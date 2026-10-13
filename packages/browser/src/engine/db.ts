@@ -45,8 +45,9 @@ export const db = {
       tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Link storage failed"));
     });
   },
-  async patchLink(linkId: string, patch: Partial<StoredLink>): Promise<void> {
-    const tx = (await openDb()).transaction(STORES.links, "readwrite");
+  /** `relaxed`: for what a power cut may cost (a round trip, a note made again later), no disk sync of its own. */
+  async patchLink(linkId: string, patch: Partial<StoredLink>, relaxed = false): Promise<void> {
+    const tx = (await openDb()).transaction(STORES.links, "readwrite", relaxed ? RELAXED : undefined);
     const links = tx.objectStore(STORES.links);
     const request = links.get(linkId);
     request.onsuccess = () => { if (!request.result) { tx.abort(); return; } links.put({ ...request.result, ...patch, id: linkId }); };

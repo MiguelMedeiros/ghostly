@@ -77,6 +77,12 @@
     "youJoined": "Sei entrato.",
     "youJoinedAgain": "Sei entrato di nuovo."
   },
+  "forget": {
+    "invitation": "L'invito viene eliminato da questo dispositivo. {{contact}} saprà che hai rifiutato.",
+    "invitationUnknown": "L'invito viene eliminato da questo dispositivo. Il contatto che l'ha inviato saprà che hai rifiutato.",
+    "joining": "Smetti di chiedere di entrare, e il gruppo viene eliminato da questo dispositivo.",
+    "kept": "Il gruppo e la sua cronologia vengono eliminati da questo dispositivo."
+  },
   "hubs": {
     "auto": "Hub se sempre acceso",
     "badge": "hub",
@@ -125,7 +131,8 @@
     "forgetTitleUnnamed": "Eliminare questo gruppo?",
     "successor": "Sei l'admin: {{name}} diventa admin quando esci.",
     "title": "Uscire da {{name}}?",
-    "titleUnnamed": "Uscire da questo gruppo?"
+    "titleUnnamed": "Uscire da questo gruppo?",
+    "unsaidNext": "Viene comunque eliminato da questo dispositivo. Gli altri ti vedranno ancora come membro."
   },
   "link": {
     "broken": "Questo link a un gruppo non funziona",

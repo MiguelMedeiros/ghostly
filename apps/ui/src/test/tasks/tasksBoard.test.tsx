@@ -174,8 +174,8 @@ describe("the Tasks board", () => {
     expect(cardIds("running")).toEqual(["relay"]);
     const done = task({ id: "relay", status: "done", progress: 100 });
     set([{ ...rows[0], card: done, editedAt: NOW }, rows[1], rows[2]]);
-    // The chat's messages changed, as the engine tells every page.
-    act(() => engine.messages("link-1", [{ linkId: "link-1", id: rows[0].id, text: statusCardText(done), sender: "peer", timestamp: rows[0].timestamp, via: "datalink", card: done } as StoredMessage]));
+    // The chat's messages changed, as the engine tells every page: the card's message, edited.
+    act(() => engine.messages("link-1", [{ linkId: "link-1", id: rows[0].id, text: statusCardText(done), sender: "peer", timestamp: rows[0].timestamp, via: "datalink", card: done, edit: { seq: 1, at: NOW, history: [] } } as StoredMessage]));
     await waitFor(() => expect(cardIds("done")).toEqual(["relay", "ci"]));
     expect(cardIds("running")).toEqual([]);
     expect(screen.getByTestId("tasks-summary")).toHaveTextContent("1 active · 3 tasks");
@@ -511,6 +511,39 @@ describe("the way to the board, above the chat list", () => {
     expect(entry).toHaveAccessibleName("Tasks");
     expect(entry).toHaveAttribute("aria-current", "page");
     expect(within(entry).getByTestId("sidebar-tasks-summary")).toHaveTextContent("Nothing running");
+  });
+
+  it("reads the index once while the engine starts, though its chats and groups arrive in several states; one that comes later asks once more", async () => {
+    const answers: (() => void)[] = [];
+    const rows = [row("link-1", task({ id: "relay" }))];
+    fakeEngine.on("statusCardIndex", () => new Promise<CardIndexRow[]>((done) => answers.push(() => done(rows))));
+    const { engine } = renderApp(<SidebarTasks active={false} onOpen={() => {}} />);
+    const reads = () => engine.callsTo("statusCardIndex").length;
+    const settled = () => act(() => new Promise((done) => setTimeout(done, 300)));
+    await waitFor(() => expect(reads()).toBe(1));
+    // The engine starting: its links, then more of them, then its groups, before it answers the first question.
+    act(() => engine.update({ links: [linkView({ id: "link-1" })] }));
+    act(() => engine.update({ links: [linkView({ id: "link-1" }), linkView({ id: "link-2" })] }));
+    act(() => engine.update({ groups: [groupView({ id: "g1" })] }));
+    await settled();
+    expect(reads()).toBe(1);
+    act(() => answers.shift()!());
+    await screen.findByTestId("sidebar-tasks");
+    await settled();
+    expect(reads()).toBe(1);
+
+    // A chat that comes after the answer asks again; two more while that question waits ask once more, not twice.
+    act(() => engine.update({ links: [linkView({ id: "link-1" }), linkView({ id: "link-2" }), linkView({ id: "link-3" })] }));
+    await waitFor(() => expect(reads()).toBe(2));
+    act(() => engine.update({ groups: [groupView({ id: "g1" }), groupView({ id: "g2" })] }));
+    act(() => engine.update({ groups: [groupView({ id: "g1" }), groupView({ id: "g2" }), groupView({ id: "g3" })] }));
+    await settled();
+    expect(reads()).toBe(2);
+    act(() => answers.shift()!());
+    await waitFor(() => expect(reads()).toBe(3));
+    act(() => answers.shift()!());
+    await settled();
+    expect(reads()).toBe(3);
   });
 
   it("reads the cards once at start, and again only when a chat's cards change, not for every message of a bot's chat", async () => {

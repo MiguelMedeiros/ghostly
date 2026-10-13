@@ -2,6 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Groups, type EntryTimings, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { GroupSession, commitUntaggedHash, confirmationTag, createIdentity, encodeCommunityLink, epochKeys, fromBase64Url, identityFromSeedB64, signCommit, type GhostRecord, type GroupState } from "@ghostly/core";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
+
+// Counts the derivations of a public key from a seed (the group link's entry key is derived once, not at every state).
+const derived = vi.hoisted(() => ({ seeds: [] as string[] }));
+vi.mock("@ghostly/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@ghostly/core")>();
+  return { ...actual, identityFromSeedB64: (seedB64: string) => { derived.seeds.push(seedB64); return actual.identityFromSeedB64(seedB64); } };
+});
 // covers: groups.invite, groups.remove-member, groups.admin-change, groups.rotate, groups.leave, groups.forget, groups.link.join, groups.link.replace, groups.protocol.entry
 
 /**
@@ -139,6 +146,25 @@ async function groupOf(names: string[]) {
 }
 
 afterEach(() => { vi.useRealTimers(); });
+
+describe("a group's link", () => {
+  it("derives its entry key once, not at every state built, and again when the link is replaced", async () => {
+    const world = new World();
+    const alice = world.add("alice");
+    const groupId = await alice.create("Ghosts", "mesh");
+    const link = await alice.enableLink(groupId);
+    const seed = () => world.peers.get("alice")!.store.groups.get(groupId)!.entry!.seedB64;
+    expect(view(alice, groupId).entryLink).toBe(link);
+    derived.seeds.length = 0;
+    for (let i = 0; i < 20; i++) alice.views();
+    expect(derived.seeds.filter(s => s === seed()).length).toBe(0);
+    const replaced = await alice.enableLink(groupId, true);
+    expect(replaced).not.toBe(link);
+    expect(view(alice, groupId).entryLink).toBe(replaced);
+    for (let i = 0; i < 20; i++) alice.views();
+    expect(derived.seeds.filter(s => s === seed()).length).toBe(1);
+  });
+});
 
 describe("group roster changes: only the admin, and someone removed reads nothing after", () => {
   it("a removed member is told on the admin's chat, loses its edges, and cannot read what is sent next", async () => {
@@ -570,6 +596,43 @@ describe("invitations: what the admission exchange ignores", () => {
     vi.mocked(host.linkReady).mockImplementation(ready);
     await alice.handleContactFrame("chat-ab", { t: "group-accept", g: groupId, key: bobKey });
     expect(welcomes()).toBe(before);
+  });
+
+  it("a member let in whose welcome was lost and who then declines goes from the admin's roster, and may be invited again", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    const host = world.peers.get("alice")!.host, send = host.sendOnLink.bind(host);
+    const lost = vi.spyOn(host, "sendOnLink").mockImplementation((linkId, frame) => {
+      if ((frame as { t?: string }).t === "group-welcome") return;
+      send(linkId, frame);
+    });
+    await bob.accept(groupId); await world.settle();
+    const bobKey = identityFromSeedB64(world.peers.get("bob")!.store.groups.get(groupId)!.invitation!.seedB64!).pubKeyZ32;
+    const edge = host.edges(groupId).get(bobKey);
+    const ready = host.linkReady.bind(host);
+    vi.spyOn(host, "linkReady").mockImplementation((linkId, version) => linkId !== edge && ready(linkId, version));
+    expect(view(alice, groupId).members).toHaveLength(2);
+
+    // Bob taps Decline before his accept is answered again: he never had the group's keys, so he is not a member.
+    await bob.decline(groupId); await world.settle();
+    expect(bob.views()).toEqual([]);
+    expect(view(alice, groupId).members.map(m => m.key)).not.toContain(bobKey);
+    expect(world.peers.get("alice")!.store.groups.get(groupId)!.unseen).toBeUndefined();
+    // And he may be invited again.
+    lost.mockRestore(); vi.mocked(host.linkReady).mockImplementation(ready);
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    expect(view(bob, groupId).invitation).toBeDefined();
+  });
+
+  it("a member seen on an edge stays in the roster whatever its contact chat declines after", async () => {
+    const { world, alice, others: [bob], groupId, key } = await groupOf(["bob"]);
+    expect(world.peers.get("alice")!.store.groups.get(groupId)!.unseen).toBeUndefined();
+    const chat = world.peers.get("alice")!.store.groups.get(groupId)!.contacts![key(bob)];
+    await alice.handleContactFrame(chat, { t: "group-decline", g: groupId }); await world.settle();
+    expect(view(alice, groupId).members.map(m => m.key)).toContain(key(bob));
   });
 
   it("deleting or leaving a group, or handing its admin role on, takes back the invitations nobody answered", async () => {

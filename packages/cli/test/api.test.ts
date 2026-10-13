@@ -264,6 +264,18 @@ describe("chats", () => {
     expect(await callApi(ctx, "chat.history", { chat: "chat-one", before: 3_000 })).toMatchObject({ messages: [{ id: "a" }, { id: "b" }] });
   });
 
+  it("history cursors: digits are a time (0 from the start), seconds are refused, anything else is an id", () => {
+    for (const name of ["chat history", "group history"]) {
+      const command = COMMANDS[name]!;
+      const params = (argv: string[]) => command.params!(parseArgs(["c1", ...argv], command.options ?? {}), { chat: "c1", group: "c1" });
+      expect(params(["--after", "0"])).toMatchObject({ after: 0 });
+      expect(params(["--after", "1000", "--before", "1791849403000"])).toMatchObject({ after: 1000, before: 1791849403000 });
+      expect(params(["--before", "me_12"])).toMatchObject({ before: "me_12" });
+      expect(() => params(["--before", "1791849403"])).toThrow(expect.objectContaining({ code: "usage", message: "--before takes milliseconds, not seconds: 1791849403000" }));
+      expect(() => params(["--after", "1700000000"])).toThrow(/--after takes milliseconds, not seconds: 1700000000000/);
+    }
+  });
+
   it("remove needs a yes", async () => {
     const { ctx } = fake();
     await expect(callApi(ctx, "chat.remove", { chat: "chat-one" })).rejects.toMatchObject({ code: "confirm" });
@@ -474,6 +486,12 @@ describe("settings", () => {
     await expect(callApi(ctx, "settings.set", { relays: "x" })).rejects.toMatchObject({ code: "bad_request" });
     await callApi(ctx, "settings.set", { relays: ["http://127.0.0.1:1"], readRelays: true });
     expect(node.updateSettings).toHaveBeenCalledWith({ settings: { relays: ["http://127.0.0.1:1"], readRelays: true } });
+    // ICE servers in WebRTC's form (urls a list) are taken; one without urls is a bad_request that says what to write.
+    await callApi(ctx, "settings.set", { iceServers: [{ urls: ["stun:stun.example.org:3478", "stun:b.example.org"] }] });
+    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { iceServers: [{ urls: "stun:stun.example.org:3478, stun:b.example.org" }] } });
+    for (const server of [{}, { url: "stun:stun.example.org" }])
+      await expect(callApi(ctx, "settings.set", { iceServers: [server] })).rejects.toMatchObject({ code: "bad_request", message: "iceServers: Each ICE server needs urls: one address, or several comma-separated (turn:host:port)" });
+    await expect(callApi(ctx, "settings.set", { iceServers: [{ urls: "turn:t.example.org:3478" }] })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("username and credential") });
   });
 });
 

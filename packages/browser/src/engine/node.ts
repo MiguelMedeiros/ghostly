@@ -1,5 +1,5 @@
 import { UsdtWallet, usdtMode } from "./paymentAdapters/usdtWallet";
-import { iceServerProblem } from "../shared/ice";
+import { iceServerProblem, iceServerSetting } from "../shared/ice";
 import type { UsdtPrepared } from "./paymentAdapters/usdt";
 import { ArkWallet, arkMode } from "./paymentAdapters/arkWallet";
 import { BarkWallet, barkMode } from "./paymentAdapters/barkWallet";
@@ -280,6 +280,12 @@ const MAX_DELETED_IDS = 500;
  */
 const CARD_RESTORE_MOST = 50;
 const CARD_RESTORE_MS = 7 * 24 * 60 * 60_000;
+/**
+ * A round trip that moved is shown at once, and written to disk by itself (relaxed, no disk sync of its own) at most
+ * this often: a 15 s sample on an internet path moves by 10 ms most of the time. A power cut loses at most this much
+ * of the round trip's drift, never a row; any other change to the story writes the latest round trip with it.
+ */
+const RTT_SAVE_MS = 5 * 60_000;
 /** A reaction said on the live session and not confirmed is said again after this long. */
 const REACTION_RESEND_MS = 30_000;
 /** A chat's reactions shown on the chat list before the one shown now, kept to show again when that one is taken back. */
@@ -311,6 +317,9 @@ interface LiveLink {
   floorFiles?: Promise<Map<string, string>>;
   /** The chat's connection story (paired chats), made from `stored.transportLog` on first use. */
   transportLog?: TransportLog;
+  /** When a round trip alone last wrote the story to disk (`noteRtt`), and whether one shown since is not on disk yet. */
+  rttSavedAt?: number;
+  rttUnsaved?: boolean;
   /** A group's entry session whose admission is done: it closes once its data link does (`GroupsHost.entryDone`). */
   entryDone?: boolean;
   /** A group's edge whose session in this run is kept as its `edgeLiveSince` (`noteEdgeLive`). */
@@ -668,10 +677,11 @@ export class GhostlyNode implements EngineImplementation {
   private readonly clock = new ClockWatch(() => { if (!this.shuttingDown) this.emitState(); });
   private clockOff: (() => void) | undefined;
   /**
-   * Edges of groups whose WebRTC did not connect in this run of the app (`edgeWithoutRtc`): they go on as an app with
-   * no WebRTC does, over a native transport. Not kept: the next start tries WebRTC first again.
+   * Edges of groups whose WebRTC did not connect (`edgeWithoutRtc`): they go on as an app with no WebRTC does, over a
+   * native transport, until the member is seen online again after a packet said it was gone (`away`, `edgeRtcPresence`).
+   * Not kept: the next start tries WebRTC first again.
    */
-  private readonly edgeRtcOff = new Set<string>();
+  private readonly edgeRtcOff = new Map<string, { away: boolean }>();
   private readonly pollIntervals: PollIntervals;
   private readonly localFetch: LocalFetch;
   private readonly links = new Map<string, LiveLink>();
@@ -4152,11 +4162,29 @@ export class GhostlyNode implements EngineImplementation {
     if (cue) this.cueFeedback(cue, linkId);
   }
 
-  private saveTransportLog(live: LiveLink, log: TransportLog): void {
+  /** `toDisk: false` shows the story and leaves the disk as it is; `relaxed`: written with no disk sync of its own. */
+  private saveTransportLog(live: LiveLink, log: TransportLog, { toDisk = true, relaxed = false } = {}): void {
     const transportLog = log.entries.map(e => ({ ...e })), transportHistory = log.history.map(e => ({ ...e }));
     live.stored = { ...live.stored, transportLog, transportHistory };
-    void db.patchLink(live.stored.id, { transportLog, transportHistory }).catch(() => {});
+    if (toDisk) {
+      live.rttUnsaved = false;
+      void db.patchLink(live.stored.id, { transportLog, transportHistory }, relaxed).catch(() => {});
+    }
     this.emitState();
+  }
+
+  /** A round trip measured on the chat's transport: in the view at once, on disk at most every `RTT_SAVE_MS`. */
+  private noteRtt(live: LiveLink, ms: number): void {
+    const log = this.transportLogOf(live);
+    if (!log) { this.emitState(); return; }
+    const changed = log.rtt(ms);
+    if (changed) live.rttUnsaved = true;
+    const now = Date.now();
+    if (live.rttUnsaved && (live.rttSavedAt === undefined || now - live.rttSavedAt >= RTT_SAVE_MS)) {
+      live.rttSavedAt = now;
+      this.saveTransportLog(live, log, { relaxed: true });
+    } else if (changed) this.saveTransportLog(live, log, { toDisk: false });
+    else this.emitState();
   }
 
   /** Which ways of paying one chat allows. */
@@ -4179,7 +4207,12 @@ export class GhostlyNode implements EngineImplementation {
   async connect({ linkId }: { linkId: string }): Promise<void> {
     const link = this.links.get(linkId)?.link;
     if (!link) throw new Error("You are offline. Go online before reconnecting.");
-    await this.ensureNativeEndpoints(linkId);
+    const live = this.links.get(linkId)!, native = this.ensureNativeEndpoints(linkId);
+    // It dials at once where WebRTC can carry the chat, and each native listener joins the dial as it comes up
+    // (`registerEndpoint`): waiting for them all first cost 10 s a reconnect with Iroh's relay out of reach. A chat that
+    // goes live only natively, or is set to a native transport with Fallback off, has nothing to dial until they are up.
+    const { preferredTransport: preferred, transportFallback: fallback } = live.stored;
+    if (this.reachedOnlyNatively(live) || (fallback === false && preferred && preferred !== "webrtc/1")) await native;
     await link.connect();
   }
 
@@ -5478,6 +5511,7 @@ export class GhostlyNode implements EngineImplementation {
     const wasOnline = this.networkOn;
     // Checked before anything changes: a relay list with no relay, or a TURN server a browser rejects,
     // would leave this peer unreachable or without WebRTC.
+    if (Array.isArray(settings.iceServers)) settings.iceServers = settings.iceServers.map(iceServerSetting);
     for (const server of settings.iceServers ?? []) { const problem = iceServerProblem(server); if (problem) throw new Error(problem); }
     if (settings.avatar !== undefined && settings.avatar !== "" && typeof sanitizeAvatar(settings.avatar) !== "string") throw new Error("Use a small JPEG picture");
     if (settings.relays && (this.relays || this.transport.configure) && !settings.relays.some((relay) => normalizeRelayUrl(relay))) throw new Error("Enter at least one relay address (https://…)");
@@ -6663,6 +6697,7 @@ export class GhostlyNode implements EngineImplementation {
           // An open edge's name comes from `onPeerNick`. A closed one keeps the last name: an edge going down says no
           // name, and taking that would drop the member's name and set it again on every drop and reopen.
           if (!entry && presence.nick && !live.link?.isDataLinkOpen) this.groups.edgeNick(group, peer, presence.nick);
+          if (!entry) this.edgeRtcPresence(linkId, presence);
           this.emitState(); },
         onPairingState: state => { live.pairing = state; this.emitState(); },
         onDirectEvidence: evidence => {
@@ -6714,14 +6749,44 @@ export class GhostlyNode implements EngineImplementation {
    * never went live, and the member stayed unreachable for as long as that network lasted. The edge starts again as on an
    * app with no WebRTC (WISP 902 § Transports): it runs its native endpoints and says so in its packet (`_tr`, with no
    * `webrtc/1`), the member's app starts its own for it as it does for a Linux Desktop, and the two meet over Iroh
-   * through its relay. For this run of the app only.
+   * through its relay. Until the member comes back (`edgeRtcPresence`), or for this run of the app.
    */
   private async edgeWithoutRtc(linkId: string): Promise<void> {
-    const live = this.links.get(linkId), link = live?.link;
-    if (!live || !link || !live.stored.group || live.stored.groupEntry || this.shuttingDown || this.options.webrtcGroupLinks) return;
+    const live = this.links.get(linkId);
+    if (!live?.link || !live.stored.group || live.stored.groupEntry || this.shuttingDown || this.options.webrtcGroupLinks) return;
     if (this.edgeRtcOff.has(linkId) || this.keepsGroupNative(live.stored) || !Object.keys(this.nativeFactories).length) return;
-    this.edgeRtcOff.add(linkId);
+    this.edgeRtcOff.set(linkId, { away: false });
     traceLink(live.myPubKeyZ32, "edge-rtc-off", {});
+    await this.restartEdge(linkId);
+  }
+
+  /**
+   * A member whose edge went native here (`edgeWithoutRtc`) is seen online again after a packet said it was gone: the
+   * attempt that failed may have been its app quitting in the middle of it (a one-shot CLI command, a quick restart),
+   * not a network that blocks direct connections. Held native for this whole run, the edge said so in its packet, the
+   * member's app followed on its next starts, and past the group links' native slots members stayed unreachable for as
+   * long as this app ran (2026-10-09). The edge tries WebRTC again, its `_tr` with `webrtc/1` again (WISP 902 §
+   * Transports); a network that really blocks it costs one more failed attempt per return.
+   */
+  private edgeRtcPresence(linkId: string, presence: PeerPresence): void {
+    const off = this.edgeRtcOff.get(linkId);
+    if (!off) return;
+    if (!presence.online) { off.away = true; return; }
+    if (!off.away) return;
+    const live = this.links.get(linkId);
+    this.edgeRtcOff.delete(linkId);
+    if (live) traceLink(live.myPubKeyZ32, "edge-rtc-back", {});
+    // Its native slot, if it held one, is free: a group link waiting for one tries at the next tick.
+    this.groupNativeWaiting.delete(linkId);
+    this.groupNativeFailed.delete(linkId);
+    this.groupNativeRetryAt = 0;
+    void this.restartEdge(linkId);
+  }
+
+  /** An edge starts again, on what `keepsGroupNative` says now. */
+  private async restartEdge(linkId: string): Promise<void> {
+    const live = this.links.get(linkId), link = live?.link;
+    if (!live || !link) return;
     live.link = null;
     // No goodbye: the edge is back in a moment, and the member must not take this for a leave.
     await link.stop(false).catch(() => {});
@@ -6893,7 +6958,7 @@ export class GhostlyNode implements EngineImplementation {
         onTransportWait: () => { this.observeTransport(linkId); this.emitState(); },
         // Why the chat is not live: what the last attempt tried (WISP 100), never a silent retry loop.
         onLiveAttempt: () => this.emitState(),
-        onRtt: ms => { const log = this.transportLogOf(live); if (log?.rtt(ms)) this.saveTransportLog(live, log); else this.emitState(); },
+        onRtt: ms => this.noteRtt(live, ms),
         // Said on every read (no error is `null`): the pages hear only of a change.
         onDiscoveryError: error => { if ((error ?? undefined) !== live.discoveryError) { live.discoveryError = error ?? undefined; this.emitState(); } },
         onTransportDiscovery: async (peerDescriptors, peerTransports, peerFallback) => {

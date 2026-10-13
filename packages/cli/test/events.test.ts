@@ -383,3 +383,90 @@ describe("the event stream", () => {
     });
   });
 });
+
+/**
+ * The seen set forgets (SEEN_KEEP_MS): a note per message of the whole history, kept in memory for as long as a daemon
+ * ran, was ~150 bytes a message. A settled message's note goes 30 days after its last activity, and a message that came
+ * longer ago with no note is no news; what happens to it later still is.
+ */
+describe("the seen set forgets", () => {
+  const DAY = 86_400_000;
+  const clock = { now: 0 };
+  async function clocked(name: string) {
+    const h = new EventHub(join(dir, name), () => clock.now, name);
+    await h.open();
+    const events: GhostlyEvent[] = [];
+    h.onEvent((e) => events.push(e));
+    return { h, events };
+  }
+  const notes = (h: EventHub) => (h as unknown as { seen: Map<string, Map<string, string>> }).seen;
+  const storedKeys = (h: EventHub) => new Promise<unknown[]>((resolve, reject) => {
+    const request = (h as unknown as { db: IDBDatabase }).db.transaction("seen").objectStore("seen").getAllKeys();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+
+  it("drops settled notes 30 days after their last activity, from memory and the store; those messages are no news, what changes in them is", async () => {
+    const m1 = message("c1", "m1", { timestamp: 1 * DAY, reactions: { me: { e: "👍", n: 1, at: 2 * DAY } } });
+    const me1 = message("c1", "me_1", { sender: "me", delivery: "delivered", timestamp: 1 * DAY });
+    const me2 = message("c1", "me_2", { sender: "me", delivery: "failed", timestamp: 1 * DAY });
+    const m3 = message("c1", "m3", { timestamp: 20 * DAY });
+    clock.now = 25 * DAY;
+    const { h, events } = await clocked("forget.jsonl");
+    h.baseline(state([link("c1")]), new Map([["c1", [m1, me1, me2, m3]]]));
+    h.markSaid("c1", "joined");
+
+    clock.now = 41 * DAY;
+    // m1, its reaction and me_1: settled, last active more than 30 days ago. me_2 failed (a retry sends it again), m3 is recent.
+    expect(h.sweep()).toBe(3);
+    expect([...notes(h).get("c1")!.keys()].sort()).toEqual(["m3", "me_2"]);
+    expect(notes(h).has("reactions:c1")).toBe(false);
+    expect(h.said("c1", "joined")).toBe(true);
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await storedKeys(h)).filter((k) => (k as string[])[0] === "c1" || (k as string[])[0] === "reactions:c1").map((k) => (k as string[])[1]).sort()).toEqual(["m3", "me_2"]);
+
+    // The whole history again (a client behind, a restart): nothing of it is news.
+    h.sink.post({ kind: "messages", linkId: "c1", messages: [m1, me1, me2, m3] });
+    expect(events).toEqual([]);
+    expect(notes(h).get("c1")!.has("m1")).toBe(false);
+    // An edit of a forgotten message is reported, and its note comes back; a new message is news as ever.
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [{ ...m1, edit: { seq: 1, at: 40 * DAY, history: [] } }, message("c1", "m4", { timestamp: 41 * DAY })], deleted: [] });
+    expect(events.map((e) => e.id)).toEqual(["message.edited:c1:m1:1", "message.received:c1:m4"]);
+    expect(notes(h).get("c1")!.has("m1")).toBe(true);
+
+    // After a restart, a chat whose newest messages' notes were dropped is still in step: no whole read at each start.
+    await new Promise((r) => setTimeout(r, 50));
+    const again = await clocked("forget.jsonl");
+    expect(again.h.inStep("c1", [me1, me2])).toBe(true);
+    // One active since (a reaction now) is not.
+    expect(again.h.inStep("c1", [{ ...me1, reactions: { peer: { e: "❤️", n: 1, at: 40 * DAY } } }, me2])).toBe(false);
+  });
+
+  it("a seen set from before notes carried their time: the first start reads every history whole, stamps the notes, then drops the old ones", async () => {
+    clock.now = 41 * DAY;
+    // As an older release left it: `received` with no time, and the mark that it notes mentions.
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open("aged.jsonl", 1);
+      request.onupgradeneeded = () => request.result.createObjectStore("seen");
+      request.onsuccess = () => {
+        const tx = request.result.transaction("seen", "readwrite");
+        tx.objectStore("seen").put("received", ["c1", "m1"]);
+        tx.objectStore("seen").put("received", ["c1", "m2"]);
+        tx.objectStore("seen").put("yes", ["format:", "mentions"]);
+        tx.oncomplete = () => { request.result.close(); resolve(); };
+        tx.onerror = () => reject(tx.error);
+      };
+      request.onerror = () => reject(request.error);
+    });
+    const { h, events } = await clocked("aged.jsonl");
+    const m1 = message("c1", "m1", { timestamp: 1 * DAY }), m2 = message("c1", "m2", { timestamp: 40 * DAY });
+    expect(h.inStep("c1", [m1, m2])).toBe(false);
+    h.baseline(state([link("c1")]), new Map([["c1", [m1, m2]]]));
+    expect(events).toEqual([]);
+    // m1 stamped with its time and dropped at once (41 days old), m2 kept with its time.
+    expect([...notes(h).get("c1")!.entries()]).toEqual([["m2", `received@${(40 * DAY).toString(36)}`]]);
+    expect(notes(h).get("format:")!.get("ages")).toBe("yes");
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await clocked("aged.jsonl")).h.inStep("c1", [m1, m2])).toBe(true);
+  });
+});

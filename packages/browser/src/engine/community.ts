@@ -381,7 +381,7 @@ export class Communities {
     return [...this.stored.values()].flatMap((group): GroupView[] => {
       const live = this.live.get(group.id);
       const base = { id: group.id, profile: "community" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [], memberLinks: {} };
-      const invitation = this.knocking(group, live) ? { linkId: group.joining!.linkId, contact: "", admin: group.joining!.inviter, members: 0, accepted: true, viaLink: true, stage: this.joinStage(group),
+      const invitation = this.knocking(group, live) ? { linkId: group.joining!.linkId, contact: "", admin: group.joining!.inviter, members: 0, accepted: true, viaLink: true, stage: this.joinStage(group), since: group.joining!.since,
         ...(this.knockingWith.get(group.id) ? { waiting: this.knockingWith.get(group.id) } : {}) } : undefined;
       // Removed, and knocking to get back in: still the group kept here (who was in it, its history), the knock beside it.
       if (invitation && !this.keptWhileKnocking(live)) return [{ ...base, name: groupName(group.joining!.name) ?? live?.session.name ?? "", isAdmin: false, members: [], canSend: false, invitation }];
@@ -557,6 +557,21 @@ export class Communities {
     }
     await s.leave();
     await this.forget(groupId);
+  }
+
+  /**
+   * Delete from this device: left first, as Leave does. With nothing connected to carry the request, a member's leave
+   * goes unsaid and the group goes anyway, as a private group's failed goodbye does: the others still list the device,
+   * but members who never open the app again kept it here for good. An admin with members is still refused: gone with
+   * the role, the group would have no admin.
+   */
+  async deleteHere(groupId: string): Promise<void> {
+    try { await this.leave(groupId); }
+    catch (error) {
+      const s = this.live.get(groupId)?.session;
+      if (!s || (s.isAdmin && s.others.length)) throw error;
+      await this.forget(groupId);
+    }
   }
 
   successor(groupId: string): string | undefined {

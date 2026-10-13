@@ -115,6 +115,14 @@ const RULES: readonly Rule[] = [
   exact("The file arrived damaged and was deleted. Send it again.", "errors.files.refused.damaged", "errors.files.refused.sendAgain"),
   exact("Not accepted in time", "errors.files.refused.expired", "errors.files.refused.sendAgain"),
   exact("Your contact could not take this file", "errors.files.refused.other", "errors.files.refused.sendAgain"),
+  // A file that ended without arriving here, and a sent one never delivered (packages/core chatFiles.ts): why as the
+  // status, the next step behind the ⓘ. The system's reason for a file not stored stays English, as the detail.
+  exact("The file arrived damaged and was deleted. Ask for it again.", "errors.files.refused.damaged", "errors.files.askAgain"),
+  exact("The offer expired", "errors.files.offerExpired", "errors.files.askAgain"),
+  { match: /^Could not store the file: (?:This device has no space left for the file|QuotaExceededError[\s\S]*|[\s\S]*No space left on device[\s\S]*)$/, key: "errors.files.noRoomHere", next: "errors.files.noRoomHereNext", detail: true },
+  { match: /^Could not store the file: [\s\S]+$/, key: "errors.files.storeFailed", next: "errors.files.askAgain", detail: true },
+  exact("Not delivered in time", "errors.files.notDelivered", "errors.files.sendWhenBack"),
+  exact("Your contact asked for the same part of this file too many times", "errors.files.askedTooOften", "errors.files.refused.sendAgain"),
   { match: /^That file is too large for your contact's app \(max (?<max>.+)\)\. Larger files need an updated Ghostly on their side\.$/, key: "errors.files.tooLargeForContact", next: "errors.files.tooLargeForContactNext" },
   { match: /^That file is too large \(max (?<size>.+)\)\.$/, key: "chat.fileTooLarge" },
   exact("That is too large to paste. Send it with + → Document.", "errors.files.pasteTooLarge"),
@@ -123,7 +131,9 @@ const RULES: readonly Rule[] = [
   exact("The clipboard's picture is damaged", "errors.files.pasteDamaged", "errors.files.pasteDamagedNext"),
   exact("Clipboard unavailable", "errors.files.clipboardUnavailable", "errors.files.clipboardUnavailableNext"),
   exact("That paste is gone. Paste it again.", "errors.files.pasteGone", "errors.files.pasteGoneNext"),
-  { match: /^Could not read the file: [\s\S]+$/, key: "errors.files.pasteFileUnreadable", next: "errors.files.pasteFileUnreadableNext", detail: true },
+  { match: /^Could not read the pasted file: [\s\S]+$/, key: "errors.files.pasteFileUnreadable", next: "errors.files.pasteFileUnreadableNext", detail: true },
+  // A file being sent whose copy could not be read (packages/core chatFiles.ts): picked with + or dropped, not pasted.
+  { match: /^Could not read the file: [\s\S]+$/, key: "errors.files.unreadable", next: "errors.files.unreadableNext", detail: true },
   exact("This device cannot decode the recording", "errors.files.cannotDecodeRecording"),
   exact("The video took too long", "errors.files.videoTooSlow"),
   { match: HOLD_FULL_ITEMS, key: "errors.hold.fullItems", next: "errors.hold.fullNext" },
@@ -356,6 +366,10 @@ const RULES: readonly Rule[] = [
   exact("This is not a link to a group", "errors.group.notALink"),
   exact("You are already joining this group", "errors.group.alreadyJoining"),
   exact("This group is joined with its current link", "errors.group.currentLink"),
+  // A group's link the engine refuses for a group already here (engine/groups.ts joinGroupByLink).
+  exact("You have an invitation to this group. Answer it first.", "errors.group.invitedFirst", "errors.group.invitedFirstNext"),
+  exact("You are out of this group and its history is still here. Delete it from this device to join with a link.", "errors.group.noLonger", "errors.group.outKeptNext"),
+  exact("This link names a private group of yours, not a community", "errors.group.privateNotCommunity", "errors.group.privateNotCommunityNext"),
   // A group's link pasted or opened while Ghostly is set offline (engine/node.ts joinGroupByLink).
   exact("Go online to join a group", "errors.group.offline", "errors.group.offlineNext"),
   exact("Only the admin can change the members of this group", "errors.group.adminMembers"),

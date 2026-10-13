@@ -32,7 +32,8 @@ function appHint(app: InstalledAppView, t: Translate): { text: string; tone: "mu
   if (app.run.status === "needs-files") return { text: t("apps.app.needsFiles"), tone: "warning" };
   if (app.pending) return { text: t("apps.app.updateAsks"), tone: "warning" };
   // The version this client's own list pins is no stranger's (WISP 1200 § Built-in apps).
-  if (app.unknownPublisher && !app.builtIn) return { text: `${app.tagline} · ${t("apps.install.unknownPublisher")}`, tone: "muted" };
+  // What the row is there to say comes first: on a phone the one line is cut at its end, and a tagline is long.
+  if (app.unknownPublisher && !app.builtIn) return { text: `${t("apps.install.unknownPublisher")} · ${app.tagline}`, tone: "muted" };
   return { text: app.tagline, tone: "muted" };
 }
 
@@ -70,7 +71,7 @@ function BuiltInRow({ app, busy, onOpen, onRemove }: { app: BuiltInAppOffer; bus
         <AppIcon />
         <span className="min-w-0">
           <span dir="auto" className="block text-sm text-text-primary truncate">{app.title}</span>
-          <span dir="auto" data-testid="built-in-app-hint" className="block text-xs text-text-muted truncate">{app.tagline} · {t("apps.builtIn.hint")}</span>
+          <span dir="auto" data-testid="built-in-app-hint" className="block text-xs text-text-muted truncate">{t("apps.builtIn.hint")} · {app.tagline}</span>
         </span>
       </div>
       <div className="flex items-center gap-2 ms-auto">
@@ -154,7 +155,7 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
             <Fingerprint value={store.fingerprint} />
           </span>
           {!read && <span className="block text-xs text-text-muted">{t("apps.store.notRead")}</span>}
-          {store.expired && store.fetchedAt !== undefined && <span data-testid="app-store-stale" className="block text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires ?? 0) })}</span>}
+          {store.expired && store.fetchedAt !== undefined && <span data-testid="app-store-stale" className="block text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires ?? 0, t.language) })}</span>}
           {store.problem && <span data-testid="app-store-problem" className="block text-xs text-danger">{t("apps.store.problem")}</span>}
         </button>
         <div className="flex items-center gap-2">

@@ -58,7 +58,18 @@ export function forgetChatScroll() {
 }
 
 const rowsOf = (list: HTMLElement) => list.querySelectorAll<HTMLElement>("[data-message-id]");
-const rowById = (list: HTMLElement, id: string) => list.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`);
+/**
+ * What stands for a row on screen. A row folded away (a bot's routine cards, in RoutineStack's `hidden`) has no box,
+ * 0 x 0 at 0, 0: its fold's own row is where it is, for the pill, the row the view is held on and putting it back.
+ */
+const shown = (list: HTMLElement, row: HTMLElement): HTMLElement => {
+  const fold = row.closest<HTMLElement>("[hidden]");
+  return fold && fold !== list && list.contains(fold) && fold.parentElement ? fold.parentElement : row;
+};
+const rowById = (list: HTMLElement, id: string) => {
+  const row = list.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`);
+  return row && shown(list, row);
+};
 const editable = (target: EventTarget | null) =>
   target instanceof Element && !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='dialog'], [role='menu']");
 
@@ -144,9 +155,9 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
     let found = -1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (all[mid].getBoundingClientRect().bottom > top) { found = mid; hi = mid - 1; } else lo = mid + 1;
+      if (shown(el, all[mid]).getBoundingClientRect().bottom > top) { found = mid; hi = mid - 1; } else lo = mid + 1;
     }
-    anchor.current = found < 0 ? null : { id: all[found].dataset.messageId!, offset: all[found].getBoundingClientRect().top - top, height: el.clientHeight };
+    anchor.current = found < 0 ? null : { id: all[found].dataset.messageId!, offset: shown(el, all[found]).getBoundingClientRect().top - top, height: el.clientHeight };
   }, []);
 
   const clear = useCallback(() => {

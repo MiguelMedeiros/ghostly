@@ -61,6 +61,8 @@ describe("usage send", () => {
     expect(() => params(["--left", "5"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/Name a chat or group, or give --all/) }));
     expect(() => params(["Miguel", "--also", "week"])).toThrow(/--also takes window=percent/);
     expect(() => params(["Miguel", "--resets", "soon"])).toThrow(/--resets takes a time/);
+    expect(() => params(["Miguel", "--left", "50", "--resets", "1791849403"])).toThrow(expect.objectContaining({ code: "usage", message: "--resets takes milliseconds, not seconds: 1791849403000" }));
+    expect(() => params(["Miguel", "--left", "50", "--also", "week=80@1791849403"])).toThrow(/--also takes milliseconds, not seconds/);
   });
 
   it("refuses a report that says no quota as a usage error (exit 2) that names the flag, not the card's field", () => {

@@ -17,9 +17,9 @@ describe("extra words", { timeout: 60_000 }, () => {
       [["profile", "backup", "extra", "--out", "f", "--no-passphrase"], "profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]"],
       [["profile", "restore","file", "new", "extra"], "profile restore <file> <new profile> [--passphrase-file f] [--use]"],
       [["daemon", "status", "extra"], "daemon status"],
-      [["daemon", "stop", "extra"], "daemon stop"],
-      [["daemon", "restart", "extra"], "daemon restart"],
-      [["daemon", "--detach", "extra"], "daemon [--detach]"],
+      [["daemon", "stop", "extra"], "daemon stop [--timeout s]"],
+      [["daemon", "restart", "extra"], "daemon restart [--timeout s]"],
+      [["daemon", "--detach", "extra"], "daemon [--detach] [--timeout s]"],
       [["settings", "get", "extra"], "settings get [--show-secret]"],
       [["engine", "--list", "extra"], "engine --list"],
     ];

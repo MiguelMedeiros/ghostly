@@ -77,6 +77,12 @@
     "youJoined": "You joined.",
     "youJoinedAgain": "You joined again."
   },
+  "forget": {
+    "invitation": "The invitation goes from this device. {{contact}} is told you declined.",
+    "invitationUnknown": "The invitation goes from this device. The contact who sent it is told you declined.",
+    "joining": "You stop asking to join, and the group goes from this device.",
+    "kept": "The group and its history go from this device."
+  },
   "hubs": {
     "auto": "Hub if always on",
     "badge": "hub",
@@ -125,7 +131,8 @@
     "forgetTitleUnnamed": "Delete this group?",
     "successor": "You are the admin: {{name}} becomes the admin when you leave.",
     "title": "Leave {{name}}?",
-    "titleUnnamed": "Leave this group?"
+    "titleUnnamed": "Leave this group?",
+    "unsaidNext": "It goes from this device anyway. The others will still list you as a member."
   },
   "link": {
     "broken": "This link to a group does not work",

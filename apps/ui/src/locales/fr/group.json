@@ -77,6 +77,12 @@
     "youJoined": "Vous avez rejoint le groupe.",
     "youJoinedAgain": "Vous avez rejoint le groupe à nouveau."
   },
+  "forget": {
+    "invitation": "L'invitation est supprimée de cet appareil. {{contact}} saura que vous l'avez refusée.",
+    "invitationUnknown": "L'invitation est supprimée de cet appareil. Le contact qui l'a envoyée saura que vous l'avez refusée.",
+    "joining": "Vous ne demandez plus à rejoindre, et le groupe est supprimé de cet appareil.",
+    "kept": "Le groupe et son historique sont supprimés de cet appareil."
+  },
   "hubs": {
     "auto": "Hub s'il reste allumé",
     "badge": "hub",
@@ -125,7 +131,8 @@
     "forgetTitleUnnamed": "Supprimer ce groupe ?",
     "successor": "Vous êtes l'admin : {{name}} devient l'admin quand vous partez.",
     "title": "Quitter {{name}} ?",
-    "titleUnnamed": "Quitter ce groupe ?"
+    "titleUnnamed": "Quitter ce groupe ?",
+    "unsaidNext": "Il est quand même supprimé de cet appareil. Les autres vous verront encore comme membre."
   },
   "link": {
     "broken": "Ce lien vers un groupe ne fonctionne pas",

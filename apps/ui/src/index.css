@@ -1322,3 +1322,10 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 .money-ink-mainnet,[data-message-bubble] .network-tag[data-network="mainnet"]{color:color-mix(in oklab,var(--color-accent) 50%,var(--color-text-primary))}
 [data-message-bubble] .network-tag[data-network="testnet"]{color:color-mix(in oklab,var(--color-test-money) 50%,var(--color-text-primary))}
 .payment-back-network{margin-left:8px;font-size:9px}
+
+/* An app opened alone covers the whole screen: its bar keeps clear of a phone's status bar and notch (webOpener.ts). */
+.alone-bar {
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+  padding-inline-start: max(0.75rem, env(safe-area-inset-left));
+  padding-inline-end: max(0.75rem, env(safe-area-inset-right));
+}

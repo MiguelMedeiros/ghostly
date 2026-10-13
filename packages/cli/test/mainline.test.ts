@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { GhostLink, createIdentity, edgeParams, randomBytes, toBase64Url, type Identity, type PollIntervals } from "@ghostly/core";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -129,6 +129,13 @@ describe("a private network's relays (GHOSTLY_PKARR_RELAYS)", { timeout: 60_000 
     await a.publish(me, [{ label: "_hello", value: "private" }]);
     expect(store.packets.size).toBe(1);
     expect((await a.resolve(me.pubKeyZ32))?.records[0].value).toBe("private");
+    // A packet signed here goes to the relays with its date, its signature not checked again (`putSigned`): only a
+    // payload signed elsewhere goes through `publishPayload`, which checks it to read its date.
+    const checked = vi.spyOn(a.relays, "publishPayload"), signed = vi.spyOn(a.relays, "putSigned");
+    await a.publish(me, [{ label: "_hello", value: "again" }]);
+    expect(checked).not.toHaveBeenCalled();
+    expect(signed).toHaveBeenCalledTimes(1);
+    expect(signed.mock.calls[0]![2]).toBe((await a.resolve(me.pubKeyZ32))!.timestampMicros);
     // Not pinned: the setting replaces them, as before.
     const b = new RelaysAndDht(null, { relays: RELAYS, fetch: relays(store), log: () => {} });
     b.configure({ relays: ["https://pkarr.example.org"], readRelays: false });
