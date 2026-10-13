@@ -302,7 +302,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       noMoreThan(2, parsed.positionals, "profile restore <file> <new profile> [--passphrase-file f] [--use]");
       // A backup made without a passphrase says so in its header: none is asked for, and the answer says it was not protected.
       const protection = await backupFileProtection(file);
-      const paths = await restoreProfile(g.home, checkProfileName(name), file, protection === "none" ? undefined : backupPassphrase(parsed.options["passphrase-file"]));
+      const paths = await restoreProfile(g.home, checkProfileName(name), file, protection === "none" ? undefined : backupPassphrase(parsed.options["passphrase-file"], RESTORE_PASSPHRASE));
       if (parsed.options.use) selectProfile(g.home, name);
       print({ restored: name, folder: paths.dir, protection });
       return;
@@ -334,10 +334,14 @@ function onStopSignals(stop: () => void): void {
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal, stop);
 }
 
+const BACKUP_PASSPHRASE = "The backup passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE (at least 12 characters). For a backup that is not encrypted, say so with --no-passphrase";
+/** Restore takes no --no-passphrase: a backup made without one says so itself. */
+const RESTORE_PASSPHRASE = "This backup is encrypted: its passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE";
+
 /** The backup passphrase: from a file or the environment, never the command line (it would sit in shell history). */
-function backupPassphrase(file: unknown): string {
+function backupPassphrase(file: unknown, missing = BACKUP_PASSPHRASE): string {
   const value = typeof file === "string" ? readFileSync(file, "utf8").replace(/\r?\n$/, "") : process.env.GHOSTLY_BACKUP_PASSPHRASE;
-  if (!value) throw new CliError("usage", "The backup passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE (at least 12 characters). For a backup that is not encrypted, say so with --no-passphrase");
+  if (!value) throw new CliError("usage", missing);
   return value;
 }
 
