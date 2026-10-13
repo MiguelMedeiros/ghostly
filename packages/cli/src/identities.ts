@@ -164,8 +164,11 @@ export const IDENTITY_METHODS: Record<string, Method> = {
 
   async "identity.share"(ctx, params) {
     const link = chatOf(ctx, params);
-    await node(ctx).shareIdentityProof({ linkId: link.id, id: str(params, "id", true) });
-    return { chat: link.id, shared: str(params, "id", true) };
+    const id = str(params, "id", true);
+    // Before, an id not in the profile reached the engine and came back as `engine` (exit 1).
+    if (!state(ctx).identityProofs.some((p) => p.id === id)) throw new CliError("not_found", `No identity proof ${JSON.stringify(id)} (ghostly identity list)`);
+    await node(ctx).shareIdentityProof({ linkId: link.id, id });
+    return { chat: link.id, shared: id };
   },
 
   async "identity.withdraw"(ctx, params) {
@@ -189,7 +192,9 @@ export const IDENTITY_METHODS: Record<string, Method> = {
 
   async "identity.recheck"(ctx, params) {
     const link = chatOf(ctx, params);
-    await node(ctx).recheckIdentityProof({ linkId: link.id, id: str(params, "id", true) });
+    const id = str(params, "id", true);
+    if (!link.identities?.received.some((r) => r.id === id)) throw new CliError("not_found", `No identity ${JSON.stringify(id)} from the contact in this chat (ghostly identity contact ${link.id})`);
+    await node(ctx).recheckIdentityProof({ linkId: link.id, id });
     return IDENTITY_METHODS["identity.contact"](ctx, { chat: link.id });
   },
 };
