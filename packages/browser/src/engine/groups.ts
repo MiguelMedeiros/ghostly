@@ -1106,6 +1106,7 @@ export class Groups {
     this.stored.delete(groupId);
     this.takeBack(groupId);
     this.acceptSaid.delete(groupId);
+    this.entryHosts.delete(groupId);
     this.lastRoster.delete(groupId);
     this.lastTold.delete(groupId);
     this.pendingEntries.delete(groupId);
@@ -1356,8 +1357,14 @@ export class Groups {
   }
 
   private entryOf(group: StoredGroup): { link: GroupEntryLink; seedB64: string } | undefined {
-    return group.entry ? { link: { g: group.id, host: identityFromSeedB64(group.entry.seedB64).pubKeyZ32 }, seedB64: group.entry.seedB64 } : undefined;
+    if (!group.entry) return undefined;
+    const { seedB64 } = group.entry;
+    // Derived once per seed (the link made or reset), not at every state: every view of an admin's group reads it.
+    let host = this.entryHosts.get(group.id);
+    if (host?.seedB64 !== seedB64) this.entryHosts.set(group.id, (host = { seedB64, key: identityFromSeedB64(seedB64).pubKeyZ32 }));
+    return { link: { g: group.id, host: host.key }, seedB64 };
   }
+  private readonly entryHosts = new Map<string, { seedB64: string; key: string }>();
 
   /** Joiner side: the entry session kept after the welcome goes (the edge to the admin is up, or it was kept long enough). */
   private async endLinger(groupId: string): Promise<void> {
