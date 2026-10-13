@@ -915,6 +915,29 @@ describe("invitations: what the admission exchange ignores", () => {
     expect(bob.views().map(v => v.id)).toContain(id(9));
   });
 
+  it("one chat keeps its four newest invitations taken back: an invite and take-back sent over and over does not grow the list", async () => {
+    const world = new World();
+    const bob = world.add("bob");
+    const admin = createIdentity().pubKeyZ32;
+    const id = (i: number) => `${String(i).padStart(3, "0")}${"C".repeat(19)}`;
+    const sent = vi.spyOn((bob as unknown as { host: GroupsHost }).host, "sendOnLink");
+    for (let i = 0; i < 50; i++) {
+      await bob.handleContactFrame("chat-mb", { t: "group-invite", g: id(i), name: `Free coins ${i}`, admin, e: 0, n: 1 });
+      await bob.handleContactFrame("chat-mb", { t: "group-decline", g: id(i) });
+    }
+    // The newest four stay, marked; the older ones go without a word to anyone.
+    expect(bob.views().map(v => v.id).sort()).toEqual([46, 47, 48, 49].map(id));
+    expect(takenBack(bob)).toBe(true);
+    expect([...world.peers.get("bob")!.store.groups.keys()].sort()).toEqual([46, 47, 48, 49].map(id));
+    expect(sent).not.toHaveBeenCalled();
+    // Another contact's taken-back invitation is not one of that chat's.
+    await bob.handleContactFrame("chat-xb", { t: "group-invite", g: "X".repeat(22), name: "Ghosts", admin, e: 0, n: 1 });
+    await bob.handleContactFrame("chat-xb", { t: "group-decline", g: "X".repeat(22) });
+    await bob.handleContactFrame("chat-mb", { t: "group-invite", g: id(50), name: "Free coins 50", admin, e: 0, n: 1 });
+    await bob.handleContactFrame("chat-mb", { t: "group-decline", g: id(50) });
+    expect(bob.views().map(v => v.id).sort()).toEqual([...[47, 48, 49, 50].map(id), "X".repeat(22)]);
+  });
+
   it("an invitation's member count and epoch are kept within what a group can be", async () => {
     const world = new World();
     const bob = world.add("bob");

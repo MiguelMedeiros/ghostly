@@ -788,6 +788,11 @@ export class Groups {
     group.invitation = { ...invitation, pieces: [], takenBack: this.now() };
     this.acceptSaid.delete(group.id);
     await this.store.putGroup(group);
+    // A chat keeps its newest few taken back, as it keeps a few waiting: invited and taken back over and over, one
+    // contact would grow the list and the store for a week. The oldest go as their week would, with no word.
+    const kept = [...this.stored.values()].filter(x => x.invitation?.takenBack && !x.state && x.invitation.linkId === invitation.linkId)
+      .reverse().sort((a, b) => b.invitation!.takenBack! - a.invitation!.takenBack!);
+    for (const old of kept.slice(MAX_INVITATIONS_PER_CHAT)) await this.forget(old.id, false);
     this.host.emit();
   }
 
