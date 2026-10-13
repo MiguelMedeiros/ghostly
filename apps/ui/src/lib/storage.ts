@@ -192,6 +192,32 @@ function forgetKey(key: string): void {
 }
 
 /**
+ * Writes again what this page holds (`unsaved`), once room may have been made: a chat or profile deleted here, or in
+ * another page of this origin (its `storage` event), or the person back on the page. What still does not fit stays held.
+ */
+export function retryUnsaved(): void {
+  if (!unsaved.size) return;
+  for (const [key, value] of [...unsaved]) {
+    try {
+      localStorage.setItem(key, value);
+      unsaved.delete(key);
+    } catch {
+      // still no room for it
+    }
+  }
+  if (!unsaved.size) tellUnsaved();
+}
+
+/** While this page holds something, room made elsewhere is tried at once (`retryUnsaved`). */
+function watchForRoom(on: boolean): void {
+  if (typeof window === "undefined") return;
+  for (const event of ["storage", "focus"]) {
+    if (on) window.addEventListener(event, retryUnsaved);
+    else window.removeEventListener(event, retryUnsaved);
+  }
+}
+
+/**
  * Whether this page holds something localStorage refused: storage is full, and what came since is shown but gone at a
  * reload until the engine brings it back (the storage-full notice, `StorageFullBanner`).
  */
@@ -206,6 +232,7 @@ export function onUnsavedChange(listener: () => void): () => void {
   return () => void unsavedListeners.delete(listener);
 }
 function tellUnsaved(): void {
+  watchForRoom(unsaved.size > 0);
   // A write may come while a component draws: the notice draws again after it.
   queueMicrotask(() => { for (const listener of unsavedListeners) listener(); });
 }
@@ -418,6 +445,8 @@ export function deleteSession(sessionId: string): void {
   }
   const order = storedPinOrder();
   if (order.includes(sessionId)) writePinOrder(order.filter(id => id !== sessionId));
+  // The room it made may fit what this page held.
+  retryUnsaved();
 }
 
 /**
