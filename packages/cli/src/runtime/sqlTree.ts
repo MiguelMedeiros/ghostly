@@ -27,6 +27,24 @@ interface Layer { owner: object | null; seq: number; cleared: boolean; puts: Map
 
 const buffer = (bytes: string) => Buffer.from(bytes, "latin1");
 
+/**
+ * Values just read from rows.db, which nothing else holds: fake-indexeddb copies each value it hands out, and for these
+ * the copy is a second one (v8 made the first), 7.6 s of a 30 s profile of sends in a chat of 15,000. A value that goes
+ * into a layer leaves the set: from then on the store holds it.
+ */
+const fresh = new WeakSet<object>();
+
+function thaw(bytes: Uint8Array): unknown {
+  const value = deserialize(bytes);
+  if (value && typeof value === "object") fresh.add(value);
+  return value;
+}
+
+/** A value to hand out: one just read from rows.db as it is, once; any other a copy, as fake-indexeddb makes. */
+export function handOut(value: unknown): unknown {
+  return value && typeof value === "object" && fresh.delete(value) ? value : structuredClone(value);
+}
+
 /** rows.db's trees: the stores kept on disk and their indexes, each a tree id in `entries`. */
 export class TreeFile {
   /** The transaction whose writes come now (its rollback log), set by `storage.ts` around each; null for one without. */
@@ -37,6 +55,8 @@ export class TreeFile {
   private readonly put: StatementSync;
   private readonly remove: StatementSync;
   private readonly empty: StatementSync;
+  /** `range`'s page reads by their SQL: a few shapes (direction, bounds), each prepared once. */
+  private readonly pages = new Map<string, StatementSync>();
 
   constructor(readonly db: DatabaseSync, readonly constraintError: new () => Error) {
     db.exec(`
@@ -135,7 +155,7 @@ export class TreeFile {
   /** @internal */
   read(id: number, bytes: string): Entry | undefined {
     const row = this.get.get(id, buffer(bytes)) as { key: Uint8Array; value: Uint8Array } | undefined;
-    return row && { key: deserialize(row.key), value: deserialize(row.value) };
+    return row && { key: deserialize(row.key), value: thaw(row.value) };
   }
   /** @internal */
   size(id: number): number { return Number((this.count.get(id) as { n: number }).n); }
@@ -150,7 +170,7 @@ export class TreeFile {
     if (upper !== undefined) { where.push("pv < ?"); args.push(buffer(upper)); }
     // Named: with no ANALYZE, SQLite plans this on the primary key's `tree = ?` and reads every entry of the index.
     return (this.db.prepare(`SELECT key, value FROM entries INDEXED BY entries_by_value WHERE ${where.join(" AND ")}`).all(...args) as { key: Uint8Array; value: Uint8Array }[])
-      .map((row) => ({ key: deserialize(row.key), value: deserialize(row.value) }));
+      .map((row) => ({ key: deserialize(row.key), value: thaw(row.value) }));
   }
   /** @internal */
   /**
@@ -165,8 +185,11 @@ export class TreeFile {
       if (low !== undefined) { where.push(!descending && !first ? "id > ?" : "id >= ?"); args.push(buffer(low)); }
       if (high !== undefined) { where.push("id < ?"); args.push(buffer(high)); }
       args.push(size);
-      const rows = this.db.prepare(`SELECT id, key, value FROM entries WHERE ${where.join(" AND ")} ORDER BY id ${descending ? "DESC" : "ASC"} LIMIT ?`).all(...args) as { id: Uint8Array; key: Uint8Array; value: Uint8Array }[];
-      for (const row of rows) yield [Buffer.from(row.id).toString("latin1"), { key: deserialize(row.key), value: deserialize(row.value) }];
+      const sql = `SELECT id, key, value FROM entries WHERE ${where.join(" AND ")} ORDER BY id ${descending ? "DESC" : "ASC"} LIMIT ?`;
+      let statement = this.pages.get(sql);
+      if (!statement) this.pages.set(sql, (statement = this.db.prepare(sql)));
+      const rows = statement.all(...args) as { id: Uint8Array; key: Uint8Array; value: Uint8Array }[];
+      for (const row of rows) yield [Buffer.from(row.id).toString("latin1"), { key: deserialize(row.key), value: thaw(row.value) }];
       if (rows.length < size) return;
       from = Buffer.from(rows.at(-1)!.id).toString("latin1");
       first = false;
@@ -198,6 +221,7 @@ export class SqlTree {
 
   /** An entry (or its removal, `entry` null) in this transaction's layer; an index's by its record key too. */
   private set(bytes: string, record: Entry, entry: Entry | null): void {
+    if (entry?.value && typeof entry.value === "object") fresh.delete(entry.value);
     const layer = this.layer();
     layer.puts.set(bytes, entry);
     if (!this.index) return;
