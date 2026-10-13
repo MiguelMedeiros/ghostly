@@ -377,6 +377,7 @@
     "offline": "أنت غير متصل",
     "onchain": "Bitcoin على السلسلة",
     "paidByOther": "دفعه عضو آخر في المجموعة بالفعل",
+    "payingByOther": "عضو آخر في المجموعة يدفعه الآن",
     "refused": "رُفضت الدفعة",
     "refusedAllBack": "عادت كل الـ {{amount}} sats.",
     "refusedBack": "عادت الـ sats.",
