@@ -52,7 +52,9 @@ The payer's copy settles on the payee's `pay-res ok` (it redeemed them); a refus
 - redeems only notes of a federation it joined on the request's network, parsed offline first (amount and federation prefix);
 - writes the incoming payment, notes included, **before** redeeming, and finishes an interrupted redeem from the journal at start or on a retransmission;
 - settles its request only in full (face value at least the amount) and in a federation the request named; the federation's fee on redeeming is the payee's;
-- answers a retransmission of a redeemed payment with the same result and redeems nothing twice.
+- answers a retransmission of a redeemed payment with the same result and redeems nothing twice;
+- says the payment in the chat once the federation took the notes (a "Could not receive" line once when it refused them), never before;
+- keeps a digest of every incoming payment's notes, so the same notes under another payment id are refused from it, with no new record, line or redeem.
 
 ## Lightning through the federation
 
