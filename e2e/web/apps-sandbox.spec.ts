@@ -313,6 +313,32 @@ test("the runner refuses to run outside its sandboxed frame, and its server send
   expect(RTC_PROBES.length).toBeGreaterThan(10);
 });
 
+test("an app may ask for the pointer after a click (mouse look): its sandbox no longer refuses it", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page }) => {
+  await appPage(page);
+  const ref = "gamepublisherkey/look";
+  // What the frame's sandbox decides shows in the refusal's name: SecurityError ("the frame is sandboxed and the
+  // 'allow-pointer-lock' permission is not set") before; past it, a browser driven by a test still refuses for want of
+  // window focus (WrongDocumentError), or gives the lock. A person's click in a focused window gets it, and Esc frees it.
+  const entry = `<!doctype html><title>look</title><body style="margin:0"><div id=pad style="width:100vw;height:100vh;background:#123"></div><script>
+    const g = window.ghostly, pad = document.getElementById("pad");
+    pad.addEventListener("click", () => {
+      try {
+        const asked = pad.requestPointerLock();
+        if (asked && asked.then) asked.then(() => g.storage.set("lock", "held"), (e) => g.storage.set("lock", e.name));
+      } catch (e) { g.storage.set("lock", e.name); }
+    });
+    g.storage.set("ready", true);
+  </script>`;
+  await open(page, ref, entry);
+  await expect.poll(() => stored(page, ref)).toMatchObject({ ready: true });
+  await expect(page.locator(`iframe[data-app="${ref}"]`)).toHaveAttribute("sandbox", "allow-scripts allow-pointer-lock");
+  await page.frameLocator(`iframe[data-app="${ref}"]`).locator("#pad").click();
+  await expect.poll(async () => (await stored(page, ref)).lock).toBeDefined();
+  expect(["held", "WrongDocumentError"]).toContain((await stored(page, ref)).lock);
+});
+
 test("Chess, as it is built, runs under the runner's lock", {
   tag: ["@feature:apps.web-sandbox", "@feature:apps.chess"],
 }, async ({ page }) => {
