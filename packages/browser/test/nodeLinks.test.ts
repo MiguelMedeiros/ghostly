@@ -217,6 +217,33 @@ describe("a chat as the contact drives it", () => {
     expect(await saved(chat.id)).toMatchObject({ peerTransports: ["iroh/1"], peerFallback: false });
   });
 
+  it("a chat that never synced and whose reads fail (no network) shows its first sync under way once, not a state at every read", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const { events } = linkOf(chat.id).options;
+    const emit = vi.spyOn(node as unknown as { emitState(): void }, "emitState");
+    events.onPoll({ polling: true, nextInMs: 0 });
+    expect(node.getState().links[0].poll.polling, "the first sync under way").toBe(true);
+    events.onStatus("error");
+    events.onPoll({ polling: false, nextInMs: 2_000 });
+    expect(node.getState().links[0].poll.polling).toBe(false);
+    const first = emit.mock.calls.length;
+    expect(first).toBeGreaterThan(0);
+    for (let i = 0; i < 10; i++) {
+      events.onPoll({ polling: true, nextInMs: 0 });
+      // A read under way after the first one is no first sync under way: the list shows none, whenever it is drawn.
+      expect(node.getState().links[0].poll.polling).toBe(false);
+      events.onStatus("error");
+      events.onPoll({ polling: false, nextInMs: 2_000 });
+    }
+    expect(emit.mock.calls.length - first, "ten failed reads").toBe(0);
+    // The read that works is news: the chat synced.
+    events.onPoll({ polling: true, nextInMs: 0 });
+    events.onStatus("online");
+    expect(emit.mock.calls.length).toBeGreaterThan(first);
+    expect(node.getState().links[0].lastSyncAt).toBeGreaterThan(0);
+  });
+
   it("once paired, the chat is pinned to that contact: another key is refused, and a failed save pins nothing", async () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
