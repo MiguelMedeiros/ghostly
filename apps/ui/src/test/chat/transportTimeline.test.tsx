@@ -1,5 +1,6 @@
 import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import type { PairedTransport } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { TransportLine } from "../../components/TransportTimeline";
 import { ChatConnection } from "../../components/ChatConnection";
@@ -170,6 +171,41 @@ describe("a transport change that did not land, in the app's language", () => {
         expect([language, lines.join(" ")]).not.toEqual([language, expect.stringContaining(english)]);
       }
     }
+  });
+
+  // A chosen Iroh or HyperDHT dial that failed, as the Desktop's runtimes say it: the contact's app closed (HyperDHT's
+  // PEER_NOT_FOUND), its two native channels taken (its stream reset), the runtimes' timeouts, a stream that closed or
+  // never reached the page (iroh_transport.rs, hyperdht.rs, paired_transport.rs, endpoint.mjs, nativeTransports.ts).
+  const dials: [PairedTransport, string][] = [
+    ["hyperdht/1", "PEER_NOT_FOUND: Peer not found"], ["hyperdht/1", "connection reset by peer"],
+    ["hyperdht/1", "HyperDHT connection timed out"], ["hyperdht/1", "Native channel closed"], ["iroh/1", "Iroh connection timed out"],
+    ["iroh/1", "Native stream timed out"], ["iroh/1", "Native channel did not reach the application"],
+  ];
+
+  it.each(dials)("%s %s: the not-live line, a failed switch's line and its Why row say it in each language, with a next step", (transport, error) => {
+    const entry = line({ kind: "failed", target: transport, transport: "webrtc/1", reason: failed(error) });
+    for (const [language, t] of others) {
+      const notLive = liveAttemptText({ at: 1, side: "dialled", failed: [{ transport, error }] }, "you", "Ana", at, t)!.lines.join(" ");
+      const why = transportLineDetails(entry, "Ana", at, t).find(r => r.label === t("connection.detail.why"))!.value;
+      for (const said of [notLive, transportLineText(entry, "Ana", t), why]) expect([language, said]).not.toEqual([language, expect.stringContaining(error)]);
+      // Not the generic "Couldn't connect": what happened, and what to do.
+      expect([language, problemText(error, t, "connect").title]).not.toEqual([language, t("errors.problem.connectFailed")]);
+      expect([language, problemText(error, t, "connect").next]).toEqual([language, expect.any(String)]);
+      expect(problemText(error, t, "connect").detail).toBe(error);
+    }
+  });
+
+  it("says a native dial's failure and its next step in Portuguese", () => {
+    const pt = translateWith(LOCALES.pt, "pt");
+    const why = (error: string) => transportLineDetails(line({ kind: "failed", target: "iroh/1", transport: "webrtc/1", reason: failed(error) }), "Ana", at, pt)
+      .find(r => r.label === "Por quê")?.value;
+    expect(transportLineText(line({ kind: "failed", target: "iroh/1", transport: "webrtc/1", reason: failed("Iroh connection timed out") }), "Ana", pt))
+      .toBe("Não foi possível mudar para Iroh: Iroh não conectou a tempo. Continua em WebRTC");
+    expect(why("Iroh connection timed out")).toBe("Iroh não conectou a tempo. O app do seu contato pode estar fechado: ligue a Alternativa para a conversa seguir por outro caminho. A conversa continuou em WebRTC.");
+    expect(why("connection reset by peer")).toBe("O app do seu contato não tem conexão nativa livre. Tente de novo em alguns minutos ou ligue a Alternativa. A conversa continuou em WebRTC.");
+    expect(why("PEER_NOT_FOUND: Peer not found")).toBe("O app do seu contato não está acessível pelo HyperDHT. Ele pode estar fechado: tente de novo quando seu contato estiver online. A conversa continuou em WebRTC.");
+    expect(liveAttemptText({ at: 1, side: "dialled", failed: [{ transport: "hyperdht/1", error: "connection reset by peer" }] }, "you", "Ana", at, pt)!.lines)
+      .toContain("HyperDHT: O app do seu contato não tem conexão nativa livre.");
   });
 });
 
