@@ -143,6 +143,32 @@ describe("placing a call", () => {
     expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_connected")).toHaveLength(1);
   });
 
+  it("a video call answered with the video lane closed (a bot that takes no picture) keeps the camera button until the camera is off", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(true); });
+    const stream = devices.userMedia[0].grant();
+    await settle();
+    const pc = FakePeerConnection.instances[0];
+    call.receive(JSON.stringify({ ...JSON.parse(remote.answer(Date.now() + 1)), vr: 0 }));
+    await settle();
+    act(() => pc.setIceState("connected"));
+
+    // Nothing can be sent or shared, but the camera captured for the call is still on, for the self-view.
+    expect(call.result.current.canShareScreen).toBe(false);
+    expect(call.result.current.isVideoOff).toBe(false);
+    expect(call.result.current.canSendVideo).toBe(true);
+
+    const camera = stream.getVideoTracks()[0];
+    await act(() => call.result.current.toggleVideo());
+
+    expect(camera.stop).toHaveBeenCalled();
+    expect(call.result.current.isVideoOff).toBe(true);
+    expect(call.result.current.localStream!.getVideoTracks()).toEqual([]);
+    // With the camera off there is nothing left to turn on that the contact would see.
+    expect(call.result.current.canSendVideo).toBe(false);
+    expect(call.result.current.callState).toBe("connected");
+  });
+
   it("a hang-up while the answer's description is being applied leaves the call ended", async () => {
     const call = renderCall();
     const { pc } = await offered(call);

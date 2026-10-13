@@ -206,6 +206,10 @@ test("a person video-calls a headless bot: the bot says it takes no picture, and
     expect(await pageSent(person.page)).toMatchObject({ video: 0, lane: "inactive" });
     // The person still sees their own picture.
     await expect(person.page.getByTestId("call-self-view")).toBeVisible();
+    // And can turn that camera off without hanging up.
+    await person.page.getByTestId("call-camera").click();
+    await expect(person.page.getByTestId("call-self-view")).toBeHidden();
+    await expect(person.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
 
     await person.page.getByTestId("call-hang-up").click();
     expect(await bot.event((e) => e.type === "call.ended")).toMatchObject({ chat: invite.chat, reason: "remote-hangup" });
