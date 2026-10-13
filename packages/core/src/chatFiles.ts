@@ -36,6 +36,11 @@ export const FILE_LIMITS = {
   chunkBytes: 16 * 1024,
   /** Bytes a sender has sent and not seen confirmed: throughput is this per round trip. */
   windowBytes: 1024 * 1024,
+  /**
+   * Bytes all of a chat's files have sent and not seen confirmed, together. Three files' windows at once were 3 MiB, and
+   * as base64 text past what a session's receive queue holds (`SESSION_RECEIVE_PENDING`, 3.75 MiB).
+   */
+  chatWindowBytes: 2 * 1024 * 1024,
   /** A receiver asks its person before taking a file larger than this. */
   askAboveBytes: 25 * 1024 * 1024,
   /** Files taken without asking, per contact, while stored. Past it, every file is asked about. */
@@ -297,6 +302,10 @@ export function refusalText(why: string, room?: number): { state: TransferState;
 
 export class ChatFiles {
   private readonly entries = new Map<string, Entry>();
+  /** Files sending that may have bytes not confirmed yet: what `inFlight` adds up (the rest are left out as it goes). */
+  private readonly moving = new Set<Entry>();
+  /** Files that stopped sending for the chat's window alone: they go on once another's bytes are confirmed. */
+  private readonly held = new Set<Entry>();
   private attached = false;
   private peerRoomValue: number | null = null;
 
@@ -369,6 +378,7 @@ export class ChatFiles {
     if (!this.attached) return;
     this.attached = false;
     this.peerRoomValue = null;
+    this.moving.clear(); this.held.clear();
     for (const entry of this.entries.values()) {
       if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.next = entry.record.confirmed; }
       if (entry.in) clearTimeout(entry.in.timer);
@@ -454,9 +464,30 @@ export class ChatFiles {
     return out.block!.bytes.subarray(at, at + length);
   }
 
-  private shouldPump(entry: Entry): boolean {
+  /** Whether this file's own window lets it send more. */
+  private fileMayPump(entry: Entry): boolean {
     const { record } = entry, out = entry.out!;
     return this.attached && record.state === "active" && out.next < record.file.size && out.next - record.confirmed < FILE_LIMITS.windowBytes;
+  }
+
+  private shouldPump(entry: Entry): boolean {
+    return this.fileMayPump(entry) && this.inFlight() < FILE_LIMITS.chatWindowBytes;
+  }
+
+  /** Bytes this chat's files sent and have not seen confirmed. */
+  private inFlight(): number {
+    let bytes = 0;
+    for (const entry of this.moving) {
+      const out = entry.out, { record } = entry;
+      if (!out || record.state !== "active" || out.next <= record.confirmed) { this.moving.delete(entry); continue; }
+      bytes += out.next - record.confirmed;
+    }
+    return bytes;
+  }
+
+  /** Bytes were confirmed, or a file stopped sending: the files the chat's window held go on, before the one that freed it. */
+  private wakeHeld(): void {
+    for (const entry of [...this.held]) { this.held.delete(entry); void this.pump(entry); }
   }
 
   /**
@@ -490,6 +521,7 @@ export class ChatFiles {
         if (!this.sendData(entry.record.id, offset, chunk)) { refused = true; break; }
         out.next = offset + chunk.length;
         out.sent += chunk.length;
+        this.moving.add(entry);
       }
     } catch (error) {
       if (generation === out.generation) {
@@ -502,7 +534,7 @@ export class ChatFiles {
         // A refused frame is tried again later, never at once: at once, nothing else would run until it went.
         if (refused) out.wake = setTimeout(() => void this.pump(entry), FILE_LIMITS.sendRetryMs);
         else void this.pump(entry);
-      }
+      } else if (generation === out.generation && this.fileMayPump(entry)) this.held.add(entry);
     }
   }
 
@@ -843,6 +875,7 @@ export class ChatFiles {
         record.state = "active";
         record.pausedBy = record.waitingFor = undefined;
         this.changed(outgoing);
+        this.wakeHeld();
         if (record.confirmed === record.file.size) void this.sendSum(outgoing);
         else { this.armStall(outgoing); void this.pump(outgoing); }
         return;
@@ -856,12 +889,14 @@ export class ChatFiles {
         if (frame.why === "paused") { record.state = "paused"; record.pausedBy = "peer"; }
         else { record.state = "asking"; record.waitingFor = frame.why === "busy" ? "busy" : "consent"; }
         this.changed(outgoing);
+        this.wakeHeld();
         return;
       }
       case "pf-got": {
         if (!isInt(frame.offset) || frame.offset <= record.confirmed || frame.offset > out.next) return;
         record.confirmed = frame.offset;
         this.changed(outgoing, true);
+        this.wakeHeld();
         if (record.confirmed === record.file.size) void this.sendSum(outgoing);
         else { this.armStall(outgoing); void this.pump(outgoing); }
         return;
@@ -885,7 +920,10 @@ export class ChatFiles {
     record.state = state;
     record.error = error;
     record.pausedBy = record.waitingFor = undefined;
-    if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.block = undefined; entry.out.source = undefined; }
+    if (entry.out) {
+      entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.block = undefined; entry.out.source = undefined;
+      this.moving.delete(entry); this.held.delete(entry);
+    }
     if (entry.in) {
       const incoming = entry.in;
       clearTimeout(incoming.timer);
@@ -894,6 +932,7 @@ export class ChatFiles {
       void incoming.writing.finally(() => { if (transferEnded(record)) incoming.target = undefined; });
     }
     this.changed(entry);
+    if (entry.out) this.wakeHeld();
   }
 
   // ─── What the person does ───────────────────────────────────────────────
@@ -932,6 +971,7 @@ export class ChatFiles {
     if (entry.out) { entry.out.generation++; entry.out.next = record.confirmed; clearTimeout(entry.out.timer); this.send(this.offerFrame(record, true)); }
     else { this.send({ t: "pf-wait", id, why: "paused" }); void this.checkpoint(entry); this.startNext(); }
     this.changed(entry);
+    if (entry.out) this.wakeHeld();
   }
 
   resume(direction: "in" | "out", id: string): void {

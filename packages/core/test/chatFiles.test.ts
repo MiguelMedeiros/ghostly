@@ -792,6 +792,29 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(sending).toBeLessThanOrEqual(FILE_LIMITS.maxActiveIncoming);
   });
 
+  it("what a chat's files have sent and not seen confirmed stays within one window for them all", async () => {
+    // Three files at once with a 1 MiB window each were 3 MiB in flight, and as base64 text more than a session's
+    // receive queue takes (`SESSION_RECEIVE_PENDING`): a receiver that stalled a moment ended the session.
+    const w = wire({ writeMs: 1 });
+    w.attach();
+    const sizes = new Map<string, number>();
+    for (let i = 0; i < 3; i++) { sizes.set(`shared-0${i}`, 3 * 1024 * 1024); send(w, file(`shared-0${i}`, 3 * 1024 * 1024)); }
+    let most = 0;
+    const sample = setInterval(() => {
+      let total = 0;
+      for (const id of sizes.keys()) {
+        const sent = w.a.sent.filter((f) => f.t === "pf-data" && f.id === id).reduce((end, f) => Math.max(end, (f.offset as number) + FILE_LIMITS.chunkBytes), 0);
+        total += Math.max(0, Math.min(sent, sizes.get(id)!) - (w.a.records.get(`out:${id}`)?.confirmed ?? 0));
+      }
+      most = Math.max(most, total);
+    }, 0);
+    try {
+      await until(() => [...sizes.keys()].every((id) => state(w.a, "out", id) === "done"), 60_000);
+    } finally { clearInterval(sample); }
+    expect(most).toBeGreaterThan(FILE_LIMITS.windowBytes);
+    expect(most).toBeLessThanOrEqual(FILE_LIMITS.chatWindowBytes);
+  });
+
   it("no more than 16 offers wait for an answer; the 17th is refused", async () => {
     const w = wire();
     w.b.decide = async () => "ask";
