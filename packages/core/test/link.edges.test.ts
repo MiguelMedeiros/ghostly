@@ -17,6 +17,7 @@ import {
   STALLED_LOOK_MS,
   WATCH_PEER_MS,
   DEPARTED_READ_MS,
+  UNUSED_INVITE_WAIT_MAX_MS,
   type LinkSessionEvents,
   type LinkSessionOptions,
 } from "../src/link";
@@ -637,6 +638,24 @@ describe("LinkSession poll pacing", () => {
     await settle();
     expect(lastPoll(a.ev)).toBe(I.background);
     await a.s.stop(false);
+  });
+
+  it("reads an invite nobody used less often once no longer awaited, and at the background pace once its contact shows", async () => {
+    const { a, b } = pair({ invite: true }, { getServices: () => [{ id: "atlas", type: "http" }] });
+    a.s.start();
+    await settle();
+    vi.setSystemTime(NOW + 3 * AWAITING_PEER_MS);
+    a.s.pollNow();
+    await settle();
+    expect(lastPoll(a.ev)).toBe(UNUSED_INVITE_WAIT_MAX_MS);
+    b.s.start();
+    await settle();
+    a.s.pollNow();
+    await settle();
+    expect(a.s.peerPresence.lastPacketAt).toBeGreaterThan(0);
+    expect(lastPoll(a.ev)).toBe(I.background);
+    await a.s.stop(false);
+    await b.s.stop(false);
   });
 
   it("counts that wait from when the chat was made: a saved chat reads in the background from its first read of a start", async () => {

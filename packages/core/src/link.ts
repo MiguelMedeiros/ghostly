@@ -95,6 +95,17 @@ export const DEPARTED_READ_MS = EXPECT_PEER_MS;
 /** A chat whose contact was never seen (an invite just sent) keeps looking at the active pace this long. */
 export const AWAITING_PEER_MS = 10 * 60_000;
 /**
+ * An invite this side made that nobody used, once no longer awaited (`AWAITING_PEER_MS`), is read less often the older
+ * it is: a fifth of its age between reads, up to this. Read at the background pace instead, 15 unused invites (their
+ * keys and their mailboxes) asked the relays for 60 reads a minute for as long as the app ran: the relays' minute went
+ * to invites nobody may ever open, and a join on one was noticed 90 s later (bug hunt 1013-1642, 2026-10-13).
+ */
+export const UNUSED_INVITE_WAIT_MAX_MS = 3 * 60_000;
+/** The wait between reads of an unused invite of age `age` (`UNUSED_INVITE_WAIT_MAX_MS`), never shorter than the pace's `interval`. */
+export function unusedInviteWait(age: number, interval: number): number {
+  return Math.max(interval, Math.min(UNUSED_INVITE_WAIT_MAX_MS, Math.round(age / 5)));
+}
+/**
  * A group link's peer whose packet advertises and carries no `_tr` on every read for this long publishes none: what it
  * said before is forgotten (WISP 902 § Transports). Not at the first such packet: an app with no WebRTC (a Linux
  * Desktop) publishes its `_tr` only once a native endpoint is up, seconds after its first packet of a run, and what it
@@ -199,6 +210,8 @@ export interface LinkSessionOptions {
    * sent at once) went out for a minute (2026-10-08).
    */
   awaitingSince?: number;
+  /** This side made the invite, and nobody used it yet: once no longer awaited, read less often (`unusedInviteWait`). */
+  invite?: boolean;
 }
 
 /** With `firstPublish: "after-first-poll"`, the first packet goes out by then whatever happened. */
@@ -247,6 +260,8 @@ export class LinkSession {
   private readonly startedAt = Date.now();
   /** From when a peer never seen is awaited (`AWAITING_PEER_MS`): never later than this start, whatever the clock said when the chat was made. */
   private readonly awaitingSince: number;
+  /** This side's invite, nobody used yet (`LinkSessionOptions.invite`). */
+  private readonly invite: boolean;
   private readonly intervals: PollIntervals;
   private fastPollUntil = 0;
   /** An offer to a saved contact is out: from then on its fast window looks less often (`OFFER_FAST_MS`); 0 for none. */
@@ -299,6 +314,7 @@ export class LinkSession {
     this.events = options.events ?? {};
     this.firstPublish = options.firstPublish ?? "at-start";
     this.awaitingSince = Math.min(options.awaitingSince ?? this.startedAt, this.startedAt);
+    this.invite = options.invite ?? false;
   }
 
   get peerPresence(): PeerPresence {
@@ -561,6 +577,8 @@ export class LinkSession {
     const stepping = this.fastStepsAfter ? Date.now() - this.fastStepsAfter : -1;
     if (pace === "fast" && stepping >= 0) return Math.min(OFFER_STEP_MAX * interval, Math.max(2 * interval, stepping));
     if (pace === "fast" || pace === "connected" || since < 0) return interval;
+    // An invite nobody used, no longer awaited: the older it is, the less often it is read.
+    if (pace === "background" && this.invite && this.presence.lastPacketAt === 0) return unusedInviteWait(Date.now() - this.awaitingSince, interval);
     return Math.min(interval, Math.max(2 * this.intervals.fast, since));
   }
 
