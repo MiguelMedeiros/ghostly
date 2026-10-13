@@ -1,0 +1,1 @@
+A sender keeps at most 2 MiB sent and not confirmed across all the files it sends a contact, on top of 1 MiB per file: three files' windows at once, sent as text, overflowed what a receiver's session holds and ended it. No wire change.
