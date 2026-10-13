@@ -169,7 +169,8 @@ The rows are in alphabetical order of their first command, and every command of 
 | `wallet remove <type> [--network n] [--card id] [--accept-loss]` | Refused while it holds money or waits for some, unless `--accept-loss` |
 
 Help: `ghostly help` lists every command; `ghostly help file` (or `ghostly file --help`) a group; `ghostly help file
-save` (or `ghostly file save --help`) one command, with its options. `-h` works too, except after `--`.
+save` (or `ghostly file save --help`) one command, with its options. `-h` and `--help=true` work too, except after `--`;
+`--help=false` runs the command. A global boolean's `--no-` form (`--no-pretty`) may come before the command, as the option does.
 
 Arguments: an option's value is taken as is, even when it starts with `-`. So is an id in a positional that takes
 one (`<chat>`, `<group>`, `<message>`, `<file>`, `<payment>`, `<draft>`, `<id>`, …): drafts, payments and groups

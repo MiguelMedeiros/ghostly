@@ -93,10 +93,15 @@ export function globalOption(arg: string): OptionSpec | undefined {
   return name ? GLOBAL_OPTIONS[name] : undefined;
 }
 
-/** The name of the global option a word names (`profile` for `-p`), else undefined. */
+/**
+ * The name of the global option a word names (`profile` for `-p`, `pretty` for `--no-pretty`), else undefined. A
+ * boolean's `--no-` form, with no value, is that option as `parseArgs` reads it: before, `ghostly --no-pretty status`
+ * was not lifted and answered "Unknown command: --no-pretty status".
+ */
 function globalName(arg: string): string | undefined {
   const eq = arg.indexOf("=");
-  const name = arg.startsWith("--") ? arg.slice(2, eq === -1 ? undefined : eq) : arg.length === 2 && arg.startsWith("-") ? Object.entries(GLOBAL_OPTIONS).find(([, o]) => o.short === arg.slice(1))?.[0] : undefined;
+  let name = arg.startsWith("--") ? arg.slice(2, eq === -1 ? undefined : eq) : arg.length === 2 && arg.startsWith("-") ? Object.entries(GLOBAL_OPTIONS).find(([, o]) => o.short === arg.slice(1))?.[0] : undefined;
+  if (name?.startsWith("no-") && eq === -1 && Object.hasOwn(GLOBAL_OPTIONS, name.slice(3)) && GLOBAL_OPTIONS[name.slice(3)].type === "boolean") name = name.slice(3);
   return name && Object.hasOwn(GLOBAL_OPTIONS, name) ? name : undefined;
 }
 
