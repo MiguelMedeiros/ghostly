@@ -83,6 +83,8 @@
   },
   "forget": {
     "invitation": "O convite sai deste dispositivo. {{contact}} fica sabendo que você recusou.",
+    "invitationKept": "O convite e o histórico do grupo saem deste dispositivo. {{contact}} fica sabendo que você recusou.",
+    "invitationKeptUnknown": "O convite e o histórico do grupo saem deste dispositivo. O contato que o enviou fica sabendo que você recusou.",
     "invitationUnknown": "O convite sai deste dispositivo. O contato que o enviou fica sabendo que você recusou.",
     "joining": "Você deixa de pedir para entrar, e o grupo sai deste dispositivo.",
     "kept": "O grupo e o histórico dele saem deste dispositivo.",
