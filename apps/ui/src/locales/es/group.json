@@ -127,6 +127,8 @@
   "leave": {
     "blocked": "Nadie está en línea para ser admin",
     "blockedCommunity": "Nadie está en línea para registrar tu salida",
+    "blockedCommunityAdminForgetNext": "Espera a que un miembro esté en línea, o quita antes a los miembros, o haz admin a uno de ellos.",
+    "blockedCommunityAdminNext": "Espera a que un miembro esté en línea, o quita antes a los miembros.",
     "blockedCommunityNext": "Inténtalo en un momento.",
     "blockedNext": "Nombra a alguien admin o espera a un miembro.",
     "body": "El grupo y su historial se van de este dispositivo. No leerás lo que se diga después, y para volver alguien tendrá que dejarte entrar de nuevo.",

@@ -127,6 +127,8 @@
   "leave": {
     "blocked": "没有人在线可以接任管理员",
     "blockedCommunity": "没有人在线接收你的退出",
+    "blockedCommunityAdminForgetNext": "请等待有成员上线，或先移除成员，或将其中一人设为管理员。",
+    "blockedCommunityAdminNext": "请等待有成员上线，或先移除成员。",
     "blockedCommunityNext": "请稍后再试。",
     "blockedNext": "先指定一位管理员，或等待成员上线。",
     "body": "群组及其历史记录将从此设备移除。你将无法阅读之后的内容，想回来需要有人再次让你进入。",

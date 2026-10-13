@@ -127,6 +127,8 @@
   "leave": {
     "blocked": "Nessuno è online per diventare admin",
     "blockedCommunity": "Nessuno è online per registrare la tua uscita",
+    "blockedCommunityAdminForgetNext": "Aspetta che un membro sia online, oppure rimuovi prima i membri, oppure rendi admin uno di loro.",
+    "blockedCommunityAdminNext": "Aspetta che un membro sia online, oppure rimuovi prima i membri.",
     "blockedCommunityNext": "Riprova tra un momento.",
     "blockedNext": "Nomina un admin o aspetta un membro.",
     "body": "Il gruppo e la sua cronologia spariscono da questo dispositivo. Non leggerai ciò che verrà detto dopo, e per tornare qualcuno dovrà farti entrare di nuovo.",
