@@ -250,6 +250,25 @@ describe("GroupChat: out of the group", () => {
     expect(screen.getByText("said before I was removed")).toBeInTheDocument();
   });
 
+  it("removed from a community and knocking again: after two minutes of the knock, says the link may have been replaced", () => {
+    // Kept a month: timed from when the knock started, not from the group's creation.
+    const kept = (since: number) => ({ ...knockingAgain(), createdAt: Date.now() - 30 * 86_400_000,
+      invitation: { ...knockingAgain().invitation!, since } });
+    const view = openGroup(kept(Date.now() - 60_000));
+    expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
+    act(() => view.engine.update({ groups: [kept(Date.now() - 2 * 60_000 - 1000)] }));
+    expect(within(screen.getByTestId("group-notice")).getByTestId("group-joining-stale")).toHaveTextContent("Still no answer. If the link was replaced, ask for the new one.");
+  });
+
+  it("removed from a community and knocking again: Cancel joining hands the focus to the group's ⋮", async () => {
+    const { user, engine } = openGroup(knockingAgain());
+    engine.on("declineGroupInvitation", () => { fakeEngine.update({ groups: [{ ...knockingAgain(), invitation: undefined }] }); });
+    within(screen.getByTestId("group-notice")).getByRole("button", { name: "Cancel joining" }).focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByText("You were removed. Open the group's link to join again.")).toBeInTheDocument();
+    expect(screen.getByTestId("group-options")).toHaveFocus();
+  });
+
   it("removed from a community and knocking again: a cancel the engine refuses is said, and the knock goes on", async () => {
     const { user, engine } = openGroup(knockingAgain());
     engine.on("declineGroupInvitation", () => { throw new Error("No invitation to decline"); });
