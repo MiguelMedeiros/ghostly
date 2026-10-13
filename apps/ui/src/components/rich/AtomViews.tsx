@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { shownUrl, SPOILER_PLAIN, type Atom, type MdLinkData, type Segment, type TimeData } from "../../lib/parse";
 import { externalLinkProps } from "../../lib/externalLink";
+import type { Language } from "../../lib/settings";
+import { formatAt } from "../../lib/time";
 import { CopyButton } from "./CopyButton";
 
 /**
@@ -64,14 +66,14 @@ export function BlobView({ atom }: { atom: Atom<"blob", null> }) {
   );
 }
 
-/** "Sep 25, 17:00 GMT+3": the reader's own zone, with the date when it is not the day the message was sent. */
-function localLabel(at: number, sameDay: boolean): string {
-  return new Date(at).toLocaleString([], {
+/** "Sep 25, 17:00 GMT+3": the reader's own zone, with the date when it is not the day the message was sent, in the app's language. */
+function localLabel(at: number, sameDay: boolean, language?: Language): string {
+  return formatAt(at, {
     ...(sameDay ? {} : { month: "short", day: "numeric" }),
     hour: "2-digit",
     minute: "2-digit",
     timeZoneName: "short",
-  });
+  }, language);
 }
 
 /** A time with its zone: the reader's local time on hover (the title) or on a tap, next to what was written. */
@@ -82,7 +84,7 @@ export function TimeView({ atom, sentAt }: { atom: Atom<"time", TimeData>; sentA
   const local = new Date(atom.data.at);
   // A moment no date holds (the parser refuses one; this is the last guard): the text as written, not a crash.
   if (Number.isNaN(local.getTime())) return <>{atom.text}</>;
-  const label = t("chat.rich.localTime", { time: localLabel(atom.data.at, local.toDateString() === sent.toDateString()) });
+  const label = t("chat.rich.localTime", { time: localLabel(atom.data.at, local.toDateString() === sent.toDateString(), t.language) });
   return (
     <span data-testid="rich-time">
       <button type="button" title={label} aria-expanded={open} onClick={() => setOpen((v) => !v)} className="rich-time">

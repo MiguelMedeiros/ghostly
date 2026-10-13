@@ -100,7 +100,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
                 <Fingerprint value={store.fingerprint} />
               </p>
               {store.description && <p dir="auto" className="text-xs text-text-secondary whitespace-pre-line">{store.description}</p>}
-              {store.expired && <p className="text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires) })}</p>}
+              {store.expired && <p className="text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires, t.language) })}</p>}
             </div>
             <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>
             <div className="flex justify-end gap-2">
