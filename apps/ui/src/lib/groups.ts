@@ -89,6 +89,12 @@ export const edgeDot = (member: GroupMemberView) => member.me || member.edge?.st
   : edgeWaits(member.edge) ? "bg-text-muted motion-safe:animate-pulse"
   : member.edge?.state === "error" ? "bg-danger" : member.edge?.state === "connecting" ? "bg-text-muted motion-safe:animate-pulse" : "bg-text-muted/50";
 
+/**
+ * An invitation, or a first join through a link, answered from its row: lifted out of folders to stay in sight. A group
+ * kept here and knocking to get back in (removed from a community, its link opened again) is the group, not that.
+ */
+export const invitationRow = (group: Pick<GroupView, "invitation" | "status">): boolean => !!group.invitation && !(group.invitation.viaLink && group.status);
+
 /** Where a private group lives in the app: by its id. */
 export function groupPath(groupId: string): string {
   return `/group/${encodeURIComponent(groupId)}`;
