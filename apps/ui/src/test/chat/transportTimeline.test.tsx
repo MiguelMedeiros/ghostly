@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { TransportLine } from "../../components/TransportTimeline";
 import { ChatConnection } from "../../components/ChatConnection";
-import { mergeTimeline, shortReason, transportEventText, transportLineText, transportOptions, transportWaitText, type TransportEntry } from "../../lib/transportEvents";
+import { liveAttemptText, mergeTimeline, shortReason, transportEventText, transportLineDetails, transportLineText, transportOptions, transportWaitText, type TransportEntry } from "../../lib/transportEvents";
+import { problemText } from "../../lib/problemText";
+import { translateWith } from "../../locales/translate";
+import { LANGUAGES, LOCALES } from "../i18n/locales";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -47,7 +50,7 @@ describe("transport lines: what each change reads as", () => {
 
   it("keeps engine advice out of the line, and names transports", () => {
     expect(shortReason("Your contact did not acknowledge the transport change. Retry when both peers are connected.")).toBe("Your contact did not acknowledge the transport change");
-    expect(shortReason("Transport change timed out. Your previous connection is kept when available; retry or choose another transport.")).toBe("Transport change timed out");
+    expect(shortReason("Transport change timed out. Your previous connection is kept when available; retry or choose another transport.")).toBe("The change took too long");
     expect(shortReason("hyperdht/1 unreachable")).toBe("HyperDHT unreachable");
   });
 
@@ -93,6 +96,60 @@ describe("transport lines: what each change reads as", () => {
     const details = screen.getByTestId("transport-line-details");
     expect(within(details).getByText("Transport").nextSibling).toHaveTextContent("None live");
     expect(within(details).queryByText("Round trip")).toBeNull();
+  });
+});
+
+describe("a transport change that did not land, in the app's language", () => {
+  const others = LANGUAGES.filter(l => l !== "en").map(l => [l, translateWith(LOCALES[l], l)] as const);
+  const failed = (inner: string) => `Transport change failed: ${inner}. Retry or choose another transport.`;
+  // As the engine writes them: the switch (packages/core ghostlink.ts, transportSwitch.ts) and the native dials it names.
+  const reasons = [
+    failed("iroh/1 did not connect in time"), failed("no permitted transport connected"), failed("Transport change cancelled"),
+    failed("Peer native address unavailable"), failed("Native connection limit reached"), failed("HyperDHT handshake timed out"),
+    failed("Noise handshake failed"),
+    "Transport change timed out. Your previous connection is kept when available; retry or choose another transport.",
+    "Transport preferences do not overlap. Enable fallback or choose the same supported transport on both sides.",
+    // The engine's word when the contact's side did not dial (engine/node.ts).
+    "It did not connect",
+  ];
+  const at = () => "14:02";
+
+  it.each(reasons)("%s: the timeline line, its Why row and the history say it in each language", reason => {
+    const entry = line({ kind: "failed", target: "iroh/1", transport: "webrtc/1", reason });
+    const english = shortReason(reason);
+    for (const [language, t] of others) {
+      const why = transportLineDetails(entry, "Ana", at, t).find(r => r.label === t("connection.detail.why"))!.value;
+      expect([language, transportLineText(entry, "Ana", t)]).not.toEqual([language, expect.stringContaining(english)]);
+      expect([language, transportEventText({ at: 1, kind: "failed", target: "iroh/1", reason }, "Ana", t)]).not.toEqual([language, expect.stringContaining(english)]);
+      expect([language, why]).not.toEqual([language, expect.stringContaining(english)]);
+      expect([language, why]).not.toEqual([language, expect.stringContaining(reason.split(/[.:]/)[0])]);
+    }
+  });
+
+  it("says the reason and the next step in Portuguese, the engine's English only behind the ⓘ", () => {
+    const pt = translateWith(LOCALES.pt, "pt");
+    const entry = line({ kind: "failed", target: "iroh/1", transport: "webrtc/1", reason: failed("iroh/1 did not connect in time") });
+    expect(transportLineText(entry, "Ana", pt)).toBe("Não foi possível mudar para Iroh: Iroh não conectou a tempo. Continua em WebRTC");
+    expect(transportLineDetails(entry, "Ana", at, pt).find(r => r.label === "Por quê")?.value)
+      .toBe("Iroh não conectou a tempo. Tente de novo ou escolha outro transporte. A conversa continuou em WebRTC.");
+    // The side that did not dial: no engine default in the line, the app's own words in the Why row.
+    const quiet = line({ kind: "failed", target: "iroh/1", transport: "webrtc/1", reason: "It did not connect" });
+    expect(transportLineText(quiet, "Ana", pt)).toBe("Não foi possível mudar para Iroh. Continua em WebRTC");
+    expect(transportLineDetails(quiet, "Ana", at, pt).find(r => r.label === "Por quê")?.value).toBe("O novo transporte não conectou. A conversa continuou em WebRTC.");
+    const overlap = problemText("Transport preferences do not overlap. Enable fallback or choose the same supported transport on both sides.", pt, "connect");
+    expect(overlap).toMatchObject({ title: "Suas escolhas de transporte não combinam", next: "Ligue a Alternativa ou escolha o mesmo transporte nos dois lados." });
+    expect(overlap.detail).toContain("Transport preferences do not overlap");
+  });
+
+  it("says why a chat is not live over a native transport in each language", () => {
+    const errors = ["Peer native address unavailable; reconnect WebRTC once to exchange endpoints", "Native connection limit reached", "HyperDHT handshake timed out", "Noise handshake failed"];
+    for (const error of errors) {
+      const english = shortReason(error);
+      for (const [language, t] of others) {
+        const lines = liveAttemptText({ at: 1, side: "dialled", failed: [{ transport: "hyperdht/1", error }] }, undefined, "Ana", at, t)!.lines;
+        expect([language, lines.join(" ")]).not.toEqual([language, expect.stringContaining(english)]);
+      }
+    }
   });
 });
 
