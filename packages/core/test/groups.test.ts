@@ -386,6 +386,24 @@ describe("group session", () => {
     expect(GroupSession.join({ name: "x", admin: alice.myKey }, [], welcome[0], seed)).toHaveProperty("state");
   });
 
+  it("welcomes a member again whose welcome was lost, with the epochs since its admission and nothing committed", async () => {
+    const mesh = new Mesh();
+    const alice = mesh.add(GroupSession.create("Ghosts"));
+    const seed = createIdentity().seedB64, key = identityFromSeedB64(seed).pubKeyZ32;
+    await alice.admit(key); // lost on the way
+    await alice.admit(createIdentity().pubKeyZ32); // and someone else let in since
+    const chain = alice.state.chain.length;
+    const again = await alice.rewelcome(key);
+    expect(alice.state.chain).toHaveLength(chain);
+    const joined = GroupSession.join({ name: "Ghosts", admin: alice.myKey }, again.slice(0, -1), again.at(-1), seed);
+    expect(joined).toHaveProperty("state");
+    const state = (joined as { state: { chain: unknown[]; secrets: Record<string, string> } }).state;
+    expect(state.chain).toHaveLength(chain);
+    expect(Object.keys(state.secrets).map(Number)).toEqual([1, 2]);
+    await expect(alice.rewelcome(createIdentity().pubKeyZ32)).rejects.toThrow("Not a member");
+    await expect(alice.rewelcome(alice.myKey)).rejects.toThrow("Not a member");
+  });
+
   it("survives a restart from saved state", async () => {
     const mesh = new Mesh();
     const alice = mesh.add(GroupSession.create("Ghosts"));
