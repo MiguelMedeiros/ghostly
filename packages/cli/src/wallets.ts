@@ -93,6 +93,16 @@ export function invoiceNetwork(invoice: string): WalletNetwork | null {
 const isInvoice = (text: string) => /^(lightning:)?ln(bc|tb|tbs|sb|bcrt)[0-9a-z]+$/i.test(text.trim());
 const isLnurl = (text: string) => /^(lightning:)?lnurl[0-9a-z]+$/i.test(text.trim()) || /^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(text.trim());
 
+/**
+ * The engine refusing the mint URL the person typed (not a URL, or not https): their value, so `bad_request`, as
+ * `service add` says; before, it was `engine` (exit 1), which a bot reads as the engine failing and may retry. Read by
+ * its shape: the engine's `EngineError` carries `engineCode`.
+ */
+function badMintUrl(error: unknown): boolean {
+  const code = error instanceof Error ? (error as { engineCode?: unknown }).engineCode : undefined;
+  return code === "invalidMintUrl" || code === "mintNotHttps";
+}
+
 export const WALLET_METHODS: Record<string, Method> = {
   async "wallet.list"(ctx, params) {
     await federationsOpen(ctx);
@@ -176,7 +186,9 @@ export const WALLET_METHODS: Record<string, Method> = {
   },
 
   async "wallet.mint.add"(ctx, params) {
-    return node(ctx).walletAddMint({ url: str(params, "url", true), ...(bool(params, "primary") ? { primary: true } : {}) });
+    return node(ctx).walletAddMint({ url: str(params, "url", true), ...(bool(params, "primary") ? { primary: true } : {}) }).catch((error: unknown) => {
+      throw badMintUrl(error) ? new CliError("bad_request", (error as Error).message) : error;
+    });
   },
 
   async "lightning.default"(ctx, params) {
