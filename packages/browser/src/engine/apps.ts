@@ -40,12 +40,17 @@ export const APP_STORAGE_LIMITS = {
   /** A value, as compact JSON in UTF-8 bytes. */
   valueBytes: 64 * 1024,
   /**
-   * Counted for each key beside its own bytes and its value's: what the row costs on the device (the app's reference,
-   * the scope and the key again, in the row's own key and in its two indexes). Without it a scope of one-byte values
-   * held 20 times its 5 MiB.
+   * Counted for each key beside its own bytes and its value's: what the row costs on the device (the app's reference and
+   * the scope, in the row's own key and in its two indexes). Without it a scope of one-byte values held 20 times its 5 MiB.
    */
   rowBytes: 128,
-  /** Every key and value of one app in one scope, with `rowBytes` for each key. */
+  /**
+   * How many times a key's bytes count. The device keeps a key four times (the row's own key, its value and both
+   * indexes), three of them as UTF-16, about 10 bytes for each byte of the key: counted once, a scope of 256-byte keys
+   * took 40 to 55 MB for its 5 MiB.
+   */
+  keyTimes: 8,
+  /** Every key and value of one app in one scope, with `rowBytes` for each key and its bytes `keyTimes` over. */
   scopeBytes: 5 * 1024 * 1024,
 } as const;
 
@@ -129,8 +134,12 @@ export interface AddedAppStore {
 
 /** One key of one app's storage in one scope (`STORES.appStorage`): the value as JSON, and the bytes of the key and the value. */
 export interface AppStorageRow { ref: string; scope: string; key: string; value: string; size: number }
-/** What a row takes of its scope's 5 MiB: its key and value, and `rowBytes`. Not kept in the row, so rows from before count alike. */
-const costOf = (row: AppStorageRow): number => APP_STORAGE_LIMITS.rowBytes + row.size;
+/**
+ * What a row takes of its scope's 5 MiB: `rowBytes`, its key `keyTimes` over and its value. `size` is the key's bytes
+ * and the value's. Not kept in the row, so rows from before count alike.
+ */
+const costOf = ({ key, size }: { key: string; size: number }): number =>
+  APP_STORAGE_LIMITS.rowBytes + size + (APP_STORAGE_LIMITS.keyTimes - 1) * byteLength(key);
 
 /** Whether an installed app may run now: `needs-files` when its bundle is not on this device (a restored profile). */
 export type AppRunStatus =
@@ -1475,8 +1484,8 @@ export class Apps {
 
   /**
    * Keeps a JSON value under a key: at most 64 KiB, and 5 MiB for every key of this app in this scope, each counted
-   * with `rowBytes`. A scope already past that (filled before a key counted `rowBytes`) still takes a write that does
-   * not grow it, so the app can make room.
+   * as `costOf` says. A scope already past that (filled under an older count) still takes a write that does not grow
+   * it, so the app can make room.
    */
   async storageSet({ ref, scope, key, value, digest }: { ref: string; scope: string; key: string; value: unknown; digest?: string }): Promise<void> {
     const app = await this.runningOrFail(ref, digest);
@@ -1491,7 +1500,7 @@ export class Apps {
       const used = await this.usageOf(app.ref, where);
       const rows = await store(STORES.appStorage, "readonly");
       const old = await wrap<AppStorageRow | undefined>(rows.get([app.ref, where, name]));
-      const next = used - (old ? costOf(old) : 0) + APP_STORAGE_LIMITS.rowBytes + size;
+      const next = used - (old ? costOf(old) : 0) + costOf({ key: name, size });
       if (next > APP_STORAGE_LIMITS.scopeBytes && next > used) fail("full", "This app's storage in this chat is full (5 MiB)");
       const writing = await store(STORES.appStorage, "readwrite");
       // The chat may have been deleted while this write waited its turn and read. Asked again here, with nothing awaited

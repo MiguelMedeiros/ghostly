@@ -12,7 +12,7 @@ import { BUNDLE_URL, FakeNet, STORE_URL, appRows, apps, bundle, bundleIds, empty
 
 /*
  * Each app's own storage (WISP 1200 § Permissions: 5 MiB per app and per chat, keys of 256 bytes, JSON values of 64 KiB,
- * 128 bytes counted for each key beside its own bytes), uninstall, the database step that adds the apps' stores, what a backup carries, and the engine's flag.
+ * each key counting 128 bytes and its own bytes eight times), uninstall, the database step that adds the apps' stores, what a backup carries, and the engine's flag.
  */
 
 let net: FakeNet;
@@ -20,6 +20,9 @@ beforeEach(async () => {
   await emptyProfile();
   net = new FakeNet();
 });
+
+/** What a key and a value of `valueBytes` take of a scope's 5 MiB. */
+const cost = (key: string, valueBytes: number) => APP_STORAGE_LIMITS.rowBytes + APP_STORAGE_LIMITS.keyTimes * key.length + valueBytes;
 
 async function installed(options: Parameters<typeof bundle>[0] = {}): Promise<{ store: Apps; app: Built }> {
   const app = await bundle(options);
@@ -77,7 +80,7 @@ describe("storage", () => {
     let used = 0, n = 0;
     for (; ; n++) {
       const key = `k${String(n).padStart(3, "0")}`;
-      const size = APP_STORAGE_LIMITS.rowBytes + key.length + APP_STORAGE_LIMITS.valueBytes;
+      const size = cost(key, APP_STORAGE_LIMITS.valueBytes);
       if (used + size > APP_STORAGE_LIMITS.scopeBytes) break;
       await store.storageSet({ ref, scope: "chat-1", key, value });
       used += size;
@@ -100,35 +103,41 @@ describe("storage", () => {
     const value = "x".repeat(APP_STORAGE_LIMITS.valueBytes - 2);
     const writes = Array.from({ length: 90 }, (_, i) => store.storageSet({ ref: app.ref, scope: "chat-1", key: `k${String(i).padStart(3, "0")}`, value }).then(() => "ok", (e: Error) => e.message.split(":")[0]));
     const results = await Promise.all(writes);
-    const fit = Math.floor(APP_STORAGE_LIMITS.scopeBytes / (APP_STORAGE_LIMITS.rowBytes + 4 + APP_STORAGE_LIMITS.valueBytes));
+    const fit = Math.floor(APP_STORAGE_LIMITS.scopeBytes / cost("k000", APP_STORAGE_LIMITS.valueBytes));
     expect(results.filter((r) => r === "ok")).toHaveLength(fit);
     expect(results.filter((r) => r === "full")).toHaveLength(90 - fit);
-    const total = (await storageRows() as { size: number }[]).reduce((sum, r) => sum + APP_STORAGE_LIMITS.rowBytes + r.size, 0);
+    const total = (await storageRows() as { key: string; size: number }[]).reduce((sum, r) => sum + cost(r.key, r.size - r.key.length), 0);
     expect(total).toBeLessThanOrEqual(APP_STORAGE_LIMITS.scopeBytes);
   });
 
   /**
    * Rows as `storageSet` writes them, put straight in the store: `big` values of 64 KiB under keys `b00`, `b01`…, which
-   * take most of a scope in a few rows, then `small` values of one byte under keys `k0000`, `k0001`…
+   * take most of a scope in a few rows, then `small` values of one byte under keys `k0000`, `k0001`…, then `long` values
+   * of one byte under keys of 256 bytes.
    */
-  async function seed(ref: string, scope: string, { big, small = 0 }: { big: number; small?: number }): Promise<void> {
+  async function seed(ref: string, scope: string, { big, small = 0, long = 0 }: { big: number; small?: number; long?: number }): Promise<void> {
     const value = JSON.stringify("x".repeat(APP_STORAGE_LIMITS.valueBytes - 2));
     const tx = (await openDb()).transaction(STORES.appStorage, "readwrite");
     for (let i = 0; i < big; i++) tx.objectStore(STORES.appStorage).put({ ref, scope, key: `b${String(i).padStart(2, "0")}`, value, size: 3 + APP_STORAGE_LIMITS.valueBytes });
     for (let i = 0; i < small; i++) tx.objectStore(STORES.appStorage).put({ ref, scope, key: `k${String(i).padStart(4, "0")}`, value: "1", size: 6 });
+    for (let i = 0; i < long; i++) tx.objectStore(STORES.appStorage).put({ ref, scope, key: longKey(i), value: "1", size: 257 });
     await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
   }
+
+  /** A key of 256 bytes, `i` at its end. */
+  const longKey = (i: number) => `${"x".repeat(250)}${String(i).padStart(6, "0")}`;
 
   it("each key counts 128 bytes beside its own and its value's: the room left takes hundreds of one-byte values, not thousands", async () => {
     const { app } = await installed();
     const { ref } = app;
-    // 79 values of 64 KiB leave 55,187 bytes of the 5 MiB (65,299 before a key counted 128 bytes).
+    // 79 values of 64 KiB leave 53,528 bytes of the 5 MiB (65,299 before a key counted 128 bytes, 55,187 before it
+    // counted its own bytes eight times).
     const big = 79;
     await seed(ref, "chat-1", { big });
-    const left = APP_STORAGE_LIMITS.scopeBytes - big * (APP_STORAGE_LIMITS.rowBytes + 3 + APP_STORAGE_LIMITS.valueBytes);
-    // A key of 5 bytes and a value of 1: 6 bytes of the app's, and about 140 on the device.
-    const fit = Math.floor(left / (APP_STORAGE_LIMITS.rowBytes + 6));
-    expect(fit).toBe(411);
+    const left = APP_STORAGE_LIMITS.scopeBytes - big * cost("b00", APP_STORAGE_LIMITS.valueBytes);
+    // A key of 5 bytes and a value of 1: 6 bytes of the app's, 169 counted, and about 230 on the device.
+    const fit = Math.floor(left / cost("k0000", 1));
+    expect(fit).toBe(316);
     // A fresh engine counts the rows it finds the same way.
     const store = apps(net);
     const results: string[] = [];
@@ -142,10 +151,27 @@ describe("storage", () => {
     expect(await store.storageKeys({ ref, scope: "chat-1" })).toHaveLength(big + fit);
   });
 
-  it("a scope filled before keys counted 128 bytes takes no new key, and still rewrites and deletes the ones it has", async () => {
+  it("keys of 256 bytes count their bytes eight times: a scope holds about 2,400 of them, not 13,600", async () => {
     const { app } = await installed();
     const { ref } = app;
-    // 5,181,181 bytes as they were counted, under the 5 MiB; 5,268,093 as they are now, over it.
+    // A key of 256 bytes and a value of 1: 2,177 bytes counted, about 3,000 on the device (it was 385).
+    const fit = Math.floor(APP_STORAGE_LIMITS.scopeBytes / cost(longKey(0), 1));
+    expect(fit).toBe(2408);
+    await seed(ref, "chat-1", { big: 0, long: fit - 1 });
+    // A fresh engine counts the rows it finds the same way.
+    const store = apps(net);
+    await store.storageSet({ ref, scope: "chat-1", key: longKey(fit - 1), value: 1 });
+    await expect(store.storageSet({ ref, scope: "chat-1", key: longKey(fit), value: 1 })).rejects.toThrow(/^full/);
+    // A short key still fits in what is left, and a delete gives back the long key's whole count.
+    await store.storageSet({ ref, scope: "chat-1", key: "k", value: 1 });
+    await store.storageDelete({ ref, scope: "chat-1", key: longKey(0) });
+    await store.storageSet({ ref, scope: "chat-1", key: longKey(fit), value: 1 });
+  });
+
+  it("a scope filled under an older count takes no new key, and still rewrites and deletes the ones it has", async () => {
+    const { app } = await installed();
+    const { ref } = app;
+    // 5,181,181 bytes as they were first counted, under the 5 MiB; 5,290,752 as they are now, over it.
     await seed(ref, "chat-1", { big: 79, small: 600 });
     const store = apps(net);
     await expect(store.storageSet({ ref, scope: "chat-1", key: "new", value: 1 })).rejects.toThrow(/^full/);
