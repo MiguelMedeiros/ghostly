@@ -229,7 +229,8 @@ const METHODS: Record<string, Method> = {
     // A kept `typing --for` ends with the message (the engine says stop with it).
     endTyping(ctx, { linkId: link.id }, false);
     const result = await node(ctx).sendMessage({ linkId: link.id, text, ...(replyTo ? { replyTo } : {}), ...(card ? { card } : {}) });
-    if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
+    // A `--reply` to a message this chat does not have is not_found (exit 3), as `file send --reply` and `group send` say.
+    if (result.error) throw /not in this chat|cannot be replied to/.test(result.error) ? new CliError("not_found", result.error) : new CliError(result.refused ? "refused" : "unavailable", result.error);
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
     let message = await node(ctx).getMessage(link.id, result.messageId);
     if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
