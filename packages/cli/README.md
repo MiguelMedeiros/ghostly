@@ -73,7 +73,8 @@ and `send --reply` for its answer: [examples/claude-code-agent.sh](examples/clau
 Each profile is a folder, `~/.ghostly/profiles/<name>/` (0700; files 0600), with its own chats, keys and wallets.
 `--profile <name>` (or `GHOSTLY_PROFILE`) picks one; `ghostly profile use <name>` sets the current one;
 `--home <dir>` (or `GHOSTLY_HOME`) moves the whole folder. The `default` profile is made on first use, others with
-`ghostly profile create <name>`.
+`ghostly profile create <name>`. An empty `--profile` or `--home` (`-p "$BOT"` with `BOT` unset) is a usage error;
+an empty `GHOSTLY_PROFILE` or `GHOSTLY_HOME` counts as unset.
 
 Only one process opens a profile at a time. When a daemon runs it, every command goes through the daemon's socket.
 When none does, a command runs the profile itself for as long as it needs (a **one-shot**) and leaves: `send` then
