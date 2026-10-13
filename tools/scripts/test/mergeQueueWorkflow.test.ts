@@ -77,13 +77,16 @@ describe("merge-queue.yml waits in line", () => {
     expect(job("bases")).toMatch(/^ {4}concurrency:\n {6}group: merge-queue-bases\n {6}cancel-in-progress: false$/m);
   });
 
-  it("and a run woken by CI is named after its head, so the run that replaced it serves it", () => {
+  it("and a run woken by CI is named after its head, so the run that replaced it serves it", async () => {
     const expr = (text.match(/^run-name: >-\n((?: {2}.+\n)+)/m)?.[1] ?? "").replace(/\s+/g, " ").trim().replace(/^\$\{\{(.*)\}\}$/, "$1");
     const name = (github: object) =>
       new Function("github", "format", `return (${expr.replace(/!=|==/g, (m) => `${m}=`)});`)(github, (f: string, ...v: string[]) => f.replace(/\{(\d)\}/g, (_, i) => v[Number(i)]));
     const sha = "f".repeat(40);
     expect(name({ event_name: "workflow_run", event: { workflow_run: { head_sha: sha } } })).toBe(`Merge queue: CI ended on ${sha}`);
-    expect(missedWakes([{ id: 2, conclusion: null }, { id: 1, conclusion: "cancelled", display_title: name({ event_name: "workflow_run", event: { workflow_run: { head_sha: sha } } }) }], 2)).toEqual([sha]);
+    const runs = [{ id: 2, conclusion: null }, { id: 1, conclusion: "cancelled", display_title: name({ event_name: "workflow_run", event: { workflow_run: { head_sha: sha } } }) }];
+    expect(await missedWakes(runs, 2, async () => [])).toEqual([sha]);
+    // missedWakes tells a run replaced while it waited from one served by its bases job's name.
+    expect(job("bases")).toMatch(/^ {4}name: Bases with a train$/m);
     expect(name({ event_name: "pull_request_target", event: { pull_request: { title: "fix: x" } } })).toBe("fix: x");
     expect(name({ event_name: "push", ref_name: "dev", event: {} })).toBe("Merge queue: push to dev");
     expect(name({ event_name: "schedule", event: {} })).toBe("Merge queue");
