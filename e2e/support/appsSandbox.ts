@@ -339,9 +339,25 @@ function stormApp() {
   };
   burst();
 }
+
+/** Reads its own `big.bin` 50 times at the start of each second for 3 s, drops the bytes, then reports what it was told. */
+function fileFloodApp() {
+  const G: any = (window as any).ghostly;
+  (async () => {
+    let ok = 0;
+    const refused: string[] = [];
+    for (let second = 0; second < 3; second++) {
+      const started = Date.now();
+      const answers = await Promise.allSettled(Array.from({ length: 50 }, () => G.file("big.bin")));
+      for (const a of answers as any[]) { if (a.status === "fulfilled") ok++; else refused.push(a.reason.message); }
+      await new Promise((r) => setTimeout(r, Math.max(0, 1050 - (Date.now() - started))));
+    }
+    await G.storage.set("report", { ok, refused: [...new Set(refused)] });
+  })();
+}
 /* eslint-enable */
 
-const SOURCES = { net: netProbes, escape: escapeProbe, victim: victimApp, flood: floodApp, storm: stormApp, internet: internetApp, talker: talkerApp, eavesdropper: eavesdropperApp } as const;
+const SOURCES = { net: netProbes, escape: escapeProbe, victim: victimApp, flood: floodApp, storm: stormApp, fileFlood: fileFloodApp, internet: internetApp, talker: talkerApp, eavesdropper: eavesdropperApp } as const;
 
 /** An app's entry: the probe's source, given its targets. */
 export function appEntry(kind: keyof typeof SOURCES, targets: object = {}): string {
