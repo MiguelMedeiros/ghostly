@@ -3071,14 +3071,23 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * The message of a chat a reply answers, by its id here or the id both sides know it by (`replyRef`): what the
    * reply keeps of it, or why there is nothing to reply to. A group's reply needs the author's member key too.
+   * Read alone by its id, or a chat's `peer_`/`me_` row for a wire id, as `resolveReply` does: a group's message goes
+   * by its row's id, so a miss there is not here; a chat's other rows (a file's, a payment's) are looked for in the
+   * whole chat.
    */
   private async replyFor(linkId: string, messageId: unknown): Promise<MessageReply | string> {
     if (typeof messageId !== "string" || !messageId) return "No message to reply to";
-    const messages = await db.getMessages(linkId);
-    const original = messages.find(m => m.id === messageId) ?? messages.find(m => replyRef(m) === messageId);
+    const group = linkId.startsWith("group:");
+    let original = await db.getMessage(linkId, messageId);
+    for (const rowId of group ? [] : [`peer_${messageId}`, `me_${messageId}`]) {
+      if (original) break;
+      const row = await db.getMessage(linkId, rowId);
+      if (row && replyRef(row) === messageId) original = row;
+    }
+    if (!original && !group) original = (await db.getMessages(linkId)).find(m => replyRef(m) === messageId);
     const ref = original && replyRef(original);
     if (!original || !ref) return "That message is not in this chat, or cannot be replied to";
-    if (linkId.startsWith("group:") && !original.member) return "That message cannot be replied to";
+    if (group && !original.member) return "That message cannot be replied to";
     return replyToOriginal(original, ref);
   }
 
