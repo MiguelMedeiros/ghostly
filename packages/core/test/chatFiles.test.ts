@@ -98,6 +98,8 @@ function wire(options: {
   writable?: boolean;
   /** Storage that takes this long (ms) for each write. */
   writeMs?: number;
+  /** Storage that takes this long (ms) to open a received file, as a database lookup does. */
+  openMs?: number;
 } = {}) {
   let open = true;
   const queued = { a: 0, b: 0 };
@@ -151,6 +153,7 @@ function wire(options: {
       },
       decide: (file, again) => side.decide(file, again),
       openTarget: async (record) => {
+        if (options.openMs) await new Promise((resolve) => setTimeout(resolve, options.openMs));
         let disk = side.disks.get(record.id);
         if (!disk) { disk = new Disk(!!options.keepBytes, options.writeMs); side.disks.set(record.id, disk); }
         return disk.target();
@@ -768,6 +771,25 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect([...w.b.records.values()].filter((r) => r.state === "active").length).toBe(3);
     expect([...w.a.records.values()].filter((r) => r.waitingFor === "busy").length).toBe(2);
     await until(() => [...w.a.records.values()].every((r) => r.state === "done"), 30_000);
+  });
+
+  it("files sent all at once still arrive three at a time when opening where each is written takes a while", async () => {
+    // Opening a received file reads the database first: the offers behind it, and the files queued behind one that
+    // ended, came in meanwhile and each went, until ten sent 1 MiB windows at once and the session's receive queue
+    // overflowed.
+    const w = wire({ openMs: 5 });
+    w.attach();
+    let sending = 0, receiving = 0;
+    const sample = setInterval(() => {
+      sending = Math.max(sending, [...w.a.records.values()].filter((r) => r.state === "active").length);
+      receiving = Math.max(receiving, [...w.b.records.values()].filter((r) => r.state === "active" || r.state === "verifying").length);
+    }, 0);
+    try {
+      for (let i = 0; i < 10; i++) send(w, file(`burst-0${i}`, 256 * 1024));
+      await until(() => [...w.a.records.values()].length === 10 && [...w.a.records.values()].every((r) => r.state === "done"), 30_000);
+    } finally { clearInterval(sample); }
+    expect(receiving).toBeLessThanOrEqual(FILE_LIMITS.maxActiveIncoming);
+    expect(sending).toBeLessThanOrEqual(FILE_LIMITS.maxActiveIncoming);
   });
 
   it("no more than 16 offers wait for an answer; the 17th is refused", async () => {
