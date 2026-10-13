@@ -544,11 +544,15 @@ describe("a pending chat's invite code is a secret", () => {
     expect(chatJson(link("c")).invite).toBeNull();
     // Array.map hands the index as the second argument: it must never read as "show".
     expect(JSON.stringify([link("a"), link("b", { inviteCode: CODE } as never)].map(chatJson as never))).not.toContain(CODE);
-    for (const [method, params] of [["chat.get", {}], ["chat.rename", { name: "Alice" }], ["chat.connect", {}], ["chat.disconnect", {}], ["chat.transport", { transport: "dht" }], ["chat.wait", { until: "text", timeout: 1 }]] as const) {
+    for (const [method, params] of [["chat.get", {}], ["chat.rename", { name: "Alice" }], ["chat.disconnect", {}], ["chat.transport", { transport: "dht" }], ["chat.wait", { until: "text", timeout: 1 }]] as const) {
       const hidden = await callApi(ctx, method, { chat: "chat-one", ...params });
       expect(JSON.stringify(hidden), method).not.toContain(CODE);
       expect(hidden, method).toMatchObject({ invite: "<hidden>" });
     }
+    // Nobody took the invite: connect says so at once, without the code.
+    const refused = await callApi(ctx, "chat.connect", { chat: "chat-one" }).catch((error: unknown) => error as Error);
+    expect(refused).toMatchObject({ code: "unavailable" });
+    expect(JSON.stringify(refused) + (refused as Error).message).not.toContain(CODE);
     const listed = await callApi(ctx, "chat.list", {}) as { chats: { id: string; invite: string | null }[] };
     expect(JSON.stringify(listed)).not.toContain(CODE);
     expect(Object.fromEntries(listed.chats.map((c) => [c.id, c.invite]))).toEqual({ "chat-zero": null, "chat-one": "<hidden>", "chat-two": null });
