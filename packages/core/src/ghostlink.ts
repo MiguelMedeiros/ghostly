@@ -96,6 +96,14 @@ export const CROSSED_WAIT_MS = 500;
  * takes over.
  */
 export const CROSSED_FRESH_MS = 10_000;
+/**
+ * A dial of the contact's that meets such a session waits this long for that session to answer a ping. It answers when
+ * the dials crossed (the contact holds this side's dial too); it does not when the contact's app ended since and is
+ * back: its dial then takes over. Refused outright, that dial left the contact waiting for the dead session's end, 16.6
+ * to 18.9 s (CLI daemons over HyperDHT, the contact killed 1 to 3 s after this side's knock, 5 of 5). A round trip is
+ * 7 ms on loopback and under 0.5 s over a relayed Iroh.
+ */
+export const CROSSED_PROBE_MS = 1_500;
 /** A WebRTC attempt under way, not yet open: what a member's packet saying it has no WebRTC ends (`peerPacketTransports`). */
 const WEBRTC_ATTEMPT: ReadonlySet<DataLinkState> = new Set(["offering", "answering", "connecting"]);
 /** A joiner gathers its offer while it first looks for the inviter (`dialEarly`) only this soon after the join. */
@@ -1612,6 +1620,7 @@ export class GhostLink {
   disconnect(): void {
     this.closeRetired();
     this.dropCrossed();
+    this.dropCrossedProbe();
     this.dropBlockedDial();
     this.switcher.stop(); this.cancelCandidate();
     this.transitionTarget = this.transitionError = undefined;
@@ -3547,10 +3556,47 @@ export class GhostLink {
     const held = this.channel;
     if (held && this.activeBinding && !this.dialedIn.has(held) && Date.now() - this.channelSince < CROSSED_FRESH_MS
       && this.myPubKeyZ32 < this.options.params.peerPubKeyZ32) {
-      traceLink(this.myPubKeyZ32, "dial-crossed", { transport: binding.transport, held: true }); channel.close(); return;
+      // Still authenticating: the dials crossed, or the held one fails its authentication by itself.
+      if (this.paired?.state.status !== "ready") { traceLink(this.myPubKeyZ32, "dial-crossed", { transport: binding.transport, held: true }); channel.close(); return; }
+      this.probeCrossed(held, channel, binding); return;
     }
+    this.replaceWith(channel, binding);
+  }
+  private replaceWith(channel: FrameChannel, binding: NativeBinding): void {
     traceLink(this.myPubKeyZ32, "replacing", { transport: binding.transport, held: this.paired?.state.transport });
     this.attach(channel, binding, { resolve: () => {}, reject: () => {} });
+  }
+
+  /**
+   * The contact dialled in while this side's own fresh dial holds the chat (`CROSSED_FRESH_MS`): the dials crossed, or
+   * the contact's app ended since that dial and is back. The held session is pinged; heard from within
+   * `CROSSED_PROBE_MS`, the contact holds this side's dial too and its own closes. Not heard from, the contact's dial
+   * takes over.
+   */
+  private crossedProbe: { channel: FrameChannel; timer: ReturnType<typeof setTimeout> } | null = null;
+  /** Frames heard on the open session, counted from its start: whether the contact answered `probeCrossed`. */
+  private framesHeard = 0;
+  private probeCrossed(held: FrameChannel, channel: FrameChannel, binding: NativeBinding): void {
+    this.dropCrossedProbe();
+    traceLink(this.myPubKeyZ32, "dial-crossed", { transport: binding.transport, held: true, probe: true });
+    const heard = this.framesHeard;
+    try { this.sendPing(held, false); } catch { /* closing: the dial in is taken below */ }
+    const timer = setTimeout(() => {
+      if (this.crossedProbe?.channel !== channel) return;
+      this.crossedProbe = null;
+      if (this.stopped || this.leaving || this.candidate) { channel.close(); return; }
+      if (!this.channel) { this.attach(channel, binding); return; }
+      if (this.channel === held && this.framesHeard !== heard) { channel.close(); return; }
+      traceLink(this.myPubKeyZ32, "crossed-held-silent", { transport: binding.transport });
+      this.replaceWith(channel, binding);
+    }, CROSSED_PROBE_MS);
+    channel.onClose = () => { if (this.crossedProbe?.channel === channel) { clearTimeout(timer); this.crossedProbe = null; } };
+    this.crossedProbe = { channel, timer };
+  }
+  private dropCrossedProbe(): void {
+    const probe = this.crossedProbe;
+    if (!probe) return;
+    this.crossedProbe = null; clearTimeout(probe.timer); probe.channel.close();
   }
 
   /**
@@ -3715,7 +3761,7 @@ export class GhostLink {
         onApplication: async data => {
           if (this.channel !== channel) return;
           // Anything from the peer shows the session is alive.
-          this.unansweredPings = 0; this.heardFromPeer();
+          this.unansweredPings = 0; this.heardFromPeer(); this.framesHeard++;
           if (typeof data !== "string") {
             // files/4: a file's bytes. Any other binary message, or one nobody agreed to, is dropped (WISP 100).
             const chunk = this.supportsBinaryFiles ? decodeFileData(data) : null;
