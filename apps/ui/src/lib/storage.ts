@@ -237,7 +237,11 @@ function tellUnsaved(): void {
   queueMicrotask(() => { for (const listener of unsavedListeners) listener(); });
 }
 
-export function saveSession(session: ChatSession): void {
+/**
+ * False when localStorage did not take the session, even after making room (full, or unavailable): this page holds it
+ * (`unsaved`) until a later write fits.
+ */
+export function saveSession(session: ChatSession): boolean {
   // Whether the session was stored (or needs no write).
   const write = (): boolean => {
     const kept = stored(session);
@@ -258,7 +262,9 @@ export function saveSession(session: ChatSession): void {
     }
     return writeKey(getKey(session.id), raw);
   };
-  if (!write()) makeRoom(session.id, write);
+  if (write()) return true;
+  makeRoom(session.id, write);
+  return !unsaved.has(getKey(session.id));
 }
 
 let makingRoom = false;
@@ -738,11 +744,14 @@ export function markJoinAnnounced(sessionId: string): void {
   }
 }
 
-export function saveInviteCode(sessionId: string, code: string): void {
+/** False when the code could not be stored (storage full or unavailable). */
+export function saveInviteCode(sessionId: string, code: string): boolean {
   try {
     localStorage.setItem(`${getPrefix()}invite_${sessionId}`, code);
+    return true;
   } catch {
     // storage full or unavailable
+    return false;
   }
 }
 
@@ -814,9 +823,14 @@ export function sessionLinkParams(session: ChatSession): LinkParams {
   };
 }
 
+/** What `ensureSession` throws when a new chat could not be stored: the storage is full (errorText.ts says it). */
+export const NO_ROOM_FOR_CHAT = "There is no room left on this device for a new chat";
+
 /**
  * The id of the session for these keys, stored first if it is new. Chats are
  * routed by this id so the keys never reach the address bar or the history.
+ * A new one that could not be stored (or its invite, which the chat shows) throws
+ * `NO_ROOM_FOR_CHAT`: its id would open no chat.
  */
 export function ensureSession(
   keys: SessionKeys,
@@ -826,7 +840,7 @@ export function ensureSession(
   if (existing && existing.profile !== keys.profile) throw new Error("Invitation profile does not match this stored conversation");
   const id = existing?.id ?? newSessionId();
   if (!existing) {
-    saveSession({
+    const saved = saveSession({
       id,
       profile: keys.profile,
       deliveryMode: keys.deliveryMode,
@@ -839,8 +853,13 @@ export function ensureSession(
       createdAt: options.createdAt ?? Date.now(),
       ...(options.viaLink ? { viaLink: true as const } : {}),
     });
+    // Held only in this page, it would be gone at a reload, its link with it: not made at all.
+    if (!saved) { forgetKey(getKey(id)); throw new Error(NO_ROOM_FOR_CHAT); }
   }
-  if (options.inviteCode) saveInviteCode(id, options.inviteCode);
+  if (options.inviteCode && !saveInviteCode(id, options.inviteCode) && !existing) {
+    forgetKey(getKey(id));
+    throw new Error(NO_ROOM_FOR_CHAT);
+  }
   return id;
 }
 
