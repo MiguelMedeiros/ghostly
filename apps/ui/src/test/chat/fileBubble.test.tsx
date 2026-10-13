@@ -355,6 +355,19 @@ describe("FileBubble: files/3", () => {
     } finally { delete (servicesPlatform as { saveFile?: unknown }).saveFile; }
   });
 
+  it("a group's picture all here, too large to show here, is saved through the system though it shows no transfer (Desktop)", async () => {
+    const saveFile = vi.fn(async () => true);
+    Object.assign(servicesPlatform!, { saveFile, fileHeld: vi.fn(async () => "here" as const) });
+    try {
+      // The engine keeps no transfer for a group's file all here: its record says it is done.
+      const picture = { id: "group-g1-in-abc", name: "huge.png", mime: "image/png", size: 900 * 1024 ** 2 };
+      fakeEngine.update({ links: [], transfers: {}, transfersRestored: true });
+      renderApp(<FileBubble file={file(picture)} peerName="Ana" />);
+      fireEvent.click(await screen.findByTestId("file-save"));
+      expect(saveFile).toHaveBeenCalledWith("group-g1-in-abc", "huge.png");
+    } finally { delete (servicesPlatform as { saveFile?: unknown; fileHeld?: unknown }).saveFile; delete (servicesPlatform as { fileHeld?: unknown }).fileHeld; }
+  });
+
   // The save command (apps/desktop file_store.rs) rejects with the system's English: a folder that cannot be written
   // to, a full disk, a place without a file name.
   it.each([
