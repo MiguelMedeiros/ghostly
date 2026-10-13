@@ -98,9 +98,10 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       if (cancelled) { shown?.release(); return; }
       if (!shown) {
         // A picture too large to hand out here, or not here at all: only a file this device holds offers Save.
-        const held = await fileHeld(platform, file.id, transfer?.state === "done");
+        // Finished: done, or no transfer at all (a group's file all here shows none).
+        const held = await fileHeld(platform, file.id, settled);
         if (cancelled) return;
-        const saveable = held === "here" && (picture || !platform.fileHeld ? !!platform.saveFile && transfer?.state === "done" : true);
+        const saveable = held === "here" && (picture || !platform.fileHeld ? !!platform.saveFile && settled : true);
         if (!saveable && !settled) return;
         setSaveOnly(saveable);
         setMissing(saveable ? false : held === "left-out" ? "left-out" : true);

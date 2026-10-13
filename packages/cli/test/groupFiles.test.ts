@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import type { Server } from "node:http";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
+import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 // covers: groups.files, groups.files.wire, headless.groups
 
 /**
@@ -88,5 +88,11 @@ describe("files in a private group of three daemons", { timeout: 480_000 }, () =
         expect(sha(saved.path as string)).toBe(sha(original));
       }
     }
+    // Started again: a file all here shows no transfer in the engine's state; its record still says it is done.
+    await running.get(bob)!.stop();
+    await up(bob);
+    const listed = await files(bob, group);
+    expect(listed.map((f) => f.transfer?.state)).toEqual(["done", "done"]);
+    expect(error(await as(bob, "file", "accept", listed[0].file.id), "refused", 1).message).toBe("Nothing to ask for: the file is all here");
   });
 });

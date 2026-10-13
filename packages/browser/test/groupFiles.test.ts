@@ -106,8 +106,12 @@ class FilesWorld {
 
   key(peer: Peer, id: string): string { return this.world.view(peer, id)!.myKey!; }
 
-  /** A member's app starts again on what it kept: its new engine hears its edges' sessions open, as an app's does. */
+  /**
+   * A member's app starts again on what it kept: its new engine holds no transfer yet, and hears its edges' sessions
+   * open, as an app's does.
+   */
   async restart(peer: Peer): Promise<void> {
+    this.files.get(peer)!.transfers.clear();
     await this.world.restart(peer);
     for (const edge of peer.links.values()) edge.announced = false;
   }
@@ -131,7 +135,12 @@ class FilesWorld {
     return { message, transfer: id ? files.transfers.get(id) : undefined, bytes: id ? files.store.bytes.get(id) : undefined };
   }
 
-  done(peer: Peer, groupId: string, messageId: string): boolean { return this.got(peer, groupId, messageId).transfer?.state === "done"; }
+  /** All here: its transfer says so, or (one that shows none, as after a start) its record. */
+  done(peer: Peer, groupId: string, messageId: string): boolean {
+    const { message, transfer } = this.got(peer, groupId, messageId);
+    const record = message?.file && this.files.get(peer)!.store.records.get(message.file.id);
+    return (transfer ?? record?.transfer)?.state === "done";
+  }
 
   /** A frame one member's app sends another over their edge, as its app would. */
   say(from: Peer, to: Peer, groupId: string, frame: Record<string, unknown>): void {
@@ -892,6 +901,31 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(t.done(bob, id, messageId)).toBe(true);
   });
 
+  it("after a start, files all here show no transfer, so the engine's state does not grow with them; one still coming does", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const held = [];
+    for (let i = 0; i < 3; i++) held.push(await t.send(alice, id, pattern(20_000, 30 + i), { name: `h${i}.bin` }));
+    await t.world.until(() => held.every(({ messageId }) => t.done(bob, id, messageId)), 60_000);
+    // Alice's device serves nothing for now: the next file is still coming to Bob's when both apps start again.
+    t.files.get(alice)!.settings.serveFiles = false;
+    const coming = await t.send(alice, id, pattern(20_000, 40), { name: "late.bin" });
+    await t.world.run(5_000);
+    await t.restart(alice);
+    await t.restart(bob);
+    const late = t.got(bob, id, coming.messageId).message!.file!.id;
+    expect([...t.files.get(alice)!.transfers.keys()]).toEqual([]);
+    expect([...t.files.get(bob)!.transfers.keys()]).toEqual([late]);
+    for (const { messageId } of held) {
+      expect(t.got(bob, id, messageId).transfer).toBeUndefined();
+      expect(t.done(bob, id, messageId)).toBe(true);
+    }
+    t.files.get(alice)!.settings.serveFiles = true;
+    await t.world.until(() => t.done(bob, id, coming.messageId), 3 * 60_000);
+    expect(sha(t.got(bob, id, coming.messageId).bytes!)).toBe(coming.meta.d);
+    expect([...t.files.get(bob)!.transfers.keys()]).toEqual([late]);
+  });
+
   for (const restart of [false, true]) {
     it(`automatic downloads turned off stop the files chosen by themselves that are not here yet${restart ? ", after a restart too" : ""}`, async () => {
       const t = new FilesWorld();
@@ -940,11 +974,11 @@ describe("the files of a group this device no longer has", { timeout: 120_000 },
     const store = t.files.get(bob)!.store, here = t.got(bob, id, messageId).message!.file!.id;
     // A community left on a version whose Leave kept its files: no group stored here names them.
     const gone = await leftOver(store, "gone-community");
-    await t.world.restart(bob);
+    await t.restart(bob);
     expect(store.records.has(gone)).toBe(false);
     expect(store.bytes.has(gone)).toBe(false);
     expect(sha(store.bytes.get(here)!)).toBe(meta.d);
-    expect(t.got(bob, id, messageId).transfer).toMatchObject({ state: "done" });
+    expect(t.done(bob, id, messageId)).toBe(true);
   });
 
   it("stay for a group it was removed from, whose history is kept", async () => {
@@ -954,12 +988,12 @@ describe("the files of a group this device no longer has", { timeout: 120_000 },
     await t.world.until(() => t.done(bob, id, messageId), 60_000);
     await alice.groups.remove(id, t.key(bob, id));
     await t.world.until(() => t.world.view(bob, id)?.status === "removed", 60_000);
-    await t.world.restart(bob);
+    await t.restart(bob);
     expect(t.world.view(bob, id)?.status).toBe("removed");
-    const { message, bytes, transfer } = t.got(bob, id, messageId);
+    const { message, bytes } = t.got(bob, id, messageId);
     expect(t.files.get(bob)!.store.records.has(message!.file!.id)).toBe(true);
     expect(sha(bytes!)).toBe(meta.d);
-    expect(transfer).toMatchObject({ state: "done" });
+    expect(t.done(bob, id, messageId)).toBe(true);
   });
 
   it("stay on a copy that must stay as it is (limited mode)", async () => {
