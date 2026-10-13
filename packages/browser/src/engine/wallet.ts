@@ -103,12 +103,13 @@ export class SwapUnsettledError extends Error {
  * Where a written-down swap stands at its mint. `never`: the mint signed none of its outputs. `gone`: the inputs it
  * reads spent all the same. `final`: nothing can change that (a refusal, or inputs spent by something else); without
  * it the swap is only overdue, and stays watched after its inputs are given back. `open`: not known yet; `slow`, a
- * mint that cannot give signatures back; `idle`, a mint that answers and has done nothing with it so far.
+ * mint that cannot give signatures back; `idle`, a mint that answers and has done nothing with it so far; `pending`,
+ * inputs the mint reads pending.
  */
 type SwapOutcome =
   | { state: "done"; keep: Proof[]; send: Proof[] }
   | { state: "never"; gone: Set<string>; final: boolean }
-  | { state: "open"; slow?: boolean; idle?: boolean };
+  | { state: "open"; slow?: boolean; idle?: boolean; pending?: boolean };
 
 /** When a swap with no answer can no longer reach the mint: a request's longest life, and a margin after its last try. */
 const swapOverdueAt = (swap: PendingSwap) => Math.max(swap.createdAt + CASHU_REQUEST_TIMEOUT_MS + SWAP_SETTLED_MS, (swap.attemptEndedAt ?? Number.POSITIVE_INFINITY) + SWAP_SETTLED_MS);
@@ -980,7 +981,11 @@ export class CashuWallet {
     if (first && first !== "none") return first;
     const states = await wallet.checkProofsStates(saved.inputs.map((p) => ({ secret: p.secret, id: p.id })));
     if (states.length !== saved.inputs.length) throw new Error("The mint answered for another number of proofs");
-    if (states.some((s) => s.state === "PENDING")) return { state: "open" };
+    if (states.some((s) => s.state === "PENDING")) {
+      // A redeem's inputs are its sender's, held by a payment of theirs: refused, this redeem can never reach the mint.
+      if (swap.kind === "receive" && refused) return { state: "never", gone: new Set(), final: true };
+      return { state: "open", pending: true };
+    }
     const gone = new Set(saved.inputs.filter((_, i) => states[i]?.state === "SPENT").map((p) => p.secret));
     if (gone.size > 0) {
       // Asked once more: the swap may have gone through between the two questions.
@@ -1149,6 +1154,17 @@ export class CashuWallet {
                     await this.tellSwap(swap, false);
                     this.events.onChange();
                   } else later(SWAP_POLL_MS);
+                }
+              } else if (outcome.pending && swap.kind === "receive" && !swap.released && Date.now() >= swapOverdueAt(swap)) {
+                // No request of it can reach the mint any more, and its sender's ecash is still held by a payment of
+                // theirs: asked now and then, and let go after its hour.
+                if (Date.now() < swap.createdAt + SWAP_WATCH_MS) {
+                  await wrap((await store(STORES.swaps, "readwrite")).put({ ...swap, askAt: Date.now() + SWAP_SLOW_POLL_MS } satisfies PendingSwap));
+                  later(SWAP_SLOW_POLL_MS);
+                } else {
+                  await this.dropSwap(swap, new Set());
+                  await this.tellSwap(swap, false);
+                  this.events.onChange();
                 }
               } else later(swap.released ? SWAP_SLOW_POLL_MS : SWAP_POLL_MS);
               continue;

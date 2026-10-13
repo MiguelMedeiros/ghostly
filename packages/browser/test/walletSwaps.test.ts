@@ -266,9 +266,40 @@ describe("redeeming a token", () => {
     expect(events.onSwapSettled).not.toHaveBeenCalled();
     const [kept] = await swaps();
     mintApi.restore.mockResolvedValue(signed(kept));
-    await pass(30_000);
+    await pass(600_000);
     expect(await swaps()).toEqual([]);
     expect(await balance()).toBe(72 + 62);
+  });
+
+  it("a token the mint refuses because its ecash is pending is refused at once, and the mint is not asked about it again", async () => {
+    mintApi.completeSwap.mockRejectedValue(new MintOperationError(11002, "Token is pending"));
+    mintApi.checkProofsStates.mockResolvedValue([{ state: "PENDING" }]);
+    const { wallet, events } = setup();
+    const thrown = await wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming }).catch((e: Error) => e);
+    expect(thrown).not.toBeInstanceOf(SwapUnsettledError);
+    expect((thrown as Error).message).toBe("Token is pending");
+    expect(await swaps(), "nothing of it is ours to wait for").toEqual([]);
+    const asked = mintApi.checkProofsStates.mock.calls.length;
+    await pass(3_600_000);
+    expect(mintApi.checkProofsStates.mock.calls.length).toBe(asked);
+    expect(mintApi.completeSwap).toHaveBeenCalledOnce();
+    expect(events.onSwapSettled).not.toHaveBeenCalled();
+    expect(await balance()).toBe(72);
+  });
+
+  it("a redeem whose ecash stays pending is asked about less and less often, and let go after its hour", async () => {
+    mintApi.completeSwap.mockRejectedValue(lost());
+    mintApi.checkProofsStates.mockResolvedValue([{ state: "PENDING" }]);
+    const { wallet, events } = setup();
+    await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming })).rejects.toBeInstanceOf(SwapUnsettledError);
+    await pass(WATCH_MS);
+    expect(await swaps()).toEqual([]);
+    expect(events.onSwapSettled).toHaveBeenCalledWith(expect.objectContaining({ payment: expect.objectContaining({ id: "p1" }) }), false);
+    expect(mintApi.checkProofsStates.mock.calls.length, "not every 30 s for an hour").toBeLessThan(25);
+    const asked = mintApi.checkProofsStates.mock.calls.length;
+    await pass(3_600_000);
+    expect(mintApi.checkProofsStates.mock.calls.length).toBe(asked);
+    expect(await balance()).toBe(72);
   });
 
   it("only an answer counts: a restore that fails says nothing, and the redeem is finished when it works again", async () => {
