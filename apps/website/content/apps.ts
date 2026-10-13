@@ -67,6 +67,10 @@ export const PERMISSIONS: Record<AppPermission | "storage", { label: string; inf
   storage: { label: "Keep its own data on this device, separately in each chat" },
   chat: { label: "Talk to the same app on your contact's side, while you are both in the chat" },
   name: { label: "See your name in the chat it is opened in" },
+  files: {
+    label: "Read files and folders you pick",
+    info: "It reads only what you pick, without copying it, and can share it with your contact in the chat.",
+  },
   internet: {
     label: "Use the internet",
     info: "The app and the servers it talks to can learn your IP address and what you do in it.",
