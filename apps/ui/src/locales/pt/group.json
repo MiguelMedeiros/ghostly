@@ -77,6 +77,12 @@
     "youJoined": "Você entrou.",
     "youJoinedAgain": "Você entrou de novo."
   },
+  "forget": {
+    "invitation": "O convite sai deste dispositivo. {{contact}} fica sabendo que você recusou.",
+    "invitationUnknown": "O convite sai deste dispositivo. O contato que o enviou fica sabendo que você recusou.",
+    "joining": "Você deixa de pedir para entrar, e o grupo sai deste dispositivo.",
+    "kept": "O grupo e o histórico dele saem deste dispositivo."
+  },
   "hubs": {
     "auto": "Hub se sempre ligado",
     "badge": "hub",
