@@ -106,6 +106,101 @@ const SETTLE_MS = 400;
  */
 export const HOST_GATHER_MS = 2000;
 
+/** What a connection needs before the call's audio does. */
+type ConnectionOptions = Pick<MediaOptions, "iceServers" | "log">;
+
+/** A call's peer connection, its tracks and its description, before and once it has its audio. */
+interface Connection {
+  pc: PeerConnection;
+  track: Track;
+  videoTrack: Track | null;
+  local: Partial<CallSignal>;
+  payloadType: number;
+  ssrc: number;
+  log: (line: string) => void;
+  ice: IceView;
+  closed: boolean;
+  /** Who hears its states once it has its audio: none are told before. */
+  onState: ((state: MediaState) => void) | null;
+}
+
+/** A connection and its description, with its candidates. */
+async function openConnection(stack: CallStack, options: ConnectionOptions, offer: CallSignal | null): Promise<Connection> {
+  const { ndc } = stack;
+  const bind = process.env.GHOSTLY_CALL_BIND;
+  const pc = new ndc.PeerConnection("ghostly-call", { iceServers: callIceServers(options.iceServers), ...(bind ? { bindAddress: bind } : {}) });
+  // Each line says how long after this connection was made it happened: the order of the connection's states and
+  // the contact's answer is what explains a call that failed as it connected. The states are heard from the start.
+  const born = Date.now();
+  const sink = options.log ?? (() => {});
+  const log = (line: string) => sink(`+${Date.now() - born}ms ${line}`);
+  let conn: Connection | null = null;
+  pc.onSignalingStateChange((state) => { if (!conn?.closed) log(`signaling ${state}`); });
+  pc.onIceStateChange((state) => {
+    if (conn?.closed) return;
+    let pair: string | null = null;
+    if (state === "connected" || state === "completed") {
+      try { pair = describePair(pc.getSelectedCandidatePair()); } catch { /* none yet */ }
+    }
+    if (conn) { conn.ice.state = state; if (state === "connected" || state === "completed") conn.ice.pair = pair; }
+    log(`ice ${state}${pair ? ` over ${pair}` : ""}`);
+  });
+  pc.onStateChange((state) => {
+    if (conn?.closed) return;
+    log(`connection ${state}`);
+    if (!conn) return;
+    if (state === "connected") conn.onState?.("connected");
+    else if (state === "failed" || state === "closed") conn.onState?.(state);
+  });
+  try {
+    const payloadType = offer?.ap ?? 111;
+    const ssrc = randomBytes(4).readUInt32BE(0) || 1;
+    const audioSection = new ndc.Audio("0", "SendRecv");
+    audioSection.addOpusCodec(payloadType);
+    audioSection.addSSRC(ssrc, "ghostly", "stream", "audio0");
+    const track = pc.addTrack(audioSection);
+    // The contact's offer always has a video section (the apps open one for a camera or a screen later): it is
+    // answered closed, and the answer says so (`vr: 0` below), so the contact's app sends no picture on it. An app
+    // that does not know `vr` sends one all the same: it is dropped as it comes (libdatachannel keeps what nobody reads).
+    let videoTrack: Track | null = null;
+    if (offer?.m?.includes("v")) {
+      const video = new ndc.Video(String(offer.m.indexOf("v")), "Inactive");
+      video.addVP8Codec(offer.vp ?? 96);
+      videoTrack = pc.addTrack(video);
+      videoTrack.onMessage(() => {});
+    }
+    const gathered = gathering(pc);
+    if (offer) pc.setRemoteDescription(buildSdpFromSignal(offer), "offer");
+    else pc.setLocalDescription("offer");
+    await gathered;
+    const sdp = pc.localDescription()?.sdp;
+    if (!sdp) throw new Error("No local description");
+    // Every path, as a signal on the chat session may carry (pickCallCandidates); bound to loopback (the tests,
+    // GHOSTLY_CALL_BIND=127.0.0.1), that is the one candidate there is.
+    const params = extractParamsFromSdp(sdp, { maxCandidates: PAIRED_CALL_CANDIDATES, loopback: !!bind });
+    const local: Partial<CallSignal> = { ...params, ss: [ssrc] };
+    // An answer lists the offer's sections, video too: the rebuilt SDP must have as many as the offer.
+    if (offer?.m) local.m = [...offer.m];
+    // No picture is taken here, and none is sent: the contact's app rebuilds the video section closed (WISP 601).
+    if (videoTrack) local.vr = 0;
+    conn = { pc, track, videoTrack, local, payloadType, ssrc, log, ice: { state: "new", pair: null }, closed: false, onState: null };
+    // What each side offered to meet on: when a call does not connect, the log says between which addresses.
+    log(`candidates here: ${(local.c ?? []).join(" | ") || "none"}`);
+    try { conn.ice.state = pc.iceState(); } catch { /* keeps "new" */ }
+    return conn;
+  } catch (error) {
+    pc.close();
+    throw error;
+  }
+}
+
+function closeConnection(conn: Connection): void {
+  conn.closed = true;
+  try { conn.track.close(); } catch { /* closed with the connection */ }
+  try { conn.videoTrack?.close(); } catch { /* same */ }
+  try { conn.pc.close(); } catch { /* already */ }
+}
+
 /**
  * One call's peer connection. Its SDP never travels: the compact signal does (`local`), and each side rebuilds the
  * other's SDP from it (`buildSdpFromSignal`), so the payload types, SSRC and mids here are the ones that rebuilt SDP
@@ -113,13 +208,15 @@ export const HOST_GATHER_MS = 2000;
  */
 export class CallMedia {
   readonly audio: CallAudio;
-  private closed = false;
-  private iceState = "new";
-  private pair: string | null = null;
-  private log: (line: string) => void = () => {};
+  private readonly log: (line: string) => void;
 
-  private constructor(private readonly pc: PeerConnection, private readonly track: Track, private readonly videoTrack: Track | null, readonly local: Partial<CallSignal>, audio: CallAudio) {
+  private constructor(private readonly conn: Connection, audio: CallAudio) {
     this.audio = audio;
+    this.log = conn.log;
+  }
+
+  get local(): Partial<CallSignal> {
+    return this.conn.local;
   }
 
   /** An offer: audio only (the contact's app answers one section, and its video lane stays closed). */
@@ -133,82 +230,25 @@ export class CallMedia {
   }
 
   private static async create(stack: CallStack, options: MediaOptions, offer: CallSignal | null): Promise<CallMedia> {
-    const { ndc } = stack;
-    const bind = process.env.GHOSTLY_CALL_BIND;
-    const pc = new ndc.PeerConnection("ghostly-call", { iceServers: callIceServers(options.iceServers), ...(bind ? { bindAddress: bind } : {}) });
-    // Each line says how long after this connection was made it happened: the order of the connection's states and
-    // the contact's answer is what explains a call that failed as it connected. The states are heard from the start.
-    const born = Date.now();
-    const sink = options.log ?? (() => {});
-    const log = (line: string) => sink(`+${Date.now() - born}ms ${line}`);
-    let media: CallMedia | null = null;
-    pc.onSignalingStateChange((state) => { if (!media?.closed) log(`signaling ${state}`); });
-    pc.onIceStateChange((state) => {
-      if (media?.closed) return;
-      let pair: string | null = null;
-      if (state === "connected" || state === "completed") {
-        try { pair = describePair(pc.getSelectedCandidatePair()); } catch { /* none yet */ }
-      }
-      if (media) { media.iceState = state; if (state === "connected" || state === "completed") media.pair = pair; }
-      log(`ice ${state}${pair ? ` over ${pair}` : ""}`);
-    });
-    pc.onStateChange((state) => {
-      if (media?.closed) return;
-      log(`connection ${state}`);
-      if (!media) return;
-      if (state === "connected") options.onState("connected");
-      else if (state === "failed" || state === "closed") options.onState(state);
-    });
+    const conn = await openConnection(stack, options, offer);
+    const { track, log } = conn;
     try {
-      const payloadType = offer?.ap ?? 111;
-      const ssrc = randomBytes(4).readUInt32BE(0) || 1;
-      const audioSection = new ndc.Audio("0", "SendRecv");
-      audioSection.addOpusCodec(payloadType);
-      audioSection.addSSRC(ssrc, "ghostly", "stream", "audio0");
-      const track = pc.addTrack(audioSection);
-      // The contact's offer always has a video section (the apps open one for a camera or a screen later): it is
-      // answered closed, and the answer says so (`vr: 0` below), so the contact's app sends no picture on it. An app
-      // that does not know `vr` sends one all the same: it is dropped as it comes (libdatachannel keeps what nobody reads).
-      let videoTrack: Track | null = null;
-      if (offer?.m?.includes("v")) {
-        const video = new ndc.Video(String(offer.m.indexOf("v")), "Inactive");
-        video.addVP8Codec(offer.vp ?? 96);
-        videoTrack = pc.addTrack(video);
-        videoTrack.onMessage(() => {});
-      }
-      const gathered = gathering(pc);
-      if (offer) pc.setRemoteDescription(buildSdpFromSignal(offer), "offer");
-      else pc.setLocalDescription("offer");
-      await gathered;
-      const sdp = pc.localDescription()?.sdp;
-      if (!sdp) throw new Error("No local description");
-      // Every path, as a signal on the chat session may carry (pickCallCandidates); bound to loopback (the tests,
-      // GHOSTLY_CALL_BIND=127.0.0.1), that is the one candidate there is.
-      const params = extractParamsFromSdp(sdp, { maxCandidates: PAIRED_CALL_CANDIDATES, loopback: !!bind });
-      const local: Partial<CallSignal> = { ...params, ss: [ssrc] };
-      // An answer lists the offer's sections, video too: the rebuilt SDP must have as many as the offer.
-      if (offer?.m) local.m = [...offer.m];
-      // No picture is taken here, and none is sent: the contact's app rebuilds the video section closed (WISP 601).
-      if (videoTrack) local.vr = 0;
       const listeners: ((packet: Buffer) => void)[] = [];
       track.onMessage((packet) => { for (const listener of listeners) listener(packet); });
       const audio = new CallAudio({
-        rate: options.rate, payloadType, ssrc,
+        rate: options.rate, payloadType: conn.payloadType, ssrc: conn.ssrc,
         track: { send: (packet) => { if (track.isOpen()) track.sendMessageBinary(packet); }, onPacket: (listener) => listeners.push(listener) },
         encoder: stack.opus(options.rate), decoder: stack.opus(options.rate), onFrame: options.onFrame, queue: options.queue,
       });
-      media = new CallMedia(pc, track, videoTrack, local, audio);
-      media.log = log;
-      // What each side offered to meet on: when a call does not connect, the log says between which addresses.
-      log(`candidates here: ${(local.c ?? []).join(" | ") || "none"}`);
+      const media = new CallMedia(conn, audio);
+      conn.onState = options.onState;
       if (offer) log(`contact's candidates: ${(offer.c ?? []).join(" | ") || "none"}`);
-      try { media.iceState = pc.iceState(); } catch { /* keeps "new" */ }
       if (offer) mdnsNote(offer, log);
       track.onOpen(() => audio.start());
       if (track.isOpen()) audio.start();
       return media;
     } catch (error) {
-      pc.close();
+      closeConnection(conn);
       throw error;
     }
   }
@@ -219,24 +259,21 @@ export class CallMedia {
     mdnsNote(answer, this.log);
     if (refuseAnswers > 0) {
       refuseAnswers--;
-      this.pc.close();
+      this.conn.pc.close();
       throw new Error("libdatachannel error while adding remote description: Got a remote candidate without ICE transport (GHOSTLY_CALL_REFUSE_ANSWERS)");
     }
-    this.pc.setRemoteDescription(buildSdpFromSignal(answer), "answer");
+    this.conn.pc.setRemoteDescription(buildSdpFromSignal(answer), "answer");
     this.log("answer applied");
   }
 
   get ice(): IceView {
-    return { state: this.iceState, pair: this.pair };
+    return this.conn.ice;
   }
 
   close(): void {
-    if (this.closed) return;
-    this.closed = true;
+    if (this.conn.closed) return;
     this.audio.stop();
-    try { this.track.close(); } catch { /* closed with the connection */ }
-    try { this.videoTrack?.close(); } catch { /* same */ }
-    try { this.pc.close(); } catch { /* already */ }
+    closeConnection(this.conn);
   }
 }
 
