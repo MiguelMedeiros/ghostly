@@ -1476,13 +1476,13 @@ export class GhostLink {
   start(): void {
     // What this side runs on a group link now goes in its first packet (`packetTransportsSaid`).
     if (this.saidTransports) this.publishPacketTransports();
-    if (this.deliveryMode !== "dht") this.session.start();
     // Back after a restart: the contact, if it still holds the old session, dials or offers as soon as it notices;
-    // its offer is looked for fast rather than at the background pace.
+    // its offer is looked for fast rather than at the background pace, from the first read on.
     if (this.resuming && this.deliveryMode !== "dht") {
       this.session.expectPeer();
       this.resumeWaitUntil = Date.now() + RESUME_WAIT_MS;
     }
+    if (this.deliveryMode !== "dht") this.session.start();
     // A joiner has just opened the invite: the inviter is there, and its first-contact envelope is worth reading
     // at the signaling pace now (an inviter speeds up when the joiner's fresh packet shows).
     if (this.tracker && !this.tracker.done && this.options.pairingProgress?.role === "joiner") { this.dht?.expect(); this.dialEarly(); }
