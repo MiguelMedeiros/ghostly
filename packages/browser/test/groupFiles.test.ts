@@ -845,6 +845,35 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(t.done(bob, id, messageId)).toBe(true);
   });
 
+  it("a paused file still reads paused after a restart, with what came, and Resume goes on from there", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const size = 600_000, cut = 256 * 1024;
+    t.hold = (from, to, frame) => from === alice && to === bob && frame.t === "pf-data" && (frame.offset as number) >= cut;
+    const { messageId, meta } = await t.send(alice, id, pattern(size, 18));
+    await t.world.until(() => (t.got(bob, id, messageId).transfer?.transferred ?? 0) >= cut, 60_000);
+    const fileId = t.got(bob, id, messageId).message!.file!.id;
+    await bob.groups.haltFile(fileId, true);
+    t.release(id);
+    await t.restart(bob);
+    await t.world.run(60_000);
+    const paused = { state: "transferring", stage: "paused", pausedBy: "me", transferred: cut, size, direction: "in" };
+    expect(t.files.get(bob)!.transfers.get(fileId)).toEqual(paused);
+    expect(t.got(bob, id, messageId).bytes!.length).toBe(cut);
+    // Nothing is asked for it meanwhile, after the restart either.
+    const wants = () => t.seen.filter(s => s.from === "bob" && s.frame.t === "group-want").length;
+    const asked = wants();
+    await t.world.run(3 * 60_000);
+    expect(wants()).toBe(asked);
+    await bob.groups.downloadFile(fileId);
+    await t.world.until(() => t.done(bob, id, messageId), 5 * 60_000);
+    expect(sha(t.got(bob, id, messageId).bytes!)).toBe(meta.d);
+    expect(t.seen.filter(s => s.from === "bob" && s.frame.t === "pf-accept").at(-1)!.frame.offset).toBe(cut);
+    // Resumed, it is no longer paused after another restart.
+    await t.restart(bob);
+    expect(t.done(bob, id, messageId)).toBe(true);
+  });
+
   for (const restart of [false, true]) {
     it(`automatic downloads turned off stop the files chosen by themselves that are not here yet${restart ? ", after a restart too" : ""}`, async () => {
       const t = new FilesWorld();

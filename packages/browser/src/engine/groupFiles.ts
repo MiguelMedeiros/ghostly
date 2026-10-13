@@ -157,6 +157,8 @@ interface Kept {
   auto: boolean;
   /** Its person asked for it (Download). */
   asked: boolean;
+  /** Its person paused it: what came stays, and it reads paused after a restart too, until Resume. */
+  paused?: boolean;
   /** Every byte is here, checked against the author's digest: this device holds it. */
   held: boolean;
   /** Members said to hold it (`group-have`), or that offered it, newest first. The author is asked whether or not it is here. */
@@ -280,6 +282,12 @@ export class GroupFileDesk {
         if (kept.held) this.show(kept, { state: "done", transferred: size, size, direction: kept.mine ? "out" : "in" });
         // Every holder served it damaged: it waits for its person to ask again, not fetched again by itself.
         else if (file.transfer?.state === "failed") this.show(kept, { state: "failed", transferred: 0, size, direction: "in", retry: true, error: file.transfer.error ?? DAMAGED });
+        // Paused by its person: still paused, with the bytes that came (what the next transfer goes on from).
+        else if (file.group.paused) {
+          kept.paused = true;
+          kept.stored = await this.keptBytes(kept.id);
+          this.show(kept, { state: "transferring", stage: "paused", pausedBy: "me", transferred: kept.stored, size, direction: "in" });
+        }
         else if (kept.asked || (kept.auto && this.deps.settings().autoDownloads)) this.wants.set(kept.id, this.newWant());
         else if (kept.auto) await this.stop(kept, false);
         else this.show(kept, { state: "transferring", stage: "asking", transferred: 0, size, direction: "in" });
@@ -341,8 +349,10 @@ export class GroupFileDesk {
     this.show(kept, keep
       ? { state: "transferring", stage: "paused", pausedBy: "me", transferred: kept.stored ?? 0, size, direction: "in" }
       : { state: "transferring", stage: "asking", transferred: 0, size, direction: "in" });
-    // Not fetched by itself any more, nor asked for: it stays stopped after a restart, and counts toward no limit.
-    if (kept.auto || kept.asked) {
+    // Not fetched by itself any more, nor asked for: it stays stopped (or paused) after a restart, and counts toward no limit.
+    const wasPaused = !!kept.paused;
+    kept.paused = keep;
+    if (kept.auto || kept.asked || wasPaused !== keep) {
       kept.auto = kept.asked = false;
       await this.deps.store.patch(kept.id, { group: this.groupField(kept) }).catch(() => {});
     }
@@ -413,8 +423,8 @@ export class GroupFileDesk {
     if (kept.held) return;
     const room = await this.deps.store.room().catch(() => null);
     if (room !== null && kept.meta.size > room) throw new Error("Not enough space on this device for this file");
-    if (!kept.asked) {
-      kept.asked = true;
+    if (!kept.asked || kept.paused) {
+      kept.asked = true; kept.paused = false;
       await this.deps.store.patch(kept.id, { group: this.groupField(kept) }).catch(() => {});
     }
     // Asked again: every holder is worth asking again, one that served it damaged too.
@@ -934,7 +944,15 @@ export class GroupFileDesk {
   }
 
   private groupField(kept: Kept): NonNullable<StoredFile["group"]> {
-    return { message: kept.message, author: kept.author, ...(kept.auto && { auto: true }), ...(kept.asked && { asked: true }) };
+    return { message: kept.message, author: kept.author, ...(kept.auto && { auto: true }), ...(kept.asked && { asked: true }), ...(kept.paused && { paused: true }) };
+  }
+
+  /** The bytes of a file kept here from transfers that did not finish. */
+  private async keptBytes(id: string): Promise<number> {
+    const writer = await this.deps.store.write(id, true).catch(() => undefined);
+    if (!writer) return 0;
+    await writer.close().catch(() => {});
+    return writer.offset;
   }
 
   private pace(windows: Map<string, RateWindow>, key: string, limit: number, ms: number): RateWindow {
