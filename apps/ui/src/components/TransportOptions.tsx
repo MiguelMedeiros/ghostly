@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { automaticTransport, type PairedTransport } from "@ghostly/core";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { TransportIcon } from "./TransportIcon";
-import { transportName } from "../lib/connection";
+import { focus, transportName } from "../lib/connection";
 import { liveTransport, ownTransports, transportOptions } from "../lib/transportEvents";
 import { useI18n } from "../contexts/I18nContext";
 import { radioGroupKeys, radioTabStop } from "../lib/radioGroup";
@@ -78,7 +78,7 @@ function Option({ label, hint, off, mark, icon, checked, inUse = false, disabled
     // on a narrow screen, with no hover to show a tooltip, why an option is off is a second line too.
     <button type="button" role="radio" aria-checked={checked} aria-label={label} aria-description={hint} disabled={disabled} tabIndex={tabIndex} data-testid={testId} data-in-use={inUse ? "" : undefined} onClick={onClick}
       title={hint ? `${label}: ${hint}` : undefined}
-      className={`flex min-h-9 w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1 text-start text-xs transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:outline-none disabled:cursor-default max-md:min-h-11 ${checked ? "text-text-primary" : "text-text-secondary"} ${disabled && !checked ? "opacity-60" : ""}`}>
+      className={`flex min-h-9 w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-1 text-start text-xs transition-colors enabled:hover:bg-surface-hover focus-visible:bg-surface-hover ${focus} disabled:cursor-default max-md:min-h-11 ${checked ? "text-text-primary" : "text-text-secondary"} ${disabled && !checked ? "opacity-60" : ""}`}>
       <span aria-hidden="true" className={`flex shrink-0 ${checked ? "text-accent" : ""}`}>{icon}</span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate">{label}</span>
