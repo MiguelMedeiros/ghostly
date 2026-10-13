@@ -3,7 +3,7 @@ import { findMoney } from "./money";
 import { plainText } from "./parse";
 import { moreMoneyPreview } from "./parse/money-preview";
 import { englishT, type Translate } from "../locales/translate";
-import { languageTag } from "./documentLanguage";
+import { formatAt } from "./time";
 import type { Language } from "./settings";
 import { formatAmount } from "./amount";
 import type { ChatFile } from "./types";
@@ -56,5 +56,7 @@ export function formatListTime(ts: number, now = Date.now(), language?: Language
   if (minutes < 60) return t("chat.listTime.minutes", { count: minutes });
   if (hours < 24) return t("chat.listTime.hours", { count: hours });
   if (days < 7) return t("chat.listTime.days", { count: days });
-  return new Date(ts).toLocaleDateString(language ? languageTag(language) : [], { month: "short", day: "numeric" });
+  return formatAt(ts, LIST_DATE, language);
 }
+/** A row's date, written by one formatter per language (`formatAt`): `toLocaleDateString` built one per row per render. */
+const LIST_DATE: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
