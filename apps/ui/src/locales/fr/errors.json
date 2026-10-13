@@ -46,6 +46,11 @@
     "tooLongNext": "Raccourcissez-le ou envoyez-le en fichier."
   },
   "connectionFailed": "Échec de connexion",
+  "devices": {
+    "digitsEnded": "L'ajout de cet appareil est terminé",
+    "digitsEndedNext": "Recommencez depuis Ajouter un appareil.",
+    "onlyUnfinished": "Seul un appareil qui n'a pas fini de rejoindre se retire ici"
+  },
   "engine": {
     "alreadySubmitted": "Ce paiement a déjà été envoyé ou n’a pas pu être enregistré",
     "cannotCancelSubmitted": "Un paiement envoyé ne peut pas être annulé ; vérifiez-le plutôt",

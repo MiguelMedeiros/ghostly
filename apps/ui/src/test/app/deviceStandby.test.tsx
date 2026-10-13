@@ -223,7 +223,7 @@ describe("a device whose enrollment did not finish", () => {
     await user.click(screen.getByTestId("device-standby-finish"));
     expect(await screen.findByTestId("device-standby-unfinished-notice")).toHaveTextContent("The device record could not be read");
     await user.click(screen.getByTestId("device-standby-remove"));
-    await waitFor(() => expect(screen.getByTestId("device-standby-unfinished-notice")).toHaveTextContent("Only an enrollment that did not finish is removed here"));
+    await waitFor(() => expect(screen.getByTestId("device-standby-unfinished-notice")).toHaveTextContent("Only a device that did not finish joining is removed here"));
     expect(screen.getByTestId("device-standby-unfinished-notice")).not.toHaveTextContent("The device record could not be read");
     answer = () => ({ finished: false });
     await user.click(screen.getByTestId("device-standby-finish"));

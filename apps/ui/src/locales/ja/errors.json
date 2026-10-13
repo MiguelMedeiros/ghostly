@@ -46,6 +46,11 @@
     "tooLongNext": "短くするか、ファイルとして送信してください。"
   },
   "connectionFailed": "接続に失敗しました",
+  "devices": {
+    "digitsEnded": "このデバイスの追加は終了しました",
+    "digitsEndedNext": "「デバイスを追加」からやり直してください。",
+    "onlyUnfinished": "ここで削除できるのは、参加を終えていないデバイスだけです"
+  },
   "engine": {
     "alreadySubmitted": "この支払いはすでに送信されたか、保存できませんでした",
     "cannotCancelSubmitted": "送信済みの支払いはキャンセルできません。確認してください",

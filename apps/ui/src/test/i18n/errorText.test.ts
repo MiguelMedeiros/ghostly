@@ -204,6 +204,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Nobody in the group is connected right now to take your leave. Try again in a moment.", `${BROWSER}/engine/community.ts`],
   ["Only the admin can share a link to the group", `${BROWSER}/engine/groups.ts`],
   ["This is not a link to a group", `${BROWSER}/engine/groups.ts`],
+  ["There are no digits to confirm", `${BROWSER}/devices/enroll.ts`],
+  ["Only an enrollment that did not finish is removed here", `${BROWSER}/devices/links.ts`],
   ["You are already joining this group", `${BROWSER}/engine/groups.ts`],
   ["This group is joined with its current link", `${BROWSER}/engine/groups.ts`],
   ["You have an invitation to this group. Answer it first.", `${BROWSER}/engine/groups.ts`],
