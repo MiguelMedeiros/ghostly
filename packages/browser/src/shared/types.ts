@@ -588,6 +588,8 @@ export interface StoredPayment {
   /** Fedimint payments: the federation of the notes, and the client operation that spent (or redeems) them. */
   federation?: string;
   fedimintOp?: string;
+  /** Incoming Fedimint payments: a digest of the notes, kept after they are redeemed or refused, so the same notes sent again under another id are answered from it. */
+  notesDigest?: string;
   requestId?: string;
   /** Requests we pay: a Lightning payment is in flight at the mint, so paying again would pay twice. */
   lightningPending?: boolean;

@@ -23,6 +23,7 @@ import {
   type PaymentResult,
 } from "@ghostly/core";
 import { STORES, store, wrap } from "../shared/idb";
+import { digestHex } from "./messageDetails";
 import { isWorthlessMint, mintNetwork } from "../shared/mints";
 import type { PaymentView, PendingMelt, PendingSwap, StoredMessage, StoredPayment, StoredQuote } from "../shared/types";
 import { SwapUnsettledError, assertAmount, type CashuWallet } from "./wallet";
@@ -1327,7 +1328,7 @@ export class PaymentDesk {
   /**
    * Notes from the contact. Redeemed only when they are of a federation we joined and this chat allows Fedimint;
    * otherwise refused unredeemed, and the contact takes them back. Written down (with the notes) before redeeming:
-   * an interrupted redeem is finished from the journal, never lost.
+   * an interrupted redeem is finished from the journal, never lost. The chat says it once the federation answered.
    */
   private async receiveFedimint(linkId: string, payment: Payment): Promise<void> {
     const link = this.host.getLink(linkId);
@@ -1356,8 +1357,11 @@ export class PaymentDesk {
     if (amount < 1) { await refuse("These notes are worth less than a sat"); return; }
     const network = this.fedimintOf(found.federation)?.federation(found.federation)?.network;
     if (network && !this.accepts(linkId, "fedimint", walletNetworkOf(network))) { await refuse(`${networkLabel(walletNetworkOf(network))} Fedimint is off in this chat`); return; }
-    await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: payment.requestId, federation: found.federation, token: notes });
-    await this.host.storeMessage({ linkId, id: `peer_${payment.timestamp}`, text: `⚡ ${amount.toLocaleString()} ${network === "bitcoin" ? "sats" : "test sats"} on Fedimint`, sender: "peer", timestamp: payment.timestamp, via: "datalink", paymentId: payment.id });
+    // The same notes under another id: answered from what is known, with no new line and no new redeem.
+    const digest = digestHex(notes.trim());
+    const before = [...this.payments.values()].find((p) => p.notesDigest === digest && p.direction === "in" && p.kind === "payment");
+    if (before) { link.sendPaymentResult({ id: payment.id, ok: false, error: before.state === "failed" ? before.error ?? "These notes were already redeemed" : "These notes were already received" }); return; }
+    await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: payment.requestId, federation: found.federation, token: notes, notesDigest: digest });
     await this.finishRedeem(this.payments.get(payment.id)!);
   }
 
@@ -1391,7 +1395,13 @@ export class PaymentDesk {
     if (state === "failed") {
       await this.save({ ...this.current(payment), state: "failed", token: undefined, error: "These notes were already redeemed" });
       link?.sendPaymentResult({ id, ok: false, error: "These notes were already redeemed" });
+      try { await this.host.storeMessage({ linkId: payment.linkId, id: `peer_${payment.createdAt}_refused`, text: "Could not receive Fedimint ecash: These notes were already redeemed", sender: "peer", timestamp: payment.createdAt, via: "datalink" }); } catch { /* the contact was told */ }
       return;
+    }
+    // Written once the federation took the notes (as Cashu's once the mint took the ecash); the same id on a retry.
+    if (state) {
+      const test = fedimint.federation(payment.federation)?.network !== "bitcoin";
+      await this.host.storeMessage({ linkId: payment.linkId, id: `peer_${payment.createdAt}`, text: `⚡ ${payment.amount.toLocaleString()} ${test ? "test sats" : "sats"} on Fedimint`, sender: "peer", timestamp: payment.createdAt, via: "datalink", paymentId: id });
     }
     if (state !== "done") return;
     await this.save({ ...this.current(payment), state: "settled", token: undefined, error: undefined });
