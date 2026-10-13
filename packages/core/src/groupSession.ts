@@ -634,6 +634,27 @@ export class GroupSession {
     });
   }
 
+  /**
+   * A welcome for a member already in the roster that never got the first one (its chat closed while it was let in):
+   * nothing is committed. It carries the secrets of the epochs it was in, from its admission on, sealed to its key.
+   */
+  rewelcome(memberKey: string): Promise<(GroupChainFrame | GroupWelcomeFrame)[]> {
+    return this.serialize(async () => {
+      this.requireAdmin();
+      if (!rosterHas(this.roster, memberKey) || memberKey === this.myKey) throw new Error("Not a member");
+      const chain = this.state.chain;
+      let admitted = chain.length - 1;
+      while (admitted >= 0 && !(chain[admitted].k === "add" && chain[admitted].s === memberKey)) admitted--;
+      if (admitted < 0) throw new Error("Not a member");
+      const secrets = chain.slice(admitted).filter(c => this.state.secrets[c.e] && rosterHas(c.m, memberKey))
+        .map(c => ({ e: c.e, s: sealSecret(memberKey, this.secret(c.e)!, secretAad(this.id, c.e, memberKey)) }));
+      const pieces = chainPieces(chain);
+      const tail = pieces.pop()!;
+      return [...pieces.map((commits): GroupChainFrame => ({ t: "group-chain", g: this.id, commits })),
+        { t: "group-welcome", g: this.id, name: this.name, commits: tail, secrets }];
+    });
+  }
+
   remove(memberKey: string, now = Date.now()): Promise<void> {
     return this.serialize(async () => {
       this.requireAdmin();

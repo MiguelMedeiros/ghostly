@@ -1277,6 +1277,8 @@ export class Groups {
       this.host.emit();
     }
     if (said.n >= ACCEPT_AGAINS || (!said.down && now - said.at < ACCEPT_AGAIN_MS)) return;
+    // The pieces of a welcome that came only in part: the one this accept brings comes whole.
+    invitation.pieces = [];
     try { this.host.sendOnLink(invitation.linkId, { t: "group-accept", g: group.id, key: identityFromSeedB64(invitation.seedB64!).pubKeyZ32 }); } catch { return; }
     this.acceptSaid.set(group.id, { at: now, n: said.n + 1, ...(said.unanswered && { unanswered: true }) });
   }
@@ -1470,6 +1472,13 @@ export class Groups {
           // nor on an entry session, which the link's own pace answers.
           const letIn = !!session && rosterHas(session.roster, frame.key) && this.stored.get(g)?.contacts?.[frame.key] === linkId;
           if (!letIn && ![...this.host.entries(g).values()].includes(linkId)) { try { this.host.sendOnLink(linkId, { t: "group-decline", g }); } catch { /* it asks again when the chat is up */ } }
+          // Let in, but its edge is not up: its welcome may never have reached it (the chat closed while this app let it
+          // in), and it would wait on "Joining…" for good. It gets the welcome again; nothing is committed for it.
+          const edge = this.host.edges(g).get(frame.key);
+          if (letIn && session.isAdmin && !(edge && this.host.linkReady(edge))) {
+            const welcome = await session.rewelcome(frame.key).catch(() => []);
+            try { for (const piece of welcome) this.host.sendOnLink(linkId, piece); } catch { /* it says its accept again */ }
+          }
           return;
         }
         const group = this.stored.get(g)!;
