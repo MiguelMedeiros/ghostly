@@ -8,7 +8,7 @@ import { removeStored } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import type { GroupView, MessageFile } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
-import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
 import { CliError } from "./errors";
 import { endTyping } from "./typing";
@@ -156,13 +156,6 @@ export function saveName(name: string): string {
 }
 
 const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "request"] as const;
-
-/**
- * A sent file's time, its own even within one millisecond (a bot's photos, `file send` run in parallel): the engine
- * names its row after it (`me_<timestamp>`), and a resend after a drop finds the row by it, as a forward does.
- */
-let lastSentAt = 0;
-const sentAt = () => (lastSentAt = Math.max(Date.now(), lastSentAt + 1));
 
 export const FILE_METHODS: Record<string, Method> = {
   async "file.send"(ctx, params) {
