@@ -93,11 +93,14 @@ export function globalOption(arg: string): OptionSpec | undefined {
   return name ? GLOBAL_OPTIONS[name] : undefined;
 }
 
-/** The name of the global option a word names (`profile` for `-p`), else undefined. */
+/** The name of the global option a word names (`profile` for `-p`, `pretty` for `--no-pretty`), else undefined. */
 function globalName(arg: string): string | undefined {
   const eq = arg.indexOf("=");
   const name = arg.startsWith("--") ? arg.slice(2, eq === -1 ? undefined : eq) : arg.length === 2 && arg.startsWith("-") ? Object.entries(GLOBAL_OPTIONS).find(([, o]) => o.short === arg.slice(1))?.[0] : undefined;
-  return name && Object.hasOwn(GLOBAL_OPTIONS, name) ? name : undefined;
+  if (name && Object.hasOwn(GLOBAL_OPTIONS, name)) return name;
+  // A boolean's `--no-` form, as the parser reads it (with no value): before, `ghostly --no-pretty status` was no command.
+  const negated = name?.startsWith("no-") && eq === -1 ? name.slice(3) : undefined;
+  return negated && GLOBAL_OPTIONS[negated]?.type === "boolean" ? negated : undefined;
 }
 
 /**
