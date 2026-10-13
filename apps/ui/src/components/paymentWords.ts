@@ -50,13 +50,14 @@ const RAIL_NAME: Partial<Record<string, string>> = { cashu: "Cashu", lightning: 
 
 /**
  * Whether a payment or a request moves test money. Test sats are worth nothing, and wherever the payment shows it says
- * so: a contact must not pass them off as money. The payment says its network; one from before networks carries it (a
- * target's chain, a test mint, an invoice's chain). Fedimint: the network of the federation it names, when we joined it.
+ * so: a contact must not pass them off as money, nor real money as test sats. A target's chain says it; else the payment
+ * says its network; one from before networks carries it (a test mint, an invoice's chain). Fedimint: the network of the federation it names, when we joined it.
  */
 export function paymentIsTest(payment: ChatPayment, state: WalletState | null | undefined): boolean {
-  if (payment.network) return payment.network === "testnet";
+  // A target's chain first: a Bitcoin address is real money whatever the record says.
   const method = payment.target?.method;
   if (method === "arkade" || method === "bark" || method === "bitcoin" || method === "fedimint" || method === "spark") return payment.target!.network !== "bitcoin";
+  if (payment.network) return payment.network === "testnet";
   const fedimint = payment.federation ?? payment.federations?.[0];
   if (fedimint) {
     const networks = state?.networks;
