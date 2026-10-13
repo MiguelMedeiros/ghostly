@@ -1,4 +1,4 @@
-import { groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
@@ -114,7 +114,8 @@ const inviteShown = new WeakMap<ApiContext, () => void>();
 /**
  * Marks a new invite as the chat on screen (native listeners, the quick pace) only until it is paired: a paired chat
  * keeps its listeners anyway, and a daemon nobody looks at reads an away contact at the background pace, as its
- * other chats and the same chat after a restart do.
+ * other chats and the same chat after a restart do. Nor past its wait for a peer (`AWAITING_PEER_MS`): an invite
+ * nobody joined is then read at the background pace like the daemon's other ones, which it no longer holds back.
  */
 function showUntilPaired(ctx: ApiContext, linkId: string): void {
   inviteShown.get(ctx)?.();
@@ -126,12 +127,11 @@ function showUntilPaired(ctx: ApiContext, linkId: string): void {
     if (link) seen = true;
     return link ? !!link.peerParticipationKey : seen;
   };
-  const stop = () => { off(); if (inviteShown.get(ctx) === stop) inviteShown.delete(ctx); };
-  const off = ctx.hub.onState((s) => {
-    if (!done(s)) return;
-    stop();
-    node(ctx).setActiveLink({ linkId: null });
-  });
+  const stop = () => { off(); clearTimeout(timer); if (inviteShown.get(ctx) === stop) inviteShown.delete(ctx); };
+  const hide = () => { stop(); node(ctx).setActiveLink({ linkId: null }); };
+  const timer = setTimeout(hide, AWAITING_PEER_MS);
+  timer.unref?.();
+  const off = ctx.hub.onState((s) => { if (done(s)) hide(); });
   inviteShown.set(ctx, stop);
 }
 
