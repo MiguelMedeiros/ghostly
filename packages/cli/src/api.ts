@@ -662,7 +662,7 @@ function editRefused(message: StoredMessage | undefined, ref: string, where: "ch
  */
 async function historyOf(ctx: ApiContext, chat: string, params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {
   if (params.after !== undefined && params.after !== null) return history(await node(ctx).getMessages(chat), params, json);
-  const limit = num(params, "limit", 50, { min: 1, max: 10_000 });
+  const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
   const before = params.before ?? undefined;
   if (before !== undefined && typeof before !== "number" && typeof before !== "string") throw new CliError("bad_request", "before must be a timestamp or a message id");
   const page = await node(ctx).messagePage({ linkId: chat, limit, before }).catch((error: unknown) => {
@@ -672,7 +672,7 @@ async function historyOf(ctx: ApiContext, chat: string, params: Params, json: (m
 }
 
 function history(messages: StoredMessage[], params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {
-  const limit = num(params, "limit", 50, { min: 1, max: 10_000 });
+  const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
   const before = params.before;
   const after = params.after;
   let list = messages.slice().sort((a, b) => a.timestamp - b.timestamp);
