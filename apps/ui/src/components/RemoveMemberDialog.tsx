@@ -1,22 +1,20 @@
-import { useEffect, useId, useRef } from "react";
+import { useId, useRef, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { useBackdropDismiss } from "../hooks/useDismiss";
+import { useBackdropDismiss, useQuestionDialog } from "../hooks/useDismiss";
 import { useI18n } from "../contexts/I18nContext";
 
 /**
  * Removing a member, asked before it happens: Remove sits in a list, beside Hand over admin, one tap from the next row's.
  * It opens over the members list, inside it in React's tree: its Escape stops here and leaves the list open.
  * `linkOn`: the group's link works, and whoever is removed still has it: they can join again until it is replaced.
+ * Closed, it gives the focus back to the Remove that asked; once that row is gone (confirmed), to `returnFocus`.
  */
-export function RemoveMemberDialog({ name, linkOn = false, onClose, onConfirm }: { name: string; linkOn?: boolean; onClose(): void; onConfirm(): void }) {
+export function RemoveMemberDialog({ name, linkOn = false, returnFocus, onClose, onConfirm }: { name: string; linkOn?: boolean; returnFocus?: RefObject<HTMLElement | null>; onClose(): void; onConfirm(): void }) {
   const { t } = useI18n();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null), cancel = useRef<HTMLButtonElement>(null);
   const backdrop = useBackdropDismiss(onClose);
-  useEffect(() => {
-    const element = dialog.current!; element.showModal(); cancel.current?.focus();
-    return () => element.close();
-  }, []);
+  useQuestionDialog(dialog, cancel, returnFocus);
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); e.stopPropagation(); onClose(); }} aria-labelledby={`${id}-title`} aria-describedby={`${id}-body`}
     data-testid="group-remove-dialog" className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <h2 id={`${id}-title`} className="break-words text-base font-semibold">{t("group.remove.title", { name })}</h2>

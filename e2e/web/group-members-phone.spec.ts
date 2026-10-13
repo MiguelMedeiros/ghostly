@@ -56,4 +56,25 @@ test("on a phone the admin's members list shows each member's name", { tag: ["@f
     expect(box!.x + box!.width).toBeLessThanOrEqual(dialogBox!.x + dialogBox!.width);
   }
   await testInfo.attach("members-link-panel-375", { body: await admin.page.screenshot(), contentType: "image/png" });
+
+  // Remove and Hand over admin, from the keyboard: closed, each question gives the focus back to the button that asked,
+  // and to the list once the removed member's row is gone. It fell to the page.
+  const remove = row.getByTestId("group-remove-member"), promote = row.getByTestId("group-make-admin");
+  await remove.focus();
+  await admin.page.keyboard.press("Enter");
+  await expect(admin.page.getByTestId("group-remove-dialog")).toBeVisible();
+  await admin.page.keyboard.press("Escape");
+  await expect(admin.page.getByTestId("group-remove-dialog")).toHaveCount(0);
+  await expect(remove).toBeFocused();
+  await promote.focus();
+  await admin.page.keyboard.press("Enter");
+  await expect(admin.page.getByTestId("group-make-admin-dialog")).toBeVisible();
+  await admin.page.keyboard.press("Escape");
+  await expect(promote).toBeFocused();
+  await remove.focus();
+  await admin.page.keyboard.press("Enter");
+  await admin.page.getByTestId("group-remove-confirm").click();
+  await expect(row).toHaveCount(0, { timeout: 60_000 });
+  await expect(admin.page.getByTestId("group-member-list")).toBeFocused();
+  await expect(admin.page.getByTestId("group-members-dialog")).toBeVisible();
 });
