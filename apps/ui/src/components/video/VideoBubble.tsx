@@ -85,11 +85,12 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
   const durationMs = meta?.duration ?? (local && Number.isFinite(local.duration) ? local.duration * 1000 : undefined);
   const poster = posterUrl(meta?.poster) ?? local?.url;
 
-  // Is it on screen: a poster is made only for one that is, and one that leaves it stops.
+  // Is it on screen (the chat list's view, not the window's): a poster is made only for one that is, and one that leaves
+  // it stops.
   useEffect(() => {
     const root = rootRef.current;
     if (!root || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver((entries) => setVisible(entries.some((entry) => entry.isIntersecting)), { rootMargin: "200px 0px" });
+    const observer = new IntersectionObserver((entries) => setVisible(entries.some((entry) => entry.isIntersecting)), { root: root.closest("[data-message-list]"), rootMargin: "200px 0px" });
     observer.observe(root);
     return () => observer.disconnect();
   }, []);
