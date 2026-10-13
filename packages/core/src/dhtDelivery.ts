@@ -35,6 +35,13 @@ export const DHT_EXPIRY_SKEW_MS = PKARR_FUTURE_SKEW_MS;
  */
 export const DHT_ISSUED_BACK_MS = 2 * 60_000;
 const MAX_ATTEMPTS = 8;
+/**
+ * Envelope sequences are set aside this many at a time (`DhtDeliveryState.sequence` is the highest set aside): a
+ * keep-alive, every four minutes per chat, and one the relays' budget turns away, every 30 s on a profile idling at
+ * it, then cost no disk write of their own. A reader only needs the sequence to grow, so those a restart skips cost
+ * nothing; one the budget turned away is not used again, as it may have gone out on the DHT (the CLI puts there too).
+ */
+const SEQUENCE_BLOCK = 64;
 /** The wait before publication attempt `attempts + 1` of a text, or of a receipt the contact still asks for. */
 const backoff = (attempts: number) => Math.min(60_000, 4_000 * 2 ** attempts);
 /** The contact's mailbox is read this often while either side is DHT-only, and otherwise… */
@@ -184,6 +191,10 @@ export const emptyDhtDeliveryState = (): DhtDeliveryState => ({ sequence: 0, pee
  * No forward-secrecy or guaranteed DHT retention claim is made. */
 export class DhtDelivery {
   private state: DhtDeliveryState;
+  /** The state as last saved: a save that would write the same row again is skipped. */
+  private saved?: string;
+  /** The sequence of the last envelope signed here; the state's is the highest set aside (`SEQUENCE_BLOCK`). */
+  private sequence: number;
   private mode: DeliveryMode;
   private running = false;
   private ticking = false;
@@ -266,7 +277,8 @@ export class DhtDelivery {
     // `peerRejected`, saved by apps before WISP 403 revision 0.3, stopped the chat for good on an envelope anyone
     // holding the invite could forge: it is dropped, not honoured.
     const { peerRejected: _peerRejected, ...state } = structuredClone(options.state ?? emptyDhtDeliveryState()) as DhtDeliveryState & { peerRejected?: boolean };
-    this.state = state; this.mode = options.mode;
+    this.state = state; this.mode = options.mode; this.sequence = state.sequence;
+    if (options.state) this.saved = JSON.stringify(state);
     this.unsealedOut = state.sequence > 0 && !options.credentials.peerKey;
     this.from = identityFromSeedB64(options.params.seedB64).pubKeyZ32; this.to = options.params.peerPubKeyZ32;
     this.participation = identityFromSeedB64(options.credentials.seedB64);
@@ -324,7 +336,11 @@ export class DhtDelivery {
   private serialize<T>(run: () => Promise<T>): Promise<T> {
     const operation = this.chain.then(run); this.chain = operation.then(() => {}, () => {}); return operation;
   }
-  private async persist(next: DhtDeliveryState): Promise<void> { await this.options.save(structuredClone(next)); this.state = next; }
+  private async persist(next: DhtDeliveryState): Promise<void> {
+    const json = JSON.stringify(next);
+    if (json !== this.saved) { await this.options.save(structuredClone(next)); this.saved = json; }
+    this.state = next;
+  }
   private sealedKey(peer: string): Uint8Array {
     const shared = x25519.getSharedSecret(ed25519.utils.toMontgomerySecret(this.participation.seed), ed25519.utils.toMontgomery(publicKeyFromZ32(peer)));
     return hkdf(sha256, shared, this.key, utf8Encode("ghostly-dht-participation-envelope/1"), 32);
@@ -450,12 +466,12 @@ export class DhtDelivery {
     return error && next.reply ? this.packetError(next.message, next.expires) : error;
   }
   private packetError(message: Message, expires: number, reply?: string, edit?: DhtEdit): string | null {
-    try { this.records(this.body(this.state.sequence + 1, Date.now(), expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", reply, [], edit), this.options.credentials.peerKey ?? this.participation.pubKeyZ32); return null; }
+    try { this.records(this.body(this.sequence + 1, Date.now(), expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", reply, [], edit), this.options.credentials.peerKey ?? this.participation.pubKeyZ32); return null; }
     catch (error) { return error instanceof Error ? error.message : String(error); }
   }
   /** Whether a text with its hop count fits the packet and what a reader reads (`MAX_ENVELOPE_PLAINTEXT`). */
   private roomForHops(message: Message, expires: number, reply: string | undefined, forwarded: number): boolean {
-    const body = this.body(this.state.sequence + 1, Date.now(), expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", reply, [], undefined, forwarded);
+    const body = this.body(this.sequence + 1, Date.now(), expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", reply, [], undefined, forwarded);
     try { this.records(body, this.options.credentials.peerKey ?? this.participation.pubKeyZ32); } catch { return false; }
     return utf8Encode(JSON.stringify([body, "x".repeat(86)])).length <= MAX_ENVELOPE_PLAINTEXT;
   }
@@ -498,7 +514,7 @@ export class DhtDelivery {
     const message: Message = [id, timestamp, file.name], expires = now + DHT_MESSAGE_TTL;
     const hops = readForwarded(forwarded);
     const fits = (element: DhtFileElement, withReply: boolean, withHops: boolean) => {
-      const body = this.body(this.state.sequence + 1, now, expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", withReply ? reply : undefined, [], undefined, withHops ? hops : undefined, element);
+      const body = this.body(this.sequence + 1, now, expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", withReply ? reply : undefined, [], undefined, withHops ? hops : undefined, element);
       try { this.records(body, this.options.credentials.peerKey ?? this.participation.pubKeyZ32); } catch { return false; }
       return utf8Encode(JSON.stringify([body, "x".repeat(86)])).length <= MAX_ENVELOPE_PLAINTEXT;
     };
@@ -620,7 +636,7 @@ export class DhtDelivery {
     // Dated back (`DHT_ISSUED_BACK_MS`), and a control envelope's lifetime with it: a reader bounds `expires - issued`.
     const expires = pending?.expires ?? now - DHT_ISSUED_BACK_MS + CONTROL_TTL;
     const issued = Math.min(now, Math.max(now - DHT_ISSUED_BACK_MS, expires - (pending ? DHT_MESSAGE_TTL : CONTROL_TTL), (pending?.message[1] ?? 0) - 30_000));
-    const { body, records, reactions } = this.fitted(this.state.sequence + 1, issued, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply, pending?.edit, pending?.forwarded, pending?.file);
+    const { body, records, reactions } = this.fitted(this.sequence + 1, issued, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply, pending?.edit, pending?.forwarded, pending?.file);
     const reactionsWereDue = this.reactionsDue;
     // A text that left no room: the reactions go on the next envelope. Once some went, the rest wait for the contact
     // to say those were taken (the engine announces the rest then).
@@ -628,10 +644,13 @@ export class DhtDelivery {
     // In the pinned mailbox once the contact said it reads there; until then where an older app looks.
     // The one that replaces an unsealed envelope goes where that lies.
     const identity = (!reseal && this.state.peerPinned && this.state.peerPinned !== "can" && this.pinned()?.identity) || this.identity;
-    // Persist sequence and attempt count first. A crash cannot reuse them or
+    // Persist the sequence (set aside, a block at a time) and attempt count first. A crash cannot reuse them or
     // reset the retransmission budget/absolute message deadline.
-    await this.persist({ ...this.state, sequence: body[1], pending: pending ? { ...pending, attempts: pending.attempts + 1, next: now + backoff(pending.attempts) } : this.state.pending,
+    const sequence = body[1];
+    await this.persist({ ...this.state, sequence: sequence > this.state.sequence ? sequence + SEQUENCE_BLOCK - 1 : this.state.sequence,
+      pending: pending ? { ...pending, attempts: pending.attempts + 1, next: now + backoff(pending.attempts) } : this.state.pending,
       receipt: receipt ? { ...receipt, attempts: receipt.attempts + 1, next: now + backoff(receipt.attempts) } : this.state.receipt });
+    this.sequence = sequence;
     const before = { lastPublish: this.lastPublish, controlDue: this.controlDue };
     this.lastPublish = now; this.controlDue = now + 4 * 60_000;
     traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1], ...(identity !== this.identity && { pinned: true }) });
