@@ -10,8 +10,10 @@ import { renderApp } from "../render";
 
 /** An IntersectionObserver the test moves: `seen` puts a bubble on screen (or near it), or takes it off. */
 const observed = new Map<Element, IntersectionObserverCallback>();
+/** What each observer was asked to measure against. */
+let inits: (IntersectionObserverInit | undefined)[] = [];
 class FakeObserver {
-  constructor(private readonly callback: IntersectionObserverCallback) {}
+  constructor(private readonly callback: IntersectionObserverCallback, init?: IntersectionObserverInit) { inits.push(init); }
   observe(element: Element) { observed.set(element, this.callback); }
   unobserve(element: Element) { observed.delete(element); }
   disconnect() { for (const [element, callback] of observed) if (callback === this.callback) observed.delete(element); }
@@ -38,6 +40,7 @@ const revoked: string[] = [];
 beforeEach(() => {
   asked = []; inFlight = 0; peak = 0; revoked.length = 0;
   observed.clear();
+  inits = [];
   vi.stubGlobal("IntersectionObserver", FakeObserver);
   let made = 0;
   URL.createObjectURL = () => `blob:picture-${made++}`;
@@ -110,5 +113,12 @@ describe("a chat's pictures are read as they come on screen, a few at a time, on
     await settle();
     expect(asked).toHaveLength(6);
     expect(screen.getAllByRole("img").map((img) => img.getAttribute("src"))).toEqual(shown);
+  });
+
+  it("a picture is read 200 px before it scrolls into the chat list's view, not only once it shows", () => {
+    renderApp(<div data-testid="list" data-message-list>{pictures(2).map((file) => <FileBubble key={file.id} file={file} peerName="Ana" />)}</div>);
+    // Measured against the window, the margin would stop at the list's edge: the list scrolls inside it.
+    expect(inits).toHaveLength(2);
+    for (const init of inits) expect(init).toMatchObject({ root: screen.getByTestId("list"), rootMargin: "200px 0px" });
   });
 });

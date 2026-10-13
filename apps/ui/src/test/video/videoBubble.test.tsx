@@ -147,6 +147,19 @@ describe("a video in the chat", () => {
     expect(revoke).toHaveBeenCalledWith(url);
   });
 
+  it("its poster is made 200 px before it scrolls into the chat list's view, not only once it shows", () => {
+    const inits: (IntersectionObserverInit | undefined)[] = [];
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(_callback: IntersectionObserverCallback, init?: IntersectionObserverInit) { inits.push(init); }
+      observe() {}
+      disconnect() {}
+    });
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    renderApp(<div data-testid="list" data-message-list><VideoBubble file={video()} sender="peer" peerName="Ana" /></div>);
+    expect(inits).toEqual([{ root: screen.getByTestId("list"), rootMargin: "200px 0px" }]);
+    vi.unstubAllGlobals();
+  });
+
   it("scrolled out of view it stops and lets go of its bytes; played again, it goes on from there", async () => {
     let seen: ((entries: { isIntersecting: boolean }[]) => void) | null = null;
     vi.stubGlobal("IntersectionObserver", class {
