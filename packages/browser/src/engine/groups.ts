@@ -1333,7 +1333,7 @@ export class Groups {
     const session = this.sessions.get(groupId), group = this.stored.get(groupId);
     if (!session?.isAdmin || !group || !this.pendingEntries.get(groupId)?.has(peer)) return;
     // An app that takes only eight cannot follow a larger roster: it is not let in past eight (and not answered for a while).
-    if (this.growthBlocked(group, session, session.roster.length + 1, linkId)) {
+    if (!rosterHas(session.roster, peer) && this.growthBlocked(group, session, session.roster.length + 1, linkId)) {
       this.pendingEntries.get(groupId)?.delete(peer);
       this.refused.set(peer, Date.now() + REFUSED_FOR_MS);
       void this.host.closeEdge(linkId);
@@ -1431,12 +1431,15 @@ export class Groups {
     traceJoin(group.id, "knocks.read", { ms: Date.now() - started, knocks: knocks.length });
     let pending = this.pendingEntries.get(group.id);
     for (const { key, ts } of knocks) {
-      if (now - ts > KNOCK_TTL_MS || rosterHas(session.roster, key) || this.refused.has(key) || pending?.has(key) || key === entry.link.host) continue;
+      // A member let in whose welcome never reached it knocks again: its session opens again for the welcome (`rewelcome`).
+      const again = this.unwelcomed(group, session, key);
+      if (now - ts > KNOCK_TTL_MS || (rosterHas(session.roster, key) && !again) || this.refused.has(key) || pending?.has(key) || key === entry.link.host) continue;
       const entryIds = new Set(this.host.entries(group.id).values());
       const contactsInvited = [...this.invited.get(group.id) ?? []].filter(id => !entryIds.has(id)).length;
       const size = session.roster.length + contactsInvited + (pending?.size ?? 0);
       // Full, or past eight while a member's app takes only eight (the newcomer's own app is checked on its entry session).
-      if ((pending?.size ?? 0) >= MAX_PENDING_ENTRIES || size >= GROUP_MEMBER_CAP.max || this.growthBlocked(group, session, size + 1)) break;
+      // A member let in already takes no new place.
+      if ((pending?.size ?? 0) >= MAX_PENDING_ENTRIES || (!again && (size >= GROUP_MEMBER_CAP.max || this.growthBlocked(group, session, size + 1)))) break;
       if (!pending) this.pendingEntries.set(group.id, (pending = new Map()));
       pending.set(key, now);
       this.warmUntil.set(group.id, now + this.timings.warmMs);
@@ -1533,23 +1536,27 @@ export class Groups {
           return;
         }
         const group = this.stored.get(g)!;
-        // A key already in the roster (ours too) is nobody new: dropped before anything is noted about its member.
-        if (frame.key === session.myKey || rosterHas(session.roster, frame.key)) return;
+        if (frame.key === session.myKey) return;
         // Through the link, the member key must be the one the entry session is pinned to: the one that knocked.
         const entryPeer = this.hostEntry(g, linkId);
         if ([...this.host.entries(g).values()].includes(linkId) && entryPeer !== frame.key) return;
-        if (session.roster.length >= GROUP_MEMBER_CAP.max || this.growthBlocked(group, session, session.roster.length + 1, linkId)) return;
+        // A key already in the roster is nobody new: dropped before anything is noted about its member. One let in through
+        // the link whose welcome never reached it, knocking again, gets the welcome again; nothing is committed for it.
+        const again = !!entryPeer && this.unwelcomed(group, session, frame.key);
+        if (rosterHas(session.roster, frame.key) && !again) return;
+        if (!again && (session.roster.length >= GROUP_MEMBER_CAP.max || this.growthBlocked(group, session, session.roster.length + 1, linkId))) return;
         if (!entryPeer) {
           // The contact's name on our chat is the best name for them until their edge says otherwise.
           await session.setNick(frame.key, this.host.contactName(linkId));
         }
-        this.meet(g, frame.key);
+        if (!again) this.meet(g, frame.key);
         if (this.host.linkReady(linkId, GROUP_VERSION_LARGE)) this.markLarge(group, frame.key);
-        const welcome = await session.admit(frame.key);
-        if (!entryPeer) {
-          group.contacts = { ...group.contacts, [frame.key]: linkId };
-          group.unseen = [...(group.unseen ?? []).filter(key => rosterHas(session.roster, key)), frame.key];
-        }
+        let welcome;
+        try { welcome = again ? await session.rewelcome(frame.key) : await session.admit(frame.key); }
+        catch (error) { if (!again) throw error; this.pendingEntries.get(g)?.delete(frame.key); await this.host.closeEdge(linkId); return; }
+        if (!entryPeer) group.contacts = { ...group.contacts, [frame.key]: linkId };
+        // Not seen on an edge yet: until it is, a decline over its chat or a knock again says its welcome was lost.
+        if (!again) group.unseen = [...(group.unseen ?? []).filter(key => rosterHas(session.roster, key)), frame.key];
         this.answered(group, linkId);
         await this.store.putGroup(group);
         for (const piece of welcome) this.host.sendOnLink(linkId, piece);
@@ -1838,6 +1845,13 @@ export class Groups {
     await this.store.putGroup(group);
     this.host.emit();
     return true;
+  }
+
+  /** Admin side: a member in the roster never seen on an edge since it was let in, whose edge is not up now. */
+  private unwelcomed(group: StoredGroup, session: GroupSession, key: string): boolean {
+    if (!session.isAdmin || !group.unseen?.includes(key) || !rosterHas(session.roster, key)) return false;
+    const edge = this.host.edges(group.id).get(key);
+    return !(edge && this.host.linkReady(edge));
   }
 
   /** Records that a member's app takes rosters past eight; true when that is news (the caller saves). */
