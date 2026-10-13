@@ -205,6 +205,15 @@ describe("a push to dev whose tree a pull request already tested", () => {
     expect(await testedAs({ sha, tree, repo, api: fake({ events: { 41: full } }).api })).toBe(null);
   });
 
+  it("does not take a run of a pull request GitHub moved to dev when its old base was deleted", async () => {
+    for (const event of ["automatic_base_change_succeeded", "automatic_base_change_failed"]) {
+      const moved = [{ event: "head_ref_deleted" }, { event }, { event: "head_ref_restored" }];
+      const { api, asked } = fake({ pulls: [into("dev", "open", 77)], events: { 77: moved } });
+      expect(await testedAs({ sha, tree, repo, api })).toBe(null);
+      expect(asked.some((p) => p.startsWith("actions/runs/"))).toBe(false);
+    }
+  });
+
   it("does not take a run whose branch has no pull request it can name", async () => {
     const { api } = fake({ pulls: [] });
     expect(await testedAs({ sha, tree, repo, api })).toBe(null);
