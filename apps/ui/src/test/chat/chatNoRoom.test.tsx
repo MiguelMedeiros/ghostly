@@ -76,4 +76,30 @@ describe("on a full localStorage", () => {
     await waitFor(() => expect(window.location.hash).not.toContain("/chat/"));
     expect(listSessions()).toEqual([]);
   }, 60_000);
+
+  it("the notice closes with Escape, a tap on its words or its ×, and gives the focus back to New", async () => {
+    render(<Root />);
+    const newChat = await screen.findByTestId("sidebar-new-chat");
+    fill();
+    const press = async () => {
+      act(() => { newChat.focus(); newChat.click(); });
+      return screen.findByTestId("chat-not-stored", undefined, { timeout: 5_000 });
+    };
+
+    await press();
+    act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(screen.queryByTestId("chat-not-stored")).toBeNull();
+    expect(document.activeElement).toBe(newChat);
+
+    await press();
+    act(() => screen.getByTestId("chat-not-stored-title").click());
+    expect(screen.queryByTestId("chat-not-stored")).toBeNull();
+
+    await press();
+    // Enter on the ×: the focus is on it when it goes.
+    const close = screen.getByTestId("chat-not-stored-close");
+    act(() => { close.focus(); close.click(); });
+    expect(screen.queryByTestId("chat-not-stored")).toBeNull();
+    expect(document.activeElement).toBe(newChat);
+  }, 60_000);
 });
