@@ -46,6 +46,11 @@
     "tooLongNext": "اختصرها أو أرسلها كملف."
   },
   "connectionFailed": "فشل الاتصال",
+  "devices": {
+    "digitsEnded": "انتهت عملية إضافة هذا الجهاز",
+    "digitsEndedNext": "ابدأ من جديد من «إضافة جهاز».",
+    "onlyUnfinished": "لا يُزال هنا إلا جهاز لم يكمل الانضمام"
+  },
   "engine": {
     "alreadySubmitted": "أُرسلت هذه الدفعة بالفعل أو تعذّر حفظها",
     "cannotCancelSubmitted": "لا يمكن إلغاء دفعة أُرسلت؛ تحقق منها بدلًا من ذلك",

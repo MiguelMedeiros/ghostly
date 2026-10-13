@@ -46,6 +46,11 @@
     "tooLongNext": "请缩短，或作为文件发送。"
   },
   "connectionFailed": "连接失败",
+  "devices": {
+    "digitsEnded": "添加此设备的流程已结束",
+    "digitsEndedNext": "请从“添加设备”重新开始。",
+    "onlyUnfinished": "这里只能移除未完成加入的设备"
+  },
   "engine": {
     "alreadySubmitted": "此付款已提交，或无法保存",
     "cannotCancelSubmitted": "已提交的付款无法取消，请改为核对",

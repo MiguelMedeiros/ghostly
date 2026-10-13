@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import { FAILURES, dayText, handoffErrorKey, handoffErrorWallet, sizeText, useHandoffView, walletNameOf } from "../../lib/handoff";
+import { FAILURES, dayText, handoffProblem, sizeText, useHandoffView, walletNameOf } from "../../lib/handoff";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
 import { meteredConnection } from "@ghostly/browser/devices/handoffHost";
@@ -11,7 +11,7 @@ import { InfoButton } from "../layout/Section";
 import { DeviceDialog, field, primaryButton, quietButton } from "./DeviceDialog";
 import { type Problem, problemText } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
-import { said, nextOf } from "../../lib/notices";
+import { nextOf } from "../../lib/notices";
 
 /*
  * The handoff's screens (WISP 06 § User experience, "Handoff progress", "Failures"): Use here with the password on a
@@ -134,7 +134,7 @@ export function UseHereDialog({ device, onClose, onStarted }: { device: string; 
   const submit = async () => {
     setBusy(true); setError(null);
     try { onStarted(await engine.call("deviceHandoffPull", { password, later: later ? HANDOFF_LATER_BYTES : 0 })); onClose(); }
-    catch (cause) { const key = handoffErrorKey(cause); setError(key ? said(key, t, { device, wallet: handoffErrorWallet(cause) ?? "" }) : problemText(cause, t)); }
+    catch (cause) { setError(handoffProblem(cause, t, { device }) ?? problemText(cause, t)); }
     finally { setBusy(false); }
   };
   return (
@@ -164,7 +164,7 @@ export function HandoffOffer({ view }: { view: HandoffView }) {
   // The engine refuses when the offer is gone or the copy has nowhere to go: said under the buttons, as Use here's dialog does.
   const act = (work: () => Promise<unknown>) => {
     setBusy(true); setError(null);
-    void work().catch((cause: unknown) => { const key = handoffErrorKey(cause); setError(key ? said(key, t, { device, wallet: handoffErrorWallet(cause) ?? "" }) : problemText(cause, t)); })
+    void work().catch((cause: unknown) => { setError(handoffProblem(cause, t, { device }) ?? problemText(cause, t)); })
       .finally(() => setBusy(false));
   };
   return (
@@ -190,8 +190,7 @@ export function MoveDialog({ device, deviceKey, onClose }: { device: string; dev
   const view = useHandoffView(started);
   useEffect(() => {
     void engine.call("deviceHandoffPush", { key: deviceKey }).then(() => setStarted(true), (cause: unknown) => {
-      const key = handoffErrorKey(cause);
-      setError(key ? said(key, t, { device, wallet: handoffErrorWallet(cause) ?? "" }) : problemText(cause, t));
+      setError(handoffProblem(cause, t, { device }) ?? problemText(cause, t));
     });
   }, [deviceKey, device, t]);
   return (

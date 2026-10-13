@@ -46,6 +46,11 @@
     "tooLongNext": "Shorten it or send it as a file."
   },
   "connectionFailed": "Connection failed",
+  "devices": {
+    "digitsEnded": "Adding this device has ended",
+    "digitsEndedNext": "Start again from Add a device.",
+    "onlyUnfinished": "Only a device that did not finish joining is removed here"
+  },
   "engine": {
     "alreadySubmitted": "This payment was already submitted or could not be saved",
     "cannotCancelSubmitted": "A submitted payment cannot be cancelled; reconcile it instead",
