@@ -2374,7 +2374,16 @@ export class Groups {
       for (const [key] of after) if (!rosterHas(before, key) && key !== session.myKey) await this.event(groupId, "joined", `${name(key)} joined`, when, top.e, key);
       const gone = before.filter(([key]) => !rosterHas(after, key)).map(([key]) => key);
       this.hubs.removed(groupId, gone, this.now());
-      for (const key of gone) await this.event(groupId, "gone", `${name(key)} is no longer a member`, when, top.e, key);
+      // One who left on their own: the admin's remove carries its `left` mark (WISP 902 § Admission and departure).
+      const left = (key: string) => {
+        const chain = session.state.chain;
+        for (let e = chain.length - 1; e > 0; e--) if (chain[e].k === "remove" && chain[e].s === key) return !!session.state.leftMarks?.[e];
+        return false;
+      };
+      for (const key of gone) {
+        if (left(key)) await this.event(groupId, "left", `${name(key)} left`, when, top.e, key);
+        else await this.event(groupId, "gone", `${name(key)} is no longer a member`, when, top.e, key);
+      }
       if (top.k === "role") await this.event(groupId, "admin", `${name(top.s!)} ${top.s === session.myKey ? "are" : "is"} now the admin`, when, top.e, top.s);
       if (top.k === "rotate") await this.event(groupId, "rotated", "Keys rotated: a fresh epoch", when, top.e);
     }

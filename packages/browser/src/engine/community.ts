@@ -1813,7 +1813,17 @@ export class Communities {
       // the lines among the messages of their moment, not after everything it missed.
       const at = receivedTimestamp(top.ts, when);
       for (const [key] of after) if (!rosterHas(before, key) && key !== s.myKey) await this.event(groupId, "joined", `${name(key)} joined`, at, top.e, key);
-      for (const [key] of before) if (!rosterHas(after, key)) await this.event(groupId, "gone", `${name(key)} is no longer a member`, at, top.e, key);
+      // One who left on their own: the commit that took them out is a `leave`, not a `remove` (WISP 903 § Leaving and removal).
+      const left = (key: string) => {
+        const chain = s.state.chain;
+        for (let i = chain.length - 1; i >= 0; i--) if ((chain[i].k === "remove" || chain[i].k === "leave") && chain[i].s === key) return chain[i].k === "leave";
+        return false;
+      };
+      for (const [key] of before) {
+        if (rosterHas(after, key)) continue;
+        if (left(key)) await this.event(groupId, "left", `${name(key)} left`, at, top.e, key);
+        else await this.event(groupId, "gone", `${name(key)} is no longer a member`, at, top.e, key);
+      }
       if (top.k === "role" && before.find(([k]) => k === top.s)?.[1] !== "admin") await this.event(groupId, "admin", `${name(top.s!)} ${top.s === s.myKey ? "are" : "is"} now the admin`, at, top.e, top.s);
       if (top.k === "rotate") await this.event(groupId, "rotated", "Keys rotated: a fresh epoch", at, top.e);
     }
