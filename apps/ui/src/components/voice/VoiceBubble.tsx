@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
+import { formatVoiceDuration, sanitizeFileName, type VoiceMeta } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
@@ -26,7 +26,8 @@ import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMedi
 import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { Waveform } from "./Waveform";
 import "./voice.css";
-import { problemLine } from "../../lib/problemText";
+import { problemLine, saveProblemLine } from "../../lib/problemText";
+import { downloadFile } from "../../lib/fileDownload";
 
 type PlayState = "idle" | "loading" | "playing" | "paused";
 
@@ -364,6 +365,21 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
     // The ring turns until the transfer moves, or the request comes back without moving it.
     void action().catch((error: Error) => setRetryError(problemLine(error, t))).finally(() => setBusy(false));
   };
+  /**
+   * Save on one that will not play here: the same path as Download in the message's menu, the system's save dialog
+   * where there is one. The link's own download is only the web's fallback: the desktop WebView saves nothing from it.
+   */
+  const save = (event: MouseEvent) => {
+    if (!platform) return;
+    event.preventDefault();
+    void downloadFile(platform, file, sanitizeFileName(file.name))
+      .then(async (result) => {
+        if (result !== "missing" || !mountedRef.current) return;
+        const leftOut = (await fileHeld(platform, file.id, false)) === "left-out";
+        if (mountedRef.current) setProblem(t(leftOut ? "chat.file.notInBackup" : "chat.file.gone"));
+      })
+      .catch((error: Error) => { if (mountedRef.current) setProblem(saveProblemLine(error, t)); });
+  };
 
   return (
     <div
@@ -463,7 +479,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
       {problem && (
         <p className="text-[12px] text-danger-ink m-0 mt-1 px-1" role="alert" data-testid="voice-problem" data-error={failure ?? undefined}>
           {problem}{" "}
-          {saveUrl && <a href={saveUrl} download={file.name} data-testid="voice-save" className="underline text-inherit">{t("common.save")}</a>}
+          {saveUrl && <a href={saveUrl} download={file.name} onClick={save} data-testid="voice-save" className="underline text-inherit">{t("common.save")}</a>}
         </p>
       )}
       {(reason || hint) && why && <WhyText id={whyId} testId="voice-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
