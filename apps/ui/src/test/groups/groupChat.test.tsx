@@ -6,6 +6,8 @@ import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { groupChat, mutedUntil, setChatMute } from "../../lib/chatMute";
+import { groupReadAt, markGroupRead } from "../../lib/groups";
+import { getSessionDraft } from "../../lib/storage";
 
 // covers: groups.send, groups.leave, groups.forget, groups.rotate, groups.link.join
 
@@ -532,6 +534,19 @@ describe("GroupChat: leaving", () => {
     await user.click(within(dialog).getByTestId("group-leave-confirm"));
     expect(await screen.findByText("Chat list")).toBeInTheDocument();
     expect(mutedUntil(groupChat("group-1"))).toBeUndefined();
+  });
+
+  it("forgets what was typed in it and its read mark: a community rejoined by link had the old words in its field", async () => {
+    const { user, engine } = openGroup(active());
+    engine.on("leaveGroup", () => undefined);
+    await user.type(composer(), "the door code is 4471");
+    expect(getSessionDraft("group:group-1")).toBe("the door code is 4471");
+    markGroupRead("group-1");
+    const dialog = await leaveFromMenu(user);
+    await user.click(within(dialog).getByTestId("group-leave-confirm"));
+    expect(await screen.findByText("Chat list")).toBeInTheDocument();
+    expect(getSessionDraft("group:group-1")).toBe("");
+    expect(groupReadAt("group-1")).toBe(0);
   });
 
   it("stays, and says why, when the engine refuses", async () => {
