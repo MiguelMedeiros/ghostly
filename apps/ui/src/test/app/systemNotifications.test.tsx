@@ -435,9 +435,10 @@ describe("AttentionFeedback: which chat a notification opens", () => {
       saveSettings({ ...loadSettings(), notifications: { ...loadSettings().notifications, soundEnabled: false, systemEnabled: true } });
       vi.spyOn(document, "hasFocus").mockReturnValue(false);
       renderApp(<AttentionFeedback />);
-      act(() => { fakeEngine.emit({ kind: "attention", event: event({ linkId: "link-a" }) }); });
+      // Chats of their own: a burst in the test before would keep the notice back for another reason.
+      act(() => { fakeEngine.emit({ kind: "attention", event: event({ linkId: "link-frozen" }) }); });
       await waitFor(() => expect(nativeIds()).toHaveLength(1));
-      act(() => { fakeEngine.emit({ kind: "attention", event: event({ linkId: "group:g1" }) }); });
+      act(() => { fakeEngine.emit({ kind: "attention", event: event({ linkId: "group:frozen" }) }); });
       await waitFor(() => expect(nativeIds()).toHaveLength(2));
     } finally {
       delete (navigator as { locks?: unknown }).locks;
