@@ -83,6 +83,8 @@
   },
   "forget": {
     "invitation": "邀请将从此设备删除。{{contact}} 会知道你已拒绝。",
+    "invitationKept": "邀请和群组的历史记录将从此设备删除。{{contact}} 会知道你已拒绝。",
+    "invitationKeptUnknown": "邀请和群组的历史记录将从此设备删除。发送邀请的联系人会知道你已拒绝。",
     "invitationUnknown": "邀请将从此设备删除。发送邀请的联系人会知道你已拒绝。",
     "joining": "你将不再请求加入，群组也会从此设备删除。",
     "kept": "群组及其历史记录将从此设备删除。",
