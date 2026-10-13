@@ -104,6 +104,12 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Your contact has too many files waiting. Try again later.", `${CORE}/chatFiles.ts`],
   ["The file arrived damaged and was deleted. Send it again.", `${CORE}/chatFiles.ts`],
   ["Not accepted in time", `${CORE}/chatFiles.ts`],
+  ["The file arrived damaged and was deleted. Ask for it again.", `${CORE}/chatFiles.ts`],
+  ["The offer expired", `${CORE}/chatFiles.ts`],
+  ["Not delivered in time", `${CORE}/chatFiles.ts`],
+  ["Your contact asked for the same part of this file too many times", `${CORE}/chatFiles.ts`],
+  ["Could not store the file: This device has no space left for the file", `${CORE}/chatFiles.ts`, "Could not store the file: "],
+  ["Could not store the file: The stored copy is gone", `${CORE}/chatFiles.ts`, "Could not store the file: "],
   ["Your contact could not take this file", `${CORE}/chatFiles.ts`],
   ["That file is too large (max 64 MB).", `${BROWSER}/platform/services.ts`, "That file is too large (max "],
   ["That is not a valid mint URL", CODES],
@@ -196,6 +202,9 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This is not a link to a group", `${BROWSER}/engine/groups.ts`],
   ["You are already joining this group", `${BROWSER}/engine/groups.ts`],
   ["This group is joined with its current link", `${BROWSER}/engine/groups.ts`],
+  ["You have an invitation to this group. Answer it first.", `${BROWSER}/engine/groups.ts`],
+  ["You are out of this group and its history is still here. Delete it from this device to join with a link.", `${BROWSER}/engine/groups.ts`],
+  ["This link names a private group of yours, not a community", `${BROWSER}/engine/groups.ts`],
   ["Go online to join a group", `${BROWSER}/engine/node.ts`],
   ["Only the admin can change the members of this group", `${CORE}/groupSession.ts`],
   ["Only the admin can do that", `${CORE}/groupCommunity.ts`],
@@ -330,7 +339,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The clipboard's picture is damaged", "apps/desktop/src/clipboard.rs"],
   ["Clipboard unavailable", "apps/desktop/src/clipboard.rs"],
   ["That paste is gone. Paste it again.", "apps/desktop/src/clipboard.rs"],
-  ["Could not read the file: Permission denied (os error 13)", "apps/desktop/src/clipboard.rs", "Could not read the file: {e}"],
+  ["Could not read the pasted file: Permission denied (os error 13)", "apps/desktop/src/clipboard.rs", "Could not read the pasted file: {e}"],
+  ["Could not read the file: The file changed while it was being copied", `${CORE}/chatFiles.ts`, "Could not read the file: "],
   ["This browser cannot wake Ghostly while it is closed.", "apps/ui/src/lib/wakePush.ts"],
   ["Your signer holds a different key than this identity. Nothing was published.", "apps/ui/src/lib/nostr.ts"],
   ["This device cannot decode the recording", "apps/ui/src/lib/voiceMp3.ts"],
@@ -429,8 +439,11 @@ describe("errors in the app's language", () => {
     expect(errorText("That picture is too large to paste", pt)).toBe("Isso é grande demais para colar. Envie com + → Documento.");
     expect(errorText("That paste is gone. Paste it again.", pt)).toBe("Essa colagem expirou. Cole de novo.");
     expect(errorText("Clipboard unavailable", pt)).toBe("Não foi possível ler a área de transferência. Anexe com +.");
-    expect(errorText("Could not read the file: Permission denied (os error 13)", pt)).toBe("Não foi possível ler o arquivo colado. Anexe com +.");
-    expect(knownErrorParts("Could not read the file: Permission denied (os error 13)", pt)?.detail).toBe("Could not read the file: Permission denied (os error 13)");
+    expect(errorText("Could not read the pasted file: Permission denied (os error 13)", pt)).toBe("Não foi possível ler o arquivo colado. Anexe com +.");
+    expect(knownErrorParts("Could not read the pasted file: Permission denied (os error 13)", pt)?.detail).toBe("Could not read the pasted file: Permission denied (os error 13)");
+    // A file sent with + whose copy could not be read is not a paste, and is sent again.
+    expect(knownErrorParts("Could not read the file: The file changed while it was being copied", english)).toEqual({
+      title: "The file cannot be read", next: "Send it again, or pick the file again.", detail: "Could not read the file: The file changed while it was being copied" });
   });
 
   it("an action refused in limited mode says why and what to do, in the language", () => {
