@@ -990,6 +990,27 @@ html .toast-place.toast-place-page[data-at="top"] {
   contain: size;
 }
 
+/*
+ * The rows of a long chat off screen are left out of its layout and paint: each page of older rows coming in laid out
+ * and painted all the rows in the page (150), 50-90 ms on a mid phone, a freeze at every step of a wheel up the history.
+ * A row never drawn takes a typical row's height; one drawn keeps its last real one (`auto`), and the view stays on its
+ * message as a row comes on screen at its real height (useChatScroll's `settle`). Not the last rows: one arriving there
+ * would first take the typical height, and a chat at its bottom would go past its end and come back. Every row
+ * remembers its size, so the one that stops being among the last as another arrives keeps its own. Its bubble's
+ * shadow and outline pass the row's edge by a few pixels: still painted, so only where the clip can be widened (WebKit
+ * can't, and would cut them). Not a row playing its video full screen (`position: fixed`), which the containment would
+ * hold inside the row.
+ */
+@supports (overflow-clip-margin: 8px) {
+  [data-message-row] {
+    contain-intrinsic-block-size: auto 90px;
+    overflow-clip-margin: 8px;
+  }
+  [data-message-row]:nth-last-child(n + 11 of [data-message-row]):not(:has([data-theater])) {
+    content-visibility: auto;
+  }
+}
+
 /* On a touch screen a long press on a message opens its quick bar (Copy is there). iOS fires no `contextmenu` to cancel,
    so it also selected a word and put its own Copy, Look Up, Translate menu over the bar. Links keep their own callout. */
 @media (pointer: coarse) {
