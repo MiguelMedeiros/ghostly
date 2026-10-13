@@ -107,6 +107,26 @@ describe("a member back in a private group reads what it missed in the order it 
     expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
   });
 
+  it("two members talked while the app was closed and every edge opens at once: their lines alternate as written", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "eve"]);
+    const [alice, , carol, dave] = peers;
+    dave.online = false;
+    await world.run(2_000);
+    // Thirty each: within the last 32 an author hands on of its own, whichever member is told first.
+    const written: string[] = [];
+    for (let i = 1; i <= 30; i++) for (const p of [alice, carol]) {
+      written.push(`${p.name} ${i}`);
+      await p.groups.send(id, `${p.name} ${i}`);
+      await new Promise(done => setTimeout(done, 2));
+      await world.run(300, 300);
+    }
+    await world.run(3_000);
+    await world.restart(dave);
+    await world.until(() => world.texts(dave, id).filter(t => written.includes(t)).length === written.length, 120_000);
+    await world.run(30_000);
+    expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
+  });
+
   it("one member wrote 200 and every edge opens at once: that member's lines in the order written, the newest last", async () => {
     const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave", "eve"]);
     const [alice, , , dave] = peers;
