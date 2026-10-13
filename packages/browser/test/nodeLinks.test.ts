@@ -1063,6 +1063,36 @@ describe("an away contact", () => {
     expect(linkOf(chat.id).connect).toHaveBeenCalledOnce();
     await expect(node.connect({ linkId: "missing" })).rejects.toThrow("Go online before reconnecting");
   });
+
+  it("reconnecting dials at once where WebRTC can carry the chat, beside a native listener still starting; a native-only chat waits for it", async () => {
+    // Iroh's relay out of reach: its listener takes 10 s to give up. Reconnect waited for it before it dialed.
+    vi.stubGlobal("RTCPeerConnection", class {});
+    const starting: (() => void)[] = [];
+    const made = () => ({ transport: "iroh/1" as const, descriptor: { id: "ab".repeat(32), relay: "https://relay.test./", addresses: [] },
+      connect: vi.fn(), close: vi.fn(async () => {}), onConnection: null, onDescriptor: null });
+    const iroh = vi.fn(() => new Promise((resolve) => { starting.push(() => resolve(made())); }));
+    const both = row({ pairedPeerKey: createIdentity().pubKeyZ32, peerTransports: ["webrtc/1", "iroh/1"] });
+    const native = row({ pairedPeerKey: createIdentity().pubKeyZ32, peerTransports: ["iroh/1"] });
+    const pinned = row({ pairedPeerKey: createIdentity().pubKeyZ32, peerTransports: ["webrtc/1", "iroh/1"], preferredTransport: "iroh/1", transportFallback: false });
+    try {
+      const { node, linkOf } = await startedWith({ nativeTransports: { "iroh/1": iroh } } as unknown as Partial<NodeOptions>, both, native, pinned);
+      for (const chat of [both, native, pinned]) linkOf(chat.id).availableTransports = ["webrtc/1"];
+      const began = Date.now();
+      await node.connect({ linkId: both.id });
+      expect(Date.now() - began).toBeLessThan(500);
+      expect(linkOf(both.id).connect).toHaveBeenCalledOnce();
+      // Nothing to dial without the listener: these wait for it, as before.
+      const waiting = [node.connect({ linkId: native.id }), node.connect({ linkId: pinned.id })];
+      await new Promise((r) => setTimeout(r, 50));
+      expect(linkOf(native.id).connect).not.toHaveBeenCalled();
+      expect(linkOf(pinned.id).connect).not.toHaveBeenCalled();
+      // The listeners come up, one after another in Iroh's queue: then they dial.
+      await vi.waitFor(() => { for (const start of starting.splice(0)) start(); expect(linkOf(pinned.id).connect).toHaveBeenCalled(); }, { timeout: 3_000 });
+      await Promise.all(waiting);
+      // (The engine also dials a native contact itself once its listener is up, as the lower key.)
+      expect(linkOf(native.id).connect).toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
+  });
 });
 
 describe("what arrives from held storage", () => {
