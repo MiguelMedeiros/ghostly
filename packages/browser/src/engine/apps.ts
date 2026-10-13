@@ -433,6 +433,8 @@ export class Apps {
   /** What each `ref\0scope` holds, read once from its counter row and kept in step by the writes here. */
   private readonly usage = new Map<string, AppScopeCount>();
   private readonly queues = new Map<string, Promise<unknown>>();
+  /** The keys read of each `ref\0scope` running, and the one every call made while it runs shares after it. */
+  private readonly keyReads = new Map<string, { running: Promise<string[]>; next?: Promise<string[]> }>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** Drops what `staged` holds past `STAGED.ms`, set while it holds anything: a closed install screen sends no call. */
   private sweep: ReturnType<typeof setTimeout> | null = null;
@@ -1628,8 +1630,29 @@ export class Apps {
 
   async storageKeys({ ref, scope, digest }: { ref: string; scope: string; digest?: string }): Promise<string[]> {
     const app = await this.runningOrFail(ref, digest);
-    const keys = await wrap((await store(STORES.appStorage, "readonly")).getAllKeys(keysOf(app.ref, this.scopeOf(scope)))) as [string, string, string][];
-    return keys.map((k) => k[2]);
+    const where = this.scopeOf(scope);
+    return this.keysOnce(`${app.ref}\0${where}`, async () => {
+      const keys = await wrap((await store(STORES.appStorage, "readonly")).getAllKeys(keysOf(app.ref, where))) as [string, string, string][];
+      return keys.map((k) => k[2]);
+    });
+  }
+
+  /**
+   * One read of a scope's keys at a time. Every call made while one runs shares the single read that starts after it, so
+   * it still sees each write done before it was made: 50 calls a second on a full scope held the profile's database,
+   * a chat message's write waited 17 s behind them.
+   */
+  private keysOnce(id: string, read: () => Promise<string[]>): Promise<string[]> {
+    const waiting = this.keyReads.get(id);
+    if (waiting) return waiting.next ??= waiting.running.then(() => this.keysStart(id, read), () => this.keysStart(id, read));
+    return this.keysStart(id, read);
+  }
+
+  private keysStart(id: string, read: () => Promise<string[]>): Promise<string[]> {
+    const slot: { running: Promise<string[]>; next?: Promise<string[]> } = { running: read() };
+    this.keyReads.set(id, slot);
+    void slot.running.catch(() => {}).then(() => { if (this.keyReads.get(id) === slot && !slot.next) this.keyReads.delete(id); });
+    return slot.running;
   }
 
   /** An app's storage in every scope, as export files (WISP 1200 § Where installed apps live), offered before an uninstall. */
