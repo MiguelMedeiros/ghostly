@@ -3,10 +3,18 @@ import { flushSync } from "react-dom";
 
 /** Rows a timeline opens with: its last ones, several screens of them. */
 export const OPEN_ROWS = 100;
-/** Rows added at an edge of the window when the view nears it. */
-export const PAGE_ROWS = 100;
-/** Most rows in the page at once: past this, the rows at the far end of the window go. */
-export const MAX_ROWS = 300;
+/**
+ * Rows added at an edge of the window when the view nears it. A page is one commit (its rows in, as many out past
+ * `MAX_ROWS`, the view put back on its message): 100 froze a mid phone 150-175 ms a page while it scrolled.
+ */
+export const PAGE_ROWS = 25;
+/**
+ * Most rows in the page at once: past this, the rows at the far end of the window go. Every frame of a scroll and every
+ * page step lays out, paints and layers all of them: with 300 a slower processor took longer over its pages.
+ */
+export const MAX_ROWS = 150;
+/** Rows on each side of a message the window opens around (`reveal`, `opensOn`): within `MAX_ROWS`. */
+export const AROUND_ROWS = 50;
 
 const REVEAL = "ghostly:reveal-message";
 
@@ -74,9 +82,9 @@ function span(key: string, ids: readonly string[], from: number, to: number): St
   return { key, decided: true, first: ids[from] ?? null, firstAt: from, last: end ? null : ids[to - 1], lastAt: end ? 0 : to - 1 };
 }
 
-/** The window around row `at`: `PAGE_ROWS` on each side, to the end when the end is that near. */
+/** The window around row `at`: `AROUND_ROWS` on each side, to the end when the end is that near. */
 function around(key: string, ids: readonly string[], at: number): State {
-  return span(key, ids, at - PAGE_ROWS, at + PAGE_ROWS + 1);
+  return span(key, ids, at - AROUND_ROWS, at + AROUND_ROWS + 1);
 }
 
 /**
