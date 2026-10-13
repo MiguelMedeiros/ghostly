@@ -2050,10 +2050,13 @@ export class Groups {
     let tried = this.gapsAsked.get(groupId);
     if (!tried) this.gapsAsked.set(groupId, (tried = new Map()));
     let entry = tried.get(via);
-    if (!entry || entry.mark !== mark) tried.set(via, (entry = { mark, of: new Set(), noticed: entry?.noticed, last: entry?.last }));
+    const now = this.now();
+    // Noticed now, if not before: its answer (its last 32) shows what is below them, which `gapsAgain` asks another for
+    // `MESH_GAP_AGAIN_MS` later, not at the next gossip turn.
+    if (!entry || entry.mark !== mark) tried.set(via, (entry = { mark, of: new Set(), noticed: entry?.noticed ?? now, last: entry?.last }));
     if (entry.of.has(via)) return false;
     entry.of.add(via);
-    entry.at = this.now();
+    entry.at = now;
     return true;
   }
 
