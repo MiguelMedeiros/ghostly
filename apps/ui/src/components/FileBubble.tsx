@@ -73,11 +73,12 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   }, [readable, file.id]);
   // A chat opens with up to a hundred bubbles: a picture is read once its bubble comes near the screen. Near the chat
   // list's own view: measured against the window, the margin stops at the list's edge and a picture is read only once
-  // it shows.
+  // it shows. More than a fast wheel notch (400 px) ahead: with less, a notch takes a box from out of the margin to on
+  // screen at once, and it shows grey while it is read.
   useEffect(() => {
     const root = rootRef.current;
     if (!picture || !root || typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver((entries) => setVisible(entries.some((entry) => entry.isIntersecting)), { root: root.closest("[data-message-list]"), rootMargin: "200px 0px" });
+    const observer = new IntersectionObserver((entries) => setVisible(entries.some((entry) => entry.isIntersecting)), { root: root.closest("[data-message-list]"), rootMargin: "400px 0px" });
     observer.observe(root);
     return () => observer.disconnect();
   }, [picture]);
