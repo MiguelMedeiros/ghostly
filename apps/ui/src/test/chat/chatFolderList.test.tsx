@@ -176,6 +176,17 @@ describe("the chat list with folders", () => {
     expect(names(sidebar())).toEqual(["Bob", "Machines", "Carol"]);
   });
 
+  it("keeps a community I knock to get back into in its folder, with its mute action: it is the group, not an invitation", () => {
+    seed();
+    fakeEngine.update({ groups: [groupView({ id: "g", name: "Machines", profile: "community", status: "removed", canSend: false,
+      invitation: { linkId: "entry-1", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked" } }), groupView({ id: "l", name: "Loose group" })] });
+    list();
+    expect(names(folder("Agents"))).toContain("Machines");
+    expect(names(within(sidebar()).getByTestId("chat-folder-loose"))).not.toContain("Machines");
+    const row = folder("Agents").querySelector<HTMLElement>('[data-testid="group-row"][data-group="g"]')!;
+    expect(within(row).getByTestId("chat-row-mute")).toBeInTheDocument();
+  });
+
   it("shows a search's results as one list, without folders, a folded folder's chats included", async () => {
     const { agents } = seed();
     setFolderFolded(agents.id, true);
