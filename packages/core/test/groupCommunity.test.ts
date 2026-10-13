@@ -281,6 +281,29 @@ describe("community sessions", { timeout: 60_000 }, () => {
     expect(net.texts(bob)).toContain("just us");
   });
 
+  it("what a member said before it left reaches a member who was away; what a removed one said does not", async () => {
+    for (const how of ["leave", "remove"] as const) {
+      const net = new Net();
+      const alice = net.create("alice");
+      const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol"), dave = await net.admit(alice, "dave");
+      await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(bob, carol); await net.meet(alice, dave);
+      dave.online = false;
+      await say(net, bob, "bob 1");
+      await say(net, bob, "thanks all, leaving now");
+      if (how === "leave") { await bob.session.leave(); await net.settle(); expect(await alice.session.commitPendingLeaves()).toBe(1); }
+      else await alice.session.remove(bob.session.myKey);
+      await net.settle();
+      expect(carol.session.wasRemoved(bob.session.myKey)).toBe(true);
+      await say(net, alice, "alice 1");
+      expect(net.texts(carol)).toEqual(["bob 1", "thanks all, leaving now", "alice 1"]);
+      // Dave is back: Carol hands on what he missed, Bob's lines included when Bob left by himself.
+      dave.online = true;
+      await net.meet(dave, carol);
+      expect(dave.session.wasRemoved(bob.session.myKey)).toBe(true);
+      expect(net.texts(dave)).toEqual(how === "leave" ? ["bob 1", "thanks all, leaving now", "alice 1"] : ["alice 1"]);
+    }
+  });
+
   it("what was said on the branch of a leave that lost reaches a member who was never on that branch", async () => {
     // The admin leaves; the members are in two parts for a while (the hub they shared is gone), and a member of
     // each part commits the same leave: two branches, each with its own fresh secret. Each part talks meanwhile.
