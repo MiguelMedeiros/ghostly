@@ -88,11 +88,13 @@ function tabbables(root: HTMLElement): HTMLElement[] {
  * A modal made of plain elements: focus moves into it when it opens (so keys reach it even when what
  * opened it is gone), Tab and Shift+Tab go round its own controls and never to the page behind it, Escape anywhere
  * closes it, and focus goes back where it was on close, unless `restore` says no (what it made takes the focus instead).
+ * Where it was is nothing to go back to (the page's body, or a row that is gone), `fallback` has it.
  * A layer of its own that holds the focus (a select's list, a menu drawn over the page) keeps its Tab.
  */
-export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () => void, restore: () => boolean = () => true) {
+export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () => void, restore: () => boolean = () => true, fallback?: RefObject<HTMLElement | null>) {
   const callback = useRef(onClose); callback.current = onClose;
   const restoring = useRef(restore); restoring.current = restore;
+  const back = useRef(fallback); back.current = fallback;
   // Where the focus goes back to, read as the modal first renders: a field's autoFocus has moved the focus into the
   // modal by the time the effect runs, and that field is gone once the modal closes.
   const opener = useRef<Element | null | undefined>(undefined);
@@ -115,7 +117,9 @@ export function useDialogFocus(ref: RefObject<HTMLElement | null>, onClose: () =
       document.removeEventListener("keydown", key);
       const at = modals.lastIndexOf(ref);
       if (at >= 0) modals.splice(at, 1);
-      if (before?.isConnected && restoring.current()) before.focus();
+      if (!restoring.current()) return;
+      if (before?.isConnected && before !== document.body) before.focus();
+      else back.current?.current?.focus();
     };
   }, [ref]);
 }
