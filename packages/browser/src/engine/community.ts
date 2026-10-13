@@ -335,6 +335,13 @@ export class Communities {
 
   /** The clock: the last tick's time (the engine ticks every second), so every decision reads one clock. */
   private time = 0;
+  /**
+   * The communities this app is in, and those it is a hub of, as of the last tick: their idle looks share one
+   * community's pace (`beaconEvery`, `knockRecordsToRead`). Each community a hub held cost it about 10 requests a minute
+   * on each relay with nobody coming in: 4 of them on one relay, or 8 on two, spent the relays' budget on those looks,
+   * and the edges of some of them stayed down 10 minutes and more (CLI daemons, 2026-10-13).
+   */
+  private sharing = { groups: 1, hubs: 1 };
   private now(): number { return this.time || Date.now(); }
 
   /** Files and voice messages (WISP 503), the desk `Groups` keeps for every group. */
@@ -648,6 +655,8 @@ export class Communities {
   /** Everything timed: beacon, hub election, lobbies, knocks, leaves, edges. The engine calls it every second or so. */
   async tick(now = Date.now()): Promise<void> {
     this.time = now;
+    const active = [...this.live.values()].filter(l => l.session.status === "active");
+    this.sharing = { groups: Math.max(1, active.length), hubs: Math.max(1, active.filter(l => l.hub).length) };
     for (const group of [...this.stored.values()]) {
       const live = this.live.get(group.id);
       if (group.joining && (this.knocking(group, live) || group.joining.check)) {
@@ -690,7 +699,7 @@ export class Communities {
     for (const [linkId, until] of live.lingering) if (now >= until || !this.host.linkReady(linkId, 2)) { live.lingering.delete(linkId); if ([...this.host.entries(groupId).values()].includes(linkId)) await this.host.closeEdge(linkId); }
     const alone = live.hub && !freshHubs(this.hubs(live), now).some(h => h.key !== me);
     // A read that failed is tried again in a moment, not at the next turn of the usual pace.
-    const readDue = live.beaconFailedAt ? now - live.beaconFailedAt >= BEACON_RETRY_MS : now - live.lastBeaconRead >= (alone ? COMMUNITY_TOPOLOGY.beaconEveryMs : this.timings.beaconReadMs);
+    const readDue = live.beaconFailedAt ? now - live.beaconFailedAt >= BEACON_RETRY_MS : now - live.lastBeaconRead >= this.beaconEvery(groupId, live, alone);
     if (readDue || live.lastBeaconRead === 0) await this.readBeacon(groupId, live, now);
     // Never read yet (the app just started, and the relays' budget or the network refused the read): who the hubs are
     // is unknown, which is not "there are none". Taken for none, this app became a hub at once and the door alone, and
@@ -1008,6 +1017,19 @@ export class Communities {
     return n >= this.capacity(groupId, live, now, false) ? Math.max(n, COMMUNITY_TOPOLOGY.hubCapacity) : n;
   }
 
+  /**
+   * How often the beacon is read: alone, as often as I write my entry. A member with an edge up shares one community's
+   * pace with the others it is in (`sharing`), up to that of a lone hub: an entry stays fresh three such readings. A
+   * hub does not: the door is the hubs whose entries it read lately (`doorHubs`, an entry 45 s old at most), and read
+   * slower, the door kept changing and read every knock record again each time. Nor a member with no edge up: who the
+   * hubs are is what it needs to connect.
+   */
+  private beaconEvery(groupId: string, live: Live, alone: boolean): number {
+    if (alone) return COMMUNITY_TOPOLOGY.beaconEveryMs;
+    const up = !live.hub && [...this.host.edges(groupId).values()].some(id => this.host.linkReady(id, 2));
+    return up ? Math.min(this.timings.beaconReadMs * this.sharing.groups, COMMUNITY_TOPOLOGY.beaconEveryMs) : this.timings.beaconReadMs;
+  }
+
   /** Reads the beacon; false when the reading did not happen (the relays held it back, or none answered). */
   private async readBeacon(groupId: string, live: Live, now: number): Promise<boolean> {
     live.lastBeaconRead = now;
@@ -1321,8 +1343,10 @@ export class Communities {
       return Array.from({ length: KNOCK_SHARDS }, (_, n) => n);
     }
     const crowd = now < live.crowdUntil;
+    // A door with nobody coming in shares its pace with the other communities I am a hub of (`sharing`), never slower
+    // than the other hubs look: a knock is seen within seconds still, and the door of 4 does not spend what 4 doors would.
     const every = !door ? this.timings.otherHubKnockPollMs : busy && !crowd ? this.timings.knockBusyPollMs
-      : now < live.warmUntil ? this.timings.knockWarmPollMs : this.timings.knockPollMs;
+      : now < live.warmUntil ? this.timings.knockWarmPollMs : Math.min(this.timings.knockPollMs * this.sharing.hubs, this.timings.otherHubKnockPollMs);
     if (now - live.lastKnockPoll < every) return [];
     live.lastKnockPoll = now;
     if (!door) return [live.knockCursor = (live.knockCursor + 1) % KNOCK_SHARDS];

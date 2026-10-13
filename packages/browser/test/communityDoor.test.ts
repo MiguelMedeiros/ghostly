@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DiscoveryBudgetError, EXPECT_PEER_MS, PRESENCE_WINDOW, MAX_KNOCKS, beaconKeys, createIdentity, decodeCommunityLink, entryParams, identityFromSeedB64, knockIdentity, lobbyKeys, publicKeyFromZ32, readBeacon, readKnocks, type GroupEntryLink } from "@ghostly/core";
+import { COMMUNITY_TOPOLOGY, DiscoveryBudgetError, EXPECT_PEER_MS, PRESENCE_WINDOW, MAX_KNOCKS, beaconKeys, createIdentity, decodeCommunityLink, entryParams, identityFromSeedB64, knockIdentity, lobbyKeys, publicKeyFromZ32, readBeacon, readKnocks, type GroupEntryLink } from "@ghostly/core";
 import { COMMUNITY_TIMINGS, KNOCK_SHARDS, UNKNOCKED_RETRY_MS, dialedKey } from "../src/engine/community";
 import { otherEndSeen } from "../src/engine/groups";
 import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
@@ -410,5 +410,50 @@ describe("a hub's own lobby and beacon", { timeout: 120_000 }, () => {
     const ofMember = seen.filter(r => r.who === member && r.key === beacon);
     expect(ofMember.length).toBeGreaterThan(0);
     expect(ofMember.some(r => r.door)).toBe(false);
+  });
+});
+
+/**
+ * An app in several communities shares one community's pace of idle looks over them (`Communities.sharing`): the doors
+ * it holds read their bells as one door does, and a member connected to its hubs reads each beacon less often. Each
+ * community cost a hub about 10 requests a minute on each relay with nobody coming in: 4 of them on one relay, or 8 on
+ * two, spent the relays' budget on those looks, and the edges of some stayed down 10 minutes and more (CLI daemons,
+ * 2026-10-13). Someone who knocks is still let in within seconds.
+ */
+describe("an app in several communities", { timeout: 120_000 }, () => {
+  it("reads their bells as one door does and their beacons less often, and still lets a joiner in within seconds", async () => {
+    const world = new CommunityWorld();
+    const admin = world.add("admin"), bob = world.add("bob"), carol = world.add("carol"), everyone = [admin, bob, carol];
+    const doors: { id: string; link: string; entry: GroupEntryLink }[] = [];
+    for (let i = 0; i < 4; i++) {
+      const door = await community(world, admin);
+      doors.push(door);
+      for (const p of [bob, carol]) { await p.groups.joinByLink(door.link); await world.until(() => world.member(p, door.id), 5 * 60_000); }
+    }
+    await world.run(4 * 60_000);
+    const bells = new Set(doors.map(d => recordKey(d.entry, 0)));
+    const beacons = new Set(doors.map(d => beaconKeys(admin.groups.communities.session(d.id)!.state.rv, d.id).identity.pubKeyZ32));
+    const bellReads = new Map<Peer, number>(), beaconReads = new Map<Peer, number>();
+    world.onPkarr = (p, op, key) => {
+      if (op !== "resolve") return;
+      if (bells.has(key)) bellReads.set(p, (bellReads.get(p) ?? 0) + 1);
+      if (beacons.has(key)) beaconReads.set(p, (beaconReads.get(p) ?? 0) + 1);
+    };
+    await world.run(60_000, 500);
+    world.onPkarr = null;
+    // Each app reads every bell it is the door of together as often as a lone door reads its own (4 doors: 4 times that).
+    for (const p of everyone) expect(bellReads.get(p) ?? 0, p.name).toBeLessThanOrEqual(60_000 / COMMUNITY_TIMINGS.knockPollMs + 4);
+    expect([...bellReads.values()].reduce((a, b) => a + b, 0)).toBeGreaterThan(0);
+    // A member of all four that is no hub of any reads their beacons as often as a lone hub reads its own (they would
+    // be read every 10 s each).
+    const members = everyone.filter(p => doors.every(d => !p.groups.communities.isHub(d.id)));
+    expect(members.length).toBeGreaterThan(0);
+    for (const p of members) expect(beaconReads.get(p) ?? 0, p.name).toBeLessThanOrEqual(doors.length * 60_000 / COMMUNITY_TOPOLOGY.beaconEveryMs + 2);
+    // Nobody coming in for minutes, and someone knocks at the last one: in, and connected, within seconds.
+    const dave = world.add("dave"), last = doors[doors.length - 1];
+    const started = world.now;
+    await dave.groups.joinByLink(last.link);
+    await world.until(() => world.member(dave, last.id) && (world.view(dave, last.id)?.community?.connected ?? 0) > 0, 60_000, 500);
+    expect(world.now - started).toBeLessThanOrEqual(30_000);
   });
 });
