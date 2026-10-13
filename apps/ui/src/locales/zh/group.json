@@ -125,7 +125,8 @@
     "forgetTitleUnnamed": "删除此群组？",
     "successor": "你是管理员：你退出后 {{name}} 将成为管理员。",
     "title": "退出 {{name}}？",
-    "titleUnnamed": "退出此群组？"
+    "titleUnnamed": "退出此群组？",
+    "unsaidNext": "它仍会从此设备删除。其他人仍会看到你是成员。"
   },
   "link": {
     "broken": "此群组链接无效",

@@ -125,7 +125,8 @@
     "forgetTitleUnnamed": "Supprimer ce groupe ?",
     "successor": "Vous êtes l'admin : {{name}} devient l'admin quand vous partez.",
     "title": "Quitter {{name}} ?",
-    "titleUnnamed": "Quitter ce groupe ?"
+    "titleUnnamed": "Quitter ce groupe ?",
+    "unsaidNext": "Il est quand même supprimé de cet appareil. Les autres vous verront encore comme membre."
   },
   "link": {
     "broken": "Ce lien vers un groupe ne fonctionne pas",
