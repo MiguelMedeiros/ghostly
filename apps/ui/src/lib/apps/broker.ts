@@ -384,7 +384,8 @@ export function startApp({ container, host, launch, view, onStop, startTimeoutMs
 }): RunningApp {
   const runner = runnerFor(host, launch);
   const frame = document.createElement("iframe");
-  frame.setAttribute("sandbox", "allow-scripts");
+  // Scripts, and the pointer for mouse look (Esc always gives it back): nothing else of what a page may do.
+  frame.setAttribute("sandbox", "allow-scripts allow-pointer-lock");
   frame.setAttribute("referrerpolicy", "no-referrer");
   frame.setAttribute("allow", "");
   frame.title = launch.title;

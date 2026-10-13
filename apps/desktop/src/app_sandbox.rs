@@ -32,14 +32,14 @@ pub const LABEL_PREFIX: &str = "app-";
 
 /// The runner's policy (WISP 1200, "The runner's CSP"), sent as a header so `sandbox` holds even if the page
 /// is opened some other way. Tauri's configured CSP is not added to a custom scheme's responses.
-pub const RUNNER_CSP: &str = "sandbox allow-scripts; default-src 'none'; \
+pub const RUNNER_CSP: &str = "sandbox allow-scripts allow-pointer-lock; default-src 'none'; \
 script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; \
 media-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; worker-src 'none'; \
 form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
 /// The network runner's policy (WISP 1200, "The network runner's CSP"), for an app the person granted
 /// `internet`: HTTPS and WSS for fetches, sockets, images, media and fonts, and nothing else wider.
-pub const NET_RUNNER_CSP: &str = "sandbox allow-scripts; default-src 'none'; \
+pub const NET_RUNNER_CSP: &str = "sandbox allow-scripts allow-pointer-lock; default-src 'none'; \
 script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob: https:; \
 media-src data: blob: https:; font-src data: https:; connect-src https: wss:; frame-src 'none'; \
 worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
@@ -1335,7 +1335,7 @@ mod tests {
     fn the_policies_are_the_wisps() {
         for policy in [RUNNER_CSP, NET_RUNNER_CSP] {
             for directive in [
-                "sandbox allow-scripts;",
+                "sandbox allow-scripts allow-pointer-lock;",
                 "default-src 'none';",
                 "script-src 'unsafe-inline' 'wasm-unsafe-eval';",
                 "frame-src 'none';",
