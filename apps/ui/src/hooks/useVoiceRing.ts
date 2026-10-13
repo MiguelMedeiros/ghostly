@@ -8,6 +8,8 @@ const SPEAKING = 0.06;
 const HOLD_MS = 400;
 /** The ring moves in tenths: a steady voice wavers by hundredths, and every write would repaint the call window. */
 const STEP = 10;
+/** A width of the ring stays at least this long: a voice swings at every tick, and every new width redraws the call window. */
+const WIDTH_HOLD_MS = 320;
 
 /** Reads `stream`'s loudness with an analyser: what gives the level now, and what closes it. None without sound, or in an engine with no analyser. */
 function analysed(stream: MediaStream | null): { read: () => number; stop: () => void } | null {
@@ -39,7 +41,7 @@ function analysed(stream: MediaStream | null): { read: () => number; stop: () =>
 /**
  * Who is speaking in a call: while `on`, the element holding the returned ref says `data-speaking` and carries
  * `--voice-level` (0 to 1, in tenths), read every 80 ms from an analyser on `stream`'s sound and written only when it
- * changes. The sound is only measured,
+ * changes, each level held at least `WIDTH_HOLD_MS` (the first one, and 0 when they stop, at once). The sound is only measured,
  * here on this device: nothing of it is played or sent. Where the page cannot hear the call (a Linux Desktop call
  * keeps its sound in Rust), `source` says the level instead; with neither, nothing is marked.
  */
@@ -53,13 +55,18 @@ export function useVoiceRing<T extends HTMLElement>(stream: MediaStream | null, 
     if (!meter) return;
     let heardAt = -Infinity;
     let shown = "";
+    let shownAt = -Infinity;
     const timer = setInterval(() => {
       const level = meter.read();
-      if (level >= SPEAKING) heardAt = Date.now();
-      const speaking = Date.now() - heardAt < HOLD_MS;
+      const now = Date.now();
+      if (level >= SPEAKING) heardAt = now;
+      const speaking = now - heardAt < HOLD_MS;
       const said = speaking ? (Math.round(level * STEP) / STEP).toFixed(1) : "0";
       if (el.dataset.speaking !== String(speaking)) el.dataset.speaking = String(speaking);
-      if (said !== shown) el.style.setProperty("--voice-level", (shown = said));
+      if (said !== shown && (said === "0" || now - shownAt >= WIDTH_HOLD_MS)) {
+        el.style.setProperty("--voice-level", (shown = said));
+        shownAt = said === "0" ? -Infinity : now;
+      }
     }, 80);
     return () => {
       clearInterval(timer);
