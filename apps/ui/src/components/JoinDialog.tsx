@@ -100,7 +100,8 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     if (outcome.kind === "own") { setError(null); setManual(false); setOwn(outcome.sessionId); return; }
     joined.current = true; stop();
     if (outcome.kind === "joined") { showJoinNotice("join.alreadyIn"); (onOpenChat ?? (() => onJoin?.(reading.keys)))(outcome.sessionId); return; }
-    onJoin?.(reading.keys);
+    // A chat that could not be stored (no room left) is said here, the dialog still open: the invite was good.
+    try { onJoin?.(reading.keys); } catch (cause) { joined.current = false; setError(problemText(cause, t)); setManual(true); }
   };
   const paste = async () => {
     if (busyRef.current || joined.current || closed.current) return;

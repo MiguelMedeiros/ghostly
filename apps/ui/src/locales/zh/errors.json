@@ -40,6 +40,8 @@
   "chat": {
     "editTooMany": "这条消息无法再编辑",
     "editTooManyNext": "一条消息最多可编辑 {{max}} 次。",
+    "noRoom": "没有空间保存新聊天",
+    "noRoomNext": "请释放此设备上的空间，例如删除旧聊天，然后重试。",
     "replyGone": "无法回复那条消息",
     "replyGoneNext": "取消回复后再发送一次。",
     "tooLong": "消息太长",

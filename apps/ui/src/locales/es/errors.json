@@ -40,6 +40,8 @@
   "chat": {
     "editTooMany": "Este mensaje ya no se puede editar",
     "editTooManyNext": "Un mensaje admite {{max}} ediciones como máximo.",
+    "noRoom": "No hay espacio para un chat nuevo",
+    "noRoomNext": "Libera espacio en este dispositivo, por ejemplo borrando chats antiguos, y vuelve a intentarlo.",
     "replyGone": "No se puede responder a ese mensaje",
     "replyGoneNext": "Cancela la respuesta y envíalo de nuevo.",
     "tooLong": "Mensaje demasiado largo",
