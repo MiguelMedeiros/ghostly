@@ -56,8 +56,8 @@ export class MockBroker implements MiniAppApi {
       if (!strictJson(value)) throw new Error("bad-request");
       const text = JSON.stringify(value);
       if (bytes(value) > MINI_APP_LIMITS.storageValueBytes) throw new Error("value too big");
-      const row = MINI_APP_LIMITS.storageRowBytes;
-      const total = [...this.stored].reduce((n, [k, v]) => (k === key ? n : n + row + k.length + v.length), row + key.length + text.length);
+      const cost = (k: string, v: string) => MINI_APP_LIMITS.storageRowBytes + MINI_APP_LIMITS.storageKeyTimes * k.length + v.length;
+      const total = [...this.stored].reduce((n, [k, v]) => (k === key ? n : n + cost(k, v)), cost(key, text));
       if (total > MINI_APP_LIMITS.storageScopeBytes) throw new Error("storage full");
       this.stored.set(key, text);
     },
