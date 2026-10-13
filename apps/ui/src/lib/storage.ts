@@ -220,21 +220,21 @@ let makingRoom = false;
  * chat least recently active first, until the write fits; then, if it still does not, the chat's own. Rows only the page
  * keeps (a call's line) never go. What still does not fit stays in this page (`unsaved`).
  */
-function makeRoom(sessionId: string, write: () => boolean): void {
+function makeRoom(chatId: string, write: () => boolean): void {
   // No chat left that could give room: nothing to read.
   if (makingRoom || [...inEngine.keys()].every((id) => gaveRoom.has(id))) return;
   makingRoom = true;
   try {
     const givers = listSessions()
-      .filter((s) => s.id !== sessionId && inEngine.has(s.id) && !gaveRoom.has(s.id))
+      .filter((s) => s.id !== chatId && inEngine.has(s.id) && !gaveRoom.has(s.id))
       .sort((a, b) => (a.lastSyncAt ?? a.createdAt) - (b.lastSyncAt ?? b.createdAt) || a.createdAt - b.createdAt);
     for (const giver of givers) {
       gaveRoom.add(giver.id);
       saveSession(giver);
       if (write()) return;
     }
-    if (inEngine.has(sessionId) && !gaveRoom.has(sessionId)) {
-      gaveRoom.add(sessionId);
+    if (inEngine.has(chatId) && !gaveRoom.has(chatId)) {
+      gaveRoom.add(chatId);
       write();
     }
   } finally {
