@@ -17,7 +17,10 @@ export interface ListenOptions {
   webhook?: string;
   cursor?: string;
   print: boolean;
-  write: (line: string) => void;
+  /** `false` (as `stream.write` says it): the output wants a drain, and the next event waits for `drained`. */
+  write: (line: string) => unknown;
+  /** Resolves once the output takes more (its 'drain'), or is gone. */
+  drained?: () => Promise<void>;
   /** `--from` and `--group`: events of anyone else stop here (they stay in the chat). */
   allow?: Allowlist;
   /** `--turns`: only agent turns, as `agent.turn` events. */
@@ -191,15 +194,26 @@ async function post(url: URL, event: GhostlyEvent): Promise<boolean> {
   return false;
 }
 
+/** Events given to a handler and not handled yet: what `listen` holds in memory. */
+export interface EventHandler {
+  (event: GhostlyEvent): void;
+  /** How many events are given and not handled yet. */
+  behind(): number;
+  /** Resolves when every event given is handled. */
+  idle(): Promise<void>;
+}
+
 /**
  * A handler that takes events in order, one at a time. A step that throws (the output closed, the allowlist's lookup,
  * the cursor's disk) is said on stderr and passed: the cursor moves on and the next event is handled.
  */
-export function eventHandler(options: ListenOptions): (event: GhostlyEvent) => void {
+export function eventHandler(options: ListenOptions): EventHandler {
   const webhook = options.webhook ? checkWebhook(options.webhook) : null;
   let chain = Promise.resolve();
-  return (event) => {
+  let behind = 0;
+  const handle = (event: GhostlyEvent) => {
     const seq = event.seq, type = event.type;
+    behind++;
     chain = chain.then(async () => {
       const skip = () => { if (options.cursor) writeCursor(options.cursor, event.seq); };
       if (!matches(event, options.types)) return skip();
@@ -209,12 +223,14 @@ export function eventHandler(options: ListenOptions): (event: GhostlyEvent) => v
         if (!next) return skip();
         event = next;
       }
-      if (options.print) options.write(JSON.stringify(event));
+      const full = options.print && options.write(JSON.stringify(event)) === false;
       if (options.exec) {
         const code = await runExec(options.exec, event);
         if (code !== 0) process.stderr.write(`ghostly: --exec exited ${code} on event ${event.seq} (${event.type})\n`);
       }
       if (webhook && !(await post(webhook, event))) process.stderr.write(`ghostly: the webhook did not take event ${event.seq} (${event.type})\n`);
+      // An output whose reader stopped holds the next event here, not one more line in its buffer per event.
+      if (full) await options.drained?.();
       // A failed handler still moves the cursor: one poisonous event must not stop the stream. The failure is on stderr.
       if (options.cursor) writeCursor(options.cursor, event.seq);
     }).catch((error: unknown) => {
@@ -222,6 +238,36 @@ export function eventHandler(options: ListenOptions): (event: GhostlyEvent) => v
         process.stderr.write(`ghostly: event ${seq} (${type}) failed: ${error instanceof Error ? error.message : String(error)}\n`);
         if (options.cursor) writeCursor(options.cursor, seq);
       } catch { /* the next event moves the cursor */ }
-    });
+    }).finally(() => { behind--; });
+  };
+  return Object.assign(handle, { behind: () => behind, idle: () => chain });
+}
+
+/** Events a listener takes ahead of its output and hooks before it stops taking more (a few MB at most). */
+export const MAX_BEHIND = 1_000;
+
+/**
+ * Bounds what a listener holds when its output or hooks fall behind (a stdout reader that hung, a slow --exec): past
+ * `MAX_BEHIND` events not handled it stops taking events (`pause`: the subscription closes) and drops what still
+ * arrives; once every event taken is handled, `resume` opens it again after the last one taken. The daemon's journal
+ * keeps what came meanwhile (and says `events.gap` past what it keeps), so a consumer that hangs for a day does not
+ * grow the listener by the day's traffic.
+ */
+export class Feed {
+  private held = false;
+
+  /** `since`: the last event taken, where a new subscription starts. */
+  constructor(private readonly handle: EventHandler, public since: number | undefined, private readonly pause: () => void, private readonly resume: (since: number | undefined) => void) {}
+
+  get paused(): boolean { return this.held; }
+
+  readonly take = (event: GhostlyEvent): void => {
+    if (this.held) return;
+    this.since = event.seq;
+    this.handle(event);
+    if (this.handle.behind() < MAX_BEHIND) return;
+    this.held = true;
+    this.pause();
+    void this.handle.idle().then(() => { this.held = false; this.resume(this.since); });
   };
 }

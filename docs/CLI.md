@@ -116,6 +116,9 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
   followed).
 - With no daemon running, `listen` becomes the daemon, so a hook can answer with `ghostly send`.
+- A reader that stops reading the output, or a hook that falls behind, holds `listen` back: about 1,000 events
+  ahead it stops taking more and goes on from the last one once they are handled. The journal keeps what comes
+  meanwhile (past 10,000 events, an `events.gap` says what was dropped).
 
 Main types: `message.received`, `message.sent`, `message.delivery`, `message.edited`, `chat.pairing`, `chat.connection`, `chat.joined`,
 `typing.started` (with `kind` and `status`) and `typing.stopped` (`group.typing.started` and `group.typing.stopped` in a private group, with `member`), `message.reaction` and `group.reaction`, `group.message.edited`,
