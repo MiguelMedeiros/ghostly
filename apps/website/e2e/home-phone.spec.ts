@@ -19,22 +19,25 @@ async function walk(page: Page) {
   }
 }
 
-for (const width of [360, 390, 430]) {
+// From the smallest phones (320px, a 344px folding cover screen) up.
+for (const width of [320, 344, 360, 390, 430]) {
   test(`${width}px: nothing is wider than the phone`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
     await page.goto("/", { waitUntil: "networkidle" });
     await walk(page);
     const wide = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(wide).toBeLessThanOrEqual(width);
-    // The page clips sideways overflow, so also look for words and buttons cut by the edge (the wallet deck's track
-    // shows the next card on purpose, and the terminal scrolls in its own box).
+    // The page and the hero and finale clip sideways overflow, so also look for words and buttons cut by the edge:
+    // every element with text of its own, by its box or by the text running out of it (the wallet deck's track shows
+    // the next card on purpose, and the terminal scrolls in its own box).
     const cut = await page.evaluate((width) => {
-      const skip = ".sp-deck-zone, .nx-term, .rail, .sr-only, .particles";
-      return [...document.querySelectorAll("main :is(h1, h2, h3, p, a.btn, li)")]
-        .filter((e) => !e.closest(skip))
+      const skip = ".sp-deck-zone, .nx-term, .rail, .sr-only, .particles, svg, [aria-hidden='true']";
+      return [...document.querySelectorAll("main *")]
+        .filter((e) => !e.closest(skip) && [...e.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent?.trim()))
         .filter((e) => {
           const r = e.getBoundingClientRect();
-          return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== "hidden" && (r.left < -1 || r.right > width + 1);
+          const right = Math.max(r.right, r.left + e.scrollWidth);
+          return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== "hidden" && (r.left < -1 || right > width + 1);
         })
         .map((e) => `${e.tagName.toLowerCase()} "${(e.textContent ?? "").trim().slice(0, 40)}"`);
     }, width);
