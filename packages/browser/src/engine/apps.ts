@@ -77,6 +77,12 @@ const REVOCATION_FILES_KEPT = { max: 64, bytes: APP_FETCH_LIMITS.revocationsByte
 const STORE_REVOCATIONS_KEPT = 4 * APP_STORE_LIMITS.revoked;
 /** A fetched bundle kept for its install screen: at most this many, for this long. */
 const STAGED = { max: 4, ms: 10 * 60 * 1000 } as const;
+/**
+ * Checked bundles kept in memory: the most recently used `min`, and beyond them each one a running app used (`entry`,
+ * `file`, `fileAt`) within `ms`. The engine is not told when an app closes; one not used for that long goes, and is read
+ * and checked again if it still runs.
+ */
+const BUNDLES_KEPT = { min: 2, ms: 60 * 1000 } as const;
 /** The first bytes of a bundle: magic, the manifest's length and the largest manifest. */
 const PEEK_BYTES = APP_BUNDLE_MAGIC.length + 4 + APP_BUNDLE_LIMITS.manifestBytes;
 
@@ -413,8 +419,10 @@ export function peekAppManifest(bytes: Uint8Array): { ref: string; sequence: num
 
 export class Apps {
   private readonly staged = new Map<string, Staged>();
-  /** Bundles read back and checked, by digest, least recently used first: the ones running are read once, not on every `file`. */
+  /** Bundles read back and checked, by digest, least recently used first (`BUNDLES_KEPT`): the ones running are read once, not on every `file`. */
   private readonly verified = new Map<string, AppBundle>();
+  /** When a running app last used its bundle, by digest (`BUNDLES_KEPT`): an icon drawn is not a use. */
+  private readonly runUsed = new Map<string, number>();
   /** Reads of a bundle under way, by digest: icons drawn at once share one read. */
   private readonly verifying = new Map<string, Promise<AppBundle>>();
   /**
@@ -754,6 +762,7 @@ export class Apps {
 
   private async removeBundle(kind: FileBytesKind, digest: string): Promise<void> {
     this.verified.delete(digest);
+    this.runUsed.delete(digest);
     this.icons.delete(digest);
     await (await fileBytesOf(kind))?.remove(bundleId(digest)).catch(() => {});
   }
@@ -765,7 +774,8 @@ export class Apps {
   }
 
   /** The installed bundle read back and checked again before it runs (WISP 1200 § Signatures: "again before it runs one"). */
-  private verifiedBundle(app: InstalledApp): Promise<AppBundle> {
+  private verifiedBundle(app: InstalledApp, running: boolean): Promise<AppBundle> {
+    if (running) this.runUsed.set(app.digest, this.now());
     const kept = this.verified.get(app.digest);
     // Used last, dropped last: a running app's `file` reads keep its bundle.
     if (kept) { this.verified.delete(app.digest); this.verified.set(app.digest, kept); return Promise.resolve(kept); }
@@ -777,10 +787,14 @@ export class Apps {
       const read = await readAppBundleAsync(bytes);
       if (!read.ok || read.bundle.digest !== app.digest) fail("damaged", "This app's stored files do not match what was installed");
       this.verified.set(app.digest, read.bundle);
-      // One for each app started here (this one counted while it starts), two at least: apps running at once do not push
-      // each other's bundle out, which every `file` read would then read and check again whole.
-      const room = Math.max(2, this.started.size + (this.started.has(app.ref) ? 0 : 1));
-      while (this.verified.size > room) this.verified.delete(this.verified.keys().next().value!);
+      // Apps running at once do not push each other's bundle out, which every `file` read would then read and check again
+      // whole; one closed (or only drawn as an icon) goes once two newer ones are kept.
+      for (const digest of this.verified.keys()) {
+        if (this.verified.size <= BUNDLES_KEPT.min) break;
+        if (this.now() - (this.runUsed.get(digest) ?? -Infinity) < BUNDLES_KEPT.ms) continue;
+        this.verified.delete(digest);
+        this.runUsed.delete(digest);
+      }
       // A copy: the bundle's files are views into its whole bytes, which would stay in memory for as long as the icon.
       this.icons.set(app.digest, read.bundle.files.get(APP_ICON_PATH)?.slice() ?? null);
       return read.bundle;
@@ -1400,7 +1414,7 @@ export class Apps {
     if (run.status === "removed" && runAnyway !== true) fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     if (run.status === "needs-files") fail("needs-files", "This app's files are not on this device yet");
     if (run.status === "removed") this.anyway.add(`${app.ref} ${app.digest}`);
-    const bundle = await this.verifiedBundle(app);
+    const bundle = await this.verifiedBundle(app, true);
     const entry = bundle.files.get(bundle.manifest.entry) ?? fail("damaged", "The entry is missing");
     this.ran.add(app.ref);
     const versions = this.started.get(app.ref) ?? new Map<string, number>();
@@ -1419,7 +1433,7 @@ export class Apps {
     const app = await this.runningOrFail(ref, digest);
     if (digest !== undefined && digest !== app.digest) fail("no-file", "No such file in this app");
     if (app.bytes !== "native") return null;
-    const bundle = await this.verifiedBundle(app);
+    const bundle = await this.verifiedBundle(app, true);
     const file = typeof path === "string" ? bundle.files.get(path) : undefined;
     const listed = bundle.manifest.files.find((f) => f.path === path);
     if (!file || !listed) fail("no-file", "No such file in this app");
@@ -1439,7 +1453,7 @@ export class Apps {
     const icon = path === APP_ICON_PATH ? this.icons.get(app.digest) : undefined;
     if (icon) return icon.slice();
     if (icon === null) fail("no-file", "No such file in this app");
-    const bundle = await this.verifiedBundle(app);
+    const bundle = await this.verifiedBundle(app, path !== APP_ICON_PATH);
     if (typeof path !== "string" || !bundle.files.has(path)) fail("no-file", "No such file in this app");
     return bundle.files.get(path)!.slice();
   }
