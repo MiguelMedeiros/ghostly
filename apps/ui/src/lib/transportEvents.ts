@@ -3,7 +3,7 @@ import type { LinkView } from "@ghostly/browser/shared/types";
 import type { TransportEntry, TransportEvent } from "@ghostly/browser/engine/transportLog";
 import { transportName } from "./connection";
 import { englishT, type Translate } from "../locales/translate";
-import { problemLine, problemText } from "./problemText";
+import { problemLine, problemText, sentences } from "./problemText";
 
 export type { TransportEntry, TransportEvent };
 
@@ -127,8 +127,9 @@ function transportLineWhy(entry: TransportEntry, contact: string, format: (at: n
       return tr("connection.why.auto", { transport, from });
     case "failed": {
       // The reason and its next step in the app's language (lib/errorText.ts), never the engine's English as it came.
-      const reason = switchReason(entry.reason);
-      return join(reason ? problemLine(reason, tr, "connect") : tr("connection.why.failedDefault"), !!entry.transport && tr("connection.why.stayedOn", { transport }));
+      // A title alone ends with no stop: one goes before where the chat stayed.
+      const reason = switchReason(entry.reason), said = reason ? problemLine(reason, tr, "connect") : tr("connection.why.failedDefault");
+      return entry.transport ? sentences(said, tr("connection.why.stayedOn", { transport }), tr) : said;
     }
     case "lost":
       if (entry.fallback === "dht-only") return tr("connection.why.lostDhtOnly");
