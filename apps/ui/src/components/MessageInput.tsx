@@ -806,7 +806,7 @@ export function MessageInput({
           }} />
       )}
       {sheetOpen && (
-        <AttachmentSheet files={attached} alert={toastBox} status={readingLine} onPaste={takePaste}
+        <AttachmentSheet files={attached} alert={toastBox} status={readingLine} returnFocus={textareaRef} onPaste={takePaste}
           onRemove={(index) => setAttached((was) => was && was.length > 1 ? was.filter((_, i) => i !== index) : null)}
           onCancel={() => setAttached(null)}
           onSend={(caption) => void sendAttached(caption)} />
