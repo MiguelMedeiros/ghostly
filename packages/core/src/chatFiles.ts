@@ -867,7 +867,8 @@ export class ChatFiles {
         return;
       }
       case "pf-done": {
-        if (record.state !== "verifying") return;
+        // Checked out there. Said again to the offer of a new session too, after which this side is no longer verifying.
+        if (record.state !== "verifying" && record.confirmed !== record.file.size) return;
         record.confirmed = record.file.size;
         this.end(outgoing, "done");
         return;
