@@ -2,6 +2,8 @@ import { act, screen, within } from "@testing-library/react";
 import { Route, Routes, useNavigate } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { GroupJoinStage, GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
+import { Sidebar } from "../../components/Sidebar";
+import { UpdateProvider } from "../../contexts/UpdateContext";
 import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -140,6 +142,26 @@ describe("GroupChat: what the header says", () => {
     await user.keyboard("{Enter}");
     expect(engine.callsTo("declineGroupInvitation")).toEqual([{ groupId: "group-1" }]);
     expect(await screen.findByText("Chat list")).toBeInTheDocument();
+  });
+
+  it("Delete from the keyboard on a taken-back invitation's page hands the focus to the next row of the list, or to New", async () => {
+    // It was left on the page's body once home: the next Tab started again from the top.
+    const other = { ...takenBack, id: "group-2" };
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
+    for (const [groups, next] of [[[takenBack, other], "group-2"], [[takenBack], undefined]] as const) {
+      fakeEngine.update({ groups: [...groups] });
+      const { user, engine, unmount } = renderApp(<UpdateProvider><Sidebar /><Routes>
+        <Route path="/" element={<p>Chat list</p>} />
+        <Route path="/group/:groupId" element={<GroupChat />} />
+      </Routes></UpdateProvider>, { route: "/group/group-1" });
+      engine.on("declineGroupInvitation", () => { fakeEngine.update({ groups: groups.slice(1) }); });
+      within(screen.getByTestId("group-invitation")).getByTestId("group-taken-back-delete").focus();
+      await user.keyboard("{Enter}");
+      expect(await screen.findByText("Chat list")).toBeInTheDocument();
+      const row = next && screen.getAllByTestId("group-row").find(r => r.dataset.group === next)!;
+      expect(row ? within(row).getByTestId("group-row-open") : screen.getByTestId("sidebar-new-chat")).toHaveFocus();
+      unmount();
+    }
   });
 
   it("a Decline the engine refuses keeps the invitation's page, and says why", async () => {
