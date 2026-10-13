@@ -2,7 +2,7 @@ import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import type { WalletNetwork } from "@ghostly/core";
 import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletType } from "@ghostly/browser/shared/types";
-import { bool, chatOf, node, num, oneOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, node, num, oneOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
 import { CliError } from "./errors";
 
@@ -234,7 +234,7 @@ export const WALLET_METHODS: Record<string, Method> = {
     const n = network(params);
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
     await federationsOpen(ctx);
-    const { paymentId } = await node(ctx).sendPayment({ linkId: link.id, amount, timestamp: Date.now(), network: n, ...(str(params, "memo") ? { memo: str(params, "memo") } : {}), ...real(params) });
+    const { paymentId } = await node(ctx).sendPayment({ linkId: link.id, amount, timestamp: sentAt(), network: n, ...(str(params, "memo") ? { memo: str(params, "memo") } : {}), ...real(params) });
     return { chat: link.id, paymentId };
   },
 
@@ -247,7 +247,7 @@ export const WALLET_METHODS: Record<string, Method> = {
     const rail = params.rail === undefined ? undefined : oneOf(params, "rail", ["cashu", "lightning"] as const, "cashu");
     await federationsOpen(ctx);
     const { paymentId } = await node(ctx).requestPayment({
-      linkId: link.id, amount, timestamp: Date.now(), network: network(params),
+      linkId: link.id, amount, timestamp: sentAt(), network: network(params),
       ...(str(params, "memo") ? { memo: str(params, "memo") } : {}), ...(method ? { method } : {}), ...(rail ? { rail } : {}), ...(str(params, "card") ? { card: str(params, "card") } : {}),
     });
     return { chat: link.id, paymentId };
