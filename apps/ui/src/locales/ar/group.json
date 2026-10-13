@@ -67,6 +67,7 @@
     "forked": "تشعّب سجل العضوية",
     "gone": "لم يعد {{name}} عضوًا",
     "joined": "انضم {{name}}",
+    "left": "غادر {{name}}",
     "pictureChanged": "غيّر {{name}} صورة المجموعة",
     "pictureChangedNoName": "تم تغيير صورة المجموعة",
     "pictureChangedYou": "غيّرت صورة المجموعة",

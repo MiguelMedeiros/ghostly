@@ -67,6 +67,7 @@
     "forked": "O histórico de membros se bifurcou",
     "gone": "{{name}} não é mais membro",
     "joined": "{{name}} entrou",
+    "left": "{{name}} saiu",
     "pictureChanged": "{{name}} alterou a foto do grupo",
     "pictureChangedNoName": "A foto do grupo foi alterada",
     "pictureChangedYou": "Você alterou a foto do grupo",
