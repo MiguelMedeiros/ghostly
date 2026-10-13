@@ -8,7 +8,8 @@ import { CommunityWorld, type Peer } from "./communityWorld";
  * was written after it. The catch-up brings the change (its commit) before the messages written under the epoch before.
  */
 
-const ROW = (m: { event?: string; text: string }) => m.event ? `[${m.event}]` : m.text;
+/** A line as `[event]`: a member who left on their own may be told "… left" or "… is no longer a member", both `[gone]`. */
+const ROW = (m: { event?: string; text: string }) => m.event ? `[${m.event === "left" ? "gone" : m.event}]` : m.text;
 /** The rows each member holds now: what comes after them is what the test reads. */
 const mark = (peers: Peer[]) => new Map(peers.map(p => [p, p.messages.length]));
 /** The history as a member reads it, lines and messages, from these texts and lines only, since `from` was marked. */
