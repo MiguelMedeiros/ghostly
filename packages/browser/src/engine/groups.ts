@@ -496,7 +496,11 @@ export class Groups {
     this.communities = new Communities(host, store, communityTimings, random);
     this.hubs = new MeshHubs(host, { stored: id => this.stored.get(id), save: group => { if (this.stored.get(group.id) === group) void this.store.putGroup(group).catch(() => {}); } }, hubTimings);
     this.typings = new GroupTypings(host);
-    this.authorOrder = new GroupAuthorOrder(host, MESSAGE_LINK);
+    // A member some of whose messages are still on their way (and not known gone): its rows wait for them.
+    this.authorOrder = new GroupAuthorOrder(host, MESSAGE_LINK, (groupId, sender) => {
+      const session = this.sessions.get(groupId);
+      return !!session && session.missing(sender, this.gapsGone.get(groupId)?.get(sender)?.[session.epoch]) > 0;
+    });
     this.signals = new MeshSignals(host, { session: id => this.sessions.get(id), stored: id => this.stored.get(id), now: () => this.now() });
     const files = host.groupFiles;
     if (files) {
@@ -1218,6 +1222,7 @@ export class Groups {
     if (this.ticking) return;
     this.ticking = true;
     try {
+      this.authorOrder.tick(now);
       for (const group of [...this.stored.values()]) {
         if (group.left) {
           if (now - group.left.at > LEFT_KEPT_MS) await this.forget(group.id);
