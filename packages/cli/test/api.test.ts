@@ -474,6 +474,12 @@ describe("settings", () => {
     await expect(callApi(ctx, "settings.set", { relays: "x" })).rejects.toMatchObject({ code: "bad_request" });
     await callApi(ctx, "settings.set", { relays: ["http://127.0.0.1:1"], readRelays: true });
     expect(node.updateSettings).toHaveBeenCalledWith({ settings: { relays: ["http://127.0.0.1:1"], readRelays: true } });
+    // ICE servers in WebRTC's form (urls a list) are taken; one without urls is a bad_request that says what to write.
+    await callApi(ctx, "settings.set", { iceServers: [{ urls: ["stun:stun.example.org:3478", "stun:b.example.org"] }] });
+    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { iceServers: [{ urls: "stun:stun.example.org:3478, stun:b.example.org" }] } });
+    for (const server of [{}, { url: "stun:stun.example.org" }])
+      await expect(callApi(ctx, "settings.set", { iceServers: [server] })).rejects.toMatchObject({ code: "bad_request", message: "iceServers: Each ICE server needs urls: one address, or several comma-separated (turn:host:port)" });
+    await expect(callApi(ctx, "settings.set", { iceServers: [{ urls: "turn:t.example.org:3478" }] })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("username and credential") });
   });
 });
 
