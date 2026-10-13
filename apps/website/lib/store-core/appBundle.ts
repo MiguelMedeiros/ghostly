@@ -54,10 +54,11 @@ export const APP_SCREENSHOTS_DIR = "screenshots/";
 const SCREENSHOT_TYPES = /\.(png|jpg|webp)$/;
 
 /**
- * The permissions of phase 1 (WISP 1200 · Permissions). `internet`: the app reaches HTTPS and WSS servers of its
- * choosing (the client runs it in its network runner); without it, an app has no network.
+ * The permissions an app may ask (WISP 1200 · Permissions). `internet`: the app reaches HTTPS and WSS servers of its
+ * choosing (the client runs it in its network runner); without it, an app has no network. `files`: the app reads files
+ * and folders the person picks, linked by the client rather than copied (WISP 1200 · Linked files).
  */
-export const APP_PERMISSIONS = ["chat", "internet", "name"] as const;
+export const APP_PERMISSIONS = ["chat", "files", "internet", "name"] as const;
 export type AppPermission = typeof APP_PERMISSIONS[number];
 /**
  * The clients a writer may name in `runtime.clients` (WISP 1200 · Manifest). A reader also accepts a client name it does
