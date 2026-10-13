@@ -2197,9 +2197,17 @@ export class GhostlyNode implements EngineImplementation {
     return { mine, inviteKey: identityFromSeedB64(invite.seedB64), inviteCode, madeAt: Date.now() };
   }
 
-  /** One invite warmed and waiting (`after` ms from now), warmed again every so often while it waits (the relays forget). */
+  /**
+   * One invite warmed and waiting (`after` ms from now), warmed again every so often while it waits (the relays forget).
+   * Once too old for `takeInvite` to hand out, it is replaced by a new one, warmed at once: warming it on would spend
+   * two puts every few minutes on keys nobody will use, and leave the next invite on cold keys.
+   */
   private prepareSpare(after = 0): void {
     if (this.shuttingDown || !this.networkOn) return;
+    if (this.spare && after === 0 && Date.now() - this.spare.madeAt >= SPARE_INVITE_MAX_AGE_MS) {
+      for (const identity of [identityFromSeedB64(this.spare.mine.seedB64), this.spare.inviteKey]) this.warmedKeys.delete(identity.pubKeyZ32);
+      this.spare = null;
+    }
     if (!this.spare) this.spare = this.makeSpare();
     const spare = this.spare;
     if (this.spareTimer) clearTimeout(this.spareTimer);
@@ -2212,7 +2220,8 @@ export class GhostlyNode implements EngineImplementation {
       this.warmedKeys.set(identity.pubKeyZ32, Date.now());
       this.warmKey(identity);
     }
-    this.spareTimer = setTimeout(() => { this.spareTimer = null; if (this.spare === spare) this.prepareSpare(); }, SPARE_INVITE_WARM_EVERY_MS);
+    const untilAged = spare.madeAt + SPARE_INVITE_MAX_AGE_MS - Date.now();
+    this.spareTimer = setTimeout(() => { this.spareTimer = null; if (this.spare === spare) this.prepareSpare(); }, Math.min(SPARE_INVITE_WARM_EVERY_MS, untilAged));
   }
 
   async joinLink({ inviteCode }: { inviteCode: string }): Promise<{ linkId: string }> {
