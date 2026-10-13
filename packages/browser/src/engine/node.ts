@@ -3404,6 +3404,7 @@ export class GhostlyNode implements EngineImplementation {
       const chat = this.links.get(linkId)?.stored, oneToOne = !!chat?.profile && !chat.group;
       outbox = new Outbox({
         read: () => db.getMessages(linkId),
+        get: id => db.getMessage(linkId, id),
         update: async (id, delivery, error, extra) => {
           // A receipt marks the row and notes its time in one write. As `db.updateDelivery`: a row with no delivery
           // state gets none, and one already delivered keeps its mark and the time of its first receipt.
