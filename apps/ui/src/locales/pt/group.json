@@ -127,6 +127,8 @@
   "leave": {
     "blocked": "Ninguém está online para virar admin",
     "blockedCommunity": "Ninguém está online para registrar sua saída",
+    "blockedCommunityAdminForgetNext": "Espere um membro ficar online, ou remova os membros antes, ou torne um deles admin.",
+    "blockedCommunityAdminNext": "Espere um membro ficar online, ou remova os membros antes.",
     "blockedCommunityNext": "Tente de novo em instantes.",
     "blockedNext": "Torne alguém admin ou espere um membro.",
     "body": "O grupo e seu histórico saem deste dispositivo. Você não lerá o que for dito depois, e para voltar alguém terá que deixar você entrar de novo.",
