@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, isBatch, LABEL, localBases, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, isBatch, LABEL, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string; merged?: boolean; author?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -1746,6 +1746,34 @@ describe("the bases with a train", () => {
     const pulls = await gh.pulls();
     expect(trainBases(pulls, queued)).toEqual(["dev"]);
     expect(trainBases(pulls, draft)).toEqual([]);
+  });
+
+  // A run that waits in the `bases` job's group is replaced by the next one that joins it (merge-queue.yml): that one
+  // serves it too, so a queued pull request's CI ending is never lost to a draft's CI ending just after it.
+  it("woken by a CI run are also those of the runs it replaced while they waited", () => {
+    const a = "a".repeat(40), b = "b".repeat(40), c = "c".repeat(40), d = "d".repeat(40);
+    const pr = (base: string, sha: string, labels: string[] = []) => ({ base, sha, labels, body: "", branch: "fix", fork: false });
+    const pulls = [pr("dev", a, [LABEL.queue]), pr("dev", b), pr("epic/x", c, [LABEL.queue]), pr("epic/y", d, [LABEL.queue])];
+    const ci = (id: number, head: string, conclusion: string | null) => ({ id, conclusion, display_title: `Merge queue: CI ended on ${head}` });
+    const run = (id: number, display_title: string, conclusion: string | null) => ({ id, conclusion, display_title });
+    // Newest first, as GitHub lists them: 9 runs now; 8 (a draft's CI, after 7) and 6 (the queued pull request's CI)
+    // waited and were replaced; 7 was the train's own label (all skipped); 5 ran; 4 waited before 5 ran and is served.
+    const runs = [run(10, "Merge queue", null), ci(9, b, null), ci(8, b, "cancelled"), run(7, "fix: x", "skipped"), ci(6, a, "cancelled"), ci(5, d, "success"), ci(4, c, "cancelled")];
+    expect(missedWakes(runs, 9)).toEqual([b, a]);
+    expect(trainBases(pulls, [b, ...missedWakes(runs, 9)!])).toEqual(["dev"]);
+    // Before: the draft's CI alone, so no train ran until the schedule.
+    expect(trainBases(pulls, b)).toEqual([]);
+    // Nothing replaced (the one before ran, or is running), and a run not on the page: its own head alone.
+    expect(missedWakes(runs, 6)).toEqual([]);
+    expect(missedWakes([ci(2, a, null), ci(1, b, null)], 2)).toEqual([]);
+    expect(missedWakes(runs, 11)).toEqual([]);
+    expect(trainBases(pulls, [b])).toEqual([]);
+    // A replaced run that was not woken by CI (a `queue` label, a person's push, the schedule): every base.
+    const label = [ci(3, b, null), run(2, "perf(chat): rows", "cancelled"), ci(1, a, "success")];
+    expect(missedWakes(label, 3)).toBeNull();
+    expect(trainBases(pulls, null)).toEqual(["dev", "epic/x", "epic/y"]);
+    // A name that only looks like a head is no head.
+    expect(missedWakes([ci(2, b, null), run(1, "Merge queue: CI ended on abc", "cancelled")], 2)).toBeNull();
   });
 
   it("on a Mac are dev and every epic branch, queued or not, with no queue app", async () => {
