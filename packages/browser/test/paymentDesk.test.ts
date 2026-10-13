@@ -1113,12 +1113,15 @@ describe("a redeem the mint has not answered yet", () => {
     expect(texts()).toEqual(["⚡ 100 sats"]);
   });
 
-  it("a redeem the mint never made leaves the ecash the contact's, and the contact is told", async () => {
-    const { desk, sent, state } = setup();
+  it("a redeem the mint never made leaves the ecash the contact's, and the contact and the chat are told", async () => {
+    const { desk, sent, state, texts, host } = setup();
     await desk.start();
     await desk.onSwapSettled(swap(received), false);
     expect(sent).toEqual([{ kind: "res", frame: { id: "p1", ok: false, error: "The mint did not confirm the ecash" } }]);
     expect(state("p1")).toBeUndefined();
+    // The line a refusal on the spot writes, under the same id.
+    expect(texts()).toEqual(["Could not receive 100 sats: The mint did not confirm the ecash"]);
+    expect(host.storeMessage).toHaveBeenCalledWith(expect.objectContaining({ linkId: "l", id: "peer_9_refused", sender: "peer", timestamp: 9 }));
   });
 
   it("ecash of ours that came back after the fact is no longer a payment waiting on the contact", async () => {

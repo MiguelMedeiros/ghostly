@@ -897,8 +897,12 @@ export class PaymentDesk {
       if (done) { this.payments.set(record.id, record); this.host.onChange(); }
       return;
     }
-    if (done) await this.creditCashu(record, link);
-    else if (!this.payments.has(record.id)) link?.sendPaymentResult({ id: record.id, ok: false, error: "The mint did not confirm the ecash" });
+    if (done) { await this.creditCashu(record, link); return; }
+    if (this.payments.has(record.id)) return;
+    const reason = "The mint did not confirm the ecash";
+    link?.sendPaymentResult({ id: record.id, ok: false, error: reason });
+    // The chat line a refusal on the spot writes, under the same id: a redeem that ends without the ecash is never silent.
+    try { await this.host.storeMessage({ linkId: record.linkId, id: `peer_${record.createdAt}_refused`, text: `Could not receive ${record.amount.toLocaleString()} sats: ${reason}`, sender: "peer", timestamp: record.createdAt, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
   }
 
   async onPaymentResult(linkId: string, result: PaymentResult): Promise<void> {
