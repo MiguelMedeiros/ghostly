@@ -13,7 +13,7 @@ import { foldText } from "../lib/chatSearch";
 import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { NewGroupDialog } from "./NewGroupDialog";
-import { groupPath, groupRouteId } from "../lib/groups";
+import { groupPath, groupRouteId, invitationRow } from "../lib/groups";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useLabelsFit } from "../hooks/useLabelsFit";
 import { Menu, MenuItem } from "./Menu";
@@ -218,7 +218,8 @@ export function Sidebar() {
   const filed = (chat: string) => shownFolders.length > 0 && folderOf(chat) !== undefined;
   // The chats and groups in no folder: all of them while there are no folders, where the list is as it always was.
   // An invitation to a group is answered from its row: it stays in sight, in no folder, whatever folder the group was in.
-  const folderOfGroup = (g: (typeof groups)[number]) => (g.invitation || shownFolders.length === 0 ? undefined : folderOf(groupChat(g.id)));
+  // A group kept here, knocking to get back in, is no invitation: it stays in its folder.
+  const folderOfGroup = (g: (typeof groups)[number]) => (invitationRow(g) || shownFolders.length === 0 ? undefined : folderOf(groupChat(g.id)));
   const looseGroups = shownGroups.filter(g => folderOfGroup(g) === undefined);
   const loose = filtered.filter(s => !filed(s.id));
   // The pinned chats are put in order by dragging one among the others of its own part of the list: those of its
@@ -229,7 +230,7 @@ export function Sidebar() {
   // out. An invitation stays where it is answered. With no folder the list is as it always was: pinned chats only.
   type PartRow = { key: string; group?: (typeof groups)[number]; session?: ChatSession };
   const partRows = (itsGroups: typeof groups, itsChats: ChatSession[], folder: string | undefined): PartRow[] => inOrder(
-    [...itsGroups.filter(g => !g.invitation).map(group => ({ key: groupChat(group.id), group })), ...itsChats.map(session => ({ key: session.id, session }))],
+    [...itsGroups.filter(g => !invitationRow(g)).map(group => ({ key: groupChat(group.id), group })), ...itsChats.map(session => ({ key: session.id, session }))],
     row => row.key, orderOf(folder));
   const byFolders = shownFolders.length > 0;
   const looseRows = byFolders ? partRows(looseGroups, loose, undefined) : [];
@@ -381,7 +382,7 @@ export function Sidebar() {
                 ordered={!!orderOf(folder.id)?.length} onByLatest={() => setSectionOrder(folder.id, [])}
                 onToggle={() => setFolderFolded(folder.id, !folder.folded)} />
               {!folder.folded && <div id={folderChatsId(folder.id)} data-testid="chat-folder-chats">
-                {itsGroups.filter(g => g.invitation).map(groupRow)}
+                {itsGroups.filter(invitationRow).map(groupRow)}
                 {(folderRows.get(folder.id) ?? []).map(row => (row.group ? groupRow(row.group) : chatRow(row.session!)))}
                 {itsGroups.length === 0 && itsChats.length === 0 && <p data-testid="chat-folder-empty" className="m-0 px-3 py-3 text-[13px] text-text-muted">{t("sidebar.folder.empty")}</p>}
               </div>}
@@ -392,14 +393,14 @@ export function Sidebar() {
             shows while a row is in the hand even when nothing is in it yet. */}
         <div data-testid="chat-folder-loose" {...(shownFolders.length > 0 && { "data-folder-drop": "", "data-drop-over": reorder.over === null || undefined })} className={dropMark(null).trim() || undefined}>
           {shownFolders.length > 0 && (looseGroups.length > 0 || loose.length > 0 || reorder.dragging !== undefined) && (
-            <OtherChatsHeader folded={looseFolded} sessions={loose.filter(s => s.id !== activeSessionId)} groups={looseGroups.filter(g => g.id !== activeGroupId && !g.invitation)}
+            <OtherChatsHeader folded={looseFolded} sessions={loose.filter(s => s.id !== activeSessionId)} groups={looseGroups.filter(g => g.id !== activeGroupId && !invitationRow(g))}
               onToggle={() => setOthersFolded(!looseFolded)} />
           )}
           {/* An invitation to a group is answered from its row: it stays in sight, folded or not. */}
-          {looseFolded ? looseGroups.filter(g => g.invitation).map(groupRow) : (
+          {looseFolded ? looseGroups.filter(invitationRow).map(groupRow) : (
             <div id={OTHER_CHATS_ID} data-testid="chat-folder-others-rows">
               {byFolders ? <>
-                {looseGroups.filter(g => g.invitation).map(groupRow)}
+                {looseGroups.filter(invitationRow).map(groupRow)}
                 {looseRows.map(row => (row.group ? groupRow(row.group) : chatRow(row.session!)))}
               </> : <>
                 {looseGroups.map(groupRow)}

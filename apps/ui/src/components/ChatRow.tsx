@@ -15,7 +15,7 @@ import { filePreview, formatListTime, previewText } from "../lib/chatList";
 import { cardLine, showsCard } from "../lib/statusCards";
 import { deliveryShape, useDeliveryWords, useDhtOnly, waitsForLive, type DhtOnlyBy } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
-import { authorName, groupReadAt, groupStatusText, groupUnreadAt } from "../lib/groups";
+import { authorName, groupReadAt, groupStatusText, groupUnreadAt, invitationRow } from "../lib/groups";
 import { reactionNoteText } from "../lib/reactions";
 import { problemText } from "../lib/problemText";
 import { sameValue } from "../lib/sameValue";
@@ -452,7 +452,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
           time={time}
           timeClass={unread && !muted ? "text-accent font-medium" : "text-text-muted"}
           status={muted && <MutedMark label={t("mute.bell")} />}
-          timeCover={!invitation && <RowActions active={active}><RowMute chat={groupChat(group.id)} mentions /></RowActions>}
+          timeCover={!invitationRow(group) && <RowActions active={active}><RowMute chat={groupChat(group.id)} mentions /></RowActions>}
           preview={note ? <span data-testid="group-row-note" className="text-text-muted">{note}</span> : <span className="text-text-muted">{status}</span>}
           trailing={unread && <span className="flex items-center gap-1.5">
             {mention && <span data-testid="group-row-mention" data-muted={mentionQuiet || undefined} aria-label={t("mentions.unread")} title={t("mentions.unread")} role="img"
