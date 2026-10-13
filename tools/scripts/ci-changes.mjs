@@ -106,8 +106,9 @@ export const TESTED_PAGES = 3;
  * - its head has that tree, and its "CI Success" (not the draft's) passed in its latest attempt;
  * - it ran dev's own ci.yml: its head is a branch of this repository, and every pull request ever opened from that
  *   branch (closed ones too: the batch has closed by the time dev's last push runs, and its run's `pull_requests` is
- *   empty then) is into dev. A pull request into an epic (or a fork's) runs the ci.yml of its own base, which a writer
- *   can make a stub;
+ *   empty then) is into dev, and always was. A pull request into an epic (or a fork's) runs the ci.yml of its own base,
+ *   which a writer can make a stub; `base.ref` is the base now, and ci.yml has no `edited` trigger, so a pull request
+ *   moved to dev keeps the green run it made on the old base's ci.yml;
  * - every commit of the push that its head lacks was committed after the run started. A pull request's run tests the
  *   head merged with its base as it was then: had dev held a commit the head lacks, that run tested another tree.
  * @param {{ sha: string, tree: string, repo: string, api: (path: string) => Promise<any> }} push  `repo` is owner/name;
@@ -122,6 +123,7 @@ export async function testedAs({ sha, tree, repo, api }) {
       if (run.path !== ".github/workflows/ci.yml" || run.head_repository?.full_name !== repo) continue;
       const pulls = await api(`pulls?state=all&per_page=100&head=${encodeURIComponent(`${owner}:${run.head_branch}`)}`);
       if (!pulls.length || pulls.some((p) => p.base.ref !== "dev" || p.base.repo?.full_name !== repo)) continue;
+      if (await retargeted(api, pulls)) continue;
       const { jobs } = await api(`actions/runs/${run.id}/jobs?per_page=100`);
       if (!jobs.some((j) => j.name === "CI Success" && j.conclusion === "success")) continue;
       const { ahead_by: ahead, commits } = await api(`compare/${run.head_sha}...${sha}`);
@@ -132,6 +134,20 @@ export async function testedAs({ sha, tree, repo, api }) {
     if (runs.length < 100) break;
   }
   return null;
+}
+
+/**
+ * Whether any of these pull requests ever had its base changed (by a writer, or by GitHub when the old base was
+ * deleted). Only the issue events list `base_ref_changed`, not the timeline. A full page is a doubt: it counts as yes.
+ * @param {(path: string) => Promise<any>} api
+ * @param {{ number: number }[]} pulls
+ */
+async function retargeted(api, pulls) {
+  for (const { number } of pulls) {
+    const events = await api(`issues/${number}/events?per_page=100`);
+    if (events.length >= 100 || events.some((e) => e.event === "base_ref_changed")) return true;
+  }
+  return false;
 }
 
 /**

@@ -157,14 +157,16 @@ describe("a push to dev whose tree a pull request already tested", () => {
   });
   const landed = (date: string) => ({ commit: { committer: { date } } });
   // The batch, closed by the time dev's last push runs.
-  const into = (ref: string, state = "closed") => ({ state, base: { ref, repo: { full_name: repo } } });
-  const fake = ({ runs = [[run()]], pulls = [into("dev")], jobs = [{ name: "CI Success", conclusion: "success" }], compare = { ahead_by: 2, commits: [landed("2026-10-12T21:00:50Z"), landed("2026-10-12T21:01:05Z")] } }: { runs?: object[][]; pulls?: object[]; jobs?: object[]; compare?: object } = {}) => {
+  const into = (ref: string, state = "closed", number = 41) => ({ number, state, base: { ref, repo: { full_name: repo } } });
+  const fake = ({ runs = [[run()]], pulls = [into("dev")], events = {}, jobs = [{ name: "CI Success", conclusion: "success" }], compare = { ahead_by: 2, commits: [landed("2026-10-12T21:00:50Z"), landed("2026-10-12T21:01:05Z")] } }: { runs?: object[][]; pulls?: object[]; events?: Record<number, object[]>; jobs?: object[]; compare?: object } = {}) => {
     const asked: string[] = [];
     const api = async (path: string) => {
       asked.push(path);
       const page = /[?&]page=(\d+)/.exec(path);
       if (page) return { workflow_runs: runs[Number(page[1]) - 1] ?? [] };
       if (path.startsWith("pulls?")) return pulls;
+      const issue = /^issues\/(\d+)\/events\?per_page=100$/.exec(path);
+      if (issue) return events[Number(issue[1])] ?? [{ event: "closed" }];
       if (path.startsWith("actions/runs/")) return { jobs };
       if (path.startsWith("compare/")) return compare;
       throw new Error(path);
@@ -189,6 +191,18 @@ describe("a push to dev whose tree a pull request already tested", () => {
   it("does not take a run whose branch also has a pull request into another base, even a closed one", async () => {
     const { api } = fake({ pulls: [into("dev"), into("epic/x")] });
     expect(await testedAs({ sha, tree, repo, api })).toBe(null);
+  });
+
+  it("does not take a run of a pull request moved to dev: its run may have run the old base's ci.yml", async () => {
+    const moved = [{ event: "base_ref_changed" }, { event: "closed" }];
+    const { api, asked } = fake({ pulls: [into("dev", "open", 77)], events: { 77: moved } });
+    expect(await testedAs({ sha, tree, repo, api })).toBe(null);
+    expect(asked).toContain("issues/77/events?per_page=100");
+    expect(asked.some((p) => p.startsWith("actions/runs/"))).toBe(false);
+    // Any one of the branch's pull requests, and a page too full to read whole, count the same.
+    expect(await testedAs({ sha, tree, repo, api: fake({ pulls: [into("dev"), into("dev", "closed", 77)], events: { 77: moved } }).api })).toBe(null);
+    const full = Array.from({ length: 100 }, () => ({ event: "labeled" }));
+    expect(await testedAs({ sha, tree, repo, api: fake({ events: { 41: full } }).api })).toBe(null);
   });
 
   it("does not take a run whose branch has no pull request it can name", async () => {
@@ -234,6 +248,7 @@ describe("a push to dev whose tree a pull request already tested", () => {
       calls.push(path);
       if (path.startsWith("actions/workflows/")) return { workflow_runs: [run(), other] };
       if (path.startsWith("pulls?")) return [into("dev")];
+      if (path.startsWith("issues/")) return [];
       if (path === "actions/runs/7/jobs?per_page=100") return { jobs: [{ name: "CI Success", conclusion: "failure" }] };
       if (path.startsWith("actions/runs/")) return { jobs: [{ name: "CI Success", conclusion: "success" }] };
       return { ahead_by: 1, commits: [landed("2026-10-12T21:01:05Z")] };
