@@ -434,6 +434,19 @@ describe("NewGroupDialog", () => {
     expect(onCreated).toHaveBeenCalledWith("small");
   });
 
+  it("keeps Create off for a name with nothing visible in it, and says a refused name in the app's words", async () => {
+    const { user, engine } = open();
+    engine.on("createGroup", () => { throw new Error("A group's name is 1 to 64 characters on one line"); });
+    await user.type(screen.getByTestId("new-group-name"), "\u200B");
+    expect(screen.getByTestId("new-group-create")).toBeDisabled();
+    await user.type(screen.getByTestId("new-group-name"), "{Enter}");
+    expect(engine.callsTo("createGroup")).toEqual([]);
+    // One the engine still refuses (a race, another app's rule): said in words a person reads.
+    await user.type(screen.getByTestId("new-group-name"), "Climbing");
+    await user.click(screen.getByTestId("new-group-create"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Type a name with letters or emoji" + "Up to 64 characters, on one line.");
+  });
+
   it("shows why a group could not be created, and lets the user try again", async () => {
     const { user, engine, onCreated } = open();
     engine.on("createGroup", () => { throw new Error("Ghostly is still starting"); });
