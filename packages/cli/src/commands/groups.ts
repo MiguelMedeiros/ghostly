@@ -21,7 +21,7 @@ export const commands: Record<string, Command> = {
   "group history": {
     method: "group.history", usage: "group history <group> [--limit n] [--before id|ms] [--after id|ms]", summary: "A group's messages (a page)", args: ["group"],
     options: { limit: { type: "number", description: "Messages per page (default 50)" }, before: { type: "string", description: "Only before this message id or timestamp" }, after: { type: "string", description: "Only after this message id or timestamp" } },
-    params: ({ options }, { group }) => ({ group, limit: options.limit, before: cursor(options.before), after: cursor(options.after) }),
+    params: ({ options }, { group }) => ({ group, limit: options.limit, before: cursor(options.before, "before"), after: cursor(options.after, "after") }),
   },
   "group hub": {
     method: "group.hub", usage: "group hub <group> <member> [--pin | --exclude | --auto] [--show-secret]",
