@@ -306,7 +306,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
         {error && <ErrorLine error={error} />}
         <div className="flex flex-wrap justify-end gap-2">
           <Button onClick={() => setRemoving(false)}>{t("common.cancel")}</Button>
-          <Button data-testid="app-export" disabled={busy} onClick={() => void act(async () => saveAppData(app.ref, await engine.call("appDataExport", { ref: app.ref })))}>{t("apps.app.export")}</Button>
+          <Button data-testid="app-export" disabled={busy} onClick={() => void act(async () => saveAppData(app.ref, await engine.call("appDataExportText", { ref: app.ref })))}>{t("apps.app.export")}</Button>
           <Button variant="danger" data-testid="app-uninstall-confirm" disabled={busy} onClick={() => void act(async () => { await engine.call("appUninstall", { ref: app.ref }); onUninstalled?.(); }, true)}>{t("apps.app.uninstall")}</Button>
         </div>
       </Shell>
