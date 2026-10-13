@@ -63,7 +63,7 @@ export function DeleteFolderDialog({ name, onClose, onConfirm, returnFocus }: { 
     <p id={`${id}-body`} className="mt-2 text-sm text-text-muted">{t("sidebar.folder.deleteBody")}</p>
     <div className="mt-5 flex justify-end gap-2">
       <button ref={cancel} onClick={onClose} className={QUIET}>{t("common.cancel")}</button>
-      <button onClick={onConfirm} data-testid="folder-delete-confirm" className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger">{t("sidebar.folder.delete")}</button>
+      <button onClick={onConfirm} data-testid="folder-delete-confirm" className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger-ink hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger">{t("sidebar.folder.delete")}</button>
     </div>
   </dialog>, document.body);
 }

@@ -22,7 +22,7 @@ export function GroupLinkAskDialog({ kind, onClose, onConfirm }: { kind: "reset"
     <div className="mt-5 flex justify-end gap-2">
       <button ref={cancel} onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
       <button onClick={onConfirm} data-testid="group-link-ask-confirm"
-        className={`min-h-11 rounded-lg px-4 text-sm focus-visible:ring-2 ${kind === "reset" ? "bg-accent font-semibold text-panel-header hover:bg-accent-hover focus-visible:ring-accent" : "bg-danger/15 text-danger hover:bg-danger/25 focus-visible:ring-danger"}`}>{t(kind === "reset" ? "group.link.reset" : "group.link.disable")}</button>
+        className={`min-h-11 rounded-lg px-4 text-sm focus-visible:ring-2 ${kind === "reset" ? "bg-accent font-semibold text-panel-header hover:bg-accent-hover focus-visible:ring-accent" : "bg-danger/15 text-danger-ink hover:bg-danger/25 focus-visible:ring-danger"}`}>{t(kind === "reset" ? "group.link.reset" : "group.link.disable")}</button>
     </div>
   </dialog>, document.body);
 }

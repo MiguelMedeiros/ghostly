@@ -67,7 +67,7 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
     <div className="mt-5 flex justify-end gap-2">
       <button ref={cancel} onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
       <button disabled={busy || blocked} onClick={() => void leave()} data-testid="group-leave-confirm"
-        className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger disabled:opacity-40">{forget ? t("group.menu.forget") : t("group.menu.leave")}</button>
+        className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger-ink hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger disabled:opacity-40">{forget ? t("group.menu.forget") : t("group.menu.leave")}</button>
     </div>
   </dialog>, document.body);
 }

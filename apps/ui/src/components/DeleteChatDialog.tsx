@@ -25,7 +25,7 @@ export function DeleteChatDialog({name, onClose, onConfirm, title, body, confirm
     <p id={`${id}-body`} className="mt-2 text-sm text-text-muted">{body ?? t("common.deleteChatLocal")}</p>
     <div className="mt-5 flex justify-end gap-2">
       <button ref={cancel} onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
-      <button ref={confirm} onClick={onConfirm} className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger">{confirmLabel ?? t("sidebar.deleteChat")}</button>
+      <button ref={confirm} onClick={onConfirm} className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger-ink hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger">{confirmLabel ?? t("sidebar.deleteChat")}</button>
     </div>
   </dialog>,document.body);
 }
