@@ -226,3 +226,29 @@ it("waits for a HyperDHT chosen with Fallback off that does not connect yet: no 
     expect(lines(view())).toEqual([["connected", null, "iroh/1"], ["switched", "you", "hyperdht/1"]]);
   } finally { vi.useRealTimers(); }
 }, 40_000);
+
+it("shows each round trip at once and writes it to disk at most every 5 minutes, relaxed: an internet-like path costs no disk sync per sample", async () => {
+  const { node, id, view } = await setup();
+  await vi.waitFor(() => expect(view().transportLog![0]?.rttMs).toBeGreaterThanOrEqual(0));
+  const onRtt = (node as unknown as { links: Map<string, { link: { options: { events: { onRtt(ms: number): void } } } }> })
+    .links.get(id)!.link.options.events.onRtt;
+  const writes = vi.spyOn(db, "patchLink");
+  const start = Date.now();
+  let now = start;
+  const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+  const stretchRtt = () => view().transportHistory!.filter(e => e.kind === "live" || e.kind === "switched").at(-1)!.rttMs;
+  try {
+    // One hour of 15 s samples between 30 and 70 ms, as an internet path gives them.
+    for (let i = 0; i < 240; i++) {
+      now = start + i * 15_000;
+      onRtt(30 + ((i * 37) % 41));
+    }
+    const rttWrites = writes.mock.calls.filter(([linkId, patch]) => linkId === id && "transportHistory" in patch);
+    if (process.env.RTT_SAVES) console.log(`saves in an hour (240 samples, 30-70 ms): ${rttWrites.length}`);
+    expect(rttWrites.length).toBeLessThanOrEqual(13);
+    expect(rttWrites.every(call => call[2] === true)).toBe(true);
+    // The view has the last sample that moved, though the disk may not yet.
+    onRtt(200);
+    expect(stretchRtt()).toBe(200);
+  } finally { clock.mockRestore(); writes.mockRestore(); }
+}, 20_000);

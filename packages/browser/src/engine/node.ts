@@ -280,6 +280,12 @@ const MAX_DELETED_IDS = 500;
  */
 const CARD_RESTORE_MOST = 50;
 const CARD_RESTORE_MS = 7 * 24 * 60 * 60_000;
+/**
+ * A round trip that moved is shown at once, and written to disk by itself (relaxed, no disk sync of its own) at most
+ * this often: a 15 s sample on an internet path moves by 10 ms most of the time. A power cut loses at most this much
+ * of the round trip's drift, never a row; any other change to the story writes the latest round trip with it.
+ */
+const RTT_SAVE_MS = 5 * 60_000;
 /** A reaction said on the live session and not confirmed is said again after this long. */
 const REACTION_RESEND_MS = 30_000;
 /** A chat's reactions shown on the chat list before the one shown now, kept to show again when that one is taken back. */
@@ -311,6 +317,9 @@ interface LiveLink {
   floorFiles?: Promise<Map<string, string>>;
   /** The chat's connection story (paired chats), made from `stored.transportLog` on first use. */
   transportLog?: TransportLog;
+  /** When a round trip alone last wrote the story to disk (`noteRtt`), and whether one shown since is not on disk yet. */
+  rttSavedAt?: number;
+  rttUnsaved?: boolean;
   /** A group's entry session whose admission is done: it closes once its data link does (`GroupsHost.entryDone`). */
   entryDone?: boolean;
   /** A group's edge whose session in this run is kept as its `edgeLiveSince` (`noteEdgeLive`). */
@@ -4143,11 +4152,29 @@ export class GhostlyNode implements EngineImplementation {
     if (cue) this.cueFeedback(cue, linkId);
   }
 
-  private saveTransportLog(live: LiveLink, log: TransportLog): void {
+  /** `toDisk: false` shows the story and leaves the disk as it is; `relaxed`: written with no disk sync of its own. */
+  private saveTransportLog(live: LiveLink, log: TransportLog, { toDisk = true, relaxed = false } = {}): void {
     const transportLog = log.entries.map(e => ({ ...e })), transportHistory = log.history.map(e => ({ ...e }));
     live.stored = { ...live.stored, transportLog, transportHistory };
-    void db.patchLink(live.stored.id, { transportLog, transportHistory }).catch(() => {});
+    if (toDisk) {
+      live.rttUnsaved = false;
+      void db.patchLink(live.stored.id, { transportLog, transportHistory }, relaxed).catch(() => {});
+    }
     this.emitState();
+  }
+
+  /** A round trip measured on the chat's transport: in the view at once, on disk at most every `RTT_SAVE_MS`. */
+  private noteRtt(live: LiveLink, ms: number): void {
+    const log = this.transportLogOf(live);
+    if (!log) { this.emitState(); return; }
+    const changed = log.rtt(ms);
+    if (changed) live.rttUnsaved = true;
+    const now = Date.now();
+    if (live.rttUnsaved && (live.rttSavedAt === undefined || now - live.rttSavedAt >= RTT_SAVE_MS)) {
+      live.rttSavedAt = now;
+      this.saveTransportLog(live, log, { relaxed: true });
+    } else if (changed) this.saveTransportLog(live, log, { toDisk: false });
+    else this.emitState();
   }
 
   /** Which ways of paying one chat allows. */
@@ -6884,7 +6911,7 @@ export class GhostlyNode implements EngineImplementation {
         onTransportWait: () => { this.observeTransport(linkId); this.emitState(); },
         // Why the chat is not live: what the last attempt tried (WISP 100), never a silent retry loop.
         onLiveAttempt: () => this.emitState(),
-        onRtt: ms => { const log = this.transportLogOf(live); if (log?.rtt(ms)) this.saveTransportLog(live, log); else this.emitState(); },
+        onRtt: ms => this.noteRtt(live, ms),
         // Said on every read (no error is `null`): the pages hear only of a change.
         onDiscoveryError: error => { if ((error ?? undefined) !== live.discoveryError) { live.discoveryError = error ?? undefined; this.emitState(); } },
         onTransportDiscovery: async (peerDescriptors, peerTransports, peerFallback) => {
