@@ -442,7 +442,14 @@ export function GroupChat() {
   // Timed from the knock: a group kept here, knocking to get back in, was created long before it.
   const knockedLong = usePast(knock === "knocked" ? rosterGroup!.invitation!.since ?? rosterGroup!.createdAt : undefined, LONG_KNOCK_MS);
   if (!state) return null;
-  if (!group) return <div className="flex flex-1 items-center justify-center text-sm text-text-muted">{t("group.chat.gone")}</div>;
+  const back = <button onClick={nav.up} className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0" title={t("common.back")} aria-label={t("common.back")} data-testid="chat-back">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
+  </button>;
+  // Deleted on another device, or an address kept from before: the header keeps its way back (the group page hides the tabs).
+  if (!group) return <div className="flex-1 flex flex-col h-full bg-chat-bg" data-testid="group-gone">
+    <div className="h-14 header-safe flex items-center px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">{back}</div>
+    <div className="flex flex-1 items-center justify-center px-4 text-center text-sm text-text-muted">{t("group.chat.gone")}</div>
+  </div>;
   const nameOf = replyNames(group, t("chat.reply.you"), t);
   const quoteOf = (m: StoredMessage): QuoteView | undefined => m.replyTo && quoteFor(m.replyTo, quoteIndex, nameOf, t);
   // Reactions (WISP 902 § Reactions): one per member per message, named by the roster.
@@ -548,9 +555,7 @@ export function GroupChat() {
       <MessageAnnouncer chat={groupId} messages={messages} nameOf={m => m.member ? authorName(group, m.member, t) : group.name || t("group.chat.unnamed")} />
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:pl-1 max-md:pr-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1.5 min-w-0">
-          <button onClick={nav.up} className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0" title={t("common.back")} data-testid="chat-back">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
-          </button>
+          {back}
           {/* With a picture, the avatar opens it large; without one, the members, as the line under the name does. */}
           <button ref={avatarButton} onClick={() => (group.picture ? setViewingPicture(true) : setShowMembers(true))} data-testid="group-avatar-open"
             className={`relative rounded-full shrink-0 ${group.picture ? "cursor-zoom-in" : ""}`}
