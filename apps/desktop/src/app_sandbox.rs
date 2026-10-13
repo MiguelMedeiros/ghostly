@@ -124,9 +124,6 @@ const RUNNER: &str = r#"<!doctype html>
     if (!isJson(args, 0)) return Promise.reject(refusal("bad-request"));
     const id = nextId++;
     return broker({ id, type, args }).then((answer) => {
-      // A file's bytes as Rust read them from its file storage: raw, or a list of numbers where the IPC has no raw body.
-      if (type === "file" && answer instanceof ArrayBuffer) return answer;
-      if (type === "file" && Array.isArray(answer)) return new Uint8Array(answer).buffer;
       if (!answer || typeof answer !== "object" || answer.id !== id) throw refusal("failed");
       if (answer.ok !== true) throw refusal(answer.error);
       return typeof answer.bytes === "string" ? bytesOf(answer.bytes) : answer.value;
@@ -841,7 +838,7 @@ const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// The one command an app window may call (`only_main` lets it through from `app-*` windows only). The
 /// request is `{"id", "type", "args"}`; the result is the broker's answer, `{"id", "ok", "value" | "error"}`, or
-/// for a file the bytes themselves, raw (`file_bytes`), or base64 `"bytes"` where the broker carried them.
+/// for a file `{"id", "ok", "bytes"}`, the bytes in base64, read here (`file_bytes`) or carried by the broker.
 #[tauri::command]
 pub async fn app_broker<R: Runtime>(
     app: AppHandle<R>,
@@ -869,10 +866,19 @@ pub async fn app_broker<R: Runtime>(
         _ => return Err("No answer".into()),
     };
     match file_bytes(&app, &answer).await {
-        Some(Ok(bytes)) => Ok(tauri::ipc::Response::new(bytes)),
+        Some(Ok(bytes)) => bytes_response(id, &bytes),
         Some(Err(_)) => json_response(&json!({ "id": id, "ok": false, "error": "failed" })),
         None => json_response(&answer),
     }
+}
+
+/// A file's bytes for the app window, as base64 in the answer (`"bytes"`, which the runner decodes). Not raw: the
+/// window's CSP and rule list block `ipc://`, so Tauri would eval a raw body into it as a JSON list of numbers,
+/// about 3.6 characters a byte, slow to build, parse and hold, and on the GTK main loop the windows share.
+fn bytes_response(id: u64, bytes: &[u8]) -> Result<tauri::ipc::Response, String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD.encode(bytes);
+    json_response(&json!({ "id": id, "ok": true, "bytes": bytes }))
 }
 
 fn json_response(answer: &Value) -> Result<tauri::ipc::Response, String> {
@@ -1354,6 +1360,33 @@ mod tests {
             None
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// An app window has no raw IPC body (its CSP and rule list block `ipc://`): a raw answer would reach it as an
+    /// eval'd list of numbers. The bytes go as base64 in a JSON answer, which the runner decodes (`bytesOf`).
+    #[test]
+    fn a_file_answer_reaches_the_app_window_as_base64_json() {
+        use base64::Engine;
+        let bytes: Vec<u8> = (0..70_000u32).map(|i| (i % 253) as u8).collect();
+        let response = bytes_response(7, &bytes).unwrap();
+        let json = match tauri::ipc::IpcResponse::body(response).unwrap() {
+            tauri::ipc::InvokeResponseBody::Json(json) => json,
+            tauri::ipc::InvokeResponseBody::Raw(_) => panic!("a raw answer, not JSON"),
+        };
+        let answer: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(answer["id"], 7);
+        assert_eq!(answer["ok"], true);
+        let sent = answer["bytes"].as_str().unwrap();
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(sent)
+                .unwrap(),
+            bytes
+        );
+        assert!(RUNNER.contains(
+            r#"return typeof answer.bytes === "string" ? bytesOf(answer.bytes) : answer.value;"#
+        ));
+        assert!(!RUNNER.contains("new Uint8Array(answer)"));
     }
 
     fn window(app: &str, ready: bool, brokered: bool) -> AppWindow {
