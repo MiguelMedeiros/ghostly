@@ -119,7 +119,13 @@ const inviteShown = new WeakMap<ApiContext, () => void>();
 function showUntilPaired(ctx: ApiContext, linkId: string): void {
   inviteShown.get(ctx)?.();
   node(ctx).setActiveLink({ linkId });
-  const done = (s: EngineState) => { const link = s.links.find((l) => l.id === linkId); return !link || !!link.peerParticipationKey; };
+  // Gone only once a state had it: one pushed before the invite was made does not end it.
+  let seen = false;
+  const done = (s: EngineState) => {
+    const link = s.links.find((l) => l.id === linkId);
+    if (link) seen = true;
+    return link ? !!link.peerParticipationKey : seen;
+  };
   const stop = () => { off(); if (inviteShown.get(ctx) === stop) inviteShown.delete(ctx); };
   const off = ctx.hub.onState((s) => {
     if (!done(s)) return;

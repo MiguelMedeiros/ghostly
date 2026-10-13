@@ -441,10 +441,13 @@ describe("the chat on screen of a daemon", () => {
     d.pair("inv1");
     expect(d.shown()).toEqual(["inv1", null]);
 
-    // The joiner's side the same, and a chat deleted before it paired too.
+    // The joiner's side the same, and a chat deleted before it paired too; a state from before the chat was made, not.
     await callApi(d.ctx, "invite.join", { invite: "ghostly1abc" });
     d.pair("join");
     await callApi(d.ctx, "invite.create", {});
+    for (const l of [...d.listeners]) l({ links: [], groups: [] } as unknown as EngineState);
+    expect(d.shown()).toEqual(["inv1", null, "join", null, "inv2"]);
+    d.pair("inv1");
     d.drop("inv2");
     expect(d.shown()).toEqual(["inv1", null, "join", null, "inv2", null]);
     expect(d.listeners.size).toBe(0);
