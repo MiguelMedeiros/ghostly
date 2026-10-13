@@ -104,16 +104,17 @@ if (bundle.length === 0) {
   for (const [needle, source] of wanted) {
     if (!bundle.includes(needle)) problems.push(`${JSON.stringify(needle)}, from ${source}, is not in the built app.`);
   }
-  // 3. The stand-ins are what shipped: a swapped module's own calls into Rust are not in the built app.
+  // 3. The stand-ins are what shipped: a swapped module's own calls into Rust are not in the built app. One name alone
+  // may be another library's word (a Nostr signer's "get_public_key"); two of a module's are the module.
   let replaced = 0;
   for (const path of swapped) {
     const source = readFileSync(join(root, "apps/ui/src", path), "utf8");
-    for (const [, needle] of source.matchAll(/\binvoke\s*(?:<[\s\S]*?>)?\s*\(\s*"([^"]+)"/g)) {
-      if (wanted.has(needle)) continue;
-      replaced++;
-      if (bundle.includes(`"${needle}"`)) {
-        problems.push(`apps/ui/src/${path} was not swapped: its ${JSON.stringify(needle)} is in the built app (see ghostlyPlatformModules).`);
-      }
+    const calls = [...source.matchAll(/\binvoke\s*(?:<[\s\S]*?>)?\s*\(\s*"([^"]+)"/g)].map(([, needle]) => needle).filter((needle) => !wanted.has(needle));
+    replaced += calls.length;
+    // As a string of its own: the minifier may write it with backquotes.
+    const shipped = [...new Set(calls)].filter((needle) => new RegExp(`["'\`]${needle}["'\`]`).test(bundle));
+    if (shipped.length >= 2) {
+      problems.push(`apps/ui/src/${path} was not swapped: its ${shipped.map((n) => JSON.stringify(n)).join(", ")} are in the built app (see ghostlyPlatformModules).`);
     }
   }
   if (replaced === 0) problems.push("No swapped module calls into Rust — check 3 has gone stale; find another mark of the swap.");
