@@ -70,7 +70,8 @@ describe("usage send", () => {
     usage(["Alice"], /^--left is needed \(or --used with --limit\): ghostly usage send/);
     usage(["--all", "--window", "5 h"], /^--left is needed/);
     usage(["Alice", "--used", "5"], /^--used goes with --limit: ghostly usage send/);
-    usage(["Alice", "--limit", "50", "--left", "40"], /^--limit goes with --used: ghostly usage send/);
+    usage(["Alice", "--limit", "50"], /^--limit goes with --used: ghostly usage send/);
+    usage(["Alice", "--limit", "50", "--left", "40"], /^--left or --used with --limit, not both$/);
     usage(["Alice", "--left", "140"], /^--left takes a percent from 0 to 100, not 140$/);
     // --json may give them, and the two ways to say it stand.
     expect(params(["Alice", "--json", '{"left":40}']).card).toEqual({ left: 40 });
