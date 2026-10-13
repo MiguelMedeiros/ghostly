@@ -373,6 +373,45 @@ describe("relay transport publishing in bursts", () => {
     await expect(relay.publish(id, [{ label: "_ts", value: "1" }])).rejects.toThrow("budget");
     expect(requests).toBe(30);
   });
+  it("signs no packet every relay's budget holds back, nor dates one: the wait is said before", async () => {
+    let requests = 0;
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: (async () => {
+      requests++; return new Response(null, { status: 204 });
+    }) as typeof fetch });
+    // Each signature reads the seed: counted.
+    let signed = 0;
+    const id = createIdentity();
+    const counted = new Proxy(id, { get: (target, name) => { if (name === "seed") signed++; return Reflect.get(target, name); } });
+    for (let i = 0; i < 30; i++) await relay.publish(counted, [{ label: "_ts", value: String(i) }]);
+    expect(signed).toBe(30);
+    const dated = (relay as unknown as { lastTimestamp: Map<string, bigint> }).lastTimestamp.get(id.pubKeyZ32);
+    // A daemon at its budget signed ~500 packets a minute that never went out; now each costs nothing but the wait.
+    for (let i = 0; i < 5; i++) await expect(relay.publish(counted, [{ label: "_ts", value: "late" }])).rejects.toSatisfy(isDiscoveryBudgetError);
+    expect(signed).toBe(30);
+    expect(requests).toBe(60);
+    expect((relay as unknown as { lastTimestamp: Map<string, bigint> }).lastTimestamp.get(id.pubKeyZ32)).toBe(dated);
+    // Where `put` takes it past the relays too (the CLI's DHT), it is signed whatever the budgets say.
+    let put = 0;
+    await relay.publishDated(counted, [{ label: "_ts", value: "dht" }], async () => { put++; }, {}, false, true);
+    expect([signed, put]).toEqual([31, 1]);
+  });
+
+  it("signs a publish one relay takes while another rate limits this address", async () => {
+    let calls = 0;
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: (async (input: RequestInfo | URL) => {
+      calls++;
+      return new URL(String(input)).host === "a.test" ? new Response(null, { status: 429, headers: { "retry-after": "60" } }) : new Response(null, { status: 204 });
+    }) as typeof fetch });
+    let signed = 0;
+    const id = createIdentity();
+    const counted = new Proxy(id, { get: (target, name) => { if (name === "seed") signed++; return Reflect.get(target, name); } });
+    await relay.publish(counted, [{ label: "_ts", value: "1" }]);
+    await relay.publish(counted, [{ label: "_ts", value: "2" }]);
+    expect(signed).toBe(2);
+    // a.test is left alone for its minute after the first 429: the second went to b.test only.
+    expect(calls).toBe(3);
+  });
+
   it("tells the relay which packet it replaces, and insists when the relay never saw it", async () => {
     const id = createIdentity();
     const seen: (string | null)[] = [];
