@@ -10,7 +10,7 @@ import { asCliError, CliError, EXIT } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import type { RuntimeOptions } from "./runtime/engine";
-import { allowlist, checkCursor, checkWebhook, eventHandler, readCursor } from "./listen";
+import { allowlist, checkCursor, checkWebhook, eventHandler, Feed, readCursor } from "./listen";
 import { resolve } from "node:path";
 import { format } from "node:util";
 import { secretsFromStdin } from "./secretInput";
@@ -507,10 +507,9 @@ async function listenCommand(argv: string[]): Promise<void> {
   const cursor = parsed.options.cursor as string | undefined;
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
-  let since = (parsed.options.since as number | undefined) ?? readCursor(cursor);
-  let handle: ((event: GhostlyEvent) => void) | null = null;
+  const since = (parsed.options.since as number | undefined) ?? readCursor(cursor);
   const start = async (call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>) => {
-    handle = eventHandler({
+    return eventHandler({
       types, turns,
       exec: parsed.options.exec as string | undefined,
       webhook: parsed.options.webhook as string | undefined,
@@ -518,32 +517,42 @@ async function listenCommand(argv: string[]): Promise<void> {
       // With a hook, events go to the hook; --print shows them too.
       print: parsed.options.print === true || (!parsed.options.exec && !parsed.options.webhook),
       write: (line) => process.stdout.write(line + "\n"),
+      drained: () => new Promise<void>((resolve) => {
+        const done = () => { process.stdout.off("drain", done); process.stdout.off("close", done); resolve(); };
+        process.stdout.on("drain", done);
+        process.stdout.on("close", done);
+      }),
       allow: from.length || groups.length ? await allowlist(from, groups, call, peerOf) : undefined,
     });
   };
-  const onEvent = (event: GhostlyEvent) => { since = event.seq; handle?.(event); };
   requireProfile(g);
   const client = await connectDaemon(g.paths.socket);
   if (client) await warnVersion(client);
   if (client) {
     // The subscription takes the connection: a chat's contact key is asked on a connection of its own.
-    await start((m, p) => client.call(m, p), async (chat) => {
+    const handle = await start((m, p) => client.call(m, p), async (chat) => {
       const c = await connectDaemon(g.paths.socket, 1000);
       if (!c) return null;
       try { return ((await c.call("chat.get", { chat })) as { peer?: string }).peer || null; } finally { c.close(); }
     }).catch((error) => { client.close(); throw error; });
-    // Followed until stopped; a daemon that restarts is picked up again after the last event seen.
+    // Followed until stopped; a daemon that restarts is picked up again after the last event seen, and so is the
+    // subscription the feed closed while the output or the hooks fell behind.
     let current: DaemonClient | null = client;
+    const reconnect = (wait: number) => void (async () => {
+      while (!current && !feed.paused) {
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        wait = 1000;
+        if (current || feed.paused) return;
+        const next = await connectDaemon(g.paths.socket, 1000);
+        if (next) { current = next; await follow(next).catch(() => { if (current === next) current = null; }); }
+      }
+    })();
+    const feed = new Feed(handle, since, () => { const c = current; current = null; c?.destroy(); }, () => reconnect(0));
     const follow = async (c: DaemonClient) => {
-      await c.subscribe(since, onEvent, () => {
+      await c.subscribe(feed.since, feed.take, () => {
+        if (current !== c) return;
         current = null;
-        void (async () => {
-          while (!current) {
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            const next = await connectDaemon(g.paths.socket, 1000);
-            if (next) { current = next; await follow(next).catch(() => { current = null; }); }
-          }
-        })();
+        reconnect(1000);
       });
     };
     await follow(client);
@@ -555,14 +564,31 @@ async function listenCommand(argv: string[]): Promise<void> {
   const [{ keepServing, openHost, serve }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
   const host: Host = await openHost(g.paths, "daemon", VERSION);
   const call = (m: string, p: Record<string, unknown>) => callApi(host.ctx, m, p);
-  await start(call, async (chat) => ((await call("chat.get", { chat })) as { peer?: string }).peer || null).catch(async (error) => { await host.close(); throw error; });
+  const handle = await start(call, async (chat) => ((await call("chat.get", { chat })) as { peer?: string }).peer || null).catch(async (error) => { await host.close(); throw error; });
   const served = await serve(host).catch(async (error) => { await host.close(); throw error; });
   keepServing();
   const stop = stopper(async () => { await served.close(); await host.close(); });
   host.ctx.stop = stop;
   onStopSignals(stop);
-  for (const event of host.ctx.hub.replay(since ?? host.ctx.hub.lastSeq)) onEvent(event);
-  host.ctx.hub.onEvent(onEvent);
+  // The hub's listener comes off while the feed is paused, and back after a replay from the last event taken. What a
+  // replay gave and the feed did not take yet waits for the resume: one read of the journal per catch-up, not one per
+  // pause; the journal is read again only for what came meanwhile.
+  let off: (() => void) | null = null, left: GhostlyEvent[] = [];
+  const open = (from: number | undefined) => {
+    for (;;) {
+      const events = left.length ? left : host.ctx.hub.replay(from ?? host.ctx.hub.lastSeq);
+      left = [];
+      if (!events.length) break;
+      for (let i = 0; i < events.length; i++) {
+        feed.take(events[i]);
+        if (feed.paused) { left = events.slice(i + 1); return; }
+      }
+      from = feed.since;
+    }
+    off = host.ctx.hub.onEvent(feed.take);
+  };
+  const feed = new Feed(handle, since, () => { off?.(); off = null; }, open);
+  open(since);
   host.ctx.hub.emit("daemon.started", `daemon.started:${process.pid}:${Date.now()}`, { pid: process.pid, version: VERSION, listen: true });
 }
 
