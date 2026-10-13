@@ -222,6 +222,20 @@ function microphone(device: string | null = null): MediaStreamTrack {
 
 type Handler<E extends Event = Event> = ((event: E) => void) | null;
 
+/**
+ * Our half of the video lane, from the peer's description: Rust always offers and answers it both ways, so ours is
+ * the peer's turned round. A peer that takes no picture (`vr: 0`, a bot) has its section rebuilt `a=inactive`,
+ * and the call hook then turns no camera or screen on. No video section: open, as before.
+ */
+function videoDirection(sdp: string): RTCRtpTransceiverDirection {
+  const video = sdp.split(/\r?\n(?=m=)/).find((section) => section.startsWith("m=video"));
+  const said = video?.match(/^a=(sendrecv|sendonly|recvonly|inactive)\s*$/m)?.[1];
+  if (said === "inactive") return "inactive";
+  if (said === "sendonly") return "recvonly";
+  if (said === "recvonly") return "sendonly";
+  return "sendrecv";
+}
+
 interface Lane {
   mid: string | null;
   direction: RTCRtpTransceiverDirection;
@@ -382,7 +396,7 @@ export class NativePeerConnection extends EventTarget {
     const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_answer", { id: this.id, offer, ...this.devices() }));
     this.using(microphone);
     if (this.muted) await this.mute(true);
-    this.negotiated();
+    this.negotiated(offer);
     return { type: "answer", sdp };
   }
 
@@ -400,7 +414,7 @@ export class NativePeerConnection extends EventTarget {
       return;
     }
     await this.hold(() => invoke("native_call_accept", { id: this.id, answer: description.sdp ?? "" }));
-    this.negotiated();
+    this.negotiated(description.sdp ?? "");
   }
 
   /**
@@ -423,10 +437,11 @@ export class NativePeerConnection extends EventTarget {
     else this.remote.onFirstFrame = hand;
   }
 
-  private negotiated(): void {
+  /** Both sides have described the lanes; `remote` is the peer's description, offer or answer. */
+  private negotiated(remote: string): void {
     this.lanes();
     this.audio.currentDirection = "sendrecv";
-    this.video.currentDirection = "sendrecv";
+    this.video.currentDirection = videoDirection(remote);
   }
 
   /** Sends this camera's picture, or none. */
