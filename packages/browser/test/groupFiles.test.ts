@@ -581,6 +581,10 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(at.at(-1)).toBe(15 * count);
     // A second with nothing arriving is a member that was turned away as busy, or waits for a holder, and was not told.
     expect(at.filter((n, i) => n === (at[i - 1] ?? 0))).toEqual([]);
+    // A file waiting behind another on the author's edge waits for it, or for a holder's word: before, each member asked
+    // every other member for the second and later files, and they all answered gone (1,050 for six files).
+    const gone = t.seen.filter(s => s.frame.t === "group-want-no" && s.frame.why === "gone");
+    expect(gone.length).toBeLessThanOrEqual(others.length);
     for (const p of others) for (const s of sent) expect(sha(t.got(p, id, s.messageId).bytes!)).toBe(s.meta.d);
   });
 
