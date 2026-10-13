@@ -27,6 +27,8 @@
   "shareTitle": "Share to…",
   "shareWaiting": "Getting what was shared...",
   "stepsThen": "Then open Ghostly from its new icon.",
+  "storageFull": "Storage full",
+  "storageFullHint": "New messages still show here. To keep them after a reload, delete chats or profiles you no longer need.",
   "wake": "Wake me while closed",
   "wakeAway": "Off here. Contacts wake {{device}} for now.",
   "wakeAwayUnnamed": "Off here. Contacts wake your other device for now.",

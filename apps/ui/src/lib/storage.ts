@@ -173,6 +173,7 @@ function readKey(key: string): string | null {
 
 /** Writes a key, or keeps it in this page when localStorage refuses it (`unsaved`). Whether localStorage took it. */
 function writeKey(key: string, value: string): boolean {
+  const held = unsaved.size > 0;
   try {
     localStorage.setItem(key, value);
     unsaved.delete(key);
@@ -180,12 +181,33 @@ function writeKey(key: string, value: string): boolean {
   } catch {
     unsaved.set(key, value);
     return false;
+  } finally {
+    if (held !== unsaved.size > 0) tellUnsaved();
   }
 }
 
 function forgetKey(key: string): void {
-  unsaved.delete(key);
+  if (unsaved.delete(key) && !unsaved.size) tellUnsaved();
   localStorage.removeItem(key);
+}
+
+/**
+ * Whether this page holds something localStorage refused: storage is full, and what came since is shown but gone at a
+ * reload until the engine brings it back (the storage-full notice, `StorageFullBanner`).
+ */
+export function holdsUnsaved(): boolean {
+  return unsaved.size > 0;
+}
+
+const unsavedListeners = new Set<() => void>();
+/** Told when `holdsUnsaved` changes. */
+export function onUnsavedChange(listener: () => void): () => void {
+  unsavedListeners.add(listener);
+  return () => void unsavedListeners.delete(listener);
+}
+function tellUnsaved(): void {
+  // A write may come while a component draws: the notice draws again after it.
+  queueMicrotask(() => { for (const listener of unsavedListeners) listener(); });
 }
 
 export function saveSession(session: ChatSession): void {

@@ -27,6 +27,8 @@
   "shareTitle": "分享到…",
   "shareWaiting": "正在接收分享的内容...",
   "stepsThen": "然后从新图标打开 Ghostly。",
+  "storageFull": "存储空间已满",
+  "storageFullHint": "新消息仍会显示在这里。要在重新加载后保留它们，请删除不再需要的聊天或个人资料。",
   "wake": "关闭时唤醒我",
   "wakeAway": "此设备上已关闭。目前联系人会唤醒 {{device}}。",
   "wakeAwayUnnamed": "此设备上已关闭。目前联系人会唤醒你的另一台设备。",
