@@ -76,10 +76,13 @@
     "unlistedVersion": "このリンクには、このストアがまだ掲載していないバージョンがあります。"
   },
   "files": {
+    "allow": "許可",
+    "askAgain": "{{app}} が「{{name}}」をもう一度読み取ることを求めています",
     "askFiles": "{{app}} がファイルの読み取りを求めています",
     "askFolder": "{{app}} がフォルダの読み取りを求めています",
     "chooseFiles": "ファイルを選ぶ",
     "chooseFolder": "フォルダを選ぶ",
+    "notNow": "今はしない",
     "note": "何もコピーされません。{{app}} はこの端末で選んだものを読み取ります。"
   },
   "install": {
