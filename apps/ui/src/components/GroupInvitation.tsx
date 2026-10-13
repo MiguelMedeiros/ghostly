@@ -27,11 +27,32 @@ function takenBackWords(group: GroupView, t: Translate): { title: string; next: 
     : { title: t("group.chat.takenBackUnknown", { name }), next: t("group.chat.takenBackNextUnknown") };
 }
 
+/** The open button of the chat list's row after this group's, if there is one. */
+function rowAfter(groupId: string): HTMLElement | null {
+  const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="chat-row"], [data-testid="group-row"]')];
+  const at = rows.findIndex(row => row.dataset.group === groupId);
+  return at < 0 ? null : rows[at + 1]?.querySelector<HTMLElement>('[data-testid$="-row-open"]') ?? null;
+}
+
+/**
+ * Once a declined invitation is gone from the list: the focus on the next row, or on New after the last, as the
+ * delete dialog's. It was left on the page's body. While the list is still hidden behind the page (a phone, before
+ * home shows), the focus does not take: tried again on the next frames, as long as nothing else took it.
+ */
+function focusPastRow(next: HTMLElement | null, pressed: Element | null, frames = 60) {
+  const lost = document.activeElement === null || document.activeElement === document.body || document.activeElement === pressed;
+  if (!lost) return;
+  const target = next?.isConnected ? next : document.querySelector<HTMLElement>('[data-testid="sidebar-new-chat"]');
+  target?.focus();
+  if (document.activeElement !== target && frames > 0) requestAnimationFrame(() => focusPastRow(next, pressed, frames - 1));
+}
+
 /**
  * Accept or Decline, from the invitation's row or its own page. Accept needs the inviter's chat live, which takes a
  * moment after the app opens: why the last answer did not go is said for a few seconds, since a click that did nothing
  * and said nothing looked broken. `onDeclined`: what follows a Decline that went. `returnFocus`: where the focus goes
- * once Accept went, on the page, where the buttons go with the answer and left it on the page's body.
+ * once Accept went, on the page, where the buttons go with the answer and left it on the page's body. A Decline that
+ * takes the invitation away (its row, or its page going home) hands the focus to the next row of the list.
  */
 export function useInvitationAnswer(group: GroupView, onDeclined?: () => void, returnFocus?: RefObject<HTMLElement | null>) {
   const { t } = useI18n();
@@ -46,9 +67,14 @@ export function useInvitationAnswer(group: GroupView, onDeclined?: () => void, r
     setBusy(true);
     setRefused(null);
     const pressed = document.activeElement;
+    // Before the row goes with the answer. The band over a member's kept history stays (no onDeclined, a returnFocus).
+    const next = method === "declineGroupInvitation" && (onDeclined || !returnFocus) ? rowAfter(group.id) : undefined;
     try {
       await engine.call(method, { groupId: group.id });
-      if (method === "declineGroupInvitation") onDeclined?.();
+      if (method === "declineGroupInvitation") {
+        onDeclined?.();
+        if (next !== undefined) focusPastRow(next, pressed);
+      }
       // Only if the focus is still on the button (or already dropped with it): the user may have gone on elsewhere.
       else if (document.activeElement === pressed || document.activeElement === document.body) returnFocus?.current?.focus();
     } catch (error) {
