@@ -108,6 +108,27 @@ export function mentionsFor(text: string, refs: readonly string[], group: GroupV
   return out;
 }
 
+/** Per host: stops watching the invite it marked as the chat on screen. */
+const inviteShown = new WeakMap<ApiContext, () => void>();
+
+/**
+ * Marks a new invite as the chat on screen (native listeners, the quick pace) only until it is paired: a paired chat
+ * keeps its listeners anyway, and a daemon nobody looks at reads an away contact at the background pace, as its
+ * other chats and the same chat after a restart do.
+ */
+function showUntilPaired(ctx: ApiContext, linkId: string): void {
+  inviteShown.get(ctx)?.();
+  node(ctx).setActiveLink({ linkId });
+  const done = (s: EngineState) => { const link = s.links.find((l) => l.id === linkId); return !link || !!link.peerParticipationKey; };
+  const stop = () => { off(); if (inviteShown.get(ctx) === stop) inviteShown.delete(ctx); };
+  const off = ctx.hub.onState((s) => {
+    if (!done(s)) return;
+    stop();
+    node(ctx).setActiveLink({ linkId: null });
+  });
+  inviteShown.set(ctx, stop);
+}
+
 // ---------- methods ----------
 
 const METHODS: Record<string, Method> = {
@@ -181,7 +202,7 @@ const METHODS: Record<string, Method> = {
     const { linkId, inviteCode } = await node(ctx).createLink();
     if (label) await node(ctx).renameLink({ linkId, label });
     // Native listeners start for the chat on screen (or a paired one): a new invite is the chat a bot waits on.
-    node(ctx).setActiveLink({ linkId });
+    showUntilPaired(ctx, linkId);
     // Its first records must be out before a one-shot leaves. A daemon publishes them later too: it answers at once when
     // the relays' request budget holds them back (a few invites in a minute), and says when they go.
     const progressOf = (s: EngineState) => s.links.find((l) => l.id === linkId)?.pairingProgress;
@@ -206,7 +227,7 @@ const METHODS: Record<string, Method> = {
     }
     const label = str(params, "label");
     if (label) await node(ctx).renameLink({ linkId, label });
-    node(ctx).setActiveLink({ linkId });
+    showUntilPaired(ctx, linkId);
     return { chat: linkId };
   },
 
@@ -584,6 +605,8 @@ const METHODS: Record<string, Method> = {
     }
     if (method === "getMessages") return node(ctx).getMessages(str(args ?? {}, "linkId", true));
     if (method === "getState") return state(ctx);
+    // Someone chose the chat on screen: an invite's mark no longer clears it.
+    if (method === "setActiveLink") inviteShown.get(ctx)?.();
     const target = (node(ctx) as unknown as Record<string, (p?: unknown) => unknown>)[method];
     if (typeof target !== "function") throw new CliError("not_found", `The engine has no call ${method}`);
     if (args === undefined) args = undefined;
