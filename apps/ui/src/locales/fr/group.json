@@ -144,6 +144,7 @@
     "disableTitle": "Désactiver le lien ?",
     "enable": "Activer le lien",
     "enableFailed": "Impossible d'activer le lien",
+    "endsOnHandover": "Le lien partagé jusqu'ici cesse de fonctionner. {{name}} peut en partager un nouveau.",
     "full": "Le groupe est plein ({{count}} sur {{count}}). Personne n'entre avant qu'un membre parte.",
     "fullShort": "Le groupe est complet",
     "hideQr": "Masquer le QR",

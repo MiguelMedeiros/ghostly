@@ -165,6 +165,16 @@ describe("GroupMembersDialog", () => {
     }
   });
 
+  it("says, while a private group's link works, that handing the admin role over ends it; a community's link goes on", async () => {
+    for (const [profile, ends] of [["mesh", true], ["community", false]] as const) {
+      const { user, unmount } = members_(groupView({ status: "active", isAdmin: true, profile, members, entryLink: "https://app.ghostly.tools/#/join/group2/g/k" }));
+      await user.click(within(row(BOB)).getByTestId("group-make-admin"));
+      const body = "You will no longer be the admin. Only Bob can then rename the group, change its picture and link, invite or remove members, and give the role back.";
+      expect(screen.getByTestId("group-make-admin-dialog"), profile).toHaveAccessibleDescription(ends ? `${body} The link shared so far stops working. Bob can share a new one.` : body);
+      unmount();
+    }
+  });
+
   it("past 16 members with hubs, marks the hubs, says who is reached through one, and lets the admin choose", async () => {
     const many = Array.from({ length: 15 }, (_, i) => member({ key: `m${i}`.padEnd(52, "y"), viaHub: true, online: true }));
     const hub = member({ key: ALICE, nick: "Alice", online: true, hub: true, hubRole: "pin", edge: { linkId: "e1", state: "open", lastSeenAt: 1 } });

@@ -144,6 +144,7 @@
     "disableTitle": "Turn the link off?",
     "enable": "Turn on the link",
     "enableFailed": "Could not turn the link on",
+    "endsOnHandover": "The link shared so far stops working. {{name}} can share a new one.",
     "full": "The group is full ({{count}} of {{count}}). Nobody joins until someone leaves.",
     "fullShort": "The group is full",
     "hideQr": "Hide QR",

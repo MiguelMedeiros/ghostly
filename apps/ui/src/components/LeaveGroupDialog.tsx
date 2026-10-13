@@ -53,7 +53,9 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
     <div id={`${id}-body`} className="mt-2 space-y-2 text-sm text-text-muted">
       {forget && <p>{t("group.leave.forgetBody")}</p>}
       <p>{t(community ? "group.leave.bodyCommunity" : "group.leave.body")}</p>
-      {successor && others.length > 0 && <p data-testid="group-leave-successor">{t("group.leave.successor", { name: memberName(successor, t) })}</p>}
+      {successor && others.length > 0 && <p data-testid="group-leave-successor">{t("group.leave.successor", { name: memberName(successor, t) })}
+        {/* A private group's link works from the admin's app: the one shared so far stops working with the role. */}
+        {group.entryLink && !community && <> {t("group.link.endsOnHandover", { name: memberName(successor, t) })}</>}</p>}
       {unsaid && <Notice tone="warning" className="text-sm" testId="leave-unsaid" title={t("group.leave.blockedCommunity")} next={t("group.leave.unsaidNext")} />}
       {blocked && <Notice tone={community ? "wait" : "error"} className="text-sm" testId="leave-blocked" title={community ? t("group.leave.blockedCommunity") : t("group.leave.blocked")} next={community ? t("group.leave.blockedCommunityNext") : t("group.leave.blockedNext")} />}
     </div>
