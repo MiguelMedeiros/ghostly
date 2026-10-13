@@ -67,6 +67,21 @@ describe("in the composer", () => {
     expect(onSendFile).not.toHaveBeenCalled();
   });
 
+  it("closing the sheet puts the focus in the message field, where the shared text is, though nothing had it as the sheet opened", async () => {
+    const { user } = renderApp(<LockScreenProvider><MessageInput draftId="chat-1" onSend={onSend} onSendFile={onSendFile} /></LockScreenProvider>);
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+    act(() => {
+      receiveShare(share({ text: "Look at this", files: [file("a.txt"), file("b.txt"), file("c.txt")] }));
+      sendShareTo("chat-1");
+    });
+    await screen.findByTestId("attachment-sheet");
+    expect(screen.getByTestId("attachment-caption")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("attachment-sheet")).toBeNull();
+    expect(screen.getByPlaceholderText<HTMLTextAreaElement>("Message…")).toHaveFocus();
+  });
+
   it("files not read yet (the Android app's) are read when the composer takes them, not before", async () => {
     const read = vi.fn(async () => [file("photo.jpg")]);
     renderApp(<LockScreenProvider><MessageInput draftId="chat-1" onSend={onSend} onSendFile={onSendFile} /></LockScreenProvider>);
