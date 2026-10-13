@@ -161,6 +161,14 @@ export function findChatOrGroup(links: readonly LinkView[], groups: readonly Gro
 
 export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).links, str(params, "chat", true));
 
+/**
+ * A chat whose invite nobody took yet: nobody is there to pay or to dial, and its stage says so. Before, `chat pay`
+ * waited 15 s and `chat connect` 25 s for the contact, then answered `engine`.
+ */
+export function inviteTaken(link: LinkView): void {
+  if (link.profile && link.inviteCode && !link.peerParticipationKey) throw new CliError("unavailable", "Nobody joined this chat yet: its invite is still waiting to be taken");
+}
+
 /** A chat or a group as `findChatOrGroup` reads it. `linkId` is what the engine calls it. */
 export function chatOrGroup(ctx: ApiContext, ref: string): { id: string; linkId: string; group: boolean } {
   const found = findChatOrGroup(state(ctx).links, state(ctx).groups, ref);
