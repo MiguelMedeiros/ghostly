@@ -434,6 +434,16 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     invoke.resolve()
   }
 
+  /** Takes away every message notification still there: the page that starts knows none an earlier one posted. */
+  @Command
+  fun cancelNotifications(invoke: Invoke) {
+    val manager = activity.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    manager.activeNotifications
+      .filter { it.id == 1 && it.tag != null && it.notification.channelId == CHANNEL }
+      .forEach { manager.cancel(it.tag, it.id) }
+    invoke.resolve()
+  }
+
   @Command
   fun openNotificationSettings(invoke: Invoke) {
     val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)

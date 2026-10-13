@@ -140,6 +140,20 @@ pub async fn native_clear_notification(id: String) -> Result<(), String> {
     }
 }
 
+/// The page starts: the message notifications an earlier one left go. Android keeps them after the app's process
+/// ends, and the page that posted them was the only one that knew their chats. Elsewhere, nothing.
+#[tauri::command]
+pub async fn native_clear_notifications() -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        crate::android::cancel_notifications().await
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(())
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod mac {
     use block2::RcBlock;
@@ -898,5 +912,6 @@ mod tests {
             Ok(false)
         );
         assert_eq!(super::native_clear_notification("1".into()).await, Ok(()));
+        assert_eq!(super::native_clear_notifications().await, Ok(()));
     }
 }

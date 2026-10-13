@@ -152,6 +152,12 @@ export async function requestNotifications():Promise<NoticePermission>{
  * replaces and closes its own there (apps/desktop notifications.rs).
  */
 const oneNoticePerChat=()=>androidApp() || (native() && /Linux/i.test(platform()));
+/*
+ * Android keeps them past the page, too: the app's process ends (swiped from Recents, ended in the background, an
+ * update) and the next page knows none of their tags. It could not replace them, take them away or open their chat,
+ * so they go as the page starts, before it posts its own.
+ */
+const leftOver=androidApp()?invoke("native_clear_notifications").catch(()=>{/* an older app */}):Promise.resolve();
 const chatTags=new Map<string,string>();
 function chatTag(chat:string):string{
   let tag=chatTags.get(chat);
@@ -188,6 +194,7 @@ export async function showPrivateNotification(event:string,body:string,chat?:str
   }
   try {
     if(native()){
+      await leftOver;
       if(await invoke<boolean>("native_private_notification",{id,body})) return;
       (await import("@tauri-apps/plugin-notification")).sendNotification({title:"Ghostly",body,silent:true});
     }else{
