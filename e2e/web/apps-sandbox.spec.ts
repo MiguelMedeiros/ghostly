@@ -29,7 +29,7 @@ test.beforeAll(async () => { listeners = await startListeners(); });
 test.afterAll(async () => { await listeners?.close(); });
 
 interface Hook {
-  open(launch: { ref: string; version: string; title: string; permissions: string[]; entry: string; chat?: { linkId: string } | null; unguarded?: boolean }): number;
+  open(launch: { ref: string; version: string; title: string; permissions: string[]; entry: string; chat?: { linkId: string } | null; files?: Record<string, string>; unguarded?: boolean }): number;
   status(handle: number): { phase: string; stopped: string | null };
   stored(ref: string, scope: string): Record<string, unknown>;
   calls(): { op: string; ref: string; scope?: string; key?: string }[];
@@ -54,8 +54,8 @@ async function appPage(page: Page): Promise<void> {
   });
 }
 
-async function open(page: Page, ref: string, entry: string, extra: { permissions?: string[]; chat?: { linkId: string }; unguarded?: boolean } = {}): Promise<number> {
-  return page.evaluate(({ ref, entry, extra }) => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.open({ ref, version: "1.0.0", title: ref, permissions: extra.permissions ?? [], entry, chat: extra.chat ?? null, unguarded: extra.unguarded }), { ref, entry, extra });
+async function open(page: Page, ref: string, entry: string, extra: { permissions?: string[]; chat?: { linkId: string }; files?: Record<string, string>; unguarded?: boolean } = {}): Promise<number> {
+  return page.evaluate(({ ref, entry, extra }) => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.open({ ref, version: "1.0.0", title: ref, permissions: extra.permissions ?? [], entry, chat: extra.chat ?? null, files: extra.files, unguarded: extra.unguarded }), { ref, entry, extra });
 }
 
 const stored = (page: Page, ref: string, scope = "alone") => page.evaluate(({ ref, scope }) => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.stored(ref, scope), { ref, scope });
@@ -228,6 +228,32 @@ test("an app that keeps sending far past the request rate is stopped, and the pa
     }, 10);
   }));
   expect(gap).toBeLessThan(500);
+});
+
+test("an app that reads its own 16 MiB file 50 times a second gets one a second, and the page stays smooth", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page }, testInfo) => {
+  await appPage(page);
+  const ref = "evilpublisherkey/file-flood";
+  const handle = await open(page, ref, appEntry("fileFlood"), { files: { "big.bin": "x".repeat(16 * 1024 * 1024) } });
+  // Watched once the hook has its 16 MiB (encoding it is the test's, not the app's), before the frame has loaded: the
+  // longest the page's timers wait while the app reads.
+  await page.evaluate(() => {
+    const watch = ((window as unknown as { __gap: { longest: number } }).__gap = { longest: 0 });
+    let last = performance.now();
+    setInterval(() => { const now = performance.now(); watch.longest = Math.max(watch.longest, now - last); last = now; }, 10);
+  });
+  await expect.poll(() => stored(page, ref), { timeout: 60_000 }).toHaveProperty("report");
+  const report = (await stored(page, ref)).report as { ok: number; refused: string[] };
+  const gap = await page.evaluate(() => (window as unknown as { __gap: { longest: number } }).__gap.longest);
+  testInfo.annotations.push({ type: "file flood", description: JSON.stringify({ ...report, gap: Math.round(gap) }) });
+  // 16 MiB of answers a second: the first read of each second, at most one more where a second's edge falls between.
+  expect(report.ok).toBeGreaterThanOrEqual(3);
+  expect(report.ok).toBeLessThanOrEqual(6);
+  expect(report.refused).toEqual(["too-fast"]);
+  // Measured on a 4-core host: 36-40 ms; 453-473 ms while every read was answered (149 of 150, 2.3 GB copied).
+  expect(gap).toBeLessThan(300);
+  expect(await status(page, handle)).toEqual({ phase: "running", stopped: null });
 });
 
 test("an app in a chat talks to its contact's app through the broker, and keeps its data in that chat", {

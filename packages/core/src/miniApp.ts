@@ -129,6 +129,11 @@ export const MINI_APP_LIMITS = {
   requestBytes: 64 * 1024,
   /** Requests per second, per app. */
   requestsPerSecond: 50,
+  /**
+   * Bytes of `file` answers per second, per app: a whole bundle's worth. A read that starts under it is answered whole;
+   * past it `file` is refused with `too-fast` until the second has gone.
+   */
+  fileBytesPerSecond: 16 * 1024 * 1024,
   /** A storage key, UTF-8. */
   storageKeyBytes: 256,
   /** One stored JSON value, serialized. */
