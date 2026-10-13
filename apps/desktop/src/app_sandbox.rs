@@ -124,6 +124,9 @@ const RUNNER: &str = r#"<!doctype html>
     if (!isJson(args, 0)) return Promise.reject(refusal("bad-request"));
     const id = nextId++;
     return broker({ id, type, args }).then((answer) => {
+      // A file's bytes as Rust read them from its file storage: raw, or a list of numbers where the IPC has no raw body.
+      if (type === "file" && answer instanceof ArrayBuffer) return answer;
+      if (type === "file" && Array.isArray(answer)) return new Uint8Array(answer).buffer;
       if (!answer || typeof answer !== "object" || answer.id !== id) throw refusal("failed");
       if (answer.ok !== true) throw refusal(answer.error);
       return typeof answer.bytes === "string" ? bytesOf(answer.bytes) : answer.value;
@@ -786,19 +789,65 @@ pub fn admit(
         .unwrap_or_else(|| Err("Not an app window".into()))
 }
 
+/// Where the broker says a `file` answer's bytes lie in the file storage (`AppFileAt` in the engine).
+#[derive(Deserialize)]
+struct FileAt {
+    space: String,
+    id: String,
+    offset: u64,
+    length: u64,
+    sha256: String,
+}
+
+/// A `file` answer the broker gave by reference (`{"id", "ok": true, "file": FileAt}`): the bytes, read from the
+/// file storage off the main thread and checked against the SHA-256 the bundle's manifest gives them. Only an
+/// app's bundle (`app-<digest>`), at most a bundle's size.
+async fn file_bytes<R: Runtime>(app: &AppHandle<R>, answer: &Value) -> Option<Result<Vec<u8>, String>> {
+    let at: FileAt = serde_json::from_value(answer.get("file")?.clone()).ok()?;
+    if answer.get("ok").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    if !at.id.starts_with("app-") || at.length > MAX_FILE_BYTES {
+        return Some(Err("failed".into()));
+    }
+    let base = match crate::file_store::base_of(app) {
+        Ok(base) => base,
+        Err(e) => return Some(Err(e)),
+    };
+    let read = tauri::async_runtime::spawn_blocking(move || {
+        let bytes = crate::file_store::FileStore::new(base).read(&at.space, &at.id, at.offset, at.length)?;
+        if bytes.len() as u64 != at.length || !sha256_is(&bytes, &at.sha256) {
+            return Err("failed".to_string());
+        }
+        Ok(bytes)
+    })
+    .await;
+    Some(read.map_err(|e| e.to_string()).and_then(|r| r))
+}
+
+/// Whether `bytes` hash to `expected`, the manifest's base64url SHA-256.
+fn sha256_is(bytes: &[u8], expected: &str) -> bool {
+    use base64::Engine;
+    use sha2::Digest;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(bytes)) == expected
+}
+
+/// The largest file an app's bundle may hold (WISP 1200: a bundle is at most 64 MiB).
+const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
+
 /// The one command an app window may call (`only_main` lets it through from `app-*` windows only). The
-/// request is `{"id", "type", "args"}`; the result is the broker's answer, `{"id", "ok", "value" | "error"}`
-/// (or `"bytes"`, base64, for a file).
+/// request is `{"id", "type", "args"}`; the result is the broker's answer, `{"id", "ok", "value" | "error"}`, or
+/// for a file the bytes themselves, raw (`file_bytes`), or base64 `"bytes"` where the broker carried them.
 #[tauri::command]
 pub async fn app_broker<R: Runtime>(
     app: AppHandle<R>,
     webview: tauri::Webview<R>,
     request: Value,
-) -> Result<Value, String> {
+) -> Result<tauri::ipc::Response, String> {
     let label = webview.label().to_string();
     let state = app.state::<AppSandboxState>();
     let (id, receiver) = match admit(&state, &label, &request, Instant::now())? {
-        Admitted::Answer(answer) => return Ok(answer),
+        Admitted::Answer(answer) => return json_response(&answer),
         Admitted::Relay(id, receiver) => (id, receiver),
     };
     let sent = app.emit_to(
@@ -811,10 +860,19 @@ pub async fn app_broker<R: Runtime>(
         Err(_) => None,
     };
     state.with(&label, |window| window.pending.remove(&id));
-    match answer {
-        Some(Ok(answer)) => Ok(answer),
-        _ => Err("No answer".into()),
+    let answer = match answer {
+        Some(Ok(answer)) => answer,
+        _ => return Err("No answer".into()),
+    };
+    match file_bytes(&app, &answer).await {
+        Some(Ok(bytes)) => Ok(tauri::ipc::Response::new(bytes)),
+        Some(Err(_)) => json_response(&json!({ "id": id, "ok": false, "error": "failed" })),
+        None => json_response(&answer),
     }
+}
+
+fn json_response(answer: &Value) -> Result<tauri::ipc::Response, String> {
+    serde_json::to_string(answer).map(tauri::ipc::Response::new).map_err(|e| e.to_string())
 }
 
 /// What the Ghostly window's broker sends an app window (`post`): an answer (`{"id", …}`) goes to the request
@@ -1242,6 +1300,41 @@ mod tests {
 
     fn url(value: &str) -> url::Url {
         url::Url::parse(value).unwrap()
+    }
+
+    #[test]
+    fn a_file_answer_by_reference_is_the_stored_bytes_checked_against_their_hash() {
+        let dir = std::env::temp_dir().join(format!("ghostly-app-file-{}", std::process::id()));
+        let files = crate::file_store::FileStore::new(dir.clone());
+        let bytes: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+        files.append("ghostly-a", "app-digest", 0, &bytes).unwrap();
+        files.flush("ghostly-a", "app-digest").unwrap();
+        let app = mock_builder()
+            .manage(AppSandboxState::default())
+            .manage(crate::file_store::FileStore::new(dir.clone()))
+            .build(tauri::generate_context!(test = true))
+            .expect("app");
+        let handle = app.handle();
+        let hash = |part: &[u8]| {
+            use base64::Engine;
+            use sha2::Digest;
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(part))
+        };
+        let answer = |id: &str, offset: u64, length: u64, sha256: &str| {
+            json!({ "id": 7, "ok": true, "file": { "space": "ghostly-a", "id": id, "offset": offset, "length": length, "sha256": sha256 } })
+        };
+        let read = |answer: Value| tauri::async_runtime::block_on(file_bytes(handle, &answer));
+        // A file inside the bundle: its bytes, as they are on disk.
+        let part = &bytes[1000..201_000];
+        assert_eq!(read(answer("app-digest", 1000, 200_000, &hash(part))), Some(Ok(part.to_vec())));
+        // Bytes that do not hash to what the manifest says, a file outside the apps' bundles, or past a bundle's size: refused.
+        assert_eq!(read(answer("app-digest", 1001, 200_000, &hash(part))), Some(Err("failed".into())));
+        assert_eq!(read(answer("chat-in-x", 1000, 200_000, &hash(part))), Some(Err("failed".into())));
+        assert_eq!(read(answer("app-digest", 0, 65 * 1024 * 1024, &hash(part))), Some(Err("failed".into())));
+        // Any other answer is passed on as the broker wrote it.
+        assert_eq!(read(json!({ "id": 7, "ok": true, "value": 1 })), None);
+        assert_eq!(read(json!({ "id": 7, "ok": false, "error": "no-file" })), None);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     fn window(app: &str, ready: bool, brokered: bool) -> AppWindow {
