@@ -629,8 +629,8 @@ export function GroupChat() {
       </div>}
 
 
-      {invited && !invitedFresh && <GroupInvitationCard group={group} compact />}
-      {invitedFresh ? <GroupInvitationCard group={group} />
+      {invited && !invitedFresh && <GroupInvitationCard group={group} compact returnFocus={optionsRef} />}
+      {invitedFresh ? <GroupInvitationCard group={group} returnFocus={optionsRef} />
       : joiningByLink ? <div className="flex flex-1 items-center justify-center overflow-y-auto chat-wallpaper px-4">
         <div role="status" data-testid="group-joining" className="w-full max-w-sm rounded-2xl border border-border bg-sidebar-bg/95 p-6 text-center shadow-xl">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-accent/15 text-accent">
