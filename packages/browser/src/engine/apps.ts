@@ -1364,7 +1364,10 @@ export class Apps {
     return { ref: app.ref, digest: app.digest, version: app.manifest.version, title: app.manifest.title, permissions: [...app.permissions], view: appViewOf(bundle.manifest), entry: utf8Decode(entry) };
   }
 
-  /** A file of the installed bundle, for the broker's `file` (`ghostly.file(path)`). `digest`: the version the frame runs. */
+  /**
+   * A file of the installed bundle, for the broker's `file` (`ghostly.file(path)`): a copy, which the broker transfers to
+   * the app as it is. `digest`: the version the frame runs.
+   */
   async file({ ref, path, digest }: { ref: string; path: string; digest?: string }): Promise<Uint8Array> {
     // Its icon still shows on the Apps page and in chats once it is stopped: a picture the publisher signed, nothing more.
     const app = path === APP_ICON_PATH ? await this.installedOrFail(ref) : await this.runningOrFail(ref, digest);
