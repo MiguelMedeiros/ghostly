@@ -59,7 +59,7 @@ describe("a member back from away in a busy group", { timeout: 10 * 60_000 }, ()
     const add = (name: string) => {
       const f = { store: new MemoryFiles(), transfers: new Map<string, FileTransferView>() };
       const settings = { autoDownloads: true, serveFiles: true, ...(name === "other" && other) };
-      const peer = world.add(name, p => ({ groupFiles: { store: f.store, transfers: f.transfers, settings: () => settings,
+      const peer = world.add(name, p => ({ groupFiles: { store: f.store, transfers: f.transfers, brief: () => {}, settings: () => settings,
         sendFiles: (linkId, frame) => world.sendFiles(p, linkId, frame) } }));
       files.set(peer, f);
       return peer;

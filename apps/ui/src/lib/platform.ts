@@ -556,6 +556,11 @@ export interface ServicesPlatform {
    * file with no transfer may still be moving. Where left out, `getTransfer` always knows.
    */
   transfersRestored?(): boolean;
+  /**
+   * A transfer the engine shows none of, read from the file's record: a group's file waiting for its person's Download
+   * (the engine keeps no transfer for it). Null for any other file.
+   */
+  storedTransfer?(fileId: string): Promise<FileTransferState | null>;
   /** files/3: answers an offer, or pauses, resumes, cancels, sends again or asks again for a transfer. */
   fileAction?(fileId: string, action: FileAction): Promise<void>;
   /** Why a file of this size cannot go to this contact now, or null when it can (checked before sending). */

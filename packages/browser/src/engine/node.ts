@@ -784,6 +784,11 @@ export class GhostlyNode implements EngineImplementation {
   private readonly groupWakeReceived = new Map<string, RateWindow>();
   private readonly requestCounts = new Map<string, number>();
   private readonly transfers = new Map<string, FileTransferView>();
+  /**
+   * Views that go in the next state sent, and then away (`GroupFilesHost.brief`): dropped once a state carried them,
+   * unless another view took their place meanwhile.
+   */
+  private readonly briefViews = new Map<string, FileTransferView>();
   /** files/3 in every chat: offers, resumable transfers, checked by digest (WISP 501 rev 0.3). */
   private readonly fileDesk = new FileDesk({
     send: (linkId, frame) => this.links.get(linkId)?.link?.sendFilesFrame(frame) ?? false,
@@ -1339,6 +1344,7 @@ export class GhostlyNode implements EngineImplementation {
     groupFiles: {
       store: storedGroupFiles,
       transfers: this.transfers,
+      brief: id => { const view = this.transfers.get(id); if (view) this.briefViews.set(id, view); },
       settings: () => ({ autoDownloads: this.settings.autoDownloads !== false, serveFiles: this.settings.serveFiles !== false }),
       sendFiles: (linkId, frame) => this.links.get(linkId)?.link?.sendFilesFrame(frame) ?? false,
       sendData: (linkId, id, offset, data) => this.links.get(linkId)?.link?.sendFileData(id, offset, data) ?? false,
@@ -7849,6 +7855,7 @@ export class GhostlyNode implements EngineImplementation {
       // Asked for just before another device's turn stopped this engine: the pages keep the standby screen.
       if (this.gatedOut) return;
       this.events.onState(this.getState());
+      this.dropBriefViews();
       // A chat deleted or muted, a token made: the other devices learn which tokens the profile hands out.
       if (this.deviceLinks) this.syncDeviceTokens();
     }, delayMs);
@@ -7859,5 +7866,12 @@ export class GhostlyNode implements EngineImplementation {
     if (this.stateTimer) { clearTimeout(this.stateTimer); this.stateTimer = null; }
     if (this.gatedOut) return;
     this.events.onState(this.getState());
+    this.dropBriefViews();
+  }
+
+  /** A state went with the brief views: they go, so the next states do not carry them (`briefViews`). */
+  private dropBriefViews(): void {
+    for (const [id, view] of this.briefViews) if (this.transfers.get(id) === view) this.transfers.delete(id);
+    this.briefViews.clear();
   }
 }
