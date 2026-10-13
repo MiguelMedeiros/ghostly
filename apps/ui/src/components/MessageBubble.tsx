@@ -630,7 +630,7 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onPin, pin
                   playCue("deleted", { chat });
                   onDelete();
                 }}
-                className="px-2 py-0.5 rounded border border-danger/30 bg-danger/20 text-danger text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
+                className="px-2 py-0.5 rounded border border-danger/30 bg-danger/20 text-danger-ink text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
               >
                 {t("common.delete")}
               </button>
@@ -895,7 +895,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         <div
           className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
             isMissed
-              ? "bg-danger/10 text-danger"
+              ? "bg-danger/10 text-danger-ink"
               : "bg-surface-alt/80 text-text-secondary"
           } ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}
         >

@@ -22,7 +22,7 @@ export function RemoveMemberDialog({ name, linkOn = false, returnFocus, onClose,
     <div className="mt-5 flex justify-end gap-2">
       <button ref={cancel} onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
       <button onClick={onConfirm} data-testid="group-remove-confirm"
-        className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger">{t("group.members.remove")}</button>
+        className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger-ink hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger">{t("group.members.remove")}</button>
     </div>
   </dialog>, document.body);
 }
