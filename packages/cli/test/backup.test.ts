@@ -103,8 +103,8 @@ it("a backup an older CLI made (version 1) still restores", async () => {
   await folding.close();
   // As the CLI wrote it until now: the store and every file as base64 in one sealed JSON document. Its store was of
   // format 1, every value inline: this profile has no messages, so the messages store kept in rows.db has none to inline.
-  const saved = deserialize(readFileSync(join(dir, "profiles", "default", "db", "snapshot.bin"))) as { format: number; databases: { stores: { records: unknown[]; rows?: { keys: unknown[] } }[] }[] };
-  for (const db of saved.databases) for (const kept of db.stores) if (kept.rows) { expect(kept.rows.keys).toEqual([]); delete kept.rows; }
+  const saved = deserialize(readFileSync(join(dir, "profiles", "default", "db", "snapshot.bin"))) as { format: number; databases: { stores: { records: unknown[]; onDisk?: boolean }[] }[] };
+  for (const db of saved.databases) for (const kept of db.stores) if (kept.onDisk) { expect(kept.records).toEqual([]); delete kept.onDisk; }
   saved.format = 1;
   const store = serialize(saved).toString("base64");
   const payload = { format: "ghostly-cli-profile/1", createdAt: 1, store, files: [{ path: "ghostly/chat-in-a", data: pattern(3000, 3).toString("base64") }] };
@@ -236,7 +236,7 @@ it("a backup carries the messages kept in rows.db, as a store of format 1", asyn
   d.close();
   await putIn.compact();
   await putIn.close();
-  expect((deserialize(readFileSync(join(dbDir, "snapshot.bin"))) as { format: number }).format).toBe(2);
+  expect((deserialize(readFileSync(join(dbDir, "snapshot.bin"))) as { format: number }).format).toBe(3);
 
   ok(await ghostly(["--home", dir, "profile", "backup", "--out", join(dir, "rows.ghostly-backup")], { env: PASS }));
   const restored = ok(await ghostly(["--home", dir, "profile", "restore", join(dir, "rows.ghostly-backup"), "rows-copy"], { env: PASS })) as { folder: string };

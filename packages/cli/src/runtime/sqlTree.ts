@@ -1,3 +1,4 @@
+import { closeSync, openSync } from "node:fs";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { deserialize, serialize } from "node:v8";
 import { AFTER, keyBytes } from "./keyBytes";
@@ -18,8 +19,11 @@ import { AFTER, keyBytes } from "./keyBytes";
 interface Entry { key: unknown; value: unknown }
 interface Range { lower?: unknown; upper?: unknown; lowerOpen: boolean; upperOpen: boolean; includes(key: unknown): boolean }
 
-/** A transaction's writes to one tree: an entry by its id, null for one removed; `cleared`: nothing under it counts. */
-interface Layer { owner: object | null; seq: number; cleared: boolean; puts: Map<string, Entry | null> }
+/**
+ * A transaction's writes to one tree: an entry by its id, null for one removed; `cleared`: nothing under it counts. An
+ * index's layer also finds its ids by their record key's bytes (`byValue`): a record written over drops its entries by it.
+ */
+interface Layer { owner: object | null; seq: number; cleared: boolean; puts: Map<string, Entry | null>; byValue: Map<string, Set<string>> }
 
 const buffer = (bytes: string) => Buffer.from(bytes, "latin1");
 
@@ -81,14 +85,27 @@ export class TreeFile {
 
   /** The layers of the journal's entries up to `upTo` into SQLite, in one transaction that says so (`applied`). */
   apply(upTo: number): void {
+    // An entry that wrote no tree (settings, the event set's notes) has nothing to take: no SQLite write for it.
     const due = [...this.live].filter((tree) => tree.due(upTo));
-    if (!due.length && upTo <= this.applied()) return;
+    if (!due.length) return;
     this.db.exec("BEGIN");
     try {
       for (const tree of due) tree.write(upTo);
       this.db.prepare("INSERT OR REPLACE INTO meta (name, value) VALUES ('applied', max(?, coalesce((SELECT value FROM meta WHERE name = 'applied'), 0)))").run(upTo);
       this.db.exec("COMMIT");
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+    // Only once SQLite has them: a write that failed leaves the layers where reads still find them, for the next try.
+    for (const tree of due) tree.settle(upTo);
+  }
+
+  /** Whether a store has its tree here (a snapshot that says a store is on disk names one that must be). */
+  has(db: string, store: string): boolean {
+    return this.db.prepare("SELECT 1 FROM trees WHERE db = ? AND store = ? AND idx = ''").get(db, store) !== undefined;
+  }
+
+  /** Everything SQLite holds is on disk: before a snapshot takes the place of the journal that had it. */
+  sync(): void {
+    this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
   }
 
   /** Trees whose store or index is gone from the schema (deleted, a database removed) go, with their entries. */
@@ -131,14 +148,24 @@ export class TreeFile {
     return (this.byValue.all(id, buffer(keyBytes(value))) as { key: Uint8Array; value: Uint8Array }[]).map((row) => ({ key: deserialize(row.key), value: deserialize(row.value) }));
   }
   /** @internal */
+  /**
+   * The entries between two ids, a page at a time: no statement stays open between pages, so a read that takes the
+   * first entry and stops (fake-indexeddb's `get`) leaves nothing that would lock the table for a later write.
+   */
   *range(id: number, lower: string | undefined, upper: string | undefined, descending: boolean): Generator<[string, Entry]> {
-    const where = ["tree = ?"], args: (number | Buffer)[] = [id];
-    if (lower !== undefined) { where.push("id >= ?"); args.push(buffer(lower)); }
-    if (upper !== undefined) { where.push("id < ?"); args.push(buffer(upper)); }
-    // A statement of its own: a cursor's read may run while another one of the same shape is still being walked.
-    const statement = this.db.prepare(`SELECT id, key, value FROM entries WHERE ${where.join(" AND ")} ORDER BY id ${descending ? "DESC" : "ASC"}`);
-    for (const row of statement.iterate(...args) as Iterable<{ id: Uint8Array; key: Uint8Array; value: Uint8Array }>) {
-      yield [Buffer.from(row.id).toString("latin1"), { key: deserialize(row.key), value: deserialize(row.value) }];
+    let from = descending ? upper : lower, first = true, size = 8;
+    for (;;) {
+      const where = ["tree = ?"], args: (number | Buffer)[] = [id];
+      const low = descending ? lower : from, high = descending ? from : upper;
+      if (low !== undefined) { where.push(!descending && !first ? "id > ?" : "id >= ?"); args.push(buffer(low)); }
+      if (high !== undefined) { where.push("id < ?"); args.push(buffer(high)); }
+      args.push(size);
+      const rows = this.db.prepare(`SELECT id, key, value FROM entries WHERE ${where.join(" AND ")} ORDER BY id ${descending ? "DESC" : "ASC"} LIMIT ?`).all(...args) as { id: Uint8Array; key: Uint8Array; value: Uint8Array }[];
+      for (const row of rows) yield [Buffer.from(row.id).toString("latin1"), { key: deserialize(row.key), value: deserialize(row.value) }];
+      if (rows.length < size) return;
+      from = Buffer.from(rows.at(-1)!.id).toString("latin1");
+      first = false;
+      size = Math.min(size * 4, 512);
     }
   }
 }
@@ -161,7 +188,18 @@ export class SqlTree {
       if (owner && !this.active.owner) this.active.owner = owner;
       return this.active;
     }
-    return (this.active = { owner, seq: 0, cleared: false, puts: new Map() });
+    return (this.active = { owner, seq: 0, cleared: false, puts: new Map(), byValue: new Map() });
+  }
+
+  /** An entry (or its removal, `entry` null) in this transaction's layer; an index's by its record key too. */
+  private set(bytes: string, record: Entry, entry: Entry | null): void {
+    const layer = this.layer();
+    layer.puts.set(bytes, entry);
+    if (!this.index) return;
+    const value = keyBytes(record.value);
+    let ids = layer.byValue.get(value);
+    if (!ids) layer.byValue.set(value, (ids = new Set()));
+    ids.add(bytes);
   }
 
   /** Newest first: the layer that has the entry says what it is; one cleared hides everything older. */
@@ -203,18 +241,19 @@ export class SqlTree {
   put(record: Entry, noOverwrite = false): Entry | undefined {
     const existing = this.get(record);
     if (existing !== undefined && noOverwrite) throw new this.file.constraintError();
-    this.layer().puts.set(this.idOf(record), record);
+    this.set(this.idOf(record), record, record);
     return existing;
   }
 
   delete(record: Entry): void {
     if (this.get(record) === undefined) return;
-    this.layer().puts.set(this.idOf(record), null);
+    this.set(this.idOf(record), record, null);
   }
 
   clear(): void {
     const layer = this.layer();
     layer.puts.clear();
+    layer.byValue.clear();
     layer.cleared = true;
   }
 
@@ -253,7 +292,7 @@ export class SqlTree {
   /** The index entries whose record key (`value`) is in `range`: one key is looked up by its bytes, not walked. */
   deleteByValue(range: Range, single: unknown): Entry[] {
     const candidates = single !== undefined && this.index
-      ? [...this.file.withValue(this.id, single), ...this.overlayEntries()]
+      ? [...this.file.withValue(this.id, single), ...this.overlayWithValue(keyBytes(single))]
       : [...this.getAllRecords()];
     const deleted: Entry[] = [], seen = new Set<string>();
     for (const candidate of candidates) {
@@ -262,15 +301,18 @@ export class SqlTree {
       seen.add(bytes);
       const current = this.get(candidate);
       if (!current) continue;
-      this.layer().puts.set(bytes, null);
+      this.set(bytes, current, null);
       deleted.push(current);
     }
     return deleted;
   }
 
-  private overlayEntries(): Entry[] {
+  /** The entries of the layers whose record key has these bytes. */
+  private overlayWithValue(value: string): Entry[] {
     const out: Entry[] = [];
-    for (const layer of this.active ? [...this.pending, this.active] : this.pending) for (const entry of layer.puts.values()) if (entry) out.push(entry);
+    for (const layer of this.active ? [...this.pending, this.active] : this.pending) {
+      for (const bytes of layer.byValue.get(value) ?? []) { const entry = layer.puts.get(bytes); if (entry) out.push(entry); }
+    }
     return out;
   }
 
@@ -289,8 +331,8 @@ export class SqlTree {
   due(upTo: number): boolean { return this.pending.length > 0 && this.pending[0]!.seq <= upTo; }
   /** @internal */
   write(upTo: number): void {
-    while (this.pending.length && this.pending[0]!.seq <= upTo) {
-      const layer = this.pending.shift()!;
+    for (const layer of this.pending) {
+      if (layer.seq > upTo) break;
       if (layer.cleared) this.file.clearRows(this.id);
       for (const [bytes, entry] of layer.puts) {
         if (entry) this.file.row(this.id, entry, this.index, this._keysAreUnique);
@@ -298,6 +340,18 @@ export class SqlTree {
       }
     }
   }
+  /** @internal */
+  settle(upTo: number): void {
+    while (this.pending.length && this.pending[0]!.seq <= upTo) this.pending.shift();
+  }
   /** Whether a transaction's writes are still waiting here (a snapshot then waits for them). */
   get busy(): boolean { return this.active !== null || this.pending.length > 0; }
+}
+
+/** rows.db, owner-only (SQLite makes its WAL files with the database's mode), in WAL with NORMAL: the journal makes a transaction durable, and `sync` runs before a snapshot takes the journal's place. */
+export function openTreeFile(sqlite: typeof import("node:sqlite"), path: string, constraintError: new () => Error): TreeFile {
+  closeSync(openSync(path, "a", 0o600));
+  const db = new sqlite.DatabaseSync(path);
+  db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL");
+  return new TreeFile(db, constraintError);
 }

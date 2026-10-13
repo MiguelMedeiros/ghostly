@@ -3,7 +3,8 @@ import { closeSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readF
 import { join } from "node:path";
 import { deserialize, serialize } from "node:v8";
 import { IDBFactory, IDBKeyRange, IDBTransaction } from "fake-indexeddb";
-import { loadSqlite, openRowFile, ROW, rowRecords, type RowFile, type RowRecord } from "./rows";
+import { loadSqlite, openRowFile, rowRecords, type RowFile } from "./rows";
+import { openTreeFile, SqlTree, type TreeFile } from "./sqlTree";
 
 /**
  * IndexedDB for the engine on Node, kept on disk.
@@ -21,30 +22,25 @@ import { loadSqlite, openRowFile, ROW, rowRecords, type RowFile, type RowRecord 
  *   already, and writing the whole snapshot again for them cost a second or more of every command on a large profile;
  * - a journal begins by naming the snapshot it follows: one found beside another snapshot is in that snapshot already
  *   (the process died between writing the snapshot and removing the journal), and is not replayed over it;
- * - the engine's messages keep their values in `rows.db` (./rows.ts), not in memory: their records hold a key and a row
- *   id, the snapshot (format 2) their keys, row ids and index entries. A committed message's value goes to its row
- *   right after the journal has it; a row goes once a snapshot that no longer names it is on disk. A profile's snapshot
- *   of format 1 (values inline) is written as format 2 at its first open; a Node without `node:sqlite` keeps format 1.
+ * - the engine's messages, and their indexes, are kept in `rows.db` (SQLite: ./sqlTree.ts), not in memory: their
+ *   store's tree and its indexes' are SQL trees in place of fake-indexeddb's, and the snapshot (format 3) says only that
+ *   they are there. A transaction's writes go to SQLite once the journal has them (each entry is numbered, and SQLite
+ *   says which it holds: a replay skips those). A profile's snapshot of format 1 (every value inline) or 2 (values in
+ *   rows) is moved at its first open; a Node without `node:sqlite` keeps format 1.
  *
  * Only one process may hold a profile's store: the caller takes the profile lock first (see `profiles.ts`).
  * fake-indexeddb is pinned: this reaches into its raw classes, and `storage.test.ts` checks them.
  */
 
 type Key = unknown;
-/**
- * What a transaction did to a store kept on disk, besides what the journal gets: the store, the record a put left in
- * it, and the rows of the records it wrote over or removed (`dead`).
- */
-interface OnDisk { target?: RawStore; record?: RawRecord; dead?: number[] }
-type Op = (
+type Op =
   | { db: string; store: string; kind: "put"; key: Key; value: unknown }
   | { db: string; store: string; kind: "delete"; key: Key }
-  | { db: string; store: string; kind: "clear" }
-) & OnDisk;
+  | { db: string; store: string; kind: "clear"; seq?: number };
 
 interface RawRecord { key: Key; value: unknown }
 interface RawIndex {
-  name: string; keyPath: string | string[]; multiEntry: boolean; unique: boolean; initialized: boolean; deleted: boolean;
+  name: string; rawObjectStore: RawStore; initialize(transaction: unknown): void; keyPath: string | string[]; multiEntry: boolean; unique: boolean; initialized: boolean; deleted: boolean;
   records: RawRecordStore; storeRecord(record: RawRecord): void;
 }
 interface RawNode { record: RawRecord; left: RawNode | undefined; right: RawNode | undefined; parent: RawNode | undefined; deleted: boolean; red: boolean }
@@ -71,6 +67,8 @@ interface RawClasses {
   ObjectStore: new (db: RawDatabase, name: string, keyPath: string | string[] | null, autoIncrement: boolean) => RawStore;
   Index: new (store: RawStore, name: string, keyPath: string | string[], multiEntry: boolean, unique: boolean) => RawIndex;
   RecordStore: new (keysAreUnique: boolean) => RawRecordStore;
+  /** fake-indexeddb's ConstraintError, which a tree throws for a key already there. */
+  constraintError: new () => Error;
 }
 
 interface SnapshotIndex { name: string; keyPath: string | string[]; multiEntry: boolean; unique: boolean }
@@ -79,12 +77,14 @@ interface SnapshotIndex { name: string; keyPath: string | string[]; multiEntry: 
  * a Blob), the inline values by position, and each index's entries in its own order, as [index key, record position].
  */
 interface SnapshotRows { keys: Key[]; ids: number[]; inline: [number, unknown][]; indexes: Record<string, [Key, number][]> }
-interface SnapshotStore { name: string; keyPath: string | string[] | null; autoIncrement: boolean; keyGenerator: number | null; indexes: SnapshotIndex[]; records: [Key, unknown][]; rows?: SnapshotRows }
+/** `onDisk`: its records and its indexes' entries are in rows.db (format 3). */
+interface SnapshotStore { name: string; keyPath: string | string[] | null; autoIncrement: boolean; keyGenerator: number | null; indexes: SnapshotIndex[]; records: [Key, unknown][]; rows?: SnapshotRows; onDisk?: true }
 /**
  * `journal`: the name a journal that follows this snapshot begins with (absent in one an older version wrote).
- * `format`: 1, every value inline; 2, the stores kept on disk have theirs in `rows.db`. An older ghostly refuses 2.
+ * `format`: 1, every value inline; 2, the stores kept on disk have their values in `rows.db`; 3, their records and index
+ * entries too. An older ghostly refuses 2 and 3.
  */
-interface Snapshot { format: 1 | 2; journal?: string; databases: { name: string; version: number; stores: SnapshotStore[] }[] }
+interface Snapshot { format: 1 | 2 | 3; journal?: string; databases: { name: string; version: number; stores: SnapshotStore[] }[] }
 
 const SNAPSHOT = "snapshot.bin";
 const JOURNAL = "journal.bin";
@@ -100,6 +100,8 @@ const KEEP_BYTES = 1024 * 1024;
 const CLOSED = "__ghostly_closed__";
 /** The database a journal's first entry names, with the snapshot the journal follows: skipped by a replay as the mark is. */
 const FOLLOWS = "__ghostly_journal__";
+/** The database an entry's first op names, with the entry's number (`seq`): SQLite's trees hold the entries up to theirs. */
+const SEQ = "__ghostly_entry__";
 /** How long `close` waits for the transactions still running: one left open for good does not keep the process. */
 const CLOSE_WAIT_MS = 5_000;
 /** How long a relaxed transaction's entry may wait for a sync when no other transaction brings one. */
@@ -128,7 +130,7 @@ export interface PersistentIndexedDb {
 }
 
 export interface StoreOptions {
-  /** The stores whose values are kept in `rows.db`: by default the engine's messages. */
+  /** The stores kept in `rows.db`, records and indexes: by default the engine's messages. */
   rowsOnDisk?: (db: string, store: string) => boolean;
 }
 
@@ -144,18 +146,19 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   dropIndexEntriesByRecord(classes, (a, b) => factory.cmp(a, b));
   const order = keyOrder((a, b) => factory.cmp(a, b));
 
-  // Found before it is opened: opening makes it, and a snapshot that names rows needs the file it named.
+  // Found before it is opened: opening makes it, and a snapshot that names it needs the file it named.
   const rowsPath = join(dir, ROWS);
   const rowsFound = existsSync(rowsPath);
   const sqlite = await loadSqlite();
-  const rows: RowFile | null = sqlite ? openRowFile(sqlite, rowsPath) : null;
-  const made = rows ? rowRecords(rows) : null;
+  const trees: TreeFile | null = sqlite ? openTreeFile(sqlite, rowsPath, classes.constraintError) : null;
   const onDisk = options.rowsOnDisk ?? ((_db: string, store: string) => store === "messages");
   // This store's own databases only: the hooks are on fake-indexeddb's shared classes, and another store opened in the
   // process (a test's) must not move this one's records into its rows.db.
-  const disk = (store: RawStore) => rows !== null && raw._databases.get(store.rawDatabase.name) === store.rawDatabase && onDisk(store.rawDatabase.name, store.name);
-  /** Rows of records written over or removed by committed transactions, dropped once a snapshot without them is on disk. */
-  const dead: number[] = [];
+  const disk = (store: RawStore) => trees !== null && raw._databases.get(store.rawDatabase.name) === store.rawDatabase && onDisk(store.rawDatabase.name, store.name);
+  /** The number of the last journal entry made: SQLite says which ones its trees hold (`TreeFile.applied`). */
+  let seq = trees?.applied() ?? 0;
+  /** The last entry the journal has: SQLite takes the layers up to it before a snapshot takes the journal's place. */
+  let journaled = seq;
 
   let writing = true;
   let restoring = true;
@@ -175,16 +178,17 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   // Load what the disk holds before any connection opens; a snapshot with no journal after it is already what is held.
   const snapshotFound = existsSync(snapshotPath), journalFound = existsSync(journalPath);
   const saved = snapshotFound ? (deserialize(readFileSync(snapshotPath)) as Snapshot) : null;
+  // A snapshot of format 2 reads its values from the rows it names, once: they move into the trees at this open.
+  const rows: RowFile | null = sqlite && saved?.format === 2 && rowsFound ? openRowFile(sqlite, rowsPath) : null;
   try {
-    if (saved) restore(classes, raw._databases, saved, order, { rows, made, rowsFound, onDisk });
+    if (saved) restore(classes, raw._databases, saved, order, { trees, rows, made: rows ? rowRecords(rows) : null, rowsFound, attach: attachTrees });
   } catch (error) {
     rows?.close();
+    trees?.db.close();
     // Made by this open: a second one must refuse as this one did, not find an empty file and read nothing.
     if (!rowsFound) for (const file of [rowsPath, `${rowsPath}-wal`, `${rowsPath}-shm`]) rmSync(file, { force: true });
     throw error;
   }
-  // A snapshot of format 1 whose messages are to be kept on disk: written as format 2 at this open.
-  const moving = !!rows && saved?.format === 1 && saved.databases.some((db) => db.stores.some((store) => store.records.length > 0 && onDisk(db.name, store.name)));
   /** The name of the snapshot on disk, which its journal begins with. */
   let snapshotName = saved?.journal;
   let journal = journalFound ? readFileSync(journalPath) : null;
@@ -193,25 +197,25 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   // what came between (an upgrade that rewrote them). The process that left it died while it folded.
   const folded = named !== undefined && snapshotName !== undefined && named !== snapshotName;
   if (folded) { rmSync(journalPath, { force: true }); journal = null; }
-  const replayed = journal ? replay(raw._databases, journal, order) : { end: 0, closed: !folded };
+  const replayed = journal ? replay(raw._databases, journal, order, { applied: seq, onTrees }) : { end: 0, closed: !folded, seq: 0 };
+  // What the journal had for the trees and SQLite did not: written now, numbered as its last entry.
+  seq = Math.max(seq, replayed.seq);
+  journaled = seq;
+  if (trees) { trees.complete(null, seq); trees.apply(seq); }
+  // Stores kept on disk still in memory (a snapshot of format 1 or 2, and the journal replayed over it): moved now.
+  let moved = false;
+  if (trees) for (const db of raw._databases.values()) for (const store of db.rawObjectStores.values()) if (!store.deleted && disk(store) && !onTrees(store)) { toDisk(store); moved = true; }
   restoring = false;
   /** Whether the journal on disk says the store is closed: nothing was written since its mark, or there is none. */
   let marked = replayed.closed;
   // A journal cut short is never appended to: what came after the torn bytes could not be read back. Nor one that
   // does not name this snapshot (an older version's).
   const kept = !!journal && named !== undefined && named === snapshotName && replayed.end === journal.length && journal.length <= KEEP_BYTES;
-  const rewrite = (journal && !kept) || !snapshotFound || moving;
+  const rewrite = (journal && !kept) || !snapshotFound || moved;
   if (rewrite) await writeSnapshot();
-  if (rows) {
-    // Rows nothing names (a process that died between writing a row and the snapshot after it, a database deleted):
-    // gone once they are many. The snapshot on disk names its rows still, when this open did not write it.
-    const keep = new Set<number>();
-    for (const db of raw._databases.values()) for (const store of db.rawObjectStores.values()) {
-      if (disk(store)) for (const record of store.records.values()) { const id = (record as RowRecord)[ROW]; if (id !== undefined) keep.add(id); }
-    }
-    if (!rewrite) for (const db of saved?.databases ?? []) for (const store of db.stores) for (const id of store.rows?.ids ?? []) if (id >= 0) keep.add(id);
-    if (rows.count() > keep.size * 1.1 + 1000) rows.sweep(keep);
-  }
+  rows?.close();
+  // Format 2's rows: in the trees now, and the snapshot that named them is gone.
+  if (rows && rewrite) trees!.db.exec("DROP TABLE IF EXISTS rows");
 
   // Record what each read-write transaction does, keyed by its rollback log (one array per transaction).
   const storeProto = classes.ObjectStore.prototype as RawStore;
@@ -223,26 +227,41 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     if (!ops) pending.set(log, (ops = []));
     return ops;
   };
-  // A store kept on disk: the records a write replaces or removes are found first, for their rows.
-  const rowsOf = (records: Iterable<RawRecord | undefined>) => { const ids: number[] = []; for (const record of records) { const id = (record as RowRecord | undefined)?.[ROW]; if (id !== undefined) ids.push(id); } return ids; };
+  /**
+   * A write to a store kept on disk goes to its trees' layer of this transaction (its rollback log names it): a store
+   * made since the open (an upgrade) moves to the trees at its first write.
+   */
+  function owned<T>(store: RawStore, rollbackLog: unknown[] | undefined, work: () => T): T {
+    if (!disk(store)) return work();
+    if (!onTrees(store)) toDisk(store);
+    if (!rollbackLog) return work();
+    trees!.owner = rollbackLog;
+    try { return work(); } finally { trees!.owner = null; }
+  }
   storeProto.storeRecord = function (this: RawStore, record, noOverwrite, rollbackLog) {
-    const kept = !!rollbackLog && !restoring && disk(this);
-    const before = kept && record.key !== undefined ? this.records.get(record.key) : undefined;
-    const key = storeRecord.call(this, record, noOverwrite, rollbackLog);
-    if (rollbackLog && !restoring) opsOf(rollbackLog).push({ db: this.rawDatabase.name, store: this.name, kind: "put", key, value: record.value, ...(kept && { target: this, record, dead: rowsOf([before]) }) });
+    const key = owned(this, rollbackLog, () => storeRecord.call(this, record, noOverwrite, rollbackLog));
+    if (rollbackLog && !restoring) opsOf(rollbackLog).push({ db: this.rawDatabase.name, store: this.name, kind: "put", key, value: record.value });
     return key;
   };
   storeProto.deleteRecord = function (this: RawStore, key, rollbackLog) {
-    const kept = !!rollbackLog && !restoring && disk(this);
-    const gone = kept ? rowsOf(key instanceof IDBKeyRange ? this.records.values(key) : [this.records.get(key)]) : [];
-    deleteRecord.call(this, key, rollbackLog);
-    if (rollbackLog && !restoring) opsOf(rollbackLog).push({ db: this.rawDatabase.name, store: this.name, kind: "delete", key: keyToDisk(key), ...(kept && { dead: gone }) });
+    owned(this, rollbackLog, () => deleteRecord.call(this, key, rollbackLog));
+    if (rollbackLog && !restoring) opsOf(rollbackLog).push({ db: this.rawDatabase.name, store: this.name, kind: "delete", key: keyToDisk(key) });
   };
   storeProto.clear = function (this: RawStore, rollbackLog) {
-    const kept = !!rollbackLog && !restoring && disk(this);
-    const gone = kept ? rowsOf(this.records.values()) : [];
-    clear.call(this, rollbackLog);
-    if (rollbackLog && !restoring) opsOf(rollbackLog).push({ db: this.rawDatabase.name, store: this.name, kind: "clear", ...(kept && { dead: gone }) });
+    owned(this, rollbackLog, () => clear.call(this, rollbackLog));
+    if (rollbackLog && !restoring) opsOf(rollbackLog).push({ db: this.rawDatabase.name, store: this.name, kind: "clear" });
+  };
+  // An index made on a store kept on disk (an upgrade) is a tree there too, emptied of what an earlier one of its name left.
+  const indexProto = classes.Index.prototype as RawIndex;
+  const initialize = indexProto.initialize;
+  indexProto.initialize = function (this: RawIndex, transaction: unknown) {
+    const store = this.rawObjectStore;
+    if (disk(store) && onTrees(store) && !(this.records.records instanceof SqlTree)) {
+      const tree = trees!.tree(trees!.treeId(store.rawDatabase.name, store.name, this.name), this.records.keysAreUnique, true);
+      tree.clear();
+      attachTree(this.records, tree, true);
+    }
+    return initialize.call(this, transaction);
   };
 
   // The transaction's `complete` is where it becomes durable: written before the engine hears of it.
@@ -250,14 +269,24 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   const dispatch = txProto.dispatchEvent;
   txProto.dispatchEvent = function (this: RawTransaction, event: Event) {
     if (event.type === "complete" && writing) {
-      if (this.mode === "versionchange") schemaDirty = true;
-      else {
+      if (this.mode === "versionchange") {
+        schemaDirty = true;
+        // A schema change goes to a snapshot, not the journal: what it wrote in the trees (an index filled) goes now.
+        if (trees) { trees.complete(this._rollbackLog, ++seq); written(seq); }
+      } else {
         const ops = pending.get(this._rollbackLog);
-        if (ops?.length) { append(ops, this.durability === "relaxed"); toRows(ops); }
+        if (ops?.length) {
+          const entry = ++seq;
+          trees?.complete(this._rollbackLog, entry);
+          append(ops, this.durability === "relaxed", entry);
+        }
       }
       pending.delete(this._rollbackLog);
       if (schemaDirty) void enqueue(writeSnapshot);
-    } else if (event.type === "abort") pending.delete(this._rollbackLog);
+    } else if (event.type === "abort") {
+      pending.delete(this._rollbackLog);
+      trees?.abort(this._rollbackLog);
+    }
     const dispatched = dispatch.call(this, event);
     // fake-indexeddb keeps every transaction a database ever ran in its list (its scheduler only skips the finished
     // ones), each with its requests, results and rollback log: a daemon's heap grew by about 100 KB a message, without
@@ -276,36 +305,69 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     return request;
   };
 
-  function append(all: Op[], lazy: boolean) {
-    const ops = all.map(journalOp);
+  /** A committed transaction's entry, numbered `entry` (its first op says so, where there are trees). */
+  function append(ops: Op[], lazy: boolean, entry: number) {
+    if (trees) ops = [{ db: SEQ, store: "", kind: "clear", seq: entry }, ...ops];
     if (queued === 0 && !ops.some((op) => op.kind === "put" && hasBlob(op.value))) {
-      writeEntry(serialize(ops), lazy);
+      if (writeEntry(serialize(ops), lazy)) written(entry);
       return;
     }
-    void enqueue(async () => writeEntry(serialize(await Promise.all(ops.map(async (op) => (op.kind === "put" ? { ...op, value: await blobsToDisk(op.value) } : op)))), lazy));
+    void enqueue(async () => { if (writeEntry(serialize(await Promise.all(ops.map(async (op) => (op.kind === "put" ? { ...op, value: await blobsToDisk(op.value) } : op)))), lazy)) written(entry); });
   }
 
   /**
-   * After the journal has a committed transaction: each message it left in a store kept on disk gets its row, and its
-   * value is read from there; the rows of what it wrote over or removed are dead. A record the same transaction wrote
-   * over again, or a value with a Blob, stays in memory until a snapshot. A row that cannot be written leaves the value
-   * in memory: the journal has it, and the next snapshot tries again.
+   * The journal has entry `entry`: the trees' layers up to it go to SQLite. One that fails stays in memory, where reads
+   * find it, and goes with the next entry, or before the next snapshot (which fails without it).
    */
-  function toRows(ops: Op[]) {
-    if (!rows || !made || !writing) return;
-    for (const op of ops) if (op.dead?.length) dead.push(...op.dead);
-    // Rows first, records after: a batch that fails is rolled back whole, and no record may name a row it took back.
-    const moved: [RawRecord, number][] = [];
+  function written(entry: number) {
+    journaled = Math.max(journaled, entry);
+    if (!trees || !writing) return;
+    try { trees.apply(entry); } catch (error) { failed(error); }
+  }
+
+  /** Whether a store's records are in the trees already. */
+  function onTrees(store: RawStore): boolean {
+    return store.records.records instanceof SqlTree;
+  }
+
+  /** A tree in place of fake-indexeddb's in a record store; its `clear` and (an index's) `deleteByValue` with it. */
+  function attachTree(records: RawRecordStore, tree: SqlTree, index: boolean) {
+    (records as unknown as { records: unknown }).records = tree;
+    records.clear = () => { const deleted = [...tree.getAllRecords()]; tree.clear(); return deleted; };
+    if (index) records.deleteByValue = (key: Key) => tree.deleteByValue((key instanceof IDBKeyRange ? key : IDBKeyRange.only(key)) as never, key instanceof IDBKeyRange ? undefined : key);
+  }
+
+  /** A store whose records and index entries are in rows.db already (a snapshot of format 3): its trees attached. */
+  function attachTrees(store: RawStore) {
+    const db = store.rawDatabase.name;
+    attachTree(store.records, trees!.tree(trees!.treeId(db, store.name), true, false), false);
+    for (const index of store.rawIndexes.values()) if (!index.deleted) attachTree(index.records, trees!.tree(trees!.treeId(db, store.name, index.name), index.records.keysAreUnique, true), true);
+  }
+
+  /** A store kept on disk, held in memory: its records and index entries written to rows.db, its trees in place. */
+  function toDisk(store: RawStore) {
+    const db = store.rawDatabase.name;
+    const indexes = [...store.rawIndexes.values()].filter((index) => !index.deleted);
+    const id = trees!.treeId(db, store.name), ids = indexes.map((index) => trees!.treeId(db, store.name, index.name));
+    trees!.db.exec("BEGIN");
     try {
-      rows.batch(() => {
-        for (const op of ops) {
-          if (op.kind !== "put" || !op.record || !op.target) continue;
-          if (op.target.records.get(op.key) !== op.record || (op.record as RowRecord)[ROW] !== undefined || hasBlob(op.value)) continue;
-          moved.push([op.record, rows.add(op.value)]);
-        }
-      });
-    } catch (error) { failed(error); return; }
-    for (const [record, id] of moved) made.move(record as RowRecord, id);
+      trees!.load(id, store.records.values(), false, true);
+      indexes.forEach((index, at) => trees!.load(ids[at]!, index.records.values(), true, index.records.keysAreUnique));
+      trees!.db.exec("COMMIT");
+    } catch (error) { trees!.db.exec("ROLLBACK"); throw error; }
+    attachTree(store.records, trees!.tree(id, true, false), false);
+    indexes.forEach((index, at) => attachTree(index.records, trees!.tree(ids[at]!, index.records.keysAreUnique, true), true));
+  }
+
+  /** The trees of the stores and indexes the schema has now: the others are swept after a snapshot. */
+  function liveTrees(): Set<number> {
+    const keep = new Set<number>();
+    for (const db of raw._databases.values()) for (const store of db.rawObjectStores.values()) {
+      if (store.deleted || !onTrees(store)) continue;
+      keep.add((store.records.records as unknown as SqlTree).id);
+      for (const index of store.rawIndexes.values()) if (!index.deleted && index.records.records instanceof SqlTree) keep.add((index.records.records as unknown as SqlTree).id);
+    }
+    return keep;
   }
 
   function enqueue(work: () => Promise<void> | void): Promise<void> {
@@ -324,8 +386,8 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
    * transaction wrote can be made again (the event set's note of a message it already reported): written, it outlives
    * the process; a power cut may take its last second.
    */
-  function writeEntry(entry: Buffer, lazy = false) {
-    if (!writing) return;
+  function writeEntry(entry: Buffer, lazy = false): boolean {
+    if (!writing) return false;
     try {
       if (journalFd === null) {
         journalFd = openSync(journalPath, "a", 0o600);
@@ -341,6 +403,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     if (lazy) relaxed ??= setTimeout(() => { try { sync(); } catch (error) { failed(error); } }, RELAXED_SYNC_MS).unref();
     else sync();
     if (statSync(journalPath).size > COMPACT_BYTES) void enqueue(writeSnapshot);
+    return true;
   }
 
   function sync() {
@@ -359,14 +422,10 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
 
   /**
    * What is held, as a snapshot. `inline`: every value in it (format 1, `exportSnapshot`); otherwise the stores kept on
-   * disk give their keys, rows and index entries (format 2), and a record with no row yet gets one here.
+   * disk say only that they are (format 3).
    */
   async function capture(journalName: string | undefined, inline: boolean): Promise<Snapshot> {
     const snapshot: Snapshot = { format: 1, ...(journalName !== undefined && { journal: journalName }), databases: [] };
-    // The stores kept on disk first, in one pass with no turn in between: what the rows sweep keeps is what this holds.
-    const onRows = new Map<RawStore, SnapshotRows>();
-    if (!inline) for (const db of raw._databases.values()) for (const store of db.rawObjectStores.values()) if (!store.deleted && db.name !== PROBE && disk(store)) onRows.set(store, rowsOfStore(store));
-    if (onRows.size) snapshot.format = 2;
     for (const db of raw._databases.values()) {
       if (db.name === PROBE) continue;
       const stores: SnapshotStore[] = [];
@@ -377,10 +436,10 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
           name: store.name, keyPath: store.keyPath, autoIncrement: store.autoIncrement, keyGenerator: store.keyGenerator?.num ?? null,
           indexes: live.map(({ name, keyPath, multiEntry, unique }) => ({ name, keyPath, multiEntry, unique })),
         };
-        const kept = onRows.get(store);
-        if (kept) {
-          for (const item of kept.inline) item[1] = await blobsToDisk(item[1]);
-          stores.push({ ...meta, records: [], rows: kept });
+        if (!inline && disk(store)) {
+          if (!onTrees(store)) toDisk(store);
+          stores.push({ ...meta, records: [], onDisk: true });
+          snapshot.format = 3;
           continue;
         }
         const records: [Key, unknown][] = [];
@@ -392,61 +451,20 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     return snapshot;
   }
 
-  /** A store kept on disk, as format 2 has it (its Blob values still to be made bytes): taken with no turn in the middle. */
-  function rowsOfStore(store: RawStore): SnapshotRows {
-    const indexes = [...store.rawIndexes.values()].filter((index) => !index.deleted);
-    const keys: Key[] = [], ids: number[] = [], inline: [number, unknown][] = [], at = new Map<unknown, number>();
-    // Rows first, records after (as `toRows`): a batch that fails takes back every row it wrote, and the snapshot with it.
-    const records = [...store.records.values()], moved: [RawRecord, number][] = [];
-    rows!.batch(() => {
-      for (const record of records) {
-        let id = (record as RowRecord)[ROW];
-        if (id === undefined && !hasBlob(record.value)) moved.push([record, (id = rows!.add(record.value))]);
-        at.set(record.key, keys.length);
-        if (id === undefined) inline.push([keys.length, record.value]);
-        keys.push(record.key);
-        ids.push(id ?? -1);
-      }
-    });
-    for (const [record, id] of moved) made!.move(record as RowRecord, id);
-    const entries: Record<string, [Key, number][]> = {};
-    for (const index of indexes) {
-      // An entry holds its record's key itself (`value: record.key`): found by identity, else by order.
-      entries[index.name] = [...index.records.values()].map((entry): [Key, number] => [entry.key, at.get(entry.value) ?? position(keys, entry.value, order)]);
-    }
-    return { keys, ids, inline, indexes: entries };
-  }
-
   async function snapshotToDisk() {
     const name = randomBytes(8).toString("hex");
-    // Rows dead before this snapshot is taken are in neither it nor what is held: they go once it is on disk. Taken
-    // while no transaction runs (`compact`, a close that folds, a quiet moment), the snapshot names every row anything
-    // can still read (an open transaction's rollback puts back records it replaced): every older row it does not name
-    // goes too.
-    const quiet = !!rows && !busy();
-    const upTo = quiet ? rows!.last() : 0;
-    const dropping = dead.splice(0);
-    let snapshot: Snapshot;
-    try {
-      snapshot = await capture(name, false);
-      // The rows it names reach the disk before it takes the place of the snapshot (and journal) that had their values.
-      rows?.sync();
-      const temporary = snapshotPath + ".tmp";
-      const fd = openSync(temporary, "w", 0o600);
-      try { writeAll(fd, serialize(snapshot)); fsyncSync(fd); } finally { closeSync(fd); }
-      renameSync(temporary, snapshotPath);
-    } catch (error) {
-      dead.unshift(...dropping);
-      throw error;
+    const snapshot = await capture(name, false);
+    if (trees) {
+      // What the journal has goes to the trees, and to the disk, before the snapshot takes the journal's place.
+      trees.apply(journaled);
+      trees.sync();
     }
-    try {
-      rows?.drop(dropping);
-      if (quiet) {
-        const keep = new Set<number>();
-        for (const db of snapshot.databases) for (const store of db.stores) for (const id of store.rows?.ids ?? []) if (id >= 0) keep.add(id);
-        rows!.sweep(keep, upTo);
-      }
-    } catch (error) { process.stderr.write(`ghostly: storage: old rows not removed: ${error instanceof Error ? error.message : String(error)}\n`); }
+    const temporary = snapshotPath + ".tmp";
+    const fd = openSync(temporary, "w", 0o600);
+    try { writeAll(fd, serialize(snapshot)); fsyncSync(fd); } finally { closeSync(fd); }
+    renameSync(temporary, snapshotPath);
+    // Trees of stores and indexes gone from the schema: once no snapshot on disk names them.
+    try { trees?.sweep(liveTrees()); } catch (error) { process.stderr.write(`ghostly: storage: old trees not removed: ${error instanceof Error ? error.message : String(error)}\n`); }
     snapshotName = name;
     unsaved = false;
     // The snapshot holds what the journal's entries said, the relaxed ones too.
@@ -496,7 +514,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     recovered: !replayed.closed,
     flush: () => queue,
     async compact() {
-      // After the transactions running now: the fold is whole, and rows.db is swept with it.
+      // After the transactions running now: the fold is whole.
       await settled();
       // The caller reads the snapshot next (a backup): a fold that failed is its failure, not a line on stderr.
       let thrown: { error: unknown } | null = null;
@@ -510,7 +528,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       await enqueue(leave);
       writing = false;
       if (journalFd !== null) { closeSync(journalFd); journalFd = null; }
-      rows?.close();
+      trees?.db.close();
     },
     journalBytes,
     async exportSnapshot(path: string) {
@@ -520,23 +538,6 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
       try { writeAll(fd, serialize(snapshot)); fsyncSync(fd); } finally { closeSync(fd); }
     },
   };
-}
-
-/** An op as the journal keeps it: what the store kept on disk needs in memory stays out. */
-function journalOp(op: Op): Op {
-  if (op.kind === "put") return { db: op.db, store: op.store, kind: op.kind, key: op.key, value: op.value };
-  if (op.kind === "delete") return { db: op.db, store: op.store, kind: op.kind, key: op.key };
-  return { db: op.db, store: op.store, kind: op.kind };
-}
-
-/** Where a key is among keys in order (an index entry whose record key is not the record's own object). */
-export function position(keys: Key[], key: Key, cmp: (a: Key, b: Key) => number): number {
-  for (let low = 0, high = keys.length - 1; low <= high;) {
-    const middle = (low + high) >>> 1, side = cmp(keys[middle], key);
-    if (side === 0) return middle;
-    if (side < 0) low = middle + 1; else high = middle - 1;
-  }
-  throw new Error("An index names a record its store does not hold");
 }
 
 /** Writes every byte: one write may take only a part (a disk nearly full). */
@@ -575,7 +576,12 @@ async function probeClasses(factory: IDBFactory): Promise<RawClasses> {
     ObjectStore: rawStore.constructor as RawClasses["ObjectStore"],
     Index: rawStore.rawIndexes.get("i")!.constructor as RawClasses["Index"],
     RecordStore: rawStore.records.constructor as RawClasses["RecordStore"],
+    constraintError: Error,
   };
+  // The error a tree throws for a put with no overwrite on a key it has: fake-indexeddb's own (not exported).
+  const probe = new classes.RecordStore(true);
+  probe.put({ key: 1, value: 1 });
+  try { probe.put({ key: 1, value: 2 }, true); } catch (error) { classes.constraintError = (error as Error).constructor as new () => Error; }
   db.close();
   await new Promise<void>((resolve) => { const request = factory.deleteDatabase(PROBE); request.onsuccess = request.onerror = () => resolve(); });
   return classes;
@@ -676,14 +682,16 @@ export function keyOrder(cmp: (a: Key, b: Key) => number): (a: Key, b: Key) => n
  * built whole from sorted arrays: storing record by record compared every key down the tree, a 70,000-message profile
  * took seconds. A snapshot not in order (never written so) is stored record by record.
  */
-interface RestoreRows { rows: RowFile | null; made: ReturnType<typeof rowRecords> | null; rowsFound: boolean; onDisk: (db: string, store: string) => boolean }
+interface RestoreDisk { trees: TreeFile | null; rows: RowFile | null; made: ReturnType<typeof rowRecords> | null; rowsFound: boolean; attach: (store: RawStore) => void }
 
-function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snapshot: Snapshot, cmp: (a: Key, b: Key) => number, disk: RestoreRows) {
-  if (snapshot?.format !== 1 && snapshot?.format !== 2) throw new Error("This profile was last used by a newer version of ghostly (its store has a format this version does not read). Update ghostly to open it.");
-  if (snapshot.format === 2 && !disk.rows) throw new Error(`This profile keeps its messages in rows.db, which needs Node 22.13 or newer (this is ${process.version}). Update Node to open it.`);
-  // Gone, or empty while the snapshot names rows (made by an open that failed): the same, and never read as no messages.
+function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snapshot: Snapshot, cmp: (a: Key, b: Key) => number, disk: RestoreDisk) {
+  if (snapshot?.format !== 1 && snapshot?.format !== 2 && snapshot?.format !== 3) throw new Error("This profile was last used by a newer version of ghostly (its store has a format this version does not read). Update ghostly to open it.");
+  if (snapshot.format !== 1 && !disk.trees) throw new Error(`This profile keeps its messages in rows.db, which needs Node 22.13 or newer (this is ${process.version}). Update Node to open it.`);
+  // Gone, or without what the snapshot names (made empty by an open that failed): the same, and never read as no messages.
+  const missing = new Error("This profile's store is missing rows.db (beside snapshot.bin): its messages cannot be read. Restore the profile from a backup.");
   const named = snapshot.format === 2 && snapshot.databases.some((db) => db.stores.some((store) => store.rows?.ids.some((id) => id >= 0)));
-  if (snapshot.format === 2 && (!disk.rowsFound || (named && disk.rows!.count() === 0))) throw new Error("This profile's store is missing rows.db (beside snapshot.bin): its messages cannot be read. Restore the profile from a backup.");
+  if (snapshot.format === 2 && (!disk.rowsFound || !disk.rows || (named && disk.rows.count() === 0))) throw missing;
+  if (snapshot.format === 3 && (!disk.rowsFound || snapshot.databases.some((db) => db.stores.some((store) => store.onDisk && !disk.trees!.has(db.name, store.name))))) throw missing;
   const intern = interner();
   for (const saved of snapshot.databases) {
     const db = new classes.Database(saved.name, saved.version);
@@ -696,6 +704,7 @@ function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snaps
         store.rawIndexes.set(i.name, index);
       }
       db.rawObjectStores.set(s.name, store);
+      if (s.onDisk) { disk.attach(store); continue; }
       if (s.rows) {
         const kept = s.rows;
         const records: RawRecord[] = kept.keys.map((key, at) => (kept.ids[at] >= 0 ? disk.made!.make(intern(key), kept.ids[at]) : { key: intern(key), value: undefined }));
@@ -707,7 +716,7 @@ function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snaps
         }
         continue;
       }
-      const records = s.records.map(([key, value]): RawRecord => ({ key: disk.rows && disk.onDisk(saved.name, s.name) ? intern(key) : key, value: blobsFromDisk(value) }));
+      const records = s.records.map(([key, value]): RawRecord => ({ key, value: blobsFromDisk(value) }));
       if (records.some((record, at) => at > 0 && cmp(records[at - 1].key, record.key) >= 0)) {
         for (const record of records) store.storeRecord(record, false);
         continue;
@@ -788,8 +797,11 @@ function fill(store: RawRecordStore, sorted: RawRecord[]) {
  */
 interface Touched { indexes: Map<string, RawIndex>; was: Set<RawRecord> | null; now: Set<RawRecord> }
 
-/** Where the journal's whole entries end, and whether the last thing in it is a close mark. */
-interface Replayed { end: number; closed: boolean }
+/** Where the journal's whole entries end, whether the last thing in it is a close mark, and its last entry's number. */
+interface Replayed { end: number; closed: boolean; seq: number }
+
+/** The trees' part of a replay: entries up to `applied` are in SQLite already, and a store on trees keeps its indexes. */
+interface ReplayTrees { applied: number; onTrees: (store: RawStore) => boolean }
 
 /**
  * Replays whole entries; a torn last entry (the process died mid-write) was never acknowledged and is dropped.
@@ -800,9 +812,9 @@ interface Replayed { end: number; closed: boolean }
  * touched change in an index (what each was before goes, what it is now comes in): a journal of one message costs one
  * message, not the profile's history once per index. A store the journal cleared has its indexes built again whole.
  */
-function replay(databases: Map<string, RawDatabase>, journal: Buffer, cmp: (a: Key, b: Key) => number): Replayed {
+function replay(databases: Map<string, RawDatabase>, journal: Buffer, cmp: (a: Key, b: Key) => number, trees: ReplayTrees): Replayed {
   const touched = new Map<RawStore, Touched>();
-  try { return replayEntries(databases, journal, touched); } finally {
+  try { return replayEntries(databases, journal, touched, trees); } finally {
     for (const [store, { indexes, was, now }] of touched) {
       const records: Partial<RawRecordStore> = store.records;
       delete records.put;
@@ -818,8 +830,8 @@ function replay(databases: Map<string, RawDatabase>, journal: Buffer, cmp: (a: K
   }
 }
 
-function replayEntries(databases: Map<string, RawDatabase>, journal: Buffer, touched: Map<RawStore, Touched>): Replayed {
-  let offset = 0, closed = false;
+function replayEntries(databases: Map<string, RawDatabase>, journal: Buffer, touched: Map<RawStore, Touched>, trees: ReplayTrees): Replayed {
+  let offset = 0, closed = false, last = 0;
   while (offset + 4 <= journal.length) {
     const length = journal.readUInt32BE(offset);
     if (offset + 4 + length > journal.length) break;
@@ -827,20 +839,27 @@ function replayEntries(databases: Map<string, RawDatabase>, journal: Buffer, tou
     try { ops = deserialize(journal.subarray(offset + 4, offset + 4 + length)) as Op[]; } catch { break; }
     offset += 4 + length;
     closed = ops.some((op) => op.db === CLOSED);
+    const marker = ops.find((op) => op.db === SEQ);
+    const entry = marker?.kind === "clear" ? marker.seq : undefined;
+    if (entry !== undefined) last = Math.max(last, entry);
     for (const op of ops) {
       const store = databases.get(op.db)?.rawObjectStores.get(op.store);
       if (!store) continue;
-      let change = touched.get(store);
-      if (!change) touched.set(store, (change = watch(store)));
+      const onTrees = trees.onTrees(store);
+      // In SQLite already: the trees took this entry before the process stopped.
+      if (onTrees && entry !== undefined && entry <= trees.applied) continue;
+      // A store on trees keeps its indexes in step as it goes: each write costs a few rows, never a walk.
+      let change = onTrees ? undefined : touched.get(store);
+      if (!onTrees && !change) touched.set(store, (change = watch(store)));
       if (op.kind === "put") store.storeRecord({ key: op.key, value: blobsFromDisk(op.value) }, false);
       else if (op.kind === "delete") store.deleteRecord(keyFromDisk(op.key));
       else {
-        change.was = null;
+        if (change) change.was = null;
         store.clear();
       }
     }
   }
-  return { end: offset, closed: closed && offset === journal.length };
+  return { end: offset, closed: closed && offset === journal.length, seq: last };
 }
 
 /**

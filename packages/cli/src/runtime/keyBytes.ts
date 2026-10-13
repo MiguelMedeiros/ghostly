@@ -26,8 +26,13 @@ function write(key: unknown, out: number[], depth: number): void {
   if (key instanceof Date) { out.push(DATE); number(key.getTime(), out); return; }
   if (typeof key === "string") {
     out.push(STRING);
-    // Each code unit as three bytes from 1 up: 0 ends the string, so a shorter string sorts first.
-    for (let at = 0; at < key.length; at++) { const unit = key.charCodeAt(at); out.push((unit >> 12) + 1, ((unit >> 6) & 63) + 1, (unit & 63) + 1); }
+    // Each code unit from 1 up (0 ends the string, so a shorter string sorts first): one byte below 0x7e (most ids are
+    // ASCII), else 0x7f and three bytes, which sort after every one-byte unit as their units do.
+    for (let at = 0; at < key.length; at++) {
+      const unit = key.charCodeAt(at);
+      if (unit < 0x7e) out.push(unit + 1);
+      else out.push(0x7f, (unit >> 12) + 1, ((unit >> 6) & 63) + 1, (unit & 63) + 1);
+    }
     out.push(0);
     return;
   }

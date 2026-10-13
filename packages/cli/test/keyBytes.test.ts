@@ -9,7 +9,7 @@ const cmp = (a: unknown, b: unknown) => new IDBFactory().cmp(a, b);
 let seed = 7;
 const random = (below: number) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % below; };
 const NUMBERS = [0, -0, 1, -1, 0.5, -0.5, Infinity, -Infinity, Number.MAX_VALUE, -Number.MAX_VALUE, Number.MIN_VALUE, -Number.MIN_VALUE, 1e21, 1_790_000_000_000, 2 ** 53, -(2 ** 53)];
-const STRINGS = ["", "a", "ab", "b", "\u0000", "\u0000a", "￿", "😀", "\ud800", "é", "z\u0000", "peer_1", "me_10"];
+const STRINGS = ["", "a", "ab", "b", "\u0000", "\u0000a", "\u007d", "\u007e", "\u007f", "}~", "\u0080", "\uffff", "\ud83d\ude00", "\ud800", "\u00e9", "z\u0000", "peer_1", "me_10"];
 function key(depth = 0): unknown {
   switch (random(depth > 2 ? 4 : 5)) {
     case 0: return random(3) ? NUMBERS[random(NUMBERS.length)] : (random(2000) - 1000) / (1 + random(7));
