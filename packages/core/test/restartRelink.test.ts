@@ -303,6 +303,36 @@ describe("coming back after a restart, the edges", () => {
     expect(low.link.isDataLinkOpen && high.link.isDataLinkOpen).toBe(true);
   }, 120_000);
 
+  /**
+   * The lower key's app is back after a restart and its knock carries the chat again; seconds later the contact's app
+   * crashes and is back too, and knocks in turn. The lower key took that knock for one crossing its own (its session
+   * was under `CROSSED_FRESH_MS` old) and refused it, so the contact waited for the dead session's end: live again
+   * 16.6-18.9 s after the contact's start, 5 of 5, against 0.5 s with the crash 13 s after the knock (CLI daemons over
+   * HyperDHT on a loopback testnet, 2026-10-13).
+   */
+  it("the contact crashes seconds after the lower key's knock, and its own knock carries the chat", async () => {
+    const kind = "iroh";
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    const [lowSide, highSide] = [made.inviter, made.joiner];
+    let low = startApp(world, "low", lowSide, { side: highSide, name: "high" }, kind, emptyDhtDeliveryState());
+    let high = startApp(world, "high", highSide, { side: lowSide, name: "low" }, kind, emptyDhtDeliveryState());
+    expect(await until(() => low.link.isDataLinkOpen && high.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    await quit(world, low, "crash");
+    await run(1_000);
+    low = startApp(world, "low", lowSide, { side: highSide, name: "high" }, kind, low.dhtState, true);
+    expect(await until(() => low.link.isDataLinkOpen && high.link.isDataLinkOpen && channelOf(high) !== null, 30_000), "the lower key's knock").toBeLessThanOrEqual(5_000);
+    await run(2_000);
+    const held = channelOf(low);
+    await quit(world, high, "crash");
+    await run(500);
+    high = startApp(world, "high", highSide, { side: lowSide, name: "low" }, kind, high.dhtState, true);
+    const liveMs = await until(() => low.link.isDataLinkOpen && high.link.isDataLinkOpen && channelOf(low) !== held, 120_000);
+    // Before: 30 s and more (the dead session's idle timeout). After: the contact's knock, a round trip and a ping's wait.
+    expect(liveMs, "from the contact's start to live on both sides").toBeLessThanOrEqual(5_000);
+  }, 240_000);
+
   it("a dial in from another key than the pinned one leaves the held session as it was", async () => {
     const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
     const made = invitationWhere("inviter");
