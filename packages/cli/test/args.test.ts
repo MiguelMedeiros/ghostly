@@ -163,6 +163,12 @@ describe("the argument parser", () => {
     usage("group picture", ["g1"], "Missing <jpeg>: ghostly group picture <group> <jpeg> | --clear");
     usage("forward", ["g1"], `Missing <message>: ghostly ${COMMANDS.forward.usage}`);
     usage("forward", ["g1", "m1"], `Missing --to: ghostly ${COMMANDS.forward.usage}`);
+    // Auto-answer's chats and rate are only kept when it goes on: elsewhere they would be dropped without a word.
+    usage("call auto", ["--from", "bob"], "--from and --rate go with on: ghostly call auto on --from <chat>");
+    usage("call auto", ["--rate", "16000"], "--from and --rate go with on: ghostly call auto on --from <chat>");
+    usage("call auto", ["off", "--from", "bob", "--rate", "16000"], "--from and --rate go with on: ghostly call auto on --from <chat>");
+    expect(params("call auto", ["on", "--from", "bob", "--rate", "16000"])).toEqual({ on: true, from: ["bob"], rate: 16000 });
+    expect(params("call auto", ["off"])).toEqual({ on: false });
     // What may be left out still may: a picture cleared, a chat's own name back, a reaction taken back, the only call.
     expect(params("profile picture", ["--clear"])).toEqual({ path: undefined, clear: true });
     expect(params("group picture", ["g1", "--clear"])).toEqual({ group: "g1", path: undefined, clear: true });
