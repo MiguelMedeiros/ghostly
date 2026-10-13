@@ -31,7 +31,7 @@ function fake() {
       },
     }) as unknown as EngineState,
     walletCreate: vi.fn(async (p: { type: string; network: string }) => ({ id: `${p.type}:${p.network}`, type: p.type, network: p.network, config: {} })),
-    walletRemove: vi.fn(async (_: unknown) => { throw new Error("This wallet still holds 42 sats on this device"); }),
+    walletRemove: vi.fn(async (_: unknown): Promise<void> => { throw new Error("This wallet still holds 42 sats on this device"); }),
     walletTestCoins: vi.fn(async () => ({ amount: 10000, unit: "test sats" })),
     walletQuoteInvoice: vi.fn(async () => ({ quote: "q", mint: "m", amount: 10, feeReserve: 3 })),
     walletPayQuote: vi.fn(async (_: unknown) => ({ paid: true })),
@@ -77,6 +77,22 @@ describe("wallets", () => {
     expect(node.walletRemove.mock.calls.at(-1)![0]).toMatchObject({ acceptLoss: true });
   });
 
+  it("a --card is a Lightning card on the network: with another type it is usage, unknown it is not_found, before the engine", async () => {
+    const { ctx, node } = fake();
+    await expect(callApi(ctx, "wallet.remove", { type: "cashu", card: "no-such-card", acceptLoss: true })).rejects.toMatchObject({ code: "usage", message: "--card names a Lightning card: not with cashu" });
+    await expect(callApi(ctx, "wallet.remove", { type: "lightning", card: "no-such-card", acceptLoss: true })).rejects.toMatchObject({ code: "not_found" });
+    await expect(callApi(ctx, "wallet.remove", { type: "lightning", card: "cashu", network: "mainnet", acceptLoss: true })).rejects.toMatchObject({ code: "not_found" });
+    await expect(callApi(ctx, "wallet.faucet", { type: "cashu", card: "cashu" })).rejects.toMatchObject({ code: "usage" });
+    await expect(callApi(ctx, "wallet.faucet", { type: "lightning", card: "no-such-card" })).rejects.toMatchObject({ code: "not_found" });
+    await expect(callApi(ctx, "wallet.receive", { amount: 10, card: "no-such-card" })).rejects.toMatchObject({ code: "not_found" });
+    expect(node.walletRemove).not.toHaveBeenCalled();
+    expect(node.walletTestCoins).not.toHaveBeenCalled();
+    node.walletRemove.mockResolvedValueOnce(undefined);
+    expect(await callApi(ctx, "wallet.remove", { type: "lightning", card: "cashu" })).toEqual({ removed: { type: "lightning", network: "testnet", card: "cashu" } });
+    expect(node.walletRemove.mock.calls.at(-1)![0]).toMatchObject({ type: "lightning", card: "cashu" });
+    expect(await callApi(ctx, "wallet.faucet", { type: "lightning", card: "cashu" })).toEqual({ amount: 10000, unit: "test sats" });
+  });
+
   it("the faucet is Testnet's only", async () => {
     const { ctx } = fake();
     await expect(callApi(ctx, "wallet.faucet", { type: "cashu", network: "mainnet" })).rejects.toMatchObject({ code: "refused" });
@@ -98,7 +114,8 @@ describe("wallets", () => {
     const cases: [() => void, string, Record<string, unknown>, string][] = [
       [() => node.walletRemove.mockRejectedValueOnce(refused("There is no Testnet Cashu wallet to remove")), "wallet.remove", { type: "cashu" }, "not_found"],
       [() => node.walletRemove.mockRejectedValueOnce(refused("There is no Testnet Lightning wallet to remove")), "wallet.remove", { type: "lightning" }, "not_found"],
-      [() => node.walletReceiveLightning.mockRejectedValueOnce(refused("That Lightning card is gone: pick another")), "wallet.receive", { amount: 10, card: "nope" }, "not_found"],
+      // A card there when the CLI looked, gone when the engine did (one that is not there is refused before the engine).
+      [() => node.walletReceiveLightning.mockRejectedValueOnce(refused("That Lightning card is gone: pick another")), "wallet.receive", { amount: 10, card: "cashu" }, "not_found"],
       [() => node.walletReceiveToken.mockRejectedValueOnce(refused("That is not a valid ecash token")), "wallet.redeem", { token: "hello" }, "bad_request"],
       [() => node.walletQuoteInvoice.mockRejectedValueOnce(refused("That is not a Lightning invoice")), "pay", { target: "lnbc1notaninvoice" }, "bad_request"],
       [() => node.walletCreate.mockRejectedValueOnce(refused("You already have a Testnet Cashu wallet")), "wallet.create", { type: "cashu" }, "refused"],
