@@ -369,13 +369,37 @@ describe("GroupChat: the options menu", () => {
     expect(screen.getByTestId("group-chat")).toBeInTheDocument();
   });
 
-  it("deletes a group it is no longer in as a chat: nothing to leave", async () => {
+  it("deletes a group it is no longer in in a group's words: nothing to leave, and no contact's copy", async () => {
     const { user, engine } = openGroup(active({ status: "removed", canSend: false }));
     engine.on("forgetGroup", () => undefined);
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete chat" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "Delete Friends?" })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("The group and its history go from this device.");
+    expect(dialog).not.toHaveTextContent("contact");
+    await user.click(within(dialog).getByRole("button", { name: "Delete from this device" }));
     expect(engine.callsTo("forgetGroup")).toEqual([{ groupId: "group-1" }]);
+  });
+
+  it("deleting an invitation says its sender is told it was declined", async () => {
+    const { user } = openGroup(groupView({ canSend: false, invitation: { linkId: "link-1", contact: "Ana", admin: ALICE, members: 3, accepted: false } }));
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId("group-forget"));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: "Delete Friends?" })).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("The invitation goes from this device. Ana is told you declined.");
+    expect(dialog).not.toHaveTextContent("Your contact");
+  });
+
+  it("deleting a community I knock to get back into says the group and its history go", async () => {
+    const { user } = openGroup(active({ profile: "community", status: "removed", canSend: false,
+      invitation: { linkId: "entry-1", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked" } }));
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId("group-forget"));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("The group and its history go from this device.");
+    expect(dialog).not.toHaveTextContent("declined");
   });
 
   it("says that deleting a community leaves it, and how to come back", async () => {
@@ -424,13 +448,13 @@ describe("GroupChat: the options menu", () => {
     expect(screen.queryByText("Chat list")).not.toBeInTheDocument();
   });
 
-  it.each(["removed", "left"] as const)("deletes a community it is no longer in (%s) with the plain question: nothing to leave", async (status) => {
+  it.each(["removed", "left"] as const)("deletes a community it is no longer in (%s) in a group's words: nothing to leave", async (status) => {
     const { user, engine } = openGroup(active({ profile: "community", status, canSend: false }));
     engine.on("forgetGroup", () => undefined);
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
     expect(screen.queryByTestId("group-leave-dialog")).not.toBeInTheDocument();
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete chat" }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete from this device" }));
     expect(engine.callsTo("forgetGroup")).toEqual([{ groupId: "group-1" }]);
   });
 
