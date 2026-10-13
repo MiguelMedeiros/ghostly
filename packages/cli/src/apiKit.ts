@@ -82,15 +82,16 @@ export function oneOf<T extends string>(params: Params, name: string, values: re
 export const CONTACT_KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
 
 /**
- * A chat by its id; by its contact's key (only by the key: a name is never taken for one); by a unique prefix of its
- * id; or by its name: the label this side gave it first, and only when no label matches, the name the contact gave
- * itself (which the contact controls, so it never wins over a label).
+ * A chat by its id; by its contact's key (only by the key: a name is never taken for one); by the label this side gave
+ * it; and only when no label matches, by a unique prefix of its id or the name the contact gave itself. The contact
+ * controls both of those (a joiner's chat id is made from the inviter's code), so neither wins over a label, and a ref
+ * that fits one chat's prefix and another's name is refused.
  */
 export function findChat(links: readonly LinkView[], ref: string): LinkView {
   return chatBy(links, ref).link;
 }
 
-/** `findChat`, and whether only the name the contact gave itself (`theirName`) found the chat. */
+/** `findChat`, and whether only what the contact controls (`theirName`: a prefix of the id, its own name) found the chat. */
 function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; theirName: boolean } {
   const exact = links.find((link) => link.id === ref);
   if (exact) return { link: exact, theirName: false };
@@ -100,14 +101,12 @@ function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; thei
     if (byKey.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: byKey.map((link) => link.id) });
     throw new CliError("not_found", `No chat with ${JSON.stringify(ref)}`);
   }
-  const byPrefix = links.filter((link) => link.id.startsWith(ref));
-  if (byPrefix.length === 1) return { link: byPrefix[0], theirName: false };
   const lower = ref.toLowerCase();
   const named = (name: string | null | undefined) => name?.trim().toLowerCase() === lower;
   const byLabel = links.filter((link) => named(link.label));
-  const byName = byLabel.length ? byLabel : links.filter((link) => named(link.peerNick));
-  if (byName.length === 1) return { link: byName[0], theirName: !byLabel.length };
-  if (byPrefix.length > 1 || byName.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: [...byPrefix, ...byName].map((link) => link.id) });
+  const found = byLabel.length ? byLabel : [...new Set([...links.filter((link) => link.id.startsWith(ref)), ...links.filter((link) => named(link.peerNick))])];
+  if (found.length === 1) return { link: found[0], theirName: !byLabel.length };
+  if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one chat: use its id`, { matches: found.map((link) => link.id) });
   throw new CliError("not_found", `No chat ${JSON.stringify(ref)}`);
 }
 
@@ -115,25 +114,28 @@ function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; thei
 const invitedOnly = (group: GroupView) => group.status === undefined && !!group.invitation;
 
 /**
- * A group by its id, by a unique prefix of its id, or by its name. A group this profile is in wins over an invitation
- * with the same prefix or name (the one who invites chooses those); an invitation is still found by its id, and by
- * prefix or name where no group of this profile has it.
+ * A group by its id, by its name, or (only when no name matches) by a unique prefix of its id: whoever created a group
+ * chose its id, so a prefix never wins over a name. A group this profile is in wins over an invitation with the same
+ * name or prefix (the one who invites chooses those); an invitation is still found by its id, and by name or prefix
+ * where no group of this profile has it.
  */
 export function findGroup(groups: readonly GroupView[], ref: string): GroupView {
   const exact = groups.find((group) => group.id === ref);
   if (exact) return exact;
-  const mineFirst = (found: GroupView[]) => { const mine = found.filter((group) => !invitedOnly(group)); return mine.length ? mine : found; };
-  const byPrefix = mineFirst(groups.filter((group) => group.id.startsWith(ref)));
-  if (byPrefix.length === 1) return byPrefix[0];
-  const byName = mineFirst(groups.filter((group) => group.name.trim().toLowerCase() === ref.toLowerCase()));
-  if (byName.length === 1) return byName[0];
-  if (byPrefix.length > 1 || byName.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one group: use its id`, { matches: [...byPrefix, ...byName].map((group) => group.id) });
+  const lower = ref.toLowerCase();
+  for (const among of [groups.filter((group) => !invitedOnly(group)), groups.filter(invitedOnly)]) {
+    const byName = among.filter((group) => group.name.trim().toLowerCase() === lower);
+    const found = byName.length ? byName : among.filter((group) => group.id.startsWith(ref));
+    if (found.length === 1) return found[0];
+    if (found.length > 1) throw new CliError("bad_request", `${JSON.stringify(ref)} names more than one group: use its id`, { matches: found.map((group) => group.id) });
+  }
   throw new CliError("not_found", `No group ${JSON.stringify(ref)}`);
 }
 
 /**
  * A chat or a group, where a command takes either: `group:<id>` is a group; anything else a chat first (`findChat`),
- * then a group. A chat found only by the name its contact gave itself never takes what also names a group: a group's
+ * then a group. A chat found only by what its contact chose (a prefix of its id, its own name) never takes what also
+ * names a group: a group's
  * own id is that group, and a prefix or the name of a group this profile is in is refused, with both ids. With neither,
  * one `not_found` names both and where to look (a contact's key: no chat with it); a name that matches more than one
  * chat or group stays that error.
@@ -156,7 +158,7 @@ export function findChatOrGroup(links: readonly LinkView[], groups: readonly Gro
   if (exact) return { group: exact };
   const lower = ref.toLowerCase();
   const also = groups.filter((group) => !invitedOnly(group) && (group.id.startsWith(ref) || group.name.trim().toLowerCase() === lower));
-  if (also.length) throw new CliError("bad_request", `${JSON.stringify(ref)} names a chat (the name its contact chose) and a group: use the chat's id or group:<id>`, { chat: chat.link.id, groups: also.map((group) => group.id) });
+  if (also.length) throw new CliError("bad_request", `${JSON.stringify(ref)} names a chat (by what its contact chose) and a group: use the chat's id or group:<id>`, { chat: chat.link.id, groups: also.map((group) => group.id) });
   return { link: chat.link };
 }
 
