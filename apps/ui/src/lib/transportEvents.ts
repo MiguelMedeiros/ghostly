@@ -3,7 +3,7 @@ import type { LinkView } from "@ghostly/browser/shared/types";
 import type { TransportEntry, TransportEvent } from "@ghostly/browser/engine/transportLog";
 import { transportName } from "./connection";
 import { englishT, type Translate } from "../locales/translate";
-import { problemText } from "./problemText";
+import { problemLine, problemText } from "./problemText";
 
 export type { TransportEntry, TransportEvent };
 
@@ -31,10 +31,16 @@ function span(ms: number, tr: Translate): string {
   return minutes < 60 ? tr("connection.duration.minutes", { n: minutes }) : tr("connection.duration.hours", { n: Math.round(minutes / 60) });
 }
 
+/**
+ * Why a switch failed, when the engine knows: not its stand-in for none (engine/node.ts, transportLog.ts store "It did
+ * not connect" when the contact's side did not dial), which the app's own words say better.
+ */
+const switchReason = (reason?: string) => reason === "It did not connect" ? undefined : reason;
+
 /** "Couldn't switch to Iroh: it timed out": the head of a failed switch, with the engine's reason when there is one. */
 function couldNotSwitch(target: PairedTransport | undefined, reason: string | undefined, tr: Translate): string {
   const head = target ? tr("connection.line.failTo", { target: name(target) }) : tr("connection.line.failAny");
-  const short = reason ? shortReason(reason, tr) : "";
+  const known = switchReason(reason), short = known ? shortReason(known, tr) : "";
   return short ? tr("connection.line.withReason", { text: head, reason: short }) : head;
 }
 
@@ -119,7 +125,11 @@ function transportLineWhy(entry: TransportEntry, contact: string, format: (at: n
       if (entry.cause === "dropped") return tr("connection.why.dropped", { transport, from });
       if (entry.relayed) return tr("connection.why.autoRelayed", { transport, from });
       return tr("connection.why.auto", { transport, from });
-    case "failed": return join(entry.reason ?? tr("connection.why.failedDefault"), !!entry.transport && tr("connection.why.stayedOn", { transport }));
+    case "failed": {
+      // The reason and its next step in the app's language (lib/errorText.ts), never the engine's English as it came.
+      const reason = switchReason(entry.reason);
+      return join(reason ? problemLine(reason, tr, "connect") : tr("connection.why.failedDefault"), !!entry.transport && tr("connection.why.stayedOn", { transport }));
+    }
     case "lost":
       if (entry.fallback === "dht-only") return tr("connection.why.lostDhtOnly");
       if (entry.fallback === "dht") return tr("connection.why.lostDht", { from });
