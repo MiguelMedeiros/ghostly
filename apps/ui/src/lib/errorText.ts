@@ -52,6 +52,10 @@ const PARTS: Record<string, TranslationKey> = {
 };
 const readParts = (parts: string, t: Translate) => parts.split(", ").map((part) => (PARTS[part] ? t(PARTS[part]) : part)).join(", ");
 
+/** A transport as the engine names it ("iroh/1"), as people call it: a name, the same in every language. */
+const TRANSPORT_WORDS: Record<string, string> = { "webrtc/1": "WebRTC", "iroh/1": "Iroh", "hyperdht/1": "HyperDHT" };
+const transportWord = (transport: string) => TRANSPORT_WORDS[transport] ?? transport;
+
 /** A copy the app could not save where the person chose (Android's document picker, apps/desktop android.rs). */
 export const SAVE_REFUSED = /^(?:The file could not be saved there|Unreadable file path)$/;
 /**
@@ -138,7 +142,21 @@ const RULES: readonly Rule[] = [
   // A chat's dial (packages/core ghostlink.ts), the connection panel's line: no transport in common, or none that
   // connected, or a contact whose app cannot switch. The engine's sentence stays behind the ⓘ.
   { match: /^No transport both apps allow is available yet$/, key: "errors.transport.noneInCommon", next: "errors.transport.allowAnotherNext", detail: true },
-  { match: /^No permitted transport could connect$/, key: "errors.transport.noneConnected", next: "errors.transport.allowAnotherNext", detail: true },
+  { match: /^(?:No permitted transport could connect|no permitted transport connected)$/, key: "errors.transport.noneConnected", next: "errors.transport.allowAnotherNext", detail: true },
+  // A transport change that did not land (packages/core ghostlink.ts `prepareSwitch`, transportSwitch.ts): why, as the
+  // dial it tried said it, and the next step. lib/transportEvents.ts takes the switch's own words off for a short line.
+  { match: /^Transport change failed: (?<reason>[\s\S]+?)\.? Retry or choose another transport\.$/, key: "errors.transport.switchFailed", reason: "title" },
+  { match: /^(?<transport>webrtc\/1|iroh\/1|hyperdht\/1|WebRTC|Iroh|HyperDHT) did not connect in time$/, key: "errors.transport.switchSlow", next: "errors.transport.switchRetryNext", detail: true, params: ({ transport }) => ({ transport: transportWord(transport) }) },
+  { match: /^Transport change timed out(?:\. Your previous connection is kept when available; retry or choose another transport\.)?$/, key: "errors.transport.switchTimedOut", next: "errors.transport.switchRetryNext", detail: true },
+  exact("Transport change cancelled", "errors.transport.switchCancelled"),
+  { ...exact("Transport preferences do not overlap. Enable fallback or choose the same supported transport on both sides.", "errors.transport.noOverlap", "errors.transport.noOverlapNext"), detail: true },
+  { match: /^Peer native address unavailable(?:; reconnect WebRTC once to exchange endpoints)?$/, key: "errors.transport.noAddress", next: "errors.transport.noAddressNext", detail: true },
+  // A native dial that failed (native/transports/hyperdht/endpoint.mjs, apps/desktop paired_transport.rs).
+  { match: /^Native connection limit reached$/, key: "errors.transport.slotsFull", next: "errors.transport.slotsFullNext", detail: true },
+  { match: /^HyperDHT handshake timed out$/, key: "errors.transport.handshakeTimedOut", detail: true },
+  { match: /^Noise handshake failed$/, key: "errors.transport.handshakeFailed", detail: true },
+  // What the engine stores when a switch failed with no reason (engine/node.ts, transportLog.ts).
+  exact("It did not connect", "errors.transport.didNotConnect"),
   { match: /^The peer closed this connection\. Check that both transport preferences allow a common transport, then reconnect\.$/, key: "errors.transport.peerClosed", next: "errors.transport.peerClosedNext", detail: true },
   { match: /^Your contact needs an updated app to negotiate a transport change\.$/, key: "errors.transport.cannotSwitch", next: "errors.transport.cannotSwitchNext", detail: true },
   // Why a chat cannot call right now (packages/core ghostlink.ts `callsUnavailable`): the title of its call buttons.
