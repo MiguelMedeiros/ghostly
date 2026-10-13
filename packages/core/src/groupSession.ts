@@ -116,7 +116,12 @@ export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: st
  * of this version (WISP 405 · Status Cards); with one, `v` may go up to `STATUS_CARD_LIMITS.edits`.
  */
 export interface GroupEditFrame { t: "group-edit"; g: string; e: number; s: string; n: number; v: number; ts: number; nn: string; c: string; sig: string }
-export interface GroupCommitFrame { t: "group-commit"; g: string; commit: GroupCommit; secret?: SealedSecret }
+/**
+ * `left`: on a `remove` commit made on the member's own leave (its `group-leave`, its signed `group-bye`, or its leave
+ * on the admin's chat), the committer's signature over `leftSigned` (WISP 902 § Leaving): only the admin knows the
+ * removal was asked for, and a hub cannot add the mark to one it was not. Apps from before leave it out and drop it.
+ */
+export interface GroupCommitFrame { t: "group-commit"; g: string; commit: GroupCommit; secret?: SealedSecret; left?: string }
 /**
  * `mt`: which metadata statement I hold (`groupMetaTag`); apps without metadata leave it out. `miss`: sequence numbers
  * below the highest in `have` that never arrived, per sender and epoch. `ask`: members whose messages I want the
@@ -178,6 +183,8 @@ export interface GroupState {
    * (`resealBehind`): I may have been behind on the chain without knowing. Absent in older states.
    */
   alone?: string[];
+  /** Epoch → the admin's mark (`GroupCommitFrame.left`) on the commit of that epoch that took out a member who left. Absent in older states. */
+  leftMarks?: Record<string, string>;
 }
 
 /**
@@ -285,6 +292,7 @@ export interface GroupReactedFrame extends WireReaction { t: typeof GROUP_REACTE
 const pinSigned = (g: string, p: WirePin) => utf8Encode(JSON.stringify(["ghostly-group/1 pin", g, p.id, p.n]));
 export interface GroupPinFrame extends WirePin { t: typeof GROUP_PIN_FRAME; g: string; k: string; sig: string }
 const byeSigned = (f: Omit<GroupByeFrame, "sig" | "t">) => utf8Encode(JSON.stringify(["ghostly-group/1 bye", f.g, f.k, f.e, f.ts]));
+const leftSigned = (commit: GroupCommit) => utf8Encode(JSON.stringify(["ghostly-group/1 left", commit.g, commit.e, commitHash(commit)]));
 const editSigned = (f: Omit<GroupEditFrame, "sig" | "t">) => utf8Encode(JSON.stringify(["ghostly-group/1 edit", f.g, f.e, f.s, f.n, f.v, f.ts, f.nn, f.c]));
 function isEditFrame(v: unknown): v is GroupEditFrame {
   if (!v || typeof v !== "object") return false;
@@ -655,11 +663,12 @@ export class GroupSession {
     });
   }
 
-  remove(memberKey: string, now = Date.now()): Promise<void> {
+  /** `left`: the member asked to leave (on the admin's chat), and the commit says so (`GroupCommitFrame.left`). */
+  remove(memberKey: string, now = Date.now(), { left = false } = {}): Promise<void> {
     return this.serialize(async () => {
       this.requireAdmin();
       if (!rosterHas(this.roster, memberKey) || memberKey === this.myKey) throw new Error("Not a member");
-      await this.commit("remove", memberKey, now);
+      await this.commit("remove", memberKey, now, left);
     });
   }
 
@@ -676,7 +685,7 @@ export class GroupSession {
     return this.serialize(async () => { this.requireAdmin(); await this.commit("rotate", undefined, now); });
   }
 
-  private async commit(kind: CommitKind, subject: string | undefined, now: number): Promise<{ secret: Uint8Array }> {
+  private async commit(kind: CommitKind, subject: string | undefined, now: number, left = false): Promise<{ secret: Uint8Array }> {
     if (this.hooks.adminWork?.() === false) throw new Error(GROUP_ADMIN_OFF_ERROR);
     if (this.hooks.adminTurn && !(await this.hooks.adminTurn())) throw engineError("groupTurnUnconfirmed");
     if (this.state.chain.length >= MAX_GROUP_CHAIN) throw new Error("This group has reached its membership history limit. Create a new group.");
@@ -687,6 +696,8 @@ export class GroupSession {
     const secret = newEpochSecret();
     const draft: Omit<GroupCommit, "sig" | "c"> = { v: 1, g: this.id, e: epoch, p: commitHash(previous), k: kind, m: roster, by: this.myKey, ...(subject ? { s: subject } : {}), ts: now };
     const commit = signCommit({ ...draft, c: confirmationTag(epochKeys(secret, this.id, epoch).confirm, commitUntaggedHash(draft)) }, this.identity.seed);
+    const mark = left && kind === "remove" ? toBase64Url(sign(leftSigned(commit), this.identity.seed)) : undefined;
+    if (mark) (this.state.leftMarks ??= {})[epoch] = mark;
     this.state.chain.push(commit);
     this.chainMovedAt = this.clock();
     this.state.secrets[epoch] = toBase64Url(secret);
@@ -698,7 +709,7 @@ export class GroupSession {
     for (const [key] of previous.m) {
       if (key === this.myKey) continue;
       const member = rosterHas(roster, key);
-      this.hooks.send(key, { t: "group-commit", g: this.id, commit, ...(member ? { secret: sealSecret(key, secret, secretAad(this.id, epoch, key)) } : {}) });
+      this.hooks.send(key, { t: "group-commit", g: this.id, commit, ...(member ? { secret: sealSecret(key, secret, secretAad(this.id, epoch, key)) } : {}), ...(mark ? { left: mark } : {}) });
     }
     this.hooks.changed();
     return { secret };
@@ -1024,7 +1035,7 @@ export class GroupSession {
           case "group-secrets": await this.receiveSecrets(raw as GroupSecretsFrame); break;
           case "group-meta": await this.receiveMeta(from, raw); break;
           case "group-bye": await this.receiveBye(from, raw); break;
-          case "group-leave": if (this.isAdmin && this.hooks.adminWork?.() !== false && rosterHas(this.roster, from) && from !== this.myKey) await this.commitUnlessTurnUnconfirmed("remove", from); break;
+          case "group-leave": if (this.isAdmin && this.hooks.adminWork?.() !== false && rosterHas(this.roster, from) && from !== this.myKey) await this.commitUnlessTurnUnconfirmed("remove", from, true); break;
         }
         // Removed, the last thing a hub passes on is the commit that says so: it may be the only way the others hear it.
         return this.state.status === "active" ? this.passOn : this.state.status === "removed" ? this.passOn.filter(f => f.t === "group-commit") : [];
@@ -1087,7 +1098,7 @@ export class GroupSession {
     // Signed before the member was last admitted: a leave from before it came back, which anyone who passed it on kept.
     if (bye.e < this.admittedAt(bye.k)) return;
     // An admin whose admin work is off on this device passes the leave on, as a member does: it commits nothing.
-    if (this.isAdmin && this.hooks.adminWork?.() !== false && (await this.commitUnlessTurnUnconfirmed("remove", bye.k))) return;
+    if (this.isAdmin && this.hooks.adminWork?.() !== false && (await this.commitUnlessTurnUnconfirmed("remove", bye.k, true))) return;
     // Passed on the first time only, so it does not go round the hubs while the admin is away; again only from its
     // member, who says it on every edge to a hub that opens until the admin hears it.
     if (from !== bye.k && this.byesPassed.get(bye.k)?.sig === bye.sig) return;
@@ -1119,8 +1130,8 @@ export class GroupSession {
    * An automatic commit (a member's leave): made, or not made when no fresh turn read says this device is the active
    * one (`adminTurn`). Then false, and the caller goes on as a member would. Any other refusal is thrown as before.
    */
-  private async commitUnlessTurnUnconfirmed(kind: CommitKind, subject: string): Promise<boolean> {
-    try { await this.commit(kind, subject, Date.now()); return true; }
+  private async commitUnlessTurnUnconfirmed(kind: CommitKind, subject: string, left = false): Promise<boolean> {
+    try { await this.commit(kind, subject, Date.now(), left); return true; }
     catch (error) { if (error instanceof EngineError && error.engineCode === "groupTurnUnconfirmed") return false; throw error; }
   }
 
@@ -1328,6 +1339,8 @@ export class GroupSession {
       // Evidence of a fork must come from whoever signed my commit for that epoch; at epoch 0 anyone can sign a genesis.
       if ("error" in result || result.commit.by !== known.by) return;
       if (commitHash(result.commit) !== commitHash(known)) await this.fork(`Member ${from.slice(0, 8)} holds a different membership history for epoch ${e}`);
+      // Heard first from an app that leaves the mark out: taken now.
+      else if (this.takeLeftMark(known, frame.left)) await this.persist();
       return;
     }
     if (e > this.epoch + 1) {
@@ -1343,12 +1356,21 @@ export class GroupSession {
       if (result.error.startsWith("Commit does not follow") && verifyCommitSignature(raw)?.by === this.admin) await this.fork(`Member ${from.slice(0, 8)} holds a different membership history for epoch ${e}`);
       return;
     }
+    const mark = this.takeLeftMark(result.commit, frame.left) ? frame.left : undefined;
     await this.apply(result.commit, frame.secret);
-    this.took({ t: "group-commit", g: this.id, commit: result.commit });
+    this.took({ t: "group-commit", g: this.id, commit: result.commit, ...(mark ? { left: mark } : {}) });
     // Handed on by a hub, the commit carries no secret sealed for me: whoever handed it on holds it, and seals it to me.
     if (this.state.status === "active" && !this.state.secrets[this.epoch]) this.ask(from);
     const next = this.pendingCommits.get(this.epoch + 1);
     if (next) { this.pendingCommits.delete(this.epoch + 1); await this.receiveCommit(from, next); }
+  }
+
+  /** Keeps the admin's mark on a commit that took out a member who left (`GroupCommitFrame.left`) when it holds; true when new. */
+  private takeLeftMark(commit: GroupCommit, mark: unknown): mark is string {
+    if (commit.k !== "remove" || typeof mark !== "string" || mark.length !== 86 || !B64.test(mark) || this.state.leftMarks?.[commit.e]) return false;
+    try { if (!verify(fromBase64Url(mark), leftSigned(commit), publicKeyFromZ32(commit.by))) return false; } catch { return false; }
+    (this.state.leftMarks ??= {})[commit.e] = mark;
+    return true;
   }
 
   private async apply(commit: GroupCommit, sealed?: SealedSecret): Promise<void> {
@@ -1419,7 +1441,8 @@ export class GroupSession {
     // Commits they lack, each with its secret sealed for them when they were in that roster and I still hold it.
     for (let e = frame.e + 1; e <= this.epoch; e++) {
       const commit = this.state.chain[e], secret = this.secret(e);
-      answer.push({ t: "group-commit", g: this.id, commit, ...(secret && rosterHas(commit.m, from) ? { secret: sealSecret(from, secret, secretAad(this.id, e, from)) } : {}) });
+      const left = this.state.leftMarks?.[e];
+      answer.push({ t: "group-commit", g: this.id, commit, ...(secret && rosterHas(commit.m, from) ? { secret: sealSecret(from, secret, secretAad(this.id, e, from)) } : {}), ...(left ? { left } : {}) });
     }
     // Secrets of epochs they were in but do not hold, sixteen to a frame (what apps from before revision 0.9 take).
     const theirs = new Set(Array.isArray(frame.secrets) ? frame.secrets.filter(n => Number.isSafeInteger(n)) : []);

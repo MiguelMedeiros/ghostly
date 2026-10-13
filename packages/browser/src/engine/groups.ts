@@ -1604,7 +1604,7 @@ export class Groups {
         const member = Object.entries(group?.contacts ?? {}).find(([, id]) => id === linkId)?.[0];
         if (!session?.isAdmin || !member || member === session.myKey) return;
         // Its edge may have carried the same leave a moment ago: removed once is enough.
-        if (rosterHas(session.roster, member)) await session.remove(member).catch(() => {});
+        if (rosterHas(session.roster, member)) await session.remove(member, Date.now(), { left: true }).catch(() => {});
         try { this.host.sendOnLink(linkId, { t: "group-removed", g }); } catch { /* the commit reaches it on the edge */ }
         return;
       }
