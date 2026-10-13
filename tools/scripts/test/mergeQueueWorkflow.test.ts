@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { missedWakes } from "../merge-train.mjs";
 
 /**
  * Which events wake the merge train: merge-queue.yml's `bases` job condition, evaluated for each. A green batch lands
@@ -51,5 +52,30 @@ describe("merge-queue.yml wakes the train", () => {
     expect(wakes({ event_name: "pull_request_target", event: { label: { name: "kind:bug" } } })).toBe(false);
     expect(wakes({ event_name: "pull_request_target", event: { label: { name: "queued" } } })).toBe(false);
     expect(wakes(ci("success", "push"))).toBe(false);
+  });
+});
+
+// GitHub cancels the run waiting in a concurrency group when a newer one joins it. On the whole workflow, every run
+// joined: one whose jobs were all skipped (the train's own `queue:conflict`, a push's CI, its own landing pushes)
+// replaced a batch's CI-end wake, and the train waited for the schedule.
+describe("merge-queue.yml waits in line", () => {
+  const job = (name: string) => text.match(new RegExp(`^ {2}${name}:\n((?: {4}.*\n|\n)+)`, "m"))?.[1] ?? "";
+
+  it("only for runs that pass the bases job's condition: the group is that job's, not the workflow's", () => {
+    expect(text).not.toMatch(/^concurrency:/m);
+    expect(job("bases")).toMatch(/^ {4}concurrency:\n {6}group: merge-queue-bases\n {6}cancel-in-progress: false$/m);
+  });
+
+  it("and a run woken by CI is named after its head, so the run that replaced it serves it", () => {
+    const expr = (text.match(/^run-name: >-\n((?: {2}.+\n)+)/m)?.[1] ?? "").replace(/\s+/g, " ").trim().replace(/^\$\{\{(.*)\}\}$/, "$1");
+    const name = (github: object) =>
+      new Function("github", "format", `return (${expr.replace(/!=|==/g, (m) => `${m}=`)});`)(github, (f: string, ...v: string[]) => f.replace(/\{(\d)\}/g, (_, i) => v[Number(i)]));
+    const sha = "f".repeat(40);
+    expect(name({ event_name: "workflow_run", event: { workflow_run: { head_sha: sha } } })).toBe(`Merge queue: CI ended on ${sha}`);
+    expect(missedWakes([{ id: 2, conclusion: null }, { id: 1, conclusion: "cancelled", display_title: name({ event_name: "workflow_run", event: { workflow_run: { head_sha: sha } } }) }], 2)).toEqual([sha]);
+    expect(name({ event_name: "pull_request_target", event: { pull_request: { title: "fix: x" } } })).toBe("fix: x");
+    expect(name({ event_name: "push", ref_name: "dev", event: {} })).toBe("Merge queue: push to dev");
+    expect(name({ event_name: "schedule", event: {} })).toBe("Merge queue");
+    expect(text).toMatch(/--list-bases --woken "\$WOKEN" --run-id "\$RUN_ID"/);
   });
 });

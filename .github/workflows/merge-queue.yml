@@ -1,4 +1,10 @@
 name: Merge queue
+# A run woken by CI carries that run's head in its name: a run that replaced it in the `bases` group serves it too
+# (missedWakes in the script).
+run-name: >-
+  ${{ github.event_name == 'workflow_run' && format('Merge queue: CI ended on {0}', github.event.workflow_run.head_sha) ||
+  github.event_name == 'pull_request_target' && github.event.pull_request.title ||
+  github.event_name == 'push' && format('Merge queue: push to {0}', github.ref_name) || 'Merge queue' }}
 
 # Runs the merge train (tools/scripts/merge-train.mjs): pull requests labelled `queue` land on their base (dev or an
 # epic/* branch) in batches of up to 12, in the order they were queued (`queue:priority` first). Each run moves every
@@ -38,13 +44,6 @@ on:
 
 permissions: {}
 
-# One tick at a time and one waiting: every CI run that ends and every label added starts a tick, and with many pull
-# requests open their first job alone filled the runners (2026-10-13: 47 ticks queued ahead of the batches' CI). A newer
-# tick replaces the waiting one; the one running is never cancelled, so a batch in flight is not cut.
-concurrency:
-  group: merge-queue-ticks
-  cancel-in-progress: false
-
 jobs:
   bases:
     name: Bases with a train
@@ -61,9 +60,18 @@ jobs:
       (github.event_name != 'pull_request_target' || github.event.label.name == 'queue' ||
       github.event.label.name == 'queue:priority') &&
       (github.event_name != 'push' || github.event.sender.type != 'Bot')
+    # One at a time and one waiting: every CI run that ends and every label added starts a run, and with many pull
+    # requests open this job alone filled the runners (2026-10-13: 47 queued ahead of the batches' CI). A newer one
+    # replaces the waiting one, and the one running is never cancelled. The group is the job's, not the workflow's: a run
+    # whose `if` above fails never joins it, so it replaces nothing (the train's own labels and pushes, CI on a push).
+    # The one that replaced a waiting one lists that one's bases too (`List the bases`), so no wake is lost.
+    concurrency:
+      group: merge-queue-bases
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
+      actions: read
       contents: read
       pull-requests: read
     outputs:
@@ -103,12 +111,15 @@ jobs:
           # only the bases where this commit is the head of a queued pull request or of a batch are listed, and with
           # none the train job is skipped. A head pushed after `queue` waits for its own CI run, or the schedule.
           WOKEN: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || '' }}
+          # This run, among the workflow's runs: the ones that waited in the group and were replaced since the last
+          # one that ran are served here too, the heads their names carry (every base for one not woken by CI).
+          RUN_ID: ${{ github.run_id }}
         # The assignment on its own line, so a failing --list-bases fails this step (inside `echo` it would not).
         run: |
           if [[ -n "$BASE" ]]; then
             bases=$(jq -cn --arg b "$BASE" '[$b]')
           elif [[ -n "$WOKEN" ]]; then
-            bases=$(node tools/scripts/merge-train.mjs --list-bases --woken "$WOKEN")
+            bases=$(node tools/scripts/merge-train.mjs --list-bases --woken "$WOKEN" --run-id "$RUN_ID")
           else
             bases=$(node tools/scripts/merge-train.mjs --list-bases)
           fi
