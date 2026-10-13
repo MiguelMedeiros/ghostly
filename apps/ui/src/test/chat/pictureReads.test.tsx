@@ -115,10 +115,10 @@ describe("a chat's pictures are read as they come on screen, a few at a time, on
     expect(screen.getAllByRole("img").map((img) => img.getAttribute("src"))).toEqual(shown);
   });
 
-  it("a picture is read 200 px before it scrolls into the chat list's view, not only once it shows", () => {
+  it("a picture is read 400 px before it scrolls into the chat list's view, more than a fast wheel notch moves it", () => {
     renderApp(<div data-testid="list" data-message-list>{pictures(2).map((file) => <FileBubble key={file.id} file={file} peerName="Ana" />)}</div>);
     // Measured against the window, the margin would stop at the list's edge: the list scrolls inside it.
     expect(inits).toHaveLength(2);
-    for (const init of inits) expect(init).toMatchObject({ root: screen.getByTestId("list"), rootMargin: "200px 0px" });
+    for (const init of inits) expect(init).toMatchObject({ root: screen.getByTestId("list"), rootMargin: "400px 0px" });
   });
 });
