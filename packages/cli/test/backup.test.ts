@@ -140,6 +140,20 @@ it("a file that is no backup is called that at once, whatever the passphrase, an
   }
 });
 
+// A folder to restore was refused with Node's "EISDIR: illegal operation on a directory, read", and a backup into a
+// folder that does not exist named a file the person never typed (`x.backup.partial-<pid>`).
+it("a path that is wrong on this machine is named as the person typed it: a folder to restore, a missing folder to back up into", async () => {
+  const dir = home("backup-paths");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Bot"]));
+  const folder = join(dir, "a-folder");
+  mkdirSync(folder);
+  expect(error(await ghostly(["--home", dir, "profile", "restore", folder, "copy"], { env: NO_PASS }), "bad_request", 1).message).toBe(`${folder} is a folder: name a file`);
+  const missing = join(dir, "nodir");
+  const message = error(await ghostly(["--home", dir, "profile", "backup", "--out", join(missing, "x.ghostly-backup"), "--no-passphrase"], { env: NO_PASS }), "not_found", 3).message;
+  expect(message).toBe(`No such file or folder: ${missing}`);
+  expect(existsSync(missing)).toBe(false);
+});
+
 // The folder took the profile's name before anything was in it: a restore stopped half way (Ctrl-C, a kill) left a
 // profile that was listed and opened, with the keys of the original and a file cut short.
 it("a restore stopped while it writes leaves no profile, and the next one is whole", { timeout: 120_000 }, async () => {

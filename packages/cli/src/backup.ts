@@ -68,6 +68,9 @@ export const BACKUP_METHODS: Record<string, Method> = {
     const passphrase = str(params, "passphrase"), unsealed = bool(params, "noPassphrase");
     if (!passphrase && !unsealed) throw new CliError("bad_request", "passphrase is required (or noPassphrase: true for a backup anyone can read)");
     if (passphrase && unsealed) throw new CliError("bad_request", "Give a passphrase or noPassphrase, not both");
+    // The folder it goes in, checked first: a missing one is named, not the file written beside `path`.
+    const folder = dirname(path);
+    if (!(await stat(folder)).isDirectory()) throw new CliError("not_found", `No such file or folder: ${folder}`);
     const paths = ctx.runtime.paths;
     // The store as one snapshot with every value in it (the messages too, which the profile keeps in rows.db): a backup
     // any ghostly restores, this one or an older one.
@@ -120,10 +123,12 @@ async function openFile(path: string): Promise<FileHandle> {
   }
 }
 
-/** A file on disk as a backup's source: read in ranges, never whole. */
+/** A file on disk as a backup's source: read in ranges, never whole. A folder opens, and is refused as one here. */
 async function fileSource(path: string): Promise<BackupSource & { close(): Promise<void> }> {
   const handle = await open(path, "r");
-  const { size } = await handle.stat();
+  const found = await handle.stat();
+  if (found.isDirectory()) { await handle.close(); throw new CliError("bad_request", `${path} is a folder: name a file`); }
+  const { size } = found;
   return {
     size,
     read: async (offset, length) => {
