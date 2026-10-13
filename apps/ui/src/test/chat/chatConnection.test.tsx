@@ -189,6 +189,12 @@ describe("ChatConnection: what the header says", () => {
     expect(within(hyperdht!).getByTestId("connection-transport-error-title")).toHaveTextContent("HyperDHT: Relay HyperDHT inacessível");
     expect(within(iroh!).getByTestId("connection-transport-error-title")).toHaveTextContent("Iroh: Todas as conexões nativas em uso");
     expect(within(iroh!).getByTestId("connection-transport-error-next")).toHaveTextContent("Desconecte a conexão nativa de outra conversa, ou espere uma ficar ociosa.");
+    // The option says the same few words: its tooltip, its description and its second line on a phone.
+    const option = screen.getByRole("radio", { name: "Iroh" });
+    expect(option).toHaveAttribute("title", "Iroh: Todas as conexões nativas em uso");
+    expect(option).toHaveAttribute("aria-description", "Todas as conexões nativas em uso");
+    expect(option).toHaveTextContent("Todas as conexões nativas em uso");
+    expect(screen.getByRole("radio", { name: "HyperDHT" })).toHaveAttribute("title", "HyperDHT: Relay HyperDHT inacessível");
   });
 
   it.each<[string, Partial<LinkView>, string]>([
