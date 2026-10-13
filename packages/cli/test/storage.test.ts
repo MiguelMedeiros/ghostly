@@ -1,4 +1,4 @@
-import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deserialize, serialize } from "node:v8";
@@ -946,6 +946,22 @@ describe("messages kept in rows.db", () => {
     await store.compact();
     expect(await entryCount(dir, "byLink")).toBe(0);
     expect(await entryCount(dir)).toBe(1);
+  });
+
+  it("a chat's deleted messages leave no copy of their text in the profile's files after the fold", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    const d = await db(store.factory);
+    const secret = (i: number) => ({ ...message(i), text: `deleted-secret-${i} `.repeat(20) });
+    for (let i = 0; i < 12; i++) await tx(d, ["messages"], (s) => { s.messages.put(i % 3 === 1 ? secret(i) : message(i)); });
+    await store.compact();
+    // `chat remove`: the chat's key range; `message delete`: one key (here chat-1's, as db.deleteLink deletes them).
+    await tx(d, ["messages"], (s) => { s.messages.delete(IDBKeyRange.bound(["chat-1"], ["chat-1", []])); });
+    d.close();
+    await store.compact();
+    await store.close();
+    expect(await entryCount(dir)).toBe(8);
+    for (const name of readdirSync(dir)) expect(readFileSync(join(dir, name)).includes("deleted-secret"), name).toBe(false);
   });
 
   it("an index added by an upgrade to a store that holds messages is built in rows.db, and kept across a restart", async () => {
