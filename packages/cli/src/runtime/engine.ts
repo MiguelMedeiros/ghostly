@@ -177,8 +177,11 @@ function irohWasmBytes(): Buffer {
   return readFileSync(createRequire(import.meta.url).resolve("@ghostly/iroh-web/wasm"));
 }
 
-/** How a runtime starts: `deferGroups` leaves the groups' sessions unstarted (a one-shot for one chat). */
-export interface RuntimeOptions { deferGroups?: boolean }
+/**
+ * How a runtime starts: `deferGroups` leaves the groups' sessions unstarted (a one-shot for one chat); `offline` starts
+ * no chat or group and publishes nothing (a one-shot that only reads).
+ */
+export interface RuntimeOptions { deferGroups?: boolean; offline?: boolean }
 
 /**
  * Starts the app's engine on this profile (WISP 1100 § Runtime): IndexedDB on disk, WebRTC through libdatachannel,
@@ -277,6 +280,7 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     callsSupport: callsUnavailable === null,
     ...(callsUnavailable ? { callsUnavailable } : {}),
     ...(options.deferGroups ? { deferGroups: true } : {}),
+    ...(options.offline ? { offline: true } : {}),
     // Tests only: group links as an app from before native ones (test/groupCompat.test.ts).
     ...(process.env.GHOSTLY_TEST_WEBRTC_GROUP_LINKS === "1" ? { webrtcGroupLinks: true } : {}),
   });
