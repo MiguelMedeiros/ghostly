@@ -1,6 +1,7 @@
 import type { BrowserContext, Route } from "@playwright/test";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { decodeTxtPacket } from "../../packages/core/src/dns";
 
 /**
  * A Pkarr relay that lives in the test process. Peers on the web have every
@@ -50,6 +51,14 @@ export class LocalRelay {
       await new Promise<void>((resolve) => this.server!.listen(port, "127.0.0.1", resolve));
     }
     return `http://127.0.0.1:${(this.server.address() as AddressInfo).port}`;
+  }
+
+  /** The labels of the records the newest packet of `key` holds (`_dm`, `_msgs`, …), none for a key never put. */
+  labels(key: string): string[] {
+    const packet = this.packets.get(key);
+    if (!packet) return [];
+    const suffix = `.${key}`;
+    return decodeTxtPacket(packet.subarray(72)).map(({ name }) => (name.endsWith(suffix) ? name.slice(0, -suffix.length) : name));
   }
 
   close(): void {

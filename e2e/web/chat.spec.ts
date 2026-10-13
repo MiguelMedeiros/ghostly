@@ -36,6 +36,11 @@ test("two people chat: relay discovery, then peer-to-peer messages", { tag: ["@f
     peer.page.getByTestId("datalink-state").filter({ hasText: "Peer to peer" })
       .or(peer.page.locator("[data-testid=connection-options][aria-label*=\"Connected · WebRTC\"]")),
   ).toBeVisible();
+  // A side's first envelope in the invite's DHT mailbox can go before the other is pinned, sealed with the invite key
+  // only (`_dm`, no `_dmk`); 4 s on it is sealed again, link up or not (DhtDelivery's reseal). That write is no
+  // message's: it goes before the count starts. Each relay gets each packet, so one write is already 2 puts.
+  const unsealed = () => [...relay.packets.keys()].filter((key) => { const labels = relay.labels(key); return labels.includes("_dm") && !labels.includes("_dmk"); });
+  await expect.poll(unsealed, { message: "every DHT mailbox sealed to its contact", timeout: 15_000 }).toEqual([]);
   const relayed = relay.puts;
   await say(bob, "boo over WebRTC");
   await expect(chat(alice).getByText("boo over WebRTC")).toBeVisible({ timeout: 10_000 });
