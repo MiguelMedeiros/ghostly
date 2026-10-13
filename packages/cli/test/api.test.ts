@@ -392,6 +392,70 @@ describe("invite create", () => {
   });
 });
 
+describe("the chat on screen of a daemon", () => {
+  /** A daemon whose invites are `inv1`, `inv2`…, and `join` the chats it joins; `pair` pairs one, `drop` deletes one. */
+  function daemon() {
+    let links: LinkView[] = [];
+    const listeners = new Set<(s: EngineState) => void>();
+    const stateOf = () => ({ links, groups: [] }) as unknown as EngineState;
+    const push = () => { for (const l of [...listeners]) l(stateOf()); };
+    let n = 0;
+    const node = {
+      getState: stateOf, setActiveLink: vi.fn(), renameLink: vi.fn(),
+      createLink: vi.fn(async () => { const linkId = `inv${++n}`; links = [...links, link(linkId, { pairingProgress: { stage: "waiting" } } as Partial<LinkView>)]; return { linkId, inviteCode: "ghostly1" + linkId }; }),
+      joinLink: vi.fn(async () => { links = [...links, link("join")]; return { linkId: "join" }; }),
+    };
+    const ctx = {
+      runtime: { server: { node }, paths: { name: "default" } },
+      hub: { onEvent: () => () => {}, onState: (l: (s: EngineState) => void) => { listeners.add(l); return () => listeners.delete(l); }, lastSeq: 0, replay: () => [] },
+      mode: "daemon", version: "test",
+    } as unknown as ApiContext;
+    return {
+      ctx, node, listeners,
+      pair: (id: string) => { links = links.map((l) => l.id === id ? { ...l, peerParticipationKey: "peer-" + id } : l); push(); },
+      drop: (id: string) => { links = links.filter((l) => l.id !== id); push(); },
+      shown: () => node.setActiveLink.mock.calls.map(([p]) => p.linkId),
+    };
+  }
+
+  it("an invite is the chat on screen until it is paired, then none is: an away contact is read at the background pace", async () => {
+    const d = daemon();
+    await callApi(d.ctx, "invite.create", {});
+    expect(d.shown()).toEqual(["inv1"]);
+    d.pair("inv1");
+    expect(d.shown()).toEqual(["inv1", null]);
+    // Nothing more to watch, and later states change nothing.
+    expect(d.listeners.size).toBe(0);
+    d.pair("inv1");
+    expect(d.shown()).toEqual(["inv1", null]);
+
+    // The joiner's side the same, and a chat deleted before it paired too; a state from before the chat was made, not.
+    await callApi(d.ctx, "invite.join", { invite: "ghostly1abc" });
+    d.pair("join");
+    await callApi(d.ctx, "invite.create", {});
+    for (const l of [...d.listeners]) l({ links: [], groups: [] } as unknown as EngineState);
+    expect(d.shown()).toEqual(["inv1", null, "join", null, "inv2"]);
+    d.pair("inv1");
+    d.drop("inv2");
+    expect(d.shown()).toEqual(["inv1", null, "join", null, "inv2", null]);
+    expect(d.listeners.size).toBe(0);
+  });
+
+  it("a newer invite keeps the mark when an older one pairs, and a chat someone chose stays on screen", async () => {
+    const d = daemon();
+    await callApi(d.ctx, "invite.create", {});
+    await callApi(d.ctx, "invite.create", {});
+    d.pair("inv1");
+    expect(d.shown()).toEqual(["inv1", "inv2"]);
+    expect(d.listeners.size).toBe(1);
+
+    await callApi(d.ctx, "engine.call", { method: "setActiveLink", params: { linkId: "inv2" } });
+    d.pair("inv2");
+    expect(d.shown()).toEqual(["inv1", "inv2", "inv2"]);
+    expect(d.listeners.size).toBe(0);
+  });
+});
+
 describe("the engine passthrough", () => {
   it("reaches only the app's calls", async () => {
     const { ctx, node } = fake();
