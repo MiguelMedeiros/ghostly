@@ -563,6 +563,11 @@ export interface NodeOptions {
    */
   deferGroups?: boolean;
   /**
+   * This run stays off the network whatever the `online` setting says: no chat or group starts, nothing is published
+   * or read. A headless one-shot that only reads the store (`ghostly status`, `chat list`). Default: off.
+   */
+  offline?: boolean;
+  /**
    * Posts a wake-up to a contact's push service (WISP 401 § Wake-up push) and answers its HTTP status. Default:
    * `fetch` from here, and when that is refused (a browser page: push services answer without CORS) the push
    * relay in the settings. Ghostly Desktop posts from Rust; the CLI's `fetch` has no CORS to refuse it.
@@ -666,7 +671,7 @@ export class GhostlyNode implements EngineImplementation {
    * Whether this engine may use the network for the profile: the person's own switch, and never in limited mode.
    * Everything that publishes, dials, polls or settles asks this, not the stored setting.
    */
-  private get networkOn(): boolean { return !!this.settings.online && !this.limitedMode; }
+  private get networkOn(): boolean { return !!this.settings.online && !this.limitedMode && !this.options.offline; }
   private readonly transport: PkarrTransport;
   /** The same, for groups' requests: a relay budget keeps a chat's share from them (`CHAT_RESERVE`). */
   private readonly groupTransport: PkarrTransport;
