@@ -40,9 +40,6 @@ struct Route {
     events: Channel<Value>,
     ready: Option<Reply>,
     pending: Option<Reply>,
-    /// Sends the runtime has not answered yet, by the number each went with.
-    sends: HashMap<u64, Reply>,
-    sent: u64,
     sockets: Vec<u64>,
 }
 type Routes = Arc<Mutex<HashMap<u64, Route>>>;
@@ -53,9 +50,6 @@ impl Route {
         }
         if let Some(reply) = self.pending {
             let _ = reply.send(Err(format!("{error} during connection")));
-        }
-        for (_, reply) in self.sends {
-            let _ = reply.send(Err(error.to_string()));
         }
         for socket in self.sockets {
             let _ = self.events.send(json!({"type":"closed", "id":socket}));
@@ -222,11 +216,15 @@ async fn read(output: ChildStdout, routes: Routes, peers: Peers) {
                         let _ = reply.send(Ok(value["id"].clone()));
                     }
                 }
+                // The page counts a frame against its send budget until it hears this.
                 Some("sent") => {
-                    if let Some(reply) = value["seq"].as_u64().and_then(|n| route.sends.remove(&n))
-                    {
-                        let _ = reply.send(Ok(Value::Null));
-                    }
+                    let sent = json!({"type":"sent", "id":value["id"], "seq":value["seq"]});
+                    gone = route.events.send(sent).is_err();
+                }
+                // A frame that could not go is never lost unseen: the page closes its channel.
+                Some("error") if value["command"] == "send" => {
+                    let unsent = json!({"type":"unsent", "id":value["id"], "seq":value["seq"]});
+                    gone = route.events.send(unsent).is_err();
                 }
                 Some("error") => {
                     let error = value["message"]
@@ -236,7 +234,6 @@ async fn read(output: ChildStdout, routes: Routes, peers: Peers) {
                     let reply = match value["command"].as_str() {
                         Some("start") => route.ready.take(),
                         Some("connect") => route.pending.take(),
-                        Some("send") => value["seq"].as_u64().and_then(|n| route.sends.remove(&n)),
                         _ => None,
                     };
                     if let Some(reply) = reply {
@@ -286,17 +283,11 @@ async fn forward(
                 let _ = reply.send(Err("HyperDHT endpoint closed".into()));
                 continue;
             };
-            if value["type"] == "send" {
-                // Answered under its number once the runtime wrote it (`sent`), or could not (`error`).
-                route.sent += 1;
-                value["seq"] = json!(route.sent);
-                route.sends.insert(route.sent, reply);
-            } else if route.pending.is_some() {
+            if route.pending.is_some() {
                 let _ = reply.send(Err("A native connection attempt is already running".into()));
                 continue;
-            } else {
-                route.pending = Some(reply);
             }
+            route.pending = Some(reply);
         }
         value["endpoint"] = json!(id);
         if lines.send(value.to_string()).await.is_err() {
@@ -364,8 +355,6 @@ pub async fn paired_hyperdht_start<R: tauri::Runtime>(
                 events,
                 ready: Some(ready_tx),
                 pending: None,
-                sends: HashMap::new(),
-                sent: 0,
                 sockets: Vec::new(),
             },
         );
@@ -460,13 +449,15 @@ pub async fn paired_hyperdht_connect(
         .ok_or("Invalid native connection ID".into())
 }
 /// One frame: `text`, or `bytes` (a binary message, WISP 103 § Frames, in base64), as the runtime takes it. Answered
-/// once the runtime's socket has room for more: on a link slower than the page sends, the page counts the frame
-/// against its send budget until then. A frame the runtime could not send is an error here, never lost unseen.
+/// once queued for the runtime, in the order the page sends; the runtime's word comes on the page's channel under
+/// `seq`: `sent` once its socket has room for more (the page counts the frame against its send budget until then, so
+/// several are in flight and none waits a round trip to the runtime), `unsent` when it could not send it.
 #[tauri::command]
 pub async fn paired_hyperdht_send(
     state: State<'_, HyperState>,
     endpoint_id: u64,
     connection_id: u64,
+    seq: u64,
     text: Option<String>,
     bytes: Option<String>,
 ) -> Result<(), String> {
@@ -486,20 +477,13 @@ pub async fn paired_hyperdht_send(
     if size == 0 || size > 60 * 1024 {
         return Err("Frame exceeds transport budget".into());
     }
-    let mut value = json!({"type":"send", "id":connection_id});
+    let mut value = json!({"type":"send", "id":connection_id, "seq":seq});
     value[field] = json!(frame);
-    let (reply, result) = oneshot::channel();
+    // A runtime slower than the page fills the queue: the page's next send waits here, behind this one.
     sender(&state, endpoint_id)?
-        .send(Request {
-            value,
-            reply: Some(reply),
-        })
+        .send(Request { value, reply: None })
         .await
-        .map_err(|_| "HyperDHT endpoint closed")?;
-    result
-        .await
-        .map_err(|_| "Native runtime stopped")?
-        .map(|_| ())
+        .map_err(|_| "HyperDHT endpoint closed".into())
 }
 #[tauri::command]
 pub fn paired_hyperdht_close(
@@ -665,49 +649,53 @@ mod tests {
     fn sending(
         app: &tauri::App<MockRuntime>,
         id: u64,
+        seq: u64,
         text: Option<String>,
         bytes: Option<String>,
     ) -> tokio::task::JoinHandle<Result<(), String>> {
         let handle = app.handle().clone();
         tokio::spawn(async move {
-            paired_hyperdht_send(handle.state::<HyperState>(), id, 3, text, bytes).await
+            paired_hyperdht_send(handle.state::<HyperState>(), id, 3, seq, text, bytes).await
         })
     }
 
     #[tokio::test]
-    async fn frames_are_bounded_forwarded_as_they_are_and_answered_once_written() {
+    async fn frames_are_bounded_forwarded_as_they_are_and_answered_once_queued() {
         let app = app();
         let (id, mut rx) = runtime(&app, 1);
         for text in [String::new(), "x".repeat(60 * 1024 + 1)] {
             assert_eq!(
-                paired_hyperdht_send(app.state(), id, 3, Some(text), None)
+                paired_hyperdht_send(app.state(), id, 3, 1, Some(text), None)
                     .await
                     .unwrap_err(),
                 "Frame exceeds transport budget"
             );
         }
-        let first = sending(&app, id, Some("x".repeat(60 * 1024)), None);
+        // Answered once queued, without waiting for the runtime to write it: the runtime's `sent` reaches the page
+        // on its channel, so the page's next frame goes without a round trip to the runtime.
+        let first = sending(&app, id, 1, Some("x".repeat(60 * 1024)), None);
+        tokio::time::timeout(Duration::from_secs(5), first)
+            .await
+            .expect("answered once queued")
+            .unwrap()
+            .unwrap();
+        // The queue is bounded: past it, the next send waits behind the ones before it instead of failing.
+        let second = sending(&app, id, 2, Some("more".into()), None);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!second.is_finished());
         let sent = rx.recv().await.unwrap();
         assert_eq!(sent.value["type"], "send");
-        assert_eq!(sent.value["id"], 3);
-        assert_eq!(sent.value["text"].as_str().unwrap().len(), 60 * 1024);
-        // Not answered until the runtime wrote it: the page counts it against its budget until then, and the next
-        // send waits behind it instead of failing.
-        let second = sending(&app, id, Some("more".into()), None);
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(!first.is_finished() && !second.is_finished());
-        sent.reply.unwrap().send(Ok(Value::Null)).unwrap();
-        assert_eq!(first.await.unwrap(), Ok(()));
-        // One the runtime could not send is an error for the page, not a frame lost unseen.
-        let more = rx.recv().await.unwrap();
-        assert_eq!(more.value["text"], "more");
-        more.reply
-            .unwrap()
-            .send(Err("Native channel is closed".into()))
-            .unwrap();
         assert_eq!(
-            second.await.unwrap().unwrap_err(),
-            "Native channel is closed"
+            (&sent.value["id"], &sent.value["seq"]),
+            (&json!(3), &json!(1))
+        );
+        assert_eq!(sent.value["text"].as_str().unwrap().len(), 60 * 1024);
+        assert!(sent.reply.is_none());
+        assert_eq!(second.await.unwrap(), Ok(()));
+        let more = rx.recv().await.unwrap();
+        assert_eq!(
+            (&more.value["text"], &more.value["seq"]),
+            (&json!("more"), &json!(2))
         );
 
         paired_hyperdht_close(app.state(), id, 3).unwrap();
@@ -736,20 +724,19 @@ mod tests {
             ),
         ] {
             assert_eq!(
-                paired_hyperdht_send(app.state(), id, 3, text, bytes)
+                paired_hyperdht_send(app.state(), id, 3, 1, text, bytes)
                     .await
                     .unwrap_err(),
                 error
             );
         }
         let largest = encode(&vec![4u8; 60 * 1024]);
-        let sent = sending(&app, id, None, Some(largest.clone()));
+        let sent = sending(&app, id, 1, None, Some(largest.clone()));
         let request = rx.recv().await.unwrap();
         assert_eq!(
             request.value,
-            json!({"type": "send", "id": 3, "bytes": largest})
+            json!({"type": "send", "id": 3, "seq": 1, "bytes": largest})
         );
-        request.reply.unwrap().send(Ok(Value::Null)).unwrap();
         assert_eq!(sent.await.unwrap(), Ok(()));
     }
 
@@ -769,7 +756,7 @@ mod tests {
             closed
         );
         assert_eq!(
-            paired_hyperdht_send(app.state(), id, 1, Some("x".into()), None)
+            paired_hyperdht_send(app.state(), id, 1, 1, Some("x".into()), None)
                 .await
                 .unwrap_err(),
             closed
@@ -920,7 +907,7 @@ mod runtime_tests {
         );
         let incoming = next(&mut page_b).await;
         assert_eq!(incoming["incoming"], true);
-        paired_hyperdht_send(app.state(), a.id, connection, Some("hello".into()), None)
+        paired_hyperdht_send(app.state(), a.id, connection, 1, Some("hello".into()), None)
             .await
             .unwrap();
         let frame = next(&mut page_b).await;
@@ -929,21 +916,38 @@ mod runtime_tests {
             (&json!("frame"), &json!("hello"))
         );
         assert_eq!(frame["id"], incoming["id"]);
+        // The sender's page hears that it went, under the number it sent it with.
+        assert_eq!(
+            next(&mut page_a).await,
+            json!({"type":"sent", "id":connection, "seq":1})
+        );
         // A binary message, in base64 through the runtime and back.
-        paired_hyperdht_send(app.state(), a.id, connection, None, Some("BAD/Cg==".into()))
-            .await
-            .unwrap();
+        paired_hyperdht_send(
+            app.state(),
+            a.id,
+            connection,
+            2,
+            None,
+            Some("BAD/Cg==".into()),
+        )
+        .await
+        .unwrap();
         let frame = next(&mut page_b).await;
         assert_eq!(
             (&frame["type"], &frame["bytes"], &frame["id"]),
             (&json!("frame"), &json!("BAD/Cg=="), &incoming["id"])
         );
-        // A frame the runtime cannot send is an error for the page, not lost unseen.
         assert_eq!(
-            paired_hyperdht_send(app.state(), a.id, 999, Some("nowhere".into()), None)
-                .await
-                .unwrap_err(),
-            "Native channel is closed"
+            next(&mut page_a).await,
+            json!({"type":"sent", "id":connection, "seq":2})
+        );
+        // A frame the runtime cannot send is told to the page, not lost unseen.
+        paired_hyperdht_send(app.state(), a.id, 999, 3, Some("nowhere".into()), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            next(&mut page_a).await,
+            json!({"type":"unsent", "id":999, "seq":3})
         );
         assert!(page_a.try_recv().is_err());
 
