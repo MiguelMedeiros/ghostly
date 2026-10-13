@@ -13,7 +13,7 @@ import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 const REF = "pubkeyalpha/chess";
 const LINK = "link-1";
 
-function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }) {
+function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }, { byReference = false } = {}) {
   const host = memoryHost();
   const posted: { message: Record<string, unknown>; transfer?: Transferable[] }[] = [];
   const stops: AppStopReason[] = [];
@@ -23,6 +23,7 @@ function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }) {
     view: { theme: () => "dark", locale: () => "pt-BR" },
     post: (message, transfer) => posted.push({ message: message as Record<string, unknown>, transfer }),
     stopped: (reason) => stops.push(reason),
+    byReference,
     now: () => clock.t,
   });
   let next = 1;
@@ -307,6 +308,30 @@ describe("requests", () => {
     const read = await host.file(REF, "a.bin");
     expect(read).toEqual(stored);
     expect(read.buffer).not.toBe(stored.buffer);
+  });
+
+  it("file by reference (Desktop): where the bytes lie instead of the bytes, with the same checks and budget", async () => {
+    const { host, broker, run, ask, posted, clock } = setup({}, { t: 1_000 }, { byReference: true });
+    run();
+    const MiB = 1024 * 1024;
+    host.files.set(REF, new Map([["big.bin", new Uint8Array(6 * MiB)], ["icon.png", new Uint8Array([9])]]));
+    const where = { space: "ghostly-a", id: "app-d", offset: 4096, length: 6 * MiB, sha256: "h" };
+    const asked: string[] = [];
+    host.fileAt = async (ref, path) => { asked.push(`${ref} ${path}`); return path === "big.bin" ? where : null; };
+    const read = vi.spyOn(host, "file");
+    const answer = await ask("file", ["big.bin"]);
+    expect(answer).toEqual({ id: answer.id, ok: true, file: where });
+    expect(posted[posted.length - 1]!.transfer).toBeUndefined();
+    expect(read).not.toHaveBeenCalled();
+    // Where the host cannot say (the icon, kept in memory), the bytes as before.
+    expect(new Uint8Array((await ask("file", ["icon.png"])).value as ArrayBuffer)).toEqual(new Uint8Array([9]));
+    expect(asked).toEqual([`${REF} big.bin`, `${REF} icon.png`]);
+    expect(await ask("file", ["../other/app"])).toMatchObject({ ok: false });
+    // The bytes it names count toward the 16 MiB a second as bytes carried do.
+    clock.t += 1_001;
+    for (let id = 50; id < 54; id++) broker.message({ id, type: "file", args: ["big.bin"] });
+    await vi.waitFor(() => expect(posted.filter((p) => (p.message.id as number) >= 50).length).toBe(4));
+    expect(posted.filter((p) => (p.message.id as number) >= 50).map((p) => p.message.ok === true ? "ok" : p.message.error)).toEqual(["ok", "ok", "ok", "too-fast"]);
   });
 
   it("file: at most a bundle's worth of bytes a second, read one file at a time", async () => {

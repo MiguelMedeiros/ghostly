@@ -1,3 +1,4 @@
+import type { AppFileAt } from "@ghostly/browser/engine/apps";
 import type { PaymentMethodName } from "@ghostly/core";
 import type { UsdtWalletView, UsdtCreate } from "@ghostly/browser/engine/paymentAdapters/usdtWallet";
 import type { PaymentReview, PaymentTarget } from "@ghostly/core";
@@ -437,6 +438,11 @@ export interface AppsPlatform {
   running?(digest: string): AppsPlatform;
   /** One file of an installed app's bundle: a copy the caller owns, which the broker hands to the app (transferred). */
   file(ref: string, path: string): Promise<Uint8Array>;
+  /**
+   * Where that file lies in this device's file storage, for an opener that hands its bytes to the app itself (Desktop):
+   * null where it cannot say (the icon, a bundle kept in the browser), and absent where nothing reads it.
+   */
+  fileAt?(ref: string, path: string): Promise<AppFileAt | null>;
   storage: {
     /** Null when the key is not set. */
     get(ref: string, scope: string, key: string): Promise<{ value: MiniAppJson } | null>;

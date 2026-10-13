@@ -7,7 +7,7 @@ import {
   type AppStoreView, type AppViewMode, type AppVersion, type JsonValue, type SignedAppRevocation,
 } from "@ghostly/core";
 import { APP_STORAGE_SCOPE_INDEX, STORES, openDb, store, wrap } from "../shared/idb";
-import { FILE_BYTES_STEP, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "../shared/fileBytes";
+import { FILE_BYTES_STEP, fileBytes, fileBytesOf, fileSpace, type FileBytes, type FileBytesKind } from "../shared/fileBytes";
 import { APP_FETCH_LIMITS, AppFetchError, appPasteUrl, besideUrl, isAppFetchUrl, isGitHubPage, type AppFetcher } from "./appFetch";
 import { BUILT_IN_APPS, DEFAULT_APP_STORES, type BuiltInApp } from "./appDefaults";
 
@@ -131,6 +131,9 @@ export interface AddedAppStore {
   /** What went wrong at the last read: a refusal code, or the fetch error's. */
   problem?: string;
 }
+
+/** Where a bundle's file lies in the client's own file storage (`Apps.fileAt`): bytes `offset` to `offset + length` of `id`. */
+export interface AppFileAt { space: string; id: string; offset: number; length: number; sha256: string }
 
 /** One key of one app's storage in one scope (`STORES.appStorage`): the value as JSON, and the bytes of the key and the value. */
 export interface AppStorageRow { ref: string; scope: string; key: string; value: string; size: number }
@@ -1373,6 +1376,25 @@ export class Apps {
     const versions = this.started.get(app.ref) ?? new Map<string, number>();
     this.started.set(app.ref, versions.set(app.digest, app.sequence));
     return { ref: app.ref, digest: app.digest, version: app.manifest.version, title: app.manifest.title, permissions: [...app.permissions], view: appViewOf(bundle.manifest), entry: utf8Decode(entry) };
+  }
+
+  /**
+   * Where a file of the installed bundle lies in this device's file storage, for a client that hands the bytes to the
+   * app itself (Desktop: Rust reads them, checks their SHA-256 and gives them to the app's window, so they never cross
+   * the Ghostly window). The same checks as `file`; null where the bundle is not in such storage, and for the icon,
+   * which `file` answers from memory.
+   */
+  async fileAt({ ref, path, digest }: { ref: string; path: string; digest?: string }): Promise<AppFileAt | null> {
+    if (path === APP_ICON_PATH) return null;
+    const app = await this.runningOrFail(ref, digest);
+    if (digest !== undefined && digest !== app.digest) fail("no-file", "No such file in this app");
+    if (app.bytes !== "native") return null;
+    const bundle = await this.verifiedBundle(app);
+    const file = typeof path === "string" ? bundle.files.get(path) : undefined;
+    const listed = bundle.manifest.files.find((f) => f.path === path);
+    if (!file || !listed) fail("no-file", "No such file in this app");
+    // The bundle was read whole from its stored file (`readBundleBytes`): a file's place in its bytes is its place there.
+    return { space: fileSpace(), id: bundleId(app.digest), offset: file.byteOffset, length: file.length, sha256: listed.sha256 };
   }
 
   /**

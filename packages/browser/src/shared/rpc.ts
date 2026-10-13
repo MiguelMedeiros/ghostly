@@ -533,6 +533,8 @@ export interface EngineApi {
   appEntry(params: { ref: string; runAnyway?: boolean }): import("../engine/apps").AppRunEntry;
   /** One file of an installed app (`ghostly.file(path)`). */
   appFile(params: { ref: string; path: string; digest?: string }): Uint8Array;
+  /** Where that file lies in this device's file storage, for a client that hands its bytes over itself; null where it cannot. */
+  appFileAt(params: { ref: string; path: string; digest?: string }): import("../engine/apps").AppFileAt | null;
   /** An app's storage in one scope: keys of up to 256 bytes, JSON values of up to 64 KiB, 5 MiB in all. `null`: no such key. */
   appStorageGet(params: { ref: string; scope: string; key: string; digest?: string }): { value: import("@ghostly/core").JsonValue } | null;
   appStorageSet(params: { ref: string; scope: string; key: string; value: unknown; digest?: string }): void;
