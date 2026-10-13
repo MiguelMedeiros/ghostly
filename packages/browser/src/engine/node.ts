@@ -37,7 +37,7 @@ import { readPubkyProof } from '../proofs/storage';
 import { lookupPublicProfile, currentProfileProof, PROFILE_RETRY, PROFILE_TTL, type ProfileChoice } from '../profiles/public';
 import { APPS_CAPABILITY, BUTTON_ID, BUTTONS_CAPABILITY, EDIT_CAPABILITY, STATUS_CARD_CAPABILITY, UPGRADE_CAPABILITY, MAX_EDITS_PER_MESSAGE, STATUS_CARD_LIMITS, checkStatusCard, forwardedAgain, readForwarded, statusCardText, withRequestOptions, type StatusCard, type WireEdit } from "@ghostly/core";
 import { FORWARD_MESSAGES, FORWARD_TARGETS, copyForForward, forwardKind, type ForwardResult } from "./forwards";
-import { TEST_USDT_FAUCET_AMOUNT, arrivalKey, claimedTime, heardTime, receivedTimestamp, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { TEST_USDT_FAUCET_AMOUNT, arrivalKey, claimedTime, heardTime, receivedTimestamp, shownTime, typingActivity, type TypingActivity, type TypingKind, WALLET_NETWORKS, walletNetworkOf, type GroupMention, type PaymentNetworks, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/modeGate";
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
@@ -7640,8 +7640,9 @@ export class GhostlyNode implements EngineImplementation {
 
   /**
    * These rows, in this order, placed again below everything in their history, as if they came now: a group member's
-   * messages that came above an older one of theirs (WISP 400, requirement 10). The places are taken before anything is
-   * awaited, so a row that comes meanwhile goes below them. All of them in one write: one disk sync, not one a row.
+   * messages that came above an older one of theirs (WISP 400, requirement 10), and the lines that came after them. The
+   * places are taken before anything is awaited, so a row that comes meanwhile goes below them. Each still shows the
+   * time it showed. All of them in one write: one disk sync, not one a row.
    */
   private async placeAgain(linkId: string, ids: readonly string[]): Promise<void> {
     const places = new Map(ids.map(id => {
@@ -7649,7 +7650,7 @@ export class GhostlyNode implements EngineImplementation {
       this.placedAt.set(linkId, timestamp);
       return [id, timestamp];
     }));
-    const moved = await db.patchMessages(linkId, [...places.keys()], m => ({ timestamp: places.get(m.id)! }));
+    const moved = await db.patchMessages(linkId, [...places.keys()], m => ({ timestamp: places.get(m.id)!, sentAt: shownTime(m) }));
     if (moved.length) await this.messagesChanged(linkId, moved.map(m => m.id));
   }
 
