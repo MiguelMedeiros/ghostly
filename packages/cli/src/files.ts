@@ -214,13 +214,15 @@ export const FILE_METHODS: Record<string, Method> = {
   async "file.list"(ctx, params) {
     const target = chatOrGroupOf(ctx, params);
     const views = state(ctx).transfers;
+    // A file that finished before this run has no transfer in the engine's state: its record says it is done.
+    const doneOf = async (linkId: string) => new Map((await fileStore.listForLink(linkId).catch(() => []))
+      .flatMap((f) => f.transfer?.state === "done" ? [[f.id, { ...f.transfer, direction: f.direction }] as const] : []));
     if ("group" in target) {
-      // A group's file all here has no transfer in the engine's state: its record says it is done.
-      const done = new Map((await fileStore.listForLink(`group:${target.group.id}`).catch(() => []))
-        .flatMap((f) => f.transfer?.state === "done" ? [[f.id, { ...f.transfer, direction: f.direction }] as const] : []));
+      const done = await doneOf(`group:${target.group.id}`);
       return { group: target.group.id, files: filesOf(await node(ctx).groupMessages({ groupId: target.group.id }), (id) => views[id] ?? done.get(id)) };
     }
-    return { chat: target.link.id, files: filesOf(await node(ctx).getMessages(target.link.id), (id) => views[id]) };
+    const done = await doneOf(target.link.id);
+    return { chat: target.link.id, files: filesOf(await node(ctx).getMessages(target.link.id), (id) => views[id] ?? done.get(id)) };
   },
 
   /**
