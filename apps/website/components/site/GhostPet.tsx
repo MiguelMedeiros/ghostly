@@ -8,14 +8,18 @@ type Mood = "sleeping" | "bored" | "happy" | "tired";
 /* How long the ghost takes to close most of the distance to the pointer, per mood (seconds). */
 const TAU: Record<Mood, number> = { happy: 2.1, bored: 2.1, tired: 4.1, sleeping: 8.3 };
 
+/* Below this speed (px a second, a twentieth of a pixel a frame at 60 Hz) the ghost has settled and its clock stops. */
+const SETTLE = 3;
+
 /**
  * The little ghost from the original site: it trails the pointer, gets bored,
  * falls asleep when you stop moving and ducks away if you reach for it.
  * Kept as it was; it now stays home on touch screens, with reduced motion,
- * and while the tab is hidden. Its position is written straight to the DOM
- * (no render per frame), the page size is measured on resize instead of every
- * frame, its easing is in time (the same at 60 and 120 Hz), and it stops its
- * clock once it is asleep and settled until the pointer moves again.
+ * and while the tab is hidden. Its position is written straight to the DOM as
+ * a transform (no render and no page layout per frame), the page size is
+ * measured on resize instead of every frame, its easing is in time (the same
+ * at 60 and 120 Hz), and it stops its clock once it has settled until the
+ * pointer moves again or its next mood is due.
  */
 export function GhostPet({ label = "Hide the ghost" }: { label?: string }) {
   const [enabled, setEnabled] = useState(false);
@@ -54,6 +58,7 @@ export function GhostPet({ label = "Hide the ghost" }: { label?: string }) {
     if (!enabled || !visible) return;
     let frame = 0;
     let last = 0;
+    let moodTimer: ReturnType<typeof setTimeout> | null = null;
     const measure = () => {
       bounds.current = { w: Math.max(document.body.scrollWidth, window.innerWidth) - 46, h: Math.max(document.body.scrollHeight, window.innerHeight) - 55 };
     };
@@ -65,8 +70,7 @@ export function GhostPet({ label = "Hide the ghost" }: { label?: string }) {
     const place = () => {
       const node = el.current;
       if (!node) return;
-      node.style.left = `${current.current.x}px`;
-      node.style.top = `${current.current.y}px`;
+      node.style.transform = `translate3d(${current.current.x}px, ${current.current.y}px, 0)`;
     };
 
     const tick = (now: number) => {
@@ -110,11 +114,17 @@ export function GhostPet({ label = "Hide the ghost" }: { label?: string }) {
         directionRef.current = dir;
         setDirection(dir);
       }
-      // Asleep and settled: let the clock stop until the pointer moves.
-      if (next === "sleeping" && Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+      // Settled: let the clock stop until the pointer moves, or until the next mood is due. Waiting for the last half
+      // pixel at the sleeping pace kept it running 45-57 s after every stop of the pointer.
+      if (Math.hypot(dx, dy) / TAU[next] < SETTLE) {
+        if (next !== "sleeping") moodTimer = setTimeout(wake, (idle > 2000 ? 4000 : 2000) - idle + 1);
+        return;
+      }
       frame = requestAnimationFrame(tick);
     };
     const wake = () => {
+      if (moodTimer) clearTimeout(moodTimer);
+      moodTimer = null;
       if (!frame) {
         last = 0;
         frame = requestAnimationFrame(tick);
@@ -141,6 +151,7 @@ export function GhostPet({ label = "Hide the ghost" }: { label?: string }) {
       window.removeEventListener("resize", measure);
       ro.disconnect();
       if (frame) cancelAnimationFrame(frame);
+      if (moodTimer) clearTimeout(moodTimer);
       if (hideTimer.current) clearTimeout(hideTimer.current);
     };
   }, [enabled, visible]);
@@ -148,53 +159,53 @@ export function GhostPet({ label = "Hide the ghost" }: { label?: string }) {
   if (!enabled || !visible) return null;
 
   return (
-    <div
-      ref={el}
-      className="pet"
-      data-mood={mood}
-      // left/top are written by the frame loop (place), never by a render.
-      style={{
-        transform: `scaleX(${direction === "left" ? -1 : 1}) ${hiding ? "scale(0.2)" : "scale(1)"}`,
-        opacity: hiding ? 0 : 0.2,
-      }}
-    >
-      <svg width="36" height="45" viewBox="0 0 80 100" aria-hidden="true" className="pet-body">
-        <path
-          d={GHOST_PATH}
-          fill="#22d3ee"
-          style={{ filter: "drop-shadow(0 0 3px #22d3ee)" }}
-        />
-        {mood === "sleeping" && (
-          <g>
-            <path d="M24 36 Q29 34 34 36" stroke="#0f172a" strokeWidth="3" fill="none" strokeLinecap="round" />
-            <path d="M46 36 Q51 34 56 36" stroke="#0f172a" strokeWidth="3" fill="none" strokeLinecap="round" />
-            <text x="62" y="24" fontSize="12" fill="rgba(34,211,238,0.8)" className="pet-z">z</text>
-            <text x="68" y="16" fontSize="10" fill="rgba(34,211,238,0.6)" className="pet-z" style={{ animationDelay: "0.3s" }}>z</text>
-            <text x="72" y="10" fontSize="8" fill="rgba(34,211,238,0.4)" className="pet-z" style={{ animationDelay: "0.6s" }}>z</text>
-          </g>
-        )}
-        {(mood === "bored" || mood === "happy") && (
-          <g>
-            <circle cx="29" cy="36" r={mood === "happy" ? 6 : 5} fill="#0f172a" />
-            <circle cx="51" cy="36" r={mood === "happy" ? 6 : 5} fill="#0f172a" />
-            <circle cx="30" cy="34" r={mood === "happy" ? 2 : 1.5} fill="white" />
-            <circle cx="52" cy="34" r={mood === "happy" ? 2 : 1.5} fill="white" />
-          </g>
-        )}
-        {mood === "tired" && (
-          <g>
-            <path d="M22 32 L36 36" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
-            <path d="M44 36 L58 32" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
-            <circle cx="29" cy="40" r="4" fill="#0f172a" />
-            <circle cx="51" cy="40" r="4" fill="#0f172a" />
-            <circle cx="30" cy="38" r="1.5" fill="white" />
-            <circle cx="52" cy="38" r="1.5" fill="white" />
-          </g>
-        )}
-      </svg>
-      <button type="button" className="pet-hide" tabIndex={-1} onClick={() => setVisible(false)} aria-label={label}>
-        ×
-      </button>
+    // The outer box's transform is its position, written by the frame loop (place), never by a render.
+    <div ref={el} className="pet" data-mood={mood}>
+      <div
+        className="pet-look"
+        style={{
+          transform: `scaleX(${direction === "left" ? -1 : 1}) ${hiding ? "scale(0.2)" : "scale(1)"}`,
+          opacity: hiding ? 0 : 0.2,
+        }}
+      >
+        <svg width="36" height="45" viewBox="0 0 80 100" aria-hidden="true" className="pet-body">
+          <path
+            d={GHOST_PATH}
+            fill="#22d3ee"
+            style={{ filter: "drop-shadow(0 0 3px #22d3ee)" }}
+          />
+          {mood === "sleeping" && (
+            <g>
+              <path d="M24 36 Q29 34 34 36" stroke="#0f172a" strokeWidth="3" fill="none" strokeLinecap="round" />
+              <path d="M46 36 Q51 34 56 36" stroke="#0f172a" strokeWidth="3" fill="none" strokeLinecap="round" />
+              <text x="62" y="24" fontSize="12" fill="rgba(34,211,238,0.8)" className="pet-z">z</text>
+              <text x="68" y="16" fontSize="10" fill="rgba(34,211,238,0.6)" className="pet-z" style={{ animationDelay: "0.3s" }}>z</text>
+              <text x="72" y="10" fontSize="8" fill="rgba(34,211,238,0.4)" className="pet-z" style={{ animationDelay: "0.6s" }}>z</text>
+            </g>
+          )}
+          {(mood === "bored" || mood === "happy") && (
+            <g>
+              <circle cx="29" cy="36" r={mood === "happy" ? 6 : 5} fill="#0f172a" />
+              <circle cx="51" cy="36" r={mood === "happy" ? 6 : 5} fill="#0f172a" />
+              <circle cx="30" cy="34" r={mood === "happy" ? 2 : 1.5} fill="white" />
+              <circle cx="52" cy="34" r={mood === "happy" ? 2 : 1.5} fill="white" />
+            </g>
+          )}
+          {mood === "tired" && (
+            <g>
+              <path d="M22 32 L36 36" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
+              <path d="M44 36 L58 32" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
+              <circle cx="29" cy="40" r="4" fill="#0f172a" />
+              <circle cx="51" cy="40" r="4" fill="#0f172a" />
+              <circle cx="30" cy="38" r="1.5" fill="white" />
+              <circle cx="52" cy="38" r="1.5" fill="white" />
+            </g>
+          )}
+        </svg>
+        <button type="button" className="pet-hide" tabIndex={-1} onClick={() => setVisible(false)} aria-label={label}>
+          ×
+        </button>
+      </div>
     </div>
   );
 }

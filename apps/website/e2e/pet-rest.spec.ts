@@ -49,3 +49,29 @@ for (const rest of RESTS) {
     expect(await frames(page), "frames asked for in 5 s of rest").toBe(0);
   });
 }
+
+test("the pointer ghost settles soon after the pointer stops, and moves without a page layout", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/privacy");
+  const pet = page.locator(".pet");
+  await expect(pet).toHaveCount(1);
+  // Let it come over to the pointer and settle, then read across a line for 2 s and stop.
+  await page.mouse.move(600, 400);
+  await page.clock.runFor(120_000);
+  for (let i = 0; i < 40; i++) {
+    await page.mouse.move(600 + i * 8, 400 + (i % 5) * 6);
+    await page.clock.runFor(50);
+  }
+  await countFrames(page);
+  const before = await pet.boundingBox();
+
+  // A glide of a few seconds, then nothing: it used to creep its last pixels for 45-57 s at 60 frames a second.
+  await page.clock.runFor(60_000);
+  console.log(`frames after the pointer stops: ${await frames(page)}`);
+  expect(await frames(page), "frames asked for after the pointer stops").toBeLessThan(600);
+  expect(await pet.boundingBox(), "the ghost has moved").not.toEqual(before);
+
+  // It moves by a compositor transform: left/top would lay the page out again at every frame.
+  const style = await pet.evaluate((el) => ({ left: (el as HTMLElement).style.left, top: (el as HTMLElement).style.top }));
+  expect(style).toEqual({ left: "", top: "" });
+});
