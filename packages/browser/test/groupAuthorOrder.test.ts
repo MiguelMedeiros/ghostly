@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { describe, expect, it, vi } from "vitest";
-import { AUTHOR_ORDER_WINDOW_MS, GroupAuthorOrder } from "../src/engine/groupAuthorOrder";
+import { AUTHOR_ORDER_SETTLE_MS, AUTHOR_ORDER_WAIT_MAX_MS, AUTHOR_ORDER_WINDOW_MS, GroupAuthorOrder } from "../src/engine/groupAuthorOrder";
 import { db } from "../src/engine/db";
 import { GhostlyNode } from "../src/engine/node";
 import type { StoredMessage } from "../src/shared/types";
@@ -12,10 +12,11 @@ import type { StoredMessage } from "../src/shared/types";
  * again below it; nobody else's line moves, and nothing moves back.
  */
 
-/** A history kept as the order rows come in, and an order that follows it. */
-function history() {
+/** A history kept as the order rows come in, and an order that follows it; `missing`: a member's messages still on their way. */
+function history(missing = new Set<string>()) {
   const rows: string[] = [];
-  const order = new GroupAuthorOrder({ placeAgain: async (_linkId, ids) => { for (const id of ids) { rows.splice(rows.indexOf(id), 1); rows.push(id); } } }, id => `group:${id}`);
+  const moves: number[] = [];
+  const order = new GroupAuthorOrder({ placeAgain: async (_linkId, ids) => { moves.push(ids.length); for (const id of ids) { rows.splice(rows.indexOf(id), 1); rows.push(id); } } }, id => `group:${id}`, (_groupId, sender) => missing.has(sender));
   let at = 0;
   const comes = async (sender: string, seq: number, epoch = 1, wait = 0) => {
     at += wait;
@@ -24,7 +25,8 @@ function history() {
     order.placed("g", { sender, epoch, seq, id, at });
     await new Promise(done => setTimeout(done, 0));
   };
-  return { rows, comes };
+  const tick = async (wait: number) => { at += wait; order.tick(at); await new Promise(done => setTimeout(done, 0)); };
+  return { rows, moves, comes, tick };
 }
 
 describe("a member's messages in a private group, in the order that member wrote them", () => {
@@ -65,6 +67,52 @@ describe("a member's messages in a private group, in the order that member wrote
     await comes("a", 9);
     await comes("a", 3, 1, AUTHOR_ORDER_WINDOW_MS);
     expect(rows).toEqual(["a9", "a3"]);
+  });
+});
+
+describe("a member's rows wait for that member's catch-up", () => {
+  it("while older ones are on their way nothing moves; once they all came, every row moves once", async () => {
+    const missing = new Set(["a"]);
+    const { rows, moves, comes, tick } = history(missing);
+    for (const seq of [9, 10, 11, 12]) await comes("a", seq);
+    for (const seq of [5, 6, 7, 8]) await comes("a", seq, 1, 1000);
+    await tick(1000);
+    expect(moves).toEqual([]);
+    for (const seq of [1, 2, 3, 4]) await comes("a", seq, 1, 1000);
+    missing.delete("a");
+    await tick(1000);
+    expect(rows).toEqual(["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9", "a10", "a11", "a12"]);
+    expect(moves).toEqual([8]);
+  });
+
+  it("what never comes is not waited for: a while after the member's last row, the rows are placed anyway", async () => {
+    const { rows, moves, comes, tick } = history(new Set(["a"]));
+    for (const seq of [9, 10]) await comes("a", seq);
+    for (const seq of [5, 6]) await comes("a", seq, 1, 1000);
+    await tick(AUTHOR_ORDER_SETTLE_MS - 1);
+    expect(moves).toEqual([]);
+    await tick(1);
+    expect(rows).toEqual(["a5", "a6", "a9", "a10"]);
+  });
+
+  it("a catch-up that goes on and on: its rows are placed now and then, and the newest stays followed to the end", async () => {
+    const { rows, comes, tick } = history(new Set(["a"]));
+    // The newest 4 first, then an older one every 10 s for five minutes (longer than the rows are followed).
+    for (const seq of [97, 98, 99, 100]) await comes("a", seq);
+    for (let seq = 96; seq > 66; seq--) { await comes("a", seq, 1, 10_000); await tick(0); }
+    await tick(AUTHOR_ORDER_SETTLE_MS);
+    expect(rows.slice(-4)).toEqual(["a97", "a98", "a99", "a100"]);
+    expect(rows.indexOf("a96")).toBeLessThan(rows.indexOf("a97"));
+    expect(30 * 10_000).toBeGreaterThan(AUTHOR_ORDER_WAIT_MAX_MS + AUTHOR_ORDER_WINDOW_MS);
+  });
+
+  it("another member's rows do not wait for that member's catch-up", async () => {
+    const { rows, comes } = history(new Set(["a"]));
+    await comes("a", 9);
+    await comes("a", 1);
+    await comes("b", 9);
+    await comes("b", 1);
+    expect(rows).toEqual(["a9", "a1", "b1", "b9"]);
   });
 });
 
