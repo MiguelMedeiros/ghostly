@@ -76,8 +76,8 @@ export const BACKGROUND_REQUESTS_PER_MINUTE = 20;
 export const WRITE_FIRST_MS = 5_000;
 /**
  * Once a 1:1 chat needs the relays (the budget refused one of its requests there, or it read urgently anywhere: it polls
- * fast for a signal due any moment), group requests leave it the last this many of each minute, for a minute. Groups
- * that spend the whole budget spend it over the minute, so the chat then takes the next request that frees, within
+ * fast for a signal due any moment), group requests and background ones leave it the last this many of each minute (more
+ * for several chats, `CHAT_RESERVE_PER_CHAT`), for a minute. Groups that spend the whole budget spend it over the minute, so the chat then takes the next request that frees, within
  * seconds, and has room for what follows (the receipt). Waiting for a refusal was too late when a contact went away
  * from a chat and from groups at once: the chat and the groups' edges all watched fast for it, the edges spent both
  * relays' minute in 40 s, and the chat read the contact's offer half a minute late (2026-09-27). A chat with nothing
@@ -87,6 +87,18 @@ export const WRITE_FIRST_MS = 5_000;
  * live in 18 s held a group's edge that had just missed its read for 48 s more (bug hunt r6a, 2026-09-29).
  */
 export const CHAT_RESERVE = 10;
+/**
+ * …and more while several chats need the relays at once: this many requests each (a read, an offer or answer, the read
+ * for the answer to it), up to `CHAT_RESERVE_MOST_SHARE` of the minute. Background requests leave it too, not the
+ * groups' alone: the looks of chats whose contacts are not there, and their presence (upkeep, `LinkSession`). An app
+ * opened while 30 of its 50 chats' contacts were online spent both relays' minute in its first second, on the presence
+ * of the chats whose contacts were long gone, its groups' records and every chat's first read: 12 of the 30 offers and
+ * answers went out, no read for an answer could, and 0 of the 30 chats were live 60 s after the start (bug hunt,
+ * 2026-10-13).
+ */
+export const CHAT_RESERVE_PER_CHAT = 3;
+/** The most of a relay's minute the chats' reserve takes, however many chats need it: the rest stays for everything else. */
+export const CHAT_RESERVE_MOST_SHARE = 5 / 6;
 /**
  * A 1:1 chat's signaling (a new offer or answer, and its reads for the answer to its offer, `signal`) may go over a
  * relay's minute by this fraction of it: 6 on a relay of 30, 12 on one of 60, 1 on relay.pkarr.org's 5 (it allows 10),
@@ -1014,9 +1026,9 @@ export class RelayTransport implements PkarrTransport {
       if (rationed.length >= most) wait = Math.max(wait, rationed[rationed.length - most] + GROUP_RATION_WINDOW_MS - now);
       if (this.readsAhead(key, now) > 0) wait = Math.max(wait, TURN_WAIT_MS);
     }
-    if (who.group) {
+    if (who.group || who.background) {
       const reserved = this.chatReservedFor(relay, now);
-      if (reserved > 0) wait = Math.max(wait, Math.min(reserved, over(recent, limit - this.reserveOf(relay))));
+      if (reserved > 0) wait = Math.max(wait, Math.min(reserved, over(recent, limit - this.chatReserveOf(relay, now))));
     }
     const writer = firstWriter(who);
     const waiting = (lane: "chat" | "group") => {
@@ -1111,6 +1123,13 @@ export class RelayTransport implements PkarrTransport {
     const share = RELAY_REQUESTS_PER_MINUTE[relay];
     if (share === undefined) return this.perMinute;
     return this.perMinuteGiven ? Math.min(this.perMinute, share) : share;
+  }
+
+  /** What the chats that need the relays keep on this relay (`CHAT_RESERVE_PER_CHAT`), never less than `reserveOf`. */
+  private chatReserveOf(relay: string, now: number): number {
+    let needing = 0;
+    for (const need of this.chatNeeds.values()) if (now - Math.max(need.urgentAt, need.refused.get(relay) ?? -Infinity) < 60_000) needing++;
+    return Math.max(this.reserveOf(relay), Math.min(needing * CHAT_RESERVE_PER_CHAT, Math.floor(this.limitOf(relay) * CHAT_RESERVE_MOST_SHARE)));
   }
 
   /** What groups leave a chat on this relay: `CHAT_RESERVE`, or a third of a smaller budget. */
