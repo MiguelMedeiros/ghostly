@@ -4,7 +4,7 @@ import { basename, extname, join, resolve } from "node:path";
 import { GROUP_FILE_LIMITS, LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, type VoiceMeta } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
-import { removeStored } from "@ghostly/browser/shared/storedFiles";
+import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import type { GroupView, MessageFile } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
@@ -207,15 +207,18 @@ export const FILE_METHODS: Record<string, Method> = {
   async "file.list"(ctx, params) {
     const target = chatOrGroupOf(ctx, params);
     const views = state(ctx).transfers;
-    // A file that finished before this run has no transfer in the engine's state: its record says it is done.
-    const doneOf = async (linkId: string) => new Map((await fileStore.listForLink(linkId).catch(() => []))
-      .flatMap((f) => f.transfer?.state === "done" ? [[f.id, { ...f.transfer, direction: f.direction }] as const] : []));
+    // A file that finished before this run has no transfer in the engine's state: its record says it is done. Nor has a
+    // group's file waiting for a Download: its record says it is not here.
+    const keptOf = async (linkId: string) => new Map((await fileStore.listForLink(linkId).catch(() => [])).flatMap((f) => {
+      const kept = f.transfer?.state === "done" ? { ...f.transfer, direction: f.direction } : waitingGroupFile(f);
+      return kept ? [[f.id, kept] as const] : [];
+    }));
     if ("group" in target) {
-      const done = await doneOf(`group:${target.group.id}`);
-      return { group: target.group.id, files: filesOf(await node(ctx).groupMessages({ groupId: target.group.id }), (id) => views[id] ?? done.get(id)) };
+      const kept = await keptOf(`group:${target.group.id}`);
+      return { group: target.group.id, files: filesOf(await node(ctx).groupMessages({ groupId: target.group.id }), (id) => views[id] ?? kept.get(id)) };
     }
-    const done = await doneOf(target.link.id);
-    return { chat: target.link.id, files: filesOf(await node(ctx).getMessages(target.link.id), (id) => views[id] ?? done.get(id)) };
+    const kept = await keptOf(target.link.id);
+    return { chat: target.link.id, files: filesOf(await node(ctx).getMessages(target.link.id), (id) => views[id] ?? kept.get(id)) };
   },
 
   /**

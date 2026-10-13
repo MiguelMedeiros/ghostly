@@ -160,6 +160,34 @@ function JoinNotice() {
 }
 
 /**
+ * A top notice there until closed: by its ×, by Escape, or by a tap on its words (not on its ⓘ, Copy or the details
+ * they open). It sits over the sidebar's header, so it closes as the app's other top notices do, and the focus goes
+ * back where it was when it came (the New that could not make a chat), not to the page.
+ */
+function ClosableTopNotice({ problem, testId, onClose }: { problem: Problem; testId: string; onClose: () => void }) {
+  const t = useT();
+  const [back] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
+  const close = useRef(() => {});
+  close.current = () => {
+    onClose();
+    if (back && back !== document.body && back.isConnected) back.focus();
+  };
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented) close.current(); };
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
+  }, []);
+  return (
+    <div onClick={(e) => { if (!(e.target as Element).closest(`button, [data-testid="${testId}-details"]`)) close.current(); }}
+      className="top-notice flex cursor-pointer items-start gap-2 rounded-lg border border-border bg-panel-header py-2 ps-4 pe-2 shadow-xl">
+      <Notice problem={problem} testId={testId} className="min-w-0 text-sm" />
+      <button type="button" data-testid={`${testId}-close`} onClick={() => close.current()} aria-label={t("common.close")}
+        className="-my-1 h-8 w-8 shrink-0 cursor-pointer rounded-md text-lg leading-none text-text-secondary hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">×</button>
+    </div>
+  );
+}
+
+/**
  * A new chat the storage had no room for, made where no dialog says it (lib/chatNotStored.ts): what happened and what to
  * do, there until closed.
  */
@@ -167,13 +195,7 @@ function ChatNotStoredNotice() {
   const t = useT();
   const [problem, setProblem] = useState<Problem | null>(null);
   useEffect(() => onChatNotStored((cause) => setProblem(problemText(cause, t))), [t]);
-  return problem ? (
-    <div className="top-notice flex items-start gap-2 rounded-lg border border-border bg-panel-header py-2 ps-4 pe-2 shadow-xl">
-      <Notice problem={problem} testId="chat-not-stored" className="min-w-0 text-sm" />
-      <button type="button" data-testid="chat-not-stored-close" onClick={() => setProblem(null)} aria-label={t("common.close")}
-        className="-my-1 h-8 w-8 shrink-0 cursor-pointer rounded-md text-lg leading-none text-text-secondary hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">×</button>
-    </div>
-  ) : null;
+  return problem ? <ClosableTopNotice problem={problem} testId="chat-not-stored" onClose={() => setProblem(null)} /> : null;
 }
 
 /**
@@ -203,13 +225,7 @@ function GroupLinkIntake() {
       .catch((cause: unknown) => setProblem(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
   }, [code, hasUnlocked]);
-  return problem ? (
-    <div className="top-notice flex items-start gap-2 rounded-lg border border-border bg-panel-header py-2 ps-4 pe-2 shadow-xl">
-      <Notice problem={problem} testId="group-link-invalid" className="min-w-0 text-sm" />
-      <button type="button" data-testid="group-link-invalid-close" onClick={() => setProblem(null)} aria-label={t("common.close")}
-        className="-my-1 h-8 w-8 shrink-0 cursor-pointer rounded-md text-lg leading-none text-text-secondary hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">×</button>
-    </div>
-  ) : null;
+  return problem ? <ClosableTopNotice problem={problem} testId="group-link-invalid" onClose={() => setProblem(null)} /> : null;
 }
 
 /**

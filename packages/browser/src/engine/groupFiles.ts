@@ -112,6 +112,8 @@ export const storedGroupFiles: GroupFileStore = {
 export interface GroupFilesHost {
   store: GroupFileStore;
   transfers: Map<string, FileTransferView>;
+  /** The file's view goes in the next state the engine sends, and then away: the file's record says the rest. */
+  brief(fileId: string): void;
   settings(): { autoDownloads: boolean; serveFiles: boolean };
   /** A files/3 frame on an edge's open session; false when it could not go. */
   sendFiles(linkId: string, frame: Record<string, unknown>): boolean;
@@ -297,7 +299,7 @@ export class GroupFileDesk {
         }
         else if (kept.asked || (kept.auto && this.deps.settings().autoDownloads)) this.wants.set(kept.id, this.newWant());
         else if (kept.auto) await this.stop(kept, false);
-        else this.show(kept, { state: "transferring", stage: "asking", transferred: 0, size, direction: "in" });
+        // Waiting for a Download: no transfer either. Its record says it is not here (`waitingGroupFile`).
       }
     }
     for (const [id] of this.wants) this.ask(this.kept.get(id)!);
@@ -343,6 +345,8 @@ export class GroupFileDesk {
     const edge = want?.wire && want.linkId ? this.edgesById.get(want.linkId) : undefined;
     const record = edge?.files.get("in", want!.wire!);
     const { size } = kept.meta;
+    // One every holder served damaged waits for a Download as any other: its record no longer says it failed.
+    const failed = !keep && this.deps.transfers.get(kept.id)?.state === "failed";
     if (!keep) { kept.stored = 0; kept.fresh = true; }
     if (edge && record && !transferEnded(record)) {
       // The transfer's own writer deletes what it stored (`openTarget`), or keeps it when paused.
@@ -353,15 +357,14 @@ export class GroupFileDesk {
       // No transfer under way: what an earlier one stored goes, before the next one writes.
       kept.idle = (kept.idle ?? Promise.resolve()).then(() => this.deps.store.write(kept.id)).then(writer => writer.discard()).catch(() => {});
     }
-    this.show(kept, keep
-      ? { state: "transferring", stage: "paused", pausedBy: "me", transferred: kept.stored ?? 0, size, direction: "in" }
-      : { state: "transferring", stage: "asking", transferred: 0, size, direction: "in" });
+    if (keep) this.show(kept, { state: "transferring", stage: "paused", pausedBy: "me", transferred: kept.stored ?? 0, size, direction: "in" });
+    else this.waiting(kept);
     // Not fetched by itself any more, nor asked for: it stays stopped (or paused) after a restart, and counts toward no limit.
     const wasPaused = !!kept.paused;
     kept.paused = keep;
-    if (kept.auto || kept.asked || wasPaused !== keep) {
+    if (kept.auto || kept.asked || wasPaused !== keep || failed) {
       kept.auto = kept.asked = false;
-      await this.deps.store.patch(kept.id, { group: this.groupField(kept) }).catch(() => {});
+      await this.deps.store.patch(kept.id, { group: this.groupField(kept), ...(failed && { transfer: { state: "transferring", transferred: 0, size } }) }).catch(() => {});
     }
   }
 
@@ -399,7 +402,7 @@ export class GroupFileDesk {
       this.add(kept);
       const transfer = { state: "done" as const, transferred: m.file.size, size: m.file.size };
       await this.deps.store.patch(ownId, { group: { message: m.id, author: me }, transfer }).catch(() => {});
-      this.show(kept, { ...transfer, direction: "out" });
+      this.finished(kept, "out");
       this.queueHave(kept);
       return messageFile(kept);
     }
@@ -419,7 +422,7 @@ export class GroupFileDesk {
       metadata: { name, size, mime, timestamp: this.deps.now(), voice, video, image },
       transfer: { state: "transferring", transferred: 0, size }, group: { message: m.id, author: m.sender, ...(auto && { auto: true }) } });
     if (auto) { this.wants.set(id, this.newWant()); this.ask(kept); }
-    else this.show(kept, { state: "transferring", stage: "asking", transferred: 0, size, direction: "in" });
+    else this.waiting(kept);
     return messageFile(kept);
   }
 
@@ -951,7 +954,7 @@ export class GroupFileDesk {
         this.wants.delete(kept.id);
         edge.taking.delete(record.id);
         void this.deps.store.patch(kept.id, { transfer: { state: "done", transferred: size, size } }).catch(() => {});
-        this.show(kept, { state: "done", transferred: size, size, direction: "in" });
+        this.finished(kept, "in");
         this.queueHave(kept);
         // The holder is free for the next file this device waits for.
         this.retry(kept.groupId);
@@ -1011,6 +1014,25 @@ export class GroupFileDesk {
   private sentPaces(groupId: string): RateWindow[] {
     return [this.pace(this.sentPace, groupId, GROUP_FILE_LIMITS.announcePerMinute, 60_000),
       this.pace(this.sentTaken, groupId, GROUP_FILE_LIMITS.announceTaken, GROUP_FILE_LIMITS.announceWindowMs)];
+  }
+
+  /**
+   * The file waits for its person's Download: said in one state (the CLI's `file.offered`), then left to its record,
+   * which says it is not here (`waitingGroupFile`). A view kept for each such file would go into every state the engine
+   * builds, so each would cost more with every file the groups ever had.
+   */
+  private waiting(kept: Kept): void {
+    this.show(kept, { state: "transferring", stage: "asking", transferred: 0, size: kept.meta.size, direction: "in" });
+    this.deps.brief(kept.id);
+  }
+
+  /**
+   * All here: said in one state (the CLI's `file.done`), then left to its record, which says it is done. A view kept for
+   * each file fetched or sent would go into every state the engine builds until the next start.
+   */
+  private finished(kept: Kept, direction: "in" | "out"): void {
+    this.show(kept, { state: "done", transferred: kept.meta.size, size: kept.meta.size, direction });
+    this.deps.brief(kept.id);
   }
 
   /** A file's row shows `view`; the engine hears of it only when that is not what the row shows already. */
