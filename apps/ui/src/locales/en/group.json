@@ -83,6 +83,8 @@
   },
   "forget": {
     "invitation": "The invitation goes from this device. {{contact}} is told you declined.",
+    "invitationKept": "The invitation and the group's history go from this device. {{contact}} is told you declined.",
+    "invitationKeptUnknown": "The invitation and the group's history go from this device. The contact who sent it is told you declined.",
     "invitationUnknown": "The invitation goes from this device. The contact who sent it is told you declined.",
     "joining": "You stop asking to join, and the group goes from this device.",
     "kept": "The group and its history go from this device.",

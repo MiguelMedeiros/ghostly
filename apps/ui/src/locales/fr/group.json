@@ -83,6 +83,8 @@
   },
   "forget": {
     "invitation": "L'invitation est supprimée de cet appareil. {{contact}} saura que vous l'avez refusée.",
+    "invitationKept": "L'invitation et l'historique du groupe sont supprimés de cet appareil. {{contact}} saura que vous l'avez refusée.",
+    "invitationKeptUnknown": "L'invitation et l'historique du groupe sont supprimés de cet appareil. Le contact qui l'a envoyée saura que vous l'avez refusée.",
     "invitationUnknown": "L'invitation est supprimée de cet appareil. Le contact qui l'a envoyée saura que vous l'avez refusée.",
     "joining": "Vous ne demandez plus à rejoindre, et le groupe est supprimé de cet appareil.",
     "kept": "Le groupe et son historique sont supprimés de cet appareil.",

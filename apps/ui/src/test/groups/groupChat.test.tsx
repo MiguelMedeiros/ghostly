@@ -535,6 +535,20 @@ describe("GroupChat: the options menu", () => {
     expect(dialog).not.toHaveTextContent("declined");
   });
 
+  it("deleting an invitation back into a group whose history is kept here says that history goes too", async () => {
+    // Removed earlier, invited again: Delete takes the kept group with the invitation (Decline would keep it).
+    const { user, engine } = openGroup(groupView({ canSend: false, invitation: { linkId: "link-1", contact: "Ana", admin: ALICE, members: 3, accepted: false } }),
+      [stored({ id: "m1", member: ALICE, text: "from before" })]);
+    engine.on("forgetGroup", () => undefined);
+    expect(await screen.findByText("from before")).toBeInTheDocument();
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId("group-forget"));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveTextContent("The invitation and the group's history go from this device. Ana is told you declined.");
+    await user.click(within(dialog).getByRole("button", { name: "Delete from this device" }));
+    expect(engine.callsTo("forgetGroup")).toEqual([{ groupId: "group-1" }]);
+  });
+
   it("deleting a community I knock to get back into says the group and its history go", async () => {
     const { user } = openGroup(active({ profile: "community", status: "removed", canSend: false,
       invitation: { linkId: "entry-1", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked" } }));
