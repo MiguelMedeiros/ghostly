@@ -83,6 +83,32 @@ describe("a first pairing with no WebRTC on either side", () => {
     expect(a?.peer, "one session, the same connection at both ends").toBe(b);
     expect(native.dials, "no dial after the crossing").toBe(2);
   }, 60_000);
+
+  it("the lower key's own dial stalling, the contact's that crossed it carries the chat once it connected, not after the redial", async () => {
+    // A HyperDHT dial that opened and brought no preface: dialled again at 2 s (redial.mjs `PREFACE_WAIT_MS`); the
+    // contact never saw the first. Before, the joiner kept the inviter's connection waiting for that redial (lab, DHT
+    // direct: 5 of 20 pairings live 0.9-1.2 s after a working connection was there).
+    const { native, inviter, joiner } = await pair("joiner");
+    const connect = joiner.endpoint.connect;
+    let stalled = false;
+    joiner.endpoint.connect = async descriptor => {
+      if (!stalled) { stalled = true; await new Promise(resolve => setTimeout(resolve, 2_000)); }
+      return connect(descriptor);
+    };
+    joiner.side.link.learnPeerTransports(...record(inviter), true);
+    await run(200);
+    inviter.side.link.learnPeerTransports(...record(joiner), true);
+    const took = await until(() => inviter.dials.length > 0, 10_000);
+    expect(took, "the inviter dials").toBeLessThan(Infinity);
+    const liveMs = await until(() => live(inviter) && live(joiner), 10_000) + took;
+    // The inviter's dial connects in `dialMs` (0.4 s). Before: live 2.4 s after it dialled, with the joiner's redial; 1.15 s after.
+    expect(liveMs, "live soon after the inviter's dial connected").toBeLessThan(native.dialMs + 1_000);
+    // The joiner's redial, landing late, is closed on both sides: the session stays where it is.
+    await run(15_000);
+    for (const desk of [inviter, joiner]) expect(live(desk), `${desk.side.link.pairingProgress?.role} still live`).toBe(true);
+    const a = channelOf(inviter.side.link) as { peer?: unknown }, b = channelOf(joiner.side.link);
+    expect(a?.peer, "one session, the same connection at both ends").toBe(b);
+  }, 60_000);
 });
 
 /**
