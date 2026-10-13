@@ -894,6 +894,35 @@ describe("messages kept in rows.db", () => {
     expect(await read((await db(again.factory)).transaction("messages").objectStore("messages").index("byLink").getAll("chat-1"))).toEqual(before.filter((m) => (m as { linkId: string }).linkId === "chat-1"));
   });
 
+  it("hands out the values it reads from rows.db as v8 made them, with no second copy; changing one changes nothing stored", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    const d = await db(store.factory);
+    for (let i = 0; i < 30; i++) await tx(d, ["messages"], (s) => { s.messages.put(message(i)); });
+    const expected = await all(store.factory);
+    const clone = vi.spyOn(globalThis, "structuredClone");
+    const objects = d.transaction("messages").objectStore("messages");
+    const [whole, chat, one] = await Promise.all([read(objects.getAll()), read(objects.index("byLink").getAll("chat-1")), read(objects.get(["chat-2", "m005"]))]);
+    const copies = clone.mock.calls.length;
+    clone.mockRestore();
+    expect(whole).toEqual(expected);
+    expect(chat).toHaveLength(10);
+    expect(one).toMatchObject({ id: "m005" });
+    expect(copies).toBe(0);
+    for (const value of [...whole, ...chat, one] as { text: string }[]) value.text = "changed";
+    expect(await all(store.factory)).toEqual(expected);
+    // A value still in a transaction's layer (SQLite has not taken it) is the store's own: it is copied.
+    const apply = vi.spyOn(TreeFile.prototype, "apply").mockImplementationOnce(() => { throw new Error("SQLITE_IOERR: disk I/O error"); });
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try { await tx(d, ["messages"], (s) => { s.messages.put({ ...message(31), text: "late" }); }); } finally { apply.mockRestore(); stderr.mockRestore(); }
+    const late = await read(d.transaction("messages").objectStore("messages").get(["chat-1", "m031"])) as { text: string };
+    late.text = "changed";
+    for (const value of await all(store.factory) as { text: string }[]) value.text = "changed";
+    expect(await read(d.transaction("messages").objectStore("messages").get(["chat-1", "m031"]))).toMatchObject({ text: "late" });
+    expect(await all(store.factory)).toEqual([...expected, { ...message(31), text: "late" }].sort((a, b) => (a.linkId + a.id < b.linkId + b.id ? -1 : 1)));
+  });
+
   it("after a crash, replays what SQLite did not take, and skips what it did", async () => {
     const dir = folder();
     const store = await openPersistentIndexedDb(dir);
