@@ -71,6 +71,21 @@ describe("GroupChat: what the header says", () => {
     expect(engine.callsTo("declineGroupInvitation")).toEqual([{ groupId: "group-1" }]);
   });
 
+  it("opens no member list on an invitation: the engine knows no member yet, only the count the card says", async () => {
+    // It opened "0 members" (with the read rules) under a card that says 3 members.
+    const { user } = openGroup(groupView({ canSend: false, invitation: { linkId: "link-1", contact: "Ana", admin: ALICE, members: 3, accepted: false } }));
+    await user.click(screen.getByTestId("group-members"));
+    await user.click(screen.getByTestId("group-avatar"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("group-avatar-open")).not.toBeInTheDocument();
+    expect(screen.getByTestId("group-members").tagName).not.toBe("BUTTON");
+    await user.click(screen.getByTestId("group-options"));
+    const menu = screen.getByTestId("group-options-menu");
+    expect(menu).not.toHaveTextContent("Members");
+    expect(screen.queryByTestId("chat-mute-open")).not.toBeInTheDocument();
+    expect(within(menu).getByTestId("group-forget")).toBeInTheDocument();
+  });
+
   it.each([["removed", "removed"], ["no status", undefined]] as const)("asks a member invited back over the history kept from before (%s)", async (_, status) => {
     openGroup(groupView({ status, canSend: false, invitation: { linkId: "link-1", contact: "Alice", admin: ALICE, members: 3, accepted: false } }),
       [stored({ id: "old", text: "from before", member: ALICE })]);
