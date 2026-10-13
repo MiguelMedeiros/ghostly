@@ -376,7 +376,7 @@ export interface FrameChannel {
   readonly sendBudget?: number;
   /**
    * It carries binary messages as well as text (WISP 100 § Text and binary messages): a WebRTC data channel does.
-   * Absent: text only, as the native and iroh channels are, and nothing binary is offered or sent on it.
+   * Absent: text only, as the Iroh channels are, and nothing binary is offered or sent on it.
    */
   readonly binary?: boolean;
   close(): void;

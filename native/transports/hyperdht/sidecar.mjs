@@ -24,8 +24,11 @@ function attach(record, bound, incoming) {
   const id = ++next
   record.connections.set(id, bound.channel)
   emit({ type: 'open', endpoint: record.id, id, binding: bound.binding, incoming })
-  // The Desktop's side of this pipe takes text only, and offers nothing that needs binary messages, so none should come.
-  bound.channel.onMessage = text => { if (typeof text === 'string') emit({ type: 'frame', endpoint: record.id, id, text }) }
+  // A binary message (WISP 103 § Frames) goes on the line as `bytes`, in base64; text as `text`.
+  bound.channel.onMessage = data => {
+    if (typeof data === 'string') emit({ type: 'frame', endpoint: record.id, id, text: data })
+    else if (data instanceof Uint8Array) emit({ type: 'frame', endpoint: record.id, id, bytes: Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString('base64') })
+  }
   bound.channel.onClose = () => { if (record.connections.delete(id)) emit({ type: 'closed', endpoint: record.id, id }) }
   return id
 }
@@ -69,7 +72,10 @@ function queue(record, command) {
     if (command.type === 'connect') {
       const id = attach(record, await record.endpoint.connect(command.descriptor), false)
       if (id) emit({ type: 'result', endpoint: record.id, id })
-    } else if (command.type === 'send') record.connections.get(command.id)?.send(command.text)
+    } else if (command.type === 'send') {
+      const data = typeof command.bytes === 'string' ? new Uint8Array(Buffer.from(command.bytes, 'base64')) : command.text
+      record.connections.get(command.id)?.send(data)
+    }
     else record.connections.get(command.id)?.close()
   }).catch(error => {
     if (!record.stopped) emit({ type: 'error', endpoint: record.id, command: command.type, message: message(error) })
