@@ -84,6 +84,9 @@ class BarsArgs {
   var dark: Boolean = true
 }
 
+/** A share that ended with something for the page: its folder in the share cache and what Rust gets (`received`). */
+private class Handover(val folder: File, val json: String)
+
 /**
  * The Android host of the app (src/android.rs calls it): what Desktop does with the system's processes and windows,
  * done through Android, and what Android hands the app, passed to Rust (`received`): a sign-in's deep link, a share
@@ -108,9 +111,11 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     private const val MAX_SHARED_BYTES = 256L * 1024 * 1024
     /**
      * The shares' numbers: an older share still copying stops, and is never handed over after a newer one with
-     * something in it. Starts at the clock, so a share's folder is newer than any a previous run left.
+     * something in it. Starts at the clock, so a share's folder is newer than any a previous run left. A share never
+     * handed over (overtaken while it waited) has its copies go.
      */
-    private val shareTurns = ShareTurns(System.currentTimeMillis())
+    private val shareTurns =
+      ShareTurns<Handover>(System.currentTimeMillis()) { thread(name = "ghostly-share-clean") { it.folder.deleteRecursively() } }
     /** Whether this run swept what earlier runs left in the share cache: once, as an activity made again may come. */
     private val sharesSwept = AtomicBoolean(false)
   }
@@ -192,7 +197,9 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
    * Shares are numbered as they arrive (ShareTurns): one that a newer share overtook stops copying and is never handed
    * over, so a big share that ends late cannot replace the one made after it. A newer share overtakes only once it has
    * something (a file copied whole, a text, a title): one that ends up with nothing (no file copied, no text) is never
-   * handed over and never stops one still copying, so it never replaces the one that waits. The page reads the copies
+   * handed over and never stops one still copying, so it never replaces the one that waits. An older share that ends
+   * with something while a newer one still copies waits for it: dropped if the newer one gets something, handed over
+   * once it ends with nothing, so the replaced share is never shown first. The page reads the copies
    * by token, as a paste's, and owns them: they go when it says it is done with them (`shareDone`), never when a newer share comes,
    * since the page may still show or read an older one; what a run leaves goes at the next start.
    * Only another app's `content://` streams are read (SharedStream): the app opens a stream as itself.
@@ -214,7 +221,6 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     // A text or a title is something already; files only once one is copied whole.
     if (!SharedCopies.nothingIn(title, text, 0)) shareTurns.has(number)
     val going = { shareTurns.going(number) }
-    val latest = { shareTurns.latest(number) }
     thread(name = "ghostly-share") {
       val own = File(root, number.toString())
       own.deleteRecursively()
@@ -241,14 +247,16 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
         }
       }
       // No file to read (none copied whole): nothing names the folder to the page, so it goes now.
-      if (!latest() || files.length() == 0) own.deleteRecursively()
-      // Nothing in it: the share that waits for the page stays as it is.
-      if (!latest() || SharedCopies.nothingIn(title, text, files.length())) return@thread
-      val share = JSONObject().put("title", title).put("text", text).put("files", files)
+      if (files.length() == 0) own.deleteRecursively()
+      val share =
+        if (SharedCopies.nothingIn(title, text, files.length())) null
+        else Handover(own, JSONObject().put("title", title).put("text", text).put("files", files).toString())
+      // Decided on the main thread, where shares arrive, so none comes between the turn and the handing over. With
+      // nothing in it, an older share that waited for this one may go now; with something, this one goes, waits for
+      // a newer share still copying, or is dropped.
       activity.runOnUiThread {
-        // Checked again on the main thread, where shares arrive: a newer one may have something by now.
-        if (!latest()) return@runOnUiThread
-        received("share", share.toString())
+        val handed = if (share == null) shareTurns.nothing(number) else shareTurns.ready(number, share)
+        if (handed != null) received("share", handed.json)
       }
     }
   }
