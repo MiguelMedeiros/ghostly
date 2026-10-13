@@ -356,11 +356,15 @@ export class SqlTree {
   get busy(): boolean { return this.active !== null || this.pending.length > 0; }
 }
 
-/** rows.db, owner-only (SQLite makes its WAL files with the database's mode), in WAL with NORMAL: the journal makes a transaction durable, and `sync` runs before a snapshot takes the journal's place. */
+/**
+ * rows.db, owner-only (SQLite makes its WAL files with the database's mode), in WAL with NORMAL: the journal makes a
+ * transaction durable, and `sync` runs before a snapshot takes the journal's place. With `secure_delete` SQLite zeroes
+ * what a delete frees: a message or chat deleted is not left readable in the file's free pages after the fold.
+ */
 export function openTreeFile(sqlite: typeof import("node:sqlite"), path: string, constraintError: new () => Error): TreeFile {
   closeSync(openSync(path, "a", 0o600));
   const db = new sqlite.DatabaseSync(path);
-  db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL");
+  db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA secure_delete = ON");
   return new TreeFile(db, constraintError);
 }
 
