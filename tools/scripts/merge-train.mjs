@@ -52,13 +52,14 @@
 // that waits after it live in a hidden mark in the batch's body, the commit a lone pull request was rebased to lives in a hidden mark of its position comment, and
 // everything else is read again each run.
 //
-//   node tools/scripts/merge-train.mjs --run | --dry-run | --list-bases  [--base dev] [--every 120] [--also 12,34]
+//   node tools/scripts/merge-train.mjs --run | --dry-run | --list-bases [--woken <commit> --run-id <id>]  [--base dev] [--every 120] [--also 12,34]
 //
 // .github/workflows/merge-queue.yml runs it with the queue app's token (GH_TOKEN); pushes made with the workflow's own
 // GITHUB_TOKEN would start no CI. Until that app exists a Mac runs it with its gh login (`gh auth token` when GH_TOKEN
 // is unset) and its git credentials for `origin`; --every <seconds> repeats the run. Without --base the workflow runs
 // every base that has a queued pull request or a batch open (--list-bases prints them as JSON; with --woken <commit>,
-// the head of the CI run that woke the workflow, only the bases where that commit heads one of them), and a Mac runs `dev`
+// the head of the CI run that woke the workflow, only the bases where that commit heads one of them, or the head of a run
+// that waited and that this one, --run-id, replaced), and a Mac runs `dev`
 // and every `epic/*` branch, logging them each round. Every request and git call has a timeout, and a round that runs
 // past ROUND_DEADLINE is cut and logged, so the loop never stalls silently. --dry-run reads the live repo,
 // builds batches in a temporary worktree (never pushed) and prints what it would do; it changes nothing on GitHub.
@@ -1006,6 +1007,8 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
       }
       return false;
     },
+    /** The merge-queue workflow's last runs, newest first (one page): where a run finds the ones it replaced. */
+    queueRuns: async () => (await must("GET", "/actions/workflows/merge-queue.yml/runs?per_page=100")).workflow_runs,
     /** Every `epic/*` branch: the bases a Mac serves besides `dev`. */
     epicBranches: async () => (await must("GET", "/git/matching-refs/heads/epic/")).map((r) => r.ref.replace("refs/heads/", "")),
     events: (n) => all(`/issues/${n}/events`),
@@ -1281,8 +1284,33 @@ const COMMIT = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
  * `queue` label wakes the train by itself when it is added. Anything that is not a commit id is no `woken`. A batch
  * counts by its shape here (the train's login is not known yet): the run itself ignores one another login opened.
  */
-export const trainBases = (pulls, woken) =>
-  [...new Set(pulls.filter((p) => BASE.test(p.base) && (inLine(p.labels) || batchShaped(p, p.base)) && (!COMMIT.test(woken ?? "") || p.sha === woken)).map((p) => p.base))].sort();
+export const trainBases = (pulls, woken) => {
+  const heads = [woken ?? []].flat().filter((w) => COMMIT.test(w));
+  return [...new Set(pulls.filter((p) => BASE.test(p.base) && (inLine(p.labels) || batchShaped(p, p.base)) && (!heads.length || heads.includes(p.sha))).map((p) => p.base))].sort();
+};
+
+/** The name merge-queue.yml gives a run woken by CI: it carries that CI run's head. */
+const WAKE_NAME = /^Merge queue: CI ended on ([0-9a-f]{40}(?:[0-9a-f]{24})?)$/;
+
+/**
+ * The wakes the run `id` serves besides its own: the runs that waited in the `bases` job's group and were replaced
+ * (cancelled) since the last run before it that ran that job. `runs`: the workflow's runs, newest first. A run whose
+ * jobs were all skipped (`skipped`) never joined the group. The heads of the CI runs that woke them, or null when one
+ * was not woken by CI (a `queue` label, a person's push, the schedule, by hand): then every base. None when `id` is
+ * not among `runs`.
+ */
+export const missedWakes = (runs, id) => {
+  const at = runs.findIndex((r) => r.id === id);
+  const heads = [];
+  for (const r of at < 0 ? [] : runs.slice(at + 1)) {
+    if (r.conclusion === "skipped") continue;
+    if (r.conclusion !== "cancelled") break;
+    const head = r.display_title?.match(WAKE_NAME)?.[1];
+    if (!head) return null;
+    heads.push(head);
+  }
+  return heads;
+};
 
 /** The bases a Mac serves without --base, the queue app configured or not: `dev` and every `epic/*` branch. */
 export const localBases = async (gh) => ["dev", ...(await gh.epicBranches()).filter((b) => BASE.test(b)).sort()];
@@ -1343,7 +1371,7 @@ async function main() {
   const opt = (name) => (flag(name) ? args[args.indexOf(name) + 1] : undefined);
   const dry = flag("--dry-run") || process.env.DRY_RUN === "true";
   if (!dry && !flag("--run") && !flag("--list-bases")) {
-    console.error("usage: merge-train.mjs --run | --dry-run | --list-bases [--woken <commit>]  [--base <branch>] [--every <seconds>] [--also <n,n>]");
+    console.error("usage: merge-train.mjs --run | --dry-run | --list-bases [--woken <commit> --run-id <id>]  [--base <branch>] [--every <seconds>] [--also <n,n>]");
     process.exit(2);
   }
   const also = (opt("--also") ?? "").split(",").filter(Boolean).map(Number);
@@ -1354,7 +1382,11 @@ async function main() {
   const token = process.env.GH_TOKEN || execFileSync("gh", ["auth", "token"], { encoding: "utf8", timeout: 60_000 }).trim();
   const scrub = (s) => String(s).replaceAll(token, "***");
   const gh = restLayer(token, repo);
-  if (flag("--list-bases")) return console.log(JSON.stringify(trainBases(await gh.pulls(), opt("--woken"))));
+  if (flag("--list-bases")) {
+    const woken = opt("--woken");
+    const missed = COMMIT.test(woken ?? "") && opt("--run-id") ? missedWakes(await gh.queueRuns(), Number(opt("--run-id"))) : [];
+    return console.log(JSON.stringify(trainBases(await gh.pulls(), missed && [woken, ...missed])));
+  }
   const local = !process.env.GITHUB_ACTIONS && !dry;
   if (local) lock(join(execFileSync("git", ["rev-parse", "--git-common-dir"], { encoding: "utf8", timeout: 60_000 }).trim(), "merge-train.lock"));
   // The login the train comments as: the app's bot on a runner (set by the workflow), the gh user on a Mac.
