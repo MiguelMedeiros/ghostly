@@ -148,15 +148,20 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   private fun take(intent: Intent?) {
-    if (intent == null || intent.getBooleanExtra(EXTRA_HANDLED, false)) return
-    when {
-      intent.hasExtra(EXTRA_NOTIFICATION) -> received("notification", intent.getStringExtra(EXTRA_NOTIFICATION) ?: return)
-      intent.action == Intent.ACTION_VIEW && intent.data?.scheme == "ghostly" && intent.data?.host == "oidc" ->
-        received("oidc", intent.dataString ?: return)
-      intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE -> shared(intent)
-      else -> return
+    if (intent == null) return
+    try {
+      if (intent.getBooleanExtra(EXTRA_HANDLED, false)) return
+      when {
+        intent.hasExtra(EXTRA_NOTIFICATION) -> received("notification", intent.getStringExtra(EXTRA_NOTIFICATION) ?: return)
+        intent.action == Intent.ACTION_VIEW && intent.data?.scheme == "ghostly" && intent.data?.host == "oidc" ->
+          received("oidc", intent.dataString ?: return)
+        intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE -> shared(intent)
+        else -> return
+      }
+      intent.putExtra(EXTRA_HANDLED, true)
+    } catch (e: Exception) {
+      // What another app put in an intent (extras that cannot be unparcelled) drops the intent, never ends the app.
     }
-    intent.putExtra(EXTRA_HANDLED, true)
   }
 
   // ---- Opener ----
@@ -205,32 +210,37 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     val latest = { shareGeneration.get() == generation }
     thread(name = "ghostly-share") {
       val own = File(root, generation.toString())
-      own.deleteRecursively()
-      val files = JSONArray()
-      for ((index, uri) in streams.withIndex()) {
-        if (!latest()) break
-        try {
-          val folder = File(own, index.toString()).apply { mkdirs() }
-          val file = File(folder, SharedName.of(displayName(uri), index))
-          val copied = resolver.openInputStream(uri)?.use { input -> file.outputStream().use { copyWhile(input, it, latest) } }
-          if (copied != true) continue
-          files.put(JSONObject().put("path", file.path).put("mime", resolver.getType(uri) ?: JSONObject.NULL))
-        } catch (e: Exception) {
-          // One file that cannot be read (a revoked permission, a broken stream) leaves the rest of the share.
+      try {
+        own.deleteRecursively()
+        val files = JSONArray()
+        for ((index, uri) in streams.withIndex()) {
+          if (!latest()) break
+          try {
+            val folder = File(own, index.toString()).apply { mkdirs() }
+            val file = File(folder, SharedName.of(displayName(uri), index))
+            val copied = resolver.openInputStream(uri)?.use { input -> file.outputStream().use { copyWhile(input, it, latest) } }
+            if (copied != true) continue
+            files.put(JSONObject().put("path", file.path).put("mime", resolver.getType(uri) ?: JSONObject.NULL))
+          } catch (e: Exception) {
+            // One file that cannot be read (a revoked permission, a broken stream) leaves the rest of the share.
+          }
         }
-      }
-      // No file to read (none copied whole): nothing names the folder to the page, so it goes now.
-      if (!latest() || files.length() == 0) own.deleteRecursively()
-      if (!latest()) return@thread
-      val share = JSONObject().put("title", title).put("text", text).put("files", files)
-      activity.runOnUiThread {
-        // Checked again on the main thread, where shares arrive: a newer one may have come during the hop.
-        if (!latest()) return@runOnUiThread
-        received("share", share.toString())
-        // Only older ones: a newer share may be copying into its own folder already.
-        thread(name = "ghostly-share-clean") {
-          root.listFiles()?.filter { (it.name.toLongOrNull() ?: 0L) < generation }?.forEach { it.deleteRecursively() }
+        // No file to read (none copied whole): nothing names the folder to the page, so it goes now.
+        if (!latest() || files.length() == 0) own.deleteRecursively()
+        if (!latest()) return@thread
+        val share = JSONObject().put("title", title).put("text", text).put("files", files)
+        activity.runOnUiThread {
+          // Checked again on the main thread, where shares arrive: a newer one may have come during the hop.
+          if (!latest()) return@runOnUiThread
+          received("share", share.toString())
+          // Only older ones: a newer share may be copying into its own folder already.
+          thread(name = "ghostly-share-clean") {
+            root.listFiles()?.filter { (it.name.toLongOrNull() ?: 0L) < generation }?.forEach { it.deleteRecursively() }
+          }
         }
+      } catch (e: Throwable) {
+        // Nothing uncaught here: Android ends the app (and a call in it) for an error in any thread. The share is dropped.
+        own.deleteRecursively()
       }
     }
   }
@@ -261,16 +271,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   @Suppress("DEPRECATION")
-  private fun streamsOf(intent: Intent): List<Uri> = when (intent.action) {
-    Intent.ACTION_SEND_MULTIPLE ->
-      if (Build.VERSION.SDK_INT >= 33) intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java) ?: emptyList()
-      else intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM) ?: emptyList()
-    else ->
-      listOfNotNull(
-        if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-        else intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM),
-      )
-  }
+  private fun streamsOf(intent: Intent): List<Uri> =
+    SharedStream.of(intent.extras?.get(Intent.EXTRA_STREAM), Uri::class.java, intent.action == Intent.ACTION_SEND_MULTIPLE)
 
   /** The authorities of the app's own content providers (its FileProvider, the libraries'), from its manifest. */
   @Suppress("DEPRECATION")
