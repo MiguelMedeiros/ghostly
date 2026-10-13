@@ -41,6 +41,19 @@ function lightningCard(ctx: ApiContext, params: Params): void {
 }
 
 /**
+ * The Lightning card `card` names, checked before the engine is asked: given with another type of wallet it is a usage
+ * error, and one not on the network is not_found. Before, the engine dropped it for every type but Lightning, so a card
+ * that named nothing removed the whole wallet of that type and the answer echoed the card as removed.
+ */
+function cardOf(ctx: ApiContext, params: Params, type: WalletType): string | undefined {
+  const card = str(params, "card");
+  if (card === undefined) return undefined;
+  if (type !== "lightning") throw new CliError("usage", `--card names a Lightning card: not with ${type}`);
+  lightningCard(ctx, params);
+  return card;
+}
+
+/**
  * The engine opens the federations joined before in the background as it starts. A daemon has long done so when a call
  * comes; a one-shot command waits for them (at most 30 s) before its balances are read or money moves through one.
  */
@@ -168,21 +181,23 @@ const WALLETS: Record<string, Method> = {
   async "wallet.remove"(ctx, params) {
     const type = oneOf(params, "type", TYPES, "cashu");
     const n = network(params);
+    const card = cardOf(ctx, params, type);
     try {
-      await node(ctx).walletRemove({ type, network: n, ...(str(params, "card") ? { card: str(params, "card") } : {}), ...(bool(params, "acceptLoss") ? { acceptLoss: true } : {}) });
+      await node(ctx).walletRemove({ type, network: n, ...(card ? { card } : {}), ...(bool(params, "acceptLoss") ? { acceptLoss: true } : {}) });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       // The engine keeps a wallet that holds money here, or that someone still pays into (#303): only the person decides.
       if (!bool(params, "acceptLoss") && /hold|still|awaiting|lose|backup/i.test(message)) throw new CliError("confirm", `${message} (pass acceptLoss, --accept-loss, only if that is intended)`);
       throw error;
     }
-    return { removed: { type, network: n, card: str(params, "card") ?? null } };
+    return { removed: { type, network: n, card: card ?? null } };
   },
 
   async "wallet.faucet"(ctx, params) {
     const type = oneOf(params, "type", TYPES, "cashu");
     if (network(params) !== "testnet") throw new CliError("refused", "Test coins are for Testnet wallets only");
-    return node(ctx).walletTestCoins({ type, network: "testnet", ...(str(params, "card") ? { card: str(params, "card") } : {}) });
+    const card = cardOf(ctx, params, type);
+    return node(ctx).walletTestCoins({ type, network: "testnet", ...(card ? { card } : {}) });
   },
 
   async "wallet.history"(ctx, params) {
@@ -197,7 +212,8 @@ const WALLETS: Record<string, Method> = {
     if (!amount) throw new CliError("bad_request", "amount is required");
     const n = network(params);
     await federationsOpen(ctx);
-    const invoice = await node(ctx).walletReceiveLightning({ amount, network: n, ...(str(params, "card") ? { card: str(params, "card") } : {}) });
+    const card = cardOf(ctx, params, "lightning");
+    const invoice = await node(ctx).walletReceiveLightning({ amount, network: n, ...(card ? { card } : {}) });
     return { network: n, amount, invoice: invoice.invoice, expiresAt: invoice.expiresAt, paymentHash: invoice.paymentHash ?? null, source: invoice.source };
   },
 
