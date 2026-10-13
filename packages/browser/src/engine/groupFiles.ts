@@ -190,6 +190,8 @@ interface Kept {
    * for it again (Download). Once every holder known is here, it is fetched no more (`DAMAGED`).
    */
   damaged: Set<string>;
+  /** The holder its last transfer was left with (it stalled, or its person paused it): asked last, not first, next time. */
+  left?: string;
 }
 
 /** A file being asked for: of one holder at a time. */
@@ -200,7 +202,10 @@ interface Want {
   at: number;
   /** Holders asked in this round that had nothing to give: the next ask goes to another. */
   tried: Set<string>;
-  /** The holder's transfer, once it offered: its id on the edge, and when its bytes last moved. */
+  /**
+   * The holder's transfer, once it offered: its id on the edge, and the bytes stored when it last moved by
+   * `wantMoveBytes` and when (-1 until its first change: a resumed transfer starts at what was stored before).
+   */
   wire?: string;
   moved: number;
   movedAt: number;
@@ -351,6 +356,8 @@ export class GroupFileDesk {
     const want = this.wants.get(kept.id);
     // Gone first: the transfer's end below asks nobody else (`transferChanged`), and a late offer is refused.
     this.wants.delete(kept.id);
+    // Paused on a holder's transfer: Resume asks the others first.
+    if (want?.wire && want.holder) kept.left = want.holder;
     const edge = want?.wire && want.linkId ? this.edgesById.get(want.linkId) : undefined;
     const record = edge?.files.get("in", want!.wire!);
     const { size } = kept.meta;
@@ -536,6 +543,7 @@ export class GroupFileDesk {
       kept.holders = newestHolder(peer, kept.holders);
       want.wire = frame.id;
       want.why = undefined;
+      want.moved = -1;
       want.movedAt = this.deps.now();
     }
     return edge.files.handle(frame);
@@ -549,7 +557,9 @@ export class GroupFileDesk {
       if (!kept) { this.wants.delete(id); continue; }
       if (now - (want.wire ? want.movedAt : want.at) < GROUP_FILE_LIMITS.wantWaitMs) continue;
       if (want.wire) {
-        // A holder that stalls is left: the transfer ends here, and the next holder is asked (`transferChanged`).
+        // A holder that stalls, or sends too little to count (`wantMoveBytes`), is left: the transfer ends here, and the
+        // next holder is asked (`transferChanged`).
+        kept.left = want.holder;
         const edge = want.linkId ? this.edgesById.get(want.linkId) : undefined;
         if (edge?.files.get("in", want.wire) && !transferEnded(edge.files.get("in", want.wire)!)) { edge.files.cancel("in", want.wire); continue; }
         want.wire = undefined;
@@ -655,6 +665,8 @@ export class GroupFileDesk {
     if (known.length && known.every(key => kept.damaged.has(key))) { this.stopDamaged(kept); return; }
     const others = this.waitForKnown(kept, want, known, edges) ? [] : [...edges.keys()].filter(key => !known.includes(key) && membership && key !== membership.me && membership.couldRead(key, kept.message));
     const order = [...known, ...others].filter(key => this.mayAsk(kept, want, key, edges.get(key)));
+    // The holder last left for this file is asked once the others were.
+    if (kept.left && order.includes(kept.left)) order.push(...order.splice(order.indexOf(kept.left), 1));
     let behind = false;
     for (const key of order) {
       const linkId = edges.get(key);
@@ -1002,7 +1014,9 @@ export class GroupFileDesk {
     const kept = this.kept.get(edge.taking.get(record.id) ?? ""), want = kept && this.wants.get(kept.id);
     // A transfer this device moved on from (the holder stalled, then went on) changes nothing.
     if (!kept || !want || want.wire !== record.id || want.linkId !== edge.linkId) return;
-    if (transferred !== want.moved) { want.moved = transferred; want.movedAt = this.deps.now(); }
+    // Moving: `wantMoveBytes` more since it last moved (or the rest of the file), not any byte.
+    if (want.moved < 0) want.moved = transferred;
+    else if (transferred - want.moved >= Math.min(GROUP_FILE_LIMITS.wantMoveBytes, kept.meta.size - want.moved)) { want.moved = transferred; want.movedAt = this.deps.now(); }
     if (record.state !== "failed" && record.state !== "declined" && record.state !== "cancelled") kept.stored = transferred;
     const { size } = kept.meta;
     switch (record.state) {

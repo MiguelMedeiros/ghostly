@@ -54,6 +54,11 @@ export const GROUP_FILE_LIMITS = {
    * member's next want has overtaken it.
    */
   doneWaitMs: 5_000,
+  /**
+   * What a transfer must bring in `wantWaitMs` (or the rest of its file, when less) to count as moving: a holder that
+   * sends a few bytes at a time is left as one that stalls.
+   */
+  wantMoveBytes: 16 * 1024,
   /** A file session closes this long after its last transfer ends. */
   sessionIdleMs: 60_000,
   /** File sessions opening at once, and open at once, all groups together. */
