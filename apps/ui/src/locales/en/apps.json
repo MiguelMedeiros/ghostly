@@ -75,6 +75,13 @@
     "tooLarge": "Too large.",
     "unlistedVersion": "The link holds a version this store has not listed yet."
   },
+  "files": {
+    "askFiles": "{{app}} asks to read files",
+    "askFolder": "{{app}} asks to read a folder",
+    "chooseFiles": "Choose files",
+    "chooseFolder": "Choose a folder",
+    "note": "Nothing is copied: {{app}} reads what you pick, on this device."
+  },
   "install": {
     "equivocation": "Two different versions {{sequence}} exist. Ghostly kept the one you have.",
     "fetching": "Checking the app…",
