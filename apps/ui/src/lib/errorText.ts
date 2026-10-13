@@ -165,6 +165,15 @@ const RULES: readonly Rule[] = [
   { match: /^Native connection limit reached$/, key: "errors.transport.slotsFull", next: "errors.transport.slotsFullNext", detail: true },
   { match: /^HyperDHT handshake timed out$/, key: "errors.transport.handshakeTimedOut", detail: true },
   { match: /^Noise handshake failed$/, key: "errors.transport.handshakeFailed", detail: true },
+  // The same dial as its own runtime fails it on this side (native/transports iroh_transport.rs, iroh-web; apps/desktop
+  // hyperdht.rs, paired_transport.rs; endpoint.mjs; desktop/nativeTransports.ts; hyperdht's own errors and its stream's).
+  { match: /^(?<transport>Iroh|HyperDHT) connection timed out$/, key: "errors.transport.switchSlow", next: "errors.transport.dialSlowNext", detail: true },
+  { match: /^Native stream timed out$/, key: "errors.transport.streamSlow", next: "errors.transport.dialSlowNext", detail: true },
+  // The contact's endpoint destroys a dial past its two channels (endpoint.mjs `attach`): the dialer reads a reset.
+  { match: /^connection reset by peer$/, key: "errors.transport.dialRefused", next: "errors.transport.dialRefusedNext", detail: true },
+  { match: /^Native channel closed$/, key: "errors.transport.dialClosed", next: "errors.transport.dialRefusedNext", detail: true },
+  { match: /^PEER_NOT_FOUND: [\s\S]*$/, key: "errors.transport.peerNotFound", next: "errors.transport.peerNotFoundNext", detail: true },
+  { match: /^Native channel did not reach the application$/, key: "errors.transport.notReachedApp", next: "errors.transport.switchRetryNext", detail: true },
   // What the engine stores when a switch failed with no reason (engine/node.ts, transportLog.ts).
   exact("It did not connect", "errors.transport.didNotConnect"),
   { match: /^The peer closed this connection\. Check that both transport preferences allow a common transport, then reconnect\.$/, key: "errors.transport.peerClosed", next: "errors.transport.peerClosedNext", detail: true },

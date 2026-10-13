@@ -57,6 +57,18 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Native connection limit reached", "native/transports/hyperdht/endpoint.mjs"],
   ["HyperDHT handshake timed out", "native/transports/hyperdht/endpoint.mjs"],
   ["Noise handshake failed", "native/transports/hyperdht/endpoint.mjs"],
+  // The same dial failed on this side, by its own runtime.
+  ["Iroh connection timed out", "native/transports/src/iroh_transport.rs"],
+  ["Iroh connection timed out", "native/transports/iroh-web/src/lib.rs"],
+  ["HyperDHT connection timed out", "apps/desktop/src/hyperdht.rs"],
+  ["Native stream timed out", "apps/desktop/src/paired_transport.rs"],
+  ["Native stream timed out", "native/transports/iroh-web/src/lib.rs"],
+  ["Native channel closed", "native/transports/hyperdht/endpoint.mjs"],
+  ["Native channel did not reach the application", "apps/ui/src/desktop/nativeTransports.ts"],
+  // A dial past the contact's two channels: its endpoint destroys the stream, and the dialer's stream reads a reset
+  // (libudx's own words, measured on a local HyperDHT testnet).
+  ["connection reset by peer", "native/transports/hyperdht/endpoint.mjs", "if (stopped || channels.size >= 2) { socket.destroy();"],
+  ["PEER_NOT_FOUND: Peer not found", "node_modules/hyperdht/lib/errors.js", "static PEER_NOT_FOUND(msg = 'Peer not found')"],
   ["It did not connect", `${BROWSER}/engine/node.ts`],
   ["The peer closed this connection. Check that both transport preferences allow a common transport, then reconnect.", `${CORE}/ghostlink.ts`],
   ["Your contact needs an updated app to negotiate a transport change.", `${CORE}/ghostlink.ts`],
