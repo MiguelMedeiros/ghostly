@@ -713,6 +713,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly stopping = new Promise<null>((resolve) => { this.stopBegan = () => resolve(null); });
   /** `start` has put the kept transfers back (EngineState.transfersRestored). */
   private transfersRestored = false;
+  /** `start` has loaded the groups (EngineState.groupsLoaded). */
+  private groupsLoaded = false;
   private readonly feedbackStartedAt = Date.now();
   private readonly feedbackIds = new Set<string>();
   private walletFeedbackReady = false;
@@ -1697,6 +1699,7 @@ export class GhostlyNode implements EngineImplementation {
     for (const group of await db.getGroups()) await this.settleHistory(`group:${group.id}`);
     // Groups know their edges from the links above, and may add or drop some before anything dials.
     await this.groups.load(this.limitedMode);
+    this.groupsLoaded = true;
     for (const group of this.groups.views()) {
       const note = latestReaction(await db.getMessages(`group:${group.id}`));
       if (note) this.reactionNotes.set(`group:${group.id}`, note);
@@ -2244,6 +2247,7 @@ export class GhostlyNode implements EngineImplementation {
         .sort((a, b) => a.createdAt - b.createdAt),
       transfers: Object.fromEntries(this.transfers),
       transfersRestored: this.transfersRestored,
+      ...(this.groupsLoaded && { groupsLoaded: true as const }),
       wallet: this.walletView,
       payments: this.desk.views(),
       identityProofs: this.identities.views(),
