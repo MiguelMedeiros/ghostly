@@ -76,6 +76,8 @@ export const COMMUNITY_LIMITS = {
   /** Commits in one welcome or chain piece. */
   chainPiece: 100,
   pendingLeaves: 64,
+  /** Leaves whose mark (`group-left`) is kept, and the epochs one names. */
+  leftMarks: 64,
   /**
    * Syncs of one member answered in `syncWindowMs`: each answer may carry the chain's tail, secrets and the whole
    * store. A member catching up asks every five seconds at most, and every member syncs every thirty; one asking more
@@ -165,6 +167,10 @@ export function communityGroupId(creator: string, nonce: string): string {
 }
 
 export const leaveStatement = (g: string, s: string) => utf8Encode(JSON.stringify(["ghostly-group/2 leave", g, s]));
+/** What the member who committed a leave (`h`) had heard of the leaver then: `e:h16` → its highest number there. */
+export const leftStatement = (g: string, h: string, hi: Record<string, number>) =>
+  utf8Encode(JSON.stringify(["ghostly-group/2 left", g, h, Object.entries(hi).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))]));
+const LEFT_EPOCH = /^\d{1,15}:[a-f0-9]{16}$/;
 
 /** The secret of an epoch that adds, re-roles or re-links: from the previous one and the commit. */
 export function derivedSecret(previous: Uint8Array, untaggedHash: string): Uint8Array {
@@ -270,6 +276,11 @@ export interface CommunitySecretsFrame { t: "group-secrets"; v: 2; g: string; se
 /** `loc`: hashes of my branch at 1, 2, 4, 8… commits back from my tip, so whoever is on another branch finds where we part. */
 export interface CommunitySyncFrame { t: "group-sync"; v: 2; g: string; e: number; h: string; loc?: string[]; have: Record<string, Record<string, number>>; secrets: string[]; mt?: string }
 export interface CommunityLeaveFrame { t: "group-leave"; v: 2; g: string; s: string; ls: string }
+/**
+ * The mark of a leave (`h`, the commit's full hash), signed by the member who committed it: how far it had heard the
+ * leaver in each epoch. What the leaver wrote past it is not taken (WISP 903 § Leaving and removal).
+ */
+export interface CommunityLeftFrame { t: "group-left"; v: 2; g: string; h: string; hi: Record<string, number>; sig: string }
 /** The seed of the link's current entry key, sealed to one member: after a `link` commit, or at a sync. */
 export interface CommunityEntryFrame { t: "group-entry"; v: 2; g: string; to: string; x: string; s: SealedSecret }
 export interface CommunityInviteFrame { t: "group-invite"; v: 2; g: string; name: string; admin: string; e: number; n: number }
@@ -278,7 +289,7 @@ export interface CommunityWelcomeFrame {
   t: "group-welcome"; v: 2; g: string; name: string; commits: CommunityCommit[];
   secrets: { h: string; s: SealedSecret }[]; rv: SealedSecret; entry: SealedSecret;
 }
-export type CommunityFrame = CommunityMessageFrame | CommunityCommitFrame | CommunitySecretFrame | CommunitySecretsFrame | CommunitySyncFrame | CommunityLeaveFrame | CommunityEntryFrame | GroupMetaFrame;
+export type CommunityFrame = CommunityMessageFrame | CommunityCommitFrame | CommunitySecretFrame | CommunitySecretsFrame | CommunitySyncFrame | CommunityLeaveFrame | CommunityLeftFrame | CommunityEntryFrame | GroupMetaFrame;
 
 export type CommunityStatus = "active" | "left" | "removed" | "forked" | "lost";
 
@@ -321,6 +332,8 @@ export interface CommunityState {
   alone?: string[];
   /** Leave requests waiting for a member to commit them. */
   pendingLeaves: { s: string; ls: string }[];
+  /** Leave commit (full hash) → its mark, as its committer signed it (`group-left`), oldest first. Absent in older states. */
+  left?: Record<string, { hi: Record<string, number>; sig: string }>;
   /** The group's metadata (its picture), as the admin last signed it and I accepted it. */
   meta?: GroupMeta;
 }
@@ -620,11 +633,49 @@ export class CommunitySession {
     return -1;
   }
   /**
-   * Someone the chain removed (not one who left) and who is not back in: nothing it signs is heard any more, even for
-   * an epoch it was in. What one who left wrote while in the group is still taken and handed on, for the epochs it was
-   * in (WISP 903 § Leaving and removal): its goodbye reaches the members who were away.
+   * Whether a frame of someone the chain took out is still heard. A member removed is heard no more, even for an epoch
+   * it was in. What one who left wrote while in the group is taken and handed on, its goodbye included, up to what the
+   * member who committed the leave had heard of it then (its `group-left` mark), never past it: the leaver still holds
+   * those epochs' secrets, and anything it signs later is not heard (WISP 903 § Leaving and removal). No mark here
+   * (one not come yet, or a committer's app before it) and nothing of it is heard.
    */
-  private wasExpelled(key: string): boolean { const i = this.outIndex(key); return i >= 0 && this.state.chain[i].k === "remove"; }
+  private heardAfterOut(f: { s: string; e: number; h: string; n: number }): boolean {
+    const i = this.outIndex(f.s);
+    if (i < 0) return true;
+    const commit = this.state.chain[i];
+    if (commit.k !== "leave") return false;
+    const high = this.state.left?.[communityCommitHash(commit)]?.hi[seenKey(f.e, f.h)];
+    return high !== undefined && f.n <= high;
+  }
+  /** The mark of a leave on my branch, as a frame to hand on (see `heardAfterOut`). */
+  private leftFrame(key: string): CommunityLeftFrame | undefined {
+    const i = this.outIndex(key);
+    if (i < 0 || this.state.chain[i].k !== "leave") return undefined;
+    const h = communityCommitHash(this.state.chain[i]), mark = this.state.left?.[h];
+    return mark && { t: "group-left", v: 2, g: this.id, h, hi: mark.hi, sig: mark.sig };
+  }
+  private keepLeft(h: string, mark: { hi: Record<string, number>; sig: string }): void {
+    const left = { ...(this.state.left ?? {}) };
+    delete left[h];
+    left[h] = mark;
+    const keys = Object.keys(left);
+    for (const old of keys.slice(0, Math.max(0, keys.length - COMMUNITY_LIMITS.leftMarks))) delete left[old];
+    this.state.left = left;
+  }
+  /** A leave's mark, from the member who committed it: kept when it is that member's, for a leave I hold. */
+  private receiveLeft(frame: Record<string, unknown>): boolean {
+    const { h, hi, sig } = frame;
+    if (typeof h !== "string" || !HASH.test(h) || typeof sig !== "string" || !SIG.test(sig) || !isObject(hi)) return false;
+    const entries = Object.entries(hi);
+    if (entries.length > COMMUNITY_LIMITS.leftMarks || entries.some(([k, n]) => !LEFT_EPOCH.test(k) || !Number.isSafeInteger(n) || (n as number) < 0)) return false;
+    const commit = this.known.get(h);
+    if (!commit || commit.k !== "leave" || this.state.left?.[h]?.sig === sig) return false;
+    const marks = hi as Record<string, number>;
+    if (!verify(fromBase64Url(sig), leftStatement(this.id, h, marks), publicKeyFromZ32(commit.by))) return false;
+    this.keepLeft(h, { hi: marks, sig });
+    this.persistSoon();
+    return true;
+  }
   /**
    * What someone the chain took out is told when it comes back (WISP 903 § Leaving and removal): the commits from where
    * it says it is (`sync`: its tip, or its locator) up to the one that took it out, and nothing after. Later commits
@@ -1115,12 +1166,22 @@ export class CommunitySession {
       let done = 0;
       for (const request of [...this.state.pendingLeaves]) {
         if (!rosterHas(this.roster, request.s) || request.s === this.myKey || request.s === this.admin) { this.state.pendingLeaves = this.state.pendingLeaves.filter(r => r !== request); continue; }
-        try { await this.commit("leave", { s: request.s, ls: request.ls }, now); done++; } catch { /* not allowed right now */ }
+        try { const { hash } = await this.commit("leave", { s: request.s, ls: request.ls }, now); this.markLeft(hash, request.s); done++; } catch { /* not allowed right now */ }
         this.state.pendingLeaves = this.state.pendingLeaves.filter(r => r !== request);
       }
       if (done) await this.persist();
       return done;
     });
+  }
+
+  /** Signs and says how far I had heard a member whose leave I just committed (`group-left`). */
+  private markLeft(h: string, leaver: string): void {
+    const hi: Record<string, number> = {};
+    const heard = Object.entries(this.state.seen[leaver] ?? {}).filter(([k]) => LEFT_EPOCH.test(k)).slice(-COMMUNITY_LIMITS.leftMarks);
+    for (const [k, entry] of heard) hi[k] = entry.high;
+    const sig = toBase64Url(sign(leftStatement(this.id, h, hi), this.identity.seed));
+    this.keepLeft(h, { hi, sig });
+    this.hooks.broadcast({ t: "group-left", v: 2, g: this.id, h, hi, sig });
   }
 
   private out(status: CommunityStatus, reason: string): void {
@@ -1376,6 +1437,7 @@ export class CommunitySession {
         case "group-sync": await this.receiveSync(from, frame as unknown as CommunitySyncFrame); return false;
         case "group-meta": return this.receiveMeta(from, raw);
         case "group-leave": return this.receiveLeave(frame);
+        case "group-left": return this.receiveLeft(frame);
         case "group-entry": {
           if (frame.to !== this.myKey || !isSealed(frame.s) || frame.x !== this.currentEntryKey()) return false;
           const seed = openSecret(this.identity.seed, this.myKey, frame.s, entryAad(this.id, this.myKey));
@@ -1402,8 +1464,8 @@ export class CommunitySession {
     // Signed by its author before anything else, so a frame no member wrote never takes a place among those waiting.
     if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return false;
     // Someone removed is heard no more, even for an epoch it was in (whose secret it still holds); one who left, for
-    // the epochs it was in only (the roster check below).
-    if (this.wasExpelled(raw.s)) return false;
+    // what it wrote before its leave only (and for the epochs it was in: the roster check below).
+    if (!this.heardAfterOut(raw)) return false;
     const found = this.commitByShort(raw.e, raw.h);
     if (!found) { this.park(from, raw); return false; }
     const roster = this.rosterOf(found.hash)!;
@@ -1583,18 +1645,21 @@ export class CommunitySession {
     // Mine that no edge took when I said them go to a member let in since too: it cannot read them, and carries them
     // to the members they were written for (a hub passes them on). Anyone else's it could not read stays here.
     const unheard = new Set(this.state.unheard ?? []);
+    const marked = new Set<string>();
     for (const stored of this.state.store) {
       if (stored.s === from) continue;
       // What they have first: the checks below hash commits for every stored frame, and a member up to date has them
       // all; a hub answered each 30 s sync in ~4 ms (2026-10-08).
       const high = have[stored.s]?.[seenKey(stored.e, stored.h)];
       if (Number.isSafeInteger(high) && (high as number) >= stored.n) continue;
-      if (this.wasExpelled(stored.s)) continue;
+      if (!this.heardAfterOut(stored)) continue;
       const found = this.commitByShort(stored.e, stored.h);
       if (!found) continue;
       const reads = rosterHas(this.rosterAt(found.hash) ?? [], from), mine = stored.s === this.myKey && unheard.has(frameKey(stored));
       if (!reads && !(mine && rosterHas(this.roster, from))) continue;
       if (!this.mainIndex.has(found.hash)) this.handSide(from, found.hash, handed, answer);
+      // A leaver's frame goes after its leave's mark, without which it is not taken.
+      if (!rosterHas(this.roster, stored.s) && !marked.has(stored.s)) { marked.add(stored.s); const left = this.leftFrame(stored.s); if (left) answer.push(left); }
       answer.push(stored);
       // Handed to a member it was written for: heard.
       if (mine && reads) unheard.delete(frameKey(stored));
