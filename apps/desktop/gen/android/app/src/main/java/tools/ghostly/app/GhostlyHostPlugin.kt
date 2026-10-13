@@ -191,8 +191,10 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
    * "Share to Ghostly" from another app: its text and its streams. Each stream is copied into the app's cache (a
    * folder per share and per file, under the name the sharing app gave), off the main thread, then handed to Rust.
    * Shares are numbered as they arrive: one that a newer share overtook stops copying and is never handed over, so a
-   * big share that ends late cannot replace the one made after it. Older shares' copies go once a newer one is
-   * handed over. The page reads the copies by token, as a paste's, then says it is done with them (`shareDone`).
+   * big share that ends late cannot replace the one made after it. A share with nothing in it (no file copied, no
+   * text) is never handed over, so it never replaces the one that waits. The page reads the copies by token, as a
+   * paste's, and owns them: they go when it says it is done with them (`shareDone`), never when a newer share comes,
+   * since the page may still show or read an older one; what a run leaves goes at the next start.
    * Only another app's `content://` streams are read (SharedStream): the app opens a stream as itself.
    * Only what the page takes is copied: each stream in turn while the share stays within [MAX_SHARED_BYTES]
    * (android.ts `withinPasteTotal`, keep the two alike); one that would go past it is left out, by its size before
@@ -204,6 +206,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     val authorities = ownAuthorities()
     val streams =
       streamsOf(intent).filter { SharedStream.takes(it.scheme, it.authority, authorities) }.take(MAX_SHARED_FILES)
+    // Nothing to copy either: it does not overtake a share still copying.
+    if (SharedCopies.nothingIn(title, text, streams.size)) return
     val resolver = activity.contentResolver
     val root = sharedRoot()
     val generation = shareGeneration.incrementAndGet()
@@ -234,16 +238,13 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       }
       // No file to read (none copied whole): nothing names the folder to the page, so it goes now.
       if (!latest() || files.length() == 0) own.deleteRecursively()
-      if (!latest()) return@thread
+      // Nothing in it: the share that waits for the page stays as it is.
+      if (!latest() || SharedCopies.nothingIn(title, text, files.length())) return@thread
       val share = JSONObject().put("title", title).put("text", text).put("files", files)
       activity.runOnUiThread {
         // Checked again on the main thread, where shares arrive: a newer one may have come during the hop.
         if (!latest()) return@runOnUiThread
         received("share", share.toString())
-        // Only older ones: a newer share may be copying into its own folder already.
-        thread(name = "ghostly-share-clean") {
-          root.listFiles()?.filter { (it.name.toLongOrNull() ?: 0L) < generation }?.forEach { it.deleteRecursively() }
-        }
       }
     }
   }
