@@ -157,7 +157,7 @@ export const WALLET_METHODS: Record<string, Method> = {
 
   async "wallet.history"(ctx, params) {
     const n = network(params);
-    const limit = num(params, "limit", 50, { min: 1, max: 10_000 });
+    const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
     await federationsOpen(ctx);
     return { network: n, history: (netView(state(ctx), n)?.history ?? []).slice(0, limit) };
   },
