@@ -754,8 +754,11 @@ export async function main(input: string[]): Promise<number> {
   const helpFor = argv.length === 0 || globalOption(argv[0]) ? [] : helpAsked(argv);
   if (helpFor) { process.stdout.write((helpFor.length ? commandHelp(helpFor) : help()) + "\n"); return 0; }
   if (argv[0] === "--version" || argv[0] === "version") {
-    // Global options come after the command once lifted: `--pretty` indents this answer too.
-    pretty = argv.slice(1).some((word) => word === "--pretty" || word === "--pretty=true");
+    // Global options come after the command once lifted: `--pretty` indents this answer too. Anything else is refused,
+    // as every command refuses it: `version --json` (a typo) answered the version.
+    const parsed = parseArgs(argv.slice(1), {});
+    noMoreThan(0, parsed.positionals, "version");
+    pretty = parsed.options.pretty === true;
     print({ version: VERSION });
     return 0;
   }

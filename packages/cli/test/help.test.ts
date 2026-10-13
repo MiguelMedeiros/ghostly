@@ -117,6 +117,26 @@ describe("help", () => {
     expect((await ghostly(["version"])).stdout).toMatch(/^\{"version":"[^"]+"\}\n$/);
   });
 
+  it("version refuses a stray word or an unknown option, as every command does", async () => {
+    // `version --json` (a typo) answered 0 with the version, as `version now foo` did.
+    for (const [args, message] of [
+      [["version", "now", "foo"], "Too many arguments: ghostly version"],
+      [["--version", "extra"], "Too many arguments: ghostly version"],
+      [["version", "--nope"], "Unknown option --nope"],
+      [["--version", "--json"], "Unknown option --json"],
+    ] as const) {
+      const result = await ghostly([...args]);
+      expect(result.code, args.join(" ")).toBe(2);
+      expect(result.json, args.join(" ")).toEqual({ error: { code: "usage", message } });
+    }
+    // Global options still go with it.
+    for (const args of [["version", "-p", "bot"], ["--home", "/h", "--version"]]) {
+      const { code, json } = await ghostly(args);
+      expect(code, args.join(" ")).toBe(0);
+      expect(json, args.join(" ")).toHaveProperty("version");
+    }
+  });
+
   it("a global option that takes a value, given none, says so as a command's option does", async () => {
     for (const [args, name] of [[["-p"], "profile"], [["--profile"], "profile"], [["--home"], "home"], [["--pretty", "-p"], "profile"], [["send", "-p"], "profile"]] as const) {
       const result = await ghostly([...args]);
