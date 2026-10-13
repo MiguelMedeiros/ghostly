@@ -273,6 +273,12 @@ describe("GroupLinkPanel", () => {
     expect(screen.getByTestId("group-link-copy")).toHaveTextContent("Copied");
   });
 
+  it("reads the link left to right from its start in a right-to-left language", () => {
+    renderApp(<GroupLinkPanel group={admin({ entryLink })} />, { language: "ar" });
+    // An Arabic page drew the field's end, the https:// and the site out of sight.
+    expect(screen.getByTestId("group-link-url")).toHaveAttribute("dir", "ltr");
+  });
+
   it("says when copying did not work", async () => {
     const { user } = renderApp(<GroupLinkPanel group={admin({ entryLink })} />);
     vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("denied"));
