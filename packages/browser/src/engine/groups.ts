@@ -88,8 +88,8 @@ export interface GroupsHost {
   /**
    * Pkarr, for the knocks under a link's knock identity (and a community's beacon and lobbies).
    * `background`: a periodic look that can wait, spending only part of the relays' budget. `door`: a community hub's
-   * own records (the knock bell it reads as the door, its lobby, the beacon) and a member's request in a hub's lobby
-   * (`PkarrRequestOptions.door`).
+   * own records (the knock bell it reads as the door, its lobby, the beacon; its reads only while someone is coming in)
+   * and a member's request in a hub's lobby (`PkarrRequestOptions.door`).
    */
   publish(identity: Identity, records: GhostRecord[], background?: boolean, door?: boolean): Promise<void>;
   resolve(pubKeyZ32: string, background?: boolean, door?: boolean): Promise<GhostRecord[] | null>;
@@ -1277,6 +1277,8 @@ export class Groups {
       this.host.emit();
     }
     if (said.n >= ACCEPT_AGAINS || (!said.down && now - said.at < ACCEPT_AGAIN_MS)) return;
+    // The pieces of a welcome that came only in part: the one this accept brings comes whole.
+    invitation.pieces = [];
     try { this.host.sendOnLink(invitation.linkId, { t: "group-accept", g: group.id, key: identityFromSeedB64(invitation.seedB64!).pubKeyZ32 }); } catch { return; }
     this.acceptSaid.set(group.id, { at: now, n: said.n + 1, ...(said.unanswered && { unanswered: true }) });
   }
@@ -1470,6 +1472,13 @@ export class Groups {
           // nor on an entry session, which the link's own pace answers.
           const letIn = !!session && rosterHas(session.roster, frame.key) && this.stored.get(g)?.contacts?.[frame.key] === linkId;
           if (!letIn && ![...this.host.entries(g).values()].includes(linkId)) { try { this.host.sendOnLink(linkId, { t: "group-decline", g }); } catch { /* it asks again when the chat is up */ } }
+          // Let in, but its edge is not up: its welcome may never have reached it (the chat closed while this app let it
+          // in), and it would wait on "Joining…" for good. It gets the welcome again; nothing is committed for it.
+          const edge = this.host.edges(g).get(frame.key);
+          if (letIn && session.isAdmin && !(edge && this.host.linkReady(edge))) {
+            const welcome = await session.rewelcome(frame.key).catch(() => []);
+            try { for (const piece of welcome) this.host.sendOnLink(linkId, piece); } catch { /* it says its accept again */ }
+          }
           return;
         }
         const group = this.stored.get(g)!;
@@ -1595,7 +1604,7 @@ export class Groups {
         const member = Object.entries(group?.contacts ?? {}).find(([, id]) => id === linkId)?.[0];
         if (!session?.isAdmin || !member || member === session.myKey) return;
         // Its edge may have carried the same leave a moment ago: removed once is enough.
-        if (rosterHas(session.roster, member)) await session.remove(member).catch(() => {});
+        if (rosterHas(session.roster, member)) await session.remove(member, Date.now(), { left: true }).catch(() => {});
         try { this.host.sendOnLink(linkId, { t: "group-removed", g }); } catch { /* the commit reaches it on the edge */ }
         return;
       }
@@ -1941,10 +1950,13 @@ export class Groups {
     let tried = this.gapsAsked.get(groupId);
     if (!tried) this.gapsAsked.set(groupId, (tried = new Map()));
     let entry = tried.get(via);
-    if (!entry || entry.mark !== mark) tried.set(via, (entry = { mark, of: new Set(), noticed: entry?.noticed, last: entry?.last }));
+    const now = this.now();
+    // Noticed now, if not before: its answer (its last 32) shows what is below them, which `gapsAgain` asks another for
+    // `MESH_GAP_AGAIN_MS` later, not at the next gossip turn.
+    if (!entry || entry.mark !== mark) tried.set(via, (entry = { mark, of: new Set(), noticed: entry?.noticed ?? now, last: entry?.last }));
     if (entry.of.has(via)) return false;
     entry.of.add(via);
-    entry.at = this.now();
+    entry.at = now;
     return true;
   }
 
@@ -2009,12 +2021,18 @@ export class Groups {
       }
       try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(keys)); } catch { /* it closed: the gossip turn asks another */ }
     }
-    // Not one of the authors asked for, when there is another: an author hands on nobody's messages of its own.
-    const others = connected.filter(key => !fresh.has(key)), pool = others.length ? others : connected;
-    if (!fresh.size || !pool.length) return;
-    const via = pool[(gossipStart(session.myKey) + this.gossipTurn++) % pool.length];
+    if (!fresh.size || !connected.length) return;
+    // The gossip turn's next member that is not one of the authors asked for, when there is another: an author hands on
+    // nobody's messages of its own. Taken from the turns' own order, the next turns go on to the members not asked yet.
+    const at = () => connected[(gossipStart(session.myKey) + this.gossipTurn++) % connected.length]!;
+    let via = at();
+    for (let i = 1; i < connected.length && fresh.has(via); i++) via = at();
     const keys = this.gapsOf(groupId, session, via, fresh);
-    if (keys.length) try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(keys)); } catch { /* it closed: the gossip turn asks another */ }
+    if (!keys.length) return;
+    // As `askOf`: this is the gossip turn's ask, and the next waits a whole turn. Sooner, it found this one's answer
+    // still on its way (`gapsOf`) and asked nobody, and the turn after that went to a member asked already.
+    this.lastGossip.set(groupId, now);
+    try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(keys)); } catch { /* it closed: the gossip turn asks another */ }
   }
 
   /**

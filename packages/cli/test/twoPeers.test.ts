@@ -6,6 +6,7 @@ import { connect, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RACE_DIRECT_MS, TYPING_REFRESH_MS } from "@ghostly/core";
+import { connectDaemon } from "../src/client";
 import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running, testEnv } from "./support/cli";
 import { dominantHz, tone, wavFile } from "./support/tone";
 // covers: chat.paired.reconnect, headless.buttons, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit, headless.forward, chat.forward.files
@@ -517,6 +518,26 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(savedLarge.size).toBe(26 * 1024 * 1024);
     expect(sha(join(bob, "big-copy.bin"))).toBe(sha(large));
     await listen.stop();
+  });
+
+  it("send files all at once, as a bot sends photos: each its own message on both sides", async () => {
+    // Over the daemon's socket, every request written at once: many land in the same millisecond.
+    const client = (await connectDaemon(sockets[alice]!))!;
+    const names = Array.from({ length: 20 }, (_, i) => `burst-${i}.txt`);
+    try {
+      const sent = await Promise.all(names.map((name) => {
+        const path = join(alice, name);
+        writeFileSync(path, `photo ${name}`);
+        return client.call("file.send", { chat: "bob", path }) as Promise<{ file: { id: string } }>;
+      }));
+      expect(new Set(sent.map((s) => s.file.id)).size).toBe(names.length);
+    } finally {
+      client.close();
+    }
+    const burst = (dir: string, chat: string) => async () => ((ok(await as(dir, "file", "list", chat)).files as { file: { name: string }; transfer: { state: string } | null }[])
+      .filter((f) => f.file.name.startsWith("burst-") && f.transfer?.state === "done").map((f) => f.file.name).sort());
+    await expect.poll(burst(bob, "alice"), { timeout: 60_000, interval: 1000 }).toEqual([...names].sort());
+    await expect.poll(burst(alice, "bob"), { timeout: 30_000, interval: 1000 }).toEqual([...names].sort());
   });
 
   it("send a voice note from a file: its length and waveform measured here, the contact sees the bars", async () => {

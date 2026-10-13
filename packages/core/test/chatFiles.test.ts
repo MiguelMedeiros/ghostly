@@ -42,6 +42,8 @@ class Disk {
   bytes: number[] | null;
   failAt = Infinity;
   discarded = false;
+  /** The check of the digest waits for this, as one over a large file takes a while. */
+  checking?: Promise<void>;
   /** Every target opened on it, without keeping one alive. */
   opened: WeakRef<IncomingTarget>[] = [];
   /** Each write takes this long (ms), as storage slower than the wire does: what arrives queues up behind it. */
@@ -64,7 +66,7 @@ class Disk {
         if (this.bytes) for (const b of chunk) this.bytes.push(b);
       },
       flush: async () => { this.durable = this.length; },
-      verify: async (digest) => this.hash.copy().digest("base64url") === digest,
+      verify: async (digest) => { await this.checking; return this.hash.copy().digest("base64url") === digest; },
       discard: async () => { this.discarded = true; this.length = this.durable = 0; this.hash = createHash("sha256"); if (this.bytes) this.bytes.length = 0; },
     };
     this.opened.push(new WeakRef(target));
@@ -733,6 +735,36 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     await vi.advanceTimersByTimeAsync(FILE_LIMITS.idleMs);
     await until(() => state(w.a, "out", "quiet-01") === "done");
   });
+
+  it("the session drops after the file checked out there: on the next one the sender hears so and ends it done", async () => {
+    let lose = true;
+    const w = wire({ drop: (frame) => lose && frame.t === "pf-done" });
+    w.attach();
+    send(w, file("sum-0001", 50_000));
+    await until(() => state(w.b, "in", "sum-0001") === "done");
+    lose = false;
+    w.drop(); w.attach();
+    await until(() => state(w.a, "out", "sum-0001") === "done");
+  });
+
+  for (const back of ["after", "before"] as const) {
+    it(`the session drops while the receiver checks the digest, which ends ${back} it is back: the file ends done on both sides`, async () => {
+      const w = wire();
+      const disk = new Disk(false);
+      let release!: () => void;
+      disk.checking = new Promise<void>((resolve) => { release = resolve; });
+      w.b.disks.set("chk-0001", disk);
+      w.attach();
+      send(w, file("chk-0001", 50_000));
+      await until(() => state(w.b, "in", "chk-0001") === "verifying");
+      w.drop();
+      if (back === "before") { release(); await until(() => state(w.b, "in", "chk-0001") === "done"); }
+      w.attach();
+      if (back === "after") release();
+      await until(() => state(w.a, "out", "chk-0001") === "done");
+      expect(state(w.b, "in", "chk-0001")).toBe("done");
+    });
+  }
 
   it("a digest that does not match deletes the file on arrival and says so on both sides", async () => {
     const w = wire();

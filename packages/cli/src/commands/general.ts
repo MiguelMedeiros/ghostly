@@ -12,6 +12,7 @@ export const commands: Record<string, Command> = {
     options: { clear: { type: "boolean", description: "Remove the picture" } },
     params: ({ options }, a) => {
       if (a.path === undefined && options.clear !== true) throw new CliError("usage", "Missing <jpeg>: ghostly profile picture <jpeg> | --clear");
+      if (a.path !== undefined && options.clear === true) throw new CliError("usage", "--clear removes the picture: not with a <jpeg>");
       return { path: here(a.path), clear: options.clear === true };
     },
   },

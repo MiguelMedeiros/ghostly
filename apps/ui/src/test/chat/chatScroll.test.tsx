@@ -816,6 +816,8 @@ describe("a long timeline's window of rows", () => {
   const atTop = () => rowsIn(list()).find(row => row.getBoundingClientRect().bottom > 0)!.dataset.messageId!;
   /** The user scrolls up near the top of the rows in the page, again and again. */
   const upTimes = (n: number) => { for (let i = 0; i < n; i++) scrollTo(ROW); };
+  /** Pages up from the open rows that fill the window to its most. */
+  const FILL = Math.ceil((MAX_ROWS - OPEN_ROWS) / PAGE_ROWS);
 
   it("opens on its last rows at the bottom, and scrolled near the top takes older ones in above without moving the view", () => {
     renderApp(<WindowTimeline rows={long} />);
@@ -833,7 +835,7 @@ describe("a long timeline's window of rows", () => {
 
   it("never holds more than its most rows: far up, the last ones leave the page and new messages are counted, not drawn", () => {
     const { rerender } = renderApp(<WindowTimeline rows={long} />);
-    upTimes(4);
+    upTimes(FILL + 2);
     expect(inPage()).toBe(MAX_ROWS);
     const row = atTop();
     const was = topOf(row);
@@ -849,7 +851,7 @@ describe("a long timeline's window of rows", () => {
 
   it("going down from up the history takes newer rows in below and lets the top ones go, the view on its row", () => {
     renderApp(<WindowTimeline rows={long} />);
-    upTimes(4);
+    upTimes(FILL + 2);
     const firstBefore = rowsIn(list())[0].dataset.messageId;
     // Near the bottom of the rows in the page.
     scrollTo(MAX_ROWS * ROW - VIEW - ROW);
@@ -862,7 +864,7 @@ describe("a long timeline's window of rows", () => {
 
   it("↓ from up the history brings the last rows back and lands at the bottom", () => {
     renderApp(<WindowTimeline rows={long} />);
-    upTimes(4);
+    upTimes(FILL + 2);
     expect(pill()).not.toBeNull();
     fireEvent.click(pill()!);
     expect(lastInPage()).toBe("peer_999");
@@ -872,7 +874,7 @@ describe("a long timeline's window of rows", () => {
 
   it("what I send from up the history brings the last rows back, at the bottom", () => {
     const { rerender } = renderApp(<WindowTimeline rows={long} />);
-    upTimes(4);
+    upTimes(FILL + 2);
     rerender(<WindowTimeline rows={[...long, { id: "me_1", mine: true }]} />);
     expect(lastInPage()).toBe("me_1");
     expect(list().scrollTop).toBe(list().scrollHeight - VIEW);
@@ -901,7 +903,7 @@ describe("a long timeline's window of rows", () => {
     expect(list().scrollTop).toBe(list().scrollHeight - VIEW);
     expect(pill()).toBeNull();
     // The rows that went are still there to scroll up to.
-    upTimes(3);
+    upTimes(Math.ceil((rows.length - OPEN_ROWS) / PAGE_ROWS));
     expect(rowsIn(list())[0].dataset.messageId).toBe("peer_0");
   });
 
@@ -963,7 +965,7 @@ describe("a long timeline's window of rows", () => {
 
   it("left scrolled up far in the history, it opens on that message again", () => {
     const { unmount } = renderApp(<WindowTimeline rows={long} />);
-    upTimes(4);
+    upTimes(FILL + 2);
     const row = atTop();
     const was = topOf(row);
     unmount();

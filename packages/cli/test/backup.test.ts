@@ -108,6 +108,29 @@ it("a backup an older CLI made (version 1) still restores", async () => {
   expect(ok(await ghostly(["--home", dir, "--profile", "copy", "profile", "show"]))).toMatchObject({ name: "Old bot" });
 });
 
+it("a file that is no backup is called that at once, whatever the passphrase, and a sealed one with none asks in restore's words", async () => {
+  const dir = home("backup-not-one");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Bot"]));
+  const notes = join(dir, "notes.txt"), empty = join(dir, "empty.ghostly-backup"), other = join(dir, "other.json");
+  writeFileSync(notes, "groceries\nmilk\n");
+  writeFileSync(empty, "");
+  writeFileSync(other, JSON.stringify({ format: "something-else", version: 1 }));
+  for (const file of [notes, empty, other]) {
+    for (const env of [NO_PASS, PASS]) {
+      expect(error(await ghostly(["--home", dir, "profile", "restore", file, "copy"], { env }), "refused", 1).message).toBe("This is not a Ghostly backup");
+    }
+  }
+  // A real sealed backup (both versions) and no passphrase: restore's own options, not backup's --no-passphrase.
+  const sealed = join(dir, "sealed.ghostly-backup"), old = join(dir, "old.ghostly-backup");
+  ok(await ghostly(["--home", dir, "profile", "backup", "--out", sealed], { env: PASS }));
+  writeFileSync(old, await seal(JSON.stringify({ format: "ghostly-cli-profile/1" }), PASS.GHOSTLY_BACKUP_PASSPHRASE));
+  for (const file of [sealed, old]) {
+    const message = error(await ghostly(["--home", dir, "profile", "restore", file, "copy"], { env: NO_PASS }), "usage", 2).message;
+    expect(message).toContain("--passphrase-file or GHOSTLY_BACKUP_PASSPHRASE");
+    expect(message).not.toContain("--no-passphrase");
+  }
+});
+
 // The folder took the profile's name before anything was in it: a restore stopped half way (Ctrl-C, a kill) left a
 // profile that was listed and opened, with the keys of the original and a file cut short.
 it("a restore stopped while it writes leaves no profile, and the next one is whole", { timeout: 120_000 }, async () => {

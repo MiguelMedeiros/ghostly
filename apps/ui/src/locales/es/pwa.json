@@ -27,6 +27,8 @@
   "shareTitle": "Compartir con…",
   "shareWaiting": "Recibiendo lo compartido...",
   "stepsThen": "Luego abre Ghostly desde su nuevo icono.",
+  "storageFull": "Almacenamiento lleno",
+  "storageFullHint": "Los mensajes nuevos siguen apareciendo aquí. Para conservarlos al recargar, borra chats o perfiles que ya no necesites.",
   "wake": "Despertarme con la app cerrada",
   "wakeAway": "Desactivado aquí. Por ahora, los contactos despiertan {{device}}.",
   "wakeAwayUnnamed": "Desactivado aquí. Por ahora, los contactos despiertan tu otro dispositivo.",

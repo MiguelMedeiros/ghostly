@@ -2,7 +2,7 @@ import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import type { WalletNetwork } from "@ghostly/core";
 import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletType } from "@ghostly/browser/shared/types";
-import { bool, chatOf, node, num, oneOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, node, num, oneOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
 import { CliError } from "./errors";
 
@@ -93,6 +93,16 @@ export function invoiceNetwork(invoice: string): WalletNetwork | null {
 const isInvoice = (text: string) => /^(lightning:)?ln(bc|tb|tbs|sb|bcrt)[0-9a-z]+$/i.test(text.trim());
 const isLnurl = (text: string) => /^(lightning:)?lnurl[0-9a-z]+$/i.test(text.trim()) || /^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(text.trim());
 
+/**
+ * The engine refusing the mint URL the person typed (not a URL, or not https): their value, so `bad_request`, as
+ * `service add` says; before, it was `engine` (exit 1), which a bot reads as the engine failing and may retry. Read by
+ * its shape: the engine's `EngineError` carries `engineCode`.
+ */
+function badMintUrl(error: unknown): boolean {
+  const code = error instanceof Error ? (error as { engineCode?: unknown }).engineCode : undefined;
+  return code === "invalidMintUrl" || code === "mintNotHttps";
+}
+
 export const WALLET_METHODS: Record<string, Method> = {
   async "wallet.list"(ctx, params) {
     await federationsOpen(ctx);
@@ -147,7 +157,7 @@ export const WALLET_METHODS: Record<string, Method> = {
 
   async "wallet.history"(ctx, params) {
     const n = network(params);
-    const limit = num(params, "limit", 50, { min: 1, max: 10_000 });
+    const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
     await federationsOpen(ctx);
     return { network: n, history: (netView(state(ctx), n)?.history ?? []).slice(0, limit) };
   },
@@ -176,7 +186,9 @@ export const WALLET_METHODS: Record<string, Method> = {
   },
 
   async "wallet.mint.add"(ctx, params) {
-    return node(ctx).walletAddMint({ url: str(params, "url", true), ...(bool(params, "primary") ? { primary: true } : {}) });
+    return node(ctx).walletAddMint({ url: str(params, "url", true), ...(bool(params, "primary") ? { primary: true } : {}) }).catch((error: unknown) => {
+      throw badMintUrl(error) ? new CliError("bad_request", (error as Error).message) : error;
+    });
   },
 
   async "lightning.default"(ctx, params) {
@@ -226,7 +238,7 @@ export const WALLET_METHODS: Record<string, Method> = {
     const n = network(params);
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
     await federationsOpen(ctx);
-    const { paymentId } = await node(ctx).sendPayment({ linkId: link.id, amount, timestamp: Date.now(), network: n, ...(str(params, "memo") ? { memo: str(params, "memo") } : {}), ...real(params) });
+    const { paymentId } = await node(ctx).sendPayment({ linkId: link.id, amount, timestamp: sentAt(), network: n, ...(str(params, "memo") ? { memo: str(params, "memo") } : {}), ...real(params) });
     return { chat: link.id, paymentId };
   },
 
@@ -239,7 +251,7 @@ export const WALLET_METHODS: Record<string, Method> = {
     const rail = params.rail === undefined ? undefined : oneOf(params, "rail", ["cashu", "lightning"] as const, "cashu");
     await federationsOpen(ctx);
     const { paymentId } = await node(ctx).requestPayment({
-      linkId: link.id, amount, timestamp: Date.now(), network: network(params),
+      linkId: link.id, amount, timestamp: sentAt(), network: network(params),
       ...(str(params, "memo") ? { memo: str(params, "memo") } : {}), ...(method ? { method } : {}), ...(rail ? { rail } : {}), ...(str(params, "card") ? { card: str(params, "card") } : {}),
     });
     return { chat: link.id, paymentId };

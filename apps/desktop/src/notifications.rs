@@ -324,8 +324,9 @@ mod mac {
 #[cfg(target_os = "linux")]
 mod linux {
     use std::collections::{HashMap, VecDeque};
-    use std::sync::{Arc, Mutex, OnceLock};
-    use zbus::blocking::{Connection, MessageIterator};
+    use std::sync::{Arc, LazyLock, Mutex, OnceLock};
+    use std::time::Duration;
+    use zbus::blocking::{connection, Connection, MessageIterator};
     use zbus::names::OwnedUniqueName;
     use zbus::zvariant::Value;
 
@@ -335,6 +336,9 @@ mod linux {
     const BUS: &str = "org.freedesktop.DBus";
     /// The newest few, as the page keeps (lib/notifications.ts): an older one's click only closes it.
     const KEPT: usize = 64;
+    /// A server answers in milliseconds. One that stops answering (frozen, or stopped) has each call give up after
+    /// this, so it holds neither the thread nor NOTIFIER, and the notifications after it, for good.
+    const ANSWER_WITHIN: Duration = Duration::from_secs(5);
 
     /// A notification of ours: the server that showed it (its unique name on the bus), its id there and ours.
     /// A server that restarts numbers from 1 again, under another unique name.
@@ -350,9 +354,10 @@ mod linux {
     impl Notifier {
         /// `open` hears our id of each notification clicked.
         pub(super) fn new(
-            connection: Connection,
+            bus: connection::Builder<'static>,
             open: impl Fn(String) + Send + 'static,
         ) -> zbus::Result<Self> {
+            let connection = bus.method_timeout(ANSWER_WITHIN).build()?;
             // Subscribed before the first notification is shown, so no click comes before the listener.
             let rule = zbus::MatchRule::builder()
                 .msg_type(zbus::message::Type::Signal)
@@ -487,9 +492,107 @@ mod linux {
         }
     }
 
+    /// Let go (its call gave up, or its connection broke): the connection is closed, so the click listener's
+    /// iterator ends and its thread with it. That iterator holds the connection too: dropped alone, it stayed open.
+    impl Drop for Notifier {
+        fn drop(&mut self) {
+            let _ = self.connection.clone().close();
+        }
+    }
+
+    /// The notifier the app's notifications go through. No call holds it while the server answers: with the server
+    /// frozen, each would wait ANSWER_WITHIN in line behind the one before it.
+    #[derive(Default)]
+    pub(super) struct Notifiers {
+        /// Connected at the first notification; tried again at the next one while there is no session bus.
+        current: Mutex<Option<Arc<Notifier>>>,
+        /// Per id of ours: its calls in turn, so its notifications replace each other as they would one after another.
+        turns: Mutex<HashMap<String, Turn>>,
+    }
+
+    /// The number of an id's latest call, and the lock its calls take in turn.
+    type Turn = (u64, Arc<Mutex<()>>);
+
+    impl Notifiers {
+        /// False when it could not be shown from here (no session bus, no notification server).
+        pub(super) fn show(
+            &self,
+            connect: impl FnOnce() -> zbus::Result<Notifier>,
+            id: &str,
+            body: &str,
+        ) -> bool {
+            let notifier = {
+                let mut current = self.current.lock().unwrap();
+                if current.is_none() {
+                    *current = connect().ok().map(Arc::new);
+                }
+                current.clone()
+            };
+            let Some(notifier) = notifier else {
+                return false;
+            };
+            match self.in_turn(id, || notifier.show(id, body)) {
+                // A newer one of the same id is shown in its place.
+                None | Some(Ok(())) => true,
+                // The bus answered (no notification server, or it refused): the connection is good.
+                Some(Err(zbus::Error::MethodError(..))) => false,
+                Some(Err(_)) => {
+                    self.let_go(&notifier);
+                    false
+                }
+            }
+        }
+
+        /// Nothing before the first notification was shown from here: there is none to take back.
+        pub(super) fn clear(&self, id: &str) {
+            let Some(notifier) = self.current.lock().unwrap().clone() else {
+                return;
+            };
+            let cleared = self.in_turn(id, || notifier.clear(id));
+            // As in `show`: a connection that broke is not kept.
+            if matches!(&cleared, Some(Err(error)) if !matches!(error, zbus::Error::MethodError(..)))
+            {
+                self.let_go(&notifier);
+            }
+        }
+
+        /// A connection that broke is not kept: its listener ends with it once its last call is done, and the next
+        /// notification connects again. One that took its place already stays.
+        fn let_go(&self, notifier: &Arc<Notifier>) {
+            let mut current = self.current.lock().unwrap();
+            if current
+                .as_ref()
+                .is_some_and(|kept| Arc::ptr_eq(kept, notifier))
+            {
+                *current = None;
+            }
+        }
+
+        /// Runs `call` once the calls for `id` before it are done; not at all (None) when a later call for `id`
+        /// came meanwhile, which takes its place: the newer notification, or the clear of a chat read.
+        fn in_turn<T>(&self, id: &str, call: impl FnOnce() -> T) -> Option<T> {
+            let (number, turn) = {
+                let mut turns = self.turns.lock().unwrap();
+                let (latest, turn) = turns.entry(id.to_string()).or_default();
+                *latest += 1;
+                (*latest, Arc::clone(turn))
+            };
+            let done = {
+                let _turn = turn.lock().unwrap();
+                let latest = self.turns.lock().unwrap()[id].0 == number;
+                latest.then(call)
+            };
+            let mut turns = self.turns.lock().unwrap();
+            // The last call out takes the id's entry away (the map's and this one's are all that are left).
+            if Arc::strong_count(&turn) == 2 {
+                turns.remove(id);
+            }
+            done
+        }
+    }
+
     static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
-    /// Connected at the first notification; tried again at the next one while there is no session bus.
-    static NOTIFIER: Mutex<Option<Notifier>> = Mutex::new(None);
+    static NOTIFIERS: LazyLock<Notifiers> = LazyLock::new(Notifiers::default);
 
     pub fn install(app: &tauri::AppHandle) {
         let _ = APP.set(app.clone());
@@ -500,33 +603,16 @@ mod linux {
         let Some(app) = APP.get() else {
             return false;
         };
-        let mut notifier = NOTIFIER.lock().unwrap();
-        if notifier.is_none() {
+        let connect = || {
             let app = app.clone();
-            *notifier = Connection::session()
-                .and_then(|connection| Notifier::new(connection, move |id| super::opened(&app, id)))
-                .ok();
-        }
-        match notifier.as_ref().map(|notifier| notifier.show(id, body)) {
-            Some(Ok(())) => true,
-            // The bus answered (no notification server, or it refused): the connection is good.
-            Some(Err(zbus::Error::MethodError(..))) | None => false,
-            // A connection that broke is not kept: its listener ends with it, and the next notification connects again.
-            Some(Err(_)) => {
-                *notifier = None;
-                false
-            }
-        }
+            connection::Builder::session()
+                .and_then(|bus| Notifier::new(bus, move |id| super::opened(&app, id)))
+        };
+        NOTIFIERS.show(connect, id, body)
     }
 
-    /// Nothing before the first notification was shown from here: there is none to take back.
     pub fn clear(id: &str) {
-        let mut notifier = NOTIFIER.lock().unwrap();
-        let cleared = notifier.as_ref().map(|notifier| notifier.clear(id));
-        // As in `show`: a connection that broke is not kept.
-        if matches!(&cleared, Some(Err(error)) if !matches!(error, zbus::Error::MethodError(..))) {
-            *notifier = None;
-        }
+        NOTIFIERS.clear(id);
     }
 
     #[cfg(test)]
@@ -645,7 +731,7 @@ mod linux {
                 .unwrap()
                 .build()
                 .unwrap();
-            let notifier = Notifier::new(bus.connect().build().unwrap(), |_| {}).unwrap();
+            let notifier = Notifier::new(bus.connect(), |_| {}).unwrap();
             let listed = || listed.lock().unwrap().clone();
 
             notifier.show("chat-a", "first burst").unwrap();
@@ -696,7 +782,7 @@ mod linux {
                 .build()
                 .unwrap();
             let (opened, open) = mpsc::channel();
-            let notifier = Notifier::new(bus.connect().build().unwrap(), move |id| {
+            let notifier = Notifier::new(bus.connect(), move |id| {
                 let _ = opened.send(id);
             })
             .unwrap();
@@ -770,7 +856,7 @@ mod linux {
             };
             let server = serve();
             let (opened, open) = mpsc::channel();
-            let notifier = Notifier::new(bus.connect().build().unwrap(), move |id| {
+            let notifier = Notifier::new(bus.connect(), move |id| {
                 let _ = opened.send(id);
             })
             .unwrap();
@@ -810,7 +896,7 @@ mod linux {
                     .unwrap()
             };
             let server = serve(&Arc::default());
-            let notifier = Notifier::new(bus.connect().build().unwrap(), |_| {}).unwrap();
+            let notifier = Notifier::new(bus.connect(), |_| {}).unwrap();
             notifier.show("chat-a", "first burst").unwrap();
             notifier.show("chat-b", "another chat").unwrap();
 
@@ -841,6 +927,177 @@ mod linux {
                     (3, "second burst".to_string())
                 ]
             );
+        }
+
+        /// A notification server that stops answering (frozen, or stopped with SIGSTOP) has the bus hold our call.
+        struct Frozen;
+
+        #[zbus::interface(name = "org.freedesktop.Notifications")]
+        impl Frozen {
+            #[allow(clippy::too_many_arguments)]
+            async fn notify(
+                &self,
+                _app_name: String,
+                _replaces_id: u32,
+                _icon: String,
+                _summary: String,
+                _body: String,
+                _actions: Vec<String>,
+                _hints: HashMap<String, OwnedValue>,
+                _timeout: i32,
+            ) -> u32 {
+                std::future::pending().await
+            }
+        }
+
+        /// Every later message's sound was held back for as long as the server was frozen: the call waited with
+        /// no end, holding the thread and NOTIFIER. Now it gives up after ANSWER_WITHIN, as an
+        /// error that is not the server's answer, so the next notification connects again.
+        #[test]
+        fn a_frozen_server_gives_the_call_up() {
+            let bus = Bus::start();
+            let _server = bus
+                .connect()
+                .name(SERVER)
+                .unwrap()
+                .serve_at(PATH, Frozen)
+                .unwrap()
+                .build()
+                .unwrap();
+            let notifier = Notifier::new(bus.connect(), |_| {}).unwrap();
+            let (done, given_up) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = done.send(notifier.show("chat-a", "New message"));
+            });
+            let shown = given_up
+                .recv_timeout(ANSWER_WITHIN + Duration::from_secs(5))
+                .expect("the call is still waiting for the frozen server");
+            assert!(matches!(shown, Err(error) if !matches!(error, zbus::Error::MethodError(..))));
+        }
+
+        /// Each notification given up on a frozen server left its connection on the bus for good: the click
+        /// listener's iterator held it, with a thread and a socket each (11 of them after a 66 s freeze). A notifier
+        /// that is let go closes its connection, and its listener ends.
+        #[test]
+        fn a_notifier_let_go_leaves_the_bus() {
+            let bus = Bus::start();
+            let _server = bus
+                .connect()
+                .name(SERVER)
+                .unwrap()
+                .serve_at(PATH, Frozen)
+                .unwrap()
+                .build()
+                .unwrap();
+            let notifier = Notifier::new(bus.connect(), |_| {}).unwrap();
+            let name = notifier.connection.unique_name().unwrap().to_string();
+            assert!(notifier.show("chat-a", "New message").is_err());
+            drop(notifier);
+
+            let other = bus.connect().build().unwrap();
+            let on_the_bus = || {
+                let reply = other
+                    .call_method(
+                        Some(BUS),
+                        "/org/freedesktop/DBus",
+                        Some(BUS),
+                        "ListNames",
+                        &(),
+                    )
+                    .unwrap();
+                reply
+                    .body()
+                    .deserialize::<Vec<String>>()
+                    .unwrap()
+                    .contains(&name)
+            };
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while on_the_bus() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "{name} is still on the bus"
+                );
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+
+        /// Shows `bodies` (our id, text) on `notifiers`, all at once, one thread each; how long until all are done.
+        fn all_at_once(bus: &Bus, notifiers: &Notifiers, bodies: &[(&str, &str)]) -> Duration {
+            let start = std::sync::Barrier::new(bodies.len());
+            let started = std::time::Instant::now();
+            std::thread::scope(|scope| {
+                for (id, body) in bodies {
+                    let start = &start;
+                    scope.spawn(move || {
+                        start.wait();
+                        notifiers.show(|| Notifier::new(bus.connect(), |_| {}), id, body);
+                    });
+                }
+            });
+            started.elapsed()
+        }
+
+        /// With the server frozen, each notification waited ANSWER_WITHIN in line behind the one before it, holding
+        /// NOTIFIER: five in a frozen moment took 25 s. Now the chats' calls wait side by side, and a chat's
+        /// notification that a newer one of the same chat replaces is not sent at all.
+        #[test]
+        fn a_frozen_server_holds_up_no_line() {
+            let bus = Bus::start();
+            let _server = bus
+                .connect()
+                .name(SERVER)
+                .unwrap()
+                .serve_at(PATH, Frozen)
+                .unwrap()
+                .build()
+                .unwrap();
+            let took = all_at_once(
+                &bus,
+                &Notifiers::default(),
+                &[
+                    ("chat-a", "1"),
+                    ("chat-b", "2"),
+                    ("chat-a", "3"),
+                    ("chat-c", "4"),
+                    ("chat-a", "5"),
+                ],
+            );
+            // chat-a's first call, then its newest: two waits at most.
+            assert!(
+                took < ANSWER_WITHIN * 2 + Duration::from_secs(3),
+                "took {took:?}"
+            );
+        }
+
+        /// What NOTIFIER's line kept: a chat's notifications sent at the same time still leave it one.
+        #[test]
+        fn a_chat_s_notifications_at_once_leave_it_one() {
+            let bus = Bus::start();
+            let listed: Arc<Mutex<Vec<(u32, String)>>> = Arc::default();
+            let _server = bus
+                .connect()
+                .name(SERVER)
+                .unwrap()
+                .serve_at(PATH, Listing(Arc::clone(&listed), 0))
+                .unwrap()
+                .build()
+                .unwrap();
+            let notifiers = Notifiers::default();
+            let bodies: Vec<String> = (0..8).map(|n| format!("burst {n}")).collect();
+            let chat_a: Vec<(&str, &str)> = bodies
+                .iter()
+                .map(|body| ("chat-a", body.as_str()))
+                .collect();
+            all_at_once(&bus, &notifiers, &chat_a);
+            all_at_once(&bus, &notifiers, &[("chat-b", "another chat")]);
+            let shown = listed.lock().unwrap().clone();
+            assert_eq!(shown.len(), 2, "{shown:?}");
+            assert_eq!(shown[1], (2, "another chat".to_string()));
+
+            // And reading the chats takes them both back.
+            notifiers.clear("chat-a");
+            notifiers.clear("chat-b");
+            assert_eq!(listed.lock().unwrap().clone(), []);
         }
     }
 }

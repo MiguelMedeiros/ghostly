@@ -306,7 +306,7 @@ export function peekAppManifest(bytes: Uint8Array): { ref: string; sequence: num
 
 export class Apps {
   private readonly staged = new Map<string, Staged>();
-  /** Bundles read back and checked, by digest: the one running is read once, not on every `file`. */
+  /** Bundles read back and checked, by digest, least recently used first: the ones running are read once, not on every `file`. */
   private readonly verified = new Map<string, AppBundle>();
   /** Reads of a bundle under way, by digest: icons drawn at once share one read. */
   private readonly verifying = new Map<string, Promise<AppBundle>>();
@@ -617,7 +617,8 @@ export class Apps {
   /** The installed bundle read back and checked again before it runs (WISP 1200 § Signatures: "again before it runs one"). */
   private verifiedBundle(app: InstalledApp): Promise<AppBundle> {
     const kept = this.verified.get(app.digest);
-    if (kept) return Promise.resolve(kept);
+    // Used last, dropped last: a running app's `file` reads keep its bundle.
+    if (kept) { this.verified.delete(app.digest); this.verified.set(app.digest, kept); return Promise.resolve(kept); }
     const under = this.verifying.get(app.digest);
     if (under) return under;
     const reading = (async () => {
@@ -625,8 +626,11 @@ export class Apps {
       if (!bytes) fail("needs-files", "This app's files are not on this device yet");
       const read = readAppBundle(bytes);
       if (!read.ok || read.bundle.digest !== app.digest) fail("damaged", "This app's stored files do not match what was installed");
-      if (this.verified.size >= 2) this.verified.delete(this.verified.keys().next().value!);
       this.verified.set(app.digest, read.bundle);
+      // One for each app started here (this one counted while it starts), two at least: apps running at once do not push
+      // each other's bundle out, which every `file` read would then read and check again whole.
+      const room = Math.max(2, this.started.size + (this.started.has(app.ref) ? 0 : 1));
+      while (this.verified.size > room) this.verified.delete(this.verified.keys().next().value!);
       // A copy: the bundle's files are views into its whole bytes, which would stay in memory for as long as the icon.
       this.icons.set(app.digest, read.bundle.files.get(APP_ICON_PATH)?.slice() ?? null);
       return read.bundle;
@@ -1216,7 +1220,10 @@ export class Apps {
     return { ref: app.ref, digest: app.digest, version: app.manifest.version, title: app.manifest.title, permissions: [...app.permissions], view: appViewOf(bundle.manifest), entry: utf8Decode(entry) };
   }
 
-  /** A file of the installed bundle, for the broker's `file` (`ghostly.file(path)`). `digest`: the version the frame runs. */
+  /**
+   * A file of the installed bundle, for the broker's `file` (`ghostly.file(path)`): a copy, which the broker transfers to
+   * the app as it is. `digest`: the version the frame runs.
+   */
   async file({ ref, path, digest }: { ref: string; path: string; digest?: string }): Promise<Uint8Array> {
     // Its icon still shows on the Apps page and in chats once it is stopped: a picture the publisher signed, nothing more.
     const app = path === APP_ICON_PATH ? await this.installedOrFail(ref) : await this.runningOrFail(ref, digest);

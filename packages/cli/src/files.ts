@@ -8,7 +8,7 @@ import { removeStored } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import type { GroupView, MessageFile } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
-import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
 import { CliError } from "./errors";
 import { endTyping } from "./typing";
@@ -184,7 +184,7 @@ export const FILE_METHODS: Record<string, Method> = {
     const image = voice ? undefined : await readImageMeta(source, mime);
     const wireId = toBase64Url(randomBytes(12));
     const file: MessageFile = { id: `${link.id}-out-${wireId}`, name: sanitizeFileName(str(params, "name") ?? basename(path)), size: info.size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
-    const timestamp = Date.now();
+    const timestamp = sentAt();
     const bytes = await fileBytes();
     const digest = await bytes.stage(file.id, source);
     await fileStore.put({

@@ -167,6 +167,7 @@ export function taskFields(options: Parsed["options"]): Record<string, unknown> 
   set("title", options.title);
   set("status", options.status);
   percent(options, "progress");
+  if (options.progress !== undefined && options.steps !== undefined) throw new CliError("usage", "--progress or --steps, not both");
   set("progress", options.progress);
   set("step", options.step);
   set("branch", options.branch);
@@ -299,6 +300,7 @@ export function usageWindowOf(value: string): { window: string; left: number; re
 export function usageFields(options: Parsed["options"]): Record<string, unknown> {
   const fields: Record<string, unknown> = { ...cardJson(options.json) };
   percent(options, "left");
+  if (options.left !== undefined && (options.used !== undefined || options.limit !== undefined)) throw new CliError("usage", "--left or --used with --limit, not both");
   for (const key of ["id", "left", "used", "limit", "label", "account", "window"] as const) if (options[key] !== undefined) fields[key] = options[key];
   const resets = cardTime(options.resets, "resets");
   if (resets !== undefined) fields.resetsAt = resets;

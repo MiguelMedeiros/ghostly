@@ -697,6 +697,8 @@ export class LinkSession {
     this.polling = true;
     this.events.onPoll?.({ polling: true, nextInMs: 0 });
     const started = Date.now();
+    // A read the relays' budget held back: the next one goes when the budget frees a request.
+    let heldBackMs: number | undefined;
     try {
       // A look that can wait (nobody watching, nothing expected) says so: a transport with a request
       // budget spends only part of it on those, and keeps the rest for links that are signaling.
@@ -707,7 +709,8 @@ export class LinkSession {
       // In its first seconds, when an app that restarts has its offer out (`PkarrRequestOptions.departed`). Not `watch`
       // alone: a packet the contact put just before its goodbye, read only after it, advertises, and looks like it is back.
       const departed = !signal && Date.now() < this.departedUntil;
-      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background: pace === "background" || pace === "connected", urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }) });
+      const background = pace === "background" || pace === "connected";
+      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background, urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }) });
       if (!this.running) return;
       this.discoveryResult("read");
       const ms = Date.now() - started;
@@ -718,6 +721,7 @@ export class LinkSession {
       const read = answered !== undefined && answered >= started;
       if (read) this.lastReadAt = started;
       this.readMissed = !!this.transport.readAnsweredAt && !read;
+      if (this.readMissed) heldBackMs = this.transport.readHeldBackFor?.(this.peerPubKeyZ32);
 
       let receivedNew = false;
       // The packet an inviter puts under the contact's key before they join (`emptyLinkRecords`), so
@@ -795,7 +799,7 @@ export class LinkSession {
       if (this.running) {
         traceLink(this.identity.pubKeyZ32, "poll", { ms: Date.now() - started, error: String(error) });
         // A read the relays' request budget held back (nothing known yet to answer from) is a wait: the next poll reads.
-        if (!isDiscoveryBudgetError(error)) {
+        if (isDiscoveryBudgetError(error)) heldBackMs = error.retryInMs; else {
           this.discoveryResult("read", error);
           this.events.onStatus?.("error");
         }
@@ -811,8 +815,10 @@ export class LinkSession {
       } else if (this.running && !this.pollTimer) {
         const interval = this.nextInterval();
         // The interval is a period, counted from the start of this read: a read that took long (a key
-        // nobody has yet, a relay asking its DHT) does not push the next one further out.
-        const wait = Math.max(MIN_POLL_GAP_MS, interval - (Date.now() - started));
+        // nobody has yet, a relay asking its DHT) does not push the next one further out. A read the budget held back
+        // reads again when it frees a request, where the relays take it in turn per key (`READ_TURN_MS` in relay.ts):
+        // at the next poll, the chats that had just taken a request took the next.
+        const wait = heldBackMs !== undefined ? Math.min(interval, Math.max(BUDGET_RETRY_MIN_MS, heldBackMs)) : Math.max(MIN_POLL_GAP_MS, interval - (Date.now() - started));
         this.events.onPoll?.({ polling: false, nextInMs: wait });
         this.pollTimer = setTimeout(() => {
           this.pollTimer = null;

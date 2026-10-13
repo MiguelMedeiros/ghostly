@@ -73,6 +73,7 @@ describe("a group message names its author", () => {
     const { ctx } = fake([message("a", { member: "anakey" }), message("b", { member: "bokey", timestamp: 2 })]);
     const page = await callApi(ctx, "group.history", { group: "Crew" }) as { messages: { id: string; nick: string | null; member: string }[] };
     expect(page.messages.map((m) => [m.id, m.member, m.nick])).toEqual([["a", "anakey", "Ana"], ["b", "bokey", null]]);
+    await expect(callApi(ctx, "group.history", { group: "Crew", limit: 1.5 })).rejects.toMatchObject({ code: "bad_request", message: "limit must be a whole number from 1 to 10000" });
   });
 
   it("in the group.message event", async () => {

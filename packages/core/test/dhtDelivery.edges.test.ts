@@ -882,6 +882,32 @@ describe("DHT delivery: the relays' request budget", () => {
     await h.bob.stop();
   });
 
+  it("an idle chat's keep-alives cost a couple of disk writes an hour, the budget free or spent, and a restart still publishes above every sequence sent", async () => {
+    const seqs = (h: ReturnType<typeof setup>) => h.transport.publish.mock.calls.map(c => JSON.parse(decrypt(c[1][0].value, h.envelopeKey))[0][1] as number);
+    const free = setup({ pollMs: null, bobCredentials: { seedB64: createIdentity().seedB64 } }); await free.bob.start();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(free.transport.publish.mock.calls.length, "a keep-alive every four minutes").toBeGreaterThanOrEqual(14);
+    expect(free.saved.length, "budget free").toBeLessThanOrEqual(2);
+    await free.bob.stop();
+    const sent = seqs(free);
+    expect(sent.every((s, i) => i === 0 || s > sent[i - 1])).toBe(true);
+    // A crash right now, from what the disk holds: the next envelope still reads as newer than every one sent.
+    const again = new DhtDelivery({ params: free.link.invite, mode: "dht", state: free.last(), credentials: free.credentials, transport: free.transport,
+      save: async () => {}, pin: async () => {}, message: async () => {}, receipt: async () => {}, changed: () => {} });
+    await again.start(); await vi.advanceTimersByTimeAsync(0);
+    expect(seqs(free).at(-1)).toBeGreaterThan(Math.max(...sent));
+    await again.stop();
+
+    // At the relays' budget every keep-alive is refused, every 30 s: a refusal is not worth a disk sync.
+    const spent = setup({ pollMs: null, bobCredentials: { seedB64: createIdentity().seedB64 } });
+    spent.transport.publish.mockRejectedValue(held(30_000));
+    await spent.bob.start();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(spent.transport.publish.mock.calls.length).toBeGreaterThanOrEqual(100);
+    expect(spent.saved.length, "budget spent").toBeLessThanOrEqual(3);
+    await spent.bob.stop();
+  });
+
   it("a read the budget held back is no error either", async () => {
     const h = setup({ bobCredentials: pinned() });
     h.transport.resolve.mockRejectedValue(held(5_000));

@@ -199,6 +199,43 @@ describe("the argument parser", () => {
     expect(params("button update", ["alice", "m1", "--text", "Done"])).toMatchObject({ text: "Done" });
     expect(params("chat verify", ["alice", "--code", "ab cd"])).toEqual({ chat: "alice", code: "ab cd" });
   });
+
+  it("refuses the two sides of an either/or given together, naming both, where before one won without a word", () => {
+    const params = (name: string, argv: string[]) => {
+      const command = COMMANDS[name];
+      const parsed = parseArgs(argv, command.options ?? {}, idSlot(command));
+      return command.params!(parsed, positionals(command, parsed.positionals));
+    };
+    const pairs: [name: string, argv: string[], message: string][] = [
+      ["profile picture", ["one.jpg", "--clear"], "--clear removes the picture: not with a <jpeg>"],
+      ["group picture", ["g1", "one.jpg", "--clear"], "--clear removes the picture: not with a <jpeg>"],
+      ["task send", ["bob", "--title", "t", "--progress", "10", "--steps", "4/5"], "--progress or --steps, not both"],
+      ["task update", ["bob", "t1", "--progress", "10", "--steps", "4/5"], "--progress or --steps, not both"],
+      ["usage send", ["bob", "--left", "5", "--used", "1", "--limit", "2"], "--left or --used with --limit, not both"],
+      ["usage send", ["bob", "--left", "5", "--used", "1"], "--left or --used with --limit, not both"],
+      ["group link", ["g1", "--off", "--reset"], "--off turns the link off: not with --reset"],
+      ["group hub", ["g1", "m1", "--pin", "--exclude"], "--pin, --exclude or --auto: one of them"],
+      ["group hub", ["g1", "m1", "--exclude", "--auto"], "--pin, --exclude or --auto: one of them"],
+    ];
+    for (const [name, argv, message] of pairs) {
+      let error: unknown;
+      try { params(name, argv); } catch (caught) { error = caught; }
+      expect(error, `${name} ${argv.join(" ")}`).toBeInstanceOf(CliError);
+      expect((error as CliError).code, name).toBe("usage");
+      expect((error as CliError).message, name).toBe(message);
+    }
+    // Each side alone is taken as before.
+    expect(params("profile picture", ["--clear"])).toMatchObject({ path: undefined, clear: true });
+    expect(params("group picture", ["g1", "--clear"])).toMatchObject({ clear: true });
+    expect(params("task send", ["bob", "--title", "t", "--steps", "4/5"]).card).toMatchObject({ done: 4, total: 5 });
+    expect(params("task send", ["bob", "--title", "t", "--progress", "10"]).card).toMatchObject({ progress: 10 });
+    expect(params("usage send", ["bob", "--used", "1", "--limit", "2"]).card).toMatchObject({ used: 1, limit: 2 });
+    expect(params("usage send", ["bob", "--left", "5"]).card).toMatchObject({ left: 5 });
+    expect(params("group link", ["g1", "--reset"])).toEqual({ group: "g1", on: true, reset: true });
+    expect(params("group link", ["g1", "--off"])).toEqual({ group: "g1", on: false, reset: false });
+    for (const role of ["pin", "exclude", "auto"]) expect(params("group hub", ["g1", "m1", `--${role}`])).toMatchObject({ role });
+    expect(params("group hub", ["g1", "m1"])).toMatchObject({ role: "auto" });
+  });
 });
 
 describe("errors", () => {

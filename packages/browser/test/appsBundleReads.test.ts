@@ -49,6 +49,21 @@ describe("installed bundles read back", () => {
     expect(reads()).toBe(3);
   });
 
+  it("three apps running at once, reading their files in turn, read each bundle once", async () => {
+    const installed = await installMany(3);
+    const { store, reads } = freshEngine();
+    for (const { ref } of installed) await store.entry({ ref });
+    for (let round = 0; round < 3; round++) {
+      for (const { ref } of installed) {
+        expect(await store.file({ ref, path: "data/openings.json" })).toEqual(new TextEncoder().encode("[]"));
+        // A file the bundle does not hold is refused from the kept bundle too, not after reading it all again.
+        await expect(store.file({ ref, path: "no/such.json" })).rejects.toThrow(/^no-file/);
+      }
+    }
+    // Before: two bundles kept, the oldest dropped first, so with three apps in turn each app's first read of a round was a miss (12).
+    expect(reads()).toBe(3);
+  });
+
   it("four cards of one app drawn at once read its bundle once", async () => {
     const [{ ref, icon }] = await installMany(1);
     const { store, reads } = freshEngine();

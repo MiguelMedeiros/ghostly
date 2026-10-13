@@ -7,7 +7,8 @@
  * - The frame loads twice: the runner, then the app the runner writes into itself after `writing`. Any other load is a
  *   navigation, and tears the app down.
  * - Requests are `{id, type, args}`, at most 64 KiB as JSON and 50 a second; answers `{id, ok, value | error}`; events
- *   `{event, data}`. An unknown type is refused. An app that sends ten times the rate is stopped.
+ *   `{event, data}`. An unknown type is refused. An app that sends ten times the rate is stopped. `file` answers at
+ *   most 16 MiB a second, one read at a time.
  *
  * `createBroker` is the protocol alone (tested without a browser); `startApp` frames it in a page.
  */
@@ -187,6 +188,11 @@ export function createBroker({ host: platform, launch, view, post, stopped, now 
   const host = platform.running?.(launch.digest) ?? platform;
   let phase: AppPhase = "loading";
   const recent: number[] = [];
+  /** The `file` answers of the last second (when, how many bytes) and their sum: what `fileBytesPerSecond` counts. */
+  const served: { at: number; bytes: number }[] = [];
+  let servedBytes = 0;
+  /** The `file` read in progress: reads go one at a time, so each is counted before the next one starts. */
+  let reading: Promise<unknown> = Promise.resolve();
   const scope = launch.chat?.linkId ?? "alone";
   const chatAllowed = !!launch.chat && launch.permissions.includes("chat");
   let appId: string | null = null;
@@ -240,8 +246,23 @@ export function createBroker({ host: platform, launch, view, post, stopped, now 
       case "file": {
         const path = args[0];
         if (typeof path !== "string" || path.length === 0 || path.length > 1024) refuse("bad-path");
-        const bytes = await host.file(launch.ref, path as string);
-        const buffer = bytes.slice().buffer as ArrayBuffer;
+        // Bounded in bytes too: 50 reads a second of a 16 MiB file made the page copy 800 MB a second.
+        const read = reading.then(async () => {
+          if (phase === "stopped") refuse("stopped");
+          const at = now();
+          while (served.length && served[0]!.at <= at - 1000) servedBytes -= served.shift()!.bytes;
+          if (servedBytes >= MINI_APP_LIMITS.fileBytesPerSecond) refuse("too-fast");
+          const file = await host.file(launch.ref, path as string);
+          served.push({ at, bytes: file.byteLength });
+          servedBytes += file.byteLength;
+          return file;
+        });
+        reading = read.catch(() => {});
+        const bytes = await read;
+        // The host's copy is the caller's (AppsPlatform.file): handed over as it is when it is the whole buffer, where
+        // copying it again doubled what a read cost the page.
+        const whole = bytes.byteOffset === 0 && bytes.buffer instanceof ArrayBuffer && bytes.byteLength === bytes.buffer.byteLength;
+        const buffer = whole ? bytes.buffer as ArrayBuffer : bytes.slice().buffer as ArrayBuffer;
         return { value: buffer, transfer: [buffer] };
       }
       case "storage.get": {

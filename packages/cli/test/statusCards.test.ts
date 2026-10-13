@@ -108,7 +108,7 @@ describe("the task commands", () => {
     // An update's card may have the link already; a whole card in --json stays the card's to check.
     expect(params("task update", ["g1", "t", "--pr-checks", "failing"]).card).toEqual({ pr: { checks: "failing" } });
     expect(params("task send", send("--json", '{"pr":{"state":"open"},"tags":["a","b","c","d"]}')).card).toMatchObject({ pr: { state: "open" } });
-    expect(params("task send", send("--steps", "5/5", "--progress", "100", "--tag", "a", "--tag", "b", "--tag", "c")).card).toMatchObject({ done: 5, total: 5, progress: 100, tags: ["a", "b", "c"] });
+    expect(params("task send", send("--steps", "5/5", "--json", '{"progress":100}', "--tag", "a", "--tag", "b", "--tag", "c")).card).toMatchObject({ done: 5, total: 5, progress: 100, tags: ["a", "b", "c"] });
   });
 
   it("start the groups' sessions even in a one-shot: the chat they name may be a group", () => {

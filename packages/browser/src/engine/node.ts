@@ -306,6 +306,8 @@ interface LiveLink {
   peerAck: number;
   lastSyncAt: number;
   poll: LinkView["poll"];
+  /** Its first read ended, whatever it found: a read after it is no first sync under way. */
+  firstReadDone?: boolean;
   files: LinkFiles;
   /** The files of mine said on the DHT floor and not seen there yet, by floor id; read once in a run (`floorFilesOf`). */
   floorFiles?: Promise<Map<string, string>>;
@@ -660,10 +662,11 @@ export class GhostlyNode implements EngineImplementation {
   private readonly clock = new ClockWatch(() => { if (!this.shuttingDown) this.emitState(); });
   private clockOff: (() => void) | undefined;
   /**
-   * Edges of groups whose WebRTC did not connect in this run of the app (`edgeWithoutRtc`): they go on as an app with
-   * no WebRTC does, over a native transport. Not kept: the next start tries WebRTC first again.
+   * Edges of groups whose WebRTC did not connect (`edgeWithoutRtc`): they go on as an app with no WebRTC does, over a
+   * native transport, until the member is seen online again after a packet said it was gone (`away`, `edgeRtcPresence`).
+   * Not kept: the next start tries WebRTC first again.
    */
-  private readonly edgeRtcOff = new Set<string>();
+  private readonly edgeRtcOff = new Map<string, { away: boolean }>();
   private readonly pollIntervals: PollIntervals;
   private readonly localFetch: LocalFetch;
   private readonly links = new Map<string, LiveLink>();
@@ -2338,9 +2341,17 @@ export class GhostlyNode implements EngineImplementation {
     return { mine, inviteKey: identityFromSeedB64(invite.seedB64), inviteCode, madeAt: Date.now() };
   }
 
-  /** One invite warmed and waiting (`after` ms from now), warmed again every so often while it waits (the relays forget). */
+  /**
+   * One invite warmed and waiting (`after` ms from now), warmed again every so often while it waits (the relays forget).
+   * Once too old for `takeInvite` to hand out, it is replaced by a new one, warmed at once: warming it on would spend
+   * two puts every few minutes on keys nobody will use, and leave the next invite on cold keys.
+   */
   private prepareSpare(after = 0): void {
     if (this.shuttingDown || !this.networkOn) return;
+    if (this.spare && after === 0 && Date.now() - this.spare.madeAt >= SPARE_INVITE_MAX_AGE_MS) {
+      for (const identity of [identityFromSeedB64(this.spare.mine.seedB64), this.spare.inviteKey]) this.warmedKeys.delete(identity.pubKeyZ32);
+      this.spare = null;
+    }
     if (!this.spare) this.spare = this.makeSpare();
     const spare = this.spare;
     if (this.spareTimer) clearTimeout(this.spareTimer);
@@ -2353,7 +2364,8 @@ export class GhostlyNode implements EngineImplementation {
       this.warmedKeys.set(identity.pubKeyZ32, Date.now());
       this.warmKey(identity);
     }
-    this.spareTimer = setTimeout(() => { this.spareTimer = null; if (this.spare === spare) this.prepareSpare(); }, SPARE_INVITE_WARM_EVERY_MS);
+    const untilAged = spare.madeAt + SPARE_INVITE_MAX_AGE_MS - Date.now();
+    this.spareTimer = setTimeout(() => { this.spareTimer = null; if (this.spare === spare) this.prepareSpare(); }, Math.min(SPARE_INVITE_WARM_EVERY_MS, untilAged));
   }
 
   async joinLink({ inviteCode }: { inviteCode: string }): Promise<{ linkId: string }> {
@@ -6633,6 +6645,7 @@ export class GhostlyNode implements EngineImplementation {
           // An open edge's name comes from `onPeerNick`. A closed one keeps the last name: an edge going down says no
           // name, and taking that would drop the member's name and set it again on every drop and reopen.
           if (!entry && presence.nick && !live.link?.isDataLinkOpen) this.groups.edgeNick(group, peer, presence.nick);
+          if (!entry) this.edgeRtcPresence(linkId, presence);
           this.emitState(); },
         onPairingState: state => { live.pairing = state; this.emitState(); },
         onDirectEvidence: evidence => {
@@ -6684,14 +6697,44 @@ export class GhostlyNode implements EngineImplementation {
    * never went live, and the member stayed unreachable for as long as that network lasted. The edge starts again as on an
    * app with no WebRTC (WISP 902 § Transports): it runs its native endpoints and says so in its packet (`_tr`, with no
    * `webrtc/1`), the member's app starts its own for it as it does for a Linux Desktop, and the two meet over Iroh
-   * through its relay. For this run of the app only.
+   * through its relay. Until the member comes back (`edgeRtcPresence`), or for this run of the app.
    */
   private async edgeWithoutRtc(linkId: string): Promise<void> {
-    const live = this.links.get(linkId), link = live?.link;
-    if (!live || !link || !live.stored.group || live.stored.groupEntry || this.shuttingDown || this.options.webrtcGroupLinks) return;
+    const live = this.links.get(linkId);
+    if (!live?.link || !live.stored.group || live.stored.groupEntry || this.shuttingDown || this.options.webrtcGroupLinks) return;
     if (this.edgeRtcOff.has(linkId) || this.keepsGroupNative(live.stored) || !Object.keys(this.nativeFactories).length) return;
-    this.edgeRtcOff.add(linkId);
+    this.edgeRtcOff.set(linkId, { away: false });
     traceLink(live.myPubKeyZ32, "edge-rtc-off", {});
+    await this.restartEdge(linkId);
+  }
+
+  /**
+   * A member whose edge went native here (`edgeWithoutRtc`) is seen online again after a packet said it was gone: the
+   * attempt that failed may have been its app quitting in the middle of it (a one-shot CLI command, a quick restart),
+   * not a network that blocks direct connections. Held native for this whole run, the edge said so in its packet, the
+   * member's app followed on its next starts, and past the group links' native slots members stayed unreachable for as
+   * long as this app ran (2026-10-09). The edge tries WebRTC again, its `_tr` with `webrtc/1` again (WISP 902 §
+   * Transports); a network that really blocks it costs one more failed attempt per return.
+   */
+  private edgeRtcPresence(linkId: string, presence: PeerPresence): void {
+    const off = this.edgeRtcOff.get(linkId);
+    if (!off) return;
+    if (!presence.online) { off.away = true; return; }
+    if (!off.away) return;
+    const live = this.links.get(linkId);
+    this.edgeRtcOff.delete(linkId);
+    if (live) traceLink(live.myPubKeyZ32, "edge-rtc-back", {});
+    // Its native slot, if it held one, is free: a group link waiting for one tries at the next tick.
+    this.groupNativeWaiting.delete(linkId);
+    this.groupNativeFailed.delete(linkId);
+    this.groupNativeRetryAt = 0;
+    void this.restartEdge(linkId);
+  }
+
+  /** An edge starts again, on what `keepsGroupNative` says now. */
+  private async restartEdge(linkId: string): Promise<void> {
+    const live = this.links.get(linkId), link = live?.link;
+    if (!live || !link) return;
     live.link = null;
     // No goodbye: the edge is back in a moment, and the member must not take this for a leave.
     await link.stop(false).catch(() => {});
@@ -6886,14 +6929,16 @@ export class GhostlyNode implements EngineImplementation {
           live.status = status;
           if (status === "online") live.lastSyncAt = Date.now();
           // A read like the one before changes no row: only the open chat's panel shows its time, and a group's
-          // members when they were last seen.
-          if (status !== was || !synced || stored.group || linkId === this.activeLinkId) this.emitState();
+          // members when they were last seen. A failed read of a chat that never synced is like the one before too.
+          if (status !== was || (!synced && status === "online") || stored.group || linkId === this.activeLinkId) this.emitState();
         },
         onPoll: ({ polling, nextInMs }) => {
-          const was = live.poll.polling;
+          const was = live.poll.polling, first = !live.lastSyncAt && !live.firstReadDone;
           live.poll = { polling, nextAt: Date.now() + nextInMs, interval: nextInMs || live.poll.interval };
-          // Shown in the open chat's panel, and in the list only as a chat's first sync under way.
-          if (linkId === this.activeLinkId || (!live.lastSyncAt && polling !== was)) this.emitState();
+          if (was && !polling) live.firstReadDone = true;
+          // Shown in the open chat's panel, and in the list only as a chat's first sync under way: its first read, not
+          // every read of a chat whose reads fail (no network), which was a state a read for each such chat.
+          if (linkId === this.activeLinkId || (first && polling !== was)) this.emitState();
         },
         onMessageReceipt: async id => {
           const oneToOne = !!stored.profile && !stored.group;
@@ -7672,7 +7717,8 @@ export class GhostlyNode implements EngineImplementation {
       lastMessageAt: live.lastMessageAt,
       peerAck: live.peerAck,
       lastSyncAt: live.lastSyncAt,
-      poll: live.poll,
+      // Past its first read a chat that never synced shows no sync under way in the list (`onPoll` says none either).
+      poll: live.firstReadDone && !live.lastSyncAt && stored.id !== this.activeLinkId ? { ...live.poll, polling: false } : live.poll,
     };
   }
 

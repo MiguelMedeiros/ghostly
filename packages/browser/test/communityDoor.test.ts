@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DiscoveryBudgetError, EXPECT_PEER_MS, PRESENCE_WINDOW, MAX_KNOCKS, beaconKeys, createIdentity, decodeCommunityLink, entryParams, identityFromSeedB64, knockIdentity, lobbyKeys, publicKeyFromZ32, readBeacon, readKnocks, type GroupEntryLink } from "@ghostly/core";
+import { COMMUNITY_TOPOLOGY, DiscoveryBudgetError, EXPECT_PEER_MS, PRESENCE_WINDOW, MAX_KNOCKS, beaconKeys, createIdentity, decodeCommunityLink, entryParams, identityFromSeedB64, knockIdentity, lobbyKeys, publicKeyFromZ32, readBeacon, readKnocks, type GroupEntryLink } from "@ghostly/core";
 import { COMMUNITY_TIMINGS, KNOCK_SHARDS, UNKNOCKED_RETRY_MS, dialedKey } from "../src/engine/community";
 import { otherEndSeen } from "../src/engine/groups";
 import { CommunityWorld, RELAY_NETWORK, type Peer } from "./communityWorld";
@@ -385,30 +385,93 @@ describe("what counts as the member's side of an entry session answering (the en
  * not held to the share they get while a link signals (`PkarrRequestOptions.door`). The members of a hub that left all
  * ask a hub left at once, and the edges it opens for them signal: held to that share, the hub read its lobby and wrote
  * its beacon entry late, and the members still asking waited for those edges (CLI daemons on local relays, 2026-10-03).
+ * Its beacon entry always; its reads only while someone is coming in. Those of a community where nobody is give way to
+ * the links that signal: a hub of 4 communities on one relay spent its background share on reads that found nobody,
+ * and its edges in some of them stayed down 10 minutes and more (CLI daemons, 2026-10-13).
  */
 describe("a hub's own lobby and beacon", { timeout: 120_000 }, () => {
-  it("go as its bell does; a member's looks at the beacon do not", async () => {
+  it("its beacon entry goes as its bell does; its reads only while someone is coming in, and a member's looks never", async () => {
     const world = new CommunityWorld();
     const admin = world.add("admin"), bob = world.add("bob"), carol = world.add("carol");
-    const { id, link } = await community(world, admin);
+    const { id, link, entry } = await community(world, admin);
     for (const p of [bob, carol]) { await p.groups.joinByLink(link); await world.until(() => world.member(p, id), 5 * 60_000); }
-    await world.run(60_000);
+    // Settled: every hub at the door for a while (a hub joins the door after its first minute, and the door then reads
+    // every record again, as for someone coming in).
+    await world.run(3 * 60_000);
     const keyOf = (p: Peer) => p.groups.communities.session(id)!.myKey;
     const rv = admin.groups.communities.session(id)!.state.rv;
-    const beacon = beaconKeys(rv, id).identity.pubKeyZ32;
+    const beacon = beaconKeys(rv, id).identity.pubKeyZ32, bell = recordKey(entry, 0);
     const lobbyOf = (p: Peer) => lobbyKeys(rv, id, keyOf(p)).identity.pubKeyZ32;
-    const hub = [admin, bob, carol].find(p => p.groups.communities.isHub(id))!;
+    const hubs = [admin, bob, carol].filter(p => p.groups.communities.isHub(id));
     const member = [admin, bob, carol].find(p => !p.groups.communities.isHub(id))!;
     const seen: { who: Peer; op: string; key: string; door: boolean }[] = [];
     world.onPkarr = (who, op, key, _bg, door) => { seen.push({ who, op, key, door }); };
     await world.run(70_000);
-    world.onPkarr = null;
-    const ofHub = seen.filter(r => r.who === hub && (r.key === beacon || r.key === lobbyOf(hub)));
-    expect(ofHub.some(r => r.key === lobbyOf(hub) && r.op === "resolve")).toBe(true);
-    expect(ofHub.some(r => r.key === beacon && r.op === "publish")).toBe(true);
-    expect(ofHub.every(r => r.door), "every request of the hub for its lobby and the beacon").toBe(true);
+    // Nobody coming in: the hubs write their entry as the door, and read their lobby, the beacon and the bell as any look.
+    const own = (r: { who: Peer; key: string }) => hubs.includes(r.who) && (r.key === beacon || r.key === lobbyOf(r.who) || r.key === bell);
+    const quiet = seen.filter(own);
+    expect(quiet.some(r => r.key === bell && r.op === "resolve")).toBe(true);
+    expect(quiet.some(r => r.key === beacon && r.op === "resolve")).toBe(true);
+    expect(quiet.some(r => r.key === beacon && r.op === "publish")).toBe(true);
+    expect(quiet.filter(r => r.op === "publish").every(r => r.door), "every beacon write of a hub").toBe(true);
+    expect(quiet.filter(r => r.op === "resolve" && r.door), "a hub's reads with nobody coming in").toEqual([]);
     const ofMember = seen.filter(r => r.who === member && r.key === beacon);
     expect(ofMember.length).toBeGreaterThan(0);
     expect(ofMember.some(r => r.door)).toBe(false);
+    // Someone knocks: the door's reads that let them in go as the door's again.
+    seen.length = 0;
+    const dave = world.add("dave");
+    await dave.groups.joinByLink(link);
+    await world.until(() => world.member(dave, id), 5 * 60_000);
+    // (Its edges are signaling, and the next one may be knocking already.)
+    await world.run(20_000);
+    world.onPkarr = null;
+    expect(seen.some(r => own(r) && r.key === bell && r.op === "resolve" && r.door), "the door's bell while it lets someone in").toBe(true);
+    expect(seen.some(r => own(r) && r.key === beacon && r.op === "resolve" && r.door), "the door's look at the beacon then").toBe(true);
+  });
+});
+
+/**
+ * An app in several communities shares one community's pace of idle looks over them (`Communities.sharing`): the doors
+ * it holds read their bells as one door does, and a member connected to its hubs reads each beacon less often. Each
+ * community cost a hub about 10 requests a minute on each relay with nobody coming in: 4 of them on one relay, or 8 on
+ * two, spent the relays' budget on those looks, and the edges of some stayed down 10 minutes and more (CLI daemons,
+ * 2026-10-13). Someone who knocks is still let in within seconds.
+ */
+describe("an app in several communities", { timeout: 120_000 }, () => {
+  it("reads their bells as one door does and their beacons less often, and still lets a joiner in within seconds", async () => {
+    const world = new CommunityWorld();
+    const admin = world.add("admin"), bob = world.add("bob"), carol = world.add("carol"), everyone = [admin, bob, carol];
+    const doors: { id: string; link: string; entry: GroupEntryLink }[] = [];
+    for (let i = 0; i < 4; i++) {
+      const door = await community(world, admin);
+      doors.push(door);
+      for (const p of [bob, carol]) { await p.groups.joinByLink(door.link); await world.until(() => world.member(p, door.id), 5 * 60_000); }
+    }
+    await world.run(4 * 60_000);
+    const bells = new Set(doors.map(d => recordKey(d.entry, 0)));
+    const beacons = new Set(doors.map(d => beaconKeys(admin.groups.communities.session(d.id)!.state.rv, d.id).identity.pubKeyZ32));
+    const bellReads = new Map<Peer, number>(), beaconReads = new Map<Peer, number>();
+    world.onPkarr = (p, op, key) => {
+      if (op !== "resolve") return;
+      if (bells.has(key)) bellReads.set(p, (bellReads.get(p) ?? 0) + 1);
+      if (beacons.has(key)) beaconReads.set(p, (beaconReads.get(p) ?? 0) + 1);
+    };
+    await world.run(60_000, 500);
+    world.onPkarr = null;
+    // Each app reads every bell it is the door of together as often as a lone door reads its own (4 doors: 4 times that).
+    for (const p of everyone) expect(bellReads.get(p) ?? 0, p.name).toBeLessThanOrEqual(60_000 / COMMUNITY_TIMINGS.knockPollMs + 4);
+    expect([...bellReads.values()].reduce((a, b) => a + b, 0)).toBeGreaterThan(0);
+    // A member of all four that is no hub of any reads their beacons as often as a lone hub reads its own (they would
+    // be read every 10 s each).
+    const members = everyone.filter(p => doors.every(d => !p.groups.communities.isHub(d.id)));
+    expect(members.length).toBeGreaterThan(0);
+    for (const p of members) expect(beaconReads.get(p) ?? 0, p.name).toBeLessThanOrEqual(doors.length * 60_000 / COMMUNITY_TOPOLOGY.beaconEveryMs + 2);
+    // Nobody coming in for minutes, and someone knocks at the last one: in, and connected, within seconds.
+    const dave = world.add("dave"), last = doors[doors.length - 1];
+    const started = world.now;
+    await dave.groups.joinByLink(last.link);
+    await world.until(() => world.member(dave, last.id) && (world.view(dave, last.id)?.community?.connected ?? 0) > 0, 60_000, 500);
+    expect(world.now - started).toBeLessThanOrEqual(30_000);
   });
 });

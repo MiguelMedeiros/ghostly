@@ -217,6 +217,33 @@ describe("a chat as the contact drives it", () => {
     expect(await saved(chat.id)).toMatchObject({ peerTransports: ["iroh/1"], peerFallback: false });
   });
 
+  it("a chat that never synced and whose reads fail (no network) shows its first sync under way once, not a state at every read", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const { events } = linkOf(chat.id).options;
+    const emit = vi.spyOn(node as unknown as { emitState(): void }, "emitState");
+    events.onPoll({ polling: true, nextInMs: 0 });
+    expect(node.getState().links[0].poll.polling, "the first sync under way").toBe(true);
+    events.onStatus("error");
+    events.onPoll({ polling: false, nextInMs: 2_000 });
+    expect(node.getState().links[0].poll.polling).toBe(false);
+    const first = emit.mock.calls.length;
+    expect(first).toBeGreaterThan(0);
+    for (let i = 0; i < 10; i++) {
+      events.onPoll({ polling: true, nextInMs: 0 });
+      // A read under way after the first one is no first sync under way: the list shows none, whenever it is drawn.
+      expect(node.getState().links[0].poll.polling).toBe(false);
+      events.onStatus("error");
+      events.onPoll({ polling: false, nextInMs: 2_000 });
+    }
+    expect(emit.mock.calls.length - first, "ten failed reads").toBe(0);
+    // The read that works is news: the chat synced.
+    events.onPoll({ polling: true, nextInMs: 0 });
+    events.onStatus("online");
+    expect(emit.mock.calls.length).toBeGreaterThan(first);
+    expect(node.getState().links[0].lastSyncAt).toBeGreaterThan(0);
+  });
+
   it("once paired, the chat is pinned to that contact: another key is refused, and a failed save pins nothing", async () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
@@ -1307,6 +1334,47 @@ describe("private groups through the engine", () => {
       await node["nativeQueue"];
       expect(edgeOf(blocked)).toBe(again);
       expect(iroh).toHaveBeenCalledOnce();
+    });
+
+    // A member whose app quit in the middle of the attempt (one-shot CLI commands while its daemon was down) looked like a
+    // network that blocks: its edge stayed native for this whole run, and past 4 such edges members stayed unreachable.
+    it("an edge gone native tries WebRTC again once its member is seen online after a packet said it was gone, not while it stays online", async () => {
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      const { node, iroh } = await nativeEngine();
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const edgeId = await openEdge(node, state, createIdentity().pubKeyZ32);
+      const presence = (online: boolean, at: number) => ({ online, lastPacketAt: at, services: online ? [] : null });
+      const first = edgeOf(edgeId);
+      first.options.events.onDirectEvidence("no-path");
+      await vi.waitFor(() => expect(edgeOf(edgeId)).not.toBe(first));
+      const native = edgeOf(edgeId);
+      expect(native.options.rtcAvailable).toBe(false);
+      await vi.waitFor(() => expect(native.registerEndpoint).toHaveBeenCalledOnce());
+      // Online all along (a network that really blocks): the edge stays native, whatever packets it publishes.
+      native.options.events.onPresence(presence(true, 1));
+      native.options.events.onPresence(presence(true, 2));
+      await node["nativeQueue"];
+      expect(edgeOf(edgeId)).toBe(native);
+      // Gone (its goodbye, or a packet gone stale), and back: WebRTC again, no native endpoint, and no goodbye.
+      native.options.events.onPresence(presence(false, 3));
+      expect(edgeOf(edgeId)).toBe(native);
+      native.options.events.onPresence(presence(true, 4));
+      await vi.waitFor(() => expect(edgeOf(edgeId)).not.toBe(native));
+      expect(native.stop).toHaveBeenCalledWith(false);
+      const back = edgeOf(edgeId);
+      expect(back.options.rtcAvailable).toBe(true);
+      // It ran an endpoint there: its packet says it has WebRTC again, and the member's app goes back to it.
+      expect(back.options.packetTransportsSaid).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(back.registerEndpoint).not.toHaveBeenCalled();
+      // A network that really blocks: one more failed attempt, and native again.
+      back.options.events.onDirectEvidence("no-path");
+      await vi.waitFor(() => expect(edgeOf(edgeId)).not.toBe(back));
+      expect(edgeOf(edgeId).options.rtcAvailable).toBe(false);
+      await vi.waitFor(() => expect(edgeOf(edgeId).registerEndpoint).toHaveBeenCalledOnce());
+      expect(iroh).toHaveBeenCalledTimes(2);
     });
 
     // libdatachannel's race on a loaded core refused every answer to the edge's offers, through the pauses after them:

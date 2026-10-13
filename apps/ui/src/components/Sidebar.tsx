@@ -20,6 +20,7 @@ import { useSettings } from "../contexts/SettingsContext";
 import { AccountBar } from "./AccountBar";
 import { AppBrand } from "./AppBrand";
 import { OfflineBanner } from "./OfflineBanner";
+import { StorageFullBanner } from "./StorageFullBanner";
 import { LimitedBanner } from "./devices/LimitedStart";
 import { InstallHint } from "./InstallApp";
 import { StorageKeeper } from "./StorageKeeper";
@@ -242,6 +243,7 @@ export function Sidebar() {
       </div>
       <UpdateBanner />
       <OfflineBanner />
+      <StorageFullBanner />
       <LimitedBanner />
       <InstallHint hasChats={sessions.length > 0 || groups.length > 0} />
       <StorageKeeper hasChats={sessions.length > 0 || groups.length > 0} />

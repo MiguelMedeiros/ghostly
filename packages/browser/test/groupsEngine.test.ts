@@ -538,6 +538,40 @@ describe("invitations: what the admission exchange ignores", () => {
     expect(view(alice, groupId).members).toHaveLength(2);
   });
 
+  it("a member let in whose welcome was lost gets it again when its app says its accept again", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ab"); await world.settle();
+    // Bob's chat closes while Alice's app lets him in: the admission is saved, its welcome never reaches him.
+    const host = world.peers.get("alice")!.host, send = host.sendOnLink.bind(host);
+    const lost = vi.spyOn(host, "sendOnLink").mockImplementation((linkId, frame) => {
+      if ((frame as { t?: string }).t === "group-welcome" && lost.mock.calls.filter(([, f]) => (f as { t?: string }).t === "group-welcome").length === 1) return;
+      send(linkId, frame);
+    });
+    await bob.accept(groupId); await world.settle();
+    expect(view(alice, groupId).members).toHaveLength(2);
+    expect(view(bob, groupId).status).toBeUndefined();
+    // Alice's app opened its edge toward him; with nobody at the other end it is not up.
+    const bobKey = identityFromSeedB64(world.peers.get("bob")!.store.groups.get(groupId)!.invitation!.seedB64!).pubKeyZ32;
+    const edge = host.edges(groupId).get(bobKey);
+    const ready = host.linkReady.bind(host);
+    vi.spyOn(host, "linkReady").mockImplementation((linkId, version) => linkId !== edge && ready(linkId, version));
+
+    // His app says its accept again a minute later, as it does: this time the welcome comes.
+    await bob.tick(Date.now() + 61_000); await world.settle();
+    expect(view(bob, groupId).status).toBe("active");
+    expect(view(bob, groupId).members).toHaveLength(2);
+    expect(view(alice, groupId).members).toHaveLength(2);
+    // The same accept from a member whose edge is up is answered with nothing (it is in).
+    const welcomes = () => lost.mock.calls.filter(([, f]) => (f as { t?: string }).t === "group-welcome").length;
+    const before = welcomes();
+    vi.mocked(host.linkReady).mockImplementation(ready);
+    await alice.handleContactFrame("chat-ab", { t: "group-accept", g: groupId, key: bobKey });
+    expect(welcomes()).toBe(before);
+  });
+
   it("deleting or leaving a group, or handing its admin role on, takes back the invitations nobody answered", async () => {
     // Deleted, alone in it.
     const world = new World();

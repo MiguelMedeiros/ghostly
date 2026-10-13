@@ -325,6 +325,13 @@ describe("transport log: rows an older release stored", () => {
     // Saved once: loading what it saved changes nothing.
     expect(new TransportLog(log.entries, log.history).compacted).toBe(false);
   });
+
+  it("a run of drops it stored seeds the history with no words of its own: the app says each event in its language", () => {
+    const rows = [row("connected", 0, { transport: "webrtc/1" }), row("flapping", 10 * MIN, { since: 5 * MIN, count: 4, live: false, from: "webrtc/1" })];
+    const log = new TransportLog(rows);
+    expect(events(log)).toEqual(["live", "down"]);
+    expect(log.history.every(e => e.reason === undefined)).toBe(true);
+  });
 });
 
 describe("transport log: the live transport now", () => {

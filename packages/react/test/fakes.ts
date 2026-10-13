@@ -306,6 +306,11 @@ export class FakePeerConnection extends EventTarget {
       this.assignMids();
     } else {
       this.settleDirections();
+      // An answer whose video section is closed (`vr: 0`, a bot that takes no picture) leaves our half closed too.
+      const video = description.sdp?.split(/\r?\n(?=m=)/).find((section) => section.startsWith("m=video"));
+      if (video && /^a=inactive\s*$/m.test(video)) {
+        for (const t of this.transceivers) if (t.receiver.track.kind === "video") t.currentDirection = "inactive";
+      }
     }
   }
 
