@@ -201,7 +201,7 @@ import { CommunityPay, groupLinkId, parsePayLink } from "./communityPay";
 import { mayReach } from "./serviceAccess";
 import { Outbox } from "./outbox";
 import { HoldEngine } from "./hold";
-import { TransportLog, resumeHere } from "./transportLog";
+import { RTT_STEP_MS, TransportLog, resumeHere } from "./transportLog";
 import { ProfilePeek, readPathOf, type PeekResult } from "./profilePeek";
 import { S3Store } from "../backup/s3";
 import type { HoldStore } from "../backup/storage";
@@ -322,6 +322,8 @@ interface LiveLink {
   /** When a round trip alone last wrote the story to disk (`noteRtt`), and whether one shown since is not on disk yet. */
   rttSavedAt?: number;
   rttUnsaved?: boolean;
+  /** The round trip the last state carried (`viewOf`): one within `RTT_STEP_MS` of it posts no state (`noteRtt`). */
+  rttPosted?: number;
   /** A group's entry session whose admission is done: it closes once its data link does (`GroupsHost.entryDone`). */
   entryDone?: boolean;
   /** A group's edge whose session in this run is kept as its `edgeLiveSince` (`noteEdgeLive`). */
@@ -345,6 +347,10 @@ interface LiveLink {
 const waitsForLive = (m: StoredMessage) => m.sender === "me" && m.delivery === "waiting" && (!!m.file || !!m.paymentId);
 
 /** This side's participation key in a chat: derived from its seed once, not at every state built. */
+/** A read of the contact's packet that found it as the last one did: online the same, the same packet, name and services. */
+const samePresence = (a: PeerPresence, b: PeerPresence): boolean => a.online === b.online && a.lastPacketAt === b.lastPacketAt
+  && a.seenAt === b.seenAt && a.nick === b.nick && JSON.stringify(a.services) === JSON.stringify(b.services);
+
 function participationKeyOf(live: LiveLink): string | undefined {
   const seed = live.stored.participationSeed;
   if (!seed) return undefined;
@@ -4194,8 +4200,10 @@ export class GhostlyNode implements EngineImplementation {
 
   /** A round trip measured on the chat's transport: in the view at once, on disk at most every `RTT_SAVE_MS`. */
   private noteRtt(live: LiveLink, ms: number): void {
+    // A pong comes every few seconds on every live chat: one that shows about the same round trip posts no state.
+    const moved = live.rttPosted === undefined || Math.abs(live.rttPosted - ms) >= RTT_STEP_MS;
     const log = this.transportLogOf(live);
-    if (!log) { this.emitState(); return; }
+    if (!log) { if (moved) this.emitState(); return; }
     const changed = log.rtt(ms);
     if (changed) live.rttUnsaved = true;
     const now = Date.now();
@@ -4203,7 +4211,7 @@ export class GhostlyNode implements EngineImplementation {
       live.rttSavedAt = now;
       this.saveTransportLog(live, log, { relaxed: true });
     } else if (changed) this.saveTransportLog(live, log, { toDisk: false });
-    else this.emitState();
+    else if (moved) this.emitState();
   }
 
   /** Which ways of paying one chat allows. */
@@ -6712,12 +6720,13 @@ export class GhostlyNode implements EngineImplementation {
         onPresence: presence => {
           if (presence.online && !seen) { seen = true; traceJoin(group, "link.presence", { role }); }
           if (presence.lastPacketAt !== live.presence.lastPacketAt) traceJoin(group, "link.packet", { role, packetAt: presence.lastPacketAt });
+          const same = samePresence(live.presence, presence);
           live.presence = presence;
           // An open edge's name comes from `onPeerNick`. A closed one keeps the last name: an edge going down says no
           // name, and taking that would drop the member's name and set it again on every drop and reopen.
           if (!entry && presence.nick && !live.link?.isDataLinkOpen) this.groups.edgeNick(group, peer, presence.nick);
           if (!entry) this.edgeRtcPresence(linkId, presence);
-          this.emitState(); },
+          if (!same) this.emitState(); },
         onPairingState: state => { live.pairing = state; this.emitState(); },
         onDirectEvidence: evidence => {
           this.directPath.note(peer, evidence);
@@ -7084,13 +7093,16 @@ export class GhostlyNode implements EngineImplementation {
           this.emitState();
         },
         onPresence: (presence) => {
+          // Every read of the contact's packet says its presence: one that finds it as before shows nothing new.
+          let same = samePresence(live.presence, presence);
           live.presence = presence;
           // A legacy contact's name is in its record; a paired one's comes only from `onPeerNick`.
           if (!stored.profile && presence.nick && presence.nick !== live.stored.peerNick) {
             live.stored = { ...live.stored, peerNick: presence.nick };
             void db.patchLink(linkId, { peerNick: presence.nick });
+            same = false;
           }
-          this.emitState();
+          if (!same) this.emitState();
         },
         onMessage: (message) => {
           if (live.stored.inviteCode) {
@@ -7782,7 +7794,7 @@ export class GhostlyNode implements EngineImplementation {
       transportWait: live.link?.transportWait,
       liveAttempt: live.link?.liveAttempt,
       liveDialer: live.stored.profile && !live.stored.group ? live.link?.dialer : undefined,
-      transportRttMs: live.link?.rttMs,
+      transportRttMs: live.rttPosted = live.link?.rttMs,
       transportRelayed: live.link?.relayedPath,
       transportLive: live.transportLog?.liveNow(),
       // The whole story only for the chat on screen: every state push carries every link.
