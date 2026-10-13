@@ -237,6 +237,20 @@ export interface IncomingMessage {
   card?: StatusCard;
 }
 
+/**
+ * What files/3 may hold on a session's channel (WISP 501, Backpressure): a quarter of its send budget (native and iroh
+ * channels throw past 120 KiB), or the high water mark of a WebRTC channel, which has none.
+ */
+function filesCap(channel: FrameChannel): number {
+  return channel.sendBudget ? channel.sendBudget / 4 : LIMITS.sendHighWaterMark;
+}
+
+/**
+ * How long after files last wrote on a channel, or last waited for room on it, an app's data keeps its own quarter above
+ * their line (WISP 1200 § In a chat): a file waiting for `pf-got` holds its share meanwhile.
+ */
+const FILES_IN_USE_MS = 2_000;
+
 /** Largest `paired-message` frame sent with a preview: a session fails on a frame over 60 KiB (`PairedSession`). */
 export const MAX_PAIRED_MESSAGE_FRAME = 56 * 1024;
 
@@ -3209,14 +3223,17 @@ export class GhostLink {
    * One data frame of an app open on both sides, on the live session only. An error when it did not go: nothing is
    * kept to send later. While the channel already holds a quarter of what it may queue (its send budget, or the high
    * water mark of a WebRTC channel), the frame is refused with `too-fast`, so the chat's messages and pings never wait
-   * behind an app's data on a link slower than it sends (WISP 1200 § In a chat).
+   * behind an app's data on a link slower than it sends (WISP 1200 § In a chat). While a file goes, that quarter sits
+   * above what files may hold (`filesWritable`): files keep the channel at their own line for the whole transfer.
    */
   sendAppData(app: string, data: unknown): AppSendError | null {
     if (!this.apps.open.has(app)) return "not-open";
     if (appDataBytes(data) > APP_DATA_MAX_BYTES) return "too-large";
     if (!this.channel || !this.isDataLinkOpen) return "offline";
     if (!this.supportsApps) return "peer-closed";
-    if (this.channel.bufferedAmount >= (this.channel.sendBudget ?? LIMITS.sendHighWaterMark) / 4) return "too-fast";
+    const files = this.filesUse?.channel === this.channel && (this.filesUse.waiting > 0 || Date.now() - this.filesUse.at < FILES_IN_USE_MS)
+      ? filesCap(this.channel) : 0;
+    if (this.channel.bufferedAmount >= files + (this.channel.sendBudget ?? LIMITS.sendHighWaterMark) / 4) return "too-fast";
     const refused = this.apps.canSend(app, data);
     if (refused) return refused;
     try { this.channel.send(JSON.stringify(appDataFrame(app, data))); return null; } catch { return "offline"; }
@@ -3262,25 +3279,40 @@ export class GhostLink {
     if (!this.supportsLargeFiles || !this.channel) return false;
     try {
       this.channel.send(this.supportsBinaryFiles ? encodeFileData(id, offset, data) : JSON.stringify({ t: "pf-data", id, offset, data: toBase64Url(data) }));
+      this.filesUsing(this.channel).at = Date.now();
       return true;
     } catch { return false; }
+  }
+  /** Files on a channel: when they last wrote on it, and how many wait for room. An app's data gets room above theirs. */
+  private filesUse: { channel: FrameChannel; at: number; waiting: number } | null = null;
+  private filesUsing(channel: FrameChannel): { channel: FrameChannel; at: number; waiting: number } {
+    if (this.filesUse?.channel !== channel) this.filesUse = { channel, at: 0, waiting: 0 };
+    return this.filesUse;
   }
   /**
    * Resolves once the open session can take another files/3 data frame; undefined when it can now. A channel with a send budget (native and
    * iroh ones throw past 120 KiB) gives files a quarter of it, so a ping, a message or any other frame still fits
-   * while a file goes; others keep under the high water mark, as files/2 does.
+   * while a file goes; others keep under the high water mark, as files/2 does. An app's data gets a quarter above that
+   * line meanwhile (`sendAppData`).
    */
   filesWritable(): Promise<void> | undefined {
     const channel = this.channel;
     if (!channel) return;
-    const cap = channel.sendBudget ? channel.sendBudget / 4 : LIMITS.sendHighWaterMark;
+    const cap = filesCap(channel);
     // Room now: nothing to wait for, and nothing made for each frame of a large file.
     if (channel.bufferedAmount < cap) return;
+    const use = this.filesUsing(channel);
+    use.waiting++;
     return (async () => {
-      while (this.channel === channel && channel.bufferedAmount >= cap) {
-        await channel.drained().catch(() => {});
-        // A drain that resolved above the cap (a low water mark higher than it) is not waited on in a loop of promises.
-        if (this.channel === channel && channel.bufferedAmount >= cap) await new Promise((resolve) => setTimeout(resolve, 20));
+      try {
+        while (this.channel === channel && channel.bufferedAmount >= cap) {
+          await channel.drained().catch(() => {});
+          // A drain that resolved above the cap (a low water mark higher than it) is not waited on in a loop of promises.
+          if (this.channel === channel && channel.bufferedAmount >= cap) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      } finally {
+        use.waiting--;
+        use.at = Date.now();
       }
     })();
   }

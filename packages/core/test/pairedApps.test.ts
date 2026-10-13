@@ -465,6 +465,47 @@ describe("apps on a paired session (apps/1)", () => {
     expect(await a.link.sendMessage("hello")).toBeNull();
   });
 
+  it("gives an app's data its own quarter above what a file going in the chat holds", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { a, b, app } = pair({ a: { largeFilesSupport: true }, b: { largeFilesSupport: true } });
+      await live(a, b);
+      await vi.waitFor(() => expect(a.link.supportsApps && b.link.supportsApps && a.link.supportsLargeFiles).toBe(true));
+      a.link.openApp(app, "1.0.0"); b.link.openApp(app, "1.0.0");
+      await vi.waitFor(() => expect(a.link.peerApps.has(app) && b.link.peerApps.has(app)).toBe(true));
+      const channel = (a.link as unknown as { channel: { bufferedAmount: number; sendBudget?: number } }).channel;
+      // A file going keeps a WebRTC channel at its 1 MiB line: before, an app's frame was refused for the whole
+      // transfer, and a Chess move waited for the file to end.
+      expect(a.link.sendFileData("f".repeat(22), 0, new Uint8Array(16 * 1024))).toBe(true);
+      channel.bufferedAmount = LIMITS.sendHighWaterMark;
+      expect(a.link.sendAppData(app, 1)).toBeNull();
+      channel.bufferedAmount = LIMITS.sendHighWaterMark + LIMITS.sendHighWaterMark / 4;
+      expect(a.link.sendAppData(app, 2)).toBe("too-fast");
+      // While files wait for room, they still hold their share however long the channel takes to drain.
+      const waiting = a.link.filesWritable();
+      expect(waiting).toBeDefined();
+      vi.setSystemTime(Date.now() + 60_000);
+      channel.bufferedAmount = LIMITS.sendHighWaterMark - 1;
+      expect(a.link.sendAppData(app, 3)).toBeNull();
+      channel.bufferedAmount = 0;
+      await waiting;
+      // A channel with a send budget: files keep to a quarter of it, an app's data to the next quarter.
+      channel.sendBudget = 120 * 1024;
+      expect(a.link.sendFileData("f".repeat(22), 16 * 1024, new Uint8Array(16 * 1024))).toBe(true);
+      channel.bufferedAmount = 30 * 1024;
+      expect(a.link.sendAppData(app, 4)).toBeNull();
+      channel.bufferedAmount = 60 * 1024;
+      expect(a.link.sendAppData(app, 5)).toBe("too-fast");
+      // Once the file is done, an app's data is back to a quarter.
+      vi.setSystemTime(Date.now() + 60_000);
+      channel.bufferedAmount = 30 * 1024;
+      expect(a.link.sendAppData(app, 6)).toBe("too-fast");
+      await vi.waitFor(() => expect(b.events.filter(event => "d" in event)).toEqual([{ app, d: 1 }, { app, d: 3 }, { app, d: 4 }]));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("an app that does not offer apps/1 gets no frame, and what it sends is dropped", async () => {
     const { a, b, app } = pair({ b: { appsSupport: false } });
     await live(a, b);
