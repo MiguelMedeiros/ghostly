@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { link, mkdir, open, readdir, readFile, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { open as openEnvelope } from "@ghostly/browser/backup/envelope";
-import { BackupReader, BackupWriter, FRAME_BYTES, backupProtection, type BackupSource } from "@ghostly/browser/backup/stream";
+import { BackupReader, BackupWriter, FRAME_BYTES, readBackupHeader, type BackupSource } from "@ghostly/browser/backup/stream";
 import { LIGHT_FILE_BYTES, LIGHT_VOICE_BYTES, keptInLight, type LightMark } from "@ghostly/browser/backup/light";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { bool, str, type Method } from "./apiKit";
@@ -133,10 +133,22 @@ async function fileSource(path: string): Promise<BackupSource & { close(): Promi
   };
 }
 
-/** Whether the backup at `file` is sealed with a passphrase or was made without one, read from its clear header. */
+/** A version 1 backup is one JSON object, and `seal` writes its format first. */
+const VERSION_1_START = /^\s*\{\s*"format"\s*:\s*"ghostly-backup"/;
+
+/**
+ * Whether the backup at `file` is sealed with a passphrase or was made without one, read from its clear header.
+ * A file that is neither version is refused here, before any passphrase is asked for: the path is what is wrong.
+ */
 export async function backupFileProtection(file: string): Promise<"passphrase" | "none"> {
   const source = await fileSource(file);
-  try { return await backupProtection(source); } finally { await source.close(); }
+  try {
+    let found: Awaited<ReturnType<typeof readBackupHeader>>;
+    try { found = await readBackupHeader(source); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
+    if (found) return found.header.protection;
+    if (!VERSION_1_START.test(new TextDecoder().decode(await source.read(0, 256)))) throw new CliError("refused", "This is not a Ghostly backup");
+    return "passphrase";
+  } finally { await source.close(); }
 }
 
 /** Where a path named by a backup lands inside the new profile's files folder; never outside it. */
