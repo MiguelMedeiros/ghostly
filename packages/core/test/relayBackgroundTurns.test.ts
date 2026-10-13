@@ -16,7 +16,7 @@ import { withRequestOptions } from "../src/transport";
  */
 
 const NOW = 1_800_000_000_000;
-const CHATS = 30;
+const CHATS = 30, EDGES = 10;
 const RELAYS = ["https://a.test", "https://b.test"];
 
 beforeEach(() => {
@@ -36,33 +36,37 @@ describe("relay transport: background reads take turns per key", () => {
       return body ? new Response(body as BodyInit, { status: 200 }) : new Response(null, { status: 404 });
     }) as typeof fetch });
     const links: LinkSession[] = [], contacts: string[] = [];
-    for (let i = 0; i < CHATS; i++) {
+    const group = withRequestOptions(relay, { group: true });
+    for (let i = 0; i < CHATS + EDGES; i++) {
       const { mine, invite } = createLink();
       // Each contact was there once, and went away: its chat reads it in the background.
       const contact = new LinkSession({ params: invite, transport: new RelayTransport({ relays: RELAYS, log: () => {}, fetch: relay["fetchFn"] }), pollIntervals: RELAY_POLL_INTERVALS, getServices: () => [] });
       contact.start();
       await vi.advanceTimersByTimeAsync(0);
       await contact.stop(true);
-      contacts.push(mine.peerPubKeyZ32);
-      links.push(new LinkSession({ params: mine, transport: relay, pollIntervals: RELAY_POLL_INTERVALS }));
+      // The groups' edges to members that went away read them in the background too, in the groups' lane.
+      if (i < CHATS) contacts.push(mine.peerPubKeyZ32);
+      links.push(new LinkSession({ params: mine, transport: i < CHATS ? relay : group, pollIntervals: RELAY_POLL_INTERVALS }));
     }
     await vi.advanceTimersByTimeAsync(20 * 60_000);
     reads.clear();
-    // The groups' edges re-signal for the whole run: a fast read every 4 s keeps background requests at their floor.
-    const group = withRequestOptions(relay, { group: true });
-    const member = createIdentity().pubKeyZ32;
-    const signaling = setInterval(() => void group.resolve(member, { urgent: true }).catch(() => {}), 4_000);
+    // Links signal for the whole run, a fast read every 4 s, which keeps background requests at their floor: the groups'
+    // edges re-offering, and a chat, for which groups leave the chats their reserve (`CHAT_RESERVE`).
+    const member = createIdentity().pubKeyZ32, contact = createIdentity().pubKeyZ32;
+    let turn = 0;
+    const signaling = setInterval(() => void (turn++ % 2 ? group.resolve(member, { urgent: true }) : relay.resolve(contact, { urgent: true })).catch(() => {}), 2_000);
     try {
       const start = Date.now(), minutes = 10;
       for (const link of links) link.start();
       await vi.advanceTimersByTimeAsync(minutes * 60_000);
       // Background requests while a link signals: `BACKGROUND_WHILE_SIGNALING` a minute on each relay, 10 in all, so each
-      // of 30 contacts is read about every 3 minutes. Before, five went unread for the whole 10 minutes.
+      // of the 40 keys read in the background is read about every 4 minutes. Before, 20 of the chats' contacts were read
+      // once, as the chats started, and not again.
       const gaps = contacts.map((key) => {
         const at = [start, ...(reads.get(key) ?? []), start + minutes * 60_000];
         return Math.max(...at.slice(1).map((t, i) => t - at[i]));
       });
-      expect(Math.max(...gaps)).toBeLessThan(4.5 * 60_000);
+      expect(Math.max(...gaps)).toBeLessThan(5 * 60_000);
     } finally {
       clearInterval(signaling);
       for (const link of links) await link.stop();

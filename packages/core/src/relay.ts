@@ -308,7 +308,7 @@ export class RelayTransport implements PkarrTransport {
    */
   private readonly readTurns = new Map<string, { servedAt: number; askedAt: number; waiting: boolean; watch: boolean; lane: string }>();
   /** Per key read in the background, when a read of it last went out and when it last asked (`BACKGROUND_TURN_MS`). */
-  private readonly backgroundTurns = new Map<string, { servedAt: number; askedAt: number; waiting: boolean }>();
+  private readonly backgroundTurns = new Map<string, { servedAt: number; askedAt: number; waiting: boolean; who: Asker }>();
   /** Groups' reads (not background ones) on each relay in the last `GROUP_RATION_WINDOW_MS`. */
   private readonly spentGroupReads = new Map<string, number[]>();
   /** When a group's read last found each relay's minute full: its reads there are rationed for `GROUP_RATION_MS`. */
@@ -914,7 +914,7 @@ export class RelayTransport implements PkarrTransport {
       if (isChat(who)) this.chatNeed(key).urgentAt = now;
     }
     if (isGroupRead(who)) this.readAsked(key, who, now);
-    if (isBackgroundRead(who)) this.backgroundAsked(key, now);
+    if (isBackgroundRead(who)) this.backgroundAsked(key, who, now);
     if (this.heldFor(relay, who, now, key) > 0) {
       // The minute is full: the groups' reads are rationed from now on.
       if (isGroupRead(who) && (this.spent.get(relay)?.length ?? 0) >= this.limitOf(relay)) this.groupsFullAt.set(relay, now);
@@ -933,7 +933,7 @@ export class RelayTransport implements PkarrTransport {
       this.spentGroupReads.get(relay)!.push(now);
       this.readTurns.set(key, { servedAt: now, askedAt: now, waiting: false, watch: isWatch(who), lane: watchLane(who) });
     }
-    if (isBackgroundRead(who)) this.backgroundTurns.set(key, { servedAt: now, askedAt: now, waiting: false });
+    if (isBackgroundRead(who)) this.backgroundTurns.set(key, { servedAt: now, askedAt: now, waiting: false, who });
     return true;
   }
 
@@ -946,7 +946,7 @@ export class RelayTransport implements PkarrTransport {
    * signaling goes over the limit by its allowance (`SIGNALING_ALLOWANCE_SHARE`), and so do a few of its reads of a
    * contact that just went away (`DEPARTED_READS`).
    */
-  private heldFor(relay: string, who: Asker, now = Date.now(), key?: string): number {
+  private heldFor(relay: string, who: Asker, now = Date.now(), key?: string, turns = true): number {
     const recent = (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000);
     const recentBackground = (this.spentBackground.get(relay) ?? []).filter((at) => now - at < 60_000);
     this.spent.set(relay, recent);
@@ -971,7 +971,7 @@ export class RelayTransport implements PkarrTransport {
       const signaling = this.urgentAt + SIGNALING_WINDOW_MS - now;
       if (signaling > 0 && !who.door) wait = Math.max(wait, Math.min(signaling, over(recentBackground, this.backgroundWhileSignaling)));
       // In turn per key: a key read longer ago that is asking too goes first (`BACKGROUND_TURN_MS`).
-      if (isBackgroundRead(who) && this.backgroundAhead(key, now) > 0) wait = Math.max(wait, TURN_WAIT_MS);
+      if (turns && wait === 0 && isBackgroundRead(who) && this.backgroundAhead(relay, key, now)) wait = TURN_WAIT_MS;
     }
     // Groups' urgent reads: their share of the minute spread over it (`GROUP_BURST_MS`).
     const burst = (this.spentGroupUrgent.get(relay) ?? []).filter((at) => now - at < GROUP_BURST_MS);
@@ -1038,25 +1038,26 @@ export class RelayTransport implements PkarrTransport {
   }
 
   /** A background read of `key` asks: it waits for its turn from now on, unless it is taken (`backgroundAhead`). */
-  private backgroundAsked(key: string, now: number): void {
+  private backgroundAsked(key: string, who: Asker, now: number): void {
     for (const [other, turn] of this.backgroundTurns) if (now - Math.max(turn.askedAt, turn.servedAt) >= 60_000) this.backgroundTurns.delete(other);
-    this.backgroundTurns.set(key, { servedAt: this.backgroundTurns.get(key)?.servedAt ?? -Infinity, askedAt: now, waiting: true });
+    this.backgroundTurns.set(key, { servedAt: this.backgroundTurns.get(key)?.servedAt ?? -Infinity, askedAt: now, waiting: true, who });
   }
 
   /**
-   * Keys read in the background, still asking, that were read longer ago than `key`. One asks again after the budget
-   * held it back (a link's poll does, a one-off look does not), and keeps asking within `BACKGROUND_TURN_MS` of its last
-   * ask, or of when it was told the budget frees a request for it (`readHeldBackFor`).
+   * Whether a key read in the background longer ago than `key`, still asking, would take this relay's next request. One
+   * asks again after the budget held it back (a link's poll does, a one-off look does not), and keeps asking within
+   * `BACKGROUND_TURN_MS` of its last ask, or of when it was told the budget frees a request for it (`readHeldBackFor`).
+   * One the budget holds back on its own account (a group's read, for the chats' reserve) keeps no turn: a group key
+   * waiting for the chats held every chat's read back (CLI lab, 2026-10-13).
    */
-  private backgroundAhead(key: string | undefined, now: number): number {
+  private backgroundAhead(relay: string, key: string | undefined, now: number): boolean {
     const mine = key === undefined ? -Infinity : this.backgroundTurns.get(key)?.servedAt ?? -Infinity;
-    let ahead = 0;
     for (const [other, turn] of this.backgroundTurns) {
       const held = this.heldBack.get(other);
       if (other === key || !turn.waiting || turn.servedAt >= mine || !held || held.times < 2) continue;
-      if (now - Math.max(turn.askedAt, held.until) < BACKGROUND_TURN_MS) ahead++;
+      if (now - Math.max(turn.askedAt, held.until) < BACKGROUND_TURN_MS && this.heldFor(relay, turn.who, now, other, false) === 0) return true;
     }
-    return ahead;
+    return false;
   }
 
   /** This contact's departed reads past the limit in the last minute (`DEPARTED_READS`). */
