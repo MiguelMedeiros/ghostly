@@ -50,7 +50,7 @@ for (const rest of RESTS) {
   });
 }
 
-test("the pointer ghost settles soon after the pointer stops, and moves without a page layout", async ({ page }) => {
+test("the pointer ghost settles soon after the pointer stops, and neither moves nor floats by a page layout", async ({ page }) => {
   await page.clock.install();
   await page.goto("/privacy");
   const pet = page.locator(".pet");
@@ -67,11 +67,21 @@ test("the pointer ghost settles soon after the pointer stops, and moves without 
 
   // A glide of a few seconds, then nothing: it used to creep its last pixels for 45-57 s at 60 frames a second.
   await page.clock.runFor(60_000);
-  console.log(`frames after the pointer stops: ${await frames(page)}`);
   expect(await frames(page), "frames asked for after the pointer stops").toBeLessThan(600);
   expect(await pet.boundingBox(), "the ghost has moved").not.toEqual(before);
+  await expect(pet).toHaveAttribute("data-mood", "sleeping");
 
   // It moves by a compositor transform: left/top would lay the page out again at every frame.
   const style = await pet.evaluate((el) => ({ left: (el as HTMLElement).style.left, top: (el as HTMLElement).style.top }));
   expect(style).toEqual({ left: "", top: "" });
+  // Its loops (the float, the z's) run on HTML boxes: a CSS animation on an SVG element lays the page out at every
+  // frame for as long as the ghost is on screen.
+  const loops = await pet.evaluate((el) =>
+    el.getAnimations({ subtree: true }).map((a) => {
+      const target = (a.effect as KeyframeEffect).target!;
+      return `${target.nodeName} ${target instanceof SVGElement ? "svg" : "html"}`;
+    }),
+  );
+  expect(loops.length, "the sleeping ghost's loops").toBeGreaterThan(0);
+  expect(loops.filter((l) => l.endsWith("svg")), "loops on an SVG element").toEqual([]);
 });

@@ -345,7 +345,9 @@ Lessons from recording the story at slow, flick and reverse speeds
   without a blur.
 - Nothing reads layout in a frame loop. The pointer ghost measures the page on
   resize and writes its `transform` itself (never `left`/`top`, which lay the
-  page out at every frame); nothing calls `setState` per frame.
+  page out at every frame); nothing calls `setState` per frame. Its float and
+  its z's loop on HTML boxes: a CSS animation on an SVG element (the `<svg>`
+  itself or a `<text>` in it) lays the page out at every frame.
 - `will-change` only where a layer must be its own: the act's network field
   (`.act-field`), the boo's ghost, the rail's fill, the pointer ghost.
 - Idle loops rest off screen. `components/site/IdleLoops.tsx` watches every

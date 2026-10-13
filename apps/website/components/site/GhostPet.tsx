@@ -11,6 +11,13 @@ const TAU: Record<Mood, number> = { happy: 2.1, bored: 2.1, tired: 4.1, sleeping
 /* Below this speed (px a second, a twentieth of a pixel a frame at 60 Hz) the ghost has settled and its clock stops. */
 const SETTLE = 3;
 
+/* The sleeping z's (x, y, font size, colour in the ghost's 80x100 box), each in its own box so it floats as HTML. */
+const ZS: [number, number, number, string][] = [
+  [62, 24, 12, "rgba(34,211,238,0.8)"],
+  [68, 16, 10, "rgba(34,211,238,0.6)"],
+  [72, 10, 8, "rgba(34,211,238,0.4)"],
+];
+
 /**
  * The little ghost from the original site: it trails the pointer, gets bored,
  * falls asleep when you stop moving and ducks away if you reach for it.
@@ -168,40 +175,49 @@ export function GhostPet({ label = "Hide the ghost" }: { label?: string }) {
           opacity: hiding ? 0 : 0.2,
         }}
       >
-        <svg width="36" height="45" viewBox="0 0 80 100" aria-hidden="true" className="pet-body">
-          <path
-            d={GHOST_PATH}
-            fill="#22d3ee"
-            style={{ filter: "drop-shadow(0 0 3px #22d3ee)" }}
-          />
-          {mood === "sleeping" && (
-            <g>
-              <path d="M24 36 Q29 34 34 36" stroke="#0f172a" strokeWidth="3" fill="none" strokeLinecap="round" />
-              <path d="M46 36 Q51 34 56 36" stroke="#0f172a" strokeWidth="3" fill="none" strokeLinecap="round" />
-              <text x="62" y="24" fontSize="12" fill="rgba(34,211,238,0.8)" className="pet-z">z</text>
-              <text x="68" y="16" fontSize="10" fill="rgba(34,211,238,0.6)" className="pet-z" style={{ animationDelay: "0.3s" }}>z</text>
-              <text x="72" y="10" fontSize="8" fill="rgba(34,211,238,0.4)" className="pet-z" style={{ animationDelay: "0.6s" }}>z</text>
-            </g>
-          )}
-          {(mood === "bored" || mood === "happy") && (
-            <g>
-              <circle cx="29" cy="36" r={mood === "happy" ? 6 : 5} fill="#0f172a" />
-              <circle cx="51" cy="36" r={mood === "happy" ? 6 : 5} fill="#0f172a" />
-              <circle cx="30" cy="34" r={mood === "happy" ? 2 : 1.5} fill="white" />
-              <circle cx="52" cy="34" r={mood === "happy" ? 2 : 1.5} fill="white" />
-            </g>
-          )}
-          {mood === "tired" && (
-            <g>
-              <path d="M22 32 L36 36" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
-              <path d="M44 36 L58 32" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
-              <circle cx="29" cy="40" r="4" fill="#0f172a" />
-              <circle cx="51" cy="40" r="4" fill="#0f172a" />
-              <circle cx="30" cy="38" r="1.5" fill="white" />
-              <circle cx="52" cy="38" r="1.5" fill="white" />
-            </g>
-          )}
-        </svg>
+        {/* The loops (its float, the z's) run on HTML boxes: a CSS animation on an SVG element lays the page out at
+            every frame for as long as the ghost is on screen. */}
+        <div className="pet-body">
+          <svg width="36" height="45" viewBox="0 0 80 100" aria-hidden="true">
+            <path
+              d={GHOST_PATH}
+              fill="#22d3ee"
+              style={{ filter: "drop-shadow(0 0 3px #22d3ee)" }}
+            />
+            {mood === "sleeping" && (
+              <g>
+                <path d="M24 36 Q29 34 34 36" stroke="#0f172a" strokeWidth="3" fill="none" strokeLinecap="round" />
+                <path d="M46 36 Q51 34 56 36" stroke="#0f172a" strokeWidth="3" fill="none" strokeLinecap="round" />
+              </g>
+            )}
+            {(mood === "bored" || mood === "happy") && (
+              <g>
+                <circle cx="29" cy="36" r={mood === "happy" ? 6 : 5} fill="#0f172a" />
+                <circle cx="51" cy="36" r={mood === "happy" ? 6 : 5} fill="#0f172a" />
+                <circle cx="30" cy="34" r={mood === "happy" ? 2 : 1.5} fill="white" />
+                <circle cx="52" cy="34" r={mood === "happy" ? 2 : 1.5} fill="white" />
+              </g>
+            )}
+            {mood === "tired" && (
+              <g>
+                <path d="M22 32 L36 36" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
+                <path d="M44 36 L58 32" stroke="#0f172a" strokeWidth="2" strokeLinecap="round" />
+                <circle cx="29" cy="40" r="4" fill="#0f172a" />
+                <circle cx="51" cy="40" r="4" fill="#0f172a" />
+                <circle cx="30" cy="38" r="1.5" fill="white" />
+                <circle cx="52" cy="38" r="1.5" fill="white" />
+              </g>
+            )}
+          </svg>
+          {mood === "sleeping" &&
+            ZS.map(([x, y, size, fill], i) => (
+              <span key={i} className="pet-z" style={{ animationDelay: `${i * 0.3}s` }}>
+                <svg width="36" height="45" viewBox="0 0 80 100" aria-hidden="true">
+                  <text x={x} y={y} fontSize={size} fill={fill}>z</text>
+                </svg>
+              </span>
+            ))}
+        </div>
         <button type="button" className="pet-hide" tabIndex={-1} onClick={() => setVisible(false)} aria-label={label}>
           ×
         </button>
