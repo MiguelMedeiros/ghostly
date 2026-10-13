@@ -101,7 +101,10 @@ describe("A group gone from the engine's list takes what this device kept for it
     renderApp(<Probe />);
     setStorageProfile("work12345a");
     try {
+      // The same id kept under the other profile too: neither is touched.
+      keep("group-1");
       next({ groups: [] });
+      expect(kept("group-1")).toEqual(all);
     } finally { setStorageProfile(""); }
     expect(kept("group-1")).toEqual(all);
   });
