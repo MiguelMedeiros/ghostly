@@ -36,6 +36,15 @@ function print(value: unknown): void {
   process.stdout.write(JSON.stringify(value, null, pretty ? 2 : undefined) + "\n");
 }
 
+/** Done, with something to know (a voice note sent without its waveform): said on stderr, the JSON stays the answer. */
+function printAnswer(result: Record<string, unknown>): void {
+  if (typeof result?.warning === "string") {
+    process.stderr.write(`ghostly: ${result.warning}\n`);
+    delete result.warning;
+  }
+  print(result);
+}
+
 function globals(parsed: Parsed): Globals {
   const home = ghostlyHome(parsed.options.home as string | undefined);
   const profile = currentProfile(home, parsed.options.profile as string | undefined);
@@ -629,7 +638,7 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
     try { parsedValue = JSON.parse(value); } catch { parsedValue = value; }
     // A text setting (nick) keeps the word as given when it reads as JSON of another kind (2024, true, null).
     if ((await engineApi()).SETTABLE[key] === "string" && typeof parsedValue !== "string") parsedValue = value;
-    print(await withSession(g, (s) => s.call("settings.set", { [key]: parsedValue })));
+    printAnswer(await withSession(g, (s) => s.call("settings.set", { [key]: parsedValue })) as Record<string, unknown>);
     return;
   }
   throw new CliError("usage", "ghostly settings get | settings set <key> <json-value>");
@@ -723,9 +732,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
   pretty = g.pretty;
   const args = positionals(command, parsed.positionals);
   if (command.run) {
-    const result = await command.run(parsed, args);
-    if (typeof result.warning === "string") { process.stderr.write(`ghostly: ${result.warning}\n`); delete result.warning; }
-    print(result);
+    printAnswer(await command.run(parsed, args));
     return;
   }
   const params = command.params?.(parsed, args) ?? {};
@@ -746,12 +753,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     }
     return result;
   }, { deferGroups: chatOnly(command.method, params), offline: readOnly(command.method, params) });
-  // Done, with something to know (a voice note sent without its waveform): said on stderr, the JSON stays the answer.
-  if (typeof result?.warning === "string") {
-    process.stderr.write(`ghostly: ${result.warning}\n`);
-    delete result.warning;
-  }
-  print(result);
+  printAnswer(result);
 }
 
 /**
