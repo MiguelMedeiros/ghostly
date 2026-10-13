@@ -777,8 +777,13 @@ export class Apps {
   private verifiedBundle(app: InstalledApp, running: boolean): Promise<AppBundle> {
     if (running) this.runUsed.set(app.digest, this.now());
     const kept = this.verified.get(app.digest);
-    // Used last, dropped last: a running app's `file` reads keep its bundle.
-    if (kept) { this.verified.delete(app.digest); this.verified.set(app.digest, kept); return Promise.resolve(kept); }
+    // Used last, dropped last: a running app's `file` reads keep its bundle, and drop the ones no app has used for a while.
+    if (kept) {
+      this.verified.delete(app.digest);
+      this.verified.set(app.digest, kept);
+      this.dropUnusedBundles();
+      return Promise.resolve(kept);
+    }
     const under = this.verifying.get(app.digest);
     if (under) return under;
     const reading = (async () => {
@@ -787,20 +792,26 @@ export class Apps {
       const read = await readAppBundleAsync(bytes);
       if (!read.ok || read.bundle.digest !== app.digest) fail("damaged", "This app's stored files do not match what was installed");
       this.verified.set(app.digest, read.bundle);
-      // Apps running at once do not push each other's bundle out, which every `file` read would then read and check again
-      // whole; one closed (or only drawn as an icon) goes once two newer ones are kept.
-      for (const digest of this.verified.keys()) {
-        if (this.verified.size <= BUNDLES_KEPT.min) break;
-        if (this.now() - (this.runUsed.get(digest) ?? -Infinity) < BUNDLES_KEPT.ms) continue;
-        this.verified.delete(digest);
-        this.runUsed.delete(digest);
-      }
+      this.dropUnusedBundles();
       // A copy: the bundle's files are views into its whole bytes, which would stay in memory for as long as the icon.
       this.icons.set(app.digest, read.bundle.files.get(APP_ICON_PATH)?.slice() ?? null);
       return read.bundle;
     })().finally(() => { this.verifying.delete(app.digest); });
     this.verifying.set(app.digest, reading);
     return reading;
+  }
+
+  /**
+   * Apps running at once do not push each other's bundle out, which every `file` read would then read and check again
+   * whole; one closed (or only drawn as an icon) goes once two newer ones are kept, at the next bundle read or hit.
+   */
+  private dropUnusedBundles(): void {
+    for (const digest of this.verified.keys()) {
+      if (this.verified.size <= BUNDLES_KEPT.min) break;
+      if (this.now() - (this.runUsed.get(digest) ?? -Infinity) < BUNDLES_KEPT.ms) continue;
+      this.verified.delete(digest);
+      this.runUsed.delete(digest);
+    }
   }
 
   // ---------- network ----------

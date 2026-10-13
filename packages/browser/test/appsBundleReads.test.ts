@@ -93,6 +93,26 @@ describe("installed bundles read back", () => {
     expect(kept.verified.size).toBe(2);
   });
 
+  it("apps opened within a minute, then one used for minutes, keep two checked bundles, not one each", async () => {
+    const installed = await installMany(4);
+    let now = NOW_MS;
+    const { store, reads } = freshEngine(() => now);
+    const kept = store as unknown as { verified: Map<string, unknown> };
+    for (const { ref } of installed) {
+      await store.entry({ ref });
+      now += 8_000;
+    }
+    // The last one keeps running and reading its files; none of the others is read again.
+    const { ref } = installed[installed.length - 1];
+    for (let round = 0; round < 12; round++) {
+      now += 10_000;
+      await store.file({ ref, path: "data/openings.json" });
+    }
+    // Before: every bundle opened within the minute stayed (4, up to 16 MiB each) for as long as one app ran.
+    expect(kept.verified.size).toBe(2);
+    expect(reads()).toBe(4);
+  });
+
   it("four cards of one app drawn at once read its bundle once", async () => {
     const [{ ref, icon }] = await installMany(1);
     const { store, reads } = freshEngine();
