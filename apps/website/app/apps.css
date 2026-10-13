@@ -70,15 +70,18 @@
   gap: 4px;
   min-width: 0;
 }
+/* A title or tagline of one long word (the store takes 40 and 80 characters) wraps inside its card. */
 .ap-card-title {
   font-size: 18px;
   font-weight: 650;
   color: var(--text);
+  overflow-wrap: anywhere;
 }
 .ap-card-tagline {
   font-size: 15px;
   line-height: 1.45;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 .ap-card-meta {
   font-size: 12px;
@@ -116,10 +119,15 @@
   gap: 28px;
   align-items: flex-start;
 }
+/* One column no wider than the header: an auto track grew to a long word and took the title and Version off screen. */
 .ap-head-copy {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   min-width: 0;
+}
+.ap-head-copy .lead {
+  overflow-wrap: anywhere;
 }
 .ap-app-title {
   overflow-wrap: anywhere;
