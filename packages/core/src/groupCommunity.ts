@@ -620,6 +620,12 @@ export class CommunitySession {
     return -1;
   }
   /**
+   * Someone the chain removed (not one who left) and who is not back in: nothing it signs is heard any more, even for
+   * an epoch it was in. What one who left wrote while in the group is still taken and handed on, for the epochs it was
+   * in (WISP 903 § Leaving and removal): its goodbye reaches the members who were away.
+   */
+  private wasExpelled(key: string): boolean { const i = this.outIndex(key); return i >= 0 && this.state.chain[i].k === "remove"; }
+  /**
    * What someone the chain took out is told when it comes back (WISP 903 § Leaving and removal): the commits from where
    * it says it is (`sync`: its tip, or its locator) up to the one that took it out, and nothing after. Later commits
    * are not its business (a `link` commit names the new entry key); no secret, no stored frame, no seed goes with them.
@@ -1395,8 +1401,9 @@ export class CommunitySession {
     if (raw.s === this.myKey) { this.ownFrame(raw); return false; }
     // Signed by its author before anything else, so a frame no member wrote never takes a place among those waiting.
     if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return false;
-    // Someone the chain took out is heard no more, even for an epoch it was in (whose secret it still holds).
-    if (this.wasRemoved(raw.s)) return false;
+    // Someone removed is heard no more, even for an epoch it was in (whose secret it still holds); one who left, for
+    // the epochs it was in only (the roster check below).
+    if (this.wasExpelled(raw.s)) return false;
     const found = this.commitByShort(raw.e, raw.h);
     if (!found) { this.park(from, raw); return false; }
     const roster = this.rosterOf(found.hash)!;
@@ -1582,7 +1589,7 @@ export class CommunitySession {
       // all; a hub answered each 30 s sync in ~4 ms (2026-10-08).
       const high = have[stored.s]?.[seenKey(stored.e, stored.h)];
       if (Number.isSafeInteger(high) && (high as number) >= stored.n) continue;
-      if (this.wasRemoved(stored.s)) continue;
+      if (this.wasExpelled(stored.s)) continue;
       const found = this.commitByShort(stored.e, stored.h);
       if (!found) continue;
       const reads = rosterHas(this.rosterAt(found.hash) ?? [], from), mine = stored.s === this.myKey && unheard.has(frameKey(stored));
