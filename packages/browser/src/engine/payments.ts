@@ -720,6 +720,12 @@ export class PaymentDesk {
       // Only an invoice for exactly this amount, in sats: what is asked is what the invoice asks.
       try {target=validatePaymentTarget(JSON.parse(sparkPayload));const asked=target.method==="spark" ? sparkInvoiceDetails(target.address,target.network as SparkNetwork) : undefined;if(!asked || asked.token || asked.amount!==amount)return;} catch {return;}
     }
+    // A target's chain says its network; a request saying another is not what it carries (as a USDT request): dropped.
+    // Our own federation saying another is only that way left out.
+    if (target && request.network && request.network !== walletNetworkOf(target.network)) {
+      if (!federations) return;
+      federations = undefined; target = undefined;
+    }
     // The network that pays it: what the contact said, else what it carries (older apps say nothing).
     const network = request.network ?? paymentNetwork({ target, mints: parseCashuRequestPayload(findEndpoint(request.endpoints, ENDPOINT.cashu) ?? ""), invoice: findEndpoint(request.endpoints, ENDPOINT.bolt11) });
     // A way of paying this chat has off on that network is left out, like one off altogether.
