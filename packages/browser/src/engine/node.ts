@@ -306,6 +306,8 @@ interface LiveLink {
   peerAck: number;
   lastSyncAt: number;
   poll: LinkView["poll"];
+  /** Its first read ended, whatever it found: a read after it is no first sync under way. */
+  firstReadDone?: boolean;
   files: LinkFiles;
   /** The files of mine said on the DHT floor and not seen there yet, by floor id; read once in a run (`floorFilesOf`). */
   floorFiles?: Promise<Map<string, string>>;
@@ -6908,14 +6910,16 @@ export class GhostlyNode implements EngineImplementation {
           live.status = status;
           if (status === "online") live.lastSyncAt = Date.now();
           // A read like the one before changes no row: only the open chat's panel shows its time, and a group's
-          // members when they were last seen.
-          if (status !== was || !synced || stored.group || linkId === this.activeLinkId) this.emitState();
+          // members when they were last seen. A failed read of a chat that never synced is like the one before too.
+          if (status !== was || (!synced && status === "online") || stored.group || linkId === this.activeLinkId) this.emitState();
         },
         onPoll: ({ polling, nextInMs }) => {
-          const was = live.poll.polling;
+          const was = live.poll.polling, first = !live.lastSyncAt && !live.firstReadDone;
           live.poll = { polling, nextAt: Date.now() + nextInMs, interval: nextInMs || live.poll.interval };
-          // Shown in the open chat's panel, and in the list only as a chat's first sync under way.
-          if (linkId === this.activeLinkId || (!live.lastSyncAt && polling !== was)) this.emitState();
+          if (was && !polling) live.firstReadDone = true;
+          // Shown in the open chat's panel, and in the list only as a chat's first sync under way: its first read, not
+          // every read of a chat whose reads fail (no network), which was a state a read for each such chat.
+          if (linkId === this.activeLinkId || (first && polling !== was)) this.emitState();
         },
         onMessageReceipt: async id => {
           const oneToOne = !!stored.profile && !stored.group;
@@ -7709,7 +7713,8 @@ export class GhostlyNode implements EngineImplementation {
       lastMessageAt: live.lastMessageAt,
       peerAck: live.peerAck,
       lastSyncAt: live.lastSyncAt,
-      poll: live.poll,
+      // Past its first read a chat that never synced shows no sync under way in the list (`onPoll` says none either).
+      poll: live.firstReadDone && !live.lastSyncAt && stored.id !== this.activeLinkId ? { ...live.poll, polling: false } : live.poll,
     };
   }
 
