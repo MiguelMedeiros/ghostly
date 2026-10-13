@@ -44,7 +44,7 @@ it("reads as fake-indexeddb's own tree through puts, overwrites, deletes, clears
       default: return new IDBFactory().cmp(a, b) === 0 ? IDBKeyRange.only(a) : IDBKeyRange.bound(a, b, random(2) === 0, random(2) === 0);
     }
   };
-  let seq = 0;
+  let seq = 0, wroteLast = 0;
   for (const unique of [true, false]) {
     // A store's tree (unique keys, any value) and an index's (non-unique: key then record key, the value a key too).
     const tree = file.tree(file.treeId("db", unique ? "store" : "store", unique ? "" : "index"), unique, !unique) as unknown as Tree;
@@ -55,6 +55,7 @@ it("reads as fake-indexeddb's own tree through puts, overwrites, deletes, clears
     for (let round = 0; round < 400; round++) {
       const owner = {};
       file.owner = owner;
+      let wrote = false;
       for (let op = 0; op < 1 + random(6); op++) {
         const entry = { key: key(), value: unique ? { n: random(100) } : key() };
         const kind = random(10);
@@ -62,10 +63,10 @@ it("reads as fake-indexeddb's own tree through puts, overwrites, deletes, clears
           const noOverwrite = random(4) === 0;
           let a: unknown, b: unknown;
           try { a = oracle.put(entry, noOverwrite); } catch (error) { a = error instanceof Error ? error.name : error; }
-          try { b = (tree as Tree).put(entry, noOverwrite); } catch (error) { b = error instanceof Error ? error.name : error; }
+          try { b = (tree as Tree).put(entry, noOverwrite); wrote = true; } catch (error) { b = error instanceof Error ? error.name : error; }
           expect(b, `put ${JSON.stringify(entry)}`).toEqual(a);
-        } else if (kind < 8) { oracle.delete(entry); tree.delete(entry); }
-        else if (kind === 8 && random(5) === 0) { oracle = new Oracle(unique); (tree as unknown as { clear(): void }).clear(); }
+        } else if (kind < 8) { if (tree.get(entry) !== undefined) wrote = true; oracle.delete(entry); tree.delete(entry); }
+        else if (kind === 8 && random(5) === 0) { oracle = new Oracle(unique); (tree as unknown as { clear(): void }).clear(); wrote = true; }
         else {
           const r = range(), down = random(2) === 0;
           expect([...tree.getRecords(r, down)]).toEqual(r === undefined ? [...oracle.getAllRecords(down)] : [...oracle.getRecords(r, down)]);
@@ -75,6 +76,7 @@ it("reads as fake-indexeddb's own tree through puts, overwrites, deletes, clears
       if (random(6) === 0) { file.abort(owner); oracle = copy(committed); }
       else {
         file.complete(owner, ++seq);
+        if (wrote) wroteLast = seq;
         committed = copy(oracle);
         // The journal has it now, or a while later: SQLite takes it then.
         if (random(3) > 0) file.apply(seq);
@@ -90,7 +92,14 @@ it("reads as fake-indexeddb's own tree through puts, overwrites, deletes, clears
     file.apply(seq);
     expect([...tree.getAllRecords()]).toEqual([...oracle.getAllRecords()]);
     // SQLite says the last entry that wrote a tree (one that wrote nothing here costs no SQLite write).
-    expect(file.applied()).toBeGreaterThan(seq - 10);
-    expect(file.applied()).toBeLessThanOrEqual(seq);
+    expect(file.applied()).toBe(wroteLast);
   }
+});
+
+it("refuses a Blob in a tree at once, rather than when its transaction goes to SQLite", async () => {
+  const sqlite = (await loadSqlite())!;
+  const file = new TreeFile(new sqlite.DatabaseSync(":memory:"), Error);
+  const tree = file.tree(file.treeId("db", "messages"), true, false);
+  expect(() => tree.put({ key: 1, value: { picture: new Blob(["x"]) } })).toThrow(/takes no Blob/);
+  expect(tree.size()).toBe(0);
 });

@@ -90,17 +90,19 @@ export class TreeFile {
     if (!due.length) return;
     this.db.exec("BEGIN");
     try {
-      for (const tree of due) tree.write(upTo);
-      this.db.prepare("INSERT OR REPLACE INTO meta (name, value) VALUES ('applied', max(?, coalesce((SELECT value FROM meta WHERE name = 'applied'), 0)))").run(upTo);
+      // The number of the last entry that wrote here: a replay skips what wrote trees up to it.
+      let top = 0;
+      for (const tree of due) top = Math.max(top, tree.write(upTo));
+      this.db.prepare("INSERT OR REPLACE INTO meta (name, value) VALUES ('applied', max(?, coalesce((SELECT value FROM meta WHERE name = 'applied'), 0)))").run(top);
       this.db.exec("COMMIT");
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
     // Only once SQLite has them: a write that failed leaves the layers where reads still find them, for the next try.
     for (const tree of due) tree.settle(upTo);
   }
 
-  /** Whether a store has its tree here (a snapshot that says a store is on disk names one that must be). */
-  has(db: string, store: string): boolean {
-    return this.db.prepare("SELECT 1 FROM trees WHERE db = ? AND store = ? AND idx = ''").get(db, store) !== undefined;
+  /** Whether a store (`index` "") or one of its indexes has its tree here (a snapshot of format 3 names ones that must). */
+  has(db: string, store: string, index = ""): boolean {
+    return this.db.prepare("SELECT 1 FROM trees WHERE db = ? AND store = ? AND idx = ?").get(db, store, index) !== undefined;
   }
 
   /** Everything SQLite holds is on disk: before a snapshot takes the place of the journal that had it. */
@@ -239,6 +241,8 @@ export class SqlTree {
   contains(record: Entry): boolean { return this.get(record) !== undefined; }
 
   put(record: Entry, noOverwrite = false): Entry | undefined {
+    // A Blob cannot go to SQLite as it is (no message holds one): refused here, at once, not when the layer goes there.
+    if (holdsBlob(record.value)) throw new Error("A store kept in rows.db takes no Blob");
     const existing = this.get(record);
     if (existing !== undefined && noOverwrite) throw new this.file.constraintError();
     this.set(this.idOf(record), record, record);
@@ -330,15 +334,18 @@ export class SqlTree {
   /** @internal */
   due(upTo: number): boolean { return this.pending.length > 0 && this.pending[0]!.seq <= upTo; }
   /** @internal */
-  write(upTo: number): void {
+  write(upTo: number): number {
+    let top = 0;
     for (const layer of this.pending) {
       if (layer.seq > upTo) break;
+      top = layer.seq;
       if (layer.cleared) this.file.clearRows(this.id);
       for (const [bytes, entry] of layer.puts) {
         if (entry) this.file.row(this.id, entry, this.index, this._keysAreUnique);
         else this.file.drop(this.id, bytes);
       }
     }
+    return top;
   }
   /** @internal */
   settle(upTo: number): void {
@@ -354,4 +361,12 @@ export function openTreeFile(sqlite: typeof import("node:sqlite"), path: string,
   const db = new sqlite.DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL");
   return new TreeFile(db, constraintError);
+}
+
+function holdsBlob(value: unknown, depth = 0): boolean {
+  if (value instanceof Blob) return true;
+  if (!value || typeof value !== "object" || depth > 32 || ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return false;
+  if (value instanceof Map) { for (const [k, v] of value) if (holdsBlob(k, depth + 1) || holdsBlob(v, depth + 1)) return true; return false; }
+  for (const item of Object.values(value)) if (holdsBlob(item, depth + 1)) return true;
+  return false;
 }

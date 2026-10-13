@@ -157,8 +157,6 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   const disk = (store: RawStore) => trees !== null && raw._databases.get(store.rawDatabase.name) === store.rawDatabase && onDisk(store.rawDatabase.name, store.name);
   /** The number of the last journal entry made: SQLite says which ones its trees hold (`TreeFile.applied`). */
   let seq = trees?.applied() ?? 0;
-  /** The last entry the journal has: SQLite takes the layers up to it before a snapshot takes the journal's place. */
-  let journaled = seq;
 
   let writing = true;
   let restoring = true;
@@ -200,7 +198,6 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   const replayed = journal ? replay(raw._databases, journal, order, { applied: seq, onTrees }) : { end: 0, closed: !folded, seq: 0 };
   // What the journal had for the trees and SQLite did not: written now, numbered as its last entry.
   seq = Math.max(seq, replayed.seq);
-  journaled = seq;
   if (trees) { trees.complete(null, seq); trees.apply(seq); }
   // Stores kept on disk still in memory (a snapshot of format 1 or 2, and the journal replayed over it): moved now.
   let moved = false;
@@ -320,7 +317,6 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
    * find it, and goes with the next entry, or before the next snapshot (which fails without it).
    */
   function written(entry: number) {
-    journaled = Math.max(journaled, entry);
     if (!trees || !writing) return;
     try { trees.apply(entry); } catch (error) { failed(error); }
   }
@@ -455,8 +451,10 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     const name = randomBytes(8).toString("hex");
     const snapshot = await capture(name, false);
     if (trees) {
-      // What the journal has goes to the trees, and to the disk, before the snapshot takes the journal's place.
-      trees.apply(journaled);
+      // Every finished transaction goes to the trees, and to the disk, before the snapshot takes the journal's place:
+      // also one whose entry waits behind this snapshot in the queue (the snapshot may hold what it did elsewhere). Its
+      // entry, written after, is then one SQLite holds, which a replay skips.
+      trees.apply(seq);
       trees.sync();
     }
     const temporary = snapshotPath + ".tmp";
@@ -691,7 +689,8 @@ function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snaps
   const missing = new Error("This profile's store is missing rows.db (beside snapshot.bin): its messages cannot be read. Restore the profile from a backup.");
   const named = snapshot.format === 2 && snapshot.databases.some((db) => db.stores.some((store) => store.rows?.ids.some((id) => id >= 0)));
   if (snapshot.format === 2 && (!disk.rowsFound || !disk.rows || (named && disk.rows.count() === 0))) throw missing;
-  if (snapshot.format === 3 && (!disk.rowsFound || snapshot.databases.some((db) => db.stores.some((store) => store.onDisk && !disk.trees!.has(db.name, store.name))))) throw missing;
+  const kept = (db: string, store: SnapshotStore) => disk.trees!.has(db, store.name) && store.indexes.every((index) => disk.trees!.has(db, store.name, index.name));
+  if (snapshot.format === 3 && (!disk.rowsFound || snapshot.databases.some((db) => db.stores.some((store) => store.onDisk && !kept(db.name, store))))) throw missing;
   const intern = interner();
   for (const saved of snapshot.databases) {
     const db = new classes.Database(saved.name, saved.version);
