@@ -20,3 +20,24 @@ for (const path of ["/wisps/306-bitcoin", "/roadmap"]) {
     expect(past).toEqual([]);
   });
 }
+
+/**
+ * The "On this page" list of a WISP whose headings name a source file (Cache (packages/browser/src/engine/...ts)): its
+ * longest path set the width of every entry, so below 375 px they ran past the box's border and off the screen.
+ */
+for (const width of [320, 344, 360]) {
+  test(`/wisps/public-profiles: the 'On this page' entries wrap inside their box at ${width} px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto("/wisps/public-profiles");
+    const past = await page.locator(".reader-toc").evaluate((box) => {
+      const style = getComputedStyle(box);
+      const inner = box.getBoundingClientRect().right - parseFloat(style.borderRightWidth) - parseFloat(style.paddingRight);
+      return [...box.querySelectorAll("li")].filter((li) => {
+        const range = document.createRange();
+        range.selectNodeContents(li);
+        return range.getBoundingClientRect().right > inner + 0.5;
+      }).map((li) => (li.textContent ?? "").trim());
+    });
+    expect(past).toEqual([]);
+  });
+}
