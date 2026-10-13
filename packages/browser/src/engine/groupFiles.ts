@@ -284,9 +284,11 @@ export class GroupFileDesk {
           meta: { name, size, mime, d: file.digest, ...(voice && { voice }), ...(video && { video }), ...(image && { image }) },
           mine: file.direction === "out", auto: !!file.group.auto, asked: !!file.group.asked, held: file.transfer?.state === "done", holders: [], damaged: new Set() };
         this.add(kept);
-        if (kept.held) this.show(kept, { state: "done", transferred: size, size, direction: kept.mine ? "out" : "in" });
+        // All here: it shows no transfer (a file with none reads as finished; its record says done). A view for each
+        // would go into every state the engine builds, so each state would cost more with every file the groups ever had.
+        if (kept.held) continue;
         // Every holder served it damaged: it waits for its person to ask again, not fetched again by itself.
-        else if (file.transfer?.state === "failed") this.show(kept, { state: "failed", transferred: 0, size, direction: "in", retry: true, error: file.transfer.error ?? DAMAGED });
+        if (file.transfer?.state === "failed") this.show(kept, { state: "failed", transferred: 0, size, direction: "in", retry: true, error: file.transfer.error ?? DAMAGED });
         // Paused by its person: still paused, with the bytes that came (what the next transfer goes on from).
         else if (file.group.paused) {
           kept.paused = true;
