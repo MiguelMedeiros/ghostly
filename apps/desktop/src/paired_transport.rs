@@ -13,7 +13,7 @@ use std::{
     time::Duration,
 };
 use tauri::{ipc::Channel, State};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -31,9 +31,11 @@ pub enum Event {
         id: u64,
     },
 }
+/// A frame for the stream, and who hears once it is written there.
+type Outgoing = (String, oneshot::Sender<()>);
 struct Socket {
     connection: Connection,
-    tx: mpsc::Sender<String>,
+    tx: mpsc::Sender<Outgoing>,
 }
 struct Peer {
     endpoint: Endpoint,
@@ -87,7 +89,7 @@ impl TransportState {
         .await
         .map_err(|_| "Native stream timed out")??;
         let id = self.next();
-        let (tx, mut rx) = mpsc::channel::<String>(32);
+        let (tx, mut rx) = mpsc::channel::<Outgoing>(32);
         {
             let mut inner = self.inner.lock().unwrap();
             if !inner.peers.contains_key(&peer)
@@ -121,7 +123,7 @@ impl TransportState {
         let state = self.clone();
         tokio::spawn(async move {
             tokio::select! {
-                _ = async { while let Some(text) = rx.recv().await { wire::write_frame(&mut send, text.as_bytes()).await?; } Ok::<(), String>(()) } => {},
+                _ = async { while let Some((text, written)) = rx.recv().await { wire::write_frame(&mut send, text.as_bytes()).await?; let _ = written.send(()); } Ok::<(), String>(()) } => {},
                 _ = async { loop { let frame = wire::read_frame(&mut recv).await?; let text = String::from_utf8(frame).map_err(|_| "Non-text paired frame")?; events.send(Event::Frame { id, text }).map_err(|_| "Native UI unavailable")?; } #[allow(unreachable_code)] Ok::<(), String>(()) } => {},
                 _ = connection.closed() => {},
             }
@@ -301,8 +303,11 @@ pub async fn paired_iroh_connect(
         .attach(endpoint_id, endpoint, connection, events, false)
         .await
 }
+/// One frame, answered once it is written on the stream: on a link slower than the page sends, it waits there for
+/// room. So the page counts it against its send budget until then, and the engine sees the queue that is really
+/// there (files and apps keep to their share of it). Only a closed connection is an error.
 #[tauri::command]
-pub fn paired_native_send(
+pub async fn paired_native_send(
     state: State<'_, TransportState>,
     connection_id: u64,
     text: String,
@@ -310,15 +315,21 @@ pub fn paired_native_send(
     if text.is_empty() || text.len() > wire::MAX_FRAME {
         return Err("Frame exceeds transport budget".into());
     }
-    let inner = state.inner.lock().unwrap();
-    inner
+    let tx = state
+        .inner
+        .lock()
+        .unwrap()
         .sockets
         .get(&connection_id)
         .ok_or("Connection closed")?
         .1
         .tx
-        .try_send(text)
-        .map_err(|_| "Native send queue full or closed".into())
+        .clone();
+    let (written, done) = oneshot::channel();
+    tx.send((text, written))
+        .await
+        .map_err(|_| "Connection closed")?;
+    done.await.map_err(|_| "Connection closed".into())
 }
 #[tauri::command]
 pub fn paired_native_close(state: State<'_, TransportState>, connection_id: u64) {
@@ -358,6 +369,7 @@ mod tests {
     // covers: transport.iroh, transport.native-pool
     use super::*;
     use serde_json::Value;
+    use std::sync::atomic::AtomicBool;
     use tauri::ipc::InvokeResponseBody;
     use tauri::test::{mock_builder, MockRuntime};
     use tauri::Manager;
@@ -490,7 +502,9 @@ mod tests {
         event(&bob_seen, kind("open")).await;
 
         assert_eq!(state.network_changed().await, 2);
-        paired_native_send(one.state(), sent, "after the change".into()).unwrap();
+        paired_native_send(one.state(), sent, "after the change".into())
+            .await
+            .unwrap();
         let frame = event(&bob_seen, kind("frame")).await;
         assert_eq!(frame["text"], "after the change");
         assert!(!alice_seen
@@ -558,31 +572,132 @@ mod tests {
         );
         let incoming = accepted["id"].as_u64().unwrap();
 
-        paired_native_send(app.state(), outgoing, "hello bob".into()).unwrap();
+        paired_native_send(app.state(), outgoing, "hello bob".into())
+            .await
+            .unwrap();
         let frame = event(&bob_seen, kind("frame")).await;
         assert_eq!(
             (frame["id"].as_u64(), frame["text"].as_str()),
             (Some(incoming), Some("hello bob"))
         );
         let largest = "x".repeat(wire::MAX_FRAME);
-        paired_native_send(app.state(), incoming, largest.clone()).unwrap();
+        paired_native_send(app.state(), incoming, largest.clone())
+            .await
+            .unwrap();
         let frame = event(&alice_seen, kind("frame")).await;
         assert_eq!(frame["text"].as_str().map(str::len), Some(wire::MAX_FRAME));
+    }
+
+    /// A channel whose page takes no frame while `stalled` holds: a contact on a link slower than this side writes.
+    fn slow_channel(stalled: Arc<AtomicBool>) -> (Channel<Event>, Seen) {
+        let seen: Seen = Arc::default();
+        let log = seen.clone();
+        let channel = Channel::new(move |body| {
+            if let InvokeResponseBody::Json(json) = body {
+                let event: Value = serde_json::from_str(&json).unwrap();
+                while event["type"] == "frame" && stalled.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                log.lock().unwrap().push(event);
+            }
+            Ok(())
+        });
+        (channel, seen)
+    }
+
+    async fn send(
+        app: &tauri::AppHandle<MockRuntime>,
+        id: u64,
+        text: String,
+    ) -> Result<(), String> {
+        paired_native_send(app.state(), id, text).await
+    }
+
+    /// An app sending at its full rate over a link slower than that: each frame waits for room on the stream, in
+    /// order, so the page counts it against its budget until it is written. None is refused for a full queue, which
+    /// the page took for a dead connection and closed, taking the chat's session down with it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_frame_waits_for_room_on_the_stream_and_is_counted_until_written() {
+        let app = app();
+        let (alice, _, alice_seen) = start(&app, 60).await;
+        let stalled = Arc::new(AtomicBool::new(true));
+        let (events, bob_seen) = slow_channel(stalled.clone());
+        let bob = app
+            .state::<TransportState>()
+            .start([61; 32], events, true, &[])
+            .await
+            .unwrap();
+        let outgoing = connect(&app, alice, &bob.descriptor).await.unwrap();
+        event(&bob_seen, kind("open")).await;
+
+        let frames = 256;
+        let handle = app.handle().clone();
+        let sending = tokio::spawn(async move {
+            for i in 0..frames {
+                let text = format!("{i:05}{}", "x".repeat(wire::MAX_FRAME - 5));
+                send(&handle, outgoing, text).await?;
+            }
+            Ok::<(), String>(())
+        });
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let waiting = !sending.is_finished();
+        stalled.store(false, Ordering::SeqCst);
+        let sent = sending.await.unwrap();
+        assert!(
+            waiting,
+            "a frame with no room on the stream waits: {sent:?}"
+        );
+        sent.unwrap();
+        for _ in 0..400 {
+            if bob_seen
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|e| e["type"] == "frame")
+                .count()
+                == frames
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let order: Vec<String> = bob_seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e["type"] == "frame")
+            .map(|e| e["text"].as_str().unwrap()[..5].to_string())
+            .collect();
+        assert_eq!(
+            order,
+            (0..frames).map(|i| format!("{i:05}")).collect::<Vec<_>>()
+        );
+        assert!(!alice_seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| e["type"] == "closed"));
     }
 
     #[tokio::test]
     async fn refuses_frames_out_of_budget_and_unknown_connections() {
         let app = app();
         assert_eq!(
-            paired_native_send(app.state(), 1, String::new()).unwrap_err(),
+            paired_native_send(app.state(), 1, String::new())
+                .await
+                .unwrap_err(),
             "Frame exceeds transport budget"
         );
         assert_eq!(
-            paired_native_send(app.state(), 1, "x".repeat(wire::MAX_FRAME + 1)).unwrap_err(),
+            paired_native_send(app.state(), 1, "x".repeat(wire::MAX_FRAME + 1))
+                .await
+                .unwrap_err(),
             "Frame exceeds transport budget"
         );
         assert_eq!(
-            paired_native_send(app.state(), 1, "x".into()).unwrap_err(),
+            paired_native_send(app.state(), 1, "x".into())
+                .await
+                .unwrap_err(),
             "Connection closed"
         );
         assert_eq!(
@@ -611,7 +726,9 @@ mod tests {
         })
         .await;
         assert_eq!(
-            paired_native_send(app.state(), first, "late".into()).unwrap_err(),
+            paired_native_send(app.state(), first, "late".into())
+                .await
+                .unwrap_err(),
             "Connection closed"
         );
 
@@ -622,7 +739,9 @@ mod tests {
         })
         .await;
         assert_ne!(reopened["binding"]["context"], first_binding["context"]);
-        paired_native_send(app.state(), second, "again".into()).unwrap();
+        paired_native_send(app.state(), second, "again".into())
+            .await
+            .unwrap();
         event(&bob_seen, |e| e["text"] == "again").await;
     }
 
