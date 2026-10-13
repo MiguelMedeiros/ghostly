@@ -4,7 +4,9 @@ import { expect, test, type Page } from "@playwright/test";
  * A step button that takes the keyboard's focus is one the reader can see. A pinned chapter fades its picture and
  * copy in over its first pixels and out before the hand-off (SceneFrame FADE), and the browser brings a focused
  * button on screen at the chapter's nearest edge: Tab from a chapter's last step button to the next chapter's first
- * landed on a panel at opacity 0, on the bare backdrop. Focusing a step button brings its chapter to that step.
+ * landed on a panel at opacity 0, on the bare backdrop. Focusing a step button brings its chapter to that step, at
+ * once: a smooth scroll and the playhead's glide after it left a black screen for 1 to 2.1 s, so a reader tabbing every
+ * 600 ms was on step 2 before step 1 showed.
  */
 
 const CHAPTERS = ["invite", "dht", "agree", "alive"];
@@ -33,10 +35,13 @@ const focused = (page: Page) =>
     };
   }, SEEN);
 
-/** The page scrolls there smoothly and the playhead plays the beats on the way, so the step is given a few seconds to arrive; then it must stay. */
+/**
+ * The step is there within a few frames of the key (the page jumps, nothing glides), inside the 600 ms between two
+ * Tabs of a person; then it must stay.
+ */
 async function shows(page: Page, chapter: string, button: number) {
   const there = { chapter, button, ring: true, seen: true, onScreen: true, pinned: true, step: button };
-  await expect.poll(() => focused(page), { timeout: 8000 }).toEqual(there);
+  await expect.poll(() => focused(page), { timeout: 600, intervals: [50] }).toEqual(there);
   await page.waitForTimeout(1000);
   expect(await focused(page)).toEqual(there);
 }
