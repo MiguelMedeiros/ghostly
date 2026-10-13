@@ -11,7 +11,8 @@ import { Notice } from "./ui/Notice";
  * Leaving a group, said before it happens: it goes from this device with its history, and an admin
  * hands the role to a member who is online (the engine picks the first one over a direct edge, as here). Closed without
  * leaving, it gives the focus back to what opened it, or to `returnFocus` (the group's ⋮, whose row went with its menu).
- * `forget`: asked by "Delete from this device", which leaves an active private group as well, under the same checks.
+ * `forget`: asked by "Delete from this device", which leaves an active group as well, under the same checks, but for a
+ * community nobody is connected to: a member's delete goes ahead, and the dialog says the others still list them.
  */
 export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forget }: { group: GroupView; onClose(): void; onConfirm(): Promise<void>; returnFocus?: RefObject<HTMLElement | null>; forget?: boolean }) {
   const { t } = useI18n();
@@ -36,7 +37,10 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
   // member reached through a hub is online, but the role commit does not travel through hubs.
   const community = group.profile === "community";
   const successor = !group.isAdmin ? undefined : community ? others.find(m => m.online) ?? others[0] : others.find(m => m.online && !m.viaHub);
-  const blocked = others.length > 0 && (community ? !group.community?.connected : group.isAdmin && !successor);
+  const unheard = community && others.length > 0 && !group.community?.connected;
+  // A member deleting a community nobody is connected to: it goes anyway (the engine's `deleteHere`), the leave unsaid.
+  const unsaid = unheard && forget && !group.isAdmin;
+  const blocked = others.length > 0 && !unsaid && (community ? unheard : group.isAdmin && !successor);
   const leave = async () => {
     setBusy(true); setError(null);
     try { await onConfirm(); } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); setBusy(false); }
@@ -50,6 +54,7 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
       {forget && <p>{t("group.leave.forgetBody")}</p>}
       <p>{t(community ? "group.leave.bodyCommunity" : "group.leave.body")}</p>
       {successor && others.length > 0 && <p data-testid="group-leave-successor">{t("group.leave.successor", { name: memberName(successor, t) })}</p>}
+      {unsaid && <Notice tone="warning" className="text-sm" testId="leave-unsaid" title={t("group.leave.blockedCommunity")} next={t("group.leave.unsaidNext")} />}
       {blocked && <Notice tone={community ? "wait" : "error"} className="text-sm" testId="leave-blocked" title={community ? t("group.leave.blockedCommunity") : t("group.leave.blocked")} next={community ? t("group.leave.blockedCommunityNext") : t("group.leave.blockedNext")} />}
     </div>
     {error && <Notice problem={error} className="mt-2 text-sm" />}

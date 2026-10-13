@@ -449,14 +449,39 @@ describe("GroupChat: the options menu", () => {
     expect(within(screen.getByRole("dialog")).getByTestId("group-leave-successor")).toHaveTextContent("You are the admin: Alice becomes the admin when you leave.");
   });
 
-  it("keeps a community from being deleted while nobody is connected to take the leave", async () => {
+  it("deletes a community nobody is connected to anyway, and says the others still list the person", async () => {
+    // Members who never open the app again kept it here for good: Delete was greyed while nobody could take the leave.
     const { user, engine } = openGroup(active({ profile: "community", community: { hub: false, hubs: 0, connected: 0 } }));
+    engine.on("forgetGroup", () => undefined);
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId("group-forget"));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).queryByTestId("leave-blocked")).not.toBeInTheDocument();
+    expect(within(dialog).getByTestId("leave-unsaid")).toHaveTextContent("Nobody is online to take your leave" + "It goes from this device anyway. The others will still list you as a member.");
+    await user.click(within(dialog).getByTestId("group-leave-confirm"));
+    expect(engine.callsTo("forgetGroup")).toEqual([{ groupId: "group-1" }]);
+    expect(await screen.findByText("Chat list")).toBeInTheDocument();
+  });
+
+  it("keeps a community's admin from deleting it while nobody is connected to take the role", async () => {
+    const { user, engine } = openGroup(active({ profile: "community", isAdmin: true, community: { hub: false, hubs: 0, connected: 0 },
+      members: [member({ key: ME, me: true, online: true, role: "admin" }), member({ key: BOB, nick: "Bob" })] }));
     await user.click(screen.getByTestId("group-options"));
     await user.click(screen.getByTestId("group-forget"));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByTestId("leave-blocked")).toHaveTextContent("Nobody is online to take your leave" + "Try again in a moment.");
+    expect(within(dialog).queryByTestId("leave-unsaid")).not.toBeInTheDocument();
     expect(within(dialog).getByTestId("group-leave-confirm")).toBeDisabled();
     expect(engine.callsTo("forgetGroup")).toEqual([]);
+  });
+
+  it("keeps a member from leaving a community while nobody is connected: only Delete goes ahead unsaid", async () => {
+    const { user } = openGroup(active({ profile: "community", community: { hub: false, hubs: 0, connected: 0 } }));
+    await user.click(screen.getByTestId("group-options"));
+    await user.click(screen.getByTestId("group-leave"));
+    const dialog = screen.getByTestId("group-leave-dialog");
+    expect(within(dialog).getByTestId("leave-blocked")).toBeInTheDocument();
+    expect(within(dialog).getByTestId("group-leave-confirm")).toBeDisabled();
   });
 
   it("keeps a community whose delete was refused, and says why in the dialog", async () => {
