@@ -974,6 +974,7 @@
     "apps/ui/src/lib/pastedFiles.ts": ["app.composer.paste-files"],
     "apps/ui/src/lib/pictureBox.ts": ["files.image.*"],
     "apps/ui/src/lib/pictureLink.ts": ["chat.paired.image-links"],
+    "apps/ui/src/lib/pictureReads.ts": ["files.paired.images","files.image.*","delivery.hold.picture"],
     "apps/ui/src/lib/pictureZoom.ts": ["profiles.picture.viewer","files.image.view"],
     "apps/ui/src/lib/pkarr.ts": ["desktop.*"],
     "apps/ui/src/lib/platform.ts": ["desktop.*"],
