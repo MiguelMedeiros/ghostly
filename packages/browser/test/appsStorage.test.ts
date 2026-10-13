@@ -197,6 +197,31 @@ describe("storage", () => {
     ]);
   });
 
+  it("exports every scope with each value as the JSON text it is kept as, a scope at a time", async () => {
+    const { store, app } = await installed();
+    const other = await bundle({ name: "go" });
+    net.put("https://raw.githubusercontent.com/ana/go/HEAD/app.ghostlyapp", other.bytes);
+    await store.preview({ url: "https://github.com/ana/go" });
+    await store.install({ digest: other.digest, grant: ["chat"] });
+    await store.storageSet({ ref: app.ref, scope: "chat-2", key: "z", value: { b: 1, "2": [true, null] } });
+    await store.storageSet({ ref: app.ref, scope: "chat-1", key: "__proto__", value: "p" });
+    await store.storageSet({ ref: app.ref, scope: "chat-1", key: "a", value: [1, 2] });
+    await store.storageSet({ ref: app.ref, scope: APP_SCOPE_ALONE, key: "b", value: 0.5 });
+    await store.storageSet({ ref: other.ref, scope: "chat-1", key: "a", value: "another app's" });
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    expect(await store.exportDataText({ ref: app.ref })).toEqual([
+      { app: app.ref, scope: APP_SCOPE_ALONE, entries: [["b", "0.5"]] },
+      { app: app.ref, scope: "chat-1", entries: [["__proto__", "\"p\""], ["a", "[1,2]"]] },
+      { app: app.ref, scope: "chat-2", entries: [["z", '{"2":[true,null],"b":1}']] },
+    ]);
+    // The thread is let go between scopes.
+    expect(timers.mock.calls.filter(([, ms]) => ms === 0).length).toBeGreaterThanOrEqual(2);
+    timers.mockRestore();
+    // The parsed export is the same data.
+    expect((await store.exportData({ ref: app.ref })).map((file) => file.entries)).toEqual([{ b: 0.5 }, JSON.parse('{"__proto__":"p","a":[1,2]}'), { z: { b: 1, 2: [true, null] } }]);
+    expect(await store.exportDataText({ ref: other.ref })).toEqual([{ app: other.ref, scope: "chat-1", entries: [["a", "\"another app's\""]] }]);
+  });
+
   it("exports a key named __proto__ like any other", async () => {
     const { store, app } = await installed();
     await store.storageSet({ ref: app.ref, scope: "chat-1", key: "__proto__", value: { board: "rnbqkbnr", turn: 7 } });
