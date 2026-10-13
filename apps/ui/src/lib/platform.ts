@@ -435,7 +435,7 @@ export interface AppsPlatform {
    * installed while it runs does not make it the new version (WISP 1200 § Takedowns). Absent where no engine judges versions.
    */
   running?(digest: string): AppsPlatform;
-  /** One file of an installed app's bundle. */
+  /** One file of an installed app's bundle: a copy the caller owns, which the broker hands to the app (transferred). */
   file(ref: string, path: string): Promise<Uint8Array>;
   storage: {
     /** Null when the key is not set. */
