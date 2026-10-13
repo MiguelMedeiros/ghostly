@@ -59,6 +59,38 @@ describe("a source's view", () => {
   });
 });
 
+describe("an idle wallet", () => {
+  // The balance is read every 15 s from the source's first read on: the timers are fake from the start.
+  beforeEach(() => { vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true }); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("with only the default source and nothing open, a minute of 15 s balance reads changes nothing", async () => {
+    const { lightning, events } = service();
+    await lightning.start();
+    void lightning.sources.ensureReady();
+    const read = vi.spyOn(lightning.sources, "refresh");
+    await vi.waitFor(() => expect(lightning.view.read).toBe(true));
+    events.changed.mockClear(); read.mockClear();
+    await vi.advanceTimersByTimeAsync(60_000);
+    if (process.env.WALLET_IDLE) console.log(`in 60 s, default source, no wallet: ${read.mock.calls.length} reads, ${events.changed.mock.calls.length} changes`);
+    expect(read.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(events.changed).not.toHaveBeenCalled();
+  });
+
+  it("a source whose balance moves says so at its next read, and only then", async () => {
+    const fake = new FakeLightningProvider();
+    const { lightning, events } = await ready(fake);
+    await vi.waitFor(() => expect(lightning.view.balance).toBe(100_000));
+    events.changed.mockClear();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(events.changed).not.toHaveBeenCalled();
+    fake.balance += 21;
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(lightning.view.balance).toBe(100_021);
+    expect(events.changed).toHaveBeenCalled();
+  });
+});
+
 describe("the invoice a contact is handed", () => {
   it("comes only from a source that can receive", async () => {
     const fake = new FakeLightningProvider();
