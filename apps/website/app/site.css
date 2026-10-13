@@ -1277,16 +1277,27 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
 }
 
 /* The original pointer ghost. Its float slows as it tires and sleeps. */
+/* Placed by its transform (GhostPet's frame loop), on its own layer: a frame of it lays nothing out. */
 .pet {
   position: absolute;
+  left: 0;
+  top: 0;
   z-index: 40;
   pointer-events: none;
+  will-change: transform;
+}
+.pet-look {
   transition:
     opacity var(--dur-fast) var(--ease-exit),
     transform var(--dur-fast) var(--ease-exit);
 }
+/* Its float and z's loop on HTML boxes: on an SVG element they would lay the page out at every frame. */
 .pet-body {
+  position: relative;
   animation: pet-float 4s ease-in-out infinite;
+}
+.pet-body svg {
+  display: block;
 }
 .pet[data-mood="happy"] .pet-body {
   animation-duration: 3s;
@@ -1315,6 +1326,8 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
   color: #fff;
 }
 .pet-z {
+  position: absolute;
+  inset: 0;
   animation: zzz 2s ease-in-out infinite;
 }
 @keyframes pet-float {

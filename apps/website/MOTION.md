@@ -247,7 +247,8 @@ ghosts `STAGGER` apart, and the title's words rise `STAGGER` apart (capped at
 six). The footer's pointer ghost (`GhostPet`) is the original: it trails the
 pointer with a time-based ease (about 2 s to close most of the distance, 4 s
 tired, 8 s asleep), sleeps when you stop and ducks when you reach for it; it
-writes its position straight to the DOM and stops its clock once asleep.
+writes its position straight to the DOM as a transform and stops its clock
+once it has settled (under 3 px a second), waking only for its next mood.
 
 ### Micro-interactions
 
@@ -343,9 +344,12 @@ Lessons from recording the story at slow, flick and reverse speeds
   faint wedges, not a blurred mask, and the statement's words fade and rise
   without a blur.
 - Nothing reads layout in a frame loop. The pointer ghost measures the page on
-  resize and writes `left`/`top` itself; nothing calls `setState` per frame.
+  resize and writes its `transform` itself (never `left`/`top`, which lay the
+  page out at every frame); nothing calls `setState` per frame. Its float and
+  its z's loop on HTML boxes: a CSS animation on an SVG element (the `<svg>`
+  itself or a `<text>` in it) lays the page out at every frame.
 - `will-change` only where a layer must be its own: the act's network field
-  (`.act-field`), the boo's ghost, the rail's fill.
+  (`.act-field`), the boo's ghost, the rail's fill, the pointer ghost.
 - Idle loops rest off screen. `components/site/IdleLoops.tsx` watches every
   outermost ghost, every stage and every particle field, pauses their CSS
   animations (`data-offscreen`) and their SMIL timelines (`pauseAnimations()`)
