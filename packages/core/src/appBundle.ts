@@ -2,6 +2,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { toBase64Url, toZ32, utf8Encode } from "./bytes";
 import { canonicalJsonBytes, readCanonicalJson, type JsonValue } from "./canonicalJson";
 import { imageSize } from "./image";
+import { pacer, yieldThread } from "./pace";
 import {
   APP_NAME, APP_PREFIXES, isAppHash, isAppKey, readAppSignature, signAppObject, verifyAppSignature, type AppSignature,
 } from "./appStatements";
@@ -313,6 +314,8 @@ const u32 = (b: Uint8Array, at: number) => ((b[at]! << 24) >>> 0) + (b[at + 1]! 
 const HASH_AT_ONCE = 64 * 1024;
 /** Without `crypto.subtle`, `sha256Paced` hashes this much (a few ms), then lets the thread go. */
 const HASH_SLICE = 256 * 1024;
+/** `readAppBundleAsync` hashes files for this long at most before it lets the thread go, however small each file. */
+const HASH_SLICE_MS = 5;
 
 /**
  * SHA-256 of bytes that may be a whole bundle, for a client whose engine shares its page's thread: `sha256` in
@@ -327,7 +330,7 @@ export async function sha256Paced(bytes: Uint8Array): Promise<Uint8Array> {
   if (away) return new Uint8Array(away);
   const hash = sha256.create();
   for (let at = 0; at < bytes.length; at += HASH_SLICE) {
-    if (at) await new Promise((resolve) => setTimeout(resolve, 0));
+    if (at) await yieldThread();
     hash.update(bytes.subarray(at, at + HASH_SLICE));
   }
   return hash.digest();
@@ -397,17 +400,21 @@ export function readAppBundle(bytes: Uint8Array): AppBundleReading {
 
 /**
  * `readAppBundle` for a client whose engine shares its page's thread: the same checks in the same order, with the same
- * refusals, and each file hashed by `sha256Paced`, one after the other. The bytes must not change until it answers.
+ * refusals, and each file hashed by `sha256Paced`, one after the other, with the thread let go between files every
+ * `HASH_SLICE_MS` (64 files of 64 KiB, each hashed at once, held it for 50 ms). The bytes must not change until it
+ * answers.
  */
 export async function readAppBundleAsync(bytes: Uint8Array): Promise<AppBundleReading> {
   const read = readAppBundleHead(bytes);
   if (!read.ok) return read;
   const files = new Map<string, Uint8Array>();
+  const pause = pacer(HASH_SLICE_MS);
   let at = read.head.filesAt;
   for (const f of read.head.manifest.files) {
     const content = bytes.subarray(at, at + f.size); at += f.size;
     if (toBase64Url(await sha256Paced(content)) !== f.sha256) return { ok: false, reason: "file-hash", detail: f.path };
     files.set(f.path, content);
+    await pause();
   }
   return closeAppBundle(read.head, files);
 }

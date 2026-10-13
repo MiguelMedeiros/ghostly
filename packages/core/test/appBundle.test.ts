@@ -294,6 +294,21 @@ describe("the paced hash", () => {
     expect(await readAppBundleAsync(changed)).toEqual(refusal);
     expect(told(await readAppBundleAsync(bytes))).toEqual(told(readAppBundle(bytes)));
   });
+
+  it("lets the thread go between small files, not only inside large ones", async () => {
+    // 60 files of 64 KiB, each hashed at once: read in one run they held the thread for about 50 ms.
+    const { bytes } = await buildAppBundle(DRAFT, [ENTRY, ...Array.from({ length: 60 }, (_, i) => file(`data/${String(i).padStart(2, "0")}.bin`, fill(64 * 1024, i)))], publisher);
+    const yields = vi.fn(async () => {});
+    vi.stubGlobal("scheduler", { yield: yields });
+    // Each read of the clock moves it 1.5 ms: a pause about every sixth file, once 8 ms have run.
+    let clock = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => (clock += 1.5));
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    expect(told(await readAppBundleAsync(bytes))).toEqual(told(readAppBundle(bytes)));
+    expect(yields.mock.calls.length).toBeGreaterThanOrEqual(8);
+    expect(timers).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
 });
 
 describe("building a bundle", () => {
