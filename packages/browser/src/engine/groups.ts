@@ -1093,8 +1093,8 @@ export class Groups {
   /** `answer`: false when an invitation goes because its inviter took it back, so no decline is said for it. */
   async forget(groupId: string, answer = true): Promise<void> {
     // A community I am active in is left first (the request to the hubs, an admin's role handed on), or the others keep
-    // me as a member, and as their admin, for good: refused when nothing is connected to carry it, as Leave is.
-    if (this.isCommunity(groupId)) return this.communities.leave(groupId);
+    // me as a member, and as their admin, for good. With nothing connected to carry it, only an admin is refused.
+    if (this.isCommunity(groupId)) return this.communities.deleteHere(groupId);
     const session = this.sessions.get(groupId);
     // Deleting an active group leaves it. An admin with members who cannot hand the role on is refused, as Leave is:
     // gone with the role, the group would have no admin for good. Anyone else's failed goodbye does not keep it here.

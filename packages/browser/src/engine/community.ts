@@ -559,6 +559,21 @@ export class Communities {
     await this.forget(groupId);
   }
 
+  /**
+   * Delete from this device: left first, as Leave does. With nothing connected to carry the request, a member's leave
+   * goes unsaid and the group goes anyway, as a private group's failed goodbye does: the others still list the device,
+   * but members who never open the app again kept it here for good. An admin with members is still refused: gone with
+   * the role, the group would have no admin.
+   */
+  async deleteHere(groupId: string): Promise<void> {
+    try { await this.leave(groupId); }
+    catch (error) {
+      const s = this.live.get(groupId)?.session;
+      if (!s || (s.isAdmin && s.others.length)) throw error;
+      await this.forget(groupId);
+    }
+  }
+
   successor(groupId: string): string | undefined {
     const s = this.live.get(groupId)?.session;
     if (!s) return undefined;
