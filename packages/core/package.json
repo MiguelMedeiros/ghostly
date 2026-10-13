@@ -8,7 +8,9 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./miniApp": "./src/miniApp.ts"
+    "./miniApp": "./src/miniApp.ts",
+    "./groupFiles": "./src/groupFiles.ts",
+    "./statusCards": "./src/statusCards.ts"
   },
   "scripts": {
     "test": "vitest run",

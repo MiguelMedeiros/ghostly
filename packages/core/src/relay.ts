@@ -1,5 +1,5 @@
 import type { Identity } from "./identity";
-import { createRelayPayload, newerPacket, openRelayPayload, parseRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
+import { createRelayPayload, newerPacket, openRelayPayload, parseRelayPayload, readOwnRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type RelayFailure } from "./relayBreaker";
 import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport, type ServerTime } from "./transport";
 import { traceLink } from "./linkTrace";
@@ -503,6 +503,16 @@ export class RelayTransport implements PkarrTransport {
     if (timestamp > (this.seenTimestamp.get(pubKeyZ32) ?? 0n)) this.seenTimestamp.set(pubKeyZ32, timestamp);
   }
 
+  /**
+   * Puts a payload `publishDated` just signed, dated `timestamp`, on every relay. Its signature is not checked: it was
+   * made here (`publishPayload` checks one signed elsewhere, to read its sequence number). `conflict`: as `publishDated`
+   * gives it.
+   */
+  async putSigned(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, options: PkarrRequestOptions = {}, conflict?: (relay: string) => void): Promise<void> {
+    if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
+    await this.putEverywhere(pubKeyZ32, payload, timestamp, options, conflict);
+  }
+
   /** Puts a payload signed elsewhere (a did:dht document), byte for byte, on every relay. `conflict`: as `publishDated` gives it. */
   async publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}, conflict?: (relay: string) => void): Promise<void> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
@@ -560,7 +570,8 @@ export class RelayTransport implements PkarrTransport {
           if (accepted) return;
           accepted = true;
           noWriteWaits();
-          try { this.written.set(pubKeyZ32, parseRelayPayload(pubKeyZ32, payload)); } catch { /* not a packet a read would take either */ }
+          // Signed here (`publishDated`) or checked on the way in (`publishPayload`): not checked a third time.
+          try { this.written.set(pubKeyZ32, readOwnRelayPayload(pubKeyZ32, payload)); } catch { /* not a packet a read would take either */ }
           resolve();
         }, () => { /* read from `settled` */ });
       }

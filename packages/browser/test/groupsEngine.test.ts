@@ -2,6 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Groups, type EntryTimings, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { GroupSession, commitUntaggedHash, confirmationTag, createIdentity, encodeCommunityLink, epochKeys, fromBase64Url, identityFromSeedB64, signCommit, type GhostRecord, type GroupState } from "@ghostly/core";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
+
+// Counts the derivations of a public key from a seed (the group link's entry key is derived once, not at every state).
+const derived = vi.hoisted(() => ({ seeds: [] as string[] }));
+vi.mock("@ghostly/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@ghostly/core")>();
+  return { ...actual, identityFromSeedB64: (seedB64: string) => { derived.seeds.push(seedB64); return actual.identityFromSeedB64(seedB64); } };
+});
 // covers: groups.invite, groups.remove-member, groups.admin-change, groups.rotate, groups.leave, groups.forget, groups.link.join, groups.link.replace, groups.protocol.entry
 
 /**
@@ -139,6 +146,25 @@ async function groupOf(names: string[]) {
 }
 
 afterEach(() => { vi.useRealTimers(); });
+
+describe("a group's link", () => {
+  it("derives its entry key once, not at every state built, and again when the link is replaced", async () => {
+    const world = new World();
+    const alice = world.add("alice");
+    const groupId = await alice.create("Ghosts", "mesh");
+    const link = await alice.enableLink(groupId);
+    const seed = () => world.peers.get("alice")!.store.groups.get(groupId)!.entry!.seedB64;
+    expect(view(alice, groupId).entryLink).toBe(link);
+    derived.seeds.length = 0;
+    for (let i = 0; i < 20; i++) alice.views();
+    expect(derived.seeds.filter(s => s === seed()).length).toBe(0);
+    const replaced = await alice.enableLink(groupId, true);
+    expect(replaced).not.toBe(link);
+    expect(view(alice, groupId).entryLink).toBe(replaced);
+    for (let i = 0; i < 20; i++) alice.views();
+    expect(derived.seeds.filter(s => s === seed()).length).toBe(1);
+  });
+});
 
 describe("group roster changes: only the admin, and someone removed reads nothing after", () => {
   it("a removed member is told on the admin's chat, loses its edges, and cannot read what is sent next", async () => {

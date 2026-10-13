@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, SIGNALING_WINDOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
 import type { PkarrRequestOptions, PkarrTransport } from "../src/transport";
 // covers: core.relay-client
 
@@ -17,6 +17,24 @@ describe("relay transport", () => {
     }) as typeof fetch;
     return { calls, relay: new RelayTransport({ freshReadMs: 0, relays: Object.keys(handlers).map((h) => `https://${h}`), fetch: fetchFn }) };
   }
+
+  it("a packet signed here is put, and kept as written, without its signature checked again", async () => {
+    // A daemon at its budget checked each packet it had just signed twice (~1 ms each, ~500 a minute). The bytes are
+    // made unverifiable here to show that nothing checks them: `publishPayload`, for bytes signed elsewhere, does.
+    const bytes = packet(5000n);
+    bytes[0] ^= 1;
+    expect(() => parseRelayPayload(id.pubKeyZ32, bytes)).toThrow("Invalid signature");
+    expect(readOwnRelayPayload(id.pubKeyZ32, bytes)).toEqual({ ...(await parse(5000n)) });
+    const puts: string[] = [];
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT") { puts.push(String(input)); return new Response(null, { status: 204 }); }
+      return new Response(null, { status: 500 });
+    }) as typeof fetch });
+    await relay.putSigned(id.pubKeyZ32, bytes, 5000n);
+    expect(puts).toHaveLength(1);
+    await expect(relay.publishPayload(id.pubKeyZ32, bytes)).rejects.toThrow("Invalid signature");
+    expect(puts).toHaveLength(1);
+  });
 
   it("spends one request per poll, taking relays in turn, and keeps the newest packet", async () => {
     const { relay, calls } = transport({

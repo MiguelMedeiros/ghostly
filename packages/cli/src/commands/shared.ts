@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { ITEM_STATES, PR_CHECKS, PR_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, cardUrl } from "@ghostly/core";
+// From its own module, not the package: the command table is read by every command, and the package is all of the
+// protocol (~100 ms to load), which a command a daemon answers never needs.
+import { ITEM_STATES, PR_CHECKS, PR_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, cardUrl } from "@ghostly/core/statusCards";
 import type { OptionSpec, Parsed } from "../args";
 import { CliError } from "../errors";
 
