@@ -9,16 +9,35 @@ import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/f
  * stand-in does for the call hook: the commands it sends, the lanes it reports, the states it relays.
  */
 
+/** What Tauri evals for a channel's message: numbered, each one by itself (a picture by a fetch of its own). */
+type Raw = { message?: unknown; index: number; end?: true };
 const tauri = vi.hoisted(() => ({
   invoke: vi.fn(async (_command: string, _args?: Record<string, unknown>): Promise<unknown> => undefined),
-  channels: [] as { onmessage: (message: unknown) => void }[],
+  /** Each channel the page opened: `onmessage` sends it the next message, `raw` one numbered as Rust numbered it. */
+  channels: [] as { onmessage: (message: unknown) => void; raw: (raw: Raw) => void }[],
 }));
 // The UI tests alias every `@tauri-apps/api/*` to one stand-in (packages/browser/src/platform/tauri.ts): one mock.
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: tauri.invoke,
+  // Tauri's own: it hands the messages over in the order they were sent, a later one waiting for any before it.
   Channel: class {
     onmessage: (message: unknown) => void = () => {};
+    private next = 0;
+    private readonly held = new Map<number, unknown>();
     constructor() { tauri.channels.push(this); }
+    raw({ message, index }: Raw) {
+      this.held.set(index, message);
+      while (this.held.has(this.next)) {
+        const held = this.held.get(this.next);
+        this.held.delete(this.next++);
+        this.onmessage(held);
+      }
+    }
+  },
+  // A callback Rust evals: what a channel of the page's own is made of.
+  transformCallback: (callback: (raw: Raw) => void) => {
+    let index = 0;
+    return tauri.channels.push({ onmessage: (message) => callback({ message, index: index++ }), raw: callback }) - 1;
   },
 }));
 
@@ -164,6 +183,49 @@ describe("the RTCPeerConnection stand-in", () => {
     await new Promise((done) => setTimeout(done, 10));
     await pc.setRemoteDescription({ type: "answer", sdp: "their answer" });
     await vi.waitFor(() => expect(ontrack).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps showing the peer's picture after one is lost on the way: the ones after it are not held back for good", async () => {
+    // A picture comes by a fetch of its own; one that fails never comes, and Tauri's channel held every message
+    // after it, pictures and states, for the rest of the call: the call window's <video> never started.
+    const decoded = vi.fn(async () => ({ width: 640, height: 480, close() {} }));
+    vi.stubGlobal("createImageBitmap", decoded);
+    const pc = new NativePeerConnection({});
+    await pc.createOffer();
+    await pc.setRemoteDescription({ type: "answer", sdp: "their answer" });
+    const events = tauri.channels[0];
+    const jpeg = () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer;
+    events.raw({ message: jpeg(), index: 0 });
+    await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(1));
+    // Index 1 is lost.
+    events.raw({ message: jpeg(), index: 2 });
+    events.raw({ message: json({ ice: "connected" }), index: 3 });
+    events.raw({ message: jpeg(), index: 4 });
+    await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(3), { timeout: 3000 });
+    expect(pc.connectionState).toBe("connected");
+    // One that comes after all, too late, is not shown over the newer ones.
+    events.raw({ message: jpeg(), index: 1 });
+    events.raw({ message: jpeg(), index: 5 });
+    await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(4));
+    await new Promise((done) => setTimeout(done, 20));
+    expect(decoded).toHaveBeenCalledTimes(4);
+  });
+
+  it("keeps showing the peer's picture after one never finishes decoding", async () => {
+    let calls = 0;
+    // The second picture's decode never settles; the ones after it are drawn anyway.
+    const decoded = vi.fn(() => (++calls === 2 ? new Promise<never>(() => {}) : Promise.resolve({ width: 640, height: 480, close() {} })));
+    vi.stubGlobal("createImageBitmap", decoded);
+    const pc = new NativePeerConnection({});
+    await pc.createOffer();
+    await pc.setRemoteDescription({ type: "answer", sdp: "their answer" });
+    const jpeg = () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer;
+    tauri.channels[0].onmessage(jpeg());
+    await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(1));
+    await new Promise((done) => setTimeout(done, 10));
+    tauri.channels[0].onmessage(jpeg());
+    tauri.channels[0].onmessage(jpeg());
+    await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(3), { timeout: 3000 });
   });
 
   it("answers an offer through Rust, the lanes known as soon as the offer is", async () => {
