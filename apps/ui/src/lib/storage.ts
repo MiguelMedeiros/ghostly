@@ -149,6 +149,35 @@ function withWhole(session: ChatSession, list = whole.get(session.id)): ChatSess
   return { ...complete, messages };
 }
 
+/**
+ * What this page wrote that localStorage refused (full: another profile's chats on the same origin, or this one's many),
+ * by key: a chat's session, its read count. Read back from here before localStorage, so the chat list and the chat show
+ * what the mirror put in (the engine keeps it, and the contact was told it was delivered) and my sends turn delivered.
+ * Gone with the page: after a reload the engine's copy brings the rows back the same way. A write that succeeds later
+ * takes its key out.
+ */
+const unsaved = new Map<string, string>();
+
+/** A key as this page last wrote it: what localStorage refused to take, or what it holds. */
+function readKey(key: string): string | null {
+  return unsaved.get(key) ?? localStorage.getItem(key);
+}
+
+/** Writes a key, or keeps it in this page when localStorage refuses it (`unsaved`). */
+function writeKey(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+    unsaved.delete(key);
+  } catch {
+    unsaved.set(key, value);
+  }
+}
+
+function forgetKey(key: string): void {
+  unsaved.delete(key);
+  localStorage.removeItem(key);
+}
+
 export function saveSession(session: ChatSession): void {
   const kept = stored(session);
   // A whole history (not one read without its older messages) is what this page reads back from now on.
@@ -156,20 +185,22 @@ export function saveSession(session: ChatSession): void {
     if (kept !== session) whole.set(session.id, session.messages.slice());
     else whole.delete(session.id);
   }
+  let raw: string;
   try {
-    const raw = JSON.stringify(kept);
+    raw = JSON.stringify(kept);
     // Unchanged: no write, so another page of this app (the extension's) is not told to read it again.
-    if (localStorage.getItem(getKey(session.id)) === raw) return;
-    localStorage.setItem(getKey(session.id), raw);
+    if (readKey(getKey(session.id)) === raw) return;
   } catch {
-    // storage full or unavailable
+    // storage unavailable
+    return;
   }
+  writeKey(getKey(session.id), raw);
 }
 
 /** A session as stored, unparsed: to tell cheaply whether it changed. */
 export function storedSession(sessionId: string): string | null {
   try {
-    return localStorage.getItem(getKey(sessionId));
+    return readKey(getKey(sessionId));
   } catch {
     return null;
   }
@@ -178,7 +209,7 @@ export function storedSession(sessionId: string): string | null {
 /** The session as stored, its older messages left out (see `STORED_MESSAGES`). */
 function loadStored(sessionId: string): ChatSession | null {
   try {
-    const raw = localStorage.getItem(getKey(sessionId));
+    const raw = readKey(getKey(sessionId));
     if (!raw) return null;
     return JSON.parse(raw) as ChatSession;
   } catch {
@@ -231,12 +262,15 @@ export function addMessages(
   if (!complete || fresh.some((m) => m.timestamp > newest)) session.lastSyncAt = Date.now();
   // Unread is "messages since the last read one". A contact's message written before one already read here (it was
   // held up on its way: a resend once the chat is back, the DHT) sorts in among the read ones, and would never be
-  // counted: the count starts again from it. Not for a history made whole again after a reload: that was read.
+  // counted: the count starts again from it. Not for a history made whole again after a reload: that was read. Nor for
+  // one after every message the session had: read here before, when the page could not store it (`unsaved`).
   if (!complete) {
     const older = session.older ?? 0;
     const read = getLastReadCount(sessionId) - older;
     const added = new Set(fresh);
-    const late = session.messages.findIndex((m, i) => i < read && added.has(m) && countsAsUnread(m));
+    let had = session.messages.length - 1;
+    while (had >= 0 && added.has(session.messages[had]!)) had--;
+    const late = session.messages.findIndex((m, i) => i < read && i < had && added.has(m) && countsAsUnread(m));
     if (late >= 0) setReadCount(sessionId, older + late);
   }
 
@@ -309,7 +343,7 @@ export function deleteSession(sessionId: string): void {
     LEGACY_JOIN_PREFIX + sessionId,
   ]) {
     try {
-      localStorage.removeItem(key);
+      forgetKey(key);
     } catch {
       // ignore
     }
@@ -448,11 +482,13 @@ export type SessionCache = Map<string, { raw: string; session: ChatSession; whol
 export function listSessions(cache?: SessionCache): ChatSession[] {
   const sessions: ChatSession[] = [];
   const seen = new Set<string>();
-  for (let i = 0; i < localStorage.length; i++) {
+  // A chat made while localStorage was full is only in this page.
+  const keys = new Set<string | null>([...unsaved.keys()]);
+  for (let i = 0; i < localStorage.length; i++) keys.add(localStorage.key(i));
+  for (const key of keys) {
     try {
-      const key = localStorage.key(i);
       if (!isSessionKey(key)) continue;
-      const raw = localStorage.getItem(key);
+      const raw = readKey(key);
       if (!raw) continue;
       const hit = cache?.get(key);
       const parsed = hit?.raw === raw ? hit.session : JSON.parse(raw) as ChatSession;
@@ -508,7 +544,7 @@ export function unreadUnder(prefix: string): number {
 
 export function getLastReadCount(sessionId: string): number {
   try {
-    const val = localStorage.getItem(`${getPrefix()}read_${sessionId}`);
+    const val = readKey(`${getPrefix()}read_${sessionId}`);
     return val ? parseInt(val, 10) : 0;
   } catch {
     return 0;
@@ -517,9 +553,9 @@ export function getLastReadCount(sessionId: string): number {
 
 function setReadCount(sessionId: string, count: number): void {
   try {
-    localStorage.setItem(`${getPrefix()}read_${sessionId}`, String(count));
+    writeKey(`${getPrefix()}read_${sessionId}`, String(count));
   } catch {
-    // storage full or unavailable
+    // storage unavailable
   }
 }
 
