@@ -23,7 +23,9 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-const row = (linkId: string, i: number): StoredMessage => ({ linkId, id: `peer_${i}`, text: `message ${i}`, sender: "peer", timestamp: 1_700_000_000_000 + i * 1000, via: "datalink" });
+// Within the seen set's 30 days (SEEN_KEEP_MS): a message that came longer ago with no note is no news.
+const T0 = Date.now() - 10 * 86_400_000;
+const row = (linkId: string, i: number): StoredMessage => ({ linkId, id: `peer_${i}`, text: `message ${i}`, sender: "peer", timestamp: T0 + i * 1000, via: "datalink" });
 
 /** A process's life with the profile: the engine and the store are new each time, as after a restart. */
 async function run<T>(paths: ProfilePaths, work: (host: import("../src/host").Host, tools: { db: typeof import("@ghostly/browser/engine/db").db; wholeReads: (chat: string) => number; reported: () => string[] }) => Promise<T>): Promise<T> {
