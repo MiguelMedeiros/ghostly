@@ -29,6 +29,7 @@ import { forgetChatMute, groupChat } from "../lib/chatMute";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { authorName, groupStatusText, markGroupRead, memberName, memberPhoto } from "../lib/groups";
 import { clearChatNotification } from "../lib/notifications";
+import { useWindowAway, windowAway } from "../lib/windowAway";
 import { authorsOf, type MessageAuthor } from "../lib/senderRuns";
 import { MemberColorsProvider } from "../contexts/MemberColorsContext";
 import { chatsByPeer } from "../lib/identities";
@@ -386,8 +387,12 @@ export function GroupChat() {
   useEffect(() => {
     if (!group || !pageShown) return;
     markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now()));
-    clearChatNotification(`group:${group.id}`);
   }, [group?.id, group?.lastMessageAt, group, pageShown]);
+  // Its notification goes once the window has the focus too, as a chat's does (Chat.tsx).
+  const away = useWindowAway();
+  useEffect(() => {
+    if (group && !windowAway()) clearChatNotification(`group:${group.id}`);
+  }, [group?.id, group?.lastMessageAt, group, away]);
 
   const send = useCallback(async (text: string, mentions?: GroupMention[]): Promise<string | null> => {
     const answering = replyingRef.current;
