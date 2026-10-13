@@ -167,6 +167,33 @@ describe("a chat as the contact drives it", () => {
     expect(node.getState().links[0].peerNick).toBe("Old timer");
   });
 
+  it("a read that finds the contact as before, and a round trip about the same as the one shown, post no state", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const { events } = linkOf(chat.id).options;
+    const emits = vi.spyOn(node as never as { emitState(): void }, "emitState");
+    const read = (lastPacketAt: number) => events.onPresence({ online: true, lastPacketAt, seenAt: 5, nick: "Bob", services: [{ id: "web", type: "http" }] });
+    read(10);
+    expect(emits).toHaveBeenCalledTimes(1);
+    // Every read parses the packet again: equal services in a new array are the same.
+    read(10); read(10);
+    expect(emits).toHaveBeenCalledTimes(1);
+    read(11);
+    expect(emits).toHaveBeenCalledTimes(2);
+    expect(node.getState().links[0]).toMatchObject({ peerOnline: true, peerLastSeenAt: 5, peerServices: [{ id: "web", type: "http" }] });
+
+    // The round trip a state carries is the link's (`rttMs`): a pong within 10 ms of it shows nothing new.
+    emits.mockClear();
+    (linkOf(chat.id) as never as { rttMs: number }).rttMs = 40;
+    events.onRtt(40);
+    expect(emits).toHaveBeenCalledTimes(1);
+    expect(node.getState().links[0].transportRttMs).toBe(40);
+    events.onRtt(43); events.onRtt(37);
+    expect(emits).toHaveBeenCalledTimes(1);
+    events.onRtt(55);
+    expect(emits).toHaveBeenCalledTimes(2);
+  });
+
   it("an acknowledgement moves a legacy chat's read mark, never a paired one's", async () => {
     const legacy = row({ profile: undefined, participationSeed: undefined }), paired = row();
     const { node, linkOf } = await started(legacy, paired);
