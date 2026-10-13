@@ -594,7 +594,7 @@ export class Groups {
         const invitation = group.invitation!;
         return { ...base, name: groupName(invitation.name) ?? "", isAdmin: false, members: [], canSend: false, ...(group.formerNames ? { formerNames: group.formerNames } : {}),
           invitation: { linkId: invitation.linkId, contact: this.host.contactName(invitation.linkId) ?? "", admin: invitation.admin, members: Math.min(Math.max(invitation.n, 0), GROUP_MEMBER_CAP.max), accepted: !!invitation.seedB64,
-            ...(this.acceptSaid.get(group.id)?.unanswered ? { unanswered: true } : {}),
+            ...(this.acceptSaid.get(group.id)?.unanswered ? { unanswered: true } : {}), ...(invitation.takenBack ? { takenBack: true } : {}),
             ...(invitation.entry ? { viaLink: true, stage: this.joinStage(group) } : {}) } };
       }
       const nicks = session.state.nicks;
@@ -735,6 +735,7 @@ export class Groups {
   async accept(groupId: string): Promise<void> {
     const group = this.stored.get(groupId);
     if (!group?.invitation) throw new Error("No invitation to accept");
+    if (group.invitation.takenBack) throw new Error("This invitation was taken back");
     if (!this.host.linkReady(group.invitation.linkId)) throw new Error("The contact who invited you is not connected. Try again when they are.");
     const seedB64 = group.invitation.seedB64 ?? createIdentity().seedB64;
     group.invitation = { ...group.invitation, seedB64, pieces: [] };
@@ -748,6 +749,8 @@ export class Groups {
     if (this.isCommunity(groupId)) return this.communities.decline(groupId);
     const group = this.stored.get(groupId);
     if (!group?.invitation) throw new Error("No invitation to decline");
+    // Taken back: who took it back is owed no answer.
+    if (group.invitation.takenBack) return this.forget(groupId, false);
     // Nothing to keep: deleting it is what says no (`forget`).
     if (!group.previous) return this.forget(groupId);
     await this.dropInvitation(group, this.sayDecline(groupId, group.invitation.linkId));
@@ -764,6 +767,20 @@ export class Groups {
     this.stored.set(group.id, previous);
     if (previous.state) this.attach(previous.state);
     await this.store.putGroup(previous);
+    this.host.emit();
+  }
+
+  /**
+   * Invitee side: who sent the invitation took it back. A group I kept under its id comes back as it was; otherwise the
+   * invitation stays a week, marked, so the list says it was taken back where it was (an accept said for it stops).
+   */
+  private async takeBackFrom(group: StoredGroup): Promise<void> {
+    if (group.previous) return this.dropInvitation(group);
+    if (group.invitation!.takenBack) return;
+    const { seedB64: _unused, ...invitation } = group.invitation!;
+    group.invitation = { ...invitation, pieces: [], takenBack: this.now() };
+    this.acceptSaid.delete(group.id);
+    await this.store.putGroup(group);
     this.host.emit();
   }
 
@@ -1100,7 +1117,7 @@ export class Groups {
     // gone with the role, the group would have no admin for good. Anyone else's failed goodbye does not keep it here.
     if (session?.status === "active") { try { await this.leave(groupId); } catch (e) { if (session.isAdmin && session.others.length) throw e; } }
     // An invitation a contact sent goes with a decline, answered or not, or its inviter counts me as invited for good.
-    const gone = this.stored.get(groupId), invitation = answer && gone?.invitation && !gone.invitation.entry ? gone.invitation : undefined;
+    const gone = this.stored.get(groupId), invitation = answer && gone?.invitation && !gone.invitation.entry && !gone.invitation.takenBack ? gone.invitation : undefined;
     const owed = invitation && this.sayDecline(groupId, invitation.linkId);
     this.sessions.delete(groupId);
     this.stored.delete(groupId);
@@ -1230,6 +1247,7 @@ export class Groups {
           continue;
         }
         if (group.declined) { await this.declineOwed(group, now); if (!group.state) continue; }
+        if (group.invitation?.takenBack && !group.state) { if (now - group.invitation.takenBack > LEFT_KEPT_MS) await this.forget(group.id, false); continue; }
         if (group.invitation?.entry && !group.state) {
           const waited = now - group.createdAt, every = waited > this.timings.patienceMs ? this.timings.slowKnockMs : this.timings.knockMs;
           // Once the admin's app is on the entry session, knocking only spends the relays' budget its signaling needs.
@@ -1471,11 +1489,12 @@ export class Groups {
         // An invitation waits for my answer: another contact's, under the same id, does not take its place (Accept would
         // go to that contact). The one who sent it may send it again. One to a group I kept (`genesis`) gives way all the
         // same: only that group's chain is let in on Accept, and its admin must not find the place taken by anyone's.
-        if (existing?.invitation && !existing.state && existing.invitation.linkId !== linkId && !existing.invitation.genesis) return;
-        if ([...this.stored.values()].filter(x => x.invitation).length >= 32) return;
+        // One taken back waits for nothing: any invitation takes its place.
+        if (existing?.invitation && !existing.state && existing.invitation.linkId !== linkId && !existing.invitation.genesis && !existing.invitation.takenBack) return;
+        if ([...this.stored.values()].filter(x => x.invitation && !x.invitation.takenBack).length >= 32) return;
         // One chat holds a few unanswered at a time, so a contact cannot use up the room the others' invitations need.
         // Past that the inviter is told no, as it would be by a Decline, and may invite again later.
-        if (!existing?.invitation && [...this.stored.values()].filter(x => x.invitation?.linkId === linkId).length >= MAX_INVITATIONS_PER_CHAT) {
+        if (!existing?.invitation && [...this.stored.values()].filter(x => x.invitation?.linkId === linkId && !x.invitation.takenBack).length >= MAX_INVITATIONS_PER_CHAT) {
           try { this.host.sendOnLink(linkId, { t: "group-decline", g }); } catch { /* they may invite again */ }
           return;
         }
@@ -1552,9 +1571,9 @@ export class Groups {
       }
       case "group-decline": {
         // From the contact that invited me, over the chat its invitation came on: taken back (the group is gone from
-        // its app, or it is not the admin any more). It goes from the list, accepted already or not.
+        // its app, or it is not the admin any more). Accepted already or not, nothing comes of it: the list says so.
         const mine = this.stored.get(g);
-        if (mine?.invitation && !mine.invitation.entry && !mine.state && mine.invitation.linkId === linkId) { await this.dropInvitation(mine); return; }
+        if (mine?.invitation && !mine.invitation.entry && !mine.state && mine.invitation.linkId === linkId) { await this.takeBackFrom(mine); return; }
         const entryPeer = this.hostEntry(g, linkId);
         if (entryPeer) { this.pendingEntries.get(g)?.delete(entryPeer); await this.host.closeEdge(linkId); }
         const group = this.stored.get(g);

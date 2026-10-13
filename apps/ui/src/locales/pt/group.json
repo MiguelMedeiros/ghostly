@@ -20,6 +20,10 @@
     "sendFailed": "Não foi possível enviar",
     "shareHint": "Compartilhar o link do grupo",
     "shareLink": "Compartilhar link",
+    "takenBack": "{{contact}} retirou o convite para {{name}}",
+    "takenBackNext": "Peça a {{contact}} um novo convite ou o link do grupo.",
+    "takenBackNextUnknown": "Peça ao admin do grupo um novo convite ou o link do grupo.",
+    "takenBackUnknown": "O convite para {{name}} foi retirado",
     "unnamed": "Um grupo"
   },
   "connection": {
@@ -81,7 +85,8 @@
     "invitation": "O convite sai deste dispositivo. {{contact}} fica sabendo que você recusou.",
     "invitationUnknown": "O convite sai deste dispositivo. O contato que o enviou fica sabendo que você recusou.",
     "joining": "Você deixa de pedir para entrar, e o grupo sai deste dispositivo.",
-    "kept": "O grupo e o histórico dele saem deste dispositivo."
+    "kept": "O grupo e o histórico dele saem deste dispositivo.",
+    "takenBack": "O convite sai deste dispositivo. Ele foi retirado, então ninguém é avisado."
   },
   "hubs": {
     "auto": "Hub se sempre ligado",
