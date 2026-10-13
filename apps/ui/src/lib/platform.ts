@@ -17,7 +17,7 @@ import type { LightningCardView } from "@ghostly/browser/engine/paymentAdapters/
 import type { BitcoinView } from "@ghostly/browser/engine/paymentAdapters/providers/bitcoinService";
 import type { BackupReminders } from "@ghostly/browser/shared/backupReminder";
 import type { AppFrameEvent, AppSendError, DataLinkState, ServiceAd, PairingState, TransportWait } from "@ghostly/core";
-import type { MiniAppJson } from "@ghostly/core/miniApp";
+import type { MiniAppJson, MiniAppLinkedFile } from "@ghostly/core/miniApp";
 import type { ChatFile } from "./types";
 
 /**
@@ -461,6 +461,22 @@ export interface AppsPlatform {
     /** The contact's app as last heard: open (its version) or not. Heard since the client started, before any app ran. */
     peer(linkId: string, app: string): { version: string } | null;
   };
+  /** Linked files, where this client keeps them; absent where it cannot, and `files.*` is then `not-allowed`. */
+  linkedFiles?: LinkedFilesHost;
+}
+
+/**
+ * Files the person picks for an app (WISP 1200 · Linked files), kept by the client as links, never copies, per app.
+ * Its refusals are thrown as `"<code>: words"`: `cancelled`, `changed`, `gone`, `too-large`.
+ */
+export interface LinkedFilesHost {
+  /** Asks the person with the client's own sheet and picker, then keeps links to what was picked. */
+  pick(ref: string, title: string, options: { folder: boolean; accept: string[] }): Promise<MiniAppLinkedFile[]>;
+  list(ref: string): Promise<MiniAppLinkedFile[]>;
+  /** Bytes from `offset`, at most `length`: fewer at the end of the file. */
+  read(ref: string, id: string, offset: number, length: number): Promise<Uint8Array>;
+  /** One link, or all of the app's with "all". */
+  forget(ref: string, id: string): Promise<void>;
 }
 
 /** An installed app's entry, ready for the runner (the engine's `appEntry`). */

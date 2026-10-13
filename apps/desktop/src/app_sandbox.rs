@@ -148,6 +148,12 @@ const RUNNER: &str = r#"<!doctype html>
         return () => { set.delete(listener); };
       },
     }),
+    files: Object.freeze({
+      pick: (options) => send("files.pick", options === undefined ? [] : [options]),
+      list: call("files.list"),
+      read: (id, range) => send("files.read", [id, range]),
+      forget: (id) => send("files.forget", [id]).then(() => undefined),
+    }),
     close: () => send("close", []).then(() => undefined),
   }) });
 
@@ -1884,6 +1890,10 @@ mod tests {
             "keys: call(\"storage.keys\")",
             "send: (value) => send(\"chat.send\", [value]).then(() => undefined)",
             "close: () => send(\"close\", []).then(() => undefined)",
+            "pick: (options) => send(\"files.pick\", options === undefined ? [] : [options])",
+            "list: call(\"files.list\")",
+            "read: (id, range) => send(\"files.read\", [id, range])",
+            "forget: (id) => send(\"files.forget\", [id]).then(() => undefined)",
             "chat.on takes \\\"message\\\" or \\\"peer\\\" and a function",
         ] {
             assert!(RUNNER.contains(call), "desktop: {call}");
