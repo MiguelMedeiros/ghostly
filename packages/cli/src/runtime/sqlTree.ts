@@ -51,7 +51,8 @@ export class TreeFile {
     this.put = db.prepare("INSERT OR REPLACE INTO entries (tree, id, pv, key, value) VALUES (?, ?, ?, ?, ?)");
     this.remove = db.prepare("DELETE FROM entries WHERE tree = ? AND id = ?");
     this.empty = db.prepare("DELETE FROM entries WHERE tree = ?");
-    this.byValue = db.prepare("SELECT key, value FROM entries WHERE tree = ? AND pv = ?");
+    // Named: with no ANALYZE, SQLite plans this on the primary key's `tree = ?` and reads every entry of the index.
+    this.byValue = db.prepare("SELECT key, value FROM entries INDEXED BY entries_by_value WHERE tree = ? AND pv = ?");
   }
 
   /** The tree of a store (`index` "") or of one of its indexes, made when it is new. */

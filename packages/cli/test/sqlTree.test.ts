@@ -96,6 +96,21 @@ it("reads as fake-indexeddb's own tree through puts, overwrites, deletes, clears
   }
 });
 
+it("finds an index's entries by their record key through entries_by_value, not by walking the whole tree", async () => {
+  const sqlite = (await loadSqlite())!;
+  const file = new TreeFile(new sqlite.DatabaseSync(":memory:"), Error);
+  const id = file.treeId("db", "messages", "byChat");
+  const tree = file.tree(id, false, true);
+  for (let n = 0; n < 2000; n++) tree.put({ key: ["chat", n % 7], value: ["msg", n] });
+  file.complete(null, 1);
+  file.apply(1);
+  // The statement withValue runs: planned on the primary key's `tree = ?` alone, it would read every entry of the index.
+  const byValue = (file as unknown as { byValue: { sourceSQL: string } }).byValue;
+  const plan = (file.db.prepare(`EXPLAIN QUERY PLAN ${byValue.sourceSQL}`).all(id, Buffer.alloc(1)) as { detail: string }[]).map((row) => row.detail);
+  expect(plan.join("\n")).toMatch(/USING INDEX entries_by_value \(tree=\? AND pv=\?\)/);
+  expect(file.withValue(id, ["msg", 42])).toEqual([{ key: ["chat", 0], value: ["msg", 42] }]);
+});
+
 it("refuses a Blob in a tree at once, rather than when its transaction goes to SQLite", async () => {
   const sqlite = (await loadSqlite())!;
   const file = new TreeFile(new sqlite.DatabaseSync(":memory:"), Error);
