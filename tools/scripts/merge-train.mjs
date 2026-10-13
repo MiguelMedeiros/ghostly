@@ -1009,6 +1009,8 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     },
     /** The merge-queue workflow's last runs, newest first (one page): where a run finds the ones it replaced. */
     queueRuns: async () => (await must("GET", "/actions/workflows/merge-queue.yml/runs?per_page=100")).workflow_runs,
+    /** One workflow run's jobs (its latest attempt; one page holds the bases job and every base's train job). */
+    runJobs: async (id) => (await must("GET", `/actions/runs/${id}/jobs?per_page=100`)).jobs,
     /** Every `epic/*` branch: the bases a Mac serves besides `dev`. */
     epicBranches: async () => (await must("GET", "/git/matching-refs/heads/epic/")).map((r) => r.ref.replace("refs/heads/", "")),
     events: (n) => all(`/issues/${n}/events`),
@@ -1294,17 +1296,21 @@ const WAKE_NAME = /^Merge queue: CI ended on ([0-9a-f]{40}(?:[0-9a-f]{24})?)$/;
 
 /**
  * The wakes the run `id` serves besides its own: the runs that waited in the `bases` job's group and were replaced
- * (cancelled) since the last run before it that ran that job. `runs`: the workflow's runs, newest first. A run whose
- * jobs were all skipped (`skipped`) never joined the group. The heads of the CI runs that woke them, or null when one
- * was not woken by CI (a `queue` label, a person's push, the schedule, by hand): then every base. None when `id` is
- * not among `runs`.
+ * (cancelled) since the last run before it that ran that job. `runs`: the workflow's runs, newest first; `jobsOf(id)`:
+ * a run's jobs. A run whose jobs were all skipped (`skipped`) never joined the group. A cancelled run whose bases job
+ * ran to its end was served (its train job was replaced in its base's own group): the walk stops there; one whose jobs
+ * say nothing counts as replaced, so no wake is lost. The heads of the CI runs that woke them, or null when one was not
+ * woken by CI (a `queue` label, a person's push, the schedule, by hand): then every base. None when `id` is not among
+ * `runs`.
  */
-export const missedWakes = (runs, id) => {
+export const missedWakes = async (runs, id, jobsOf) => {
   const at = runs.findIndex((r) => r.id === id);
   const heads = [];
   for (const r of at < 0 ? [] : runs.slice(at + 1)) {
     if (r.conclusion === "skipped") continue;
     if (r.conclusion !== "cancelled") break;
+    const bases = (await jobsOf(r.id)).find((j) => j.name === "Bases with a train");
+    if (bases?.status === "completed" && bases.conclusion !== "cancelled") break;
     const head = r.display_title?.match(WAKE_NAME)?.[1];
     if (!head) return null;
     heads.push(head);
@@ -1384,7 +1390,7 @@ async function main() {
   const gh = restLayer(token, repo);
   if (flag("--list-bases")) {
     const woken = opt("--woken");
-    const missed = COMMIT.test(woken ?? "") && opt("--run-id") ? missedWakes(await gh.queueRuns(), Number(opt("--run-id"))) : [];
+    const missed = COMMIT.test(woken ?? "") && opt("--run-id") ? await missedWakes(await gh.queueRuns(), Number(opt("--run-id")), gh.runJobs) : [];
     return console.log(JSON.stringify(trainBases(await gh.pulls(), missed && [woken, ...missed])));
   }
   const local = !process.env.GITHUB_ACTIONS && !dry;

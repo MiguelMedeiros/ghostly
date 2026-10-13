@@ -1750,30 +1750,58 @@ describe("the bases with a train", () => {
 
   // A run that waits in the `bases` job's group is replaced by the next one that joins it (merge-queue.yml): that one
   // serves it too, so a queued pull request's CI ending is never lost to a draft's CI ending just after it.
-  it("woken by a CI run are also those of the runs it replaced while they waited", () => {
+  it("woken by a CI run are also those of the runs it replaced while they waited", async () => {
     const a = "a".repeat(40), b = "b".repeat(40), c = "c".repeat(40), d = "d".repeat(40);
     const pr = (base: string, sha: string, labels: string[] = []) => ({ base, sha, labels, body: "", branch: "fix", fork: false });
     const pulls = [pr("dev", a, [LABEL.queue]), pr("dev", b), pr("epic/x", c, [LABEL.queue]), pr("epic/y", d, [LABEL.queue])];
     const ci = (id: number, head: string, conclusion: string | null) => ({ id, conclusion, display_title: `Merge queue: CI ended on ${head}` });
     const run = (id: number, display_title: string, conclusion: string | null) => ({ id, conclusion, display_title });
+    // Each cancelled one waited: its bases job was cancelled before it started.
+    const waited = async () => [{ name: "Bases with a train", status: "completed", conclusion: "cancelled", steps: [] }];
     // Newest first, as GitHub lists them: 9 runs now; 8 (a draft's CI, after 7) and 6 (the queued pull request's CI)
     // waited and were replaced; 7 was the train's own label (all skipped); 5 ran; 4 waited before 5 ran and is served.
     const runs = [run(10, "Merge queue", null), ci(9, b, null), ci(8, b, "cancelled"), run(7, "fix: x", "skipped"), ci(6, a, "cancelled"), ci(5, d, "success"), ci(4, c, "cancelled")];
-    expect(missedWakes(runs, 9)).toEqual([b, a]);
-    expect(trainBases(pulls, [b, ...missedWakes(runs, 9)!])).toEqual(["dev"]);
+    expect(await missedWakes(runs, 9, waited)).toEqual([b, a]);
+    expect(trainBases(pulls, [b, ...(await missedWakes(runs, 9, waited))!])).toEqual(["dev"]);
     // Before: the draft's CI alone, so no train ran until the schedule.
     expect(trainBases(pulls, b)).toEqual([]);
     // Nothing replaced (the one before ran, or is running), and a run not on the page: its own head alone.
-    expect(missedWakes(runs, 6)).toEqual([]);
-    expect(missedWakes([ci(2, a, null), ci(1, b, null)], 2)).toEqual([]);
-    expect(missedWakes(runs, 11)).toEqual([]);
+    expect(await missedWakes(runs, 6, waited)).toEqual([]);
+    expect(await missedWakes([ci(2, a, null), ci(1, b, null)], 2, waited)).toEqual([]);
+    expect(await missedWakes(runs, 11, waited)).toEqual([]);
     expect(trainBases(pulls, [b])).toEqual([]);
     // A replaced run that was not woken by CI (a `queue` label, a person's push, the schedule): every base.
     const label = [ci(3, b, null), run(2, "perf(chat): rows", "cancelled"), ci(1, a, "success")];
-    expect(missedWakes(label, 3)).toBeNull();
+    expect(await missedWakes(label, 3, waited)).toBeNull();
     expect(trainBases(pulls, null)).toEqual(["dev", "epic/x", "epic/y"]);
     // A name that only looks like a head is no head.
-    expect(missedWakes([ci(2, b, null), run(1, "Merge queue: CI ended on abc", "cancelled")], 2)).toBeNull();
+    expect(await missedWakes([ci(2, b, null), run(1, "Merge queue: CI ended on abc", "cancelled")], 2, waited)).toBeNull();
+  });
+
+  // A run whose bases job ran but whose train job was replaced in its base's own group ends `cancelled` too: it was
+  // served, so the walk stops there, and the `queue` label run before it never makes this one wake every base.
+  it("woken by a CI run stop at a cancelled run whose bases job ran", async () => {
+    const a = "a".repeat(40), b = "b".repeat(40), e = "e".repeat(40);
+    const pr = (base: string, sha: string, labels: string[] = []) => ({ base, sha, labels, body: "", branch: "fix", fork: false });
+    const pulls = [pr("dev", a, [LABEL.queue]), pr("dev", b), pr("epic/x", "c".repeat(40), [LABEL.queue]), pr("epic/y", e, [LABEL.queue])];
+    const ci = (id: number, head: string, conclusion: string | null) => ({ id, conclusion, display_title: `Merge queue: CI ended on ${head}` });
+    const job = (name: string, conclusion: string, steps: { name: string; conclusion: string }[] = []) => ({ name, status: "completed", conclusion, steps });
+    const waited = [job("Bases with a train", "cancelled"), job("Train into ${{ matrix.base }}", "cancelled")];
+    const listed = [job("Bases with a train", "success", [{ name: "List the bases", conclusion: "success" }]), job("Train into epic/y", "cancelled")];
+    const jobs: Record<number, ReturnType<typeof job>[]> = { 8: waited, 7: listed, 6: listed };
+    const asked: number[] = [];
+    const jobsOf = async (id: number) => (asked.push(id), jobs[id] ?? []);
+    // Newest first: 9 lists now; 8 waited and was replaced; 7 listed epic/y and its train job was replaced in
+    // `merge-train-epic/y`; 6 (a `queue` label) the same; 5 ran.
+    const runs = [ci(9, b, null), ci(8, a, "cancelled"), ci(7, e, "cancelled"), { id: 6, conclusion: "cancelled", display_title: "fix: x" }, ci(5, e, "success")];
+    expect(await missedWakes(runs, 9, jobsOf)).toEqual([a]);
+    expect(trainBases(pulls, [b, a])).toEqual(["dev"]);
+    expect(asked).toEqual([8, 7]);
+    // A run whose jobs could not be told (none listed) counts as one that waited: no wake is lost.
+    expect(await missedWakes([ci(3, b, null), ci(2, a, "cancelled"), ci(1, e, "success")], 3, async () => [])).toEqual([a]);
+    // A bases job cancelled after it started (by hand, or its time ran out) listed nothing: that wake is served here.
+    const cut = [job("Bases with a train", "cancelled", [{ name: "List the bases", conclusion: "cancelled" }])];
+    expect(await missedWakes([ci(3, b, null), ci(2, a, "cancelled"), ci(1, e, "success")], 3, async () => cut)).toEqual([a]);
   });
 
   it("on a Mac are dev and every epic branch, queued or not, with no queue app", async () => {
