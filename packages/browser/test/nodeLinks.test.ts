@@ -757,6 +757,23 @@ describe("files a contact sends", () => {
     expect(linkOf(chat.id).options.events.onFileIncoming({ id: "a", name: "x", size: 1, mime: "", timestamp: 3 })).toBe("duplicate file id");
   });
 
+  it("files finished before a restart carry no transfer in the state, after the session opens too; failed ones keep theirs", async () => {
+    // A view for each finished file went into every state the engine built: its cost grew with the chat's file history.
+    const chat = row();
+    await db.putLink(chat);
+    const blob = new Blob([new Uint8Array(8)]);
+    const record = (id: string, state: "done" | "failed") => ({ id, direction: "in" as const, file: { id, name: `${id}.bin`, size: 8, mime: "" }, state, confirmed: state === "done" ? 8 : 0, since: 1, agreed: true, ...(state === "failed" && { error: "Damaged" }) });
+    await fileStore.put({ id: `${chat.id}-in-old`, linkId: chat.id, blob, createdAt: 1, direction: "in", wireId: "old", transfer: { state: "done", transferred: 8, size: 8 } });
+    await fileStore.put({ id: `${chat.id}-in-w3`, linkId: chat.id, blob, createdAt: 1, direction: "in", wireId: "w3", transfer: { state: "done", transferred: 8, size: 8 }, wire3: record("w3", "done") });
+    await fileStore.put({ id: `${chat.id}-in-bad`, linkId: chat.id, blob, createdAt: 1, direction: "in", wireId: "bad", transfer: { state: "failed", transferred: 0, size: 8 }, wire3: record("bad", "failed") });
+    const { node, linkOf } = await started();
+    linkOf(chat.id).options.events.onFilesSession!(true);
+    const { transfers } = node.getState();
+    expect(transfers[`${chat.id}-in-old`]).toBeUndefined();
+    expect(transfers[`${chat.id}-in-w3`]).toBeUndefined();
+    expect(transfers[`${chat.id}-in-bad`]).toMatchObject({ state: "failed", error: "Damaged" });
+  });
+
   it("asked whether it holds a file, a chat that never took it reads none of its stored files", async () => {
     const chat = row();
     await db.putLink(chat);
