@@ -76,7 +76,10 @@ export function satsToBtc(sats: number): string {
 
 /** `encodeURIComponent` that never throws: half of a character pair (a label cut at its limit, or sent that way) is left out. */
 function encoded(text: string): string {
-  return encodeURIComponent(text.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDFFF]/g, (found) => (found.length === 2 ? found : "")));
+  // `encodeURIComponent` leaves ! ' ( ) * ~ as they are; the extension and Desktop open a link made of letters, digits
+  // and ?=&%.:_- only (apps/extension/src/background.ts, apps/desktop/src/commands.rs `is_payment_link`).
+  return encodeURIComponent(text.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDFFF]/g, (found) => (found.length === 2 ? found : "")))
+    .replace(/[!'()*~]/g, (found) => `%${found.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
 /** A `bitcoin:` link from read fields only: what a card hands to a wallet (QR, Open in wallet). */
