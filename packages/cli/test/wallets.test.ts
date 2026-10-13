@@ -114,7 +114,8 @@ describe("wallets", () => {
     const cases: [() => void, string, Record<string, unknown>, string][] = [
       [() => node.walletRemove.mockRejectedValueOnce(refused("There is no Testnet Cashu wallet to remove")), "wallet.remove", { type: "cashu" }, "not_found"],
       [() => node.walletRemove.mockRejectedValueOnce(refused("There is no Testnet Lightning wallet to remove")), "wallet.remove", { type: "lightning" }, "not_found"],
-      [() => node.walletReceiveLightning.mockRejectedValueOnce(refused("That Lightning card is gone: pick another")), "wallet.receive", { amount: 10, card: "nope" }, "not_found"],
+      // A card there when the CLI looked, gone when the engine did (one that is not there is refused before the engine).
+      [() => node.walletReceiveLightning.mockRejectedValueOnce(refused("That Lightning card is gone: pick another")), "wallet.receive", { amount: 10, card: "cashu" }, "not_found"],
       [() => node.walletReceiveToken.mockRejectedValueOnce(refused("That is not a valid ecash token")), "wallet.redeem", { token: "hello" }, "bad_request"],
       [() => node.walletQuoteInvoice.mockRejectedValueOnce(refused("That is not a Lightning invoice")), "pay", { target: "lnbc1notaninvoice" }, "bad_request"],
       [() => node.walletCreate.mockRejectedValueOnce(refused("You already have a Testnet Cashu wallet")), "wallet.create", { type: "cashu" }, "refused"],
