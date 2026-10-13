@@ -3,18 +3,15 @@ import { connect } from "node:net";
 import { openSync, readFileSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
-import { callApi, hideStateSecrets, SETTABLE } from "./api";
 import { connectDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
 import { ENGINE_METHODS, ENGINE_READS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT } from "./errors";
 import type { GhostlyEvent } from "./events";
-import { keepServing, openHost, serve, type Host } from "./host";
+import type { Host } from "./host";
 import { allowlist, checkCursor, checkWebhook, eventHandler, readCursor } from "./listen";
 import { resolve } from "node:path";
 import { format } from "node:util";
-import { backupFileProtection, restoreProfile } from "./backup";
-import { buttonsOf } from "./buttons";
 import { secretsFromStdin } from "./secretInput";
 import {
   checkProfileName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
@@ -22,6 +19,14 @@ import {
 } from "./profiles";
 
 const VERSION = packageJson.version;
+
+/**
+ * The engine's modules (the API, the host, the backup, the buttons) are loaded only where a command needs them here: a
+ * command a running daemon answers loads none of them, and starts about as fast as Node does. Statically imported, they
+ * cost every command ~100 ms before its socket was opened.
+ */
+const engineApi = () => import("./api");
+const engineHost = () => import("./host");
 
 interface Globals { home: string; profile: string; paths: ProfilePaths; pretty: boolean }
 
@@ -85,6 +90,7 @@ async function session(g: Globals, chat = false): Promise<Session> {
   const client = await connectDaemon(g.paths.socket);
   if (client) await warnVersion(client);
   if (client) return { mode: "daemon", call: (m, p) => client.call(m, p), close: async () => client.close() };
+  const [{ openHost }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
   const host = await openHost(g.paths, "one-shot", VERSION, { deferGroups: chat });
   return { mode: "one-shot", call: (m, p) => callApi(host.ctx, m, p ?? {}), close: () => host.close() };
 }
@@ -301,6 +307,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       if (!file || !name) throw new CliError("usage", "ghostly profile restore <file> <new profile> [--passphrase-file f] [--use]");
       noMoreThan(2, parsed.positionals, "profile restore <file> <new profile> [--passphrase-file f] [--use]");
       // A backup made without a passphrase says so in its header: none is asked for, and the answer says it was not protected.
+      const { backupFileProtection, restoreProfile } = await import("./backup");
       const protection = await backupFileProtection(file);
       const paths = await restoreProfile(g.home, checkProfileName(name), file, protection === "none" ? undefined : backupPassphrase(parsed.options["passphrase-file"]));
       if (parsed.options.use) selectProfile(g.home, name);
@@ -344,6 +351,7 @@ function backupPassphrase(file: unknown): string {
 async function runDaemon(g: Globals): Promise<void> {
   requireProfile(g);
   if (await connectDaemon(g.paths.socket)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
+  const { keepServing, openHost, serve } = await engineHost();
   const host = await openHost(g.paths, "daemon", VERSION);
   let served: Awaited<ReturnType<typeof serve>>;
   try { served = await serve(host); } catch (error) { await host.close(); throw error; }
@@ -517,6 +525,7 @@ async function listenCommand(argv: string[]): Promise<void> {
     return;
   }
   // No daemon: this process becomes it (the socket too, so hooks can answer with `ghostly send`).
+  const [{ keepServing, openHost, serve }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
   const host: Host = await openHost(g.paths, "daemon", VERSION);
   const call = (m: string, p: Record<string, unknown>) => callApi(host.ctx, m, p);
   await start(call, async (chat) => ((await call("chat.get", { chat })) as { peer?: string }).peer || null).catch(async (error) => { await host.close(); throw error; });
@@ -549,6 +558,7 @@ async function engineCommand(argv: string[]): Promise<void> {
   if (confirmReal && params && typeof params === "object") (params as Record<string, unknown>).confirmedReal = true;
   let result = await withSession(g, (s) => s.call("engine.call", { method, params, confirmReal }));
   if (method === "getState" && !showSecret && result && typeof result === "object") {
+    const { hideStateSecrets } = await engineApi();
     result = hideStateSecrets(result as Parameters<typeof hideStateSecrets>[0]);
   }
   print(result);
@@ -565,7 +575,7 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
     let parsedValue: unknown;
     try { parsedValue = JSON.parse(value); } catch { parsedValue = value; }
     // A text setting (nick) keeps the word as given when it reads as JSON of another kind (2024, true, null).
-    if (SETTABLE[key] === "string" && typeof parsedValue !== "string") parsedValue = value;
+    if ((await engineApi()).SETTABLE[key] === "string" && typeof parsedValue !== "string") parsedValue = value;
     print(await withSession(g, (s) => s.call("settings.set", { [key]: parsedValue })));
     return;
   }
@@ -593,7 +603,7 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   const params: Record<string, unknown> = { [spec.target]: target, text, force: parsed.options.force === true, ...(message !== undefined && { message }) };
   if (spec.target === "group") params.mentions = parsed.options.mention ?? [];
   if (parsed.options.reply !== undefined) params.reply = parsed.options.reply;
-  if (!spec.message) Object.assign(params, buttonsOf(parsed.options));
+  if (!spec.message) Object.assign(params, (await import("./buttons")).buttonsOf(parsed.options));
   print(await withSession(g, (s) => {
     if (spec.target === "chat") {
       // A one-shot leaves once its command is done: by default it stays until the message went out.
@@ -640,6 +650,7 @@ async function identityAddCommand(argv: string[]): Promise<void> {
     try { print(await client.call("identity.add", params)); } finally { client.close(); watcher?.close(); }
     return;
   }
+  const [{ openHost }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
   const host = await openHost(g.paths, "one-shot", VERSION);
   const off = host.ctx.hub.onEvent(tell);
   try {
