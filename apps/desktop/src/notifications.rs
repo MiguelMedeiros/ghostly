@@ -325,7 +325,8 @@ mod mac {
 mod linux {
     use std::collections::{HashMap, VecDeque};
     use std::sync::{Arc, Mutex, OnceLock};
-    use zbus::blocking::{Connection, MessageIterator};
+    use std::time::Duration;
+    use zbus::blocking::{connection, Connection, MessageIterator};
     use zbus::names::OwnedUniqueName;
     use zbus::zvariant::Value;
 
@@ -335,6 +336,9 @@ mod linux {
     const BUS: &str = "org.freedesktop.DBus";
     /// The newest few, as the page keeps (lib/notifications.ts): an older one's click only closes it.
     const KEPT: usize = 64;
+    /// A server answers in milliseconds. One that stops answering (frozen, or stopped) has each call give up after
+    /// this, so it holds neither the thread nor NOTIFIER, and the notifications after it, for good.
+    const ANSWER_WITHIN: Duration = Duration::from_secs(5);
 
     /// A notification of ours: the server that showed it (its unique name on the bus), its id there and ours.
     /// A server that restarts numbers from 1 again, under another unique name.
@@ -350,9 +354,10 @@ mod linux {
     impl Notifier {
         /// `open` hears our id of each notification clicked.
         pub(super) fn new(
-            connection: Connection,
+            bus: connection::Builder<'static>,
             open: impl Fn(String) + Send + 'static,
         ) -> zbus::Result<Self> {
+            let connection = bus.method_timeout(ANSWER_WITHIN).build()?;
             // Subscribed before the first notification is shown, so no click comes before the listener.
             let rule = zbus::MatchRule::builder()
                 .msg_type(zbus::message::Type::Signal)
@@ -503,8 +508,8 @@ mod linux {
         let mut notifier = NOTIFIER.lock().unwrap();
         if notifier.is_none() {
             let app = app.clone();
-            *notifier = Connection::session()
-                .and_then(|connection| Notifier::new(connection, move |id| super::opened(&app, id)))
+            *notifier = connection::Builder::session()
+                .and_then(|bus| Notifier::new(bus, move |id| super::opened(&app, id)))
                 .ok();
         }
         match notifier.as_ref().map(|notifier| notifier.show(id, body)) {
@@ -645,7 +650,7 @@ mod linux {
                 .unwrap()
                 .build()
                 .unwrap();
-            let notifier = Notifier::new(bus.connect().build().unwrap(), |_| {}).unwrap();
+            let notifier = Notifier::new(bus.connect(), |_| {}).unwrap();
             let listed = || listed.lock().unwrap().clone();
 
             notifier.show("chat-a", "first burst").unwrap();
@@ -696,7 +701,7 @@ mod linux {
                 .build()
                 .unwrap();
             let (opened, open) = mpsc::channel();
-            let notifier = Notifier::new(bus.connect().build().unwrap(), move |id| {
+            let notifier = Notifier::new(bus.connect(), move |id| {
                 let _ = opened.send(id);
             })
             .unwrap();
@@ -770,7 +775,7 @@ mod linux {
             };
             let server = serve();
             let (opened, open) = mpsc::channel();
-            let notifier = Notifier::new(bus.connect().build().unwrap(), move |id| {
+            let notifier = Notifier::new(bus.connect(), move |id| {
                 let _ = opened.send(id);
             })
             .unwrap();
@@ -810,7 +815,7 @@ mod linux {
                     .unwrap()
             };
             let server = serve(&Arc::default());
-            let notifier = Notifier::new(bus.connect().build().unwrap(), |_| {}).unwrap();
+            let notifier = Notifier::new(bus.connect(), |_| {}).unwrap();
             notifier.show("chat-a", "first burst").unwrap();
             notifier.show("chat-b", "another chat").unwrap();
 
@@ -841,6 +846,52 @@ mod linux {
                     (3, "second burst".to_string())
                 ]
             );
+        }
+
+        /// A notification server that stops answering (frozen, or stopped with SIGSTOP) has the bus hold our call.
+        struct Frozen;
+
+        #[zbus::interface(name = "org.freedesktop.Notifications")]
+        impl Frozen {
+            #[allow(clippy::too_many_arguments)]
+            async fn notify(
+                &self,
+                _app_name: String,
+                _replaces_id: u32,
+                _icon: String,
+                _summary: String,
+                _body: String,
+                _actions: Vec<String>,
+                _hints: HashMap<String, OwnedValue>,
+                _timeout: i32,
+            ) -> u32 {
+                std::future::pending().await
+            }
+        }
+
+        /// Every later message's sound was held back for as long as the server was frozen: the call waited with
+        /// no end, holding the thread and NOTIFIER. Now it gives up after ANSWER_WITHIN, as an
+        /// error that is not the server's answer, so the next notification connects again.
+        #[test]
+        fn a_frozen_server_gives_the_call_up() {
+            let bus = Bus::start();
+            let _server = bus
+                .connect()
+                .name(SERVER)
+                .unwrap()
+                .serve_at(PATH, Frozen)
+                .unwrap()
+                .build()
+                .unwrap();
+            let notifier = Notifier::new(bus.connect(), |_| {}).unwrap();
+            let (done, given_up) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = done.send(notifier.show("chat-a", "New message"));
+            });
+            let shown = given_up
+                .recv_timeout(ANSWER_WITHIN + Duration::from_secs(5))
+                .expect("the call is still waiting for the frozen server");
+            assert!(matches!(shown, Err(error) if !matches!(error, zbus::Error::MethodError(..))));
         }
     }
 }

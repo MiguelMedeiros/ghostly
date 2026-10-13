@@ -423,4 +423,24 @@ describe("AttentionFeedback: which chat a notification opens", () => {
     act(() => FakeNotification.shown[1]!.onclick!());
     expect(screen.getByTestId("where")).toHaveTextContent("/group/g1");
   });
+
+  it("a notification server that never answers holds no later event back", async () => {
+    // One event at a time, as the browser's lock: each waits for the one before to finish.
+    let tail = Promise.resolve();
+    const locks = { request: (_name: string, run: () => Promise<void>) => (tail = tail.then(run)) };
+    Object.defineProperty(navigator, "locks", { value: locks, configurable: true });
+    try {
+      // A frozen Linux notification server: the native command never comes back.
+      desktop("Linux x86_64", { native_private_notification: new Promise(() => {}) });
+      saveSettings({ ...loadSettings(), notifications: { ...loadSettings().notifications, soundEnabled: false, systemEnabled: true } });
+      vi.spyOn(document, "hasFocus").mockReturnValue(false);
+      renderApp(<AttentionFeedback />);
+      act(() => { fakeEngine.emit({ kind: "attention", event: event({ linkId: "link-a" }) }); });
+      await waitFor(() => expect(nativeIds()).toHaveLength(1));
+      act(() => { fakeEngine.emit({ kind: "attention", event: event({ linkId: "group:g1" }) }); });
+      await waitFor(() => expect(nativeIds()).toHaveLength(2));
+    } finally {
+      delete (navigator as { locks?: unknown }).locks;
+    }
+  });
 });
