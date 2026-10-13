@@ -11,6 +11,7 @@ interface Entry { key: unknown; value: unknown }
 interface Tree {
   size(): number; get(record: Entry): Entry | undefined; put(record: Entry, noOverwrite?: boolean): Entry | undefined; delete(record: Entry): void;
   getRecords(range: unknown, descending?: boolean): Iterable<Entry>; getAllRecords(descending?: boolean): Iterable<Entry>;
+  deleteByValue?(range: unknown): Entry[];
 }
 
 /** fake-indexeddb's own red-black tree, the oracle: from a store of a throwaway database (the class is not exported). */
@@ -67,6 +68,16 @@ it("reads as fake-indexeddb's own tree through puts, overwrites, deletes, clears
           expect(b, `put ${JSON.stringify(entry)}`).toEqual(a);
         } else if (kind < 8) { if (tree.get(entry) !== undefined) wrote = true; oracle.delete(entry); tree.delete(entry); }
         else if (kind === 8 && random(5) === 0) { oracle = new Oracle(unique); (tree as unknown as { clear(): void }).clear(); wrote = true; }
+        else if (kind === 9 && !unique && random(2) === 0) {
+          // An index's entries by their record key (the value here), in a range: what the oracle holds there goes.
+          const r = range() ?? IDBKeyRange.lowerBound(-Infinity);
+          const gone = [...oracle.getAllRecords()].filter((e) => r.includes(e.value));
+          for (const e of gone) oracle.delete(e);
+          const dropped = tree.deleteByValue!(r);
+          if (dropped.length) wrote = true;
+          const order = (list: Entry[]) => list.map((e) => JSON.stringify([e.key, e.value])).sort();
+          expect(order(dropped), `deleteByValue ${JSON.stringify(r)}`).toEqual(order(gone));
+        }
         else {
           const r = range(), down = random(2) === 0;
           expect([...tree.getRecords(r, down)]).toEqual(r === undefined ? [...oracle.getAllRecords(down)] : [...oracle.getRecords(r, down)]);
@@ -96,19 +107,38 @@ it("reads as fake-indexeddb's own tree through puts, overwrites, deletes, clears
   }
 });
 
-it("finds an index's entries by their record key through entries_by_value, not by walking the whole tree", async () => {
+it("finds an index's entries by their record key, one or a range of them, through entries_by_value, not by walking the whole tree", async () => {
   const sqlite = (await loadSqlite())!;
   const file = new TreeFile(new sqlite.DatabaseSync(":memory:"), Error);
   const id = file.treeId("db", "messages", "byChat");
   const tree = file.tree(id, false, true);
-  for (let n = 0; n < 2000; n++) tree.put({ key: ["chat", n % 7], value: ["msg", n] });
+  // A long chat's messages, then a short one's: their keys are [chat, n], as the engine's.
+  for (let n = 0; n < 2000; n++) tree.put({ key: ["long", n], value: ["long", n] });
+  for (let n = 0; n < 20; n++) tree.put({ key: ["short", n], value: ["short", n] });
   file.complete(null, 1);
   file.apply(1);
-  // The statement withValue runs: planned on the primary key's `tree = ?` alone, it would read every entry of the index.
-  const byValue = (file as unknown as { byValue: { sourceSQL: string } }).byValue;
-  const plan = (file.db.prepare(`EXPLAIN QUERY PLAN ${byValue.sourceSQL}`).all(id, Buffer.alloc(1)) as { detail: string }[]).map((row) => row.detail);
-  expect(plan.join("\n")).toMatch(/USING INDEX entries_by_value \(tree=\? AND pv=\?\)/);
-  expect(file.withValue(id, ["msg", 42])).toEqual([{ key: ["chat", 0], value: ["msg", 42] }]);
+  // Planned on the primary key's `tree = ?` alone, a lookup would read every entry of the index.
+  const statements: string[] = [];
+  const prepare = file.db.prepare.bind(file.db);
+  (file.db as { prepare: typeof prepare }).prepare = (sql: string) => { statements.push(sql); return prepare(sql); };
+  // A message's delivery mark, by its key; then the short chat removed (the engine's [chat]..[chat, []]), with one of
+  // its messages written in a transaction SQLite does not have yet.
+  file.owner = {};
+  tree.put({ key: ["mark", 0], value: ["short", 3] });
+  expect(tree.deleteByValue!(IDBKeyRange.only(["short", 3])).length).toBe(2);
+  tree.put({ key: ["short", 99], value: ["short", 99] });
+  const dropped = tree.deleteByValue!(IDBKeyRange.bound(["short"], ["short", []]));
+  expect(dropped.map((e) => e.value)).toEqual(expect.arrayContaining([["short", 0], ["short", 19], ["short", 99]]));
+  expect(dropped).toHaveLength(20);
+  (file.db as { prepare: typeof prepare }).prepare = prepare;
+  // Each statement those ran, the only ones: no walk of the tree's entries in key order (`range`).
+  expect(statements.length).toBeGreaterThan(0);
+  for (const sql of statements) {
+    const args = (sql.match(/\?/g) ?? []).map((_, at) => (at === 0 ? id : Buffer.alloc(1)));
+    const plan = (file.db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...args) as { detail: string }[]).map((row) => row.detail).join("\n");
+    expect(plan, sql).toMatch(/USING INDEX entries_by_value \(tree=\? AND pv>\? AND pv<\?\)/);
+  }
+  expect([...tree.getAllRecords()]).toHaveLength(2000);
 });
 
 it("refuses a Blob in a tree at once, rather than when its transaction goes to SQLite", async () => {

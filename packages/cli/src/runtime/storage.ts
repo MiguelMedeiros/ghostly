@@ -330,7 +330,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   function attachTree(records: RawRecordStore, tree: SqlTree, index: boolean) {
     (records as unknown as { records: unknown }).records = tree;
     records.clear = () => { const deleted = [...tree.getAllRecords()]; tree.clear(); return deleted; };
-    if (index) records.deleteByValue = (key: Key) => tree.deleteByValue((key instanceof IDBKeyRange ? key : IDBKeyRange.only(key)) as never, key instanceof IDBKeyRange ? undefined : key);
+    if (index) records.deleteByValue = (key: Key) => tree.deleteByValue((key instanceof IDBKeyRange ? key : IDBKeyRange.only(key)) as never);
   }
 
   /** A store whose records and index entries are in rows.db already (a snapshot of format 3): its trees attached. */

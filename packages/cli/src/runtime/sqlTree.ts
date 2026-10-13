@@ -37,7 +37,6 @@ export class TreeFile {
   private readonly put: StatementSync;
   private readonly remove: StatementSync;
   private readonly empty: StatementSync;
-  private readonly byValue: StatementSync;
 
   constructor(readonly db: DatabaseSync, readonly constraintError: new () => Error) {
     db.exec(`
@@ -51,8 +50,6 @@ export class TreeFile {
     this.put = db.prepare("INSERT OR REPLACE INTO entries (tree, id, pv, key, value) VALUES (?, ?, ?, ?, ?)");
     this.remove = db.prepare("DELETE FROM entries WHERE tree = ? AND id = ?");
     this.empty = db.prepare("DELETE FROM entries WHERE tree = ?");
-    // Named: with no ANALYZE, SQLite plans this on the primary key's `tree = ?` and reads every entry of the index.
-    this.byValue = db.prepare("SELECT key, value FROM entries INDEXED BY entries_by_value WHERE tree = ? AND pv = ?");
   }
 
   /** The tree of a store (`index` "") or of one of its indexes, made when it is new. */
@@ -146,9 +143,14 @@ export class TreeFile {
   drop(id: number, bytes: string): void { this.remove.run(id, buffer(bytes)); }
   /** @internal */
   clearRows(id: number): void { this.empty.run(id); }
-  /** @internal */
-  withValue(id: number, value: unknown): Entry[] {
-    return (this.byValue.all(id, buffer(keyBytes(value))) as { key: Uint8Array; value: Uint8Array }[]).map((row) => ({ key: deserialize(row.key), value: deserialize(row.value) }));
+  /** @internal The index entries whose record key's bytes are from `lower` up to (not with) `upper`, either one open. */
+  withValue(id: number, lower: string | undefined, upper: string | undefined): Entry[] {
+    const where = ["tree = ?", "pv IS NOT NULL"], args: (number | Buffer)[] = [id];
+    if (lower !== undefined) { where.push("pv >= ?"); args.push(buffer(lower)); }
+    if (upper !== undefined) { where.push("pv < ?"); args.push(buffer(upper)); }
+    // Named: with no ANALYZE, SQLite plans this on the primary key's `tree = ?` and reads every entry of the index.
+    return (this.db.prepare(`SELECT key, value FROM entries INDEXED BY entries_by_value WHERE ${where.join(" AND ")}`).all(...args) as { key: Uint8Array; value: Uint8Array }[])
+      .map((row) => ({ key: deserialize(row.key), value: deserialize(row.value) }));
   }
   /** @internal */
   /**
@@ -265,8 +267,7 @@ export class SqlTree {
   *getAllRecords(descending = false): Generator<Entry> { yield* this.getRecords(undefined, descending); }
 
   *getRecords(range: Range | undefined, descending = false): Generator<Entry> {
-    const lower = range?.lower === undefined ? undefined : keyBytes(range.lower) + (range.lowerOpen ? AFTER : "");
-    const upper = range?.upper === undefined ? undefined : keyBytes(range.upper) + (range.upperOpen ? "" : AFTER);
+    const [lower, upper] = bounds(range);
     let hidden = false;
     const map = new Map<string, Entry | null>();
     for (const layer of this.active ? [...this.pending, this.active] : this.pending) {
@@ -294,10 +295,14 @@ export class SqlTree {
     }
   }
 
-  /** The index entries whose record key (`value`) is in `range`: one key is looked up by its bytes, not walked. */
-  deleteByValue(range: Range, single: unknown): Entry[] {
-    const candidates = single !== undefined && this.index
-      ? [...this.file.withValue(this.id, single), ...this.overlayWithValue(keyBytes(single))]
+  /**
+   * The index entries whose record key (`value`) is in `range`, looked up by its bytes, not walked: removing a chat
+   * (its messages' keys from [chat] to [chat, []]) read every message of the profile, 1.5 s at 100,000.
+   */
+  deleteByValue(range: Range): Entry[] {
+    const [lower, upper] = bounds(range);
+    const candidates = this.index
+      ? [...this.file.withValue(this.id, lower, upper), ...this.overlayWithValue(lower, upper)]
       : [...this.getAllRecords()];
     const deleted: Entry[] = [], seen = new Set<string>();
     for (const candidate of candidates) {
@@ -312,11 +317,14 @@ export class SqlTree {
     return deleted;
   }
 
-  /** The entries of the layers whose record key has these bytes. */
-  private overlayWithValue(value: string): Entry[] {
+  /** The entries of the layers whose record key's bytes are between these (as `withValue`). */
+  private overlayWithValue(lower: string | undefined, upper: string | undefined): Entry[] {
     const out: Entry[] = [];
     for (const layer of this.active ? [...this.pending, this.active] : this.pending) {
-      for (const bytes of layer.byValue.get(value) ?? []) { const entry = layer.puts.get(bytes); if (entry) out.push(entry); }
+      for (const [value, ids] of layer.byValue) {
+        if ((lower !== undefined && value < lower) || (upper !== undefined && value >= upper)) continue;
+        for (const bytes of ids) { const entry = layer.puts.get(bytes); if (entry) out.push(entry); }
+      }
     }
     return out;
   }
@@ -362,6 +370,14 @@ export function openTreeFile(sqlite: typeof import("node:sqlite"), path: string,
   const db = new sqlite.DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL");
   return new TreeFile(db, constraintError);
+}
+
+/** A range's keys as bytes: from the first (in) up to the second (out), undefined where it is open. */
+function bounds(range: Range | undefined): [string | undefined, string | undefined] {
+  return [
+    range?.lower === undefined ? undefined : keyBytes(range.lower) + (range.lowerOpen ? AFTER : ""),
+    range?.upper === undefined ? undefined : keyBytes(range.upper) + (range.upperOpen ? "" : AFTER),
+  ];
 }
 
 function holdsBlob(value: unknown, depth = 0): boolean {
