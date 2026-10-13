@@ -155,7 +155,7 @@ Double click, or the message's ⋮ → **Details** (#240, `apps/ui/src/component
 `files/3` ([WISP 501 Chat Files](wisps/501-paired-files.md), #228, #233, `packages/core/src/chatFiles.ts`):
 
 - Any size. Offered first, then sent in 16 KiB chunks with 1 MiB in flight, resumed from the last confirmed byte, checked against the sender's SHA-256.
-- The bytes as they are (`files/4`, `encodeFileData`): with a contact whose app has it, on a session that carries binary messages (WebRTC; HyperDHT from the CLI and a browser), each chunk is one binary message, not base64 text in a JSON frame. A 200 MiB file is 200.4 MiB on the wire instead of 267.6 MiB. In a group's file sessions too. Older apps, Iroh and the Desktop's HyperDHT keep `files/3` frames.
+- The bytes as they are (`files/4`, `encodeFileData`): with a contact whose app has it, on a session that carries binary messages (WebRTC; HyperDHT from the Desktop, the CLI and a browser), each chunk is one binary message, not base64 text in a JSON frame. A 200 MiB file is 200.4 MiB on the wire instead of 267.6 MiB. In a group's file sessions too. Older apps and Iroh keep `files/3` frames.
 - Taken without asking up to 25 MiB per file and 500 MiB per contact; past that, the receiver is asked. Offers expire after 7 days.
 - Bytes stream to storage, never whole in memory: OPFS on web and extension, files on Desktop, IndexedDB as fallback.
 - A transfer that has not moved for 60 s offers **Send again** (sender) or **Ask again** (receiver); both go on from what the receiver already holds. A receiver with no data for 30 s asks again by itself (#348, #352).

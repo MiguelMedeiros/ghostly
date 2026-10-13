@@ -71,6 +71,25 @@ it("hosts every endpoint, each under its own number, in one process", async () =
   expect(alive(runtime.child.pid!)).toBe(true);
 });
 
+it("carries a binary message both ways, as base64 on the line", async () => {
+  const runtime = sidecar();
+  runtime.send({ type: "start", endpoint: 1, seedB64: seed(1) });
+  runtime.send({ type: "start", endpoint: 2, seedB64: seed(2) });
+  const b = await runtime.next({ type: "started", endpoint: 2 });
+  await runtime.next({ type: "started", endpoint: 1 });
+  runtime.send({ type: "connect", endpoint: 1, descriptor: b.descriptor });
+  const result = await runtime.next({ type: "result", endpoint: 1 });
+  const incoming = await runtime.next({ type: "open", endpoint: 2, incoming: true });
+
+  const bytes = Buffer.from([0x04, 0, 255, 10]).toString("base64");
+  runtime.send({ type: "send", endpoint: 1, id: result.id, bytes });
+  const frame = await runtime.next({ type: "frame", endpoint: 2 });
+  expect(frame).toEqual({ type: "frame", endpoint: 2, id: incoming.id, bytes });
+  runtime.send({ type: "send", endpoint: 2, id: incoming.id, text: "and text" });
+  expect(await runtime.next({ type: "frame", endpoint: 1 })).toEqual({ type: "frame", endpoint: 1, id: result.id, text: "and text" });
+  expect(alive(runtime.child.pid!)).toBe(true);
+});
+
 it("refuses a ninth endpoint and an invalid seed without stopping the others", async () => {
   const runtime = sidecar();
   for (let n = 1; n <= 8; n++) runtime.send({ type: "start", endpoint: n, seedB64: seed(n) });
