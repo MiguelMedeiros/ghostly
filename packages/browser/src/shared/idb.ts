@@ -169,7 +169,7 @@ export interface StoredFile {
    * device fetched it without asking (it counts toward the group's automatic limit), and whether its person asked for it.
    * `digest` is the author's, which the bytes are checked against.
    */
-  group?: { message: string; author: string; auto?: boolean; asked?: boolean };
+  group?: { message: string; author: string; auto?: boolean; asked?: boolean; paused?: boolean };
 }
 
 /** The fields of a stored file that change after it is stored: kept in `STORES.fileState`, read over the record's own. */
