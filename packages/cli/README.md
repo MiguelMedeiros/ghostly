@@ -436,7 +436,9 @@ nothing on that machine can answer: allow local network traffic in the VPN, or p
 `ghostly settings set iceServers '[{"urls":"turn:turn.example.org:3478","username":"…","credential":"…"}]'` (the
 same setting chats use). A relay connects the calls no direct path can: a VPN that takes every packet through its
 tunnel, a NAT that maps each destination apart. The media stays encrypted end to end; the relay sees both
-addresses and when and how much is sent.
+addresses and when and how much is sent. The CLI (libdatachannel) reaches TURN over UDP only: a `turns:` or
+`?transport=tcp` address stays in the setting for the apps, which use it, and `settings set` warns that the CLI does
+not. Behind a network that blocks UDP, the CLI has no relay.
 
 ## Transports
 
