@@ -168,7 +168,8 @@ export function transportOptions(link: OwnTransports & Pick<LinkView, "peerTrans
   const mine = ownTransports(link), theirs = link.peerTransports;
   return MENU_ORDER.map(transport => {
     const error = link.transportErrors?.[transport];
-    if (!mine.includes(transport)) return { transport, available: false, reason: error ?? missing(transport, tr) };
+    // The engine's error in a few words of the app's language, as the line below the choices says it; its next step stays there.
+    if (!mine.includes(transport)) return { transport, available: false, reason: error ? shortReason(error, tr) : missing(transport, tr) };
     if (theirs && !theirs.includes(transport)) return { transport, available: false, reason: tr("connection.option.contactLacks", { transport: name(transport) }) };
     return { transport, available: true, ...(link.relayedTransports?.includes(transport) ? { relayed: true } : {}) };
   });
