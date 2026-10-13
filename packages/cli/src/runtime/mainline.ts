@@ -108,7 +108,9 @@ export class RelaysAndDht implements PkarrTransport {
   async publish(identity: Identity, records: GhostRecord[], options: PkarrRequestOptions = {}): Promise<void> {
     // BEP44 sequence numbers must strictly increase, on the relays and on the DHT alike: one payload for both, dated
     // past every packet put or read under the key (`RelayTransport.publishDated`), whichever clock dated those.
-    await this.relays.publishDated(identity, records, (key, payload, timestamp, conflict) => this.putBoth(key, payload, options, conflict, timestamp), options);
+    // With the DHT, the packet goes there whatever the relays' budgets say: signed every time. Without it (a private
+    // network's relays only), a publish none of them takes now is not signed at all.
+    await this.relays.publishDated(identity, records, (key, payload, timestamp, conflict) => this.putBoth(key, payload, options, conflict, timestamp), options, false, this.dht !== null);
   }
 
   publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}): Promise<void> {

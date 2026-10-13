@@ -69,7 +69,10 @@ describe("Pkarr over the Mainline DHT, beside the relays", { timeout: 60_000 }, 
     const dht = await peer(bootstrap);
     const a = new RelaysAndDht(dht, { relays: RELAYS, fetch: relays(store), log: () => {} });
     const me = createIdentity();
+    const dated = vi.spyOn(a.relays, "publishDated");
     await a.publish(me, [{ label: "_x", value: "both" }]);
+    // With the DHT, a packet is signed whatever the relays' budgets say (`elsewhere`): it goes there anyway.
+    expect(dated.mock.calls[0]![5]).toBe(true);
     expect((await a.resolve(me.pubKeyZ32))?.records[0].value).toBe("both");
     expect(a.discovery().path).toMatchObject({ via: "relay" });
     // The DHT has it as well: an app that reads only the DHT (the Desktop) finds it.
@@ -131,11 +134,13 @@ describe("a private network's relays (GHOSTLY_PKARR_RELAYS)", { timeout: 60_000 
     expect((await a.resolve(me.pubKeyZ32))?.records[0].value).toBe("private");
     // A packet signed here goes to the relays with its date, its signature not checked again (`putSigned`): only a
     // payload signed elsewhere goes through `publishPayload`, which checks it to read its date.
-    const checked = vi.spyOn(a.relays, "publishPayload"), signed = vi.spyOn(a.relays, "putSigned");
+    const checked = vi.spyOn(a.relays, "publishPayload"), signed = vi.spyOn(a.relays, "putSigned"), dated = vi.spyOn(a.relays, "publishDated");
     await a.publish(me, [{ label: "_hello", value: "again" }]);
     expect(checked).not.toHaveBeenCalled();
     expect(signed).toHaveBeenCalledTimes(1);
     expect(signed.mock.calls[0]![2]).toBe((await a.resolve(me.pubKeyZ32))!.timestampMicros);
+    // Relays only: a publish none of them takes now is not signed (the budget is asked first).
+    expect(dated.mock.calls[0]![5]).toBe(false);
     // Not pinned: the setting replaces them, as before.
     const b = new RelaysAndDht(null, { relays: RELAYS, fetch: relays(store), log: () => {} });
     b.configure({ relays: ["https://pkarr.example.org"], readRelays: false });

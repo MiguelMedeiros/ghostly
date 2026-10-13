@@ -478,6 +478,9 @@ export class RelayTransport implements PkarrTransport {
 
   /**
    * Signs the records, dated by `nextTimestamp`, and hands the payload to `put` (the relays; the CLI adds the DHT).
+   * When every relay's budget (or rate limit) holds this asker back, it throws that wait before signing anything
+   * (`publishWait`): a daemon at its budget signed about 500 packets a minute that never went out. `elsewhere`: `put`
+   * also takes the packet where no budget holds it back (the CLI's DHT), so it is signed whatever the relays say.
    * `put` calls `conflict` for a relay that answered 409: it holds a packet under this key dated at or after this one,
    * which this client has not read (an inviter's warm packet under the key it gave its contact, from a clock ahead of
    * this one). That packet is read from that relay, and the records go again dated just past it, once. Without this
@@ -486,8 +489,14 @@ export class RelayTransport implements PkarrTransport {
    */
   async publishDated(identity: Identity, records: GhostRecord[],
     put: (pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, conflict: (relay: string) => void) => Promise<void>,
-    options: PkarrRequestOptions = {}, again = false): Promise<void> {
-    const key = identity.pubKeyZ32, timestamp = this.nextTimestamp(key);
+    options: PkarrRequestOptions = {}, again = false, elsewhere = false): Promise<void> {
+    const key = identity.pubKeyZ32;
+    // Before the packet is signed and dated: a publish no relay takes now costs no signature, and moves no date on.
+    if (!again && !elsewhere) {
+      const held = this.publishWait(key, asker(options, true));
+      if (held) throw new DiscoveryBudgetError(held.wait, `Publish held back on every relay: ${held.reasons.join("; ")}`);
+    }
+    const timestamp = this.nextTimestamp(key);
     let redated: Promise<boolean> | undefined;
     const conflict = (relay: string) => {
       if (again || redated) return;
@@ -498,7 +507,7 @@ export class RelayTransport implements PkarrTransport {
         traceLink(key, "publish-redated", { aheadMs: Number((held - timestamp) / 1000n), relay });
         // A later publication of this key took over meanwhile: it is dated past what was just read.
         if (this.lastTimestamp.get(key) !== timestamp) return true;
-        await this.publishDated(identity, records, put, options, true);
+        await this.publishDated(identity, records, put, options, true, elsewhere);
         return true;
       })();
       redated.catch(() => {});
@@ -509,6 +518,40 @@ export class RelayTransport implements PkarrTransport {
       const pending = redated as Promise<boolean> | undefined;
       if (!pending || !(await pending)) throw error;
     }
+  }
+
+  /**
+   * How long until some relay takes a publish of this asker, and why each holds it back; null when one would now. Walks the relays as `put` does,
+   * without asking any: a relay the budget holds back gets its refused `take` (the asker's write then waits first in
+   * line, as when `put` is refused), one rate limiting or throttling this address is a wait, one left alone for failing
+   * is none. Null too when a relay fails another way (its network cooling down): the publish then goes, and fails, as
+   * before, and when no relay is held back at all.
+   */
+  private publishWait(pubKeyZ32: string, who: Asker): { wait: number; reasons: string[] } | null {
+    const probe = this.breaker.allDownProbe(this.relays);
+    let wait = Infinity;
+    const held: string[] = [], reasons: string[] = [];
+    for (const relay of this.relays) {
+      if (relay !== probe && this.networkCoolingDown(relay, "PUT")) return null;
+      const limited = this.rateLimitedFor(relay);
+      if (limited > 0) { wait = Math.min(wait, limited); reasons.push(`${relay}: Discovery relay is cooling down after a 429; retry shortly`); continue; }
+      const blocked = relay === probe ? 0 : this.breaker.blockedFor(relay);
+      if (blocked > 0) {
+        if (this.breaker.blockedKind(relay) === "throttled") { wait = Math.min(wait, blocked); reasons.push(`${relay}: Discovery relay is throttling this address; retry shortly`); }
+        else reasons.push(`${relay} is left alone after failing`);
+        continue;
+      }
+      if (this.heldFor(relay, who, Date.now(), pubKeyZ32) <= 0) return null;
+      held.push(relay);
+      const left = this.heldFor(relay, who);
+      wait = Math.min(wait, left);
+      reasons.push(`${relay}: discovery budget reached; retry in ${Math.ceil(left / 1000)} s`);
+    }
+    if (wait === Infinity) return null;
+    // Held back everywhere: refused as `put` would be, so what a refusal notes holds (this write goes first once a
+    // request frees, a chat's need of its reserve). Only now: a publish another relay takes leaves no write waiting.
+    for (const relay of held) this.take(relay, who, pubKeyZ32);
+    return { wait, reasons };
   }
 
   /** One relay's packet for a key, read now: its time, kept for `nextTimestamp`. Null when it has none or does not answer. */
