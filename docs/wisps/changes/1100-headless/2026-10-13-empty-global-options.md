@@ -1,0 +1,1 @@
+An empty `--profile` or `--home` is a usage error (exit 2) before anything opens, and an empty `GHOSTLY_PROFILE` or `GHOSTLY_HOME` counts as unset. Before, an empty `--profile` ran the command as the current profile, and an empty `--home` or `GHOSTLY_HOME` in the current folder.
