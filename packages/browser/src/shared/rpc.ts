@@ -182,7 +182,8 @@ export interface EngineApi {
   /**
    * One data frame to the same app on the contact's side, live only: `offline` while the session is not live (nothing is
    * kept), `too-large` past 32 KiB as JSON, `not-open`, `peer-closed` (the contact's app is not open, or cannot run
-   * apps), `too-fast` (over 48 a second for this app).
+   * apps), `too-fast` (over 48 a second for this app, or the session's channel still holds a quarter of what it may
+   * queue).
    */
   appSend(params: { linkId: string; ref: string; data: unknown; digest?: string }): { error: import("@ghostly/core").AppSendError | null };
   /** One message's details view (WISP 400 § Message details): how it travelled, as stored, plus what the engine knows around it now. */
