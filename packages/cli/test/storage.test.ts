@@ -1,7 +1,8 @@
 import { appendFileSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { deserialize, serialize } from "node:v8";
+import { deserialize, serialize, setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { keyOrder, openPersistentIndexedDb, type PersistentIndexedDb } from "../src/runtime/storage";
 import { TreeFile } from "../src/runtime/sqlTree";
@@ -1036,6 +1037,84 @@ describe("messages kept in rows.db", () => {
     opened.push(elsewhere);
     expect(await all(elsewhere.factory)).toEqual(values);
   });
+
+  it("moves a profile of format 1 with a journal after it (killed): the journal's overwrites and deletes reach rows.db and its indexes", async () => {
+    const dir = folder();
+    const old = await openPersistentIndexedDb(dir, { rowsOnDisk: () => false });
+    opened.push(old);
+    const d = await db(old.factory);
+    for (let i = 0; i < 12; i++) await tx(d, ["messages"], (s) => { s.messages.put(message(i)); });
+    await old.compact();
+    await tx(d, ["messages"], (s) => { s.messages.put({ ...message(3), linkId: "chat-0", text: "edited" }); s.messages.delete(["chat-1", "m001"]); s.messages.put(message(40)); });
+    const expected = await all(old.factory);
+    const crashed = copyOf(dir);
+    expect(snapshotOf(crashed).format).toBe(1);
+
+    const store = await openPersistentIndexedDb(crashed);
+    opened.push(store);
+    expect(store.recovered).toBe(true);
+    expect(await all(store.factory)).toEqual(expected);
+    const byLink = (await db(store.factory)).transaction("messages").objectStore("messages").index("byLink");
+    expect((await read(byLink.getAll("chat-1"))).map((m) => (m as { id: string }).id)).toEqual(["m004", "m007", "m010", "m040"]);
+    expect(snapshotOf(crashed).format).toBe(3);
+    expect(await entryCount(crashed)).toBe(expected.length);
+    expect(await entryCount(crashed, "byLink")).toBe(expected.length);
+  });
+
+  it("moves a large profile of format 1 to rows.db holding less memory than the same profile opened in memory", async () => {
+    setFlagsFromString("--expose-gc");
+    const gc = runInNewContext("gc") as () => void;
+    const count = 20_000;
+    const dir = folder();
+    // As a v1.2.3 daemon leaves it: every message inline, in key order, with the engine's two message indexes.
+    const records = Array.from({ length: count }, (_, i) => message(i)).sort((a, b) => (a.linkId === b.linkId ? (a.id < b.id ? -1 : 1) : a.linkId < b.linkId ? -1 : 1)).map((m) => [[m.linkId, m.id], m]);
+    writeFileSync(join(dir, "snapshot.bin"), serialize({ format: 1, databases: [{ name: "ghostly", version: 1, stores: [
+      { name: "messages", keyPath: ["linkId", "id"], autoIncrement: false, keyGenerator: null, records,
+        indexes: [{ name: "byLink", keyPath: "linkId", multiEntry: false, unique: false }, { name: "byLinkTime", keyPath: ["linkId", "timestamp"], multiEntry: false, unique: false }] },
+      { name: "settings", keyPath: null, autoIncrement: false, keyGenerator: null, indexes: [], records: [] },
+      { name: "log", keyPath: null, autoIncrement: true, keyGenerator: 1, indexes: [], records: [] },
+    ] }] }));
+    records.length = 0;
+    const inMemory = copyOf(dir);
+
+    // The heap in use while the store opens, after a collection, every so many rows written or index entries made.
+    const probe = await openPersistentIndexedDb(folder());
+    (await db(probe.factory)).close();
+    const indexProto = Object.getPrototypeOf((probe.factory as unknown as { _databases: Map<string, { rawObjectStores: Map<string, { rawIndexes: Map<string, object> }> }> })._databases.get("ghostly")!.rawObjectStores.get("messages")!.rawIndexes.get("byLink")!) as { storeRecord(...args: unknown[]): unknown };
+    await probe.close();
+    const peakOf = async (open: () => Promise<PersistentIndexedDb>) => {
+      // What earlier tests left to their timers goes first (freed during the open, it hid the open's own): until the heap
+      // holds still.
+      let base = Infinity;
+      for (let tries = 0; tries < 30; tries++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        gc();
+        const now = process.memoryUsage().heapUsed;
+        if (base - now < 512 * 1024) { base = Math.min(base, now); break; }
+        base = now;
+      }
+      let peak = 0, calls = 0;
+      const sample = () => { if (++calls % 2000 === 0) { gc(); peak = Math.max(peak, process.memoryUsage().heapUsed - base); } };
+      const { storeRecord } = indexProto, { row } = TreeFile.prototype;
+      indexProto.storeRecord = function (this: unknown, ...args: unknown[]) { sample(); return storeRecord.apply(this, args); };
+      TreeFile.prototype.row = function (this: TreeFile, ...args: Parameters<TreeFile["row"]>) { sample(); return row.apply(this, args); };
+      try {
+        const store = await open();
+        gc();
+        peak = Math.max(peak, process.memoryUsage().heapUsed - base);
+        expect(await read((await db(store.factory)).transaction("messages").objectStore("messages").count())).toBe(count);
+        await store.close();
+      } finally { indexProto.storeRecord = storeRecord; TreeFile.prototype.row = row; }
+      return peak;
+    };
+    const held = await peakOf(() => openPersistentIndexedDb(inMemory, { rowsOnDisk: () => false }));
+    const moved = await peakOf(() => openPersistentIndexedDb(dir));
+    expect(snapshotOf(dir).format).toBe(3);
+    expect(await entryCount(dir)).toBe(count);
+    expect(await entryCount(dir, "byLinkTime")).toBe(count);
+    // The released layout holds the store's trees; the move holds no more than the snapshot read back, let go of as it goes.
+    expect(moved).toBeLessThan(held * 0.75);
+  }, 120_000);
 
   it("moves a profile of format 2 (values in rows, keys in the snapshot) to rows.db's trees, and drops the rows", async () => {
     const dir = folder();
