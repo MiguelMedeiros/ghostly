@@ -192,6 +192,24 @@ describe("community groups on headless engines", { timeout: 120_000 }, () => {
     expect(world.view(admin, id)).toMatchObject({ status: "active", isAdmin: true });
   });
 
+  it("a member deletes it from the device with nobody connected: it goes anyway, as a private group's failed goodbye does", async () => {
+    // Bug hunt groups-flows: the others never opened the app again, and Leave and Delete both refused it for good.
+    const world = new CommunityWorld();
+    const admin = world.add("admin"), bob = world.add("bob"), dave = world.add("dave");
+    const { id, link } = await community(world, admin);
+    await joinAll(world, id, link, [bob, dave]);
+    await world.run(20_000);
+    admin.online = false;
+    bob.online = false;
+    await world.until(() => world.view(dave, id)?.community?.connected === 0, 2 * 60_000);
+    // Leave still asks for someone to take it: the others would list the device for good.
+    await expect(dave.groups.leave(id)).rejects.toThrow(/Nobody in the group is connected/);
+    expect(world.view(dave, id)).toMatchObject({ status: "active" });
+    await dave.groups.forget(id);
+    expect(dave.groups.views()).toEqual([]);
+    expect((await dave.store.getGroups()).map(g => g.id)).not.toContain(id);
+  });
+
   it("a member whose fresh secret was lost on the way asks for it and gets it", async () => {
     const world = new CommunityWorld();
     const admin = world.add("admin"), bob = world.add("bob"), carol = world.add("carol");
