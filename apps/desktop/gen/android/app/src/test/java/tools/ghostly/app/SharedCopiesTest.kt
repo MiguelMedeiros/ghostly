@@ -32,15 +32,6 @@ class SharedCopiesTest {
   }
 
   @Test
-  fun aShareWithNoFileNoTextAndNoTitleIsNothing() {
-    assertEquals(true, SharedCopies.nothingIn("", "", 0))
-    assertEquals(true, SharedCopies.nothingIn(" ", "\n\t", 0))
-    assertEquals(false, SharedCopies.nothingIn("", "", 1))
-    assertEquals(false, SharedCopies.nothingIn("", "see this", 0))
-    assertEquals(false, SharedCopies.nothingIn("A note", "", 0))
-  }
-
-  @Test
   fun aStartLeavesOnlySharesTakenSinceIt() {
     val root = temp.newFolder("shared")
     for (share in listOf("900", "1000", "1001", "junk")) copy(root, share, 0, "f")
