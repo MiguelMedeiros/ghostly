@@ -265,19 +265,28 @@ async function reconcile(): Promise<void> {
   const state = engine.state;
   if (!state) return;
 
-  if (!localStorage.getItem(MIGRATED_KEY) && localStorage.getItem(OLD_MIGRATED_KEY)) localStorage.setItem(MIGRATED_KEY, "1");
-  if (!localStorage.getItem(MIGRATED_KEY)) {
-    // Links made before the UI kept sessions (or by another Ghostly page).
-    for (const link of await engine.call("exportLinks")) {
-      if (findSession(link.seedB64, link.peerPubKeyZ32)) continue;
-      const id = ensureSession(
-        { profile: link.profile, deliveryMode: link.deliveryMode, seedB64: link.seedB64, peerPubKeyB64: link.peerPubKeyZ32, encKeyB64: link.encKeyB64 },
-        { inviteCode: link.inviteCode, createdAt: link.createdAt },
-      );
-      if (link.label) updateSessionLabel(id, link.label);
+  if (!localStorage.getItem(MIGRATED_KEY) && localStorage.getItem(OLD_MIGRATED_KEY)) {
+    try { localStorage.setItem(MIGRATED_KEY, "1"); } catch { /* no room: the old mark still counts */ }
+  }
+  let imported = !!localStorage.getItem(MIGRATED_KEY) || !!localStorage.getItem(OLD_MIGRATED_KEY);
+  if (!imported) {
+    try {
+      // Links made before the UI kept sessions (or by another Ghostly page).
+      for (const link of await engine.call("exportLinks")) {
+        if (findSession(link.seedB64, link.peerPubKeyZ32)) continue;
+        const id = ensureSession(
+          { profile: link.profile, deliveryMode: link.deliveryMode, seedB64: link.seedB64, peerPubKeyB64: link.peerPubKeyZ32, encKeyB64: link.encKeyB64 },
+          { inviteCode: link.inviteCode, createdAt: link.createdAt },
+        );
+        if (link.label) updateSessionLabel(id, link.label);
+      }
+      localStorage.setItem(MIGRATED_KEY, "1");
+      imported = true;
+      notifySessionsChanged();
+    } catch {
+      // No room to store them (or the mark): imported again at the next reconcile. Until then no link goes for want of
+      // its chat below.
     }
-    localStorage.setItem(MIGRATED_KEY, "1");
-    notifySessionsChanged();
   }
 
   const sessions = listSessions(cache);
@@ -313,6 +322,7 @@ async function reconcile(): Promise<void> {
   for (const link of state.links) {
     if (peers.has(link.peerPubKeyZ32)) continue;
     later = true;
+    if (!imported) continue;
     // A link only just made may not have its chat yet; one whose chat was deleted here goes at once.
     if (Date.now() - link.createdAt < FORGET_AFTER_MS && !wasDeleted(link.peerPubKeyZ32)) continue;
     void engine.call("removeLink", { linkId: link.id }).catch(() => {});

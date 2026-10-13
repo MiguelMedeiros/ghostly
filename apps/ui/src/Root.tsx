@@ -15,7 +15,7 @@ import { UpdateProvider } from "./contexts/UpdateContext";
 import { LockScreen } from "./components/LockScreen";
 import { ProfileSwitchSplash } from "./components/ProfileSwitchSplash";
 import { PreUnlockRing } from "./components/PreUnlockRing";
-import { LINK_CHATS_WAITING, ensureSession, linkChatsWaiting, loadSession, type SessionKeys } from "./lib/storage";
+import { LINK_CHATS_WAITING, NO_ROOM_FOR_CHAT, ensureSession, linkChatsWaiting, loadSession, type SessionKeys } from "./lib/storage";
 import { useI18n, useT } from "./contexts/I18nContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { menuPage } from "./components/MenuPage";
@@ -27,6 +27,7 @@ import { JoinHost } from "./components/devices/JoinHost";
 import { isDeviceCode, offerDeviceLink, readDeviceLink, takeDeviceLinkFromAddress } from "./lib/devices";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
 import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
+import { onChatNotStored, reportChatNotStored } from "./lib/chatNotStored";
 import { groupPath } from "./lib/groups";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
@@ -82,7 +83,11 @@ function ChatLinkIntake() {
       navigate("/", { replace: true });
       return;
     } else {
-      try { sessionId = ensureSession(keys, { viaLink: true }); } catch { sessionId = null; }
+      try { sessionId = ensureSession(keys, { viaLink: true }); } catch (cause) {
+        // A good invite the storage has no room for: said as that, never as a bad invite.
+        if (cause instanceof Error && cause.message === NO_ROOM_FOR_CHAT) { reportChatNotStored(cause); navigate("/", { replace: true }); return; }
+        sessionId = null;
+      }
       if (sessionId && outcome.kind === "joined") showJoinNotice("join.alreadyIn");
     }
     if (!sessionId) {
@@ -150,6 +155,23 @@ function JoinNotice() {
     <div role="status" data-testid="join-notice" onClick={() => setNotice(null)}
       className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl cursor-pointer">
       {t(notice)}
+    </div>
+  ) : null;
+}
+
+/**
+ * A new chat the storage had no room for, made where no dialog says it (lib/chatNotStored.ts): what happened and what to
+ * do, there until closed.
+ */
+function ChatNotStoredNotice() {
+  const t = useT();
+  const [problem, setProblem] = useState<Problem | null>(null);
+  useEffect(() => onChatNotStored((cause) => setProblem(problemText(cause, t))), [t]);
+  return problem ? (
+    <div className="top-notice flex items-start gap-2 rounded-lg border border-border bg-panel-header py-2 ps-4 pe-2 shadow-xl">
+      <Notice problem={problem} testId="chat-not-stored" className="min-w-0 text-sm" />
+      <button type="button" data-testid="chat-not-stored-close" onClick={() => setProblem(null)} aria-label={t("common.close")}
+        className="-my-1 h-8 w-8 shrink-0 cursor-pointer rounded-md text-lg leading-none text-text-secondary hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">×</button>
     </div>
   ) : null;
 }
@@ -262,6 +284,7 @@ export function Root() {
               <ErrorBoundary>
               <ChatLinkIntake />
               <JoinNotice />
+              <ChatNotStoredNotice />
               <OpenFailureNotice />
               <GroupLinkIntake />
               <HomeAnchor />
