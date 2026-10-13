@@ -513,10 +513,13 @@ export class RelayTransport implements PkarrTransport {
     await this.putEverywhere(pubKeyZ32, payload, timestamp, options, conflict);
   }
 
-  /** Puts a payload signed elsewhere (a did:dht document), byte for byte, on every relay. `conflict`: as `publishDated` gives it. */
+  /**
+   * Puts a payload signed elsewhere (a did:dht document), byte for byte, on every relay; one signed here says its date
+   * (`signedAt`) and is not checked again. `conflict`: as `publishDated` gives it.
+   */
   async publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}, conflict?: (relay: string) => void): Promise<void> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
-    const { seq } = openRelayPayload(pubKeyZ32, payload);
+    const seq = options.signedAt ?? openRelayPayload(pubKeyZ32, payload).seq;
     await this.putEverywhere(pubKeyZ32, payload, seq, options, conflict);
   }
 
