@@ -1,4 +1,7 @@
 import { act, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CallOverlay } from "../../components/CallOverlay";
 import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/fakes";
@@ -63,9 +66,9 @@ describe("who is speaking in a call", () => {
 
     hear(0.1);
     expect(avatar()).toHaveAttribute("data-speaking", "true");
-    expect(avatar().style.getPropertyValue("--voice-level")).toBe("0.40");
+    expect(avatar().style.getPropertyValue("--voice-level")).toBe("0.4");
     hear(0.2);
-    expect(avatar().style.getPropertyValue("--voice-level")).toBe("0.80");
+    expect(avatar().style.getPropertyValue("--voice-level")).toBe("0.8");
   });
 
   it("keeps the mark between words, and drops it when they stop", () => {
@@ -76,6 +79,32 @@ describe("who is speaking in a call", () => {
     hear(0, 400);
     expect(avatar()).toHaveAttribute("data-speaking", "false");
     expect(avatar().style.getPropertyValue("--voice-level")).toBe("0");
+  });
+
+  it("moves the ring in tenths, and leaves it alone while the voice wavers by hundredths", async () => {
+    call();
+    hear(0.14);
+    expect(avatar().style.getPropertyValue("--voice-level")).toBe("0.6");
+    // A steady voice: every write, even of the same value, would repaint the call window.
+    const writes: string[] = [];
+    const watch = new MutationObserver((seen) => writes.push(...seen.map((one) => one.attributeName!)));
+    watch.observe(avatar(), { attributes: true });
+    for (const level of [0.142, 0.14, 0.142, 0.14, 0.142, 0.14]) hear(level);
+    await Promise.resolve();
+    expect(writes).toEqual([]);
+
+    hear(0.2);
+    await Promise.resolve();
+    expect(avatar().style.getPropertyValue("--voice-level")).toBe("0.8");
+    expect(writes).toEqual(["style"]);
+    watch.disconnect();
+  });
+
+  it("draws the ring with no transition, which would restart at every new level", () => {
+    const css = readFileSync(join(fileURLToPath(import.meta.url), "../../../index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const avatarRules = [...css.matchAll(/([^{}]*\.call-avatar[^{}]*)\{([^{}]*)\}/g)].map(([, , body]) => body);
+    expect(avatarRules.length).toBeGreaterThan(0);
+    for (const body of avatarRules) expect(body).not.toMatch(/transition/);
   });
 
   it("takes a breath or a fan for silence", () => {
@@ -109,7 +138,7 @@ describe("who is speaking in a call", () => {
     expect(you).toHaveAttribute("data-muted", "false");
     hear(0.1);
     expect(you).toHaveAttribute("data-speaking", "true");
-    expect(you.style.getPropertyValue("--voice-level")).toBe("0.40");
+    expect(you.style.getPropertyValue("--voice-level")).toBe("0.4");
     // The contact's stream has no sound here: only your side is marked.
     expect(avatar()).not.toHaveAttribute("data-speaking");
   });
@@ -151,11 +180,11 @@ describe("who is speaking in a call", () => {
     said.peer[0](0.5);
     hear(0.2);
     expect(avatar()).toHaveAttribute("data-speaking", "true");
-    expect(avatar().style.getPropertyValue("--voice-level")).toBe("0.50");
+    expect(avatar().style.getPropertyValue("--voice-level")).toBe("0.5");
     expect(you).toHaveAttribute("data-speaking", "false");
     said.own[0](0.3);
     hear(0.2);
-    expect(you.style.getPropertyValue("--voice-level")).toBe("0.30");
+    expect(you.style.getPropertyValue("--voice-level")).toBe("0.3");
 
     // A level is said once and holds until the next: the contact goes on speaking, then stops.
     hear(0.2, 800);
