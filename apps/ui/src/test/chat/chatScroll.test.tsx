@@ -24,8 +24,12 @@ const heights = new Map<string, number>();
 const entering = new Map<string, number>();
 const positions = new WeakMap<Element, number>();
 const isList = (el: Element) => el instanceof HTMLElement && el.dataset.testid === "list";
-const rowsIn = (el: Element) => [...el.querySelectorAll<HTMLElement>("[data-message-id]")];
-const heightOf = (row: HTMLElement) => heights.get(row.dataset.messageId!) ?? ROW;
+/**
+ * What takes room in the list: the rows, and a folded run's own row (`data-fold`, a bot's routine cards) in place of
+ * the rows folded in it: those are in `hidden`, display: none, with no box at all.
+ */
+const rowsIn = (el: Element) => [...el.querySelectorAll<HTMLElement>("[data-message-id], [data-fold]")].filter(row => !row.closest("[hidden]"));
+const heightOf = (row: HTMLElement) => row.dataset.fold !== undefined ? ROW : heights.get(row.dataset.messageId!) ?? ROW;
 const contentHeight = (el: Element) => rowsIn(el).reduce((sum, row) => sum + heightOf(row), above);
 const maxTop = (el: Element) => Math.max(0, contentHeight(el) - view);
 
@@ -64,7 +68,8 @@ beforeAll(() => {
       value(this: HTMLElement) {
         if (isList(this)) return new DOMRect(0, 0, 400, view);
         const list = this.closest<HTMLElement>("[data-testid='list']");
-        if (!list || !this.dataset.messageId) return rect.call(this);
+        if (!list || (!this.dataset.messageId && this.dataset.fold === undefined)) return rect.call(this);
+        if (this.closest("[hidden]")) return new DOMRect(0, 0, 0, 0);
         let y = above - list.scrollTop;
         for (const row of rowsIn(list)) {
           if (row === this) return new DOMRect(0, y + (entering.get(row.dataset.messageId!) ?? 0), 400, heightOf(row));
@@ -96,12 +101,16 @@ afterAll(() => {
 
 beforeEach(() => { heights.clear(); entering.clear(); observed = []; view = VIEW; above = 0; forgetChatScroll(); });
 
-function Timeline({ rows, chat = "chat-1" }: { rows: ScrollRow[]; chat?: string }) {
+/** `fold`: rows drawn folded into one row (a bot's routine run), in `hidden` as RoutineStack draws them. */
+function Timeline({ rows, chat = "chat-1", fold = [] }: { rows: ScrollRow[]; chat?: string; fold?: string[] }) {
   const jump = useChatScroll({ rows, chat });
+  const row = (r: ScrollRow) => <div key={r.id} data-message-id={r.id}>{r.id}</div>;
+  const folded = rows.filter(r => fold.includes(r.id));
   return (
     <div>
       <div ref={jump.listRef} data-testid="list" data-message-list>
-        <div ref={jump.columnRef}>{rows.map(row => <div key={row.id} data-message-id={row.id}>{row.id}</div>)}</div>
+        <div ref={jump.columnRef}>{rows.map(r => !fold.includes(r.id) ? row(r)
+          : r === folded[0] ? <div key="fold" data-fold data-testid="fold"><div hidden>{folded.map(row)}</div></div> : null)}</div>
       </div>
       <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />
       <textarea data-testid="composer" />
@@ -255,6 +264,31 @@ describe("the chat timeline's scrolling", () => {
     // Nothing counted any more; still far from the bottom, so the plain ↓ stays.
     expect(pill()).toHaveAttribute("data-count", "0");
     expect(pill()).toHaveAccessibleName("Scroll to bottom");
+  });
+
+  it("the pill goes to a bot's routine cards folded into one row, not up: their rows have no box", async () => {
+    const rows = theirs(0, 10), cards = theirs(10, 3).map(r => ({ ...r, id: `card_${r.id}` }));
+    const fold = cards.map(r => r.id);
+    const { rerender, user } = renderApp(<Timeline rows={rows} fold={fold} />);
+    scrollTo(0);
+    rerender(<Timeline rows={[...rows, ...cards, ...theirs(13, 20)]} fold={fold} />);
+    expect(pill()).toHaveAttribute("data-count", "23");
+    await user.click(pill()!);
+    // The folded row starts at 500: it went up to the list's top, and the count was cleared.
+    expect(list().scrollTop).toBe(492);
+    expect(screen.getByTestId("fold").getBoundingClientRect().top).toBe(8);
+    expect(pill()).toHaveAttribute("data-count", "0");
+  });
+
+  it("scrolled up with a folded run below the view's top, the view is held on its first row in view", () => {
+    const rows = [...theirs(0, 10), ...theirs(10, 3).map(r => ({ ...r, id: `card_${r.id}` })), ...theirs(13, 10)];
+    renderApp(<Timeline rows={rows} fold={["card_peer_10", "card_peer_11", "card_peer_12"]} />);
+    scrollTo(100);
+    const before = topOf("peer_2");
+    // A picture loads in a row in view, under the first one: that first row stays where it is.
+    heights.set("peer_3", 150);
+    resized();
+    expect(topOf("peer_2")).toBe(before);
   });
 
   it("reaching the bottom by hand clears the count", () => {
