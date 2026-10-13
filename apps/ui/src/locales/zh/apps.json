@@ -75,6 +75,13 @@
     "tooLarge": "太大了。",
     "unlistedVersion": "这个链接里是该商店尚未列出的版本。"
   },
+  "files": {
+    "askFiles": "{{app}} 请求读取文件",
+    "askFolder": "{{app}} 请求读取一个文件夹",
+    "chooseFiles": "选择文件",
+    "chooseFolder": "选择文件夹",
+    "note": "不会复制任何内容：{{app}} 在此设备上读取你选择的内容。"
+  },
   "install": {
     "equivocation": "存在两个不同的版本 {{sequence}}。Ghostly 保留了你已有的那个。",
     "fetching": "正在检查应用…",

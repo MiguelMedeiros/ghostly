@@ -75,6 +75,13 @@
     "tooLarge": "Demasiado grande.",
     "unlistedVersion": "El enlace tiene una versión que esta tienda aún no lista."
   },
+  "files": {
+    "askFiles": "{{app}} pide leer archivos",
+    "askFolder": "{{app}} pide leer una carpeta",
+    "chooseFiles": "Elegir archivos",
+    "chooseFolder": "Elegir una carpeta",
+    "note": "No se copia nada: {{app}} lee lo que elijas, en este dispositivo."
+  },
   "install": {
     "equivocation": "Existen dos versiones {{sequence}} distintas. Ghostly conservó la que tienes.",
     "fetching": "Comprobando la app…",

@@ -21,6 +21,7 @@ import { setPushPlatform } from "../../ui/src/lib/wakePush";
 import { APPS_ENABLED } from "@ghostly/browser/shared/features";
 import { servicesPlatform } from "../../ui/src/lib/platform";
 import { setAppOpener, takedownText } from "../../ui/src/lib/apps/open";
+import { pickSheetText, webLinkedFiles } from "../../ui/src/lib/apps/webFiles";
 import { webOpener } from "../../ui/src/lib/apps/webOpener";
 import { nameInChat } from "../../ui/src/lib/apps/nameInChat";
 import { currentPush, pushSupported, subscribePush, syncWakeTable, syncWakeText, unsubscribePush } from "./pwa/push";
@@ -103,6 +104,8 @@ if (gate.full && (APPS_ENABLED || import.meta.env.VITE_APPS_TEST === "1")) {
     nameIn: nameInChat,
     closeLabel: () => profileTranslator()("common.close"),
     stoppedLabel: (title, takedown) => takedownText(title, takedown, profileTranslator()),
+    // Files the person picks for an app granted `files`: the client's own sheet, links for this page's life.
+    linkedFiles: webLinkedFiles({ text: () => pickSheetText(profileTranslator()) }),
   }));
 }
 
