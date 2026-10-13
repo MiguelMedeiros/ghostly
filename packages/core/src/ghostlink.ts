@@ -81,8 +81,15 @@ const PACKET_TRANSPORTS_FAST_ATTEMPTS = 3;
 export const DHT_PIN_GRACE_MS = 10_000;
 /** Back after a restart (`resume`), dials wait this long at most for the native endpoint that carried the chat to start. */
 export const RESUME_WAIT_MS = 10_000;
-/** Two dials crossing: how long the lower key's side waits for its own to connect before it takes the contact's. */
-export const CROSSED_WAIT_MS = 3_000;
+/**
+ * Two dials crossing: how long the lower key's side waits for its own to connect before it takes the contact's. Two
+ * dials that both go through connect within a round trip of each other: each side's preface goes out as the other's
+ * dial reaches it. One not connected by then has stalled (a HyperDHT stream that opened and carries nothing, dialled
+ * again only 2 s later) or goes to an endpoint the contact no longer runs: waiting for it held a working connection
+ * back 0.9-1.9 s (DHT-direct lab, 5 of 20 first pairings). Taken, this side's dial is closed when it lands, and on the
+ * contact's side it never authenticates (`attachReplacement`).
+ */
+export const CROSSED_WAIT_MS = 500;
 /**
  * A session this side dialled this recently is one a crossing dial of the contact's may meet (both connected): the
  * lower key keeps its own. Older, the session is one the contact has since lost (its app restarted), and its dial
@@ -3414,8 +3421,8 @@ export class GhostLink {
    * Both sides dialled at once (two apps back after a restart, each knocking): the lower key's dial carries the chat, on
    * both sides; the higher key's side takes it over as a replacement (`attachReplacement`). Here, on the lower key's
    * side, the contact's connection waits: dropped once this side's own dial connects, taken if that dial fails, or has
-   * not connected within `CROSSED_WAIT_MS` (the contact may be dialling an app that is not up yet, for as long as its
-   * dial takes to give up).
+   * not connected within `CROSSED_WAIT_MS` (it stalled, or goes to an endpoint the contact no longer runs, for as long
+   * as it takes to give up).
    */
   private crossed: { channel: FrameChannel; binding: NativeBinding; timer: ReturnType<typeof setTimeout> } | null = null;
   private parkCrossed(channel: FrameChannel, binding: NativeBinding): void {
