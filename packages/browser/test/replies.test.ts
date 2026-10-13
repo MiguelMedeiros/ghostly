@@ -140,6 +140,29 @@ describe("a received reply in a long history", () => {
     expect(t.whole()).toBe(0);
   });
 
+  it("a reply I send finds its original by its id: in a group or a chat, it reads no whole history unless the keyed reads miss in a chat", async () => {
+    const replyFor = (node: GhostlyNode, linkId: string, id: string) => (node as unknown as { replyFor(l: string, m: string): Promise<unknown> }).replyFor(linkId, id);
+    const group = `group:${crypto.randomUUID()}`;
+    const g = await keeper(group, history(group, i => ({ id: `k1:0:${i}`, member: "k1" })));
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: false });
+    cleanup.push(async () => { await node.shutdown(); });
+    expect(await replyFor(node, group, "k1:0:7")).toEqual({ id: "k1:0:7", snippet: "line 7", from: "peer", member: "k1", messageId: "k1:0:7" });
+    expect(await replyFor(node, group, "k3:0:1")).toMatch(/not in this chat/);
+    expect(g.whole()).toBe(0);
+    const chat = `replies-${crypto.randomUUID()}`, wire = (i: number) => `${"W".repeat(20)}${String(i).padStart(2, "0")}`;
+    const c = await keeper(chat, [
+      ...history(chat, i => ({ id: `peer_${wire(i)}`, wireId: wire(i) })),
+      { linkId: chat, id: "me_9", text: "a.txt", sender: "me", timestamp: 1_700_000_001_000, via: "datalink", file: { id: `${chat}-out-${"F".repeat(22)}`, name: "a.txt", size: 1, mime: "text/plain" } },
+    ]);
+    // By the row's id, and by the wire id both sides know a text by: keyed reads only.
+    expect(await replyFor(node, chat, `peer_${wire(7)}`)).toMatchObject({ id: wire(7), snippet: "line 7", messageId: `peer_${wire(7)}` });
+    expect(await replyFor(node, chat, wire(8))).toMatchObject({ id: wire(8), snippet: "line 8", messageId: `peer_${wire(8)}` });
+    expect(c.whole()).toBe(0);
+    // A file's wire id is not a row's id: the whole chat, once.
+    expect(await replyFor(node, chat, "F".repeat(22))).toMatchObject({ id: "F".repeat(22), messageId: "me_9" });
+    expect(c.whole()).toBe(1);
+  });
+
   it("in a group, a press on my open buttons still reads who already answered", async () => {
     const linkId = `group:${crypto.randomUUID()}`;
     const card = readStatusCard({ kind: "buttons", id: "ask", buttons: [{ id: "yes", label: "Yes", once: true }, { id: "no", label: "No", once: true }] })!;
