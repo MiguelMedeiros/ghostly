@@ -33,6 +33,8 @@ export type DiscoveryChange = "tripped" | "recovered";
  * fast for a while, on the hub left and on its members alike: on CLI daemons the hub left got 2 of 24 beacon writes
  * through in 90 s (its entry went stale, and members it should have carried became hubs), and the members' requests
  * in its lobby went out 40 s after they asked (2026-10-03).
+ * A hub's reads say `door` only while someone is coming in (`Communities.doorBusy`): otherwise they give way like any
+ * background read, and an app that was a hub of several communities left its edges' signaling the share (2026-10-13).
  *
  * `signal`: a link's WebRTC signaling, what its contact waits for: the write of a new offer or answer, or a read for
  * the answer while this side's offer is out, or the reads of a DHT-only contact's mailbox once it shows it is leaving,

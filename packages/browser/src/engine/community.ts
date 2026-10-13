@@ -1019,8 +1019,9 @@ export class Communities {
   private async readBeacon(groupId: string, live: Live, now: number): Promise<boolean> {
     live.lastBeaconRead = now;
     const keys = beaconKeys(live.session.state.rv, groupId);
-    // A hub's own reading goes as its knock bell does: not held back while its new edges signal (`PkarrRequestOptions.door`).
-    const records = await this.host.resolve(keys.identity.pubKeyZ32, true, live.hub).catch(() => undefined);
+    // A hub's own reading goes as its knock bell does: while someone is coming in (`doorBusy`), not held back while its new
+    // edges signal (`PkarrRequestOptions.door`).
+    const records = await this.host.resolve(keys.identity.pubKeyZ32, true, this.doorBusy(groupId, live, now)).catch(() => undefined);
     // A read that failed says nothing: what the last one said stays (entries go stale by their own time). Alone in the
     // group, nobody else can be a hub, read or not. Nor does an app wait for ever for its first reading: after as long
     // as an entry stays fresh, whatever was there would be stale by now.
@@ -1223,7 +1224,7 @@ export class Communities {
 
   private async pollLobby(groupId: string, live: Live, now: number): Promise<void> {
     const keys = lobbyKeys(live.session.state.rv, groupId, live.session.myKey);
-    const entries = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32, true, true).catch(() => null)) ?? []);
+    const entries = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32, true, this.doorBusy(groupId, live, now)).catch(() => null)) ?? []);
     for (const { key, ts } of entries) {
       // A member of the roster gets its edge. A key no commit names may be a member ahead of me on the roster, or one
       // whose admission lost a race, and needs an edge to find out: for a moment, and no member's (`wantAhead`).
@@ -1314,6 +1315,18 @@ export class Communities {
   }
 
   /**
+   * As a hub: someone is coming in, or about to. I am letting someone in, the link was just shown, a crowd fills the
+   * bell, or members ask in my lobby (a hub just left, say). Then my reads of the bell, the beacon and my lobby go as
+   * the door's (`PkarrRequestOptions.door`): not held back while links signal. Otherwise they give way to the links
+   * that signal, my edges in my other communities first: an app that was a hub of 4 communities on one relay (8 on
+   * two) spent its relays' background share on reads that each said nobody was there, and its edges, whose signaling
+   * had what was left, stayed down 10 minutes and more in some of them (CLI daemons, 2026-10-13).
+   */
+  private doorBusy(groupId: string, live: Live, now: number): boolean {
+    return live.hub && (now < live.warmUntil || now < live.crowdUntil || now < live.lobbyBusyUntil || this.admitting(groupId, live, now));
+  }
+
+  /**
    * Which knock records to read now (none, most of the time): every one at once the first time
    * (a hub just elected, an app back, a change of door), since a knock left while nobody was at the
    * door may be in any; then the door the bell, and the others in turn; the other hubs one in turn, slowly.
@@ -1359,9 +1372,10 @@ export class Communities {
     const records = this.knockRecordsToRead(live, door === s.myKey, busy, now);
     if (!records.length) return;
     let failed = 0;
+    const open = door === s.myKey && this.doorBusy(groupId, live, now);
     const read = await Promise.all(records.map(async n => {
       const record = knockRecord(link, n);
-      return readKnocks(record, (await this.host.resolve(knockIdentity(record).pubKeyZ32, true, door === s.myKey && n === KNOCK_BELL).catch(() => { failed++; return null; })) ?? []);
+      return readKnocks(record, (await this.host.resolve(knockIdentity(record).pubKeyZ32, true, open && n === KNOCK_BELL).catch(() => { failed++; return null; })) ?? []);
     }));
     traceJoin(groupId, "knock.read", { records: records.length, knocks: read.flat().length, ...(failed ? { failed } : {}) });
     const bell = records.indexOf(KNOCK_BELL);
