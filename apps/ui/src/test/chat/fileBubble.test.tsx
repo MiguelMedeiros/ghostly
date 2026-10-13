@@ -1,10 +1,11 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileBubble } from "../../components/FileBubble";
 import { fileStatus, timeLeft } from "../../lib/fileStatus";
 import { servicesPlatform, type FileTransferState } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
+import { everythingOnScreen } from "../onScreen";
 import { renderApp } from "../render";
 
 // covers: files.large.offer, files.large.resume, files.size-label, files.large.resend, files.large.request, backup.light
@@ -19,9 +20,11 @@ const show = (transfer: FileTransferState | null, patch: Partial<ChatFile> = {})
 };
 
 beforeEach(() => {
+  everythingOnScreen();
   vi.spyOn(servicesPlatform!, "getFile").mockResolvedValue(null);
   fakeEngine.on("fileAction", () => undefined);
 });
+afterEach(() => vi.unstubAllGlobals());
 
 describe("what a file's status line says", () => {
   const f = file();
@@ -251,8 +254,9 @@ describe("FileBubble: files/3", () => {
       expect(screen.getByRole("img", { name: "Pasted image.png" })).toHaveAttribute("src", src);
       expect(created).toEqual([src]);
       expect(revoked).toEqual([]);
+      // Kept for the run once the bubble goes: the chat opened again shows it without reading it (lib/pictureReads.ts).
       view.unmount();
-      expect(revoked).toEqual([src]);
+      expect(revoked).toEqual([]);
     } finally {
       Object.assign(URL, { createObjectURL, revokeObjectURL });
     }
