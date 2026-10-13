@@ -605,12 +605,13 @@ export class GroupFileDesk {
       .filter(key => membership && key !== membership.me && membership.inRoster(key));
     // Every holder known served it damaged: asking again would fetch the same bytes, all of them, round after round.
     if (known.length && known.every(key => kept.damaged.has(key))) { this.stopDamaged(kept); return; }
-    // A known holder that answered busy, or whose edge another file of this device's is asked of, its edge up, serves when
-    // its place frees: the others are asked only when no known holder is worth waiting for (none in reach, or every one
-    // gone), as after a restart here.
+    // A known holder that answered busy, or the author whose edge another file of this device's is asked of, its edge up,
+    // serves when its place frees: the others are asked only when no known holder is worth waiting for (none in reach, or
+    // every one gone), as after a restart here. Only the author's edge holds them back while it is asked of: any member
+    // can say it holds files, and one that serves the file asked of it slowly would keep every other file it named here.
     const waitForBusy = known.some(key => {
       const linkId = edges.get(key) ?? "";
-      return this.deps.ready(linkId) && (want.busy?.has(key) || this.askedOf(linkId, want));
+      return this.deps.ready(linkId) && (want.busy?.has(key) || (key === kept.author && this.askedOf(linkId, want)));
     });
     const others = waitForBusy ? [] : [...edges.keys()].filter(key => !known.includes(key) && membership && key !== membership.me && membership.couldRead(key, kept.message));
     const order = [...known, ...others].filter(key => !want.tried.has(key) && !kept.damaged.has(key) && !this.edgesById.get(edges.get(key) ?? "")?.gone.has(kept.message));

@@ -577,6 +577,29 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     for (const p of others) expect(sha(t.got(p, id, messageId).bytes!)).toBe(meta.d);
   });
 
+  it("files a holder named wait on it only behind the author's edge: one it is slow to serve does not hold back the rest, which another member in reach serves", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol, dave], id } = await t.mesh(["alice", "bob", "carol", "dave"]);
+    t.files.get(bob)!.settings.autoDownloads = false;
+    // Carol's word that she holds them never reaches Bob (lost, or older than what she names); Dave's does.
+    t.hold = (from, to, frame) => from === carol && to === bob && frame.t === "group-have";
+    const sent = [];
+    for (let i = 0; i < 6; i++) sent.push(await t.send(alice, id, pattern(64 * 1024, 50 + i), { name: `alice-${i}.bin` }));
+    const named = (p: Peer) => sent.every(s => t.seen.some(x => x.from === p.name && x.to === "bob" && x.frame.t === "group-have" && (x.frame.ids as string[]).includes(s.messageId)));
+    await t.world.until(() => sent.every(s => t.done(carol, id, s.messageId) && t.done(dave, id, s.messageId)) && named(dave), 5 * 60_000);
+    alice.online = false;
+    await t.world.run(2_000);
+    // Dave offers what Bob asks him for, and its bytes never come.
+    t.hold = (from, to, frame) => (from === carol && to === bob && frame.t === "group-have") || (from === dave && to === bob && frame.t === "pf-data");
+    for (const s of sent) await bob.groups.downloadFile(t.got(bob, id, s.messageId).message!.file!.id);
+    // Before, every file Dave named waited its turn behind the one he was asked for, and Carol was never asked.
+    await t.world.run(GROUP_FILE_LIMITS.wantWaitMs - 5_000);
+    expect(sent.filter(s => t.done(bob, id, s.messageId)).length).toBeGreaterThanOrEqual(5);
+    expect(t.seen.some(s => s.from === "bob" && s.to === "carol" && s.frame.t === "group-want")).toBe(true);
+    await t.world.until(() => sent.every(s => t.done(bob, id, s.messageId)), 5 * 60_000);
+    for (const s of sent) expect(sha(t.got(bob, id, s.messageId).bytes!)).toBe(s.meta.d);
+  });
+
   it.each([2, 6])("%i files sent together reach a group of 16 as fast as its edges carry them, with no wait for the next group-have", async count => {
     const t = new FilesWorld();
     const { peers: [alice, ...others], id } = await t.mesh(Array.from({ length: 16 }, (_, i) => `m${i}`));
