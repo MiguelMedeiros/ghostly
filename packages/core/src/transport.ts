@@ -51,6 +51,11 @@ export interface PkarrRequestOptions {
    * restarts publishes its offer then. A few may go over the relay's minute (`DEPARTED_READS` in relay.ts).
    */
   departed?: boolean;
+  /**
+   * `publishPayload` only: the payload was signed in this process, dated so (a group edge's, `CarriedTransport`). Its
+   * signature is not checked again on the way to the relays, as `RelayTransport.putSigned`'s is not.
+   */
+  signedAt?: bigint;
 }
 
 /**

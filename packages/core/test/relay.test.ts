@@ -36,6 +36,19 @@ describe("relay transport", () => {
     expect(puts).toHaveLength(1);
   });
 
+  it("a payload signed here that says its date (`signedAt`, a group edge's) is put without its signature checked again", async () => {
+    const bytes = packet(5000n);
+    bytes[0] ^= 1;
+    const puts: string[] = [];
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT") { puts.push(String(input)); return new Response(null, { status: 204 }); }
+      return new Response(null, { status: 500 });
+    }) as typeof fetch });
+    // Through the wrapper a group's edges publish with, as the app makes it.
+    await withRequestOptions(relay, { group: true }).publishPayload!(id.pubKeyZ32, bytes, { background: true, signedAt: 5000n });
+    expect(puts).toHaveLength(1);
+  });
+
   it("spends one request per poll, taking relays in turn, and keeps the newest packet", async () => {
     const { relay, calls } = transport({
       "a.test": () => new Response(packet(2000n) as BodyInit),
