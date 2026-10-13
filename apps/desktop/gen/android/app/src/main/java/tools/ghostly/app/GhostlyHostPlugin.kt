@@ -39,7 +39,6 @@ import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 
 @InvokeArg
@@ -108,10 +107,10 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     /** At most this many bytes from one share, in all, as a paste brings into the page (pastedFiles.ts `PLATFORM_PASTE_MAX`). */
     private const val MAX_SHARED_BYTES = 256L * 1024 * 1024
     /**
-     * The latest share's number: an older share still copying stops, and is never handed over after a newer one.
-     * Starts at the clock, so a share's folder is newer than any a previous run left.
+     * The shares' numbers: an older share still copying stops, and is never handed over after a newer one with
+     * something in it. Starts at the clock, so a share's folder is newer than any a previous run left.
      */
-    private val shareGeneration = AtomicLong(System.currentTimeMillis())
+    private val shareTurns = ShareTurns(System.currentTimeMillis())
     /** Whether this run swept what earlier runs left in the share cache: once, as an activity made again may come. */
     private val sharesSwept = AtomicBoolean(false)
   }
@@ -124,7 +123,7 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
   override fun load(webView: WebView) {
     // Copies an earlier run left (a share never read, the app stopped): only shares this run takes are kept.
     if (sharesSwept.compareAndSet(false, true)) {
-      val since = shareGeneration.get()
+      val since = shareTurns.last()
       thread(name = "ghostly-share-clean") { SharedCopies.stale(sharedRoot(), since).forEach { it.deleteRecursively() } }
     }
     take(activity.intent)
@@ -190,10 +189,11 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
   /**
    * "Share to Ghostly" from another app: its text and its streams. Each stream is copied into the app's cache (a
    * folder per share and per file, under the name the sharing app gave), off the main thread, then handed to Rust.
-   * Shares are numbered as they arrive: one that a newer share overtook stops copying and is never handed over, so a
-   * big share that ends late cannot replace the one made after it. A share with nothing in it (no file copied, no
-   * text) is never handed over, so it never replaces the one that waits. The page reads the copies by token, as a
-   * paste's, and owns them: they go when it says it is done with them (`shareDone`), never when a newer share comes,
+   * Shares are numbered as they arrive (ShareTurns): one that a newer share overtook stops copying and is never handed
+   * over, so a big share that ends late cannot replace the one made after it. A newer share overtakes only once it has
+   * something (a file copied whole, a text, a title): one that ends up with nothing (no file copied, no text) is never
+   * handed over and never stops one still copying, so it never replaces the one that waits. The page reads the copies
+   * by token, as a paste's, and owns them: they go when it says it is done with them (`shareDone`), never when a newer share comes,
    * since the page may still show or read an older one; what a run leaves goes at the next start.
    * Only another app's `content://` streams are read (SharedStream): the app opens a stream as itself.
    * Only what the page takes is copied: each stream in turn while the share stays within [MAX_SHARED_BYTES]
@@ -210,21 +210,24 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     if (SharedCopies.nothingIn(title, text, streams.size)) return
     val resolver = activity.contentResolver
     val root = sharedRoot()
-    val generation = shareGeneration.incrementAndGet()
-    val latest = { shareGeneration.get() == generation }
+    val number = shareTurns.arrive()
+    // A text or a title is something already; files only once one is copied whole.
+    if (!SharedCopies.nothingIn(title, text, 0)) shareTurns.has(number)
+    val going = { shareTurns.going(number) }
+    val latest = { shareTurns.latest(number) }
     thread(name = "ghostly-share") {
-      val own = File(root, generation.toString())
+      val own = File(root, number.toString())
       own.deleteRecursively()
       val files = JSONArray()
       var left = MAX_SHARED_BYTES
       for ((index, uri) in streams.withIndex()) {
-        if (!latest()) break
+        if (!going()) break
         try {
           if ((sizeOf(uri) ?: 0L) > left) continue
           val folder = File(own, index.toString()).apply { mkdirs() }
           val file = File(folder, SharedName.of(displayName(uri), index))
           val copied =
-            resolver.openInputStream(uri)?.use { input -> file.outputStream().use { copyAtMost(input, it, left, latest) } }
+            resolver.openInputStream(uri)?.use { input -> file.outputStream().use { copyAtMost(input, it, left, going) } }
               ?: continue
           if (copied < 0) {
             folder.deleteRecursively()
@@ -232,6 +235,7 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
           }
           left -= copied
           files.put(JSONObject().put("path", file.path).put("mime", resolver.getType(uri) ?: JSONObject.NULL))
+          shareTurns.has(number)
         } catch (e: Exception) {
           // One file that cannot be read (a revoked permission, a broken stream) leaves the rest of the share.
         }
@@ -242,7 +246,7 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       if (!latest() || SharedCopies.nothingIn(title, text, files.length())) return@thread
       val share = JSONObject().put("title", title).put("text", text).put("files", files)
       activity.runOnUiThread {
-        // Checked again on the main thread, where shares arrive: a newer one may have come during the hop.
+        // Checked again on the main thread, where shares arrive: a newer one may have something by now.
         if (!latest()) return@runOnUiThread
         received("share", share.toString())
       }
