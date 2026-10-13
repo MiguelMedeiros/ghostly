@@ -554,6 +554,20 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(sha(t.got(refused === "bob" ? bob : carol, id, messageId).bytes!)).toBe(meta.d);
   });
 
+  it("members the author turns away as busy wait for a holder's word, and do not ask members never heard of as holders", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, ...others], id } = await t.mesh(Array.from({ length: 10 }, (_, i) => `m${i}`));
+    const { messageId, meta } = await t.send(alice, id, pattern(100_000, 5));
+    await t.world.until(() => others.every(p => t.done(p, id, messageId)), 60_000, 500);
+    const wants = t.seen.filter(s => s.frame.t === "group-want");
+    const gone = t.seen.filter(s => s.frame.t === "group-want-no" && s.frame.why === "gone");
+    // Each of the 9 copies costs its ask of the author, an ask again when a place frees, and few others: before, each
+    // member turned away asked every other member, and nearly all of them answered gone.
+    expect(wants.length).toBeLessThanOrEqual(3 * others.length);
+    expect(gone.length).toBeLessThanOrEqual(others.length);
+    for (const p of others) expect(sha(t.got(p, id, messageId).bytes!)).toBe(meta.d);
+  });
+
   it.each([2, 6])("%i files sent together reach a group of 16 as fast as its edges carry them, with no wait for the next group-have", async count => {
     const t = new FilesWorld();
     const { peers: [alice, ...others], id } = await t.mesh(Array.from({ length: 16 }, (_, i) => `m${i}`));
