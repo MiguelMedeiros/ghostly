@@ -104,6 +104,5 @@ export { setLinkTraceSink, traceLink } from "./linkTrace";
 export * from "./canonicalJson";
 export * from "./appStatements";
 export * from "./appBundle";
-export * from "./pace";
 export * from "./appStore";
 export * from "./appUpdates";
