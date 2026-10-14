@@ -6,12 +6,18 @@ name: Publish npm
 # starts this workflow. A security autorelease publishes its release with the
 # workflow token, which starts nothing, so security-autorelease.yml dispatches
 # this workflow itself. A tag can also be (re)published by hand:
-#   gh workflow run npm-publish.yml -f tag=v1.0.0
+#   gh workflow run npm-publish.yml --ref main -f tag=v1.0.0
+#
+# A run uses the copy of this file on the ref it runs from, and npm's Trusted
+# Publisher does not look at the ref. So the two publish jobs run only from
+# main or a v* tag (a published release runs on its tag), and the `npm`
+# environment allows only those refs too (docs/RELEASING.md): a branch's own
+# copy can drop the check here, never the environment's.
 #
 # Authentication is npm trusted publishing (OIDC): no long-lived token. npm
 # only lets a package that already exists trust a workflow, so the very first
-# publish uses the NPM_TOKEN repository secret; once the package is on npm and
-# trusts this workflow, delete that secret. See docs/RELEASING.md.
+# publish uses the NPM_TOKEN secret of the `npm` environment; once the package
+# is on npm and trusts this workflow, delete that secret. See docs/RELEASING.md.
 #
 # Only the two publish jobs can ask for an OIDC token, and both run in the
 # `npm` environment, which each package's Trusted Publisher names. The checks
@@ -124,7 +130,7 @@ jobs:
   publish:
     name: "@ghostlytools/cli to npm"
     needs: build-cli
-    if: needs.build-cli.outputs.published == 'false'
+    if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && needs.build-cli.outputs.published == 'false'
     runs-on: ubuntu-24.04
     environment: npm
     permissions:
@@ -282,7 +288,7 @@ jobs:
   publish-sdk:
     name: "@ghostlytools/sdk to npm"
     needs: verify-sdk
-    if: needs.verify-sdk.outputs.on == 'true' && needs.verify-sdk.outputs.published == 'false'
+    if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) && needs.verify-sdk.outputs.on == 'true' && needs.verify-sdk.outputs.published == 'false'
     runs-on: ubuntu-24.04
     environment: npm
     permissions:

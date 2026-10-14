@@ -90,6 +90,22 @@ describe("npm-publish.yml's tokens", () => {
     expect(all["check-cli"]).toMatch(/needs: \[build-cli, publish\]/);
   });
 
+  it("only main or a v* tag gets into the npm environment: npm's Trusted Publisher does not look at the ref", () => {
+    const ref = "github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')";
+    for (const id of ["publish", "publish-sdk"]) {
+      const cond = /^ {4}if: (.+)$/m.exec(all[id]!)?.[1] ?? "";
+      expect(cond === ref || cond.startsWith(`(${ref}) && `), `${id}: ${cond}`).toBe(true);
+    }
+    // The default branch is not main, so a dispatch by hand names main.
+    expect(read(".github/workflows/security-autorelease.yml")).toContain("gh workflow run npm-publish.yml --repo \"$GITHUB_REPOSITORY\" --ref main");
+    const releasing = read("docs/RELEASING.md");
+    expect(releasing).toContain("gh workflow run npm-publish.yml --ref main -f tag=");
+    expect(releasing).not.toMatch(/gh workflow run npm-publish\.yml -f/);
+    // A branch's own copy of the workflow drops the check above; the environment's rule is what holds.
+    expect(releasing).toContain("Settings → Environments → `npm` → Deployment branches and tags");
+    expect(releasing).toContain("the branch `main` and the tag pattern `v*`");
+  });
+
   it("publishes the SDK tarball verify-sdk checked, with no install, build or script where the token is", () => {
     expect(all["verify-sdk"]).toContain("npm run test:sdk-example");
     expect(all["verify-sdk"]).toContain("actions/upload-artifact@");
