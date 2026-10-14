@@ -130,7 +130,8 @@ fn accepted(name: &str, accept: &[String]) -> bool {
 }
 
 /// Everything under a folder that `accept` names, its name first in each path: hidden entries and symbolic links left
-/// out, at most one more than `MAX_ENTRIES` (so a folder past it is known to be).
+/// out, at most one more than `MAX_ENTRIES` (so a folder past it is known to be). A folder under it that cannot be read
+/// (`lost+found` at a drive's root, one gone while walking) is left out too; only the picked folder itself must be.
 pub fn walk(root: &Path, accept: &[String]) -> Result<Vec<(String, PathBuf)>, String> {
     let top = root
         .file_name()
@@ -140,10 +141,12 @@ pub fn walk(root: &Path, accept: &[String]) -> Result<Vec<(String, PathBuf)>, St
     let mut found = Vec::new();
     let mut stack = vec![(top, root.to_path_buf())];
     while let Some((shown, dir)) = stack.pop() {
-        let mut entries: Vec<_> = fs::read_dir(&dir)
-            .map_err(|e| e.to_string())?
-            .filter_map(Result::ok)
-            .collect();
+        let listed = match fs::read_dir(&dir) {
+            Ok(listed) => listed,
+            Err(e) if dir == root => return Err(e.to_string()),
+            Err(_) => continue,
+        };
+        let mut entries: Vec<_> = listed.filter_map(Result::ok).collect();
         entries.sort_by_key(|e| e.file_name());
         for entry in entries {
             let Some(name) = entry.file_name().to_str().map(str::to_string) else {
@@ -528,6 +531,28 @@ mod tests {
             .unwrap()
             .iter()
             .all(|(p, _)| !p.contains("elsewhere") && !p.contains("link.mp4")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_that_cannot_be_read_is_left_out_but_the_picked_one_must_be_read() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = films();
+        let private = root.join("private");
+        fs::create_dir_all(&private).unwrap();
+        fs::write(private.join("hidden.mp4"), b"x").unwrap();
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o000)).unwrap();
+        // Root reads every folder: nothing to check there.
+        if fs::read_dir(&private).is_err() {
+            let found: Vec<String> = walk(&root, &["mp4".to_string()])
+                .unwrap()
+                .into_iter()
+                .map(|(p, _)| p)
+                .collect();
+            assert_eq!(found, ["Films/Season 1/E01.mp4", "Films/Up.mp4"]);
+            assert!(walk(&private, &[]).is_err());
+        }
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     #[test]
