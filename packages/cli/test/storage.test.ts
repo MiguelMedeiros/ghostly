@@ -895,6 +895,50 @@ describe("messages kept in rows.db", () => {
     expect(await read((await db(again.factory)).transaction("messages").objectStore("messages").index("byLink").getAll("chat-1"))).toEqual(before.filter((m) => (m as { linkId: string }).linkId === "chat-1"));
   });
 
+  it("keeps each file's state (its transfer and wire3 record) in rows.db too; the files store, which may hold a Blob, stays in memory", async () => {
+    const dir = folder();
+    const store = await openPersistentIndexedDb(dir);
+    const files = await upgrade(store.factory, 1, (t) => {
+      t.db.createObjectStore("files", { keyPath: "id" }).createIndex("byLink", "linkId");
+      t.db.createObjectStore("fileState", { keyPath: "id" });
+    });
+    const state = (i: number) => ({ id: `f${i}`, transfer: { state: "done", transferred: 8192, size: 8192 }, wire3: { id: `w${i}`, offset: 8192, digest: "d".repeat(64) } });
+    for (let i = 0; i < 10; i++) await tx(files, ["files", "fileState"], (s) => { s.files.put({ id: `f${i}`, linkId: "chat-0", createdAt: i }); s.fileState.put(state(i)); });
+    await tx(files, ["files"], (s) => { s.files.put({ id: "held", linkId: "chat-0", blob: new Blob(["bytes"]) }); });
+    files.close();
+    await store.compact();
+    const stores = snapshotOf(dir).databases.find((d) => d.name === "ghostly")!.stores;
+    expect(stores.find((s) => s.name === "fileState")).toMatchObject({ records: [], onDisk: true });
+    expect(stores.find((s) => s.name === "files")!.records).toHaveLength(11);
+    await store.close();
+
+    const again = await openPersistentIndexedDb(dir);
+    opened.push(again);
+    const reopened = await upgrade(again.factory, 1, () => {});
+    expect(await read(reopened.transaction("fileState").objectStore("fileState").get("f3"))).toEqual(state(3));
+    expect(await (await read(reopened.transaction("files").objectStore("files").get("held")) as { blob: Blob }).blob.text()).toBe("bytes");
+    reopened.close();
+  });
+
+  it("moves the file states of a profile that kept them in memory (messages already in rows.db) at its first open", async () => {
+    const dir = folder();
+    const old = await openPersistentIndexedDb(dir, { rowsOnDisk: (_db, name) => name === "messages" });
+    const d = await upgrade(old.factory, 1, (t) => { t.db.createObjectStore("fileState", { keyPath: "id" }); });
+    for (let i = 0; i < 5; i++) await tx(d, ["fileState"], (s) => { s.fileState.put({ id: `f${i}`, transfer: { state: "done" } }); });
+    d.close();
+    await old.compact();
+    await old.close();
+    const inline = () => snapshotOf(dir).databases.find((x) => x.name === "ghostly")!.stores.find((s) => s.name === "fileState")!;
+    expect(inline().records).toHaveLength(5);
+
+    const store = await openPersistentIndexedDb(dir);
+    opened.push(store);
+    expect(inline()).toMatchObject({ records: [], onDisk: true });
+    const reopened = await upgrade(store.factory, 1, () => {});
+    expect(await read(reopened.transaction("fileState").objectStore("fileState").getAll())).toHaveLength(5);
+    reopened.close();
+  });
+
   it("hands out the values it reads from rows.db as v8 made them, with no second copy; changing one changes nothing stored", async () => {
     const dir = folder();
     const store = await openPersistentIndexedDb(dir);
