@@ -596,8 +596,10 @@ export class Communities {
   async remove(groupId: string, key: string): Promise<void> { await this.require(groupId).remove(key); }
   async makeAdmin(groupId: string, key: string): Promise<void> { await this.require(groupId).transferAdmin(key); }
   async rotate(groupId: string): Promise<void> { await this.require(groupId).rotate(); }
-  async setPicture(groupId: string, picture: string | null): Promise<void> { await this.require(groupId).setPicture(picture); }
-  async rename(groupId: string, name: string): Promise<void> { await this.require(groupId).rename(name); }
+  // Dated by the engine's clock, as the messages are (`send`): a member catching up gets the statement before the first
+  // message dated after it.
+  async setPicture(groupId: string, picture: string | null): Promise<void> { await this.require(groupId).setPicture(picture, this.now()); }
+  async rename(groupId: string, name: string): Promise<void> { await this.require(groupId).rename(name, this.now()); }
   /** A new link (the old one reaches nobody), or none. */
   async replaceLink(groupId: string, off = false): Promise<string> {
     const s = this.require(groupId);

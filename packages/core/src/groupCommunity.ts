@@ -1646,6 +1646,9 @@ export class CommunitySession {
     // to the members they were written for (a hub passes them on). Anyone else's it could not read stays here.
     const unheard = new Set(this.state.unheard ?? []);
     const marked = new Set<string>();
+    // The group's picture or name, when theirs is older (after the commits and secrets above, which it may need), before
+    // the first message written after it: they place its line where it comes, as they do each message.
+    let meta = this.metaFor(from, frame.mt);
     for (const stored of this.state.store) {
       if (stored.s === from) continue;
       // What they have first: the checks below hash commits for every stored frame, and a member up to date has them
@@ -1660,6 +1663,7 @@ export class CommunitySession {
       if (!this.mainIndex.has(found.hash)) this.handSide(from, found.hash, handed, answer);
       // A leaver's frame goes after its leave's mark, without which it is not taken.
       if (!rosterHas(this.roster, stored.s) && !marked.has(stored.s)) { marked.add(stored.s); const left = this.leftFrame(stored.s); if (left) answer.push(left); }
+      if (meta && stored.ts > this.state.meta!.ts) { answer.push(meta); meta = null; }
       answer.push(stored);
       // Handed to a member it was written for: heard.
       if (mine && reads) unheard.delete(frameKey(stored));
@@ -1669,8 +1673,7 @@ export class CommunitySession {
     if (rosterHas(this.roster, from)) { const entry = this.entryFrame(from); if (entry) answer.push(entry); }
     // Pending leaves travel too, so whoever commits next can.
     for (const request of this.state.pendingLeaves) answer.push({ t: "group-leave", v: 2, g: this.id, ...request });
-    // The group's picture, when theirs is older (after the commits and secrets above, which it may need).
-    const meta = this.metaFor(from, frame.mt);
+    // Or here, when none was.
     if (meta) answer.push(meta);
     // And where I am, so they can hand me what I lack (asked once in a while, not in a loop).
     ask();
