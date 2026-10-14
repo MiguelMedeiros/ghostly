@@ -29,7 +29,16 @@ function fake() {
       wallet: {
         wallets: [{ id: "cashu:testnet", type: "cashu", network: "testnet", config: {} }, { id: "lightning:testnet:cashu", type: "lightning", network: "testnet", config: {}, card: "cashu", name: "Cashu", receive: true }],
         offers: [{ type: "bark", network: "testnet", available: true }, { type: "cashu", network: "testnet", available: true },
-          { type: "bitcoin", network: "testnet", available: true, needs: "provider", providers: [{ id: "bdk", label: "BDK", fields: [] }] }],
+          { type: "bitcoin", network: "testnet", available: true, needs: "provider", providers: [{ id: "bdk", label: "BDK", fields: [
+            { name: "network", label: "Network", kind: "select", options: [{ value: "signet", label: "Signet" }, { value: "regtest", label: "Regtest" }], defaults: { testnet: "signet" } },
+            { name: "esplora", label: "Esplora server", kind: "url", optional: true },
+            { name: "script", label: "Addresses", kind: "select", options: [{ value: "bip84", label: "Native SegWit" }, { value: "bip86", label: "Taproot" }] },
+            { name: "mnemonic", label: "Recovery phrase", kind: "secret" }] }] },
+          { type: "lightning", network: "testnet", available: true, several: true, needs: "provider", providers: [
+            { id: "nwc", label: "Nostr Wallet Connect", fields: [{ name: "uri", label: "Connection URI", kind: "secret", placeholder: "nostr+walletconnect://…" }] },
+            { id: "webln", label: "Browser wallet (WebLN)", fields: [] }] },
+          { type: "fedimint", network: "testnet", available: true, needs: "invite" },
+          { type: "spark", network: "mainnet", available: true, needs: "apiKey" }],
         networks: { testnet: { mints: [], balance: 42, history: [{ id: "h" }], feesPaid: 0, lightnings: [{ card: "cashu", balance: 42, status: "ready" }] }, mainnet: { mints: [], balance: 0, history: [], feesPaid: 0 } },
       },
     }) as unknown as EngineState,
@@ -143,8 +152,34 @@ describe("wallets", () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "wallet.create", { type: "bitcoin", provider: "nope" })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("ghostly wallet list") });
     expect(node.walletCreate).not.toHaveBeenCalled();
-    await callApi(ctx, "wallet.create", { type: "bitcoin", provider: "bdk" });
+    await callApi(ctx, "wallet.create", { type: "bitcoin", provider: "bdk", values: { script: "bip84" } });
     expect(node.walletCreate).toHaveBeenCalledOnce();
+  });
+
+  it("a source or a field left out, or one the wallet does not take, is refused naming the flag, before the engine is asked", async () => {
+    // Found in a bug hunt: each was `engine` (exit 1) in the app's words ("Enter connection uri", "try again"), naming
+    // no flag, or the flag was dropped without a word.
+    const { ctx, node } = fake();
+    const refusal = async (params: Record<string, unknown>) => {
+      const error = asCliError(await callApi(ctx, "wallet.create", params).catch((e: unknown) => e));
+      return { code: error.code, message: error.message };
+    };
+    expect(await refusal({ type: "lightning" })).toEqual({ code: "bad_request", message: "lightning needs --provider: one of nwc (ghostly wallet list)" });
+    expect(await refusal({ type: "lightning", provider: "nwc" })).toEqual({ code: "bad_request", message: "nwc needs --value uri=<nostr+walletconnect://…>" });
+    expect(await refusal({ type: "lightning", provider: "nwc", values: { bogus: "1" } })).toEqual({ code: "bad_request", message: "nwc takes no --value bogus: its fields are uri" });
+    expect(await refusal({ type: "bitcoin", values: { network: "signet" } })).toEqual({ code: "bad_request", message: "bdk needs --value script=<bip84|bip86>" });
+    expect(await refusal({ type: "fedimint" })).toEqual({ code: "bad_request", message: "fedimint needs --invite <fed11…>" });
+    expect(await refusal({ type: "spark", network: "mainnet" })).toEqual({ code: "bad_request", message: "spark on mainnet needs --api-key <key> (or api-key=… on --stdin)" });
+    expect(await refusal({ type: "cashu", provider: "nwc" })).toEqual({ code: "usage", message: "--provider and --value name a lightning or bitcoin source: not with cashu" });
+    expect(await refusal({ type: "cashu", values: { uri: "x" } })).toEqual({ code: "usage", message: "--provider and --value name a lightning or bitcoin source: not with cashu" });
+    // WebLN lives in a browser page: never offered to a headless Ghostly, and refused as one it does not have.
+    expect(await refusal({ type: "lightning", provider: "webln" })).toMatchObject({ code: "bad_request", message: expect.stringContaining("ghostly wallet list") });
+    expect(node.walletCreate).not.toHaveBeenCalled();
+    const listed = await callApi(ctx, "wallet.list", {}) as { offers: { type: string; providers?: { id: string }[] }[] };
+    expect(listed.offers.find((o) => o.type === "lightning")?.providers?.map((p) => p.id)).toEqual(["nwc"]);
+    // Given in full, it reaches the engine.
+    await callApi(ctx, "wallet.create", { type: "lightning", provider: "nwc", values: { uri: "nostr+walletconnect://x" } });
+    expect(node.walletCreate.mock.calls.at(-1)![0]).toMatchObject({ type: "lightning", providerId: "nwc", values: { uri: "nostr+walletconnect://x" } });
   });
 
   it("history takes a whole number of entries", async () => {
