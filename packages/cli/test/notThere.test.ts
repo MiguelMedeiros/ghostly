@@ -11,7 +11,11 @@ import { callApi, type ApiContext } from "../src/api";
 function fake() {
   const link = { id: "chat-one", label: "Alice", peerPubKeyZ32: "pchat-one", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", textDelivery: "stream", pairing: { status: "ready" },
     identities: { support: true, shared: [{ id: "proof-1", provider: "github", subject: "ana", status: "accepted", at: 1 }], received: [{ id: "their-1", provider: "github", subject: "bo", status: "verified" }] } } as unknown as LinkView;
-  const rows: StoredMessage[] = [{ linkId: "chat-one", id: "me_1", text: "hi", sender: "me", timestamp: 1, via: "datalink", delivery: "failed" }];
+  const rows: StoredMessage[] = [
+    { linkId: "chat-one", id: "me_1", text: "hi", sender: "me", timestamp: 1, via: "datalink", delivery: "failed" },
+    { linkId: "chat-one", id: "me_2", text: "got there", sender: "me", timestamp: 2, via: "datalink", delivery: "delivered" },
+    { linkId: "chat-one", id: "peer_1", text: "their words", sender: "peer", timestamp: 3, via: "datalink" },
+  ];
   const node = {
     getState: () => ({ links: [link], groups: [], settings: {}, transport: {},
       services: [{ id: "svc-1", name: "Notes", target: "http://127.0.0.1:8080", enabled: true, sharedWith: [], requests: 0 }],
@@ -79,6 +83,13 @@ describe("a message that is not there", () => {
     expect(node.retryMessage).not.toHaveBeenCalled();
     expect(await callApi(ctx, "chat.retry", { chat: "Alice", message: "me_1" })).toEqual({ chat: "chat-one", messageId: "me_1" });
     expect(node.retryMessage).toHaveBeenCalledWith({ linkId: "chat-one", messageId: "me_1" });
+  });
+
+  it("a delivered message, or the contact's own, is refused for retry and the engine is not asked", async () => {
+    const { ctx, node } = fake();
+    await expect(callApi(ctx, "chat.retry", { chat: "Alice", message: "me_2" })).rejects.toMatchObject({ code: "refused", message: "Nothing to send again: it was delivered" });
+    await expect(callApi(ctx, "chat.retry", { chat: "Alice", message: "peer_1" })).rejects.toMatchObject({ code: "not_found", message: "No message peer_1 of yours in this chat: only your own messages are sent again" });
+    expect(node.retryMessage).not.toHaveBeenCalled();
   });
 });
 
