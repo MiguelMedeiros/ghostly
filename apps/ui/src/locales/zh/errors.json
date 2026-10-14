@@ -4,6 +4,8 @@
     "limitedNext": "确认成功后即可使用。请检查你的网络连接。",
     "localAddress": "Ghostly 需要你的许可才能访问该本地地址",
     "lostPeer": "与 Ghostly 节点的连接已断开",
+    "noRoom": "此设备没有足够的空间",
+    "noRoomNext": "请释放空间后重试。",
     "pickCard": "请先选择一张 Lightning 卡片",
     "signerKey": "你的签名器持有的密钥与此身份不同。没有发布任何内容。",
     "starting": "Ghostly 正在启动…",

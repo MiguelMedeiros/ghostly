@@ -4,6 +4,8 @@
     "limitedNext": "確認できると使えるようになります。接続を確認してください。",
     "localAddress": "そのローカルアドレスに接続するには、Ghostly への許可が必要です",
     "lostPeer": "Ghostly のピアとの接続が失われました",
+    "noRoom": "この端末に十分な空き容量がありません",
+    "noRoomNext": "空き容量を作ってから再試行してください。",
     "pickCard": "先に Lightning カードを選んでください",
     "signerKey": "署名ツールの鍵がこの ID の鍵と異なります。何も公開されていません。",
     "starting": "Ghostly を起動しています…",

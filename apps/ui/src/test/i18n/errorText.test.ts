@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { ENGINE_ERRORS, engineText, type EngineErrorCode } from "@ghostly/core";
 import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/errorText";
 import { english } from "../../lib/english";
+import { problemText } from "../../lib/problemText";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES } from "./locales";
 
@@ -42,6 +43,9 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["That message is not in this chat, or cannot be replied to", "packages/browser/src/engine/node.ts"],
   ["That message cannot be replied to", "packages/browser/src/engine/node.ts"],
   ["There is no room left on this device for a new chat", "apps/ui/src/lib/storage.ts"],
+  // Any engine call whose storage write the browser refused for want of space (engine/server.ts): Chromium's message is empty.
+  ["Not enough space on this device (QuotaExceededError)", `${BROWSER}/engine/server.ts`, "Not enough space on this device ("],
+  ["Not enough space on this device (QuotaExceededError: The quota has been exceeded.)", `${BROWSER}/engine/server.ts`, "Not enough space on this device ("],
   ["Someone else joined with this invite first. Ask your contact for a new one.", "packages/core/src/ghostlink.ts"],
   ["Chat has been burned", "packages/browser/src/platform/useChat.ts"],
   ["No transport both apps allow is available yet", `${CORE}/ghostlink.ts`],
@@ -496,6 +500,18 @@ describe("errors in the app's language", () => {
       title: "Not enough space on this device", next: "Free some space, then pick the file again." });
     expect(knownErrorParts("Not enough space on this device to send it", translators.pt)).toEqual({
       title: "Não há espaço suficiente neste dispositivo", next: "Libere espaço e escolha o arquivo de novo." });
+  });
+
+  it.each(LANGUAGES)("a storage that is full when a group is made or a text sent says so and what to do in %s, its name behind the ⓘ", (language) => {
+    const t = translators[language];
+    const raw = "Not enough space on this device (QuotaExceededError)";
+    expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.app.noRoom"), next: t("errors.app.noRoomNext"), detail: raw });
+    expect(problemText(new Error(raw), t).title).not.toBe(t("errors.generic"));
+  });
+
+  it("a storage that is full says the same with the browser's own message, and reads in English as a sentence and its next step", () => {
+    const raw = "Not enough space on this device (QuotaExceededError: The quota has been exceeded.)";
+    expect(problemText(new Error(raw), english)).toEqual({ tone: "error", title: "Not enough space on this device", next: "Free some space, then try again.", detail: raw });
   });
 
   it("a picked file that changed on disk before its copy says it cannot be read and what to do, not the browser's English", () => {
