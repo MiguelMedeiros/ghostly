@@ -613,6 +613,20 @@ describe("settings", () => {
     await expect(callApi(ctx, "settings.set", { iceServers: [{ urls: "turn:t.example.org:3478" }] })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("username and credential") });
   });
 
+  it("say a relay address the engine refuses as a wrong value, named by its key, in a terminal's words", async () => {
+    // Each was `engine` (exit 1), in the app's words ("Enter at least one relay address").
+    const { ctx, node } = fake();
+    const refusals: [Record<string, unknown>, string, string][] = [
+      [{ relays: ["notaurl"] }, "Enter at least one relay address (https://…)", "relays: give at least one relay address (https://…)"],
+      [{ irohRelays: ["x"] }, "Not a relay address: x", "irohRelays: not a relay address: x"],
+      [{ hyperdhtRelay: "nope" }, "Enter a relay address (wss://…)", "hyperdhtRelay: give a relay address (wss://…)"],
+    ];
+    for (const [patch, engine, said] of refusals) {
+      node.updateSettings.mockRejectedValueOnce(new Error(engine));
+      await expect(callApi(ctx, "settings.set", patch)).rejects.toMatchObject({ code: "bad_request", message: said });
+    }
+  });
+
   it("take TCP and TLS TURN servers for the apps, and say the CLI does not use them", async () => {
     const { ctx, node } = fake();
     const turn = (urls: string) => ({ urls, username: "u", credential: "c" });
