@@ -107,7 +107,8 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   received message also has `sentAt`, the time its sender's clock said. Histories are ordered by `timestamp`.
 - `--since <seq>` replays from the journal (the last 10,000 events); `--cursor <file>` remembers the last event
   handled, so a restarted bot resumes where it stopped.
-- `--type message.received` keeps one type; `--type message.` a family.
+- `--type message.received` keeps one type; `--type message` (or `message.`) a family. A family deeper down ends in
+  "." (`group.typing.`): `group.message` is that type alone.
 - `--from <chat|key>` and `--group <group>` (each again for more) are an allowlist: only those chats' and groups'
   events get through. See [Allowlist](#allowlist).
 - `--turns` gives one `agent.turn` event per message to answer. See [Agent turns](#agent-turns).
