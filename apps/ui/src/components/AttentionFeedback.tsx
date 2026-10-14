@@ -8,7 +8,7 @@ import {chatPath} from "../lib/url";
 import {groupPath} from "../lib/groups";
 import {loadSettings} from "../lib/settings";
 import {attentionOutcome,chatOfLink,mutedFor} from "../lib/chatMute";
-import {eventSound,firstMentionNoticeOfBurst,firstMentionOfBurst,firstNoticeOfBurst,firstOfBurst,playCue} from "../lib/cues";
+import {eventSound,firstMentionNoticeOfBurst,firstMentionOfBurst,firstNoticeOfBurst,firstOfBurst,firstReactionNoticeOfBurst,playCue} from "../lib/cues";
 import {setDeckSwitchSound} from "./deck/motion";
 import {useI18n} from "../contexts/I18nContext";
 import {switchProfile} from "../lib/profiles";
@@ -51,9 +51,10 @@ export function AttentionFeedback(){
       // (apps/ui/src/lib/soundGate.ts).
       if(outcome.sound && event.type!=="reaction" && (event.type!=="message" || (event.mention ? firstMentionOfBurst : firstOfBurst)(chat ?? event.linkId ?? ""))) playSound(eventSound({...event,type:event.type},notifications));
       // So is a chat's system notification (another chat's still shows); a mention shows inside a burst, once a burst of
-      // mentions. Not awaited under the lock: a notification server that never answers would hold every later event's
-      // sound back.
-      if(outcome.notice && (event.type!=="message" || (event.mention ? firstMentionNoticeOfBurst : firstNoticeOfBurst)(chat ?? event.linkId ?? ""))) void showPrivateNotification(event.id,event.type==="reaction"?t("chat.reactions.notice"):t("settings.privateNotice"),chat,true);
+      // mentions; reactions that come together, once a burst of reactions. Not awaited under the lock: a notification
+      // server that never answers would hold every later event's sound back.
+      const burst=event.type==="reaction" ? firstReactionNoticeOfBurst : event.type==="message" ? (event.mention ? firstMentionNoticeOfBurst : firstNoticeOfBurst) : undefined;
+      if(outcome.notice && (!burst || burst(chat ?? event.linkId ?? ""))) void showPrivateNotification(event.id,event.type==="reaction"?t("chat.reactions.notice"):t("settings.privateNotice"),chat,true);
     };
     if(navigator.locks) void navigator.locks.request("ghostly-feedback",run);
     else void run();

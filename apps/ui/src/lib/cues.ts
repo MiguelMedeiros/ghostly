@@ -144,9 +144,16 @@ export const firstMentionOfBurst = (chat: string, now = Date.now()) => firstIn(m
 /** Whether a mention's system notification for `chat` may show now, and if so, marks it shown. */
 export const firstMentionNoticeOfBurst = (chat: string, now = Date.now()) => firstIn(mentionNoticeAt, chat, now);
 
+/**
+ * Reactions to my messages that come together in one chat (25 members react at once, one keeps changing theirs) are one
+ * system notification too, in a burst of their own: a message of that chat still shows.
+ */
+const reactionNoticeAt = new Map<string, number>();
+export const firstReactionNoticeOfBurst = (chat: string, now = Date.now()) => firstIn(reactionNoticeAt, chat, now);
+
 /** Forgets what played (tests). */
 export function resetCues(): void {
-  lastPlayed.clear(); playedKeys.length = 0; burstAt.clear(); anyBurstAt = undefined; noticeAt.clear(); mentionAt.clear(); mentionNoticeAt.clear();
+  lastPlayed.clear(); playedKeys.length = 0; burstAt.clear(); anyBurstAt = undefined; noticeAt.clear(); mentionAt.clear(); mentionNoticeAt.clear(); reactionNoticeAt.clear();
 }
 
 /** The chat on screen, as the mute store names it, for cues played from inside its messages (a spoiler, a delete). */
