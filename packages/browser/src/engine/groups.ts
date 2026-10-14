@@ -108,8 +108,9 @@ export interface GroupsHost {
   /**
    * Resolves false when the message was there already: nothing new came (void: a host that does not say). `live`: it
    * came straight from its author as it was written (`GroupIncomingMessage.live`), what tells the author's clock.
+   * `place`: the one `placeAbove` gave it, else it goes where it comes.
    */
-  storeMessage(message: StoredMessage, live?: boolean): Promise<boolean | void>;
+  storeMessage(message: StoredMessage, live?: boolean, place?: number): Promise<boolean | void>;
   /**
    * A message stored from a copy that was not whole, now whole: its mentions, reply and hop count join the stored one
    * (stored now if it is not there). Absent: `storeMessage`, which keeps the first.
@@ -128,6 +129,12 @@ export interface GroupsHost {
    * where it came.
    */
   placeAgain?(linkId: string, ids: readonly string[]): Promise<void>;
+  /**
+   * A place in the history just above this stored message, below the one before it, for a message to be stored there
+   * (`storeMessage`): a member's message that comes after a later one of theirs (`GroupAuthorOrder`). Undefined when
+   * the two leave no room (or it is not there any more). Absent: it goes where it comes.
+   */
+  placeAbove?(linkId: string, id: string): Promise<number | undefined>;
   /** A private group's roster or my status in it changed, or I forgot it. */
   membersChanged?(groupId: string): void;
   /**
@@ -2377,14 +2384,19 @@ export class Groups {
           ...(m.frame && { frame: m.frame }) };
         // A copy handed on stripped came first: the whole one adds what it lacked (WISP 902 · Group Mesh § Catch-up).
         const completed = !!m.completes && !!this.host.completeMessage;
-        // Its place is taken as the store is called, before anything is awaited: the line order follows it from there.
-        const placing = completed ? undefined : this.lineOrder.placing(MESSAGE_LINK(state.id), { id: m.id, epoch: m.epoch, line: false }, this.now());
-        const stored = completed ? (await this.host.completeMessage!(message), false) : await this.host.storeMessage(message, m.live);
+        // Older than a message of its author placed already (a catch-up's older page): just above it, where there is room.
+        const row = { sender: m.sender, epoch: m.epoch, seq: m.seq, id: m.id };
+        const above = completed || m.sender === session.myKey ? undefined : this.authorOrder.above(state.id, row);
+        const place = above === undefined ? undefined : await this.host.placeAbove?.(message.linkId, above).catch(() => undefined);
+        const placedAbove = place === undefined ? undefined : above;
+        // Its place is taken as the store is called, after the last await before it: the line order follows it from there.
+        const placing = completed ? undefined : this.lineOrder.placing(MESSAGE_LINK(state.id), { id: m.id, epoch: m.epoch, line: false }, this.now(), placedAbove);
+        const stored = completed ? (await this.host.completeMessage!(message), false) : await this.host.storeMessage(message, m.live, place);
         placing?.(stored !== false);
         // On its row now: new, or the whole copy of one stored before. A copy I had already changes no row.
         if (m.frame && (completed || stored !== false)) await this.frameKept(state.id, m.id, m.frame);
         // Mine are followed too: a member's rows placed again take along the lines written after them, mine included.
-        if (!completed && stored !== false) this.authorOrder.placed(state.id, { sender: m.sender, epoch: m.epoch, seq: m.seq, id: m.id, at: this.now() });
+        if (!completed && stored !== false) this.authorOrder.placed(state.id, { ...row, at: this.now() }, placedAbove);
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, came));
         if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, came));

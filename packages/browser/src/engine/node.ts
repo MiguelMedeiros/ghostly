@@ -191,6 +191,7 @@ import { composeDetails, fileWire, pathSnapshot, withSend, type PathSnapshot } f
 import { db } from "./db";
 import { settleAhead } from "./arrival";
 import { Groups, meshEdgeIntervals, otherEndSeen } from "./groups";
+import { AUTHOR_ORDER_ROOM } from "./groupAuthorOrder";
 import { edgeView } from "./groupEdges";
 import { GroupPayments } from "./groupPayments";
 import { Reactions,groupReactionsToResend, latestReaction, noteAfterChange, noteIfStanding } from "./reactions";
@@ -1346,12 +1347,13 @@ export class GhostlyNode implements EngineImplementation {
       else void this.closeGroupLink(linkId).catch(() => {});
     },
     edgeNick: linkId => this.links.get(linkId)?.presence.nick || undefined,
-    storeMessage: (message, live) => this.storeNewMessage(message, live),
+    storeMessage: (message, live, place) => this.storeNewMessage(message, live, place),
     completeMessage: message => this.completeGroupMessage(message),
     // A row of its own, small: written with no disk sync of its own (the frame is a copy others hold too).
     forgetFrame: async (linkId, id) => { await db.patchMessage(linkId, id, stored => stored.frame ? { frame: undefined } : null, true); },
     keepFrame: async (linkId, id, frame) => { await db.patchMessage(linkId, id, () => ({ frame }), true); },
     placeAgain: (linkId, ids) => this.placeAgain(linkId, ids),
+    placeAbove: (linkId, id) => this.placeAbove(linkId, id),
     membersChanged: groupId => this.groupMembersChanged(groupId),
     historyGone: groupId => this.groupHistoryGone(groupId),
     emit: () => this.emitState(),
@@ -7711,8 +7713,9 @@ export class GhostlyNode implements EngineImplementation {
    * ahead of this clock nor above a row placed here since the app started. The admin's clock picks that time: two
    * minutes ahead, "X joined" sat under everything said in the next two minutes; behind, it went above what the
    * members had just read. Read late with nothing newer here (a member back after a while), it keeps its moment.
+   * `place`: a received row's place given already (`placeAbove`): it takes it, and the next row still goes past the last.
    */
-  private placed(message: StoredMessage): StoredMessage {
+  private placed(message: StoredMessage, place?: number): StoredMessage {
     const now = Date.now(), last = this.placedAt.get(message.linkId) ?? 0;
     if (message.event) {
       if (message.sender !== "peer") return message;
@@ -7722,8 +7725,8 @@ export class GhostlyNode implements EngineImplementation {
     }
     if (message.sender === "peer" && message.sentAt === undefined) {
       const sentAt = claimedTime(message.timestamp);
-      message = { ...message, timestamp: arrivalKey(now, last), ...(sentAt !== undefined && { sentAt }) };
-      this.placedAt.set(message.linkId, message.timestamp);
+      message = { ...message, timestamp: place ?? arrivalKey(now, last), ...(sentAt !== undefined && { sentAt }) };
+      if (place === undefined) this.placedAt.set(message.linkId, message.timestamp);
     }
     // Mine count too, up to now: a message that comes in the millisecond I sent one goes below it.
     else this.placedAt.set(message.linkId, Math.max(last, Math.min(message.timestamp, now)));
@@ -7746,13 +7749,27 @@ export class GhostlyNode implements EngineImplementation {
     if (moved.length) await this.messagesChanged(linkId, moved.map(m => m.id));
   }
 
+  /**
+   * A place just above this row of its history, below the one before it: where a group member's message that comes
+   * after a later one of theirs is stored, so nothing has to move once the rest comes (WISP 400, requirement 10). At
+   * most `AUTHOR_ORDER_ROOM` below the row, so the next older page finds room above it too; none when the two rows are
+   * less than two milliseconds apart (it goes at the end, and is placed again).
+   */
+  private async placeAbove(linkId: string, id: string): Promise<number | undefined> {
+    const row = await db.getMessage(linkId, id);
+    if (!row) return undefined;
+    const before = (await db.getMessagePage(linkId, { limit: 1, before: { timestamp: row.timestamp, id: row.id } })).messages[0];
+    const floor = before?.timestamp ?? -Infinity;
+    return row.timestamp - floor < 2 ? undefined : Math.max(floor + 1, row.timestamp - AUTHOR_ORDER_ROOM);
+  }
+
   private async storeMessage(message: StoredMessage): Promise<void> { await this.storeNewMessage(message); }
 
   /**
    * Stores a message; false when it was there already (or deleted here): nothing new came. `straight`: a group's,
-   * straight from its author (`clockSample`).
+   * straight from its author (`clockSample`). `place`: as `placed`.
    */
-  private async storeNewMessage(message: StoredMessage, straight = false): Promise<boolean> {
+  private async storeNewMessage(message: StoredMessage, straight = false, place?: number): Promise<boolean> {
     // A payment with a member lands in the group's history, from that member, under an id of the edge's own.
     const edge = this.links.get(message.linkId)?.stored;
     if (edge?.group && edge.groupPeer && !edge.groupEntry)
@@ -7761,7 +7778,7 @@ export class GhostlyNode implements EngineImplementation {
     const pay = parsePayLink(message.linkId);
     if (pay?.member) message = { ...message, linkId: `group:${pay.groupId}`, id: `${message.linkId}:${message.id}`, ...(message.sender === "peer" ? { member: pay.member } : {}) };
     // Its place, in the order rows come (before anything is awaited).
-    message = this.placed(message);
+    message = this.placed(message, place);
     const live = this.links.get(message.linkId);
     // The peer republishes what it sent for a few minutes: what was deleted here stays deleted.
     if (live?.stored.deletedIds?.includes(message.id)) return false;
