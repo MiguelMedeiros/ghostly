@@ -75,7 +75,7 @@ function BuiltInRow({ app, busy, onOpen, onRemove }: { app: BuiltInAppOffer; bus
         </span>
       </div>
       <div className="flex items-center gap-2 ms-auto">
-        <Button data-testid="built-in-app-remove" disabled={busy} aria-label={t("apps.builtIn.removeNamed", { title: app.title })} onClick={onRemove}>{t("apps.builtIn.remove")}</Button>
+        <Button data-testid="built-in-app-remove" loading={busy} aria-label={t("apps.builtIn.removeNamed", { title: app.title })} onClick={onRemove}>{t("apps.builtIn.remove")}</Button>
         <Button variant="primary" data-testid="built-in-app-open" disabled={busy} aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={onOpen}>{t("apps.page.open")}</Button>
       </div>
     </div>
@@ -105,11 +105,13 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
   const [chosen, setChosen] = useState<boolean | null>(null);
   const open = chosen ?? (store.apps.length > 0 && (alone || store.apps.length <= LISTING_FEW));
   const [busy, setBusy] = useState(false);
+  // Which button started the work in progress: that one shows it is going (Refresh, Remove).
+  const [pending, setPending] = useState<"refresh" | "remove" | null>(null);
   const focusBack = useFocusBack(busy);
-  const work = async (call: () => Promise<unknown>, done?: () => void) => {
+  const work = async (call: () => Promise<unknown>, done?: () => void, which: "refresh" | "remove" | null = null) => {
     focusBack();
-    setBusy(true);
-    try { await call(); done?.(); onChanged(); } catch (e) { onError(e); } finally { setBusy(false); }
+    setBusy(true); setPending(which);
+    try { await call(); done?.(); onChanged(); } catch (e) { onError(e); } finally { setBusy(false); setPending(null); }
   };
   // A store may list up to 4096 apps: one page of them at a time, and a search over them all.
   const [limit, setLimit] = useState(LISTING_PAGE);
@@ -160,8 +162,8 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
         </button>
         <div className="flex items-center gap-2">
           {/* A store read again or removed can stop an installed app (a removal) or change who lists it: both lists again. */}
-          <Button data-testid="app-store-refresh" disabled={busy} onClick={() => void work(() => engine.call("appStoreRefresh", { key: store.key }))}>{read ? t("apps.store.refresh") : t("apps.store.read")}</Button>
-          <Button variant="danger" data-testid="app-store-remove" disabled={busy} onClick={() => void work(() => engine.call("appStoreRemove", { key: store.key }), onRemoved)}>{t("apps.store.remove")}</Button>
+          <Button data-testid="app-store-refresh" disabled={busy} loading={pending === "refresh"} onClick={() => void work(() => engine.call("appStoreRefresh", { key: store.key }), undefined, "refresh")}>{read ? t("apps.store.refresh") : t("apps.store.read")}</Button>
+          <Button variant="danger" data-testid="app-store-remove" disabled={busy} loading={pending === "remove"} onClick={() => void work(() => engine.call("appStoreRemove", { key: store.key }), onRemoved, "remove")}>{t("apps.store.remove")}</Button>
         </div>
       </div>
       {open && store.apps.length > LISTING_PAGE && (
