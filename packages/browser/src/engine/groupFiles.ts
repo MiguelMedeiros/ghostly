@@ -167,6 +167,8 @@ interface Kept {
   holders: string[];
   /** A discard of what an earlier transfer stored, which the next one waits for. */
   idle?: Promise<void>;
+  /** Its transfer's write under way to storage, which a Leave waits for before it deletes the file (`drop`). */
+  writing?: Promise<unknown>;
   /** Bytes a transfer stored here that the next one goes on from, shown while it waits for a holder. */
   stored?: number;
   /** The transfer (its id on the edge) its person cancelled: what it stored is deleted, not kept for the next one. */
@@ -455,6 +457,8 @@ export class GroupFileDesk {
       this.byMessage.delete(`${groupId}\n${kept.message}`);
       this.wants.delete(kept.id);
       this.deps.transfers.delete(kept.id);
+      // A write under way goes first; after it, the file's transfer writes nothing more (`openTarget`).
+      await kept.writing?.catch(() => {});
       await this.deps.store.remove(kept.id).catch(() => {});
     }
     for (const [linkId, edge] of this.edgesById) if (edge.groupId === groupId) { edge.files.detach(); this.edgesById.delete(linkId); }
@@ -886,14 +890,21 @@ export class GroupFileDesk {
     kept.fresh = false;
     const resumed = writer.offset > 0;
     let damaged = false;
+    // Its group was left (`drop`): what the transfer still has to write (its checkpoint as the edge closes) is deleted,
+    // not stored as a file nothing knows of.
+    const gone = () => this.kept.get(kept.id) !== kept;
+    const write = async <T>(op: () => Promise<T>): Promise<T> => {
+      if (gone()) { await writer.discard(); throw new Error("No such file"); }
+      return await (kept.writing = op());
+    };
     return {
       offset: writer.offset,
-      append: bytes => writer.append(bytes),
-      flush: () => writer.flush(),
+      append: bytes => write(() => writer.append(bytes)),
+      flush: () => write(() => writer.flush()),
       // Against the author's digest, read back from storage, not the holder's word: a holder can withhold a file, never
       // serve another one.
       verify: async () => {
-        damaged = (await writer.digest()) !== kept.meta.d;
+        damaged = (await write(() => writer.digest())) !== kept.meta.d;
         const want = this.wants.get(kept.id);
         if (damaged && want) want.why = "damaged";
         return !damaged;
@@ -903,7 +914,7 @@ export class GroupFileDesk {
       discard: () => {
         // Whole from this holder and damaged: its bytes are not the author's, and it is not asked for them again.
         if (damaged) { kept.stored = 0; if (resumed) kept.fresh = kept.unclear = true; else kept.damaged.add(edge.peer); }
-        return (kept.idle = (damaged || kept.dropped === record.id ? writer.discard() : writer.close()).catch(() => {}));
+        return (kept.idle = (damaged || kept.dropped === record.id || gone() ? writer.discard() : writer.close()).catch(() => {}));
       },
     };
   }
