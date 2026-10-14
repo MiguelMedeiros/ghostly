@@ -68,6 +68,7 @@
   "services": "共有サービス",
   "servicesNeedApp": "Ghostly の拡張機能またはデスクトップアプリが必要です",
   "servicesShared": "このチャットで {{count}} 件共有中",
+  "sharedTextFile": "共有されたテキスト",
   "skinTone": "肌の色",
   "takePhoto": "写真を撮る",
   "tooLong": "長すぎて送信できません（{{count}} 文字、上限は {{max}}）。",
