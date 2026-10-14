@@ -84,7 +84,6 @@ import {
   identityFromSeed,
   parseLocalTarget,
   randomBytes,
-  safeBlobType,
   serviceIdFromName,
   toBase64Url,
   webLocalFetch,
@@ -1060,9 +1059,19 @@ export class GhostlyNode implements EngineImplementation {
       if (live.stored.deletedIds?.includes(`peer_${wire.wireId}`)) return null;
       live.files.wireIds.add(wire.wireId);
       live.files.receivedBytes += wire.size;
-      // The bytes first, then the message that shows them: a message never points at a file that is not there.
-      await fileStore.put({ id: file.id, linkId, blob: new Blob([bytes as BlobPart], { type: safeBlobType(file.mime) }), createdAt: Date.now(), direction: "in", wireId: wire.wireId, digest,
-        metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp, voice: wire.voice, video: wire.video, image: wire.image }, transfer: { state: "done", transferred: wire.size, size: wire.size } });
+      // The bytes first, then the message that shows them: a message never points at a file that is not there. In file
+      // storage, as a file that arrived live: a Blob in its record stayed in the CLI's memory and snapshot for good.
+      const storage = await fileBytes();
+      try {
+        await storage.stage(file.id, new Blob([bytes as BlobPart]));
+        await fileStore.put({ id: file.id, linkId, bytes: storage.kind, createdAt: Date.now(), direction: "in", wireId: wire.wireId, digest,
+          metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp, voice: wire.voice, video: wire.video, image: wire.image }, transfer: { state: "done", transferred: wire.size, size: wire.size } });
+      } catch (error) {
+        await storage.remove(file.id).catch(() => {});
+        live.files.wireIds.delete(wire.wireId);
+        live.files.receivedBytes -= wire.size;
+        throw error;
+      }
       this.transfers.set(file.id, { state: "done", transferred: wire.size, size: wire.size });
       await this.storeMessage({ linkId, id: `peer_${wire.wireId}`, text: fileMessageText(file), sender: "peer", timestamp: wire.timestamp, via: "hold", file,
         ...(wire.reply && { replyTo: receivedPairedReply(wire.reply) }), ...(wire.forwarded && { forwarded: wire.forwarded }),
