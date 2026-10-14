@@ -1,4 +1,4 @@
-import { identityFromSeedB64, type GhostRecord } from "@ghostly/core";
+import { DiscoveryBudgetError, identityFromSeedB64, type GhostRecord } from "@ghostly/core";
 import { Groups, meshEdgeScale, type GroupStore, type GroupsHost } from "../src/engine/groups";
 import { COMMUNITY_TIMINGS, type CommunityTimings } from "../src/engine/community";
 import type { StoredGroup, StoredMessage } from "../src/shared/types";
@@ -114,6 +114,11 @@ export class CommunityWorld {
   /** Fails an app's Pkarr reads (a test says whose, and of which key): the relays' budget, or the network. */
   failRead: ((peer: Peer, key: string) => boolean) | null = null;
   /**
+   * Refuses every background request of an app (a test says whose): the relays' budget while its links signal and the
+   * looks of its other chats take every request a minute frees, ahead of a community's looks.
+   */
+  holdBackground: ((peer: Peer) => boolean) | null = null;
+  /**
    * Reads of these keys answer what the record held at the start of the step: what apps that read and write in the same
    * second see (each read is done before any of their writes lands). Writes land at once, as before.
    */
@@ -220,6 +225,7 @@ export class CommunityWorld {
       publish: async (identity, records, background, door) => {
         this.pkarrOps++;
         this.onPkarr?.(peer, "publish", identity.pubKeyZ32, !!background, !!door);
+        if (background && this.holdBackground?.(peer)) throw new DiscoveryBudgetError(1_000);
         if (!this.spend(peer, 2, background, true, `publish${background ? " bg" : ""}`)) throw new Error("Discovery request budget reached; retry shortly");
         if (peer.online) this.pkarr.set(identity.pubKeyZ32, structuredClone(records));
       },
@@ -227,6 +233,7 @@ export class CommunityWorld {
         this.pkarrOps++;
         this.onPkarr?.(peer, "resolve", key, !!background, !!door);
         if (this.failRead?.(peer, key)) throw new Error("No Pkarr relay reachable");
+        if (background && this.holdBackground?.(peer)) throw new DiscoveryBudgetError(1_000);
         if (!this.spend(peer, 1, background, false, `resolve${background ? " bg" : ""}`)) throw new Error("No Pkarr relay reachable");
         const store = this.readsFromStepStart?.(key) ? this.stepStart : this.pkarr;
         return peer.online ? structuredClone(store.get(key) ?? null) : null;

@@ -1044,8 +1044,9 @@ export class Communities {
     live.lastBeaconRead = now;
     const keys = beaconKeys(live.session.state.rv, groupId);
     // A hub's own reading goes as its knock bell does: while someone is coming in (`doorBusy`), not held back while its new
-    // edges signal (`PkarrRequestOptions.door`).
-    const records = await this.host.resolve(keys.identity.pubKeyZ32, true, this.doorBusy(groupId, live, now)).catch(() => undefined);
+    // edges signal (`PkarrRequestOptions.door`). A member's first, with no edge up, is its way back (`wayBack`).
+    const back = !live.beaconAt && this.wayBack(groupId, live);
+    const records = await this.host.resolve(keys.identity.pubKeyZ32, !back, !back && this.doorBusy(groupId, live, now), back).catch(() => undefined);
     // A read that failed says nothing: what the last one said stays (entries go stale by their own time). Alone in the
     // group, nobody else can be a hub, read or not. Nor does an app wait for ever for its first reading: after as long
     // as an entry stays fresh, whatever was there would be stale by now.
@@ -1221,11 +1222,13 @@ export class Communities {
     const keys = lobbyKeys(live.session.state.rv, groupId, hub);
     // Asking for an edge, as a knock asks to be let in: not held back while my links signal (`PkarrRequestOptions.door`).
     // A member whose hub's app was killed dials it again and looks fast for the next hub's side, both for a while: held
-    // to that share, its request went out 40 s after it picked the next hub (CLI daemons, 2026-10-03).
-    const existing = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32, true, true)) ?? []);
+    // to that share, its request went out 40 s after it picked the next hub (CLI daemons, 2026-10-03). With no edge up, it
+    // is my way back (`wayBack`).
+    const back = this.wayBack(groupId, live);
+    const existing = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32, !back, !back, back)) ?? []);
     // Dated by the hub's clock, where mine differs: the hub reads its lobby by its own, and so do the members that write there.
     const theirs = now - live.hubClocks.ahead(hub);
-    await this.host.publish(keys.identity, lobbyRecords(keys, mergeLobby(existing, { key: live.session.myKey, ts: theirs }, theirs)), true, true);
+    await this.host.publish(keys.identity, lobbyRecords(keys, mergeLobby(existing, { key: live.session.myKey, ts: theirs }, theirs)), !back, !back, back);
     // The lobby keeps whole seconds: my request reads back as the second it was written in.
     (live.lobbyChecks ??= new Map()).set(hub, { at: now + LOBBY_CHECK_MS + Math.floor(this.random() * LOBBY_CHECK_JITTER_MS), ts: Math.floor(theirs / 1000) * 1000 });
     traceJoin(groupId, "lobby.written");
@@ -1348,6 +1351,19 @@ export class Communities {
    */
   private doorBusy(groupId: string, live: Live, now: number): boolean {
     return live.hub && (now < live.warmUntil || now < live.crowdUntil || now < live.lobbyBusyUntil || this.admitting(groupId, live, now));
+  }
+
+  /**
+   * A member with no edge up in this community: its first reading of the beacon (who the hubs are) and its request in a
+   * hub's lobby are its way back, and go as a group edge's signaling for a member that may be back (`signal`, within the
+   * groups' allowance), not as background looks. Those wait for every link that signals and every chat's look: a web
+   * app opened with 30 chats whose contacts were online read none of its 5 communities' beacons in 3 minutes, dropped
+   * the edges of its last run at 60 s, and got no community line, neither those written while it was closed nor new
+   * ones (bug hunt, 2026-10-13). Bounded: the reading is asked again only when refused, and a hub that does not take
+   * me is given up after its wait (`hubWaitMs`).
+   */
+  private wayBack(groupId: string, live: Live): boolean {
+    return !live.hub && ![...this.host.edges(groupId).values()].some(id => this.host.linkReady(id, 2));
   }
 
   /**
