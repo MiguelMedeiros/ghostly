@@ -126,3 +126,69 @@ test("a voice call shows your own side too, ringed by your microphone and quiet 
   await alice.page.getByTestId("call-hang-up").click();
   await expect(bob.page.getByTitle("End call")).toHaveCount(0);
 });
+
+/**
+ * What of the small call window's middle reaches the state line above it or the buttons below it: each avatar with
+ * the widest ring it can wear there (3 + 4 px, index.css), and each name that shows.
+ */
+const crowded = (p: Peer) => p.page.evaluate(() => {
+  const win = document.querySelector("[data-testid=call-window]")!;
+  const box = (el: Element, pad = 0) => { const r = el.getBoundingClientRect(); return { l: r.left - pad, t: r.top - pad, r: r.right + pad, b: r.bottom + pad }; };
+  const meet = (a: ReturnType<typeof box>, b: ReturnType<typeof box>) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+  const shown = (el: Element) => { const r = el.getBoundingClientRect(); return r.width > 1 && r.height > 1; };
+  const line = [...win.querySelectorAll("[data-testid=call-status] span")].filter(shown).map((el) => box(el));
+  const buttons = [...win.querySelectorAll(".call-controls button")].map((el) => box(el));
+  const out: string[] = [];
+  for (const avatar of win.querySelectorAll<HTMLElement>(".call-avatar")) {
+    if (line.some((at) => meet(box(avatar, 7), at))) out.push(`${avatar.dataset.testid} reaches the state line`);
+    if (buttons.some((at) => meet(box(avatar, 7), at))) out.push(`${avatar.dataset.testid} reaches the buttons`);
+  }
+  for (const name of [...win.querySelectorAll(".call-name")].filter(shown)) {
+    if (line.some((at) => meet(box(name), at))) out.push(`"${name.textContent}" runs into the state line`);
+    if (buttons.some((at) => meet(box(name), at))) out.push(`"${name.textContent}" runs into the buttons`);
+  }
+  return out;
+});
+
+test("on a phone the small window keeps the state line, the avatars with their ring, the names and the buttons apart", { tag: ["@feature:calls.speaking", "@feature:calls.mini-window", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
+  // A phone opens the small window at its smallest width, 190 x 136 px. In Arabic: right to left.
+  const [alice, bob] = await Promise.all([peer("speaking-phone-alice", { mobile: true, viewport: { width: 320, height: 568 } }), peer("speaking-phone-bob")]);
+  await pair(alice, bob);
+  await alice.page.evaluate(() => {
+    const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "ar" }));
+  });
+  await alice.page.reload();
+  for (const p of [alice, bob]) await expect(p.page.getByTestId("call-audio")).toBeEnabled({ timeout: 90_000 });
+  const callWindow = alice.page.getByTestId("call-window");
+  const small = async () => {
+    await alice.page.getByTestId("call-audio").click();
+    await bob.page.getByTitle("Accept audio call").click();
+    await expect(alice.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+    // The next call opens as the last one was left: small.
+    if ((await callWindow.getAttribute("data-mini")) !== "true") await alice.page.getByTestId("call-minimize").click();
+    await expect(callWindow).toHaveAttribute("data-mini", "true");
+    await expect(alice.page.getByTestId("call-self-avatar")).toHaveAttribute("data-speaking", "true");
+  };
+  const hangUp = async () => {
+    await alice.page.getByTestId("call-hang-up").click();
+    await expect(bob.page.getByTitle("End call")).toHaveCount(0);
+  };
+
+  await small();
+  expect(await callWindow.evaluate((el) => [el.getBoundingClientRect().width, el.getBoundingClientRect().height])).toEqual([190, 136]);
+  expect(await crowded(alice)).toEqual([]);
+  await alice.page.screenshot({ path: testInfo.outputPath("phone-small.png") });
+  // The contact's name shows; yours is there for a screen reader, beside the avatar that is yours.
+  await expect(callWindow.locator(".call-name").first()).toBeVisible();
+  await expect(callWindow.locator(".call-self .call-name")).toHaveText("أنت");
+  await hangUp();
+
+  // As low as a pulled corner takes it, 128 px.
+  await alice.page.evaluate(() => localStorage.setItem("ghostly_call_window_box", JSON.stringify({ x: 114, y: 336, w: 190, h: 128 })));
+  await small();
+  expect(await callWindow.evaluate((el) => [el.getBoundingClientRect().width, el.getBoundingClientRect().height])).toEqual([190, 128]);
+  expect(await crowded(alice)).toEqual([]);
+  await alice.page.screenshot({ path: testInfo.outputPath("phone-small-lowest.png") });
+  await hangUp();
+});
