@@ -24,7 +24,7 @@ export const GHOST_NAMES = [
 ];
 
 export function getRandomGhostName(): string {
-  const index = Math.floor(Math.random() * GHOST_NAMES.length);
+  const index = crypto.getRandomValues(new Uint32Array(1))[0]! % GHOST_NAMES.length;
   return GHOST_NAMES[index];
 }
 

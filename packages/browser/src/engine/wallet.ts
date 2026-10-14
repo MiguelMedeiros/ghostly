@@ -157,9 +157,9 @@ const toStored = (mint: string, p: Proof, reserved?: boolean): StoredProof => ({
 
 /** The note of the ecash "Get test coins" brought (the engine plays its own sound for it). */
 export const TEST_COINS_NOTE = "Test coins from the test mint";
-const swapId = () => `swap-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+const swapId = () => `swap-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
 const walletTx = (mint: string, kind: WalletTxKind, amount: number, fee: number, note?: string): WalletTx => ({
-  id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+  id: `${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
   timestamp: Date.now(),
   mint,
   kind,
