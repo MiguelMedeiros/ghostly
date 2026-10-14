@@ -842,10 +842,13 @@ export class CommunitySession {
       this.ask(from);
       return false;
     }
+    // One I hold already (a second hub's copy, a catch-up answer) is dropped before its signatures are checked: its hash
+    // leaves the signature out, so a copy whose signature does not hold is dropped all the same.
+    const parsed = parseCommit(raw);
+    if (!parsed || this.known.has(communityCommitHash(parsed))) return false;
     const result = verifyCommunityCommit(raw, parent, parentRoster, this.id);
     if ("error" in result) return false;
     const commit = result.commit, h = communityCommitHash(commit);
-    if (this.known.has(h)) return false;
     // Two commits by the admin after the same commit: equivocation.
     const admin = rosterAdmin(parentRoster);
     if (commit.by === admin) {
@@ -1461,6 +1464,9 @@ export class CommunitySession {
   private async receiveMessage(from: string, raw: unknown): Promise<boolean> {
     if (!isMessageFrame(raw)) return false;
     if (raw.s === this.myKey) { this.ownFrame(raw); return false; }
+    // One I took already (from a second hub, or in a catch-up answer) is dropped before its signature is checked: it
+    // would be dropped below whether the signature holds or not.
+    if (this.isDuplicate(raw)) return false;
     // Signed by its author before anything else, so a frame no member wrote never takes a place among those waiting.
     if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return false;
     // Someone removed is heard no more, even for an epoch it was in (whose secret it still holds); one who left, for
@@ -1471,7 +1477,6 @@ export class CommunitySession {
     const roster = this.rosterOf(found.hash)!;
     // Not from a member of that epoch: nothing to read, nothing to relay.
     if (!rosterHas(roster, raw.s)) return false;
-    if (this.isDuplicate(raw)) return false;
     // From before I was let in: nothing for me to read, but its author may have reached nobody else yet (it wrote
     // before it heard of me, with no edge up, and I am its hub). Kept and passed on like any frame, never opened, so
     // the members it was written for get it; the store hands it to those only.
