@@ -175,6 +175,12 @@ const RULES: readonly Rule[] = [
   { match: /^connection reset by peer$/, key: "errors.transport.dialRefused", next: "errors.transport.dialRefusedNext", detail: true },
   { match: /^Native channel closed$/, key: "errors.transport.dialClosed", next: "errors.transport.dialRefusedNext", detail: true },
   { match: /^PEER_NOT_FOUND: [\s\S]*$/, key: "errors.transport.peerNotFound", next: "errors.transport.peerNotFoundNext", detail: true },
+  // Seen but not answering (HyperDHT's own errors): a frozen or asleep app keeps its record fresh, and is still dialled.
+  { match: /^(?:PEER_CONNECTION_FAILED|BAD_HOLEPUNCH_REPLY|HOLEPUNCH_[A-Z_]+): [\s\S]*$/, key: "errors.transport.peerNotAnswering", next: "errors.transport.peerNotAnsweringNext", detail: true },
+  // The Desktop's HyperDHT runtime (apps/desktop/src/hyperdht.rs): a dial while its own redial runs, the runtime gone.
+  { match: /^A native connection attempt is already running$/, key: "errors.transport.dialInFlight", next: "errors.transport.dialInFlightNext", detail: true },
+  { match: /^(?:HyperDHT endpoint closed|HyperDHT runtime stopped|Native runtime stopped)$/, key: "errors.transport.runtimeStopped", next: "errors.transport.runtimeStoppedNext", detail: true },
+  { match: /^HyperDHT failed$/, key: "errors.transport.runtimeFailed", next: "errors.transport.switchRetryNext", detail: true },
   { match: /^Native channel did not reach the application$/, key: "errors.transport.notReachedApp", next: "errors.transport.switchRetryNext", detail: true },
   // What the engine stores when a switch failed with no reason (engine/node.ts, transportLog.ts).
   exact("It did not connect", "errors.transport.didNotConnect"),
