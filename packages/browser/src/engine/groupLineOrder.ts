@@ -36,13 +36,16 @@ export class GroupLineOrder {
   /**
    * A row is being stored, a line of the history or a message sealed under this epoch, and takes its place now: `at` is
    * when, on the engine's clock. Call what this returns with whether it was new: a message below a line of a later
-   * epoch takes the line (and the rows after it written knowing it) below it.
+   * epoch takes the line (and the rows after it written knowing it) below it. `above`: the row it is stored just above
+   * (`GroupAuthorOrder.above`); else it goes to the end.
    */
-  placing(linkId: string, row: { id: string; epoch: number; line: boolean }, at: number): (stored: boolean) => void {
+  placing(linkId: string, row: { id: string; epoch: number; line: boolean }, at: number, above?: string): (stored: boolean) => void {
     if (!this.host.placeAgain) return () => {};
     const followed: Followed = { ...row, at };
     const rows = (this.rows.get(linkId) ?? []).filter(r => r.at > at - AUTHOR_ORDER_WINDOW_MS).slice(-(AUTHOR_ORDER_ROWS - 1));
-    rows.push(followed);
+    const index = above === undefined ? -1 : rows.findIndex(r => r.id === above);
+    if (index >= 0) rows.splice(index, 0, followed);
+    else rows.push(followed);
     this.rows.set(linkId, rows);
     return stored => {
       const now = this.rows.get(linkId);
