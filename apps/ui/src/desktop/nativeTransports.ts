@@ -12,6 +12,13 @@ type Event = { type: "open"; id: number; binding: NativeBinding; incoming: boole
   | { type: "address"; descriptor: unknown };
 
 /**
+ * What a HyperDHT channel may have on the way. Its frames count until the runtime says `sent`, a trip from the page to
+ * the runtime and back, so it holds more than Iroh's 120 KiB: a file's quarter of it is four 16 KiB chunks on the way,
+ * where two were while a frame counted only until Rust queued it.
+ */
+const HYPERDHT_SEND_BUDGET = 256 * 1024;
+
+/**
  * Ordered IPC writes and bounded buffering before the session installs its reader. Iroh's frames count against the send
  * budget until Rust answered; HyperDHT's until its runtime says it sent them (`sent`), while the next ones go on, so a
  * frame costs no round trip to the runtime.
@@ -26,12 +33,13 @@ class NativeChannel implements FrameChannel {
   private seq = 0;
   private waiting: (() => void)[] = [];
   bufferedAmount = 0;
-  readonly sendBudget = 120 * 1024;
+  readonly sendBudget: number;
   /** HyperDHT's frames mark a binary message (WISP 103 § Frames), and its sidecar and Rust carry one; Iroh's take text only. */
   readonly binary: boolean;
   onClose: FrameChannel["onClose"] = null;
   constructor(readonly id: number, private endpointId: () => number, private kind: "iroh" | "hyperdht") {
     this.binary = kind === "hyperdht";
+    this.sendBudget = kind === "hyperdht" ? HYPERDHT_SEND_BUDGET : 120 * 1024;
   }
   get onMessage() { return this.reader; }
   set onMessage(reader: FrameChannel["onMessage"]) {

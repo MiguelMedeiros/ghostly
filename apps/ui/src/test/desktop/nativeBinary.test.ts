@@ -63,14 +63,15 @@ describe("the Desktop's native channels and binary messages", () => {
     let room = false;
     void channel.drained().then(() => { room = true; });
     const sent = (seq: number) => tauri.channels[0].onmessage!({ type: "sent", id: 7, seq });
-    for (const { seq } of sends.slice(0, 4)) sent(seq);
+    for (const { seq } of sends.slice(0, 2)) sent(seq);
     await Promise.resolve();
-    expect(channel.bufferedAmount).toBe(2 * frame.length);
+    expect(channel.bufferedAmount).toBe(4 * frame.length);
     expect(room).toBe(false);
     // Room again once under a quarter of the budget (what a file may hold in it).
-    sent(sends[4].seq);
+    sent(sends[2].seq);
     await vi.waitFor(() => expect(room).toBe(true));
-    expect(channel.bufferedAmount).toBe(frame.length);
+    expect(channel.bufferedAmount).toBe(3 * frame.length);
+    for (const { seq } of sends.slice(3, 5)) sent(seq);
     // A frame the runtime could not send closes the channel, as a refused send did.
     let closed = false;
     channel.onClose = () => { closed = true; };
@@ -79,9 +80,21 @@ describe("the Desktop's native channels and binary messages", () => {
     expect(channel.bufferedAmount).toBe(0);
   });
 
+  it("HyperDHT's lets a file have four 16 KiB chunks on the way, as each waits for a trip to the runtime and back", async () => {
+    const { channel } = await incoming(createHyperEndpoint);
+    // What a file may hold on a channel: a quarter of its send budget (WISP 501, Backpressure; ghostlink.ts `filesCap`).
+    // With two, a file went at two chunks per round trip, 25% slower than when a frame counted only until Rust queued it.
+    const files = channel.sendBudget! / 4;
+    let chunks = 0;
+    while (channel.bufferedAmount < files) { channel.send(new Uint8Array(16 * 1024)); chunks++; }
+    expect(chunks).toBe(4);
+  });
+
   it("Iroh's carries text only: nothing binary is offered on it, and none is sent", async () => {
     const { channel } = await incoming(createIrohEndpoint);
     expect(channel.binary).toBeFalsy();
     expect(() => channel.send(new Uint8Array([0x04, 1]))).toThrow();
+    // Its frames count only until Rust answers: its budget is not HyperDHT's.
+    expect(channel.sendBudget).toBe(120 * 1024);
   });
 });
