@@ -1093,6 +1093,15 @@ export class CashuWallet {
     return this.pollSwaps(mints);
   }
 
+  /**
+   * A contact's ecash for this request of ours is being redeemed: written down, and the mint has not said how it ended,
+   * or it has and its chat was not told yet. Released: the mint never made it in time, and the ecash went back.
+   */
+  async redeemingFor(requestId: string): Promise<boolean> {
+    const open = await wrap<PendingSwap[]>((await store(STORES.swaps, "readonly")).getAll());
+    return open.some((s) => s.kind === "receive" && !s.released && s.payment?.requestId === requestId);
+  }
+
   private async pollSwaps(mints?: readonly string[]): Promise<void> {
     if (!mints) {
       if (this.swapTimer) clearTimeout(this.swapTimer);

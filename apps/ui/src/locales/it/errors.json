@@ -379,6 +379,7 @@
     "offline": "Sei offline",
     "onchain": "Bitcoin on-chain",
     "paidByOther": "Già pagato da un altro membro del gruppo",
+    "payingByOther": "Un altro membro del gruppo lo sta pagando",
     "refused": "Il pagamento è stato rifiutato",
     "refusedAllBack": "Sono tornati tutti i {{amount}} sats.",
     "refusedBack": "I sats sono tornati.",

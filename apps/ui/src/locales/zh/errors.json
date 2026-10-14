@@ -379,6 +379,7 @@
     "offline": "你已离线",
     "onchain": "链上比特币",
     "paidByOther": "群组中的另一位成员已经支付",
+    "payingByOther": "群组中的另一位成员正在支付",
     "refused": "付款被拒绝",
     "refusedAllBack": "全部 {{amount}} sats 已退回。",
     "refusedBack": "sats 已退回。",

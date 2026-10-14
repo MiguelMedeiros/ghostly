@@ -379,6 +379,7 @@
     "offline": "オフラインです",
     "onchain": "オンチェーンの Bitcoin",
     "paidByOther": "グループの別のメンバーがすでに支払いました",
+    "payingByOther": "グループの別のメンバーが支払い中です",
     "refused": "支払いは拒否されました",
     "refusedAllBack": "{{amount}} sats はすべて戻りました。",
     "refusedBack": "sats は戻りました。",

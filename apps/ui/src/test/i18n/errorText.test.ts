@@ -179,6 +179,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["A Lightning payment for this request is still pending", `${BROWSER}/engine/payments.ts`],
   ["You already paid this request", `${BROWSER}/engine/payments.ts`],
   ["Already paid by another member of the group", `${BROWSER}/engine/payments.ts`],
+  ["Another member of the group is paying it", `${BROWSER}/engine/payments.ts`],
   ["The payment was refused", `${BROWSER}/engine/payments.ts`],
   // A refused send's review once its ecash came back (refusedLine): what came back, less what the mint kept.
   ["Refused: Already paid by another member of the group. 98 sats came back; the mint kept 2 as its fee.", `${BROWSER}/engine/payments.ts`, " came back; the mint kept ${back.fee} as its fee."],

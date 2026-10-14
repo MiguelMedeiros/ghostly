@@ -457,11 +457,13 @@ export class PaymentDesk {
   }
 
   /**
-   * Why a token cannot pay a request to the group, checked before anything is redeemed: already paid, or it would
-   * not settle it (too little, a mint the request did not name). Undefined when it can.
+   * Why a token cannot pay a request to the group, checked before anything is redeemed: already paid, another member's
+   * ecash for it still being redeemed (the mint has not answered), or it would not settle it (too little, a mint the
+   * request did not name). Undefined when it can.
    */
-  private refuseForGroup(request: StoredPayment, payment: Payment): string | undefined {
+  private async refuseForGroup(request: StoredPayment, payment: Payment): Promise<string | undefined> {
     if (request.state !== "pending") return "Already paid by another member of the group";
+    if (await this.wallet.redeemingFor?.(request.id)) return "Another member of the group is paying it";
     const token = this.wallet.inspect?.(payment.endpoint[1]);
     if (token && token.kind === "token" && (token.amount < request.amount || !(request.mints ?? []).includes(token.mint)))
       return "This ecash does not pay the request: the amount or the mint differs";
@@ -763,7 +765,7 @@ export class PaymentDesk {
 
   onPayment(linkId: string, payment: Payment): Promise<void> {
     // Payments of one request to a group, from several members, one after the other: the first settles it, the
-    // others then find it paid and are refused before anything is redeemed.
+    // others then find it paid, or still being redeemed when the mint did not answer, and are refused before anything is redeemed.
     const key = payment.requestId && this.payments.get(payment.requestId)?.group ? `request:${payment.requestId}` : payment.id;
     const running = this.receiving.get(key);
     // Serialise even a collision from a different link, then re-check ownership.
@@ -806,7 +808,7 @@ export class PaymentDesk {
     }
     const forGroup = payment.requestId ? this.payments.get(payment.requestId) : undefined;
     if (forGroup?.group && forGroup.kind === "request" && forGroup.direction === "out" && this.owns(forGroup, linkId)) {
-      const refused = this.refuseForGroup(forGroup, payment);
+      const refused = await this.refuseForGroup(forGroup, payment);
       // Not redeemed either: the member takes it back.
       if (refused) { link.sendPaymentResult({ id: payment.id, ok: false, error: refused }); return; }
     }
