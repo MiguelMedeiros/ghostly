@@ -133,6 +133,7 @@
   },
   "files": {
     "askAgain": "Demandez à votre contact de le renvoyer.",
+    "askGroupAgain": "Redemandez-le au groupe plus tard.",
     "askedTooOften": "Votre contact a demandé ce fichier trop de fois",
     "cannotDecodeRecording": "Cet appareil ne peut pas décoder l'enregistrement",
     "cannotRetry": "Ce fichier ne peut pas être renvoyé",

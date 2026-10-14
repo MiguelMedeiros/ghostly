@@ -133,6 +133,7 @@
   },
   "files": {
     "askAgain": "Chiedi al tuo contatto di inviarlo di nuovo.",
+    "askGroupAgain": "Richiedilo al gruppo più tardi.",
     "askedTooOften": "Il tuo contatto ha chiesto questo file troppe volte",
     "cannotDecodeRecording": "Questo dispositivo non riesce a decodificare la registrazione",
     "cannotRetry": "Non è possibile riprovare con questo file",

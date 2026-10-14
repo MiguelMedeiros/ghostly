@@ -133,6 +133,7 @@
   },
   "files": {
     "askAgain": "相手にもう一度送ってもらってください。",
+    "askGroupAgain": "あとでもう一度グループに頼んでください。",
     "askedTooOften": "相手がこのファイルを何度も求めました",
     "cannotDecodeRecording": "この端末では録音をデコードできません",
     "cannotRetry": "このファイルは再試行できません",

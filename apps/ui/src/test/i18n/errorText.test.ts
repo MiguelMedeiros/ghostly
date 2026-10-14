@@ -255,6 +255,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["You sent many files to this group just now. Wait a minute.", `${BROWSER}/engine/groupFiles.ts`, "You sent many files to this group just now. Wait ${minutes > 1 ? `${minutes} minutes` : \"a minute\"}."],
   ["You sent many files to this group just now. Wait 7 minutes.", `${BROWSER}/engine/groupFiles.ts`, "You sent many files to this group just now. Wait ${minutes > 1 ? `${minutes} minutes` : \"a minute\"}."],
   ["Not enough space on this device for this file", `${BROWSER}/engine/groupFiles.ts`],
+  ["Every copy of this file arrived damaged and was deleted. Ask for it again later.", `${BROWSER}/engine/groupFiles.ts`],
   ["An empty file cannot go to a group", `${BROWSER}/platform/services.ts`],
   ["This app takes no group files", `${BROWSER}/engine/groups.ts`],
   ["A group takes files of up to 100.0 MB", `${BROWSER}/engine/node.ts`, "A group takes files of up to "],
@@ -476,6 +477,12 @@ describe("errors in the app's language", () => {
     // A file sent with + whose copy could not be read is not a paste, and is sent again.
     expect(knownErrorParts("Could not read the file: The file changed while it was being copied", english)).toEqual({
       title: "The file cannot be read", next: "Send it again, or pick the file again.", detail: "Could not read the file: The file changed while it was being copied" });
+  });
+
+  it("a group's file every holder served damaged says so, and that the group is asked again, not a contact", () => {
+    const damaged = "Every copy of this file arrived damaged and was deleted. Ask for it again later.";
+    expect(knownErrorParts(damaged, translators.pt)).toEqual({ title: "O arquivo chegou danificado", next: "Peça de novo ao grupo mais tarde." });
+    expect(knownErrorParts(damaged, english)).toEqual({ title: "The file arrived damaged", next: "Ask the group for it again later." });
   });
 
   it("an action refused in limited mode says why and what to do, in the language", () => {
