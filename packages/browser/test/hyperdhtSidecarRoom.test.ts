@@ -44,7 +44,9 @@ function child(args: string[], env: NodeJS.ProcessEnv = {}) {
     if (at >= 0) waiters.splice(at, 1)[0].resolve(line);
   });
   return {
-    write: (value: unknown) => proc.stdin.write(JSON.stringify(value) + "\n"),
+    // A sidecar told to stop still answers `sent` for what it drains while it closes (up to 3 s); the page's listener
+    // answers those with more chunks, after afterAll ended the pipe: they are dropped, not written after its end.
+    write: (value: unknown) => !proc.stdin.writableEnded && proc.stdin.write(JSON.stringify(value) + "\n"),
     next: (match: (line: Record<string, unknown>) => boolean) => new Promise<Record<string, unknown>>((resolve) => { waiters.push({ match, resolve }); }),
     on: (listen: (line: Record<string, unknown>) => void) => { listeners.push(listen); },
   };
