@@ -73,13 +73,17 @@ function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId
         ) : (
           <>
             <span className="text-accent me-1">⚡</span>
-            <span className="text-[22px] font-semibold" data-testid="money-amount">{formatAmount(amount, t.language)}</span>
-            <span className="text-text-primary/65 text-xs ms-1">{unit === "sat" ? "sats" : unit}</span>
+            {/* One run, isolated: in a right-to-left page the number and a Latin unit were one bidi run, the unit glued to it. */}
+            <bdi>
+              <span className="text-[22px] font-semibold" data-testid="money-amount">{formatAmount(amount, t.language)}</span>
+              <span className="text-text-primary/65 text-xs ms-1">{unit === "sat" ? "sats" : unit}</span>
+            </bdi>
           </>
         )}
       </p>
+      {/* A memo or a mint's address is text someone else wrote, in any script: laid out by its own direction, as a message is. */}
       {lines.filter(Boolean).map((line) => (
-        <p key={line} className="text-[12.5px] leading-snug m-0 mt-1 wrap-break-word text-text-primary/80">{line}</p>
+        <p key={line} dir="auto" className="text-[12.5px] leading-snug m-0 mt-1 wrap-break-word text-text-primary/80">{line}</p>
       ))}
       {!fits && <p className="text-[12.5px] leading-snug m-0 mt-1 text-text-primary/65" data-testid="qr-too-long">{t("payments.invoice.qrTooLong")}</p>}
       {fits && showQr && (
