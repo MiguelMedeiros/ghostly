@@ -171,6 +171,7 @@ export class CommunityWorld {
   add(name: string, extra?: (peer: Peer) => Partial<GroupsHost>, app: { staysOnline?: boolean; legacy?: boolean; unmetered?: boolean; peerBudget?: number; heldElsewhere?: number; clock?: number } = {}): Peer {
     const links = new Map<string, Edge>();
     const messages: StoredMessage[] = [];
+    const places = new Map<number, string>();
     const peer: Peer = { name, groups: null as unknown as Groups, store: memoryStore(messages), messages, links, online: true, nick: name, sent: { frames: 0, bytes: 0 }, spent: [], spentBackground: [], refused: 0, host: null as unknown as GroupsHost, ...app };
     const host: GroupsHost = {
       sendOnLink: (linkId, frame) => {
@@ -238,7 +239,14 @@ export class CommunityWorld {
         const store = this.readsFromStepStart?.(key) ? this.stepStart : this.pkarr;
         return peer.online ? structuredClone(store.get(key) ?? null) : null;
       },
-      storeMessage: async message => { if (messages.some(m => m.id === message.id)) return false; messages.push(message); return true; },
+      // A row given a place above another goes just before it; any other, to the end.
+      storeMessage: async (message, _live, place) => {
+        if (messages.some(m => m.id === message.id)) return false;
+        const at = place === undefined ? -1 : messages.findIndex(m => m.id === places.get(place));
+        if (at >= 0) messages.splice(at, 0, message);
+        else messages.push(message);
+        return true;
+      },
       forgetFrame: async (linkId, id) => { const row = messages.find(m => m.linkId === linkId && m.id === id); if (row) delete row.frame; },
       keepFrame: async (linkId, id, frame) => { const row = messages.find(m => m.linkId === linkId && m.id === id); if (row) row.frame = frame; },
       // The history is the order rows came in: these go to its end, in this order.
@@ -247,6 +255,12 @@ export class CommunityWorld {
           const i = messages.findIndex(m => m.linkId === linkId && m.id === id);
           if (i >= 0) messages.push(...messages.splice(i, 1));
         }
+      },
+      // The history has room above every row: the place names the row.
+      placeAbove: async (linkId, id) => {
+        if (!messages.some(m => m.linkId === linkId && m.id === id)) return undefined;
+        places.set(places.size + 1, id);
+        return places.size;
       },
       emit: () => {},
       myNick: () => peer.nick,
