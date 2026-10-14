@@ -225,10 +225,11 @@ export function keepPastGroupMeta(past: readonly GroupMeta[] | undefined, before
 /**
  * What to hand a member whose sync says it holds `theirs` (or none): the statements newer than theirs, oldest first, the
  * one I hold last. Those from before only when `wasIn` says it was a member under their commit: one let in since takes
- * the latest, as the group looked when it got in, and no line for what was changed before.
+ * the latest, as the group looked when it got in, and no line for what was changed before. And only those of the latest
+ * one's signer: a member takes no statement but the current admin's.
  */
 export function groupMetaToHand(past: readonly GroupMeta[] | undefined, meta: GroupMeta, theirs: { e: number; r: number } | undefined, wasIn: (m: GroupMeta) => boolean): GroupMeta[] {
-  const before = (past ?? []).filter(m => groupMetaNewer(m, theirs) && groupMetaNewer(meta, m) && wasIn(m));
+  const before = (past ?? []).filter(m => m.by === meta.by && groupMetaNewer(m, theirs) && groupMetaNewer(meta, m) && wasIn(m));
   return groupMetaNewer(meta, theirs) ? [...before, meta] : [];
 }
 

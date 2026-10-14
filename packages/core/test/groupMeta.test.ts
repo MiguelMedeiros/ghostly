@@ -99,6 +99,9 @@ describe("statements kept from before, for a member back from away", () => {
     expect(groupMetaToHand([a, b], c, { e: 2, r: 1 }, () => true)).toEqual([]);
     // Let in at epoch 1: the statements signed before are no change it saw, only the latest, as the group looks.
     expect(groupMetaToHand([a, b], c, undefined, m => m.e >= 1)).toEqual([c]);
+    // A former admin's: no member takes them.
+    const other = createIdentity(), former = signGroupMeta({ g: G, e: 1, h: H, r: 1, ts: 1 }, encodeGroupMetaBody({ name: "X" }), other.seed, other.pubKeyZ32);
+    expect(groupMetaToHand([a, former], c, { e: 0, r: 1 }, () => true)).toEqual([c]);
   });
 });
 
