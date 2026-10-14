@@ -31,13 +31,13 @@ const smilOffscreen = (page: Page) =>
 
 test("the ghosts drawn inside the home film's stages rest with their stage", async ({ page }) => {
   await page.goto("/");
-  const stages = page.locator("svg.stage");
-  await expect(stages.first()).toHaveAttribute("data-offscreen", "");
-  expect(await page.locator("svg.stage svg.ghost").count()).toBeGreaterThan(0);
+  // The film's stages below the fold, with their ghosts.
+  await expect.poll(() => page.locator("svg.stage[data-offscreen] svg.ghost").count()).toBeGreaterThan(0);
   await expect.poll(() => smilOffscreen(page)).toEqual([]);
 
   // In view, the stage's ghosts move again; off screen once more, they rest again.
-  const stage = page.locator("svg.stage:has(svg.ghost)").first();
+  const stage = page.locator("svg.stage:has(svg.ghost)").last();
+  await expect(stage).toHaveAttribute("data-offscreen", "");
   await stage.scrollIntoViewIfNeeded();
   await expect(stage).not.toHaveAttribute("data-offscreen");
   expect(await stage.locator("svg.ghost").first().evaluate((g) => (g as SVGSVGElement).animationsPaused())).toBe(false);
