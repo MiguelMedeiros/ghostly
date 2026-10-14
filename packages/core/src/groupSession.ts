@@ -1569,15 +1569,19 @@ export class GroupSession {
     if (handed.size) this.leaversHanded.set(from, handed);
     // In the order they were written, as far as two logs can say: the receiver places each where it arrives, and my own
     // first then the others' showed it a conversation as all my lines, then all of theirs.
-    answer.push(...asWritten(this.ownLacked(from, frame), kept));
+    const written = asWritten(this.ownLacked(from, frame), kept);
+    // The group's picture or name, when theirs is older (after the commits and secrets above, which it may need), before
+    // the first message written after it: they place its line where it comes, as they do each message.
+    const meta = this.metaFor(from, frame.mt), after = meta ? written.findIndex(f => f.ts > this.state.meta!.ts) : -1;
+    if (meta && after >= 0) answer.push(...written.slice(0, after), meta, ...written.slice(after));
+    else answer.push(...written);
     // Their latest edits too, after the messages they change (a sync says nothing of edits: one they have changes nothing).
     for (const author of asked) {
       const edits = (this.state.relayEdits ?? []).filter(f => f.s === author && this.state.chain[f.e] && rosterHas(this.state.chain[f.e].m, from));
       answer.push(...edits.slice(-GROUP_LIMITS.handOnEdits));
     }
-    // The group's picture, when theirs is older (after the commits and secrets above, which it may need).
-    const meta = this.metaFor(from, frame.mt);
-    if (meta) answer.push(meta);
+    // Or last, when none was.
+    if (meta && after < 0) answer.push(meta);
     this.handOut(from, answer);
   }
 
