@@ -1,6 +1,7 @@
 import { validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { INVITE_TAKEN } from "@ghostly/core";
 import type { EngineState } from "@ghostly/browser/shared/types";
 import { normalizeMintUrl } from "@ghostly/browser/engine/wallet";
 import { callApi, type ApiContext } from "../src/api";
@@ -16,6 +17,8 @@ function fake() {
         { id: "chat-one", label: "Alice", peerPubKeyZ32: "p", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1" },
         // An invite nobody took yet.
         { id: "chat-two", label: "Bob", peerPubKeyZ32: "q", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", inviteCode: "ghostly1code", pairing: { status: "waiting" }, pairingProgress: { stage: "waiting", role: "inviter", startedAt: 1 } },
+        // An invite someone else used first: its inviter seals everything to them.
+        { id: "chat-three", label: "Carol", peerPubKeyZ32: "r", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", pairing: { status: "connecting" }, pairingProgress: { stage: "failed", role: "joiner", reason: "taken", retryable: false, startedAt: 1 }, dhtDelivery: { inviteTaken: true }, textDelivery: "dht" },
       ],
       groups: [],
       payments: {
@@ -196,6 +199,16 @@ describe("a chat whose invite nobody took", () => {
     expect(node.sendPayment).not.toHaveBeenCalled();
     expect(node.connect).not.toHaveBeenCalled();
     expect(await callApi(ctx, "chat.pay", { chat: "Alice", amount: 10 })).toEqual({ chat: "chat-one", paymentId: "p1" });
+  });
+
+  it("someone else used first: pay and connect refuse at once with the taken sentence, as send does", async () => {
+    // Found in a bug hunt: `chat connect` dialed for 120 s, then answered `timeout`, a code a bot retries.
+    const { ctx, node } = fake();
+    const taken = { code: "refused", message: INVITE_TAKEN };
+    await expect(callApi(ctx, "chat.connect", { chat: "Carol" })).rejects.toMatchObject(taken);
+    await expect(callApi(ctx, "chat.pay", { chat: "Carol", amount: 10 })).rejects.toMatchObject(taken);
+    expect(node.connect).not.toHaveBeenCalled();
+    expect(node.sendPayment).not.toHaveBeenCalled();
   });
 });
 
