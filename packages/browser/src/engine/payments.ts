@@ -800,6 +800,11 @@ export class PaymentDesk {
       return;
     }
     const inspected = this.wallet.inspect?.(payment.endpoint[1]);
+    // Ecash the network check cannot read (a `cashu:` prefix, say) is refused unredeemed, never let through unchecked.
+    if (payment.endpoint[0] === ENDPOINT.cashu && inspected !== undefined && inspected?.kind !== "token") {
+      link.sendPaymentResult({ id: payment.id, ok: false, error: "That is not a valid ecash token" });
+      return;
+    }
     if (inspected?.kind === "token" && !this.accepts(linkId, "cashu", mintNetwork(inspected.mint))) {
       link.sendPaymentResult({ id: payment.id, ok: false, error: `${networkLabel(mintNetwork(inspected.mint))} Cashu is off in this chat` });
       return;

@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ENDPOINT, WALLET_NETWORKS, cashuRequestPayload, type GhostLink, type PaymentTarget } from "@ghostly/core";
 import { PaymentDesk, type DeskLightning } from "../src/engine/payments";
 import type { ArkWallet } from "../src/engine/paymentAdapters/arkWallet";
-import type { CashuWallet } from "../src/engine/wallet";
+import { CashuWallet } from "../src/engine/wallet";
+import { Amount, getEncodedToken, type Proof } from "@cashu/cashu-ts";
 import { STORES, openDb, transact } from "../src/shared/idb";
 import { TEST_MINT } from "../src/shared/mints";
 import { REAL_MONEY_UNCONFIRMED, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "../src/engine/paymentAdapters/walletInstances";
@@ -190,6 +191,21 @@ describe("a chat's ways of paying, per network", () => {
     // Testnet Lightning is still on: the request carries only the invoice.
     expect(sent.length).toBe(before + 1);
     expect(sent.at(-1)?.frame).toMatchObject({ network: "testnet", endpoints: [[ENDPOINT.bolt11, "lnbc-testnet"]] });
+  });
+
+  it("test ecash behind a cashu:, cashu:// or web+cashu:// prefix is refused unredeemed when Testnet Cashu is off", async () => {
+    const { desk, link, wallet } = setup();
+    (desk as unknown as { host: { acceptsNetwork: unknown } }).host.acceptsNetwork = (_l: string, method: string, network: string) => !(method === "cashu" && network === "testnet");
+    const receiveToken = vi.fn(async () => ({ amount: 500, mint: TEST_MINT, fee: 0 }));
+    // The wallet's own reading of a token, as the app does it.
+    const reader = { getKnownMints: () => [REAL] } as unknown as CashuWallet;
+    Object.assign(wallet, { inspect: (text: string) => CashuWallet.prototype.inspect.call(reader, text), receiveToken });
+    const token = getEncodedToken({ mint: TEST_MINT, unit: "sat", proofs: [{ id: "009a1f293253e41e", amount: Amount.from(500), secret: "s-500", C: `02${"ab".repeat(32)}` } as Proof] });
+    for (const [i, prefix] of ["", "cashu:", "cashu://", "web+cashu://"].entries()) {
+      await desk.onPayment("l", { id: `pay-${i}`, timestamp: i + 1, amount: { value: "500", asset: "sat" }, endpoint: [ENDPOINT.cashu, prefix + token] });
+      expect(link.sendPaymentResult, prefix || "plain").toHaveBeenLastCalledWith(expect.objectContaining({ id: `pay-${i}`, ok: false }));
+    }
+    expect(receiveToken).not.toHaveBeenCalled();
   });
 
   it("a contact that said its networks is offered only those: a Testnet card never goes to a Mainnet-only contact", async () => {
