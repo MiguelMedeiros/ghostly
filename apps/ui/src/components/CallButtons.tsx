@@ -1,7 +1,7 @@
 import { useI18n } from "../contexts/I18nContext";
 
 interface CallButtonsProps {
-  /** Why calls cannot start in this chat right now (the title of both buttons), or null when they can. */
+  /** Why calls cannot start in this chat right now (the title and description of both buttons), or null when they can. */
   blocked: string | null;
   /** A call is already ringing or running. */
   busy: boolean;
@@ -16,17 +16,18 @@ interface CallButtonsProps {
  */
 export function CallButtons({ blocked, busy, onCall, phone }: CallButtonsProps) {
   const { t } = useI18n();
-  // `aria-disabled` during a call, not `disabled`: a disabled button gives up the keyboard focus, and the call that
-  // ends has nowhere to give it back.
-  const off = "aria-disabled:opacity-30 aria-disabled:cursor-not-allowed aria-disabled:hover:text-text-secondary aria-disabled:hover:bg-transparent";
+  // `aria-disabled`, not `disabled`: a disabled button gives up the keyboard focus, and the call that ends has nowhere
+  // to give it back; nor is it reached at all, so the reason in its title (its description, the label being its name)
+  // is never heard, and a phone has no hover to show it.
+  const off = !!blocked || busy;
+  const offLook = "aria-disabled:opacity-30 aria-disabled:cursor-not-allowed aria-disabled:hover:text-text-secondary aria-disabled:hover:bg-transparent";
   return (
     <>
       {/* Audio call button */}
       <button
-        onClick={() => { if (!busy) onCall(false); }}
-        disabled={!!blocked}
-        aria-disabled={busy || undefined}
-        className={`${phone ? "w-11 h-11 flex items-center justify-center" : "p-2 max-md:px-2 max-md:py-2.5"} text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${off}`}
+        onClick={() => { if (!off) onCall(false); }}
+        aria-disabled={off || undefined}
+        className={`${phone ? "w-11 h-11 flex items-center justify-center" : "p-2 max-md:px-2 max-md:py-2.5"} text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer ${offLook}`}
         title={blocked ?? t("calls.audio")}
         aria-label={t("calls.audio")}
         data-testid="call-audio"
@@ -46,10 +47,9 @@ export function CallButtons({ blocked, busy, onCall, phone }: CallButtonsProps) 
       </button>
       {/* Video call button */}
       {!phone && <button
-        onClick={() => { if (!busy) onCall(true); }}
-        disabled={!!blocked}
-        aria-disabled={busy || undefined}
-        className={`p-2 max-md:px-2 max-md:py-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${off}`}
+        onClick={() => { if (!off) onCall(true); }}
+        aria-disabled={off || undefined}
+        className={`p-2 max-md:px-2 max-md:py-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer ${offLook}`}
         title={blocked ?? t("calls.video")}
         aria-label={t("calls.video")}
         data-testid="call-video"
