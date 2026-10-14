@@ -122,6 +122,9 @@ interface Outgoing { words: string; named: GroupMention[]; preview?: LinkPreview
 const DEFAULT_MAX = 500;
 const TOAST_DURATION = 5_000;
 
+/** The same file on disk, picked again: a picker gives a new File each time. */
+const fileKey = (file: File) => `${file.name}\n${file.size}\n${file.lastModified}`;
+
 /**
  * The chat's composer, laid out as WhatsApp's: [+] [emoji/GIF] [message] in one rounded field, and the mic (send
  * once there is text) beside it. The + opens what else can go into the chat (a payment, an identity, shared services, a
@@ -180,6 +183,12 @@ export function MessageInput({
   /** A paste the platform is reading: one at a time, and said on screen (the sheet opens only once every byte is here). */
   const [reading, setReading] = useState(false);
   const readingRef = useRef(false);
+  /**
+   * Files on their way, until the chat has them: said on screen (a group's large file is copied and hashed for seconds
+   * before anything shows), and one picked again meanwhile is not sent twice (a group keeps both for good).
+   */
+  const [preparing, setPreparing] = useState<File[]>([]);
+  const preparingKeys = useRef(new Set<string>());
   const [dragging, setDragging] = useState<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -428,11 +437,23 @@ export function MessageInput({
   /** One after the other, as + → Document sends them; the first that cannot go stops the rest. False then. */
   const sendChosen = async (chosen: File[]): Promise<boolean> => {
     if (!onSendFile || disabled || fileUnavailable) return false;
-    for (const file of chosen) {
-      const err = await onSendFile(file);
-      if (err) { showToast(err); return false; }
+    // The same file picked again (another File, the same name, size and date) while the first is still on its way.
+    const fresh = chosen.filter((file) => !preparingKeys.current.has(fileKey(file)));
+    fresh.forEach((file) => preparingKeys.current.add(fileKey(file)));
+    try {
+      for (const file of fresh) {
+        setPreparing((was) => [...was, file]);
+        const err = await onSendFile(file).finally(() => {
+          preparingKeys.current.delete(fileKey(file));
+          if (mounted.current) setPreparing((was) => was.filter((other) => other !== file));
+        });
+        if (err) { showToast(err); return false; }
+      }
+      return true;
+    } finally {
+      // The first that cannot go stops the rest: they can be picked again.
+      fresh.forEach((file) => preparingKeys.current.delete(fileKey(file)));
     }
-    return true;
   };
 
   const sendFiles = (files: FileList | null, input: HTMLInputElement) => {
@@ -666,12 +687,19 @@ export function MessageInput({
       {t("composer.pasteReading")}
     </p>
   );
+  const preparingLine = preparing.length > 0 && !locked && (
+    <p role="status" data-testid="file-preparing" className="m-0 flex items-center gap-2 text-[13px] text-text-secondary animate-fade-in">
+      <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />
+      <span className="min-w-0 truncate">{t("composer.filePreparing", { name: preparing[0]!.name })}</span>
+    </p>
+  );
 
   return (
     <div ref={composerRef} data-composer className="@container/composer bg-panel-header px-3 max-md:px-2 py-2 composer-safe shrink-0 relative">
-      {(toastBox || readingLine) && !sheetOpen && (
+      {(toastBox || readingLine || preparingLine) && !sheetOpen && (
         <div className="absolute bottom-full left-4 right-4 mb-2 z-50 flex flex-col gap-2">
           {readingLine && <div className="self-start bg-panel-header border border-border rounded-lg px-3 py-2 shadow-lg">{readingLine}</div>}
+          {preparingLine && <div className="self-start max-w-full bg-panel-header border border-border rounded-lg px-3 py-2 shadow-lg">{preparingLine}</div>}
           {toastBox && <div role="alert" className="animate-fade-in">{toastBox}</div>}
         </div>
       )}

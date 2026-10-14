@@ -22,6 +22,7 @@
   "emoji": "إيموجي",
   "emojiCategories": "فئات الإيموجي",
   "expressions": "إيموجي وصور GIF",
+  "filePreparing": "جارٍ تجهيز {{name}}…",
   "gif": "GIF",
   "gifCategories": "فئات GIF",
   "gifCategory": {
