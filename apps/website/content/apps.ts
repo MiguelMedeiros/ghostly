@@ -38,8 +38,8 @@ export const apps = {
     madeFor: "Made for",
     install: {
       title: "Install it in Ghostly",
-      steps: (title: string, fingerprint: string) => [
-        "Open Ghostly 1.2 or later: in your browser, or the desktop app on macOS or Linux.",
+      steps: (title: string, fingerprint: string, release: string) => [
+        `Open Ghostly ${release} or later: in your browser, or the desktop app on macOS or Linux.`,
         "Go to Apps. The Ghostly Store is there already.",
         `Find ${title}, check that its publisher key starts with ${fingerprint}, and press Install.`,
         "Press Open and pick a chat, or start it from Apps in a chat. It runs with your contact, live.",
