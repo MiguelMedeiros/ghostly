@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { connect } from "node:net";
-import { openSync, readFileSync } from "node:fs";
+import { openSync, readFileSync, rmSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, type DaemonClient } from "./client";
@@ -15,7 +15,7 @@ import { resolve } from "node:path";
 import { format } from "node:util";
 import { secretsFromStdin } from "./secretInput";
 import {
-  checkProfileName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
+  checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
   type ProfilePaths,
 } from "./profiles";
 
@@ -288,12 +288,20 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
     case "create": {
       const [name] = parsed.positionals;
       if (!name || parsed.positionals.length > 1) throw new CliError("usage", "ghostly profile create <name>");
+      // A command that fails changes nothing: the name is checked before the folder is made, and the profile is made
+      // current only once it holds it. Before, the retry with a good name was refused "Profile <name> exists".
+      const shownName = parsed.options.name === undefined ? undefined : checkShownName(parsed.options.name);
       const paths = createProfile(g.home, name);
-      if (parsed.options.use) selectProfile(g.home, name);
       let shown: unknown = null;
-      if (typeof parsed.options.name === "string") {
-        shown = await withSession({ ...g, profile: name, paths }, (s) => s.call("profile.set", { name: parsed.options.name }));
+      if (shownName !== undefined) {
+        try {
+          shown = await withSession({ ...g, profile: name, paths }, (s) => s.call("profile.set", { name: shownName }));
+        } catch (e) {
+          rmSync(paths.dir, { recursive: true, force: true });
+          throw e;
+        }
       }
+      if (parsed.options.use) selectProfile(g.home, name);
       print({ created: name, folder: paths.dir, current: currentProfile(g.home) === name, ...(shown ? { profile: shown } : {}) });
       return;
     }

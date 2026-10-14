@@ -9,6 +9,7 @@ import {
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
+import { checkShownName } from "./profiles";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 import { STATUS_CARD_METHODS } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
@@ -168,10 +169,7 @@ const METHODS: Record<string, Method> = {
   async "profile.set"(ctx, params) {
     const patch: Partial<Settings> = {};
     const name = params.name;
-    if (name !== undefined) {
-      if (typeof name !== "string" || [...name].length > 64) throw new CliError("bad_request", "name must be a string of up to 64 characters");
-      patch.nick = name.trim();
-    }
+    if (name !== undefined) patch.nick = checkShownName(name).trim();
     if (params.shareProfile !== undefined) patch.shareProfile = bool(params, "shareProfile");
     await node(ctx).updateSettings({ settings: patch });
     return METHODS["profile.get"](ctx, {});
