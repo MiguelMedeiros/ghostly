@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RELAY_POLL_INTERVALS, UNUSED_INVITE_WAIT_MAX_MS } from "../src/link";
-import { closeWorld, DESKTOP_NETWORK, invitation, MemoryPkarr, open, untilLive, useFakeWorld } from "./support/pairingWorld";
+import { closeWorld, DESKTOP_NETWORK, invitation, MemoryPkarr, open, rtc, untilLive, useFakeWorld } from "./support/pairingWorld";
 
 // covers: invite.create, invite.code, core.relay-client
 
@@ -60,6 +60,35 @@ it.each([
   const back = open(made[6].inviter, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS });
   expect(await untilLive(back, joiners[6], UNUSED_INVITE_WAIT_MAX_MS + 30_000)).toBeLessThan(UNUSED_INVITE_WAIT_MAX_MS + 30_000);
 });
+
+/**
+ * Send an invite, close the app, the friend joins, open the app later (bug hunt 1014-0612): the joined chat's mailbox
+ * was still read at its unused-invite wait (3 minutes for a join 15 minutes old) after its link saw the inviter online,
+ * and the inviter's first text came 127 s after it was back.
+ */
+it("a joined chat whose inviter comes back 15 minutes later reads its mailbox once its link sees the inviter online", async () => {
+  rtc.blocked = true;
+  const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+  const made = invitation();
+  const gone = open(made.inviter, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS });
+  await vi.advanceTimersByTimeAsync(5_000);
+  const stopping = gone.link.stop();
+  await vi.advanceTimersByTimeAsync(10_000);
+  await stopping;
+  const joiner = open({ ...made.joiner, createdAt: Date.now() }, pkarr, { dht: true, pollIntervals: RELAY_POLL_INTERVALS });
+  joiner.link.setChatActive(false); joiner.link.session.setActive(false);
+  await vi.advanceTimersByTimeAsync(15 * 60_000);
+  const back = open(made.inviter, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS, credentials: gone.credentials, dhtState: gone.dhtState });
+  back.link.setChatActive(false);
+  let seen = Infinity, sent = false;
+  for (const start = Date.now(); Date.now() - start < UNUSED_INVITE_WAIT_MAX_MS * 2 && !joiner.received.some((m) => m.text === "hello-from-alice"); await vi.advanceTimersByTimeAsync(250)) {
+    if (!sent && back.pinned.length) { sent = true; void back.link.sendMessage("hello-from-alice", Date.now(), "firsttextfromalice0001"); }
+    if (seen === Infinity && joiner.link.session.peerPresence.online) seen = Date.now();
+  }
+  expect(seen).toBeLessThan(Infinity);
+  // Read at the first-contact pace once the link sees the inviter, not at the end of the unused-invite wait.
+  expect(Date.now() - seen).toBeLessThan(15_000);
+}, 60_000);
 
 it("15 joined chats whose inviter never answered still read a few times a minute once the app starts again", async () => {
   const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
