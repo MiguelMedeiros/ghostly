@@ -6,6 +6,8 @@
     "lostPeer": "与 Ghostly 节点的连接已断开",
     "noRoom": "此设备没有足够的空间",
     "noRoomNext": "请释放空间后重试。",
+    "noRoomToSave": "此设备已没有剩余空间",
+    "noRoomToSaveNext": "没有保存任何内容。请释放一些空间，然后重试。",
     "pickCard": "请先选择一张 Lightning 卡片",
     "signerKey": "你的签名器持有的密钥与此身份不同。没有发布任何内容。",
     "starting": "Ghostly 正在启动…",

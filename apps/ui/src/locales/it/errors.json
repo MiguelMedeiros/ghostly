@@ -6,6 +6,8 @@
     "lostPeer": "Il peer di Ghostly è stato perso",
     "noRoom": "Spazio insufficiente su questo dispositivo",
     "noRoomNext": "Libera spazio, poi riprova.",
+    "noRoomToSave": "Spazio esaurito su questo dispositivo",
+    "noRoomToSaveNext": "Non è stato salvato nulla. Libera spazio, poi riprova.",
     "pickCard": "Scegli prima una carta Lightning",
     "signerKey": "Il tuo firmatario ha una chiave diversa da quella di questa identità. Non è stato pubblicato nulla.",
     "starting": "Ghostly si sta avviando…",

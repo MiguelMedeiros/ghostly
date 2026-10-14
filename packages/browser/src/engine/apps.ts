@@ -6,7 +6,7 @@ import {
   type AppStoreRead,
   type AppStoreView, type AppViewMode, type AppVersion, type JsonValue, type SignedAppRevocation,
 } from "@ghostly/core";
-import { APP_STORAGE_SCOPE_INDEX, STORES, openDb, store, wrap } from "../shared/idb";
+import { APP_STORAGE_SCOPE_INDEX, STORES, openDb, store, wrap, committed } from "../shared/idb";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf, fileSpace, type FileBytes, type FileBytesKind } from "../shared/fileBytes";
 import { APP_FETCH_LIMITS, AppFetchError, appPasteUrl, besideUrl, isAppFetchUrl, isGitHubPage, type AppFetcher } from "./appFetch";
 import { BUILT_IN_APPS, DEFAULT_APP_STORES, type BuiltInApp } from "./appDefaults";
@@ -637,7 +637,7 @@ export class Apps {
     if (app) await this.stillRunnable(app, digest);
   }
   private async putApp(app: InstalledApp): Promise<void> {
-    try { await wrap((await store(STORES.apps, "readwrite")).put(app)); } finally { this.held.delete(app.ref); }
+    try { await committed((await store(STORES.apps, "readwrite")).put(app)); } finally { this.held.delete(app.ref); }
   }
   /**
    * Writes an app's record back only while that install is still there (the same `installedAt`), read and written in
@@ -671,7 +671,7 @@ export class Apps {
   private async writeStores(write: (records: IDBObjectStore) => IDBRequest, apply: (held: Map<string, AddedAppStore>) => void): Promise<void> {
     const before = this.records();
     const written = before.then(async (held) => {
-      await wrap(write(await store(STORES.appStores, "readwrite")));
+      await committed(write(await store(STORES.appStores, "readwrite")));
       apply(held);
       this.views = null;
     });
@@ -1621,7 +1621,7 @@ export class Apps {
         fail("not-installed", "This app is not installed");
       }
       writing.put({ ref: app.ref, scope: where, key: name, value: text, size } satisfies AppStorageRow);
-      await wrap(writing.put(counterRow(app.ref, where, next)));
+      await committed(writing.put(counterRow(app.ref, where, next)));
       this.usage.set(`${app.ref}\0${where}`, next);
     });
   }
@@ -1636,7 +1636,7 @@ export class Apps {
       const next = plus(used, countOf(old, -1));
       const writing = await store(STORES.appStorage, "readwrite");
       writing.delete([app.ref, where, name]);
-      await (next.rows ? wrap(writing.put(counterRow(app.ref, where, next))) : wrap(writing.delete([app.ref, where, COUNT_KEY])));
+      await (next.rows ? committed(writing.put(counterRow(app.ref, where, next))) : committed(writing.delete([app.ref, where, COUNT_KEY])));
       this.usage.set(`${app.ref}\0${where}`, next);
     });
   }

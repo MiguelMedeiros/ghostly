@@ -1,5 +1,5 @@
 import { emptyIdentityLedger, emptyProofLedger, type IdentityLedger, type ProofLedger } from "@ghostly/core";
-import { APP_STORAGE_CHAT_INDEX, CARD_INDEX, STORES, fileStore, store, wrap, openDb } from "../shared/idb";
+import { APP_STORAGE_CHAT_INDEX, CARD_INDEX, STORES, fileStore, store, wrap, committed, openDb } from "../shared/idb";
 import { removeFileBytes } from "../shared/fileBytes";
 import type { MessagePage, Settings, StoredGroup, StoredLink, StoredMessage, StoredService } from "../shared/types";
 
@@ -126,9 +126,9 @@ export const db = {
     });
   },
   async deleteLink(linkId: string): Promise<void> {
-    await wrap((await store(STORES.links, "readwrite")).delete(linkId));
+    await committed((await store(STORES.links, "readwrite")).delete(linkId));
     // By key range, inside IndexedDB: a chat of many rows builds no key list and no request per row on this thread.
-    await wrap((await store(STORES.messages, "readwrite")).delete(IDBKeyRange.bound([linkId], [linkId, []])));
+    await committed((await store(STORES.messages, "readwrite")).delete(IDBKeyRange.bound([linkId], [linkId, []])));
     await fileStore.deleteForLink(linkId);
     await removeFileBytes(`${linkId}-in-`);
     await removeFileBytes(`${linkId}-out-`);
@@ -211,7 +211,7 @@ export const db = {
   },
   /** Writes a message whether or not it is there: lines of history that change as what they tell changes. */
   async putMessage(message: StoredMessage): Promise<void> {
-    await wrap((await store(STORES.messages, "readwrite")).put(message));
+    await committed((await store(STORES.messages, "readwrite")).put(message));
   },
   async updateDelivery(linkId: string, id: string, delivery: NonNullable<StoredMessage["delivery"]>, deliveryError?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>): Promise<void> {
     // `sent` and `delivered` are relaxed (written, with no disk sync of their own): a mark lost to a power cut is made
@@ -285,37 +285,37 @@ export const db = {
     return results.filter((row): row is StoredMessage => !!row);
   },
   async deleteMessage(linkId: string, messageId: string): Promise<void> {
-    await wrap((await store(STORES.messages, "readwrite")).delete([linkId, messageId]));
+    await committed((await store(STORES.messages, "readwrite")).delete([linkId, messageId]));
   },
 
   async getGroups(): Promise<StoredGroup[]> {
     return wrap((await store(STORES.groups, "readonly")).getAll());
   },
   async putGroup(group: StoredGroup): Promise<void> {
-    await wrap((await store(STORES.groups, "readwrite")).put(group));
+    await committed((await store(STORES.groups, "readwrite")).put(group));
   },
   /** The group and its history. */
   async deleteGroup(groupId: string): Promise<void> {
-    await wrap((await store(STORES.groups, "readwrite")).delete(groupId));
+    await committed((await store(STORES.groups, "readwrite")).delete(groupId));
     // By key range, as a chat's (`deleteLink`): one request, not one per message of a long group.
     const link = `group:${groupId}`;
-    await wrap((await store(STORES.messages, "readwrite")).delete(IDBKeyRange.bound([link], [link, []])));
+    await committed((await store(STORES.messages, "readwrite")).delete(IDBKeyRange.bound([link], [link, []])));
   },
 
   async getServices(): Promise<StoredService[]> {
     return wrap((await store(STORES.services, "readonly")).getAll());
   },
   async putService(service: StoredService): Promise<void> {
-    await wrap((await store(STORES.services, "readwrite")).put(service));
+    await committed((await store(STORES.services, "readwrite")).put(service));
   },
   async deleteService(serviceId: string): Promise<void> {
-    await wrap((await store(STORES.services, "readwrite")).delete(serviceId));
+    await committed((await store(STORES.services, "readwrite")).delete(serviceId));
   },
 
   async getSettings(): Promise<Partial<Settings>> {
     return (await wrap((await store(STORES.settings, "readonly")).get("settings"))) ?? {};
   },
   async putSettings(settings: Settings): Promise<void> {
-    await wrap((await store(STORES.settings, "readwrite")).put(settings, "settings"));
+    await committed((await store(STORES.settings, "readwrite")).put(settings, "settings"));
   },
 };

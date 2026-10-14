@@ -2423,9 +2423,10 @@ export class Groups {
       changed: () => {
         // Taken out as a hub: my edges stay a moment, for my last act, passing on the commit that says so (WISP 902 § Hubs).
         if (session.status === "removed" && this.hubs.isHub(state.id) && !this.removedAt.has(state.id)) this.removedAt.set(state.id, this.now());
-        void this.membershipChanged(state.id);
+        // A line the device had no room to keep is not one more error: the change itself is the session's.
+        this.membershipChanged(state.id).catch(() => {});
       },
-      metaChanged: (by, change, at) => { void this.metaChanged(state.id, session, by, change, at); },
+      metaChanged: (by, change, at) => { this.metaChanged(state.id, session, by, change, at).catch(() => {}); },
       // A catch-up answer goes a slice at a time, each once the member's app handled the last (`GROUP_LIMITS.catchUpSlice`).
       ...(this.host.linkHandled && {
         handled: (to: string) => {

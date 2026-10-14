@@ -22,7 +22,7 @@ import {
   type PaymentRequest,
   type PaymentResult,
 } from "@ghostly/core";
-import { STORES, store, wrap } from "../shared/idb";
+import { STORES, store, wrap, committed } from "../shared/idb";
 import { digestHex } from "./messageDetails";
 import { isWorthlessMint, mintNetwork } from "../shared/mints";
 import type { PaymentView, PendingMelt, PendingSwap, StoredMessage, StoredPayment, StoredQuote } from "../shared/types";
@@ -1658,7 +1658,7 @@ export class PaymentDesk {
 
   private async save(payment: StoredPayment): Promise<void> {
     this.payments.set(payment.id, payment);
-    await wrap((await store(STORES.payments, "readwrite")).put(payment));
+    await committed((await store(STORES.payments, "readwrite")).put(payment));
     this.host.onChange();
   }
 
