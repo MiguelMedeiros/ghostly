@@ -1,5 +1,6 @@
 package tools.ghostly.app
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -35,5 +36,19 @@ class SharedStreamTest {
     }
     assertFalse(SharedStream.takes("content", null, own))
     assertFalse(SharedStream.takes("content", "", own))
+  }
+
+  // Int stands in for Uri: what matters is that a value of another type is dropped, never cast.
+  @Test
+  fun onlyStreamsOfTheType() {
+    val strings = arrayListOf<Any?>("content://media/external/images/media/1", "content://media/external/images/media/2")
+    assertEquals(emptyList<Int>(), SharedStream.of(strings, Int::class.javaObjectType, many = true))
+    assertEquals(listOf(1, 3), SharedStream.of(arrayListOf<Any?>(1, "two", null, 3), Int::class.javaObjectType, many = true))
+    assertEquals(emptyList<Int>(), SharedStream.of(7, Int::class.javaObjectType, many = true))
+    assertEquals(emptyList<Int>(), SharedStream.of(null, Int::class.javaObjectType, many = true))
+    assertEquals(listOf(7), SharedStream.of(7, Int::class.javaObjectType, many = false))
+    assertEquals(emptyList<Int>(), SharedStream.of("content://x/1", Int::class.javaObjectType, many = false))
+    assertEquals(emptyList<Int>(), SharedStream.of(arrayListOf<Any?>(7), Int::class.javaObjectType, many = false))
+    assertEquals(emptyList<Int>(), SharedStream.of(null, Int::class.javaObjectType, many = false))
   }
 }
