@@ -11,6 +11,10 @@
     { "package": "unic-ucd-ident", "id": "RUSTSEC-2025-0100", "until": "2026-12-31", "why": "Unmaintained, via Tauri's urlpattern. No known vulnerability." },
     { "package": "unic-ucd-version", "id": "RUSTSEC-2025-0098", "until": "2026-12-31", "why": "Unmaintained, via Tauri's urlpattern. No known vulnerability." },
     { "package": "braces", "id": "GHSA-vfj7-8cjw-p6xm", "until": "2026-11-30", "why": "Dev-only, via micromatch in the build and lint tooling (both lockfiles). The patterns it expands are the repository's own globs, never input from a person or a peer. No fixed release exists yet (3.0.3 is the latest and is affected)." },
-    { "package": "paste", "id": "RUSTSEC-2024-0436", "until": "2026-12-31", "why": "Unmaintained proc-macro, build-time only, via iroh -> netwatch -> netlink-packet-core. No known vulnerability." }
+    { "package": "paste", "id": "RUSTSEC-2024-0436", "until": "2026-12-31", "why": "Unmaintained proc-macro, build-time only, via iroh -> netwatch -> netlink-packet-core. No known vulnerability." },
+    { "package": "rustls", "id": "RUSTSEC-2026-0346", "until": "2026-10-28", "why": "Fixed in 0.23.46, which Cargo.lock takes. Left in native/transports/iroh-web/Cargo.lock only: taking it there means rebuilding the committed browser Iroh (node tools/scripts/build-iroh-web.mjs, needs the wasm32 target, a wasm32 clang and wasm-bindgen-cli 0.2.106). Debug output of session values: we never log them." },
+    { "package": "rustls", "id": "RUSTSEC-2026-0347", "until": "2026-10-28", "why": "Same as RUSTSEC-2026-0346 (browser Iroh rebuild). ECH: iroh does not use it." },
+    { "package": "rustls", "id": "RUSTSEC-2026-0348", "until": "2026-10-28", "why": "Same as RUSTSEC-2026-0346 (browser Iroh rebuild). Brotli certificate decompression: the browser build has no brotli crate." },
+    { "package": "rustls", "id": "RUSTSEC-2026-0349", "until": "2026-10-28", "why": "Same as RUSTSEC-2026-0346 (browser Iroh rebuild)." }
   ]
 }
