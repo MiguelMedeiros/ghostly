@@ -260,7 +260,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
       <div className="flex justify-end gap-2">
         <Button onClick={onClose}>{t("common.cancel")}</Button>
         {preview && !blocked && (
-          <Button variant="primary" data-testid="app-install-confirm" disabled={busy} onClick={() => void install()}>
+          <Button variant="primary" data-testid="app-install-confirm" loading={busy} onClick={() => void install()}>
             {preview.install === "update" ? t("apps.install.update")
               // A built-in app is already here: the button allows what it asks, it downloads nothing.
               : preview.carried ? t(openAfter ? "apps.builtIn.allowOpen" : "apps.builtIn.allow")
@@ -289,12 +289,14 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   const titleId = useId();
   const [error, setError] = useState<AppErrorView | null>(null);
   const [busy, setBusy] = useState(false);
+  // Which button started the work in progress: that one shows it is going.
+  const [pending, setPending] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
   const focusBack = useFocusBack(busy);
-  const act = async (work: () => Promise<unknown>, close = false) => {
+  const act = async (work: () => Promise<unknown>, close = false, which: string | null = null) => {
     focusBack();
-    setBusy(true); setError(null);
-    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(appErrorView(e, t)); } finally { setBusy(false); }
+    setBusy(true); setPending(which); setError(null);
+    try { await work(); await refreshInstalledApps(); if (close) onClose(); } catch (e) { setError(appErrorView(e, t)); } finally { setBusy(false); setPending(null); }
   };
   const why = runLine(app.run, t);
   const canRun = app.run.status === "ok";
@@ -306,8 +308,8 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
         {error && <ErrorLine error={error} />}
         <div className="flex flex-wrap justify-end gap-2">
           <Button onClick={() => setRemoving(false)}>{t("common.cancel")}</Button>
-          <Button data-testid="app-export" disabled={busy} onClick={() => void act(async () => saveAppData(app.ref, await engine.call("appDataExportText", { ref: app.ref })))}>{t("apps.app.export")}</Button>
-          <Button variant="danger" data-testid="app-uninstall-confirm" disabled={busy} onClick={() => void act(async () => { await engine.call("appUninstall", { ref: app.ref }); onUninstalled?.(); }, true)}>{t("apps.app.uninstall")}</Button>
+          <Button data-testid="app-export" disabled={busy} loading={pending === "export"} onClick={() => void act(async () => saveAppData(app.ref, await engine.call("appDataExportText", { ref: app.ref })), false, "export")}>{t("apps.app.export")}</Button>
+          <Button variant="danger" data-testid="app-uninstall-confirm" disabled={busy} loading={pending === "uninstall"} onClick={() => void act(async () => { await engine.call("appUninstall", { ref: app.ref }); onUninstalled?.(); }, true, "uninstall")}>{t("apps.app.uninstall")}</Button>
         </div>
       </Shell>
     );
@@ -324,7 +326,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
           <p className="text-sm text-text-primary">{t("apps.app.updateWaits", { version: app.pending.version })}</p>
           <Permissions asks={app.pending.added} update />
           <div className="flex justify-end">
-            <Button variant="primary" data-testid="app-update-accept" disabled={busy} onClick={() => void act(() => engine.call("appUpdateAccept", { ref: app.ref }))}>{t("apps.install.update")}</Button>
+            <Button variant="primary" data-testid="app-update-accept" disabled={busy} loading={pending === "update"} onClick={() => void act(() => engine.call("appUpdateAccept", { ref: app.ref }), false, "update")}>{t("apps.install.update")}</Button>
           </div>
         </div>
       )}
@@ -333,7 +335,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
       {error && <ErrorLine error={error} testId="app-details-error" />}
       <div className="flex flex-wrap justify-end gap-2">
         <Button variant="danger" data-testid="app-uninstall-open" onClick={() => setRemoving(true)}>{app.run.status === "ok" ? t("apps.app.uninstall") : t("apps.app.remove")}</Button>
-        {app.run.status === "needs-files" && <Button data-testid="app-fetch-files" disabled={busy} onClick={() => void act(() => engine.call("appFetchFiles", { ref: app.ref }))}>{t("apps.app.fetchFiles")}</Button>}
+        {app.run.status === "needs-files" && <Button data-testid="app-fetch-files" disabled={busy} loading={pending === "files"} onClick={() => void act(() => engine.call("appFetchFiles", { ref: app.ref }), false, "files")}>{t("apps.app.fetchFiles")}</Button>}
         {app.run.status === "removed" && <Button data-testid="app-run-anyway" onClick={() => { onOpen(app, { runAnyway: true }); onClose(); }}>{t("apps.app.runAnyway")}</Button>}
         {!canRun && app.run.status !== "needs-files" && <Button data-testid="app-keep-stopped" onClick={onClose}>{t("apps.app.keepStopped")}</Button>}
         {canRun && <Button variant="primary" data-testid="app-open" onClick={() => { onOpen(app); onClose(); }}>{t("apps.page.open")}</Button>}
