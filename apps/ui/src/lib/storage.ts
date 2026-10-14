@@ -593,6 +593,18 @@ function sessionKeys(): string[] {
   return [...keys].filter(isSessionKey);
 }
 
+/**
+ * The sessions as the chat list and the app's badge last read them: both read them all on every `session-updated` and
+ * every few seconds, and a chat whose stored text changed (a message came) is parsed, and merged with the messages its
+ * stored copy leaves out, once for both. Neither changes one in place.
+ */
+const shownCache: SessionCache = new Map();
+
+/** Every chat, as `listSessions` reads them, for the chat list and the badge: through their one cache. */
+export function listShownSessions(): ChatSession[] {
+  return listSessions(shownCache);
+}
+
 /** Every chat, pinned first, then the latest first. With a cache, only a session whose stored text changed is parsed. */
 export function listSessions(cache?: SessionCache): ChatSession[] {
   const sessions: ChatSession[] = [];
