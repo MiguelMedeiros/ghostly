@@ -49,6 +49,7 @@
   },
   "connectionFailed": "连接失败",
   "devices": {
+    "adminOffNext": "请在群组的提示中开启“从此设备管理群组”。",
     "digitsEnded": "添加此设备的流程已结束",
     "digitsEndedNext": "请从“添加设备”重新开始。",
     "onlyUnfinished": "这里只能移除未完成加入的设备"

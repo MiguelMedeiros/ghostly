@@ -1,4 +1,4 @@
-import { parseEngineError, type EngineErrorCode } from "@ghostly/core";
+import { GROUP_ADMIN_OFF_ERROR, parseEngineError, type EngineErrorCode } from "@ghostly/core";
 import type { Translate, TranslationKey } from "../contexts/I18nContext";
 import { formatAmount } from "./amount";
 import { english } from "./english";
@@ -100,6 +100,8 @@ const RULES: readonly Rule[] = [
   exact("Lost the Ghostly peer", "errors.app.lostPeer"),
   // A call refused in limited mode (packages/browser/src/engine/node.ts LIMITED_MODE_ERROR): the banner's own words, and what to do.
   exact("Ghostly could not check which device is active yet. This works once it can.", "devices.limited.title", "errors.app.limitedNext"),
+  // A group's admin action on a device where managing the group is off: the group's notice's own words, and its button.
+  exact(GROUP_ADMIN_OFF_ERROR, "devices.manage.off", "errors.devices.adminOffNext"),
   exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress"),
   exact("Pick a Lightning card first", "errors.app.pickCard"),
   exact("This client cannot install updates", "errors.app.installUpdates"),

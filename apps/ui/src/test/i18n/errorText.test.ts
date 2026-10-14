@@ -31,6 +31,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The membership history forked", "packages/browser/src/engine/groups.ts"],
   // What every call outside LIMITED_MODE_METHODS is answered with in limited mode (engine/server.ts): a file, a group, a device action.
   ["Ghostly could not check which device is active yet. This works once it can.", "packages/browser/src/engine/node.ts"],
+  // A group's admin action (remove, hand over admin, a community's name or picture) on a device where managing it is off.
+  ["Managing this group is off on this device. Turn on Manage groups from this device first.", `${CORE}/groupCommits.ts`],
   ["Listener given to a chat in use: this one was quiet. Open this chat to take one back; your messages and transport identity are saved.", "packages/browser/src/engine/node.ts"],
   ["Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.", "packages/browser/src/engine/node.ts"],
   ["Native adapter could not start. Reopen this chat to retry.", "packages/browser/src/engine/node.ts"],
@@ -482,6 +484,12 @@ describe("errors in the app's language", () => {
     const refused = new Error("Ghostly could not check which device is active yet. This works once it can.");
     expect(knownErrorParts(refused, translators.pt)).toEqual({ title: "Não foi possível verificar qual dispositivo está ativo", next: "Isso volta a funcionar quando a verificação der certo. Confira sua conexão." });
     expect(knownErrorParts(refused, english)).toEqual({ title: "Can't check which device is active", next: "This works once the check does. Check your connection." });
+  });
+
+  it("a group's admin action refused because managing it is off here says why and what to do, in the language", () => {
+    const refused = new Error("Managing this group is off on this device. Turn on Manage groups from this device first.");
+    expect(knownErrorParts(refused, translators.pt)).toEqual({ title: "Gerenciar este grupo está desligado neste dispositivo.", next: "Ative Gerenciar grupos deste dispositivo no aviso do grupo." });
+    expect(knownErrorParts(refused, english)).toEqual({ title: "Managing this group is off on this device.", next: "Turn on Manage groups from this device in the group's notice." });
   });
 
   it("each rule has a sample, so none stops matching unseen", () => {

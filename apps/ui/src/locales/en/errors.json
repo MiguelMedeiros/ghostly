@@ -49,6 +49,7 @@
   },
   "connectionFailed": "Connection failed",
   "devices": {
+    "adminOffNext": "Turn on Manage groups from this device in the group's notice.",
     "digitsEnded": "Adding this device has ended",
     "digitsEndedNext": "Start again from Add a device.",
     "onlyUnfinished": "Only a device that did not finish joining is removed here"

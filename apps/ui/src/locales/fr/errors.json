@@ -49,6 +49,7 @@
   },
   "connectionFailed": "Échec de connexion",
   "devices": {
+    "adminOffNext": "Activez Gérer les groupes depuis cet appareil dans l'avis du groupe.",
     "digitsEnded": "L'ajout de cet appareil est terminé",
     "digitsEndedNext": "Recommencez depuis Ajouter un appareil.",
     "onlyUnfinished": "Seul un appareil qui n'a pas fini de rejoindre se retire ici"

@@ -49,6 +49,7 @@
   },
   "connectionFailed": "接続に失敗しました",
   "devices": {
+    "adminOffNext": "グループの案内で「このデバイスからグループを管理」をオンにしてください。",
     "digitsEnded": "このデバイスの追加は終了しました",
     "digitsEndedNext": "「デバイスを追加」からやり直してください。",
     "onlyUnfinished": "ここで削除できるのは、参加を終えていないデバイスだけです"

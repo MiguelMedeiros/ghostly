@@ -49,6 +49,7 @@
   },
   "connectionFailed": "Error de conexión",
   "devices": {
+    "adminOffNext": "Activa Administrar grupos desde este dispositivo en el aviso del grupo.",
     "digitsEnded": "La adición de este dispositivo terminó",
     "digitsEndedNext": "Empieza de nuevo desde Añadir un dispositivo.",
     "onlyUnfinished": "Aquí solo se quita un dispositivo que no terminó de unirse"
