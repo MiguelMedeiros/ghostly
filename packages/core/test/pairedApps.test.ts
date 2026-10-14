@@ -509,7 +509,9 @@ describe("apps on a paired session (apps/1)", () => {
   // A link that carries 512 KiB a second; an app sends 32 KiB 50 times a second (what apps/1 allows) while a file goes.
   // Before, the app refilled the room above files' line each time the channel drained to it, and the file stopped
   // moving: 32 KiB in 40 s on an iroh channel, 1 MiB in 20 s on WebRTC, where it moved 6 to 10 MiB alone.
-  it.each([["an iroh channel", 120 * 1024], ["a WebRTC channel", undefined]])("a file keeps half of %s beside an app sending at its limit", async (_, sendBudget) => {
+  // A WebRTC channel's `drained()` resolves at its low water mark (`wrapDataChannel`), so a file there writes in bursts
+  // of 768 KiB and then waits 1.5 s: the app had 16 KiB of each wait, 11-27 KiB/s.
+  it.each([["an iroh channel", 120 * 1024], ["a WebRTC channel", undefined]])("a file keeps half of %s beside an app sending at its limit, and the app about half", async (_, sendBudget) => {
     // B is not what is measured: the bytes stop at A's end of the channel.
     const isData = (data: string) => data.includes('"t":"pf-data"') || (data.includes(`"t":"${APP_FRAME}"`) && data.includes('"d":'));
     // Simulated time from the start: an app's rate window reads the clock it was made with.
@@ -520,8 +522,12 @@ describe("apps on a paired session (apps/1)", () => {
       await vi.waitFor(() => expect(a.link.supportsApps && b.link.supportsApps && a.link.supportsLargeFiles).toBe(true));
       a.link.openApp(app, "1.0.0"); b.link.openApp(app, "1.0.0");
       await vi.waitFor(() => expect(a.link.peerApps.has(app) && b.link.peerApps.has(app)).toBe(true));
-      const channel = (a.link as unknown as { channel: { bufferedAmount: number; sendBudget?: number } }).channel;
+      const channel = (a.link as unknown as { channel: { bufferedAmount: number; sendBudget?: number; drained(): Promise<void> } }).channel;
       channel.sendBudget = sendBudget;
+      // A WebRTC channel tells it drained once it is down to its low water mark, as `wrapDataChannel` does.
+      const drains: (() => void)[] = [];
+      const drainedTo = sendBudget ? undefined : LIMITS.sendLowWaterMark;
+      if (drainedTo !== undefined) channel.drained = () => channel.bufferedAmount <= drainedTo ? Promise.resolve() : new Promise<void>((resolve) => { drains.push(resolve); });
       const sent = { file: 0, app: 0 };
       // What each send put on the channel queues there until the link carries it.
       const queued = (kind: "file" | "app", from: number) => {
@@ -542,16 +548,18 @@ describe("apps on a paired session (apps/1)", () => {
       const tick = 20, rate = 512 * 1024;
       for (let t = 0; t < 10_000; t += tick) {
         channel.bufferedAmount = Math.max(0, channel.bufferedAmount - rate * tick / 1000);
+        if (drainedTo !== undefined && channel.bufferedAmount <= drainedTo) for (const resolve of drains.splice(0)) resolve();
         const from = a.sent.length;
         if (a.link.sendAppData(app, jsonOf(APP_DATA_MAX_BYTES)) === null) queued("app", from);
         await vi.advanceTimersByTimeAsync(tick);
       }
       stop = true; channel.bufferedAmount = 0;
+      for (const resolve of drains.splice(0)) resolve();
       await vi.advanceTimersByTimeAsync(tick);
       await file;
       const carried = 10 * rate;
       expect(sent.file).toBeGreaterThan(carried * 0.4);
-      // The app still gets its share: it is not refused for the whole transfer either.
+      // The app gets its share too: about half, not refused for most of the transfer.
       expect(sent.app).toBeGreaterThan(carried * 0.3);
     } finally {
       vi.useRealTimers();
