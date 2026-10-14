@@ -840,9 +840,26 @@ function countsAsUnread(message: ChatMessage): boolean {
   return message.sender !== "me" && message.systemEvent?.type !== "join";
 }
 
+/** The most calls one line says it stands for: a stored count past it (a damaged or hand-edited copy) reads as this. */
+export const MAX_CALL_LINE_COUNT = 9_999;
+
+/**
+ * How many calls a call's line stands for (`callEvent.count`): one for a line without a count, as every line written
+ * before it was, and for a count that is not a whole number of at least two. Never more than `MAX_CALL_LINE_COUNT`.
+ */
+export function callLineCount(event: { count?: unknown } | undefined): number {
+  const count = event?.count;
+  if (typeof count !== "number" || !Number.isInteger(count) || count < 2) return 1;
+  return Math.min(count, MAX_CALL_LINE_COUNT);
+}
+
+/** What a message adds to the unread count: a line of several missed calls, each of them (`callLineCount`). */
 function unreadAfter(messages: readonly ChatMessage[], read: number): number {
   let unread = 0;
-  for (let i = Math.max(0, read); i < messages.length; i++) if (countsAsUnread(messages[i]!)) unread++;
+  for (let i = Math.max(0, read); i < messages.length; i++) {
+    const message = messages[i]!;
+    if (countsAsUnread(message)) unread += message.callEvent ? callLineCount(message.callEvent) : 1;
+  }
   return unread;
 }
 

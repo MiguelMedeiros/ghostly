@@ -68,6 +68,12 @@ export interface ChatMessage {
     type: CallEventType;
     hasVideo?: boolean;
     duration?: number;
+    /**
+     * How many calls the line stands for: a burst of missed calls from the contact is one line ("12 missed calls").
+     * Absent on every line written before it, and on a line of one call: read through `callLineCount`, which takes
+     * anything but a whole number from 2 up as one.
+     */
+    count?: number;
   };
 }
 
