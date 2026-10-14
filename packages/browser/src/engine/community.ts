@@ -2,7 +2,7 @@ import {
   COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
   beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, groupName, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon, newerHead, readBeaconHead, type CommunityHead,
   mentionsMember, receivedTimestamp, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, shouldBeHub,
-  GROUP_HAVE_FRAME,
+  GROUP_HAVE_FRAME, WATCH_PEER_MS,
   type CommunityFrame, type CommunityMessageFrame, type GroupEdit, type GroupFileMeta, type GroupMention, type WireReply, type StatusCard, type CommunityState, type GroupEntryLink, type GroupMetaChange, type Hub, type Knock, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
@@ -147,6 +147,14 @@ const CUT_OFF_STEP_UP_MS = 15_000;
 /** A lobby request this recent is from a member still looking fast for my side of the edge: mine opens expecting it. */
 const LOBBY_EXPECT_MS = 30_000;
 /**
+ * A member whose edge was down `memberGoneMs` is dropped by its hub, and its edge closed: its app closed, and is often
+ * opened again within minutes, when it dials an edge my side no longer has and asks in my lobby. So my lobby is read at
+ * the busy pace this long after, as a 1:1 chat watches a contact that went away (`WATCH_PEER_MS`). Read every half minute,
+ * a web member back two minutes after it closed got the lines written meanwhile 30-45 s after it opened, while a 1:1
+ * text from the same bot came in seconds (bug hunt 1013-2254, 2026-10-14).
+ */
+const MEMBER_BACK_MS = WATCH_PEER_MS;
+/**
  * A lobby is one record every member asking a hub writes, each reading it and writing it back with its own request: two
  * members writing at once (both cut off by the same leave, in the same second) each write what they read, and the later
  * write drops the earlier request. So a member reads the lobby back this long after its write (plus up to `LOBBY_CHECK_JITTER_MS`, so
@@ -254,6 +262,8 @@ interface Live {
   warmUntil: number;
   /** My lobby is polled fast until then. */
   lobbyBusyUntil: number;
+  /** As a hub: my lobby is polled fast until then too, for a member I dropped that is likely coming back (`MEMBER_BACK_MS`). */
+  memberBackUntil?: number;
   /** Members whose edge is due any moment (we just met over the admission): opened expecting them, and since when it is awaited. */
   expect: Set<string>;
   awaited: Map<string, number>;
@@ -820,7 +830,8 @@ export class Communities {
       // So is one whose edge to me was up and dropped (its app closed, or was killed and said nothing): its members ask
       // the hubs left once they give up on it. Read every half minute, my lobby kept them waiting that long more.
       if (this.hubDropped(groupId, live, others, now)) live.lobbyBusyUntil = Math.max(live.lobbyBusyUntil, now + this.timings.lobbyBusyMs);
-      const lobbyEvery = now < live.lobbyBusyUntil && !busy ? this.timings.lobbyPollMs : this.timings.lobbyIdlePollMs;
+      // And so is one whose member I dropped a while ago (`MEMBER_BACK_MS`): its app, opened again, asks there.
+      const lobbyEvery = (now < live.lobbyBusyUntil || now < (live.memberBackUntil ?? 0)) && !busy ? this.timings.lobbyPollMs : this.timings.lobbyIdlePollMs;
       if (now - live.lastLobbyPoll >= lobbyEvery) { live.lastLobbyPoll = now; await this.pollLobby(groupId, live, now); }
       await this.answerKnocks(groupId, live, now, busy);
       await this.commitLeaves(live, others.map(h => h.key), now);
@@ -876,6 +887,12 @@ export class Communities {
       }
       let kept = live.myHubs.filter(key => (fresh.has(key) || this.recentHub(live, key)) && !live.hubsAvoided.has(key));
       kept = kept.slice(0, COMMUNITY_TOPOLOGY.hubsPerMember);
+      // Back after a restart: the hub of my last run's edge first (`restored`), while listed and not full. One that dropped
+      // me while my app was closed reads its lobby fast for my coming back (`MEMBER_BACK_MS`); another that the fresh pick
+      // named reads its own every half minute.
+      if (!kept.length) for (const key of live.restored.keys()) {
+        if (kept.length < COMMUNITY_TOPOLOGY.hubsPerMember && !live.hubsAvoided.has(key) && others.some(h => h.key === key && h.load < COMMUNITY_TOPOLOGY.hubCapacity)) kept.push(key);
+      }
       const picked = pickHubs(me, others, now, new Set(live.hubsAvoided.keys()));
       // With no edge up at all (cut off, or let in and the edge to the door never came up), the next hub's edge looks fast
       // for that hub's side, which opens when it reads my lobby. At the background pace it looked every half minute, and
@@ -987,7 +1004,8 @@ export class Communities {
       const id = edges.get(key);
       if (this.gone(live, key)) live.members.delete(key);
       else if (id && this.host.linkReady(id, 2)) live.members.set(key, now);
-      else if (now - since > this.timings.memberGoneMs || live.session.wasRemoved(key)) live.members.delete(key);
+      else if (live.session.wasRemoved(key)) live.members.delete(key);
+      else if (now - since > this.timings.memberGoneMs) { live.members.delete(key); live.memberBackUntil = now + MEMBER_BACK_MS; }
     }
     this.shed(groupId, live, now);
     return live.members.size;
