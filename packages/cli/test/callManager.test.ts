@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildSdpFromSignal, heardCallSignal, parseCallSignal } from "@ghostly/core";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { AudioSocket, audioSocketPath } from "../src/calls/audioSocket";
-import { CallManager, MAX_REDIALS, type CallEngine } from "../src/calls/manager";
+import { CALL_PACE_MS, CallManager, MAX_REDIALS, type CallEngine } from "../src/calls/manager";
 import { CallMedia, loadCallStack, type CallStack } from "../src/calls/media";
 import { dominantHz, level, tone } from "./support/tone";
 // covers: headless.calls
@@ -27,7 +27,7 @@ afterAll(() => {
 
 interface Side { calls: CallManager; events: { type: string; [k: string]: unknown }[]; signals: (string | null)[]; link: Partial<LinkView> }
 
-function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number }; iceServersB?: { urls: string }[]; earlyAnswerMs?: number } = {}): { a: Side; b: Side } {
+function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number }; iceServersB?: { urls: string }[]; earlyAnswerMs?: number; callPaceMs?: number } = {}): { a: Side; b: Side } {
   // Each side's clock: the same one unless `nowB` gives the second side its own.
   const nowA = stacks.now ?? Date.now, nowB = stacks.nowB ?? nowA;
   const make = (chat: string): Side => {
@@ -43,7 +43,7 @@ function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () 
       if (signal) setTimeout(() => other().calls.onSignal(other().link.id!, heardCallSignal(signal, heardAt())), stacks.delay ?? 5);
     },
   });
-  a.calls = new CallManager({ engine: engine(a, () => b, nowB), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials, stall: stacks.stall });
+  a.calls = new CallManager({ engine: engine(a, () => b, nowB), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials, stall: stacks.stall, callPaceMs: stacks.callPaceMs });
   b.calls = new CallManager({ engine: engine(b, () => a, nowA, stacks.iceServersB), emit: (type, _id, fields) => b.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.b, now: stacks.nowB ?? stacks.now, earlyAnswerMs: stacks.earlyAnswerMs });
   return { a, b };
 }
@@ -437,7 +437,8 @@ describe("two call managers", { timeout: 60_000 }, () => {
   it("a call placed in the hang-up's millisecond rings, and a hang-up in its offer's millisecond ends the ring", async () => {
     // A clock that stands still, as it does for a bot that redials or cancels at once: each signal is still newer.
     const at = Date.now();
-    const { a, b } = pairOfManagers({ now: () => at });
+    // No pace between calls (`CALL_PACE_MS`): this one is about the signals' timestamps.
+    const { a, b } = pairOfManagers({ now: () => at, callPaceMs: 0 });
     await a.calls.start("chat-ab", {});
     await until(() => b.events.find((e) => e.type === "call.incoming"));
     await a.calls.hangup(undefined);
@@ -449,6 +450,35 @@ describe("two call managers", { timeout: 60_000 }, () => {
     const sent = a.signals.filter((s): s is string => s !== null).map((s) => (JSON.parse(s) as { ts: number }).ts);
     expect(sent).toEqual([...sent].sort((x, y) => x - y));
     expect(new Set(sent).size).toBe(sent.length);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  // A bot looping call.start / call.hangup placed 1,375 calls a minute (agents#974): the contact's app keeps each as a
+  // missed call. A call that ended unanswered is followed by the next one no sooner than CALL_PACE_MS.
+  it("a call placed right after this side's last one ended unanswered is refused as busy, with the wait left; after it, or after a declined or answered call, it rings", async () => {
+    let at = Date.now();
+    const { a, b } = pairOfManagers({ now: () => at });
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await a.calls.hangup(undefined);
+    await until(() => b.events.find((e) => e.type === "call.ended"));
+    at += 500;
+    const refused = await a.calls.start("chat-ab", {}).catch((error: unknown) => error);
+    expect(refused).toMatchObject({ code: "busy", details: { retryAfterMs: CALL_PACE_MS - 500 } });
+    expect((refused as Error).message).toBe("Your last call in this chat ended unanswered a moment ago: call again in 1.5 s");
+    // Nothing went to the contact for it, and nothing is on here.
+    expect(b.events.filter((e) => e.type === "call.incoming")).toHaveLength(1);
+    expect(a.calls.list()).toEqual([]);
+    at += CALL_PACE_MS;
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.filter((e) => e.type === "call.incoming").length === 2);
+    // Declined by the contact: no pace, the next call may go at once.
+    await b.calls.hangup(undefined);
+    await until(() => a.events.filter((e) => e.type === "call.ended").length === 2);
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.filter((e) => e.type === "call.incoming").length === 3);
+    await a.calls.hangup(undefined);
     await a.calls.stopAll();
     await b.calls.stopAll();
   });
@@ -486,7 +516,8 @@ describe("two call managers", { timeout: 60_000 }, () => {
   it("the answer made as a call rings: closed when the call is declined or missed, made again while it rings long, and answered on", async () => {
     await withEnv({ GHOSTLY_STUN: "0" }, async () => {
       const counted = countingStack();
-      const { a, b } = pairOfManagers({ b: counted, earlyAnswerMs: 300 });
+      // No pace between calls (`CALL_PACE_MS`): the caller places one right after the one it hung up.
+      const { a, b } = pairOfManagers({ b: counted, earlyAnswerMs: 300, callPaceMs: 0 });
 
       // Declined: made again a few times while it rang, and none is left open.
       await a.calls.start("chat-ab", {});
