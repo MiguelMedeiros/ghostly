@@ -184,6 +184,8 @@
     "adminInvites": "只有管理员可以邀请",
     "adminLink": "只有管理员可以更换或关闭群组链接",
     "adminMembers": "只有管理员可以更改此群组的成员",
+    "adminOff": "此设备上已关闭对这个群组的管理",
+    "adminOffNext": "请先在群组页面上开启“从此设备管理群组”。",
     "adminOnly": "只有管理员可以这样做",
     "adminPicture": "只有管理员可以更换群组头像",
     "adminRename": "只有管理员可以重命名群组",
