@@ -22,6 +22,7 @@
   "emoji": "絵文字",
   "emojiCategories": "絵文字のカテゴリ",
   "expressions": "絵文字と GIF",
+  "filePreparing": "{{name}} を準備しています…",
   "gif": "GIF",
   "gifCategories": "GIF のカテゴリ",
   "gifCategory": {
