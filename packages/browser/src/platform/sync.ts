@@ -233,7 +233,8 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
   if (dirty || (!partial && !added.length && session.messages.length > STORED_MESSAGES && !untouched(linkId, session.id))) saveSession(session);
   if (added.length) {
     const before = session.messages.length;
-    const updated = addMessages(session.id, added, partial);
+    // The session read above, as stored (saved just now if a row changed).
+    const updated = addMessages(session.id, added, partial, session);
     if (updated) session.messages = updated.messages;
     if (session.messages.length !== before) changed = true;
   }
