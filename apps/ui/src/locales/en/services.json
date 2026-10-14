@@ -28,5 +28,9 @@
     "sharedOne": "Shared with 1 contact",
     "stopped": "Stopped"
   },
+  "window": {
+    "failed": "The request failed.",
+    "unreachable": "This service is not reachable. Services exist while their ghost is online."
+  },
   "yourApps": "Your apps"
 }

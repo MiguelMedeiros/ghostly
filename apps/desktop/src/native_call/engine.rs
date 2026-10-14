@@ -53,6 +53,8 @@ const FPS: u32 = 15;
 /// What the page gets to show, at most: the size and rate of the JPEGs.
 const SHOWN_MAX: u32 = 960;
 const SHOWN_FPS: u32 = 15;
+/// How long before it is due a picture is shown all the same ([`due`]).
+const SHOWN_EARLY: Duration = Duration::from_millis(8);
 /// The browsers' own STUN server (RTC_CONFIG), for the server reflexive candidate.
 const STUN: &str = "stun:stun.l.google.com:19302";
 /// How long its name may take to resolve before webrtc-rs is left to resolve it ([`gather::stun_urls`]).
@@ -182,11 +184,18 @@ const SAID_AT_MOST: u64 = 8;
 
 /// Logs a playing pipeline's errors and warnings. Nothing else reads its bus once it plays, so a decoder that
 /// cannot negotiate or a camera that fails a moment later stopped without a word. Everything stays on the bus
-/// (`start` reads the error that kept a pipeline from starting).
-fn watch(pipeline: &gst::Pipeline, what: &'static str) {
+/// (`start` reads the error that kept a pipeline from starting). `heard` gets what a `level` in it reads
+/// ([`loudness`]); those messages leave the bus, or it would fill with twelve a second.
+fn watch(pipeline: &gst::Pipeline, what: &'static str, heard: Option<Heard>) {
     let Some(bus) = pipeline.bus() else { return };
     let said = AtomicU64::new(0);
     bus.set_sync_handler(move |_, message| {
+        if let Some(heard) = &heard {
+            if let Some(level) = loudness(message) {
+                heard(level);
+                return gst::BusSyncReply::Drop;
+            }
+        }
         let (level, error, debug) = match message.view() {
             gst::MessageView::Error(e) => ("error", e.error().to_string(), e.debug()),
             gst::MessageView::Warning(w) => ("warning", w.error().to_string(), w.debug()),
@@ -328,7 +337,7 @@ impl Camera {
         target: &Arc<Mutex<Option<gst_app::AppSrc>>>,
         preview: &Sink,
     ) -> Result<(), String> {
-        watch(pipeline, "the camera");
+        watch(pipeline, "the camera", None);
         let to = target.clone();
         element::<gst_app::AppSink>(pipeline, "out")?.set_callbacks(
             gst_app::AppSinkCallbacks::builder()
@@ -377,6 +386,9 @@ impl Drop for Camera {
     }
 }
 
+/// Reads how loud a call's sound is where it passes, every 80 ms as Settings' meter does ([`watch`] hears it).
+const LEVEL: &str = "level interval=80000000 post-messages=true";
+
 /// A microphone's loudness for Settings' meter: `level` reports it every 80 ms, and nothing goes anywhere else.
 const METER: &str = "{device} ! queue ! audioconvert ! audioresample ! audio/x-raw,channels=1 \
      ! level interval=80000000 post-messages=true ! fakesink sync=false async=false";
@@ -388,6 +400,24 @@ pub fn meter_level(rms_db: f64) -> f64 {
         return 0.0;
     }
     (10f64.powf(rms_db / 20.0) * 4.0).min(1.0)
+}
+
+/// Where a `level` reading goes: how loud, 0 to 1.
+type Heard = Arc<dyn Fn(f64) + Send + Sync>;
+
+/// How loud the sound passing a `level` element is, from the message it posts ([`meter_level`] of its loudest
+/// channel). None for any other message.
+fn loudness(message: &gst::Message) -> Option<f64> {
+    let gst::MessageView::Element(element) = message.view() else {
+        return None;
+    };
+    let reading = element.structure().filter(|s| s.name() == "level")?;
+    let rms = reading.get::<gst::glib::ValueArray>("rms").ok()?;
+    let loudest = rms
+        .iter()
+        .filter_map(|v| v.get::<f64>().ok())
+        .fold(f64::NEG_INFINITY, f64::max);
+    Some(meter_level(loudest))
 }
 
 /// A microphone open for Settings' meter, until dropped.
@@ -415,21 +445,14 @@ impl Meter {
                     .bus()
                     .ok_or("No bus")?
                     .set_sync_handler(move |_, message| {
-                        let gst::MessageView::Element(element) = message.view() else {
+                        let Some(level) = loudness(message) else {
                             return gst::BusSyncReply::Pass;
                         };
-                        let Some(reading) = element.structure().filter(|s| s.name() == "level")
-                        else {
-                            return gst::BusSyncReply::Pass;
-                        };
-                        if let Ok(rms) = reading.get::<gst::glib::ValueArray>("rms") {
-                            let loudest = rms
-                                .iter()
-                                .filter_map(|v| v.get::<f64>().ok())
-                                .fold(f64::NEG_INFINITY, f64::max);
-                            let level = serde_json::json!({ "level": meter_level(loudest) });
-                            levels(level.to_string().into_bytes());
-                        }
+                        levels(
+                            serde_json::json!({ "level": level })
+                                .to_string()
+                                .into_bytes(),
+                        );
                         gst::BusSyncReply::Drop
                     });
                 Ok(())
@@ -531,6 +554,8 @@ struct Shared {
     speaker: Mutex<Option<String>>,
     /// The peer's sound, once it arrives; replaced when the speaker changes.
     sound: Mutex<Option<Playing>>,
+    /// The peer takes our pictures (`Call::send_pictures`).
+    pictures: AtomicBool,
     closed: AtomicBool,
 }
 
@@ -547,6 +572,24 @@ impl Shared {
         *current = state.to_string();
         crate::diagnostics::log(&format!("native call: {state}"));
         (self.events)(serde_json::json!({ "ice": state }).to_string().into_bytes());
+    }
+
+    /// Where a side's loudness goes on its way to the page, for who is speaking: `{"levels":{"mic":0.4}}`, 0 to 1
+    /// as Settings' meter reads it. `side` is "mic" for what the microphone sends (silence while muted) and
+    /// "peer" for the peer's sound. A level is said when it changes, so silence is said once.
+    fn hears(self: &Arc<Self>, side: &'static str) -> Heard {
+        let shared = self.clone();
+        let last = AtomicU64::new(u64::MAX);
+        Arc::new(move |level: f64| {
+            let hundredths = (level * 100.0).round() as u64;
+            if last.swap(hundredths, Ordering::Relaxed) == hundredths
+                || shared.closed.load(Ordering::Relaxed)
+            {
+                return;
+            }
+            let levels = serde_json::json!({ "levels": { side: hundredths as f64 / 100.0 } });
+            (shared.events)(levels.to_string().into_bytes());
+        })
     }
 
     /// Media arrived, so the call is up, whatever ICE has managed to say.
@@ -697,16 +740,15 @@ fn receiver(
             "appsrc name=rtp is-live=true format=time do-timestamp=true \
              caps=\"application/x-rtp,media=(string)video,clock-rate=(int)90000,encoding-name=(string)VP8,payload=(int){payload_type}\" \
              ! rtpjitterbuffer latency=100 ! rtpvp8depay request-keyframe=true wait-for-keyframe=true ! vp8dec name=decoder \
-             ! videoconvert ! videoscale ! video/x-raw,width=[2,{SHOWN_MAX}],height=[2,{SHOWN_MAX}],pixel-aspect-ratio=1/1 \
-             ! jpegenc quality=70 \
-             ! appsink name=picture sync=false async=false max-buffers=2 drop=true"
+             ! {}",
+            shown()
         )
     } else {
         format!(
             "appsrc name=rtp is-live=true format=time do-timestamp=true \
              caps=\"application/x-rtp,media=(string)audio,clock-rate=(int)48000,encoding-name=(string)OPUS,payload=(int){payload_type}\" \
              ! rtpjitterbuffer latency=60 ! rtpopusdepay ! opusdec plc=true name=decoder \
-             ! audioconvert ! audioresample ! {{device}}"
+             ! {LEVEL} ! audioconvert ! audioresample ! {{device}}"
         )
     };
     let ready = |pipeline: &gst::Pipeline| receiving(shared, pipeline, video, &decoded, &keyframes);
@@ -733,6 +775,53 @@ fn receiver(
     Ok((element(&pipeline, "rtp")?, pipeline, device))
 }
 
+/// What makes the pictures the element named `decoder` gives into JPEGs for the page ([`show`]).
+fn shown() -> String {
+    format!(
+        "videoconvert ! videoscale ! video/x-raw,width=[2,{SHOWN_MAX}],height=[2,{SHOWN_MAX}],pixel-aspect-ratio=1/1 \
+         ! jpegenc name=jpeg quality=70 \
+         ! appsink name=picture sync=false async=false max-buffers=2 drop=true"
+    )
+}
+
+/// Whether the page is shown a picture that comes `now`, `next` being when one is due (none before the first).
+/// The one after is due a fifteenth of a second after this one was, not after it came: at 30 a second every
+/// second picture comes right when one is due, a hair early half the time, and counting from when it came showed
+/// 12 a second, in gaps of 66 and 100 ms. SHOWN_EARLY is that hair; half the gap of 60 a second, so those are
+/// never taken a picture early. After a pause the count starts again, rather than catch up.
+fn due(next: &mut Option<Instant>, now: Instant) -> bool {
+    let every = Duration::from_secs(1) / SHOWN_FPS;
+    *next = Some(match *next {
+        Some(at) if now + SHOWN_EARLY < at => return false,
+        Some(at) if now < at + every => at + every,
+        _ => now + every,
+    });
+    true
+}
+
+/// The peer's pictures to the page, as JPEGs: at most SHOWN_FPS a second (videorate's drop-only asserts on 1.20
+/// here). The others are left out as they leave the decoder, before any is scaled or made a JPEG: a browser
+/// sends 30 a second.
+fn show(pipeline: &gst::Pipeline, page: Sink) -> Result<(), String> {
+    let next = Mutex::new(None::<Instant>);
+    element::<gst::Element>(pipeline, "decoder")?
+        .static_pad("src")
+        .ok_or("No decoder output")?
+        .add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+            if due(&mut next.lock().unwrap(), Instant::now()) {
+                gst::PadProbeReturn::Ok
+            } else {
+                gst::PadProbeReturn::Drop
+            }
+        });
+    each_buffer(&element(pipeline, "picture")?, move |buffer| {
+        if let Some(jpeg) = bytes_of(buffer) {
+            page(jpeg);
+        }
+    });
+    Ok(())
+}
+
 /// Counts what a receiving pipeline decodes and, for pictures, sends them to the page and asks for keyframes.
 fn receiving(
     shared: &Arc<Shared>,
@@ -741,14 +830,11 @@ fn receiving(
     decoded: &Arc<AtomicBool>,
     keyframes: &mpsc::UnboundedSender<()>,
 ) -> Result<(), String> {
-    watch(
-        pipeline,
-        if video {
-            "the peer's video"
-        } else {
-            "the peer's sound"
-        },
-    );
+    if video {
+        watch(pipeline, "the peer's video", None);
+    } else {
+        watch(pipeline, "the peer's sound", Some(shared.hears("peer")));
+    }
     let src: gst_app::AppSrc = element(pipeline, "rtp")?;
     let counting = shared.clone();
     let decoder: gst::Element = element(pipeline, "decoder")?;
@@ -774,19 +860,7 @@ fn receiving(
             gst::PadProbeReturn::Ok
         });
     if video {
-        // At most SHOWN_FPS pictures a second go to the page (videorate's drop-only asserts on 1.20 here).
-        let (events, last) = (shared.events.clone(), Mutex::new(None::<Instant>));
-        each_buffer(&element(pipeline, "picture")?, move |buffer| {
-            let mut last = last.lock().unwrap();
-            let now = Instant::now();
-            if last.is_some_and(|at| now - at < Duration::from_secs(1) / SHOWN_FPS) {
-                return;
-            }
-            *last = Some(now);
-            if let Some(jpeg) = bytes_of(buffer) {
-                events(jpeg);
-            }
-        });
+        show(pipeline, shared.events.clone())?;
         // The depayloader lost a frame and wants a keyframe: that goes to the sender as a PLI.
         let keyframes = keyframes.clone();
         src.static_pad("src").ok_or("No RTP output")?.add_probe(
@@ -831,6 +905,20 @@ pub fn offered_payload_types(sdp: &str) -> (u8, u8) {
         }
     }
     (opus.unwrap_or(OPUS_PT), vp8.unwrap_or(VP8_PT))
+}
+
+/// Whether the peer's description takes our pictures: its video section open both ways, or only to receive. A
+/// peer that takes none (`vr: 0`, a bot) has the section rebuilt `a=inactive`. No video section: as before.
+pub fn takes_pictures(sdp: &str) -> bool {
+    let mut video = false;
+    for line in sdp.lines().map(str::trim_end) {
+        if line.starts_with("m=") {
+            video = line.starts_with("m=video");
+        } else if video && (line == "a=inactive" || line == "a=sendonly") {
+            return false;
+        }
+    }
+    true
 }
 
 /// The local description as the page's signal needs it (`extractParamsFromSdp`): each media section with an
@@ -1012,12 +1100,21 @@ fn feed(
     });
 }
 
-/// Writes what the encoders feed it to a track, from a task, for the whole call.
-fn writer(out: Outgoing, payload_type: u8, sent: impl Fn() + Send + 'static) -> Frames {
+/// Writes what the encoders feed it to a track, from a task, for the whole call; what comes while `open` does not
+/// hold is dropped.
+fn writer(
+    out: Outgoing,
+    payload_type: u8,
+    open: impl Fn() -> bool + Send + 'static,
+    sent: impl Fn() + Send + 'static,
+) -> Frames {
     let (tx, mut rx) = mpsc::channel::<(Bytes, Duration)>(64);
     tokio::spawn(async move {
         let mut failing = false;
         while let Some((data, duration)) = rx.recv().await {
+            if !open() {
+                continue;
+            }
             let sample = Sample {
                 data,
                 duration,
@@ -1045,9 +1142,10 @@ fn writer(out: Outgoing, payload_type: u8, sent: impl Fn() + Send + 'static) -> 
     tx
 }
 
-/// The microphone to Opus, for the audio track's writer.
+/// The microphone to Opus, for the audio track's writer. Its loudness is read after the mute ([`LEVEL`]).
 const MICROPHONE: &str = "{device} ! queue ! audioconvert ! audioresample ! volume name=mic \
-     ! audio/x-raw,rate=48000,channels=1 ! opusenc bitrate=32000 frame-size=20 \
+     ! audio/x-raw,rate=48000,channels=1 ! level interval=80000000 post-messages=true \
+     ! opusenc bitrate=32000 frame-size=20 \
      ! appsink name=opus sync=false async=false max-buffers=50 drop=true";
 
 /// The microphone a call sends, playing.
@@ -1063,6 +1161,8 @@ struct Voice {
     frames: Frames,
     current: Arc<AtomicU64>,
     muted: AtomicBool,
+    /// Where each microphone's loudness goes.
+    heard: Heard,
 }
 
 impl Voice {
@@ -1078,7 +1178,7 @@ impl Voice {
             wanted,
             default,
             |p| {
-                watch(p, "the microphone");
+                watch(p, "the microphone", Some(self.heard.clone()));
                 element::<gst::Element>(p, "mic")?.set_property("mute", muted);
                 let current = self.current.clone();
                 feed(
@@ -1123,8 +1223,8 @@ pub struct Devices {
 impl Call {
     /// The pipelines playing and the peer connection ready to offer or answer. `fake`: a test tone and nothing
     /// played by default ([`fake_media`]; a device chosen by name is used all the same). `servers`: the profile's
-    /// own ICE servers ([`ice::usable`] ones), after the built-in STUN server. `events` hears the ICE state (JSON)
-    /// and each picture that arrives (JPEG).
+    /// own ICE servers ([`ice::usable`] ones), after the built-in STUN server. `events` hears the ICE state and
+    /// each side's loudness (JSON, [`Shared::hears`]), and each picture that arrives (JPEG).
     pub async fn new(
         opus_pt: u8,
         vp8_pt: u8,
@@ -1153,6 +1253,7 @@ impl Call {
             receiving: Mutex::default(),
             speaker: Mutex::new(devices.speaker),
             sound: Mutex::default(),
+            pictures: AtomicBool::new(true),
             closed: AtomicBool::new(false),
         });
         // By address: webrtc-rs would otherwise resolve the name on its driver, ahead of the host candidates.
@@ -1198,19 +1299,31 @@ impl Call {
         let counted = shared.clone();
         let voice = Voice {
             fake,
-            frames: writer(audio, opus_pt, move || {
-                counted.counts.audio_sent.fetch_add(1, Ordering::Relaxed);
-            }),
+            frames: writer(
+                audio,
+                opus_pt,
+                || true,
+                move || {
+                    counted.counts.audio_sent.fetch_add(1, Ordering::Relaxed);
+                },
+            ),
             current: Arc::default(),
             muted: AtomicBool::new(false),
+            heard: shared.hears("mic"),
         };
-        let counted = shared.clone();
-        let pictures = writer(video, vp8_pt, move || {
-            counted.counts.video_sent.fetch_add(1, Ordering::Relaxed);
-        });
+        let (counted, open) = (shared.clone(), shared.clone());
+        let pictures = writer(
+            video,
+            vp8_pt,
+            move || open.pictures.load(Ordering::Relaxed),
+            move || {
+                counted.counts.video_sent.fetch_add(1, Ordering::Relaxed);
+            },
+        );
         let started = (|| {
             let send = launch(&format!(
-                "appsrc name=video is-live=true format=time do-timestamp=true ! queue leaky=downstream max-size-buffers=4 \
+                "appsrc name=video is-live=true format=time do-timestamp=true ! valve name=pictures \
+                 ! queue leaky=downstream max-size-buffers=4 \
                  ! videoconvert ! vp8enc deadline=1 cpu-used=8 threads=2 target-bitrate=600000 end-usage=cbr keyframe-max-dist={FPS} \
                  ! appsink name=vp8 sync=false async=false max-buffers=10 drop=true"
             ))?;
@@ -1220,7 +1333,7 @@ impl Call {
                 Duration::from_secs(1) / FPS,
                 || true,
             );
-            watch(&send, "the video encoder");
+            watch(&send, "the video encoder", None);
             start(&send, "The video")?;
             match voice.open(devices.microphone.as_deref()) {
                 Ok(microphone) => Ok((send, microphone)),
@@ -1370,10 +1483,12 @@ impl Call {
             self.gather_anew();
         }
         let offer = RTCSessionDescription::offer(offer.to_owned()).map_err(|e| e.to_string())?;
+        let pictures = takes_pictures(&offer.sdp);
         self.pc
             .set_remote_description(offer)
             .await
             .map_err(|e| e.to_string())?;
+        self.send_pictures(pictures);
         let answer = self
             .pc
             .create_answer(None)
@@ -1385,10 +1500,31 @@ impl Call {
     /// The peer's answer to our offer.
     pub async fn accept(&self, answer: &str) -> Result<(), String> {
         let answer = RTCSessionDescription::answer(answer.to_owned()).map_err(|e| e.to_string())?;
+        let pictures = takes_pictures(&answer.sdp);
         self.pc
             .set_remote_description(answer)
             .await
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        self.send_pictures(pictures);
+        Ok(())
+    }
+
+    /// Encodes and sends the camera's pictures, or none: webrtc-rs sends what it is given on a video section the
+    /// peer closed (`vr: 0`), so they stop before the encoder, and those encoded before the answer stay unsent.
+    fn send_pictures(&self, on: bool) {
+        if self.shared.pictures.swap(on, Ordering::Relaxed) != on {
+            crate::diagnostics::log(&format!(
+                "native call: {}",
+                if on {
+                    "pictures sent"
+                } else {
+                    "the peer takes no picture"
+                }
+            ));
+        }
+        if let Ok(valve) = element::<gst::Element>(&self.send, "pictures") {
+            valve.set_property("drop", !on);
+        }
     }
 
     pub fn set_muted(&self, muted: bool) {
@@ -1510,7 +1646,7 @@ impl Call {
 
 #[cfg(test)]
 mod tests {
-    // covers: calls.linux-native, calls.reconnect
+    // covers: calls.linux-native, calls.reconnect, calls.speaking
     use super::*;
 
     #[test]
@@ -1617,6 +1753,197 @@ mod tests {
         );
     }
 
+    /// A peer's pictures faster than the page is shown them (a browser sends 30 a second): the ones left out are
+    /// left out as they are decoded, so none is made a JPEG for nothing. 60 pictures as fast as they come stand
+    /// for the peer's.
+    #[test]
+    fn a_picture_the_page_is_not_shown_is_never_made_a_jpeg() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let pipeline = launch(&format!(
+            "videotestsrc num-buffers=60 ! video/x-raw,format=I420,width=640,height=480,framerate=30/1 \
+             ! identity name=decoder ! {}",
+            shown()
+        ))
+        .unwrap();
+        let (decoded, encoded, pictures) = (
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(AtomicU64::new(0)),
+        );
+        let count = |name: &str, pad: &str, into: &Arc<AtomicU64>| {
+            let into = into.clone();
+            element::<gst::Element>(&pipeline, name)
+                .unwrap()
+                .static_pad(pad)
+                .unwrap()
+                .add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+                    into.fetch_add(1, Ordering::Relaxed);
+                    gst::PadProbeReturn::Ok
+                });
+        };
+        // Before `show` adds anything of its own: every picture the decoder gives is counted.
+        count("decoder", "src", &decoded);
+        count("jpeg", "sink", &encoded);
+        let seen = pictures.clone();
+        show(
+            &pipeline,
+            Arc::new(move |jpeg: Vec<u8>| {
+                assert!(jpeg.starts_with(&[0xff, 0xd8]));
+                seen.fetch_add(1, Ordering::Relaxed);
+            }),
+        )
+        .unwrap();
+        let started = Instant::now();
+        start(&pipeline, "The picture").unwrap();
+        let ended = pipeline.bus().unwrap().timed_pop_filtered(
+            gst::ClockTime::from_seconds(60),
+            &[gst::MessageType::Eos, gst::MessageType::Error],
+        );
+        let took = started.elapsed();
+        stop(pipeline);
+        assert!(
+            matches!(
+                ended.as_ref().map(|m| m.view()),
+                Some(gst::MessageView::Eos(_))
+            ),
+            "{ended:?}"
+        );
+        let (decoded, encoded, pictures) = (
+            decoded.load(Ordering::Relaxed),
+            encoded.load(Ordering::Relaxed),
+            pictures.load(Ordering::Relaxed),
+        );
+        assert_eq!(decoded, 60);
+        // The first one, then one for each fifteenth of a second gone by (the last may be a hair early).
+        let most = 1 + (took + SHOWN_EARLY).as_millis() as u64 * u64::from(SHOWN_FPS) / 1000;
+        assert!(
+            (1..=most).contains(&pictures),
+            "{pictures} pictures shown in {took:?}"
+        );
+        assert_eq!(
+            encoded, pictures,
+            "{encoded} JPEGs made for {pictures} shown"
+        );
+    }
+
+    /// How many of 4 s of pictures `gap_us` apart the page is shown, each coming up to `jitter_us` early or late,
+    /// and the longest and shortest time between two of them (ms).
+    fn shown_of(gap_us: u64, jitter_us: u64) -> (usize, u128, u128) {
+        let started = Instant::now();
+        let mut next = None;
+        let mut passed = Vec::new();
+        for n in 0..4_000_000 / gap_us {
+            // Early, on time, late, on time: the same every run.
+            let off = [0, jitter_us, 2 * jitter_us, jitter_us][n as usize % 4];
+            let now = started + Duration::from_micros(n * gap_us + off);
+            if due(&mut next, now) {
+                passed.push(now);
+            }
+        }
+        let gaps = passed
+            .windows(2)
+            .map(|pair| (pair[1] - pair[0]).as_millis());
+        (
+            passed.len(),
+            gaps.clone().max().unwrap(),
+            gaps.min().unwrap(),
+        )
+    }
+
+    #[test]
+    fn the_page_is_shown_fifteen_pictures_a_second_evenly() {
+        // 30 a second: every second one, whether they come on the dot or 5 ms early and late.
+        for jitter in [0, 5_000] {
+            let (shown, longest, shortest) = shown_of(33_333, jitter);
+            assert_eq!(shown, 60, "at 30 a second, {jitter} us of jitter");
+            assert!(
+                longest <= 77 && shortest >= 56,
+                "gaps of {shortest} to {longest} ms"
+            );
+        }
+        // 60 a second: every fourth one.
+        let (shown, longest, shortest) = shown_of(16_667, 3_000);
+        assert_eq!(shown, 60);
+        assert!(
+            longest <= 73 && shortest >= 60,
+            "gaps of {shortest} to {longest} ms"
+        );
+        // 15 a second or fewer: all of them.
+        assert_eq!(shown_of(66_666, 5_000).0, 60);
+        assert_eq!(shown_of(100_000, 5_000).0, 40);
+        // 25 a second: 15, no more.
+        assert_eq!(shown_of(40_000, 0).0, 60);
+
+        // After a pause the count starts again: the pictures that follow are not let through to catch up.
+        let every = Duration::from_secs(1) / SHOWN_FPS;
+        let started = Instant::now();
+        let mut next = None;
+        assert!(due(&mut next, started));
+        let later = started + Duration::from_secs(3);
+        assert!(due(&mut next, later));
+        assert!(!due(&mut next, later + Duration::from_millis(1)));
+        assert!(!due(&mut next, later + every / 2));
+        assert!(due(&mut next, later + every));
+    }
+
+    /// A peer at 30 pictures a second, as they come in a call (a live source, 4 s of it): the page is shown every
+    /// second one, 15 a second, not the 12 that "a fifteenth of a second since the last one came" gave.
+    #[test]
+    fn a_peer_at_thirty_pictures_a_second_is_shown_fifteen() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let pipeline = launch(&format!(
+            "videotestsrc is-live=true num-buffers=120 \
+             ! video/x-raw,format=I420,width=320,height=240,framerate=30/1 ! identity name=decoder ! {}",
+            shown()
+        ))
+        .unwrap();
+        // When each picture the page is shown left the decoder.
+        let passed = Arc::new(Mutex::new(Vec::<Instant>::new()));
+        show(&pipeline, Arc::new(|_| {})).unwrap();
+        let into = passed.clone();
+        element::<gst::Element>(&pipeline, "jpeg")
+            .unwrap()
+            .static_pad("sink")
+            .unwrap()
+            .add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+                into.lock().unwrap().push(Instant::now());
+                gst::PadProbeReturn::Ok
+            });
+        start(&pipeline, "The picture").unwrap();
+        let ended = pipeline.bus().unwrap().timed_pop_filtered(
+            gst::ClockTime::from_seconds(60),
+            &[gst::MessageType::Eos, gst::MessageType::Error],
+        );
+        stop(pipeline);
+        assert!(
+            matches!(
+                ended.as_ref().map(|m| m.view()),
+                Some(gst::MessageView::Eos(_))
+            ),
+            "{ended:?}"
+        );
+        let passed = passed.lock().unwrap();
+        let took = *passed.last().unwrap() - passed[0];
+        // Against the time they took, not a fixed number: a loaded machine gives the source's pictures late.
+        let gaps = passed.len() as u128 - 1;
+        assert!(
+            gaps * 1000 >= 14 * took.as_millis(),
+            "{} pictures shown in {took:?}",
+            passed.len()
+        );
+        assert!(
+            gaps * 1000 <= 15 * (took + SHOWN_EARLY).as_millis() + 999,
+            "{} pictures shown in {took:?}",
+            passed.len()
+        );
+    }
+
     /// Waits until `done` holds, or says what it saw.
     async fn until(what: &str, seconds: u64, done: impl Fn() -> bool, saw: impl Fn() -> String) {
         let deadline = Instant::now() + Duration::from_secs(seconds);
@@ -1637,13 +1964,15 @@ mod tests {
         }
         let frames = Arc::new(AtomicU64::new(0));
         let seen = frames.clone();
+        let (a_levels, b_levels) = (Levels::default(), Levels::default());
+        let (a_told, b_told) = (a_levels.clone(), b_levels.clone());
         let a = Call::new(
             OPUS_PT,
             VP8_PT,
             true,
             Devices::default(),
             &[],
-            Arc::new(|_| {}),
+            Arc::new(move |bytes: Vec<u8>| a_told.heard(&bytes)),
         )
         .await
         .unwrap();
@@ -1666,6 +1995,7 @@ mod tests {
                 if bytes.starts_with(&[0xff, 0xd8]) {
                     seen.fetch_add(1, Ordering::Relaxed);
                 }
+                b_told.heard(&bytes);
             }),
         )
         .await
@@ -1684,6 +2014,21 @@ mod tests {
             30,
             || a.stats().audio_received > 20 && b.stats().audio_received > 20,
             stats,
+        )
+        .await;
+        // Who is speaking: each page is told how loud its microphone is and how loud the peer's sound, the test
+        // tone both ways (0.57 on the meter, about that once through Opus).
+        let levels = || format!("a {} b {}", a_levels.said(), b_levels.said());
+        let tone = |level: f64| (level - 0.566).abs() < 0.12;
+        until(
+            "both pages are told the levels",
+            30,
+            || {
+                [&a_levels, &b_levels]
+                    .iter()
+                    .all(|told| tone(told.of("mic")) && tone(told.of("peer")))
+            },
+            levels,
         )
         .await;
         until(
@@ -1722,6 +2067,15 @@ mod tests {
         // The microphone and the speaker change mid-call: to devices that are not there, so the defaults again,
         // relaunched. The sound goes on both ways, and a muted microphone stays muted.
         a.set_muted(true);
+        // Muted, the microphone reads silence, and so does the peer of it; the other way goes on.
+        until(
+            "a muted microphone is silence on both pages",
+            30,
+            || a_levels.of("mic") == 0.0 && b_levels.of("peer") < 0.02,
+            levels,
+        )
+        .await;
+        assert!(tone(b_levels.of("mic")), "{}", levels());
         let (heard, sent) = (b.stats().audio_received, a.stats().audio_sent);
         let used = tokio::task::block_in_place(|| a.set_microphone(Some("No such microphone")));
         assert_eq!(used, Ok(None));
@@ -1741,6 +2095,13 @@ mod tests {
             stats,
         )
         .await;
+        until(
+            "the new microphone's level is told",
+            30,
+            || tone(a_levels.of("mic")) && tone(b_levels.of("peer")),
+            levels,
+        )
+        .await;
         let heard = a.stats().audio_received;
         tokio::task::block_in_place(|| a.set_speaker(Some("No such speaker".into()))).unwrap();
         until(
@@ -1753,6 +2114,147 @@ mod tests {
         assert_eq!(a.stats().speaker, None, "{}", stats());
         a.close().await;
         b.close().await;
+    }
+
+    /// An answer with its video section closed, as a peer that takes no picture (`vr: 0`) has it rebuilt.
+    fn closed_video(sdp: &str) -> String {
+        let mut video = false;
+        sdp.split("\r\n")
+            .map(|line| {
+                if line.starts_with("m=") {
+                    video = line.starts_with("m=video");
+                }
+                if video && line == "a=sendrecv" {
+                    "a=inactive"
+                } else {
+                    line
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\r\n")
+    }
+
+    /// A peer that takes no picture (`vr: 0`, a bot) answers the video section closed: the camera that is on
+    /// is neither encoded nor sent, and the sound goes on both ways.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_closed_video_section_sends_no_picture() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let a = Call::new(
+            OPUS_PT,
+            VP8_PT,
+            true,
+            Devices::default(),
+            &[],
+            Arc::new(|_| {}),
+        )
+        .await
+        .unwrap();
+        let camera = Camera::open(true, None, Arc::new(|_| {})).unwrap();
+        camera.attach(Some(a.video_input()));
+        // Each picture the encoder makes.
+        let encoded = Arc::new(AtomicU64::new(0));
+        let into = encoded.clone();
+        element::<gst::Element>(&a.send, "vp8")
+            .unwrap()
+            .static_pad("sink")
+            .unwrap()
+            .add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+                into.fetch_add(1, Ordering::Relaxed);
+                gst::PadProbeReturn::Ok
+            });
+        let offer = a.offer(false).await.unwrap();
+        let (opus, vp8) = offered_payload_types(&offer);
+        let b = Call::new(opus, vp8, true, Devices::default(), &[], Arc::new(|_| {}))
+            .await
+            .unwrap();
+        let answer = closed_video(&b.answer(&offer, false).await.unwrap());
+        assert!(answer.contains("a=inactive"), "{answer}");
+        let stats = || {
+            format!(
+                "a {} b {} encoded {}",
+                serde_json::to_string(&a.stats()).unwrap(),
+                serde_json::to_string(&b.stats()).unwrap(),
+                encoded.load(Ordering::Relaxed)
+            )
+        };
+        // Until the answer, the camera is encoded as in any call.
+        until(
+            "the camera is encoded",
+            30,
+            || encoded.load(Ordering::Relaxed) > 3,
+            stats,
+        )
+        .await;
+        a.accept(&answer).await.unwrap();
+        until(
+            "both hear",
+            30,
+            || a.stats().audio_received > 20 && b.stats().audio_received > 20,
+            stats,
+        )
+        .await;
+        // Before the answer webrtc-rs takes the pictures written (counted as sent) and has nowhere to send them.
+        let (since, sent) = (encoded.load(Ordering::Relaxed), a.stats().video_sent);
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(encoded.load(Ordering::Relaxed), since, "{}", stats());
+        assert_eq!(a.stats().video_sent, sent, "{}", stats());
+        let report = a.transport().await;
+        assert_eq!(
+            report["sent"]["video"]["packets"].as_u64().unwrap_or(0),
+            0,
+            "{report}"
+        );
+        assert_eq!(b.stats().video_received, 0, "{}", stats());
+        a.close().await;
+        b.close().await;
+    }
+
+    #[test]
+    fn pictures_go_where_the_peer_takes_them() {
+        let section = |direction: &str| {
+            format!("v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=sendrecv\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n{direction}\r\n")
+        };
+        assert!(takes_pictures(&section("a=sendrecv")));
+        assert!(takes_pictures(&section("a=recvonly")));
+        assert!(!takes_pictures(&section("a=inactive")));
+        assert!(!takes_pictures(&section("a=sendonly")));
+        // The audio section's direction says nothing of the picture.
+        assert!(!takes_pictures(
+            "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=sendrecv\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=inactive\r\n"
+        ));
+        assert!(takes_pictures(
+            "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=inactive\r\n"
+        ));
+    }
+
+    /// The last level a call told its page for each side (`{"levels":{"mic":0.4}}`).
+    #[derive(Clone, Default)]
+    struct Levels(Arc<Mutex<std::collections::BTreeMap<String, f64>>>);
+
+    impl Levels {
+        fn heard(&self, bytes: &[u8]) {
+            let Ok(said) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+                return;
+            };
+            for (side, level) in said["levels"].as_object().into_iter().flatten() {
+                self.0
+                    .lock()
+                    .unwrap()
+                    .insert(side.clone(), level.as_f64().unwrap());
+            }
+        }
+
+        /// A side's level, -1 when none was told yet.
+        fn of(&self, side: &str) -> f64 {
+            self.0.lock().unwrap().get(side).copied().unwrap_or(-1.0)
+        }
+
+        fn said(&self) -> String {
+            format!("{:?}", self.0.lock().unwrap())
+        }
     }
 
     /// The ICE user name of a description.

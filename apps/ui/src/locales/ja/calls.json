@@ -7,6 +7,8 @@
   "cameraOff": "カメラオフ",
   "connected": "接続済み",
   "connecting": "接続中...",
+  "contactCannot": "相手のアプリは通話を受けられません",
+  "contactOutdated": "通話には相手が Ghostly を更新する必要があります",
   "decline": "拒否",
   "devices": {
     "back": "{{name}} が戻りました",
@@ -37,6 +39,16 @@
   "reconnecting": "再接続中...",
   "rejected": "通話拒否",
   "selfView": "ドラッグで移動、角を引いてサイズ変更、ダブルクリックで元に戻す",
+  "share": {
+    "blocked": "画面共有がブロックされています",
+    "blockedNext": "システムのプライバシー設定で、このアプリの画面収録を許可してください。",
+    "contactCannot": "相手のアプリはこの通話で画面を表示できません",
+    "failed": "画面を共有できませんでした",
+    "failedNext": "もう一度お試しください。",
+    "noScreen": "共有できる画面がありません",
+    "notHere": "ここでは画面共有を使えません",
+    "notOnLinux": "Linux ではまだ画面共有を使えません"
+  },
   "shareScreen": "画面を共有",
   "sharing": {
     "both": "あなたと{{name}}さんが画面を共有しています",
@@ -66,6 +78,7 @@
   },
   "turnCameraOff": "カメラをオフ",
   "turnCameraOn": "カメラをオン",
+  "unavailableHere": "このアプリでは通話を利用できません",
   "unmute": "ミュート解除",
   "video": "ビデオ通話",
   "wakeGaveUp": "{{name}} は Ghostly を開きませんでした。",
@@ -74,5 +87,6 @@
     "chat": "チャットに戻る",
     "full": "全画面に戻る",
     "small": "通話を小さなウィンドウに表示"
-  }
+  },
+  "you": "あなた"
 }

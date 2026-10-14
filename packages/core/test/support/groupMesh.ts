@@ -1,5 +1,5 @@
 import { createIdentity, identityFromSeedB64 } from "../../src/identity";
-import { GroupSession, type GroupEdgeFrame, type GroupIncomingMessage, type GroupState } from "../../src/groupSession";
+import { GroupSession, type GroupEdgeFrame, type GroupIncomingMessage, type GroupMessageFrame, type GroupState } from "../../src/groupSession";
 import type { GroupIncomingEdit } from "../../src/groupEdits";
 
 export const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
@@ -10,6 +10,8 @@ export class Mesh {
   readonly inbox = new Map<string, GroupIncomingMessage[]>();
   readonly edits = new Map<string, GroupIncomingEdit[]>();
   readonly saved = new Map<string, GroupState>();
+  /** How many times each member's state was saved. */
+  readonly saves = new Map<string, number>();
   readonly sentFrames: { from: string; to: string; frame: GroupEdgeFrame }[] = [];
   readonly changes = new Map<string, number>();
   /** The sessions' clock (`hooks.clock`) when set; the wall clock otherwise. */
@@ -19,9 +21,17 @@ export class Mesh {
   private edge(a: string, b: string): string { return [a, b].sort().join("|"); }
   setEdge(a: string, b: string, open: boolean): void { if (open) this.closed.delete(this.edge(a, b)); else this.closed.add(this.edge(a, b)); }
   isOpen(a: string, b: string): boolean { return !this.closed.has(this.edge(a, b)); }
+  /** Set: each member's app keeps the frames with its messages (`GroupSession`'s `onRows`), here in `frames`. */
+  rows = false;
+  /** What each member's app holds on its rows: message id → the frame it keeps, oldest first. */
+  readonly frames = new Map<string, Map<string, GroupMessageFrame>>();
   add(state: GroupState, name?: string): GroupSession {
+    const key = identityFromSeedB64(state.seedB64).pubKeyZ32;
+    if (!this.frames.has(key)) this.frames.set(key, new Map());
+    const rows = this.frames.get(key)!;
     const session: GroupSession = new GroupSession(state, {
-      save: async s => { this.saved.set(session.myKey, s); },
+      kept: (id, frame) => { if (this.rows) rows.set(id, frame); },
+      save: async s => { this.saved.set(session.myKey, s); this.saves.set(session.myKey, (this.saves.get(session.myKey) ?? 0) + 1); },
       clock: () => this.clock ?? Date.now(),
       send: (to, frame) => {
         this.sentFrames.push({ from: session.myKey, to, frame: clone(frame) });
@@ -30,10 +40,10 @@ export class Mesh {
         this.pending.push(target.handle(session.myKey, clone(frame)));
         return true;
       },
-      message: m => { this.inbox.get(session.myKey)!.push(m); },
+      message: m => { if (this.rows && m.frame && !rows.has(m.id)) rows.set(m.id, m.frame); this.inbox.get(session.myKey)!.push(m); },
       edit: e => { this.edits.get(session.myKey)!.push(e); },
       changed: () => this.changes.set(session.myKey, (this.changes.get(session.myKey) ?? 0) + 1),
-    });
+    }, this.rows ? [...rows.values()] : undefined);
     this.sessions.set(session.myKey, session);
     this.inbox.set(session.myKey, []);
     this.edits.set(session.myKey, []);

@@ -9,6 +9,7 @@ import { DEVICE_INVITE_LIFETIME_S, inviteLink, inviteQrSegments, readInviteCode,
 import { handOverUnlock } from "./lockHandover";
 import { activeProfileId, createProfile, currentProfile, settingsKeyFor, switchProfile } from "./profiles";
 import { protocolLinkCode } from "./url";
+import { useShownPoll } from "../hooks/useShownPoll";
 
 /*
  * One profile on several devices (WISP 06), as the pages need it: the lock password a device set needs, the name a
@@ -99,17 +100,20 @@ export function enrollLoading(error: unknown): boolean {
   return message.startsWith("enroll-loading:");
 }
 
-/** The profile's device set, read when the page opens and every `everyMs` while it shows (0: once). Null until read. */
+/** Said on the window with each device set the page reads (`useDeviceSet`): what waits for a profile to get one hears it. */
+export const DEVICE_SET_EVENT = "ghostly-device-set";
+
+const readDeviceSet = () => engine.call("deviceSet").then((next) => {
+  window.dispatchEvent(new CustomEvent<DeviceSetView>(DEVICE_SET_EVENT, { detail: next }));
+  return next;
+});
+
+/**
+ * The profile's device set, read when the page opens and every `everyMs` while it shows (0: once). Null until read.
+ * Not read behind a hidden window, and the same object while the set says the same (`useShownPoll`).
+ */
 export function useDeviceSet(everyMs = 3_000): DeviceSetView | null {
-  const [view, setView] = useState<DeviceSetView | null>(null);
-  useEffect(() => {
-    let live = true;
-    const read = () => void engine.call("deviceSet").then((next) => { if (live) setView(next); }, () => {});
-    read();
-    const timer = everyMs > 0 ? setInterval(read, everyMs) : undefined;
-    return () => { live = false; clearInterval(timer); };
-  }, [everyMs]);
-  return view;
+  return useShownPoll(readDeviceSet, everyMs);
 }
 
 /** How long the answer of Check connection stays under a device's row, while its link stays as it was. */
@@ -173,7 +177,7 @@ export async function reloadIntoGate(options: { keepUnlocked?: boolean } = {}): 
 const TAKEOVER_FAILURES: Record<string, TranslationKey> = {
   password: "devices.password.wrong", "locked-out": "devices.takeover.fail.lockedOut", refused: "devices.takeover.fail.refused",
   "no-copy": "devices.takeover.fail.noCopy", "no-password": "devices.takeover.fail.noPassword", name: "devices.takeover.fail.name",
-  offline: "devices.takeover.fail.offline", state: "devices.takeover.fail.state",
+  offline: "devices.takeover.fail.offline", state: "devices.takeover.fail.state", changed: "devices.takeover.fail.changed",
 };
 
 export function takeoverErrorKey(error: unknown): TranslationKey | null {

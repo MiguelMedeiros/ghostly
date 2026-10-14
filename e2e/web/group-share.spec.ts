@@ -65,6 +65,15 @@ test("a new group opens on its link; Copy, Share and the header's Share link; jo
     const list = link.parentElement!.querySelector('[data-testid="group-member-list"]')!;
     return !!(link.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING);
   })).toBe(true);
+  // Asked from the keyboard and called off with Escape, the question gives the focus back to the button that asked,
+  // and the members stay open.
+  await panel.getByTestId("group-link-disable").focus();
+  await alice.page.keyboard.press("Enter");
+  await expect(alice.page.getByTestId("group-link-ask-dialog")).toBeVisible();
+  await alice.page.keyboard.press("Escape");
+  await expect(alice.page.getByTestId("group-link-ask-dialog")).toHaveCount(0);
+  await expect(panel).toBeVisible();
+  await expect(panel.getByTestId("group-link-disable")).toBeFocused();
   // Turned off, the header's Share link turns it on again, as a new link.
   await panel.getByTestId("group-link-disable").click();
   await alice.page.getByTestId("group-link-ask-confirm").click();
@@ -73,9 +82,20 @@ test("a new group opens on its link; Copy, Share and the header's Share link; jo
   await expect(panel.getByTestId("group-link-enable")).toBeFocused();
   await alice.page.keyboard.press("Escape");
   await alice.page.getByTestId("group-share").click();
-  const fresh = await alice.page.getByTestId("group-share-dialog").getByTestId("group-link-url").inputValue();
-  expect(fresh).not.toBe(url);
+  const share = alice.page.getByTestId("group-share-dialog");
+  const second = await share.getByTestId("group-link-url").inputValue();
+  expect(second).not.toBe(url);
+  // Turned off in the dialog itself, the dialog stays and says so; turned on there, it shows the next link.
+  await share.getByTestId("group-link-disable").click();
+  await alice.page.getByTestId("group-link-ask-confirm").click();
+  await expect(share.getByTestId("group-link")).toHaveAttribute("data-state", "off");
+  await expect(share).toContainText("The link is off");
+  await share.getByTestId("group-link-enable").click();
+  await expect(share.getByTestId("group-link")).toHaveAttribute("data-state", "on");
+  const fresh = await share.getByTestId("group-link-url").inputValue();
+  expect(fresh).not.toBe(second);
   await alice.page.getByTestId("group-share-done").click();
+  await expect(share).toHaveCount(0);
 
   // Bob, on a phone, opens it while Alice's app is closed: he lands in the group, waiting, with nothing to choose.
   const groupUrl = alice.page.url();

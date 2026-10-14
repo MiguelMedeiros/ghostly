@@ -101,9 +101,29 @@ describe("an edge's packets, carried by members beside the relays", () => {
     await vi.advanceTimersByTimeAsync(CARRIED_DEFER_MS * 2);
     expect(relays.publishes).toEqual([records("settled")]);
     // Nobody waits for it: a background write.
-    expect(relays.options).toEqual([{ background: true }]);
+    expect(relays.options).toEqual([{ background: true, signedAt: expect.any(BigInt) }]);
     expect(state.carried).toHaveLength(1);
     expect(transport.latest()).toBeNull();
+  });
+
+  it("every packet it signed goes to the relays with its date, so the relays' transport does not check its signature again", async () => {
+    const { me, relays, state, transport } = edge();
+    const dates: unknown[] = [];
+    const put = relays.publishPayload.bind(relays);
+    relays.publishPayload = async (key, payload, options) => {
+      await put(key, payload, options);
+      dates.push([(options as { signedAt?: bigint } | undefined)?.signedAt, relays.packets.get(key)!.timestampMicros]);
+    };
+    // Deferred, then flushed.
+    await transport.publish(me, records("offer"));
+    await vi.advanceTimersByTimeAsync(CARRIED_DEFER_MS);
+    // At once: nothing came back through a member.
+    await transport.publish(me, records("answer"));
+    // The edge is up: a background write.
+    state.open = true;
+    await transport.publish(me, records("settled"));
+    expect(dates).toHaveLength(3);
+    for (const [signedAt, timestamp] of dates as [bigint, bigint][]) expect(signedAt).toBe(timestamp);
   });
 
   it("stops deferring once a deferral ends with nothing heard through a member, until something is", async () => {

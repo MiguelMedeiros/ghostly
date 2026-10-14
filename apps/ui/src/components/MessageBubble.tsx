@@ -43,10 +43,12 @@ import { DeliveryStatus } from "./chat/DeliveryStatus";
 import { forwardedLabel } from "../lib/forward";
 import { PinIcon } from "./PinIcon";
 import { copyText } from "../lib/shareLink";
+import { pictureLinkUrl } from "../lib/pictureLink";
 import { SenderAvatar, type MessageAuthor } from "./chat/SenderAvatar";
 import { useMemberText } from "../contexts/MemberColorsContext";
 import { AppCardView } from "./apps/AppCardView";
 import { useAppsAvailable } from "../lib/apps/flag";
+import { useInstalledApp } from "../lib/apps/installed";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -628,7 +630,7 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onPin, pin
                   playCue("deleted", { chat });
                   onDelete();
                 }}
-                className="px-2 py-0.5 rounded border border-danger/30 bg-danger/20 text-danger text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
+                className="px-2 py-0.5 rounded border border-danger/30 bg-danger/20 text-danger-ink text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
               >
                 {t("common.delete")}
               </button>
@@ -727,6 +729,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // An app card (WISP 405 § An app) in a 1:1 chat, where Apps shows; elsewhere its text, as an older app shows it.
   const appsOn = useAppsAvailable();
   const appCard = appsOn && message.card?.kind === "app" && linkId && !linkId.startsWith("group:") ? message.card : undefined;
+  // Installed here: the card names the installed app, so its name for a screen reader does too (never the sender's).
+  const cardApp = useInstalledApp(appCard?.ref);
   const rowRef = useRef<HTMLDivElement>(null);
   // A control of the message taken out by its own press (my reaction's chip taken back, the red mark sent again): the
   // focus stays on the message, so Tab goes on from it.
@@ -798,6 +802,23 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const shownAt = shownTime(message);
   const time = clockTime(shownAt, language);
   const contentType = imgError || message.file || message.paymentId || pressed ? "text" : detectContentType(message.text);
+  // The picture this bubble shows, if it shows one (a card or a system line never does).
+  const picture = contentType === "image" && !isSystem && !showsCard(message.card) && !appCard ? message.text.trim() : null;
+  // No shell's policy lets the page load a picture from any address but the GIF sources': the app reads the others
+  // itself, once asked (my own at once), and the bubble shows what came (lib/pictureLink.ts).
+  const readHere = picture !== null && !autoLoads(picture) && (isMe || revealed) ? picture : null;
+  const [pictureRead, setPictureRead] = useState<{ link: string; url: string } | null>(null);
+  useEffect(() => {
+    if (!readHere) return;
+    let shown = true;
+    void pictureLinkUrl(readHere).then((url) => {
+      if (!shown) return;
+      if (url) setPictureRead({ link: readHere, url });
+      else setImgError(true);
+    });
+    return () => { shown = false; };
+  }, [readHere]);
+  const pictureSrc = picture === null ? null : autoLoads(picture) ? picture : pictureRead?.link === picture ? pictureRead.url : null;
   const download = message.file && !isSystem
     ? {
       file: message.file, name: downloadName(message.file, message.timestamp), sender: isMe ? "me" as const : "peer" as const,
@@ -874,7 +895,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         <div
           className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
             isMissed
-              ? "bg-danger/10 text-danger"
+              ? "bg-danger/10 text-danger-ink"
               : "bg-surface-alt/80 text-text-secondary"
           } ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}
         >
@@ -944,7 +965,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             ref={bubbleRef}
             data-message-card
             role="group"
-            aria-label={appCard ? t("apps.card.label", { title: appCard.title }) : cardLabel(t, card as ShownCard)}
+            aria-label={appCard ? t("apps.card.label", { title: cardApp ? cardApp.title : appCard.title }) : cardLabel(t, card as ShownCard)}
             className={`status-card-surface w-full text-text-primary ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}
             style={swipe.dx > 0 ? { transform: `translateX(${swipe.offset}px)` } : undefined}
           >
@@ -1089,16 +1110,21 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           <div className="relative">
             {/* A link says nothing of its picture's size: a placeholder 120 px high (as high as most GIFs and photos are
                 at least, shown here) until it loads, so it grows less when it does. */}
-            <img
-              src={message.text.trim()}
-              alt=""
-              data-testid="picture-link"
-              className={`rounded-[4px] max-w-[min(330px,72vw)] min-w-[120px] max-h-[330px] object-contain block ${pictureLoaded === message.text.trim() ? "" : "min-h-[120px] bg-black/10"}`}
-              style={isWaybackGif(message.text.trim()) ? { imageRendering: "pixelated" } : undefined}
-              loading="lazy"
-              onLoad={() => setPictureLoaded(message.text.trim())}
-              onError={() => setImgError(true)}
-            />
+            {pictureSrc ? (
+              <img
+                src={pictureSrc}
+                alt=""
+                data-testid="picture-link"
+                className={`rounded-[4px] max-w-[min(330px,72vw)] min-w-[120px] max-h-[330px] object-contain block ${pictureLoaded === message.text.trim() ? "" : "min-h-[120px] bg-black/10"}`}
+                style={isWaybackGif(message.text.trim()) ? { imageRendering: "pixelated" } : undefined}
+                loading="lazy"
+                onLoad={() => setPictureLoaded(message.text.trim())}
+                onError={() => setImgError(true)}
+              />
+            ) : (
+              // Being read: the placeholder a picture has until it loads.
+              <div data-testid="picture-link-reading" aria-busy="true" className="rounded-[4px] w-[120px] h-[120px] bg-black/10" />
+            )}
             <span data-picture-time className="absolute bottom-[4px] end-[6px] inline-flex items-center gap-[3px] bg-[rgba(11,20,26,0.55)] rounded-full px-[6px] py-[3px]">
               <span className="text-[11px] leading-none text-[hsla(0,0%,100%,0.9)]">
                 {time}

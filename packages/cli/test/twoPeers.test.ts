@@ -6,6 +6,7 @@ import { connect, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RACE_DIRECT_MS, TYPING_REFRESH_MS } from "@ghostly/core";
+import { connectDaemon } from "../src/client";
 import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running, testEnv } from "./support/cli";
 import { dominantHz, tone, wavFile } from "./support/tone";
 // covers: chat.paired.reconnect, headless.buttons, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit, headless.forward, chat.forward.files
@@ -89,6 +90,11 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(invite.invite).toMatch(/^ghostly1/);
     expect(invite.link).toBe(`https://ghostly.tools/#${invite.invite}`);
     chatA = invite.chat as string;
+    // The code lets whoever reads it take the chat: only `invite create` and an asking with --show-secret print it.
+    for (const args of [["chat", "list"], ["chat", "show", "bob"], ["chat", "rename", "bob", "bob"], ["engine", "getState"]]) expect((await as(alice, ...args)).stdout, args.join(" ")).not.toContain(invite.invite);
+    expect(ok(await as(alice, "chat", "show", "bob"))).toMatchObject({ invite: "<hidden>" });
+    expect(ok(await as(alice, "chat", "show", "bob", "--show-secret"))).toMatchObject({ invite: invite.invite });
+    expect((ok(await as(alice, "chat", "list", "--show-secret")).chats as { invite: string }[])[0].invite).toBe(invite.invite);
     // The self-invite guard (WISP 801 Q9).
     error(await as(alice, "invite", "join", invite.invite as string), "refused", 1);
     chatB = ok(await as(bob, "invite", "join", invite.link as string, "--label", "alice")).chat as string;
@@ -488,6 +494,12 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(savedName).toMatch(/^文+\.txt$/);
     expect(sha(savedLong.path as string)).toBe(sha(small));
     expect(error(await as(bob, "file", "save", longId, "--path", join(bob, longName)), "bad_request", 1).message).toMatch(/too long for this file system/);
+    // A name that starts with a dash is saved with a _ first: in the folder it is a file to every tool, never an option.
+    ok(await as(alice, "file", "send", "bob", small, "--name=-rf"));
+    const dashMessage = await listen.waitFor((e) => e.type === "message.received" && (e.message as { file?: { name: string } }).file?.name === "-rf");
+    const dashId = (dashMessage.message as { file: { id: string } }).file.id;
+    ok(await as(bob, "file", "wait", dashId, "--timeout", "30"));
+    expect(ok(await as(bob, "file", "save", dashId, "--dir", bob)).path).toBe(join(bob, "_-rf"));
     expect((sent.file as { size: number }).size).toBe(200_000);
     // Sending again or asking again: by the file's id alone, each only on its own side, and not for a file that arrived.
     expect(error(await as(alice, "file", "resend", (sent.file as { id: string }).id), "refused", 1).message).toBe("Nothing to send again: it arrived whole");
@@ -506,6 +518,37 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(savedLarge.size).toBe(26 * 1024 * 1024);
     expect(sha(join(bob, "big-copy.bin"))).toBe(sha(large));
     await listen.stop();
+
+    // Started again: a file that arrived shows no transfer in the engine's state; its record still says it is done.
+    ok(await as(bob, "daemon", "stop"));
+    const daemon = new Running(["--home", bob, "daemon"], env);
+    running.push(daemon);
+    sockets[bob] = (await daemon.waitFor((l) => l.daemon === "ready")).socket as string;
+    expect((ok(await as(bob, "engine", "getState")).transfers as Record<string, unknown>)[incoming.id]).toBeUndefined();
+    const listed = ok(await as(bob, "file", "list", "alice")).files as { file: { id: string }; transfer: { state: string } | null }[];
+    expect(listed.find((f) => f.file.id === incoming.id)?.transfer).toMatchObject({ state: "done", size: 200_000 });
+    expect(error(await as(bob, "file", "request", incoming.id), "refused", 1).message).toBe("Nothing to ask for: the file is all here");
+    ok(await as(bob, "chat", "wait", "alice", "--until", "live", "--timeout", "60"));
+  });
+
+  it("send files all at once, as a bot sends photos: each its own message on both sides", async () => {
+    // Over the daemon's socket, every request written at once: many land in the same millisecond.
+    const client = (await connectDaemon(sockets[alice]!))!;
+    const names = Array.from({ length: 20 }, (_, i) => `burst-${i}.txt`);
+    try {
+      const sent = await Promise.all(names.map((name) => {
+        const path = join(alice, name);
+        writeFileSync(path, `photo ${name}`);
+        return client.call("file.send", { chat: "bob", path }) as Promise<{ file: { id: string } }>;
+      }));
+      expect(new Set(sent.map((s) => s.file.id)).size).toBe(names.length);
+    } finally {
+      client.close();
+    }
+    const burst = (dir: string, chat: string) => async () => ((ok(await as(dir, "file", "list", chat)).files as { file: { name: string }; transfer: { state: string } | null }[])
+      .filter((f) => f.file.name.startsWith("burst-") && f.transfer?.state === "done").map((f) => f.file.name).sort());
+    await expect.poll(burst(bob, "alice"), { timeout: 60_000, interval: 1000 }).toEqual([...names].sort());
+    await expect.poll(burst(alice, "bob"), { timeout: 30_000, interval: 1000 }).toEqual([...names].sort());
   });
 
   it("send a voice note from a file: its length and waveform measured here, the contact sees the bars", async () => {

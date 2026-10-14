@@ -69,6 +69,7 @@
     "allow-native-notification-permission",
     "allow-native-private-notification",
     "allow-native-speaker-test",
+    "allow-native-unread-count",
     "allow-oidc-loopback-cancel",
     "allow-oidc-loopback-start",
     "allow-oidc-loopback-wait",

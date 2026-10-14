@@ -61,26 +61,183 @@ pub fn label(origin: &str) -> &str {
     origin.strip_prefix("http://").unwrap_or(origin)
 }
 
-/// The native dialog's title and text.
+/// What the native dialog says: its title, its text and its two buttons.
 #[cfg_attr(feature = "e2e-driver", allow(dead_code))]
-pub fn dialog_text(origin: &str, reason: Reason) -> (String, String) {
+#[derive(Debug, PartialEq, Eq)]
+pub struct DialogWords {
+    pub title: String,
+    pub text: String,
+    pub allow: &'static str,
+    pub deny: &'static str,
+}
+
+/// One language's words: each question's title and text (`{at}` is the address), and the two buttons.
+struct Words {
+    share: (&'static str, &'static str),
+    first_use: (&'static str, &'static str),
+    allow: &'static str,
+    deny: &'static str,
+}
+
+const EN: Words = Words {
+    share: (
+        "Share {at}?",
+        "Contacts you choose will be able to open the app at {at} through Ghostly.\n\n\
+         Allow only if you are sharing this app in Ghostly now.",
+    ),
+    first_use: (
+        "Let contacts reach {at}?",
+        "A contact is asking for the app at {at}. This address is not on your list of \
+         shared services: Ghostly now asks once for each address it may reach.\n\n\
+         Allow only if you shared this app in Ghostly.",
+    ),
+    allow: "Allow",
+    deny: "Don't allow",
+};
+
+const PT: Words = Words {
+    share: (
+        "Compartilhar {at}?",
+        "Os contatos que você escolher poderão abrir o app em {at} pelo Ghostly.\n\n\
+         Permita só se você está compartilhando este app no Ghostly agora.",
+    ),
+    first_use: (
+        "Deixar contatos acessarem {at}?",
+        "Um contato está pedindo o app em {at}. Este endereço não está na sua lista de \
+         serviços compartilhados: agora o Ghostly pergunta uma vez para cada endereço que pode acessar.\n\n\
+         Permita só se você compartilhou este app no Ghostly.",
+    ),
+    allow: "Permitir",
+    deny: "Não permitir",
+};
+
+const ES: Words = Words {
+    share: (
+        "¿Compartir {at}?",
+        "Los contactos que elijas podrán abrir la app en {at} a través de Ghostly.\n\n\
+         Permítelo solo si estás compartiendo esta app en Ghostly ahora.",
+    ),
+    first_use: (
+        "¿Dejar que los contactos accedan a {at}?",
+        "Un contacto está pidiendo la app en {at}. Esta dirección no está en tu lista de \
+         servicios compartidos: ahora Ghostly pregunta una vez por cada dirección a la que puede acceder.\n\n\
+         Permítelo solo si compartiste esta app en Ghostly.",
+    ),
+    allow: "Permitir",
+    deny: "No permitir",
+};
+
+const FR: Words = Words {
+    share: (
+        "Partager {at} ?",
+        "Les contacts que vous choisissez pourront ouvrir l’app à l’adresse {at} via Ghostly.\n\n\
+         N’autorisez que si vous partagez cette app dans Ghostly maintenant.",
+    ),
+    first_use: (
+        "Laisser des contacts accéder à {at} ?",
+        "Un contact demande l’app à l’adresse {at}. Cette adresse n’est pas dans votre liste de \
+         services partagés : Ghostly demande désormais une fois pour chaque adresse qu’il peut joindre.\n\n\
+         N’autorisez que si vous avez partagé cette app dans Ghostly.",
+    ),
+    allow: "Autoriser",
+    deny: "Ne pas autoriser",
+};
+
+const IT: Words = Words {
+    share: (
+        "Condividere {at}?",
+        "I contatti che scegli potranno aprire l'app su {at} tramite Ghostly.\n\n\
+         Consenti solo se stai condividendo questa app in Ghostly adesso.",
+    ),
+    first_use: (
+        "Consentire ai contatti di raggiungere {at}?",
+        "Un contatto chiede l'app su {at}. Questo indirizzo non è nel tuo elenco di \
+         servizi condivisi: ora Ghostly chiede una volta per ogni indirizzo che può raggiungere.\n\n\
+         Consenti solo se hai condiviso questa app in Ghostly.",
+    ),
+    allow: "Consenti",
+    deny: "Non consentire",
+};
+
+const ZH: Words = Words {
+    share: (
+        "共享 {at}？",
+        "你选择的联系人将可以通过 Ghostly 打开位于 {at} 的应用。\n\n\
+         仅当你现在正在 Ghostly 中共享此应用时才允许。",
+    ),
+    first_use: (
+        "允许联系人访问 {at}？",
+        "有联系人请求访问位于 {at} 的应用。此地址不在你的共享服务列表中：\
+         Ghostly 现在会对它可能访问的每个地址询问一次。\n\n\
+         仅当你在 Ghostly 中共享过此应用时才允许。",
+    ),
+    allow: "允许",
+    deny: "不允许",
+};
+
+const JA: Words = Words {
+    share: (
+        "{at} を共有しますか？",
+        "選んだ連絡先が、Ghostly を通じて {at} のアプリを開けるようになります。\n\n\
+         いま Ghostly でこのアプリを共有している場合のみ許可してください。",
+    ),
+    first_use: (
+        "連絡先に {at} へのアクセスを許可しますか？",
+        "連絡先が {at} のアプリを求めています。このアドレスは共有サービスの一覧にありません。\
+         Ghostly は、アクセスする可能性のあるアドレスごとに一度確認するようになりました。\n\n\
+         Ghostly でこのアプリを共有した場合のみ許可してください。",
+    ),
+    allow: "許可",
+    deny: "許可しない",
+};
+
+const AR: Words = Words {
+    share: (
+        "مشاركة {at}؟",
+        "جهات الاتصال التي تختارها ستتمكن من فتح التطبيق على {at} عبر Ghostly.\n\n\
+         اسمح فقط إذا كنت تشارك هذا التطبيق في Ghostly الآن.",
+    ),
+    first_use: (
+        "السماح لجهات الاتصال بالوصول إلى {at}؟",
+        "جهة اتصال تطلب التطبيق على {at}. هذا العنوان ليس في قائمة خدماتك المشتركة: \
+         يسأل Ghostly الآن مرة واحدة عن كل عنوان قد يصل إليه.\n\n\
+         اسمح فقط إذا كنت قد شاركت هذا التطبيق في Ghostly.",
+    ),
+    allow: "السماح",
+    deny: "عدم السماح",
+};
+
+/// The words for the page's language. `lang` is its `<html lang>`, a tag ("pt-BR", "zh-CN"): the language decides,
+/// and one the app does not have reads as English.
+fn words_for(lang: &str) -> &'static Words {
+    let language = lang.split('-').next().unwrap_or_default();
+    match language.to_ascii_lowercase().as_str() {
+        "pt" => &PT,
+        "es" => &ES,
+        "fr" => &FR,
+        "it" => &IT,
+        "zh" => &ZH,
+        "ja" => &JA,
+        "ar" => &AR,
+        _ => &EN,
+    }
+}
+
+/// The native dialog in the language the page is shown in. `lang` is the page's word, and all the page says: the
+/// words are these, so a page still cannot write the dialog.
+#[cfg_attr(feature = "e2e-driver", allow(dead_code))]
+pub fn dialog_words(origin: &str, reason: Reason, lang: &str) -> DialogWords {
+    let words = words_for(lang);
     let at = label(origin);
-    match reason {
-        Reason::Share => (
-            format!("Share {at}?"),
-            format!(
-                "Contacts you choose will be able to open the app at {at} through Ghostly.\n\n\
-                 Allow only if you are sharing this app in Ghostly now."
-            ),
-        ),
-        Reason::FirstUse => (
-            format!("Let contacts reach {at}?"),
-            format!(
-                "A contact is asking for the app at {at}. This address is not on your list of \
-                 shared services: Ghostly now asks once for each address it may reach.\n\n\
-                 Allow only if you shared this app in Ghostly."
-            ),
-        ),
+    let (title, text) = match reason {
+        Reason::Share => words.share,
+        Reason::FirstUse => words.first_use,
+    };
+    DialogWords {
+        title: title.replace("{at}", at),
+        text: text.replace("{at}", at),
+        allow: words.allow,
+        deny: words.deny,
     }
 }
 
@@ -276,15 +433,83 @@ mod tests {
 
     #[test]
     fn the_dialog_names_the_exact_address() {
-        for reason in [Reason::Share, Reason::FirstUse] {
-            let (title, text) = dialog_text("http://localhost:3400", reason);
-            assert!(title.contains("localhost:3400"), "{title}");
-            assert!(text.contains("localhost:3400"), "{text}");
-            assert!(!format!("{title}{text}").contains('\u{2014}'), "no em dash");
+        for lang in LANGUAGES {
+            for reason in [Reason::Share, Reason::FirstUse] {
+                let DialogWords { title, text, .. } =
+                    dialog_words("http://localhost:3400", reason, lang);
+                assert!(title.contains("localhost:3400"), "{lang}: {title}");
+                assert!(text.contains("localhost:3400"), "{lang}: {text}");
+                assert!(
+                    !format!("{title}{text}").contains('\u{2014}'),
+                    "{lang}: no em dash"
+                );
+            }
+            assert!(dialog_words("https://127.0.0.1:443", Reason::Share, lang)
+                .title
+                .contains("https://127.0.0.1:443"));
         }
-        assert!(dialog_text("https://127.0.0.1:443", Reason::Share)
-            .0
-            .contains("https://127.0.0.1:443"));
+    }
+
+    /// The app's languages (apps/ui/src/lib/settings.ts `Language`).
+    const LANGUAGES: [&str; 8] = ["en", "pt", "es", "fr", "it", "zh", "ja", "ar"];
+
+    #[test]
+    fn the_dialog_speaks_each_of_the_apps_languages() {
+        let origin = "http://localhost:3400";
+        for reason in [Reason::Share, Reason::FirstUse] {
+            let english = dialog_words(origin, reason, "en");
+            assert_eq!(english.allow, "Allow");
+            assert_eq!(english.deny, "Don't allow");
+            let mut seen = vec![];
+            for lang in LANGUAGES {
+                let words = dialog_words(origin, reason, lang);
+                // Its own title, text and buttons: nothing left in another language's words.
+                for (was, other) in &seen {
+                    let other: &DialogWords = other;
+                    assert_ne!(words.title, other.title, "{lang} / {was}: title");
+                    assert_ne!(words.text, other.text, "{lang} / {was}: text");
+                    assert_ne!(words.deny, other.deny, "{lang} / {was}: deny");
+                }
+                assert_ne!(words.allow, words.deny, "{lang}");
+                // Two paragraphs, the second the advice, as in English.
+                assert_eq!(words.text.matches("\n\n").count(), 1, "{lang}");
+                assert!(words.text.contains("Ghostly"), "{lang}");
+                seen.push((lang, words));
+            }
+            // The page's `<html lang>` is a tag ("pt-BR", "zh-CN"): its language decides.
+            for (tag, lang) in [
+                ("pt-BR", "pt"),
+                ("zh-CN", "zh"),
+                ("AR", "ar"),
+                ("ja-JP", "ja"),
+            ] {
+                assert_eq!(
+                    dialog_words(origin, reason, tag),
+                    dialog_words(origin, reason, lang),
+                    "{tag}"
+                );
+            }
+            // A language the app does not have, nothing, or a page's own text: English.
+            for unknown in ["de", "", "x-pt", "ptx", "Allow anything"] {
+                assert_eq!(
+                    dialog_words(origin, reason, unknown),
+                    english,
+                    "{unknown:?}"
+                );
+            }
+        }
+        // The two questions differ in every language.
+        for lang in LANGUAGES {
+            let share = dialog_words(origin, Reason::Share, lang);
+            let first = dialog_words(origin, Reason::FirstUse, lang);
+            assert_ne!(share.title, first.title, "{lang}");
+            assert_ne!(share.text, first.text, "{lang}");
+            assert_eq!(
+                (share.allow, share.deny),
+                (first.allow, first.deny),
+                "{lang}"
+            );
+        }
     }
 
     #[tokio::test]

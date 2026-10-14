@@ -1,10 +1,11 @@
-import { groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
+import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
 import { CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, findChat, groupOf, list, node, num, oneOf, state, str, waitForState,
+  bool, chatOf, chatOrGroup, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -14,10 +15,13 @@ import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
 import { endTyping, keepTyping, sayTyping } from "./typing";
 import { GROUP_ADMIN_METHODS } from "./groupAdmin";
+import { withStoredIds } from "./turnRefs";
 import { IDENTITY_METHODS } from "./identities";
 import { SERVICE_METHODS } from "./services";
 import { BACKUP_METHODS } from "./backup";
 import { CALL_METHODS } from "./calls/api";
+import { APP_SERVE_METHODS } from "./appServe";
+import { APP_CHAT_METHODS } from "./appChat";
 import { WALLET_METHODS } from "./wallets";
 import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, isLive, messageJson, type MessageJson } from "./views";
 
@@ -31,6 +35,20 @@ function checkTextSize(text: string): void {
 }
 
 // ---------- settings ----------
+
+/**
+ * The engine's state as `engine getState` prints it without `--show-secret`: the settings' credentials, a group's
+ * entry link (anyone who reads it can join) and a pending chat's invite code (whoever reads it can take the chat)
+ * are `<hidden>`.
+ */
+export function hideStateSecrets<T extends { settings: Settings; groups?: { entryLink?: string }[]; links?: { inviteCode?: string }[] }>(state: T) {
+  return {
+    ...state,
+    settings: redactSettings(state.settings),
+    ...(state.groups ? { groups: state.groups.map((g) => (g.entryLink ? { ...g, entryLink: "<hidden>" } : g)) } : {}),
+    ...(state.links ? { links: state.links.map((l) => (l.inviteCode ? { ...l, inviteCode: "<hidden>" } : l)) } : {}),
+  };
+}
 
 /** Settings as a bot may read them: storage credentials and other secrets masked unless asked for. */
 export function redactSettings(settings: Settings, showSecret = false): Record<string, unknown> {
@@ -50,6 +68,7 @@ export function redactSettings(settings: Settings, showSecret = false): Record<s
 export const SETTABLE: Record<string, "strings" | "string" | "boolean" | "ice"> = {
   relays: "strings", irohRelays: "strings", hyperdhtRelay: "string", readRelays: "boolean",
   iceServers: "ice", publicProfiles: "boolean", online: "boolean", shareProfile: "boolean", sendTyping: "boolean", nick: "string",
+  autoDownloads: "boolean", serveFiles: "boolean",
 };
 
 // ---------- transports ----------
@@ -89,6 +108,33 @@ export function mentionsFor(text: string, refs: readonly string[], group: GroupV
   return out;
 }
 
+/** Per host: stops watching the invite it marked as the chat on screen. */
+const inviteShown = new WeakMap<ApiContext, () => void>();
+
+/**
+ * Marks a new invite as the chat on screen (native listeners, the quick pace) only until it is paired: a paired chat
+ * keeps its listeners anyway, and a daemon nobody looks at reads an away contact at the background pace, as its
+ * other chats and the same chat after a restart do. Nor past its wait for a peer (`AWAITING_PEER_MS`): an invite
+ * nobody joined is then read at the background pace like the daemon's other ones, which it no longer holds back.
+ */
+function showUntilPaired(ctx: ApiContext, linkId: string): void {
+  inviteShown.get(ctx)?.();
+  node(ctx).setActiveLink({ linkId });
+  // Gone only once a state had it: one pushed before the invite was made does not end it.
+  let seen = false;
+  const done = (s: EngineState) => {
+    const link = s.links.find((l) => l.id === linkId);
+    if (link) seen = true;
+    return link ? !!link.peerParticipationKey : seen;
+  };
+  const stop = () => { off(); clearTimeout(timer); if (inviteShown.get(ctx) === stop) inviteShown.delete(ctx); };
+  const hide = () => { stop(); node(ctx).setActiveLink({ linkId: null }); };
+  const timer = setTimeout(hide, AWAITING_PEER_MS);
+  timer.unref?.();
+  const off = ctx.hub.onState((s) => { if (done(s)) hide(); });
+  inviteShown.set(ctx, stop);
+}
+
 // ---------- methods ----------
 
 const METHODS: Record<string, Method> = {
@@ -101,6 +147,8 @@ const METHODS: Record<string, Method> = {
   ...SERVICE_METHODS,
   ...BACKUP_METHODS,
   ...CALL_METHODS,
+  ...APP_SERVE_METHODS,
+  ...APP_CHAT_METHODS,
 
   async status(ctx) {
     const s = state(ctx);
@@ -134,17 +182,29 @@ const METHODS: Record<string, Method> = {
   },
   async "settings.set"(ctx, params) {
     const patch: Record<string, unknown> = {};
+    let warning: string | undefined;
     for (const [key, value] of Object.entries(params)) {
-      const kind = SETTABLE[key];
+      // The table's own keys only: every object has `constructor` and `toString`, which are no settings.
+      const kind = Object.hasOwn(SETTABLE, key) ? SETTABLE[key] : undefined;
       if (!kind) throw new CliError("bad_request", `${key} is not a setting the CLI changes (${Object.keys(SETTABLE).join(", ")})`);
       if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("bad_request", `${key} must be a list of strings`);
       if (kind === "string" && typeof value !== "string") throw new CliError("bad_request", `${key} must be a string`);
       if (kind === "boolean" && typeof value !== "boolean") throw new CliError("bad_request", `${key} must be true or false`);
-      if (kind === "ice" && !(Array.isArray(value) && value.every((v) => v && typeof v === "object"))) throw new CliError("bad_request", `${key} must be a list of ICE servers`);
+      if (kind === "ice") {
+        if (!(Array.isArray(value) && value.every((v) => v && typeof v === "object"))) throw new CliError("bad_request", `${key} must be a list of ICE servers`);
+        // WebRTC's own form (`urls` a list) is taken; a server without urls is said here, not as the engine's TypeError.
+        const servers = value.map(iceServerSetting);
+        for (const server of servers) { const problem = iceServerProblem(server); if (problem) throw new CliError("bad_request", `${key}: ${problem}`); }
+        patch[key] = servers;
+        // libdatachannel (libjuice) skips TURN over TCP and TLS without a word; the apps' browsers use them, so they stay.
+        const unused = servers.flatMap((server) => server.urls.split(/[\s,]+/)).filter((url) => /^turns:|\?transport=tcp$/i.test(url));
+        if (unused.length) warning = `The CLI reaches TURN over UDP only: it does not use ${unused.join(", ")} (the apps do). Add a turn: server over UDP for the CLI`;
+        continue;
+      }
       patch[key] = value;
     }
     await node(ctx).updateSettings({ settings: patch });
-    return redactSettings(state(ctx).settings);
+    return { ...redactSettings(state(ctx).settings), ...(warning ? { warning } : {}) };
   },
 
   async "invite.create"(ctx, params) {
@@ -152,7 +212,7 @@ const METHODS: Record<string, Method> = {
     const { linkId, inviteCode } = await node(ctx).createLink();
     if (label) await node(ctx).renameLink({ linkId, label });
     // Native listeners start for the chat on screen (or a paired one): a new invite is the chat a bot waits on.
-    node(ctx).setActiveLink({ linkId });
+    showUntilPaired(ctx, linkId);
     // Its first records must be out before a one-shot leaves. A daemon publishes them later too: it answers at once when
     // the relays' request budget holds them back (a few invites in a minute), and says when they go.
     const progressOf = (s: EngineState) => s.links.find((l) => l.id === linkId)?.pairingProgress;
@@ -177,16 +237,17 @@ const METHODS: Record<string, Method> = {
     }
     const label = str(params, "label");
     if (label) await node(ctx).renameLink({ linkId, label });
-    node(ctx).setActiveLink({ linkId });
+    showUntilPaired(ctx, linkId);
     return { chat: linkId };
   },
 
-  async "chat.list"(ctx) {
-    return { chats: state(ctx).links.map(chatJson).sort((a, b) => b.lastMessageAt - a.lastMessageAt || b.createdAt - a.createdAt) };
+  async "chat.list"(ctx, params) {
+    const showSecret = bool(params, "showSecret");
+    return { chats: state(ctx).links.map((link) => chatJson(link, showSecret)).sort((a, b) => b.lastMessageAt - a.lastMessageAt || b.createdAt - a.createdAt) };
   },
   async "chat.get"(ctx, params) {
     const link = chatOf(ctx, params);
-    return { ...chatDetailsJson(link), heldUntil: holdOf(ctx, link.id) };
+    return { ...chatDetailsJson(link, bool(params, "showSecret")), heldUntil: holdOf(ctx, link.id) };
   },
   async "chat.history"(ctx, params) {
     const link = chatOf(ctx, params);
@@ -207,7 +268,8 @@ const METHODS: Record<string, Method> = {
     // A kept `typing --for` ends with the message (the engine says stop with it).
     endTyping(ctx, { linkId: link.id }, false);
     const result = await node(ctx).sendMessage({ linkId: link.id, text, ...(replyTo ? { replyTo } : {}), ...(card ? { card } : {}) });
-    if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
+    // A `--reply` to a message this chat does not have is not_found (exit 3), as `file send --reply` and `group send` say.
+    if (result.error) throw /not in this chat|cannot be replied to/.test(result.error) ? new CliError("not_found", result.error) : new CliError(result.refused ? "refused" : "unavailable", result.error);
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
     let message = await node(ctx).getMessage(link.id, result.messageId);
     if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
@@ -227,7 +289,7 @@ const METHODS: Record<string, Method> = {
     }
     const wait = oneOf(params, "wait", ["none", "confirmed"] as const, "none");
     const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
-    if (result.error) throw editRefused(await node(ctx).getMessages(link.id), messageId, "chat", result.error, result.refused);
+    if (result.error) throw editRefused(await messageOf(ctx, link.id, messageId), messageId, "chat", result.error, result.refused);
     const id = result.messageId ?? messageId;
     let message = await node(ctx).getMessage(link.id, id);
     if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
@@ -258,7 +320,7 @@ const METHODS: Record<string, Method> = {
   },
   /** WISP 400 § Reactions: one emoji per person per message, a new one replaces mine; `remove` takes mine back. */
   async "chat.react"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = notAGroup(ctx, params, () => chatOf(ctx, params), "group react", "<message> <emoji>");
     return { chat: link.id, ...(await react(ctx, link.id, params)) };
   },
   /**
@@ -284,8 +346,13 @@ const METHODS: Record<string, Method> = {
     if (!messageIds.length) throw new CliError("bad_request", "Name the messages to forward (their ids, from history or an event)");
     const to = list(params, "to").map((ref) => chatOrGroup(ctx, ref));
     if (!to.length) throw new CliError("bad_request", "Forward to which chat? Name one or more with --to");
-    const history = from.group ? await node(ctx).groupMessages({ groupId: from.id }) : await node(ctx).getMessages(from.id);
-    const chosen = messageIds.map((id) => history.find((m) => m.id === id) ?? (() => { throw new CliError("not_found", `No message ${id} in this ${from.group ? "group" : "chat"}`); })());
+    // Each by its id here, one row each: never the whole history of the chat or group.
+    const chosen: StoredMessage[] = [];
+    for (const id of messageIds) {
+      const message = await node(ctx).getMessage(from.linkId, id);
+      if (!message) throw new CliError("not_found", `No message ${id} in this ${from.group ? "group" : "chat"}`);
+      chosen.push(message);
+    }
     if (!bool(params, "force")) for (const message of chosen) {
       const secret = message.file ? null : findSecret(message.text);
       if (secret) throw new CliError("confirm", `A message looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; forward it with --force if you mean to`, { kind: secret.kind, messageId: message.id });
@@ -298,7 +365,7 @@ const METHODS: Record<string, Method> = {
     const out = results.map((result, i) => ({ to: to[i]!.id, kind: to[i]!.group ? "group" as const : "chat" as const, messageIds: result.messageIds, error: result.error }));
     if (wait === "sent") for (const [i, result] of out.entries()) for (const messageId of result.messageIds) {
       if (to[i]!.group) { await waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms); continue; }
-      const sent = (await node(ctx).getMessages(to[i]!.id)).find((m) => m.id === messageId);
+      const sent = await node(ctx).getMessage(to[i]!.id, messageId);
       if (sent?.file) await FILE_METHODS["file.wait"](ctx, { chat: to[i]!.id, file: sent.file.id, timeout: ms / 1000 });
       else await waitForMessage(ctx, to[i]!.id, messageId, "sent", ms);
     }
@@ -308,13 +375,15 @@ const METHODS: Record<string, Method> = {
   },
   async "chat.retry"(ctx, params) {
     const link = chatOf(ctx, params);
-    await node(ctx).retryMessage({ linkId: link.id, messageId: str(params, "message", true) });
-    return { chat: link.id, messageId: params.message };
+    const messageId = str(params, "message", true);
+    if (!(await node(ctx).getMessage(link.id, messageId))) throw new CliError("not_found", `No message ${messageId} in this chat`);
+    await node(ctx).retryMessage({ linkId: link.id, messageId });
+    return { chat: link.id, messageId };
   },
   async "chat.delete"(ctx, params) {
     const link = chatOf(ctx, params);
     const messageId = str(params, "message", true);
-    if (!(await node(ctx).getMessages(link.id)).some((m) => m.id === messageId)) throw new CliError("not_found", `No message ${messageId} in this chat`);
+    if (!(await node(ctx).getMessage(link.id, messageId))) throw new CliError("not_found", `No message ${messageId} in this chat`);
     await node(ctx).deleteMessage({ linkId: link.id, messageId });
     return { chat: link.id, deleted: messageId };
   },
@@ -338,7 +407,7 @@ const METHODS: Record<string, Method> = {
   async "chat.transport"(ctx, params) {
     const link = chatOf(ctx, params);
     const name = str(params, "transport", true);
-    const transport = TRANSPORT_NAMES[name];
+    const transport = Object.hasOwn(TRANSPORT_NAMES, name) ? TRANSPORT_NAMES[name] : undefined;
     if (!transport) throw new CliError("bad_request", `transport must be one of auto, dht, webrtc, iroh, hyperdht`);
     await node(ctx).setChatTransport({ linkId: link.id, transport });
     return chatDetailsJson(findChat(state(ctx).links, link.id));
@@ -347,6 +416,7 @@ const METHODS: Record<string, Method> = {
   async "chat.connect"(ctx, params) {
     const link = chatOf(ctx, params);
     await releaseHold(ctx, link.id, "connect");
+    inviteTaken(link);
     await node(ctx).connect({ linkId: link.id });
     return chatJson(findChat(state(ctx).links, link.id));
   },
@@ -401,7 +471,14 @@ const METHODS: Record<string, Method> = {
     return { group: groupId, link };
   },
   async "group.join"(ctx, params) {
-    const { groupId } = await node(ctx).joinGroupByLink({ link: str(params, "link", true) });
+    let groupId: string;
+    try {
+      ({ groupId } = await node(ctx).joinGroupByLink({ link: str(params, "link", true) }));
+    } catch (error) {
+      // Not a link to a group at all: the caller's input, as `invite join` answers a word that is no invite.
+      if (error instanceof Error && error.message === "This is not a link to a group") throw new CliError("bad_request", error.message);
+      throw error;
+    }
     return { group: groupId };
   },
   async "group.list"(ctx, params) {
@@ -453,10 +530,11 @@ const METHODS: Record<string, Method> = {
     }
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
-    const before = (await node(ctx).groupMessages({ groupId: group.id })).find((m) => m.id === messageId)?.edit?.seq ?? 0;
-    const result = await node(ctx).editMessage({ linkId: `group:${group.id}`, messageId, text, ...(mentions.length ? { mentions } : {}) });
-    if (result.error) throw editRefused(await node(ctx).groupMessages({ groupId: group.id }), messageId, "group", result.error, result.refused);
-    const message = (await node(ctx).groupMessages({ groupId: group.id })).find((m) => m.id === messageId);
+    const linkId = `group:${group.id}`;
+    const before = (await node(ctx).getMessage(linkId, messageId))?.edit?.seq ?? 0;
+    const result = await node(ctx).editMessage({ linkId, messageId, text, ...(mentions.length ? { mentions } : {}) });
+    if (result.error) throw editRefused(await messageOf(ctx, linkId, messageId), messageId, "group", result.error, result.refused);
+    const message = await node(ctx).getMessage(linkId, messageId);
     const edits = message?.edit?.seq ?? 0;
     // The text the message already has: no edit was made and nothing went. It answered `sent: true` before, for a
     // message never edited, as if an edit had gone.
@@ -538,6 +616,8 @@ const METHODS: Record<string, Method> = {
     }
     if (method === "getMessages") return node(ctx).getMessages(str(args ?? {}, "linkId", true));
     if (method === "getState") return state(ctx);
+    // Someone chose the chat on screen: an invite's mark no longer clears it.
+    if (method === "setActiveLink") inviteShown.get(ctx)?.();
     const target = (node(ctx) as unknown as Record<string, (p?: unknown) => unknown>)[method];
     if (typeof target !== "function") throw new CliError("not_found", `The engine has no call ${method}`);
     if (args === undefined) args = undefined;
@@ -585,12 +665,27 @@ export function groupSendRefused(error: string): CliError {
 }
 
 /**
+ * A chat command given a group's id, prefix or name: `not_found` that says it is a group, with the group command that
+ * takes it (`react` on a group, where `group react` is meant). A name no chat and no group has stays the chat's error.
+ */
+function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, command: string, rest: string): T {
+  try { return chat(); } catch (error) {
+    if (!(error instanceof CliError) || error.code !== "not_found") throw error;
+    const ref = str(params, "chat", true);
+    let group: GroupView;
+    try { group = findGroup(state(ctx).groups, ref); } catch { throw error; }
+    const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
+    throw new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat: ghostly ${command} ${shown} ${rest}`, { group: group.id });
+  }
+}
+
+/**
  * An edit the engine refused. A message that is not in the chat or group at all is `not_found` (exit 3), naming the id
  * to give, as `button update` and `task update` do; before, a mistyped or lost id read "Only your own text messages
  * can be edited" (`refused`, exit 1), as if the message were someone else's.
  */
-function editRefused(messages: readonly StoredMessage[], ref: string, where: "chat" | "group", error: string, refused: boolean | undefined): CliError {
-  if (refused && !messages.some((m) => m.id === ref || m.wireId === ref))
+function editRefused(message: StoredMessage | undefined, ref: string, where: "chat" | "group", error: string, refused: boolean | undefined): CliError {
+  if (refused && !message)
     return new CliError("not_found", `No message ${JSON.stringify(ref)} in this ${where}: give the messageId ${where === "group" ? "group send" : "send"} printed`);
   return new CliError(refused ? "refused" : "unavailable", error);
 }
@@ -601,7 +696,7 @@ function editRefused(messages: readonly StoredMessage[], ref: string, where: "ch
  */
 async function historyOf(ctx: ApiContext, chat: string, params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {
   if (params.after !== undefined && params.after !== null) return history(await node(ctx).getMessages(chat), params, json);
-  const limit = num(params, "limit", 50, { min: 1, max: 10_000 });
+  const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
   const before = params.before ?? undefined;
   if (before !== undefined && typeof before !== "number" && typeof before !== "string") throw new CliError("bad_request", "before must be a timestamp or a message id");
   const page = await node(ctx).messagePage({ linkId: chat, limit, before }).catch((error: unknown) => {
@@ -611,7 +706,7 @@ async function historyOf(ctx: ApiContext, chat: string, params: Params, json: (m
 }
 
 function history(messages: StoredMessage[], params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {
-  const limit = num(params, "limit", 50, { min: 1, max: 10_000 });
+  const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
   const before = params.before;
   const after = params.after;
   let list = messages.slice().sort((a, b) => a.timestamp - b.timestamp);
@@ -634,10 +729,10 @@ export { findChat, findGroup } from "./apiKit";
 export type { ApiContext } from "./apiKit";
 export const API_METHODS: readonly string[] = Object.keys(METHODS);
 
-/** Runs one method of the API. */
+/** Runs one method of the API: one the table lists itself (`constructor`, which every object has, is none). */
 export async function callApi(ctx: ApiContext, method: string, params: unknown = {}): Promise<unknown> {
-  const run = METHODS[method];
+  const run = Object.hasOwn(METHODS, method) ? METHODS[method] : undefined;
   if (!run) throw new CliError("not_found", `No method ${method}`);
   if (params === null || typeof params !== "object" || Array.isArray(params)) throw new CliError("bad_request", "params must be an object");
-  return run(ctx, params as Params);
+  return run(ctx, await withStoredIds(ctx, params as Params));
 }

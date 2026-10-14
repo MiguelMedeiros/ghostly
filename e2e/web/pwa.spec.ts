@@ -49,7 +49,8 @@ test.describe("service worker", () => {
     for (const { cache, path } of entries) {
       expect(cache).toMatch(/^ghostly-shell-/);
       expect(path, `${path} is a file of the build`).toMatch(/^\/($|assets\/[\w.-]+$|[\w-]+\.(png|svg|json)$|boot-guard\.js$)/);
-      expect(path).not.toMatch(/version\.json|oidc-callback|sw\.js/);
+      // Whole paths: a build's hashed name may end in `sw` (`/assets/fr-CszXulsw.js`).
+      expect(path).not.toMatch(/^\/(version\.json|oidc-callback\.html|sw\.js)$/);
     }
 
     await ana.context.setOffline(true);

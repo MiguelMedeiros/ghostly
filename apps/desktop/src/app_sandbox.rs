@@ -32,14 +32,14 @@ pub const LABEL_PREFIX: &str = "app-";
 
 /// The runner's policy (WISP 1200, "The runner's CSP"), sent as a header so `sandbox` holds even if the page
 /// is opened some other way. Tauri's configured CSP is not added to a custom scheme's responses.
-pub const RUNNER_CSP: &str = "sandbox allow-scripts; default-src 'none'; \
+pub const RUNNER_CSP: &str = "sandbox allow-scripts allow-pointer-lock; default-src 'none'; \
 script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; \
 media-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; worker-src 'none'; \
 form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
 /// The network runner's policy (WISP 1200, "The network runner's CSP"), for an app the person granted
 /// `internet`: HTTPS and WSS for fetches, sockets, images, media and fonts, and nothing else wider.
-pub const NET_RUNNER_CSP: &str = "sandbox allow-scripts; default-src 'none'; \
+pub const NET_RUNNER_CSP: &str = "sandbox allow-scripts allow-pointer-lock; default-src 'none'; \
 script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob: https:; \
 media-src data: blob: https:; font-src data: https:; connect-src https: wss:; frame-src 'none'; \
 worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
@@ -615,10 +615,10 @@ fn build_window<R: Runtime>(
                 builder =
                     builder.with_webview_configuration(webkit::configuration(guard, internet)?);
             }
-            builder
-                .build()
-                .map(|_| ())
-                .map_err(|e| format!("Window: {e}"))
+            let window = builder.build().map_err(|e| format!("Window: {e}"))?;
+            // Mouse look: WKWebView gives the pointer lock only when asked (webkit::allow_pointer_lock).
+            let _ = window.with_webview(|platform| webkit::allow_pointer_lock(platform.inner()));
+            Ok(())
         })();
         let _ = tx.send(built);
     })
@@ -786,19 +786,69 @@ pub fn admit(
         .unwrap_or_else(|| Err("Not an app window".into()))
 }
 
+/// Where the broker says a `file` answer's bytes lie in the file storage (`AppFileAt` in the engine).
+#[derive(Deserialize)]
+struct FileAt {
+    space: String,
+    id: String,
+    offset: u64,
+    length: u64,
+    sha256: String,
+}
+
+/// A `file` answer the broker gave by reference (`{"id", "ok": true, "file": FileAt}`): the bytes, read from the
+/// file storage off the main thread and checked against the SHA-256 the bundle's manifest gives them. Only an
+/// app's bundle (`app-<digest>`), at most a bundle's size.
+async fn file_bytes<R: Runtime>(
+    app: &AppHandle<R>,
+    answer: &Value,
+) -> Option<Result<Vec<u8>, String>> {
+    let at: FileAt = serde_json::from_value(answer.get("file")?.clone()).ok()?;
+    if answer.get("ok").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    if !at.id.starts_with("app-") || at.length > MAX_FILE_BYTES {
+        return Some(Err("failed".into()));
+    }
+    let base = match crate::file_store::base_of(app) {
+        Ok(base) => base,
+        Err(e) => return Some(Err(e)),
+    };
+    let read = tauri::async_runtime::spawn_blocking(move || {
+        let bytes = crate::file_store::FileStore::new(base)
+            .read(&at.space, &at.id, at.offset, at.length)?;
+        if bytes.len() as u64 != at.length || !sha256_is(&bytes, &at.sha256) {
+            return Err("failed".to_string());
+        }
+        Ok(bytes)
+    })
+    .await;
+    Some(read.map_err(|e| e.to_string()).and_then(|r| r))
+}
+
+/// Whether `bytes` hash to `expected`, the manifest's base64url SHA-256.
+fn sha256_is(bytes: &[u8], expected: &str) -> bool {
+    use base64::Engine;
+    use sha2::Digest;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(bytes)) == expected
+}
+
+/// The largest file an app's bundle may hold (WISP 1200: a bundle is at most 64 MiB).
+const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
+
 /// The one command an app window may call (`only_main` lets it through from `app-*` windows only). The
-/// request is `{"id", "type", "args"}`; the result is the broker's answer, `{"id", "ok", "value" | "error"}`
-/// (or `"bytes"`, base64, for a file).
+/// request is `{"id", "type", "args"}`; the result is the broker's answer, `{"id", "ok", "value" | "error"}`, or
+/// for a file `{"id", "ok", "bytes"}`, the bytes in base64, read here (`file_bytes`) or carried by the broker.
 #[tauri::command]
 pub async fn app_broker<R: Runtime>(
     app: AppHandle<R>,
     webview: tauri::Webview<R>,
     request: Value,
-) -> Result<Value, String> {
+) -> Result<tauri::ipc::Response, String> {
     let label = webview.label().to_string();
     let state = app.state::<AppSandboxState>();
     let (id, receiver) = match admit(&state, &label, &request, Instant::now())? {
-        Admitted::Answer(answer) => return Ok(answer),
+        Admitted::Answer(answer) => return json_response(&answer),
         Admitted::Relay(id, receiver) => (id, receiver),
     };
     let sent = app.emit_to(
@@ -811,10 +861,30 @@ pub async fn app_broker<R: Runtime>(
         Err(_) => None,
     };
     state.with(&label, |window| window.pending.remove(&id));
-    match answer {
-        Some(Ok(answer)) => Ok(answer),
-        _ => Err("No answer".into()),
+    let answer = match answer {
+        Some(Ok(answer)) => answer,
+        _ => return Err("No answer".into()),
+    };
+    match file_bytes(&app, &answer).await {
+        Some(Ok(bytes)) => bytes_response(id, &bytes),
+        Some(Err(_)) => json_response(&json!({ "id": id, "ok": false, "error": "failed" })),
+        None => json_response(&answer),
     }
+}
+
+/// A file's bytes for the app window, as base64 in the answer (`"bytes"`, which the runner decodes). Not raw: the
+/// window's CSP and rule list block `ipc://`, so Tauri would eval a raw body into it as a JSON list of numbers,
+/// about 3.6 characters a byte, slow to build, parse and hold, and on the GTK main loop the windows share.
+fn bytes_response(id: u64, bytes: &[u8]) -> Result<tauri::ipc::Response, String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD.encode(bytes);
+    json_response(&json!({ "id": id, "ok": true, "bytes": bytes }))
+}
+
+fn json_response(answer: &Value) -> Result<tauri::ipc::Response, String> {
+    serde_json::to_string(answer)
+        .map(tauri::ipc::Response::new)
+        .map_err(|e| e.to_string())
 }
 
 /// What the Ghostly window's broker sends an app window (`post`): an answer (`{"id", …}`) goes to the request
@@ -992,6 +1062,65 @@ mod webkit {
                     .map_err(|_| "rule list not compiled in time".to_string())?
             })
             .clone()
+    }
+
+    /// The pointer lock an app asks for (mouse look), which WKWebView gives only when its UI delegate answers
+    /// `_webViewDidRequestPointerLock:completionHandler:` (private API, as `_features` below). wry's delegate does
+    /// not, so the method is added to its class, once, and answers yes for a page on the `ghostly-app` scheme only:
+    /// the class is the main window's delegate's too, and that window is told no. WebKit reads which methods a
+    /// delegate has when the delegate is set, so the app window's delegate is set again after the method is added.
+    /// The page still needs `allow-pointer-lock` in its sandbox (the runner's policy), and Esc frees the pointer.
+    pub fn allow_pointer_lock(webview: *mut std::ffi::c_void) {
+        let Some(webview) = (unsafe { (webview as *mut AnyObject).as_ref() }) else {
+            return;
+        };
+        let delegate: Option<Retained<AnyObject>> = unsafe { msg_send![webview, UIDelegate] };
+        let Some(delegate) = delegate else {
+            crate::diagnostics::log("app window: no UI delegate, no pointer lock");
+            return;
+        };
+        let class = delegate.class();
+        let selector = objc2::sel!(_webViewDidRequestPointerLock:completionHandler:);
+        if !class.responds_to(selector) {
+            let added = unsafe {
+                objc2::ffi::class_addMethod(
+                    class as *const AnyClass as *mut AnyClass,
+                    selector,
+                    std::mem::transmute::<
+                        unsafe extern "C-unwind" fn(
+                            &AnyObject,
+                            objc2::runtime::Sel,
+                            &AnyObject,
+                            &block2::Block<dyn Fn(Bool)>,
+                        ),
+                        objc2::runtime::Imp,
+                    >(did_request_pointer_lock),
+                    c"v@:@@?".as_ptr(),
+                )
+            };
+            if !added.as_bool() {
+                crate::diagnostics::log("app window: pointer lock answer not added");
+                return;
+            }
+        }
+        let _: () = unsafe { msg_send![webview, setUIDelegate: &*delegate] };
+    }
+
+    /// Whether a web view shows the runner (`ghostly-app://`), which alone may hold the pointer.
+    pub fn is_runner_view(webview: &AnyObject) -> bool {
+        let url: Option<Retained<AnyObject>> = unsafe { msg_send![webview, URL] };
+        let Some(url) = url else { return false };
+        let text: Option<Retained<NSString>> = unsafe { msg_send![&*url, absoluteString] };
+        text.is_some_and(|t| url::Url::parse(&t.to_string()).is_ok_and(|u| super::is_runner(&u)))
+    }
+
+    unsafe extern "C-unwind" fn did_request_pointer_lock(
+        _this: &AnyObject,
+        _cmd: objc2::runtime::Sel,
+        webview: &AnyObject,
+        completion: &block2::Block<dyn Fn(Bool)>,
+    ) {
+        completion.call((Bool::new(is_runner_view(webview)),));
     }
 
     /// Every WebKit feature this WebKit knows: its key and the `_WKFeature` itself.
@@ -1185,6 +1314,81 @@ mod tests {
         url::Url::parse(value).unwrap()
     }
 
+    #[test]
+    fn a_file_answer_by_reference_is_the_stored_bytes_checked_against_their_hash() {
+        let dir = std::env::temp_dir().join(format!("ghostly-app-file-{}", std::process::id()));
+        let files = crate::file_store::FileStore::new(dir.clone());
+        let bytes: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+        files.append("ghostly-a", "app-digest", 0, &bytes).unwrap();
+        files.flush("ghostly-a", "app-digest").unwrap();
+        let app = mock_builder()
+            .manage(AppSandboxState::default())
+            .manage(crate::file_store::FileStore::new(dir.clone()))
+            .build(tauri::generate_context!(test = true))
+            .expect("app");
+        let handle = app.handle();
+        let hash = |part: &[u8]| {
+            use base64::Engine;
+            use sha2::Digest;
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(part))
+        };
+        let answer = |id: &str, offset: u64, length: u64, sha256: &str| json!({ "id": 7, "ok": true, "file": { "space": "ghostly-a", "id": id, "offset": offset, "length": length, "sha256": sha256 } });
+        let read = |answer: Value| tauri::async_runtime::block_on(file_bytes(handle, &answer));
+        // A file inside the bundle: its bytes, as they are on disk.
+        let part = &bytes[1000..201_000];
+        assert_eq!(
+            read(answer("app-digest", 1000, 200_000, &hash(part))),
+            Some(Ok(part.to_vec()))
+        );
+        // Bytes that do not hash to what the manifest says, a file outside the apps' bundles, or past a bundle's size: refused.
+        assert_eq!(
+            read(answer("app-digest", 1001, 200_000, &hash(part))),
+            Some(Err("failed".into()))
+        );
+        assert_eq!(
+            read(answer("chat-in-x", 1000, 200_000, &hash(part))),
+            Some(Err("failed".into()))
+        );
+        assert_eq!(
+            read(answer("app-digest", 0, 65 * 1024 * 1024, &hash(part))),
+            Some(Err("failed".into()))
+        );
+        // Any other answer is passed on as the broker wrote it.
+        assert_eq!(read(json!({ "id": 7, "ok": true, "value": 1 })), None);
+        assert_eq!(
+            read(json!({ "id": 7, "ok": false, "error": "no-file" })),
+            None
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// An app window has no raw IPC body (its CSP and rule list block `ipc://`): a raw answer would reach it as an
+    /// eval'd list of numbers. The bytes go as base64 in a JSON answer, which the runner decodes (`bytesOf`).
+    #[test]
+    fn a_file_answer_reaches_the_app_window_as_base64_json() {
+        use base64::Engine;
+        let bytes: Vec<u8> = (0..70_000u32).map(|i| (i % 253) as u8).collect();
+        let response = bytes_response(7, &bytes).unwrap();
+        let json = match tauri::ipc::IpcResponse::body(response).unwrap() {
+            tauri::ipc::InvokeResponseBody::Json(json) => json,
+            tauri::ipc::InvokeResponseBody::Raw(_) => panic!("a raw answer, not JSON"),
+        };
+        let answer: Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(answer["id"], 7);
+        assert_eq!(answer["ok"], true);
+        let sent = answer["bytes"].as_str().unwrap();
+        assert_eq!(
+            base64::engine::general_purpose::STANDARD
+                .decode(sent)
+                .unwrap(),
+            bytes
+        );
+        assert!(RUNNER.contains(
+            r#"return typeof answer.bytes === "string" ? bytesOf(answer.bytes) : answer.value;"#
+        ));
+        assert!(!RUNNER.contains("new Uint8Array(answer)"));
+    }
+
     fn window(app: &str, ready: bool, brokered: bool) -> AppWindow {
         let mut window = AppWindow::new(
             app.into(),
@@ -1335,7 +1539,7 @@ mod tests {
     fn the_policies_are_the_wisps() {
         for policy in [RUNNER_CSP, NET_RUNNER_CSP] {
             for directive in [
-                "sandbox allow-scripts;",
+                "sandbox allow-scripts allow-pointer-lock;",
                 "default-src 'none';",
                 "script-src 'unsafe-inline' 'wasm-unsafe-eval';",
                 "frame-src 'none';",

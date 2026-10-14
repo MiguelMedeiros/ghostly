@@ -1,13 +1,16 @@
 import { act, screen, waitFor } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { AttentionFeedback } from "../../components/AttentionFeedback";
 import { MESSAGE_BURST_MS, resetCues } from "../../lib/cues";
 import { clearChatNotification, showPrivateNotification } from "../../lib/notifications";
 import { loadSettings, saveSettings } from "../../lib/settings";
 import { saveSession } from "../../lib/storage";
+import { refreshWindowAway } from "../../lib/windowAway";
 import { Chat } from "../../pages/Chat";
-import { fakeEngine, linkView } from "../fakeEngine";
+import { GroupChat } from "../../pages/GroupChat";
+import { fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
 // covers: app.attention.notifications
@@ -41,7 +44,10 @@ const cleared = () => tauri.invoke.mock.calls.filter(([command]) => command === 
 function Where() { return <p data-testid="where">{useLocation().pathname}</p>; }
 
 let visibility: DocumentVisibilityState = "visible";
+let focused = true;
 beforeEach(() => {
+  vi.spyOn(document, "hasFocus").mockImplementation(() => focused);
+  refreshWindowAway();
   (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__ = {};
   vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Linux; Android 15; Pixel 8; wv) AppleWebKit/537.36 Chrome/131.0 Mobile Safari/537.36");
   vi.spyOn(document, "visibilityState", "get").mockImplementation(() => visibility);
@@ -53,6 +59,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   visibility = "visible";
+  focused = true;
   delete (window as unknown as { __TAURI_INTERNALS__?: object }).__TAURI_INTERNALS__;
   vi.restoreAllMocks();
 });
@@ -89,7 +96,7 @@ describe("Android: one notification per chat", () => {
     await showPrivateNotification("message:group:g1:m1", "New message", "group:g1", true);
     const [tag, group] = posted();
     // The chat is open, and the app was away when the message came: it comes back, and the chat is read.
-    visibility = "hidden";
+    act(() => { visibility = "hidden"; document.dispatchEvent(new Event("visibilitychange")); });
     renderApp(<Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} />);
     expect(cleared()).toEqual([]);
     act(() => { visibility = "visible"; document.dispatchEvent(new Event("visibilitychange")); });
@@ -104,5 +111,79 @@ describe("Android: one notification per chat", () => {
     await showPrivateNotification("call:chat-1:1", "Incoming call", "chat-1");
     expect(posted()[3]).not.toBe(posted()[2]);
     expect(posted()[3]).not.toMatch(/chat-1|call/);
+  });
+});
+
+/*
+ * A Linux desktop keeps a list of notifications too. Each burst of a chat's messages used to add one, and none was
+ * taken back when the chat was read in the app. The Linux app now does as the Android app.
+ */
+describe("Linux: one notification per chat", () => {
+  it("a chat's bursts share one notification, which reading the chat takes away; on macOS each keeps its own", async () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15");
+    const os = vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
+    await showPrivateNotification("message:link-a:m1", "New message", "chat-1", true);
+    await showPrivateNotification("message:link-a:m2", "New message", "chat-1", true);
+    await showPrivateNotification("message:group:g1:m1", "New message", "group:g1", true);
+    const [tag, again, group] = posted();
+    expect(again).toBe(tag);
+    expect(group).not.toBe(tag);
+    expect(tag).not.toMatch(/chat-1|link-a|message/);
+    clearChatNotification("chat-1");
+    expect(cleared()).toEqual([tag]);
+    await showPrivateNotification("message:link-a:m3", "New message", "chat-1", true);
+    expect(posted()[3]).not.toBe(tag);
+
+    // macOS takes its own away: there a notification stays its message's, and nothing is asked to go.
+    os.mockReturnValue("MacIntel");
+    await showPrivateNotification("message:link-b:m1", "New message", "chat-2", true);
+    await showPrivateNotification("message:link-b:m2", "New message", "chat-2", true);
+    expect(posted()[5]).not.toBe(posted()[4]);
+    clearChatNotification("chat-2");
+    expect(cleared()).toEqual([tag]);
+  });
+});
+
+/*
+ * A window on screen behind another app's (a second monitor, another workspace) is told of a message, as it has no
+ * focus. Its open chat is read, yet the notification used to be taken back by the very message that made it, some
+ * 55 ms after it showed: nobody ever saw it. It now stays until the window has the focus with the chat open.
+ */
+describe("Linux: a chat open in a window without the focus", () => {
+  const linux = () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15");
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
+  };
+  const blur = (next: boolean) => act(() => { focused = !next; window.dispatchEvent(new Event(next ? "blur" : "focus")); });
+
+  it("keeps its notification through the next messages, and takes it away when the window gets the focus", async () => {
+    linux();
+    blur(true);
+    renderApp(<><AttentionFeedback /><Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} /></>);
+    act(() => fakeEngine.emit({ kind: "attention", event: { id: "message:link-a:m1", type: "message", at: Date.now(), linkId: "link-a" } }));
+    await waitFor(() => expect(posted()).toHaveLength(1));
+    // The message lands in the open chat, and another after it.
+    const landed: StoredMessage[] = [];
+    for (const id of ["m1", "m2"]) {
+      landed.push({ linkId: "link-a", id, text: "hi", sender: "peer", timestamp: Date.now(), via: "datalink" });
+      act(() => fakeEngine.messages("link-a", [...landed]));
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 60)); });
+    }
+    expect(cleared()).toEqual([]);
+    blur(false);
+    await waitFor(() => expect(cleared()).toEqual(posted()));
+  });
+
+  it("a group's too", async () => {
+    linux();
+    blur(true);
+    await showPrivateNotification("message:group:group-1:m1", "New message", "group:group-1", true);
+    fakeEngine.on("groupMessages", () => []);
+    fakeEngine.update({ groups: [groupView({ status: "active", epoch: 1 })] });
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 60)); });
+    expect(cleared()).toEqual([]);
+    blur(false);
+    await waitFor(() => expect(cleared()).toEqual(posted()));
   });
 });

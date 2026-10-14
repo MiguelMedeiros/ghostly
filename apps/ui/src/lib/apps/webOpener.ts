@@ -61,8 +61,9 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
       let running: RunningApp | null = null;
       let takenDown: AppTakedown | null = null;
       const unregister = registerRunningApp({
-        ref, runAnyway: options?.runAnyway === true,
+        ref, digest: entry.digest, runAnyway: options?.runAnyway === true,
         takeDown: (takedown) => { takenDown = takedown; running?.stop(); },
+        stop: () => running?.stop(),
       });
       running = startApp({
         container: slot, host, launch, view,
@@ -94,7 +95,9 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
     overlay.setAttribute("data-place", "alone");
     overlay.className = "fixed inset-0 z-50 flex flex-col bg-sidebar-bg text-text-primary";
     const bar = document.createElement("div");
-    bar.className = "flex items-center gap-2 border-b border-border px-3 py-2 text-sm";
+    // `alone-bar`: on a phone the layer covers the whole screen, status bar included, so the bar starts below the clock
+    // and the notch (index.css), or Close sits under them and cannot be pressed (the installed web app on an iPhone).
+    bar.className = "alone-bar flex items-center gap-2 border-b border-border px-3 py-2 text-sm";
     const title = document.createElement("span");
     title.className = "flex-1 truncate font-medium";
     title.setAttribute("data-testid", "mini-app-title");
@@ -102,7 +105,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
     title.textContent = entry.title;
     const close = document.createElement("button");
     close.type = "button";
-    close.className = "rounded px-2 py-1 hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
+    close.className = "min-h-11 rounded px-3 py-1 hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
     close.textContent = closeLabel();
     const box = document.createElement("div");
     box.className = "relative flex-1 [&>iframe]:absolute [&>iframe]:inset-0 [&>iframe]:h-full [&>iframe]:w-full [&>iframe]:border-0";
@@ -124,8 +127,9 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
     };
     let takenDown: AppTakedown | null = null;
     const unregister = registerRunningApp({
-      ref, runAnyway: options?.runAnyway === true,
+      ref, digest: entry.digest, runAnyway: options?.runAnyway === true,
       takeDown: (takedown) => { takenDown = takedown; running.stop(); },
+      stop: () => running.stop(),
     });
     const running = startApp({
       container: box, host, launch, view,

@@ -178,7 +178,7 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
   /** Why this identity cannot be shared here now. Stopping is always possible; the Ghostly identity is always seen. */
   const why = (e: Entry) => {
     if (e.add || e.ghostly || e.on) return undefined;
-    if (expired(e)) return t("identities.card.expiredOn", { date: date(e.proof.expiresAt) });
+    if (expired(e)) return t("identities.card.expiredOn", { date: date(e.proof.expiresAt, t.language) });
     if (ids?.contactProviders && !ids.contactProviders.includes(e.proof.provider)) return t("identities.picker.cannotVerify", { contact, provider: providerLabel(e.proof.provider) });
     if (unsupported) return t("identities.picker.cannotReceive", { contact });
     if (!ids) return t("identities.picker.connectFirst");
@@ -334,7 +334,7 @@ function IdentityBack({ t, entry, contact, now, busy, turning, stopping, done, e
         {/* Once done, the line saying so stands for it: the engine's state catches up a moment later. */}
         {!done && <p className="id-card-back-state">
           <span data-testid="composer-identity-status" className={tone}>{state}</span>
-          {warn && <span data-testid="composer-identity-expiring" className="text-amber-500"> · {warn}</span>}
+          {warn && <span data-testid="composer-identity-expiring" className="text-warn-ink"> · {warn}</span>}
         </p>}
         {done ? <p role="status" className="id-card-back-done" data-testid="composer-identity-done">
           <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>

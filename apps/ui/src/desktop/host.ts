@@ -31,6 +31,7 @@ import type { PubkyCookieSession } from "@ghostly/browser/host";
 import type { NodeOptions } from "@ghostly/browser/engine/node";
 import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
+import { desktopLnurlFetch } from "./lnurlFetch";
 import { desktopOidc } from "./oidc";
 import { desktopAtprotoHost } from "./atproto";
 import { appCommandForKey, isAppCommand, sendAppCommand } from "../lib/appCommands";
@@ -38,6 +39,11 @@ import { nativeCallOptions, nativeDevices, type NativeCallSupport } from "./nati
 import { setDeviceSource } from "../lib/mediaDevices";
 import { setAppBadgeTarget } from "../lib/appBadge";
 import { setSoundsRelease, type SoundsRelease } from "../lib/sounds";
+import { knownErrorText } from "../lib/errorText";
+import { english } from "../lib/english";
+import { loadSettings } from "../lib/settings";
+import { translatorFor } from "../locales";
+import type { Translate } from "../locales/translate";
 import { webkitGtkSoundsRelease } from "../lib/webkitGtk";
 import { dockBadge } from "./dockBadge";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -47,6 +53,7 @@ import { setWindowThemeSink } from "../lib/windowTheme";
 import { setNameStepUnderTest } from "../lib/nameStep";
 import { appsTestFetch } from "./appsTestFetch";
 import { appsPlatform } from "../lib/apps/flag";
+import { builtInAppOption } from "../lib/apps/builtIns";
 
 /**
  * Ghostly Desktop runs the same peer as the browser clients, in its WebView,
@@ -140,6 +147,12 @@ export function createTauriTransport(): PkarrTransport {
 }
 
 /**
+ * The language the page is shown in now (`<html lang>`, lib/documentLanguage.ts), for a native dialog Rust words
+ * itself (`local_access.rs`): the page names the language, never the words.
+ */
+const dialogLanguage = () => document.documentElement.lang;
+
+/**
  * The WebView may not talk to localhost (CSP, CORS); Rust may, and only to
  * loopback addresses this profile's person allowed (`local_service_allow`),
  * without following redirects. The Rust request cannot be aborted, so this
@@ -154,6 +167,7 @@ const tauriLocalFetch: LocalFetch = async (request) => {
     method: request.method,
     headers: request.headers,
     bodyB64: request.body ? toBase64(request.body) : null,
+    lang: dialogLanguage(),
   });
   const body = fromBase64(response.body_b64);
   return {
@@ -205,9 +219,10 @@ export interface ServiceWindowResponse {
 
 /**
  * The answer a service window gets for one request: the contact's, over the data link, with only the headers a
- * viewer serves (`viewerResponseHeaders`), or a short page saying why there is none.
+ * viewer serves (`viewerResponseHeaders`), or a short page saying why there is none, in `t`'s language. An error the
+ * app does not know is said as a failed request only: the engine's own English goes to the console, not to the page.
  */
-export async function answerServiceWindow(server: Pick<EngineServer, "ready" | "node">, payload: ServiceRequest): Promise<ServiceWindowResponse> {
+export async function answerServiceWindow(server: Pick<EngineServer, "ready" | "node">, payload: ServiceRequest, t: Translate = english): Promise<ServiceWindowResponse> {
   try {
     await server.ready;
     const answer = await server.node.request(payload.peer, payload.service, {
@@ -220,9 +235,8 @@ export async function answerServiceWindow(server: Pick<EngineServer, "ready" | "
     return { status: answer.status, headers: viewerResponseHeaders(answer.headers), body_b64: toBase64(await answer.bytes()) };
   } catch (error) {
     const gone = error instanceof GhostlyHttpError && ["unreachable", "timeout", "closed", "offline"].includes(error.code);
-    const text = gone
-      ? "This service is not reachable. Services exist while their ghost is online."
-      : `The request failed: ${error instanceof Error ? error.message : String(error)}`;
+    if (!gone) console.warn("Service window request failed:", error);
+    const text = gone ? t("services.window.unreachable") : knownErrorText(error, t) ?? t("services.window.failed");
     return {
       status: gone ? 503 : 502,
       headers: [["content-type", "text/plain; charset=utf-8"]],
@@ -231,10 +245,13 @@ export async function answerServiceWindow(server: Pick<EngineServer, "ready" | "
   }
 }
 
+/** `t()` in the profile's language, as it is now. */
+const profileT = (): Translate => translatorFor(loadSettings().language);
+
 /** Requests from a service window arrive here and leave over the contact's data link. */
 function serveServiceWindows(server: EngineServer): void {
   void listen<ServiceRequest>("ghostly-svc-request", async ({ payload }) => {
-    const response = await answerServiceWindow(server, payload);
+    const response = await answerServiceWindow(server, payload, profileT());
     await invoke("service_respond", { id: payload.id, response });
   });
 }
@@ -300,7 +317,8 @@ export function desktopApps(runsApps: boolean) {
   if (!runsApps) return { host: {}, node: { apps: false } };
   return {
     host: { appRunner: "ghostly-app://localhost/", appNetRunner: "ghostly-app://localhost/", appRunnerServed: true },
-    node: import.meta.env.VITE_APPS_TEST === "1" ? { apps: true, appFetch: appsTestFetch() } : {},
+    // The apps that come with Ghostly are files of the application (`builtInAppOption`).
+    node: { ...builtInAppOption(), ...(import.meta.env.VITE_APPS_TEST === "1" ? { apps: true, appFetch: appsTestFetch() } : {}) },
   };
 }
 
@@ -330,6 +348,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   const node: NodeOptions = { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, nativeIrohRelays: true, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
     // Wake-ups go from Rust: push services answer without CORS, which a WebView would enforce (WISP 401 § Wake-up push).
     pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
+    // A Lightning address whose service redirects is asked from Rust, which checks every hop before following it.
+    lnurlFetch: desktopLnurlFetch(invoke),
     // A new profile gets its default Mainnet wallets; never under an e2e suite (desktopUnderTest).
     defaultWallets: defaultWalletsAllowed(desktopUnderTest),
     ...apps.node, ...macPeerBudget() };
@@ -378,12 +398,13 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
         done: () => void invoke("incoming_share_done", { tokens: [token] }).catch(() => {}),
       })),
     // Rust asks in a native dialog naming the exact address (the page can neither draw nor answer it), and keeps the
-    // answer per profile: `local_fetch` reaches only an address allowed there.
-    requestLocalAccess: (_pattern, origin) => invoke<boolean>("local_service_allow", { space: fileSpace(), origin }),
+    // answer per profile: `local_fetch` reaches only an address allowed there. The dialog is in the page's language.
+    requestLocalAccess: (_pattern, origin) => invoke<boolean>("local_service_allow", { space: fileSpace(), origin, lang: dialogLanguage() }),
     forgetLocalAccess: (origin) => invoke<void>("local_service_forget", { space: fileSpace(), origin }),
     async openService(peerPubKeyZ32, serviceId) {
       const service = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId);
-      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, title: service?.name ?? serviceId });
+      // Rust says `unreachable` itself for a request this page never answered: the sentence goes with the window.
+      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, title: service?.name ?? serviceId, unreachable: profileT()("services.window.unreachable") });
     },
   });
   const connect = host.connect;

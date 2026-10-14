@@ -55,8 +55,8 @@ test("leaving: gone from the list at once, heard by an admin who was away, and t
   // Back, the admin hears it from Bob's app and removes him; Carol sees it too.
   alice.page = await alice.context.newPage();
   await alice.page.goto(groupUrl);
-  await event(alice, "Bob is no longer a member");
-  await event(carol, "Bob is no longer a member");
+  await event(alice, "Bob left");
+  await event(carol, "Bob left");
   await expect(alice.page.getByTestId("group-members")).toContainText("2 members");
 
   // The admin leaves: the dialog names who takes over, and that member is the admin after.
@@ -66,6 +66,6 @@ test("leaving: gone from the list at once, heard by an admin who was away, and t
   await alice.page.getByTestId("group-leave-confirm").click();
   await expect(rows(alice)).toHaveCount(0);
   await event(carol, "You are now the admin");
-  await event(carol, "Alice is no longer a member");
+  await event(carol, "Alice left");
   await expect(carol.page.getByTestId("group-members")).toContainText("1 member");
 });

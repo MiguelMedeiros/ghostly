@@ -24,8 +24,21 @@ const typedInto = (element: Element | null): element is HTMLElement =>
  *
  * `data-standalone` says the app runs installed: iOS 26 needs the document to be as tall as the screen there
  * (apps/ui/src/index.css).
+ *
+ * A pinch does not zoom the page (index.css: `touch-action: pan-x pan-y` on touch screens): a zoomed page left the
+ * app zoomed, its visible height wrong, and a picture zooms in its own viewer (components/AvatarViewer.tsx). Safari
+ * sends its pinch as `gesture*` events too, and an older iOS honours only their `preventDefault` for it.
  */
 export function useViewportHeight() {
+  useEffect(() => {
+    const noPagePinch = (e: Event) => e.preventDefault();
+    document.addEventListener("gesturestart", noPagePinch);
+    document.addEventListener("gesturechange", noPagePinch);
+    return () => {
+      document.removeEventListener("gesturestart", noPagePinch);
+      document.removeEventListener("gesturechange", noPagePinch);
+    };
+  }, []);
   useEffect(() => {
     document.documentElement.dataset.standalone = String(isStandalone());
     const viewport = window.visualViewport;

@@ -51,6 +51,11 @@ export class DaemonClient {
   close(): void {
     this.socket.end();
   }
+
+  /** Closes at once: what the daemon still sends is not read. */
+  destroy(): void {
+    this.socket.destroy();
+  }
 }
 
 export function connectDaemon(path: string, timeoutMs = 2_000): Promise<DaemonClient | null> {

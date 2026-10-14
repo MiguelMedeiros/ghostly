@@ -1,7 +1,7 @@
 import { parseCallSignal } from "@ghostly/core";
 import { RING_MS } from "@ghostly/react";
 import { engine } from "@ghostly/browser/platform/engine";
-import { listSessions } from "./storage";
+import { sessionIdForPeer } from "./storage";
 
 /**
  * The chat a call signal is for, when it is an offer: a call can come in for a chat that is not open, and that chat is
@@ -10,7 +10,7 @@ import { listSessions } from "./storage";
 export function offerSession(linkId: string, signal: string): string | undefined {
   if (parseCallSignal(signal)?.t !== "o") return undefined;
   const peer = engine.state?.links.find((link) => link.id === linkId)?.peerPubKeyZ32;
-  return peer ? listSessions().find((s) => s.peerPubKeyB64 === peer)?.id : undefined;
+  return peer ? sessionIdForPeer(peer) : undefined;
 }
 
 /**

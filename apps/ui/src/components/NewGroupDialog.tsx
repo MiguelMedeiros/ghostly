@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { COMMUNITY_LIMITS, MAX_GROUP_NAME_LENGTH } from "@ghostly/core";
+import { COMMUNITY_LIMITS, MAX_GROUP_NAME_LENGTH, groupName } from "@ghostly/core";
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n, type Translate } from "../contexts/I18nContext";
@@ -44,8 +44,10 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
       back?.focus();
     };
   }, [returnFocus]);
+  // A name with nothing visible in it (a zero-width space, a direction mark) is refused as the engine refuses it.
+  const named = !!groupName(name);
   const submit = async () => {
-    if (!name.trim() || busy || noLinks) return;
+    if (!named || busy || noLinks) return;
     setBusy(true); setError(null);
     try {
       const { groupId } = await engine.call("createGroup", { name: name.trim(), profile: kind });
@@ -75,7 +77,7 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
       {error && <Notice problem={error} className="mt-2 text-sm" />}
       <div className="mt-5 flex justify-end gap-2">
         <button type="button" onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
-        <button type="submit" disabled={!name.trim() || busy || noLinks} data-testid="new-group-create"
+        <button type="submit" disabled={!named || busy || noLinks} data-testid="new-group-create"
           className="min-h-11 rounded-lg bg-accent px-4 text-sm font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 focus-visible:ring-2 focus-visible:ring-accent">{t("group.create.create")}</button>
       </div>
     </form>

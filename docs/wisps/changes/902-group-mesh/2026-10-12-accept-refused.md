@@ -1,0 +1,1 @@
+An inviter's app answers a `group-accept` it cannot honour (the group is gone from it, it is not the admin, or that chat is not invited) with `group-decline`, which takes the invitation back. Before, it answered nothing and the invitee waited for a welcome for good.

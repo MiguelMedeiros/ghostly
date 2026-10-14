@@ -13,7 +13,7 @@ async function setName(peer: Peer, name: string): Promise<void> {
   await expect(peer.page.getByTitle("New Chat")).toBeVisible();
 }
 
-test("on a phone the admin's members list shows each member's name", { tag: ["@feature:groups.remove-member", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+test("on a phone the admin's members list shows each member's name", { tag: ["@feature:groups.remove-member", "@feature:app.mobile-layout"] }, async ({ peer }, testInfo) => {
   test.setTimeout(5 * 60_000);
   const [admin, member] = await Promise.all([peer("names-admin", { mobile: true, viewport: { width: 375, height: 812 } }), peer("names-member")]);
   await setName(member, "Beatriz Albuquerque");
@@ -39,4 +39,42 @@ test("on a phone the admin's members list shows each member's name", { tag: ["@f
   // The buttons are under it, inside the dialog, and still in reach.
   const [nameBox, removeBox, dialogBox] = await Promise.all([name.boundingBox(), row.getByTestId("group-remove-member").boundingBox(), admin.page.getByTestId("group-members-dialog").boundingBox()]);
   expect(removeBox!.y).toBeGreaterThanOrEqual(nameBox!.y + nameBox!.height - 1);
-  expect(removeBox!.x + removeBox!.width).toBeLessThanOrEqual(dialogBox!.x + dialogBox!.width);});
+  expect(removeBox!.x + removeBox!.width).toBeLessThanOrEqual(dialogBox!.x + dialogBox!.width);
+
+  // New link and Turn off end the shared link: a thumb's height each, on a row of their own under Share, Copy and Show QR.
+  const link = admin.page.getByTestId("group-members-dialog").getByTestId("group-link");
+  const [resetBox, disableBox, ...above] = await Promise.all(["group-link-reset", "group-link-disable", "group-link-share", "group-link-copy", "group-link-qr-toggle"].map(id => link.getByTestId(id).boundingBox()));
+  for (const box of [resetBox, disableBox]) {
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    for (const other of above) expect(box!.y).toBeGreaterThanOrEqual(other!.y + other!.height);
+  }
+  expect(disableBox!.x - (resetBox!.x + resetBox!.width)).toBeGreaterThanOrEqual(8);
+  // Share, Copy and Show QR are a thumb's height too (they were 24 to 28 px), and stay inside the dialog.
+  for (const box of above) {
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    expect(box!.x).toBeGreaterThanOrEqual(dialogBox!.x);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(dialogBox!.x + dialogBox!.width);
+  }
+  await testInfo.attach("members-link-panel-375", { body: await admin.page.screenshot(), contentType: "image/png" });
+
+  // Remove and Hand over admin, from the keyboard: closed, each question gives the focus back to the button that asked,
+  // and to the list once the removed member's row is gone. It fell to the page.
+  const remove = row.getByTestId("group-remove-member"), promote = row.getByTestId("group-make-admin");
+  await remove.focus();
+  await admin.page.keyboard.press("Enter");
+  await expect(admin.page.getByTestId("group-remove-dialog")).toBeVisible();
+  await admin.page.keyboard.press("Escape");
+  await expect(admin.page.getByTestId("group-remove-dialog")).toHaveCount(0);
+  await expect(remove).toBeFocused();
+  await promote.focus();
+  await admin.page.keyboard.press("Enter");
+  await expect(admin.page.getByTestId("group-make-admin-dialog")).toBeVisible();
+  await admin.page.keyboard.press("Escape");
+  await expect(promote).toBeFocused();
+  await remove.focus();
+  await admin.page.keyboard.press("Enter");
+  await admin.page.getByTestId("group-remove-confirm").click();
+  await expect(row).toHaveCount(0, { timeout: 60_000 });
+  await expect(admin.page.getByTestId("group-member-list")).toBeFocused();
+  await expect(admin.page.getByTestId("group-members-dialog")).toBeVisible();
+});

@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { ITEM_STATES, RUN_RESULTS } from "@ghostly/core";
+// From its own module, not the package: the command table is read by every command, and the package is all of the
+// protocol (~100 ms to load), which a command a daemon answers never needs.
+import { ITEM_STATES, PR_CHECKS, PR_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, cardUrl } from "@ghostly/core/statusCards";
 import type { OptionSpec, Parsed } from "../args";
 import { CliError } from "../errors";
 
@@ -73,13 +75,40 @@ export const buttonOptions: Record<string, OptionSpec> = {
 };
 /** The group's entry link lets anyone join: printed only when asked for. */
 export const showSecret: Record<string, OptionSpec> = { "show-secret": { type: "boolean", description: "Print the group's entry link (anyone who has it can join)" } };
+/** A pending chat's invite code lets whoever reads it take the chat: printed only when asked for. */
+export const showInvite: Record<string, OptionSpec> = { "show-secret": { type: "boolean", description: "Print a pending chat's invite code (whoever has it can take the chat)" } };
 export const secret = (options: Parsed["options"]) => (options["show-secret"] === true ? { showSecret: true } : {});
 
-/** A history cursor: a timestamp when it is all digits, else a message id. */
-export function cursor(value: unknown): string | number | undefined {
+/**
+ * `--for` of the typing commands: the seconds it is kept on, 1 to 600, and never with `--stop`. A usage error (exit 2)
+ * that names the flag: before, the API's own check answered ("for must be a number from 1 to 600", exit 1).
+ */
+export function typingFor(options: Parsed["options"]): number | undefined {
+  const seconds = options.for;
+  if (seconds === undefined) return undefined;
+  if (typeof seconds !== "number" || !(seconds >= 1 && seconds <= 600)) throw new CliError("usage", `--for takes a number of seconds from 1 to 600, not ${JSON.stringify(seconds)}`);
+  if (options.stop === true) throw new CliError("usage", "--for keeps it on: not with --stop");
+  return seconds;
+}
+
+/**
+ * A time given as digits: milliseconds. Unix seconds (from 1e9, 2001, up to 1e11, which as milliseconds would be 1970
+ * to 1973) are refused with the milliseconds they mean: before, they were read as January 1970 without a word.
+ */
+function milliseconds(text: string, flag: string): number {
+  const ms = Number(text);
+  if (ms >= 1e9 && ms < 1e11) throw new CliError("usage", `--${flag} takes milliseconds, not seconds: ${text}000`);
+  return ms;
+}
+
+/**
+ * A history cursor: a time when it is all digits (`0` is from the start), else a message id. Message ids are never all
+ * digits (`me_…`, `peer_…`): before, fewer than 10 digits were read as an id ("No message 0").
+ */
+export function cursor(value: unknown, flag: string): string | number | undefined {
   if (value === undefined) return undefined;
-  const text = String(value);
-  return /^\d{10,}$/.test(text) ? Number(text) : text;
+  const text = String(value).trim();
+  return /^\d+$/.test(text) ? milliseconds(text, flag) : text;
 }
 
 /**
@@ -132,13 +161,28 @@ export function itemOf(value: string): { state: string; text: string } {
   return { state: word, text: value.slice(colon + 1).trim() };
 }
 
-/** A task's fields from its flags; what was not given is left out, so an update changes only what it names. */
+/** `--progress`, `--left`: a percent, or a usage error that names the flag. */
+function percent(options: Parsed["options"], flag: string): void {
+  const value = options[flag];
+  if (value !== undefined && !(typeof value === "number" && value >= 0 && value <= 100)) throw new CliError("usage", `--${flag} takes a percent from 0 to 100, not ${JSON.stringify(value)}`);
+}
+
+/** The flags of a task's pull request, and the field of `pr` each one gives. */
+const PR_FLAGS = [["pr-url", "url"], ["pr-number", "number"], ["additions", "additions"], ["deletions", "deletions"], ["files", "files"], ["pr-state", "state"], ["pr-checks", "checks"]] as const;
+
+/**
+ * A task's fields from its flags; what was not given is left out, so an update changes only what it names. What a flag
+ * got wrong is a usage error (exit 2) that names the flag: before, it reached the card's own check and failed as
+ * `bad_request` (exit 1) in the card's words ("Status card: done is at most total").
+ */
 export function taskFields(options: Parsed["options"]): Record<string, unknown> {
   const fields: Record<string, unknown> = { ...cardJson(options.json) };
   const set = (key: string, value: unknown) => { if (value !== undefined) fields[key] = value; };
   set("id", options.id);
   set("title", options.title);
   set("status", options.status);
+  percent(options, "progress");
+  if (options.progress !== undefined && options.steps !== undefined) throw new CliError("usage", "--progress or --steps, not both");
   set("progress", options.progress);
   set("step", options.step);
   set("branch", options.branch);
@@ -146,12 +190,16 @@ export function taskFields(options: Parsed["options"]): Record<string, unknown> 
     const match = /^(\d+)\s*\/\s*(\d+)$/.exec(String(options.steps));
     if (!match) throw new CliError("usage", `--steps takes done/total, like 2/5, not ${JSON.stringify(options.steps)}`);
     fields.done = Number(match[1]); fields.total = Number(match[2]);
+    if (Number(match[2]) < 1 || Number(match[1]) > Number(match[2])) throw new CliError("usage", `--steps takes done/total with done at most total, like 2/5, not ${JSON.stringify(options.steps)}`);
   }
+  if (options["pr-url"] !== undefined && !cardUrl(options["pr-url"])) throw new CliError("usage", `--pr-url takes an https link of at most ${STATUS_CARD_LIMITS.url} characters, not ${JSON.stringify(options["pr-url"])}`);
+  for (const [flag, words] of [["pr-state", PR_STATES], ["pr-checks", PR_CHECKS]] as const)
+    if (options[flag] !== undefined && !(words as readonly unknown[]).includes(options[flag])) throw new CliError("usage", `--${flag} takes ${listed(words)}, not ${JSON.stringify(options[flag])}`);
   const pr: Record<string, unknown> = {};
-  for (const [flag, key] of [["pr-url", "url"], ["pr-number", "number"], ["additions", "additions"], ["deletions", "deletions"], ["files", "files"], ["pr-state", "state"], ["pr-checks", "checks"]] as const)
-    if (options[flag] !== undefined) pr[key] = options[flag];
+  for (const [flag, key] of PR_FLAGS) if (options[flag] !== undefined) pr[key] = options[flag];
   if (Object.keys(pr).length) fields.pr = { ...(fields.pr && typeof fields.pr === "object" ? fields.pr as object : {}), ...pr };
   if (Array.isArray(options.item) && options.item.length) fields.items = (options.item as string[]).map(itemOf);
+  if (Array.isArray(options.tag) && options.tag.length > STATUS_CARD_LIMITS.tags) throw new CliError("usage", `--tag is given at most ${STATUS_CARD_LIMITS.tags} times, not ${options.tag.length}`);
   if (Array.isArray(options.tag) && options.tag.length) fields.tags = options.tag as string[];
   set("parent", options.parent);
   const links = cardLinks(options.link);
@@ -170,11 +218,32 @@ export function needs(card: Record<string, unknown>, fields: readonly (readonly 
   return card;
 }
 
+/**
+ * A new task's pull request goes by its link: `--pr-state` and the like without `--pr-url` (or `pr.url` in `--json`)
+ * are a usage error that names them. An update's card may have the link already, so only a send asks.
+ */
+export function prLinked(card: Record<string, unknown>, options: Parsed["options"], usage: string): Record<string, unknown> {
+  const given = PR_FLAGS.filter(([flag]) => options[flag] !== undefined).map(([flag]) => `--${flag}`);
+  if (!given.length || (card.pr as { url?: unknown }).url !== undefined) return card;
+  throw new CliError("usage", `${given.join(" and ")} ${given.length > 1 ? "go" : "goes"} with --pr-url: ghostly ${usage}`);
+}
+
+/**
+ * A usage card says how much is left: `--left`, or `--used` with `--limit`, as flags or in `--json`. The one that is
+ * missing is a usage error that names the flag.
+ */
+export function quota(card: Record<string, unknown>, usage: string): Record<string, unknown> {
+  const used = card.used !== undefined, limit = card.limit !== undefined;
+  if (used !== limit) throw new CliError("usage", `--${used ? "used" : "limit"} goes with --${used ? "limit" : "used"}: ghostly ${usage}`);
+  if (card.left === undefined && !used) throw new CliError("usage", `--left is needed (or --used with --limit): ghostly ${usage}`);
+  return card;
+}
+
 /** A time a command names: milliseconds, or a date the JavaScript Date reads (`2026-09-30T01:00:00Z`). */
 export function cardTime(value: unknown, flag: string): number | undefined {
   if (value === undefined) return undefined;
   const text = String(value).trim();
-  const ms = /^\d+$/.test(text) ? Number(text) : Date.parse(text);
+  const ms = /^\d+$/.test(text) ? milliseconds(text, flag) : Date.parse(text);
   if (!Number.isSafeInteger(ms) || ms <= 0) throw new CliError("usage", `--${flag} takes a time in milliseconds or a date like 2026-09-30T01:00:00Z, not ${JSON.stringify(value)}`);
   return ms;
 }
@@ -245,6 +314,8 @@ export function usageWindowOf(value: string): { window: string; left: number; re
 /** A usage card's fields from its flags (WISP 405 § Usage); `--json` gives any of them, the flags win over it. */
 export function usageFields(options: Parsed["options"]): Record<string, unknown> {
   const fields: Record<string, unknown> = { ...cardJson(options.json) };
+  percent(options, "left");
+  if (options.left !== undefined && (options.used !== undefined || options.limit !== undefined)) throw new CliError("usage", "--left or --used with --limit, not both");
   for (const key of ["id", "left", "used", "limit", "label", "account", "window"] as const) if (options[key] !== undefined) fields[key] = options[key];
   const resets = cardTime(options.resets, "resets");
   if (resets !== undefined) fields.resetsAt = resets;

@@ -14,10 +14,12 @@ import { contactFace, faceChoice, shownContactName } from "./contactFace";
 import { hostList, profileCounts } from "./profileWords";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { problemLine } from "../../lib/problemText";
+import type { Language } from "../../lib/settings";
+import { formatAt } from "../../lib/time";
 import "./identity-activity.css";
 
 
-const fullDate = (seconds: number) => new Date(seconds * 1000).toLocaleString();
+const fullDate = (seconds: number, language: Language) => formatAt(seconds * 1000, { dateStyle: "medium", timeStyle: "short" }, language);
 
 /** A contact's name for a chip, as the chat list shows it: a nickname, the identity they are shown as, their own name, or their key's tag. */
 function contactName(linkId: string, links: readonly LinkView[], t: Translate): string {
@@ -114,7 +116,7 @@ function Post({ post, provider, subject, network }: { post: PublicPostView; prov
         {post.images.map((img, i) => <PostImage key={i} index={i} image={img} postId={post.id} provider={provider} subject={subject} />)}
       </div>}
       <div className="identity-activity-post-meta">
-        <time dateTime={new Date(post.createdAt * 1000).toISOString()} title={fullDate(post.createdAt)} data-testid="contact-activity-post-time">{ago(post.createdAt, undefined, language)}</time>
+        <time dateTime={new Date(post.createdAt * 1000).toISOString()} title={fullDate(post.createdAt, language)} data-testid="contact-activity-post-time">{ago(post.createdAt, undefined, language)}</time>
         {post.reply && <span>· {t("identities.activity.reply")}</span>}
         {post.url && <a {...externalLinkProps(post.url)} className="identity-activity-link" data-testid="contact-activity-post-open" aria-label={t("identities.activity.openPostIn", { network })}>{t("identities.activity.open")}</a>}
       </div>

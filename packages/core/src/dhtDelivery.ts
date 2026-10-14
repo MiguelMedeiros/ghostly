@@ -9,6 +9,7 @@ import type { PairingCredentials } from "./pairedSession";
 import { measureRecords, MAX_DNS_PACKET_BYTES, PKARR_FUTURE_SKEW_MS, type GhostRecord, type SignedPacket } from "./pkarr";
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
+import { AWAITING_PEER_MS, unusedInviteWait } from "./link";
 import { REACTION_LIMITS, readDhtReactions, validReactionNumber, type WireReaction } from "./reactions";
 import { readForwarded } from "./forwards";
 import { validEditNumber } from "./pairedEdits";
@@ -35,6 +36,13 @@ export const DHT_EXPIRY_SKEW_MS = PKARR_FUTURE_SKEW_MS;
  */
 export const DHT_ISSUED_BACK_MS = 2 * 60_000;
 const MAX_ATTEMPTS = 8;
+/**
+ * Envelope sequences are set aside this many at a time (`DhtDeliveryState.sequence` is the highest set aside): a
+ * keep-alive, every four minutes per chat, and one the relays' budget turns away, every 30 s on a profile idling at
+ * it, then cost no disk write of their own. A reader only needs the sequence to grow, so those a restart skips cost
+ * nothing; one the budget turned away is not used again, as it may have gone out on the DHT (the CLI puts there too).
+ */
+const SEQUENCE_BLOCK = 64;
 /** The wait before publication attempt `attempts + 1` of a text, or of a receipt the contact still asks for. */
 const backoff = (attempts: number) => Math.min(60_000, 4_000 * 2 ** attempts);
 /** The contact's mailbox is read this often while either side is DHT-only, and otherwise… */
@@ -136,6 +144,11 @@ export interface DhtDeliveryState {
    * someone else who used the same invite first. Kept until an envelope of the contact's newer than the last read opens.
    */
   inviteTaken?: true;
+  /**
+   * Layer 1 carried this chat with the pinned key at least once: the contact pinned this side, for good. What reads as
+   * "the invite was taken" from then on is not the contact's word (`sealedToAnother`).
+   */
+  wasLive?: true;
 }
 export interface DhtDeliveryView {
   mode: DeliveryMode;
@@ -179,6 +192,10 @@ export const emptyDhtDeliveryState = (): DhtDeliveryState => ({ sequence: 0, pee
  * No forward-secrecy or guaranteed DHT retention claim is made. */
 export class DhtDelivery {
   private state: DhtDeliveryState;
+  /** The state as last saved: a save that would write the same row again is skipped. */
+  private saved?: string;
+  /** The sequence of the last envelope signed here; the state's is the highest set aside (`SEQUENCE_BLOCK`). */
+  private sequence: number;
   private mode: DeliveryMode;
   private running = false;
   private ticking = false;
@@ -189,6 +206,7 @@ export class DhtDelivery {
   private fastUntil = 0;
   private live = false;
   private active = false;
+  private readonly startedAt = Date.now();
   /** The next read was asked for (a refresh, a fresh packet of the contact): it is not a background one. */
   private urgent = false;
   /** Reads left that are signaling: the contact is leaving DHT only, and the live link waits on them (`expect`). */
@@ -257,11 +275,14 @@ export class DhtDelivery {
      * burst of an app coming back (bug hunt r7a). A text, a receipt, a new mode or a new capability revision still go at once.
      */
     firstControlAfterMs?: number;
+    /** This side made the invite, then: once no longer awaited, its mailbox is read less often while nobody uses it (`unusedInviteWait`). */
+    inviteMadeAt?: number;
   }) {
     // `peerRejected`, saved by apps before WISP 403 revision 0.3, stopped the chat for good on an envelope anyone
     // holding the invite could forge: it is dropped, not honoured.
     const { peerRejected: _peerRejected, ...state } = structuredClone(options.state ?? emptyDhtDeliveryState()) as DhtDeliveryState & { peerRejected?: boolean };
-    this.state = state; this.mode = options.mode;
+    this.state = state; this.mode = options.mode; this.sequence = state.sequence;
+    if (options.state) this.saved = JSON.stringify(state);
     this.unsealedOut = state.sequence > 0 && !options.credentials.peerKey;
     this.from = identityFromSeedB64(options.params.seedB64).pubKeyZ32; this.to = options.params.peerPubKeyZ32;
     this.participation = identityFromSeedB64(options.credentials.seedB64);
@@ -319,7 +340,11 @@ export class DhtDelivery {
   private serialize<T>(run: () => Promise<T>): Promise<T> {
     const operation = this.chain.then(run); this.chain = operation.then(() => {}, () => {}); return operation;
   }
-  private async persist(next: DhtDeliveryState): Promise<void> { await this.options.save(structuredClone(next)); this.state = next; }
+  private async persist(next: DhtDeliveryState): Promise<void> {
+    const json = JSON.stringify(next);
+    if (json !== this.saved) { await this.options.save(structuredClone(next)); this.saved = json; }
+    this.state = next;
+  }
   private sealedKey(peer: string): Uint8Array {
     const shared = x25519.getSharedSecret(ed25519.utils.toMontgomerySecret(this.participation.seed), ed25519.utils.toMontgomery(publicKeyFromZ32(peer)));
     return hkdf(sha256, shared, this.key, utf8Encode("ghostly-dht-participation-envelope/1"), 32);
@@ -410,6 +435,14 @@ export class DhtDelivery {
     this.live = live;
     if (!live) { this.urgent = true; void this.tick(); return; }
     this.fastUntil = 0; this.signalReads = 0;
+    // Remembered past this session, and whatever said the invite was taken was not the contact (`sealedToAnother`).
+    if (this.options.credentials.peerKey && (!this.state.wasLive || this.state.inviteTaken)) void this.serialize(async () => {
+      const taken = this.state.inviteTaken;
+      if (taken) traceLink(this.from, "invite-untaken", {});
+      const { inviteTaken: _taken, ...kept } = this.state;
+      await this.persist({ ...kept, wasLive: true });
+      if (taken) this.changed();
+    }).catch(() => { /* a failed save: said again at the next session */ });
     if (this.options.credentials.peerKey && this.state.peerMode) void this.tick(); else this.schedule();
   }
   get isLive(): boolean { return this.live; }
@@ -437,12 +470,12 @@ export class DhtDelivery {
     return error && next.reply ? this.packetError(next.message, next.expires) : error;
   }
   private packetError(message: Message, expires: number, reply?: string, edit?: DhtEdit): string | null {
-    try { this.records(this.body(this.state.sequence + 1, Date.now(), expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", reply, [], edit), this.options.credentials.peerKey ?? this.participation.pubKeyZ32); return null; }
+    try { this.records(this.body(this.sequence + 1, Date.now(), expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", reply, [], edit), this.options.credentials.peerKey ?? this.participation.pubKeyZ32); return null; }
     catch (error) { return error instanceof Error ? error.message : String(error); }
   }
   /** Whether a text with its hop count fits the packet and what a reader reads (`MAX_ENVELOPE_PLAINTEXT`). */
   private roomForHops(message: Message, expires: number, reply: string | undefined, forwarded: number): boolean {
-    const body = this.body(this.state.sequence + 1, Date.now(), expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", reply, [], undefined, forwarded);
+    const body = this.body(this.sequence + 1, Date.now(), expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", reply, [], undefined, forwarded);
     try { this.records(body, this.options.credentials.peerKey ?? this.participation.pubKeyZ32); } catch { return false; }
     return utf8Encode(JSON.stringify([body, "x".repeat(86)])).length <= MAX_ENVELOPE_PLAINTEXT;
   }
@@ -485,7 +518,7 @@ export class DhtDelivery {
     const message: Message = [id, timestamp, file.name], expires = now + DHT_MESSAGE_TTL;
     const hops = readForwarded(forwarded);
     const fits = (element: DhtFileElement, withReply: boolean, withHops: boolean) => {
-      const body = this.body(this.state.sequence + 1, now, expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", withReply ? reply : undefined, [], undefined, withHops ? hops : undefined, element);
+      const body = this.body(this.sequence + 1, now, expires, message, this.state.receipt?.id ?? "abcdefghijklmnopqrstuv", withReply ? reply : undefined, [], undefined, withHops ? hops : undefined, element);
       try { this.records(body, this.options.credentials.peerKey ?? this.participation.pubKeyZ32); } catch { return false; }
       return utf8Encode(JSON.stringify([body, "x".repeat(86)])).length <= MAX_ENVELOPE_PLAINTEXT;
     };
@@ -602,11 +635,12 @@ export class DhtDelivery {
     // envelope stays in the mailbox until the next one, and every publication spends a request on each relay.
     const receiptDue = !!receipt && !receipt.settled && (receipt.next ?? 0) <= now;
     const reseal = this.resealDue;
-    if (!force && (!pending || pending.next > now) && !receiptDue && !this.reactionsDue && !reseal && this.controlDue > now) return;
+    const keepAlive = !force && (!pending || pending.next > now) && !receiptDue && !this.reactionsDue && !reseal;
+    if (keepAlive && this.controlDue > now) return;
     // Dated back (`DHT_ISSUED_BACK_MS`), and a control envelope's lifetime with it: a reader bounds `expires - issued`.
     const expires = pending?.expires ?? now - DHT_ISSUED_BACK_MS + CONTROL_TTL;
     const issued = Math.min(now, Math.max(now - DHT_ISSUED_BACK_MS, expires - (pending ? DHT_MESSAGE_TTL : CONTROL_TTL), (pending?.message[1] ?? 0) - 30_000));
-    const { body, records, reactions } = this.fitted(this.state.sequence + 1, issued, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply, pending?.edit, pending?.forwarded, pending?.file);
+    const { body, records, reactions } = this.fitted(this.sequence + 1, issued, expires, pending?.message ?? null, receipt?.id ?? null, pending?.reply, pending?.edit, pending?.forwarded, pending?.file);
     const reactionsWereDue = this.reactionsDue;
     // A text that left no room: the reactions go on the next envelope. Once some went, the rest wait for the contact
     // to say those were taken (the engine announces the rest then).
@@ -614,15 +648,20 @@ export class DhtDelivery {
     // In the pinned mailbox once the contact said it reads there; until then where an older app looks.
     // The one that replaces an unsealed envelope goes where that lies.
     const identity = (!reseal && this.state.peerPinned && this.state.peerPinned !== "can" && this.pinned()?.identity) || this.identity;
-    // Persist sequence and attempt count first. A crash cannot reuse them or
+    // Persist the sequence (set aside, a block at a time) and attempt count first. A crash cannot reuse them or
     // reset the retransmission budget/absolute message deadline.
-    await this.persist({ ...this.state, sequence: body[1], pending: pending ? { ...pending, attempts: pending.attempts + 1, next: now + backoff(pending.attempts) } : this.state.pending,
+    const sequence = body[1];
+    await this.persist({ ...this.state, sequence: sequence > this.state.sequence ? sequence + SEQUENCE_BLOCK - 1 : this.state.sequence,
+      pending: pending ? { ...pending, attempts: pending.attempts + 1, next: now + backoff(pending.attempts) } : this.state.pending,
       receipt: receipt ? { ...receipt, attempts: receipt.attempts + 1, next: now + backoff(receipt.attempts) } : this.state.receipt });
+    this.sequence = sequence;
     const before = { lastPublish: this.lastPublish, controlDue: this.controlDue };
     this.lastPublish = now; this.controlDue = now + 4 * 60_000;
     traceLink(this.from, "dht-publish", { mode: this.mode, seq: body[1], ...(identity !== this.identity && { pinned: true }) });
     if (pending) this.lastPublished = DhtDelivery.facts(body, records, identity.pubKeyZ32);
-    try { await this.options.transport.publish(identity, records); }
+    // Only the keep-alive is due while layer 1 carries the chat: upkeep nobody waits on, a background write (as the
+    // link's heartbeat, `LinkSession.publishOnce`), so a profile's live chats never take the requests its groups need.
+    try { await this.options.transport.publish(identity, records, keepAlive && this.live ? { background: true } : undefined); }
     catch (error) {
       this.reactionsDue ||= reactionsWereDue;
       if (isDiscoveryBudgetError(error)) await this.heldBack(error, now, before, pending, receipt);
@@ -687,14 +726,15 @@ export class DhtDelivery {
   }
   /**
    * The contact's envelope is sealed to another key (`open`): it pinned someone else who used the same invite first, so
-   * nothing of this side's will ever be read. Said once this side is not proven the one it pinned (never seen in the
-   * pinned mailbox, no text confirmed, never live). The hint is sealed under the invite's key, which any copy of it
-   * holds: a passive warning, taken back by the contact's next envelope that opens here.
+   * nothing of this side's will ever be read. Said only while this side is not proven the one it pinned: no envelope
+   * sealed to this side read (`peerPinned`), no text confirmed, never live (`wasLive`). The hint is sealed under the
+   * invite's key, which any copy of it holds, so past that proof it says nothing of the contact: a passive warning,
+   * taken back by the contact's next envelope that opens here, or by a live session.
    */
   private async sealedToAnother(sender: string): Promise<void> {
     const expected = this.options.credentials.peerKey ?? this.options.credentials.expectedPeerKey;
     if (this.state.inviteTaken || !expected || sender !== expected) return;
-    if (this.state.peerPinned === "seen" || this.state.confirmed || this.live) return;
+    if (this.state.peerPinned || this.state.confirmed || this.state.wasLive || this.live) return;
     traceLink(this.from, "invite-taken", {});
     await this.persist({ ...this.state, inviteTaken: true });
     this.changed();
@@ -860,11 +900,21 @@ export class DhtDelivery {
   get pollMs(): number {
     if (this.options.pollMs) return this.options.pollMs;
     const now = Date.now();
+    // An invite nobody used, no longer awaited: the older it is, the less often its mailbox is read.
+    const unused = this.unusedInviteAge(now);
+    if (unused !== undefined && !this.active && now >= this.fastUntil) return unusedInviteWait(unused, this.mode === "dht" ? DHT_POLL_MS : STREAM_POLL_MS);
     if (this.mode === "dht" || (this.state.peerMode === "dht" && now < this.leavingUntil) || now < this.fastUntil) return DHT_POLL_MS;
     if (this.live) return LIVE_POLL_MS;
     // Our text awaits its receipt: the receipt is what the person is looking at.
     if (this.state.pending && this.state.pending.expires > now) return DHT_POLL_MS;
     return this.active ? ACTIVE_DHT_POLL_MS : STREAM_POLL_MS;
+  }
+  /** How long ago this side's invite was made, while nobody used it and it is no longer awaited (`AWAITING_PEER_MS`). */
+  private unusedInviteAge(now: number): number | undefined {
+    const madeAt = this.options.inviteMadeAt;
+    if (madeAt === undefined || this.options.credentials.peerKey || this.state.peerSequence) return undefined;
+    const age = now - Math.min(madeAt, this.startedAt);
+    return age >= AWAITING_PEER_MS ? age : undefined;
   }
   private schedule(): void {
     if (!this.running || this.ticking) return;

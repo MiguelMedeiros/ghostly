@@ -36,7 +36,7 @@ describe("--reply", () => {
     expect(TEXT_COMMANDS.send.usage).toContain("--reply <message>");
   });
 
-  it("goes to the engine as replyTo; one the chat does not have is refused", async () => {
+  it("goes to the engine as replyTo; one the chat does not have is not_found, as file send says", async () => {
     const { ctx, node } = fake();
     expect(await callApi(ctx, "chat.send", { chat: "Alice", text: "yes", reply: "peer_abc" })).toMatchObject({ messageId: "me_2" });
     expect(node.sendMessage).toHaveBeenCalledWith({ linkId: "chat-one", text: "yes", replyTo: "peer_abc" });
@@ -45,7 +45,10 @@ describe("--reply", () => {
     await callApi(ctx, "group.send", { group: "Crew", text: "on it", reply: "k:0:1" });
     expect(node.sendGroupMessage).toHaveBeenCalledWith({ groupId: "g1", text: "on it", replyTo: "k:0:1" });
     const refused = fake({ error: "That message is not in this chat, or cannot be replied to", refused: true });
-    await expect(callApi(refused.ctx, "chat.send", { chat: "Alice", text: "yes", reply: "nope" })).rejects.toMatchObject({ code: "refused" });
+    // It was `refused` (exit 1) here and `not_found` (exit 3) from `file send --reply`, with the same sentence.
+    await expect(callApi(refused.ctx, "chat.send", { chat: "Alice", text: "yes", reply: "nope" })).rejects.toMatchObject({ code: "not_found", message: "That message is not in this chat, or cannot be replied to" });
+    const other = fake({ error: "The contact's app takes no replies", refused: true });
+    await expect(callApi(other.ctx, "chat.send", { chat: "Alice", text: "yes", reply: "peer_abc" })).rejects.toMatchObject({ code: "refused" });
   });
 
   it("in a group, a message the group does not have is not_found; out of the group is refused; a key on its way is unavailable", async () => {

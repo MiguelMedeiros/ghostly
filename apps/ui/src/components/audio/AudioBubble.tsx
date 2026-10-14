@@ -19,7 +19,7 @@ import { SpeedPill } from "../voice/VoiceBubble";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
 
 type PlayState = "idle" | "loading" | "playing" | "paused";
-type Problem = "unsupported" | "too-large" | "missing" | "left-out" | "not-yet";
+type Problem = "unsupported" | "too-large" | "no-room" | "missing" | "left-out" | "not-yet";
 
 const pill = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
 
@@ -99,7 +99,9 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
     setPlayState("loading");
     // Desktop streams its files from Rust, in ranges (a large one plays too); elsewhere the bytes come as a Blob.
     const source = await openStoredMedia(platform, file.id, file.mime, { bytes: !ready || fellBack.current });
-    if (!mounted.current) { source?.release(); return; }
+    if (!mounted.current) { if (source !== "no-room") source?.release(); return; }
+    // No room on the disk for the copy the player makes of it (Linux): it is offered to save instead.
+    if (source === "no-room") { releasePlayback(file.id); setPlayState("idle"); setProblem("no-room"); return; }
     if (!source) {
       releasePlayback(file.id);
       setPlayState("idle");
@@ -205,6 +207,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
 
   const problemText = problem === "unsupported" || (!playable && ready) ? t("chat.audio.cantPlay", { format: audioFormat(file.mime) })
     : problem === "too-large" ? t("chat.audio.tooLarge")
+    : problem === "no-room" ? t("chat.media.noRoomToPlay")
     : problem === "missing" ? t("chat.file.gone")
     : problem === "left-out" ? t("chat.file.notInBackup")
     : problem === "not-yet" ? t("chat.media.notYet")
@@ -297,7 +300,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
       {problemText && (
         <p className={`text-[12px] m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/65" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="audio-problem">
           {problemText}{" "}
-          {(problem === "unsupported" || problem === "too-large" || (!playable && ready)) && (
+          {(problem === "unsupported" || problem === "too-large" || problem === "no-room" || (!playable && ready)) && (
             <button type="button" data-testid="audio-download" onClick={save} className="underline text-inherit bg-transparent border-none p-0 cursor-pointer text-[12px]">{t("chat.message.download")}</button>
           )}
         </p>

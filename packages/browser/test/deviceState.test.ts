@@ -128,6 +128,10 @@ describe("a stored record", () => {
     const read = parseDeviceRecord(structuredClone(stored));
     expect(read.deviceSet).toEqual([{ key: KEY, name: "MacBook" }, null, { key: KEY, name: "enohP" }]);
     expect(read.unfinishedGrants).toEqual([{ key: KEY, name: "Tablet", at: 5 }]);
+    // A name with nothing to see in it reads as no name, so whoever shows it falls back.
+    const unseen = parseDeviceRecord(structuredClone(record("active", { deviceSet: [{ key: KEY, name: "MacBook" }, { key: KEY, name: "\u3164\u200D" }], unfinishedGrants: [{ key: KEY, name: "\u2800", at: 5 }] })));
+    expect(unseen.deviceSet).toEqual([{ key: KEY, name: "MacBook" }, { key: KEY, name: "" }]);
+    expect(unseen.unfinishedGrants).toEqual([{ key: KEY, name: "", at: 5 }]);
     // Nothing to clean: the record itself.
     const clean = record("active");
     expect(parseDeviceRecord(clean)).toBe(clean);

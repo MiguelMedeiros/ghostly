@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-  createIdentity, encodeTxtPacket, fromBase64Url, identityFromSeed, readTurnPacket, sign, signRelayPayload, signTurnPacket, signTurnRelease, toBase64Url, turnKeys,
+  createIdentity, encodeTxtPacket, fromBase64Url, identityFromSeed, readTurnPacket, sign, signRelayPayload, signTurnPacket, signTurnRelease, toBase64Url, turnKeys, turnStatedVerifier, turnVerifierMark,
   turnPayloadSequence, turnSequence, TURN_LAST_SEQUENCE, TURN_PUT_WINDOW_MS, TURN_RAISE_READ_TIMEOUT_MS, TURN_SETTLE_MS, TOMBSTONE_SEQUENCE, TOMBSTONE_TURN, TURN_NO_ACTIVE, TURN_REV_LIMIT, type Identity, type TurnRecord, type TurnRelease,
 } from "@ghostly/core";
 import { amend, firstRecord, transition, type DevicePatch, type DeviceRecord, type StoredDeviceState } from "../src/devices/state";
@@ -1085,5 +1085,61 @@ describe("settle: how a raised turn becomes active", () => {
     // Each then reads the other's record at its turn on one of the sources, and both step back.
     expect((await race([1, 2], 2, [1, 2], MIXED, false)).active).toEqual([]);
     expect((await race([1, 2], 2, [1, 2], MIXED, true)).active).toEqual([1]);
+  });
+});
+
+describe("the active device states which verifier the profile has (WISP 06 § Record, the verifier mark)", () => {
+  const FIRST = { v: 1 as const, setup: "c2V0dXA", record: "Zmlyc3Q" }, SECOND = { v: 1 as const, setup: "c2V0dXA", record: "c2Vjb25k" };
+  const stated = (network: FakeTurnNetwork) => turnStatedVerifier(opened(network.source("dht").held).instance);
+
+  it("every record it writes states the verifier beside its device state, and none is stated as none", async () => {
+    const network = new FakeTurnNetwork();
+    const withOne = device(0, network, recordOf(0, "active", 40, [0, 1, 2], { verifier: FIRST }));
+    expect((await withOne.keeper.check(true)).kind).toBe("start");
+    expect(stated(network)).toEqual(turnVerifierMark(FIRST));
+    const other = new FakeTurnNetwork();
+    const withNone = device(0, other, recordOf(0, "active", 40));
+    expect((await withNone.keeper.check(true)).kind).toBe("start");
+    expect(stated(other)).toEqual(turnVerifierMark(null));
+  });
+
+  it("a changed verifier is stated in the next record at once, once; the same one writes nothing", async () => {
+    const network = new FakeTurnNetwork();
+    const { keeper, store } = device(0, network, recordOf(0, "active", 40, [0, 1, 2], { verifier: FIRST }));
+    expect((await keeper.check(true)).kind).toBe("start");
+    const before = opened(network.source("dht").held);
+    expect(await keeper.stateVerifier()).toBe(true);
+    expect(network.puts().length).toBe(2);
+    // The lock password changed: the engine put the new verifier beside the device state.
+    await store.amend("ghostly", { verifier: SECOND });
+    expect(await keeper.stateVerifier()).toBe(true);
+    const after = opened(network.source("https://relay.test").held);
+    expect({ turn: after.turn, rev: after.rev, author: after.author }).toEqual({ turn: before.turn, rev: before.rev + 1, author: 0 });
+    expect(turnStatedVerifier(after.instance)).toEqual(turnVerifierMark(SECOND));
+    expect(opened(store.record!.turnPacket).sequence).toBe(after.sequence);
+    const puts = network.puts().length;
+    expect(await keeper.stateVerifier()).toBe(true);
+    expect(network.puts().length).toBe(puts);
+    // Gone (making the new one failed): stated too.
+    await store.amend("ghostly", { verifier: undefined });
+    expect(await keeper.stateVerifier()).toBe(true);
+    expect(stated(network)).toEqual(turnVerifierMark(null));
+  });
+
+  it("nothing is written with no source to read, over another device's record, or by a device that is not the active one", async () => {
+    const network = new FakeTurnNetwork();
+    const { keeper, store } = device(0, network, recordOf(0, "active", 40, [0, 1, 2], { verifier: FIRST }));
+    expect((await keeper.check(true)).kind).toBe("start");
+    await store.amend("ghostly", { verifier: SECOND });
+    const puts = network.puts().length;
+    for (const source of network.sources) source.down = true;
+    expect(await keeper.stateVerifier()).toBe(false);
+    for (const source of network.sources) source.down = false;
+    // The phone took the turn meanwhile: the next check stops this device, and it writes nothing over that record.
+    network.seed(await packet(41, 0, 1));
+    expect(await keeper.stateVerifier()).toBe(false);
+    expect(network.puts().length).toBe(puts);
+    const standby = device(1, new FakeTurnNetwork(), recordOf(1, "standby", 40, [0, 1, 2], { verifier: FIRST }));
+    expect(await standby.keeper.stateVerifier()).toBe(false);
   });
 });

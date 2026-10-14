@@ -136,3 +136,55 @@ for (const { name, viewport, narrowest } of smallRows) {
     await expect(alice.page.getByTestId("call-status")).toHaveCount(0);
   });
 }
+
+/**
+ * The small call window's state line ("Audio call" and the clock), measured against the window's corner button and
+ * its edges: what of it lies under the button or is cut, and whether the words are shown beside the clock.
+ */
+const stateLine = (page: Page) => page.getByTestId("call-window").evaluate((small) => {
+  const box = small.getBoundingClientRect();
+  const button = small.querySelector("[data-testid=call-minimize]")!.getBoundingClientRect();
+  const line = small.querySelector("[data-testid=call-status]")!;
+  const shown = line.getBoundingClientRect();
+  const wrong: string[] = [];
+  let words = false;
+  for (const part of line.children) {
+    const r = part.getBoundingClientRect();
+    const clock = part === line.lastElementChild;
+    // The words leave the line when the window is too narrow for them: the clock never does.
+    if (!clock && r.top >= shown.bottom - 1) continue;
+    if (!clock) words = true;
+    const where = `${part.textContent} at ${Math.round(r.left - box.left)}..${Math.round(r.right - box.left)} of ${Math.round(box.width)}`;
+    if (r.left < button.right && r.right > button.left && r.top < button.bottom && r.bottom > button.top) wrong.push(`under the button: ${where}`);
+    if (r.left < box.left || r.right > box.right || part.scrollWidth > part.clientWidth + 1) wrong.push(`cut: ${where}`);
+  }
+  return { wrong, words };
+});
+
+for (const language of ["pt", "ar"]) {
+  test(`a phone's small call window shows its state line clear of the corner button: ${language}`, { tag: ["@feature:calls.mini-window", "@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }) => {
+    const alice = await peer("alice");
+    const bob: Peer = await peer("bob", { mobile: true, viewport: { width: 375, height: 740 } });
+    await link(alice, bob);
+    await connect(alice, bob);
+    await bob.page.evaluate((language) => {
+      const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+      localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+    }, language);
+    await bob.page.reload();
+    await expect(bob.page.locator("html")).toHaveAttribute("lang", new RegExp(`^${language}`));
+    await expect(bob.page.getByTestId("call-audio")).toBeEnabled({ timeout: 30_000 });
+    await bob.page.getByTestId("call-audio").click();
+    await alice.page.getByTitle("Accept audio call").click();
+    await expect(bob.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+    await bob.page.getByTestId("call-minimize").click();
+    const small = bob.page.getByTestId("call-window");
+    await expect(small).toHaveAttribute("data-mini", "true");
+    // A phone-wide window opens it at its narrowest.
+    await expect.poll(async () => Math.round((await small.boundingBox())!.width)).toBe(190);
+    // "Chamada de áudio 00:05" was centred over the whole 190 px and started at 27: behind the button, which ends at 38.
+    await expect.poll(async () => (await stateLine(bob.page)).wrong).toEqual([]);
+    await bob.page.getByTestId("call-hang-up").click();
+    await expect(alice.page.getByTestId("call-status")).toHaveCount(0);
+  });
+}

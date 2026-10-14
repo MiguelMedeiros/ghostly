@@ -45,7 +45,7 @@
       "status": "Status"
     },
     "hideOlder": "Hide older",
-    "info": "Bots post task cards in chats and groups and keep them up to date. This board gathers them from every chat. Done and stopped tasks stay for a day; Stopped holds failed and cancelled ones. A card only shows a task: its bot changes the status. Open a card to see it in its chat.",
+    "info": "Bots' task cards from every chat. Done and stopped ones stay a day. A card only shows a task: its bot changes the status.",
     "me": "You",
     "noMatch": "No task matches",
     "none": "None",
@@ -151,7 +151,8 @@
     "title": "Usage",
     "updatedLabel": "Updated",
     "used": "{{used}} of {{limit}} used",
-    "usedLabel": "Used"
+    "usedLabel": "Used",
+    "wasReset": "reset {{ago}}"
   },
   "working": {
     "label": "Working",

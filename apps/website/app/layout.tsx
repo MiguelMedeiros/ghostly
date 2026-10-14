@@ -4,6 +4,7 @@ import Script from "next/script";
 import "./globals.css";
 import "./site.css";
 import { OG_IMAGE, X_HANDLE } from "@/lib/pageMeta";
+import { JoinLanding } from "@/components/site/JoinLanding";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -150,6 +151,8 @@ export default function RootLayout({
         className={`${inter.variable} ${jetbrains.variable} antialiased bg-[#060a10] text-gray-100`}
       >
         {children}
+        {/* Here, not in Shell: the intake above takes the code on every page (the legal pages, a 404), so every page shows it. */}
+        <JoinLanding />
       </body>
     </html>
   );

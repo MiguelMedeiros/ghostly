@@ -1,4 +1,4 @@
-import { handoffAttemptAllowed, handoffAttemptFailed, handoffAttemptSucceeded, handoffRetryAfter } from "@ghostly/core";
+import { bytesEqual, fromBase64Url, handoffAttemptAllowed, handoffAttemptFailed, handoffAttemptSucceeded, handoffRetryAfter, turnStatedVerifier, turnVerifierMark, type TurnRecord } from "@ghostly/core";
 import type { DevicePatch, DeviceRecord } from "./state";
 import type { TurnKeeper, TurnOutcome } from "./turn";
 
@@ -14,6 +14,9 @@ import type { TurnKeeper, TurnOutcome } from "./turn";
  * - the lock password is typed and checked against the profile's password proof verifier, which the active device
  *   keeps beside this device's state. A stolen standby gets a handful of guesses: five in an hour, then an hour's
  *   wait; after fifteen with no right one, none on this device (the same limits as a pull);
+ * - that verifier is the one the profile had when this device last gave it up. The active device states in the turn
+ *   record which one the profile has now (the verifier mark), and a standby whose own is another one does not take
+ *   over: the lock password was changed since, and the one this device would check is no longer the profile's;
  * - the person types the name of the device that stops, so a slip of the finger does not stop it;
  * - a wrong password, a wrong name, a refusal: nothing is written to the turn, and the active device goes on;
  * - a takeover that loses its settle read (another device took the turn at the same moment) goes back to what it was;
@@ -22,7 +25,7 @@ import type { TurnKeeper, TurnOutcome } from "./turn";
 
 /** Why a forced takeover was refused before anything was written. Its message starts with `takeover-<reason>:`. */
 export class TakeoverRefusal extends Error {
-  constructor(readonly reason: "state" | "no-copy" | "no-password" | "password" | "name" | "locked-out" | "refused" | "offline", message: string, readonly retry?: number) {
+  constructor(readonly reason: "state" | "no-copy" | "no-password" | "password" | "changed" | "name" | "locked-out" | "refused" | "offline", message: string, readonly retry?: number) {
     super(`takeover-${reason}: ${message}`);
     this.name = "TakeoverRefusal";
   }
@@ -59,6 +62,22 @@ export function canTakeOver(record: DeviceRecord | null): boolean {
   return !!record && (record.state === "standby" || record.state === "superseded") && !!record.copy;
 }
 
+/**
+ * Whether the verifier this standby keeps is still the profile's, by the last record of the device set it knows (the
+ * one just read, or the one it stored): false only when that record states the mark of another verifier. A record that
+ * states none (an app from before wrote it) leaves the device with what it has, and so does this device's own record.
+ * Only a standby is held to it: a device replaced by a takeover it did not want takes the turn back with the password
+ * it knows, whatever the device that replaced it states.
+ */
+export function verifierStands(record: DeviceRecord, latest: TurnRecord | null): boolean {
+  if (record.state !== "standby" || !record.verifier || !latest || latest.tombstone) return true;
+  const own = record.ownSlot === undefined ? undefined : record.deviceSet[record.ownSlot]?.key;
+  const author = latest.slots[latest.author];
+  if (own && author && bytesEqual(author.key, fromBase64Url(own))) return true;
+  const stated = turnStatedVerifier(latest.instance);
+  return !stated || bytesEqual(stated, turnVerifierMark(record.verifier));
+}
+
 const sameName = (a: string, b: string) => a.normalize("NFC").trim().toLocaleLowerCase() === b.normalize("NFC").trim().toLocaleLowerCase();
 
 /**
@@ -90,7 +109,10 @@ export async function forceTakeover(ports: TakeoverPorts, request: TakeoverReque
   if (record.takeoverAttempts && (record.takeoverAttempts.total > 0 || record.takeoverAttempts.recent.length)) await ports.amend({ takeoverAttempts: handoffAttemptSucceeded() });
   const keeper = await ports.keeper();
   if (!keeper) throw new TakeoverRefusal("offline", "Go online to take over.");
-  const outcome = await keeper.raise();
+  // After the read the takeover acts on, before anything is written: the last record there is to know.
+  const outcome = await keeper.raise({
+    before: (latest) => { if (!verifierStands(record, latest)) throw new TakeoverRefusal("changed", `The lock password was changed${target ? ` on ${target}` : ""}. Use here moves the profile with the new one.`); },
+  });
   if (!outcome) throw new TakeoverRefusal("state", "This profile has no device set.");
   return outcome;
 }

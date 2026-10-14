@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { concatBytes, toZ32, utf8Encode } from "../src/bytes";
-import type { FrameChannel } from "../src/frames";
+import { LIMITS, type FrameChannel } from "../src/frames";
 import { GhostLink, type GhostLinkOptions } from "../src/ghostlink";
 import { createIdentity, identityFromSeed } from "../src/identity";
 import { createLink } from "../src/invite";
@@ -311,7 +311,7 @@ function pair(options: { a?: Partial<GhostLinkOptions>; b?: Partial<GhostLinkOpt
   const make = (name: "a" | "b", params: typeof invitation.mine, me: typeof ia, peer: typeof ia, extra: Partial<GhostLinkOptions> = {}): Side => {
     const events: AppFrameEvent[] = [], sent: string[] = [];
     const endpoint: NativeEndpoint = {
-      transport: "iroh/1", descriptor: { name }, onConnection: null, onDescriptor: null,
+      transport: "iroh/1", descriptor: { id: name.repeat(64), relay: null, addresses: ["127.0.0.1:1"] }, onConnection: null, onDescriptor: null,
       close: async () => {},
       connect: async (): Promise<BoundChannel> => {
         // Only "a" dials: what each side sends is logged on its own end.
@@ -328,7 +328,7 @@ function pair(options: { a?: Partial<GhostLinkOptions>; b?: Partial<GhostLinkOpt
     const link = new GhostLink({
       params: { ...params, profile: "paired-chat/1" },
       rtcAvailable: false,
-      native: { preferred: "iroh/1", fallback: false, peerDescriptors: { "iroh/1": { name: name === "a" ? "b" : "a" } }, peerTransports: ["iroh/1"] },
+      native: { preferred: "iroh/1", fallback: false, peerDescriptors: { "iroh/1": { id: (name === "a" ? "b" : "a").repeat(64), relay: null, addresses: ["127.0.0.1:1"] } }, peerTransports: ["iroh/1"] },
       pairing: { credentials: { seedB64: me.seedB64, peerKey: peer.pubKeyZ32, requireSignedSignals: true }, pinPeer: async () => {}, trustOnFirstUse: true },
       transport: { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "memory", relays: [] }) },
       createPeerConnection: () => { throw new Error("The chat runs on Iroh here: no WebRTC"); },
@@ -438,6 +438,72 @@ describe("apps on a paired session (apps/1)", () => {
     // Counted before they are read: the open and the oversized frame took two of B's 50.
     expect(data).toEqual(Array.from({ length: APP_RATE_LIMIT - 2 }, (_, n) => ({ app, d: n })));
     expect(b.link.isDataLinkOpen).toBe(true);
+  });
+
+  it("refuses an app's data with too-fast while the channel holds a quarter of what it may queue", async () => {
+    const { a, b, app } = pair();
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsApps && b.link.supportsApps).toBe(true));
+    a.link.openApp(app, "1.0.0"); b.link.openApp(app, "1.0.0");
+    await vi.waitFor(() => expect(a.link.peerApps.has(app) && b.link.peerApps.has(app)).toBe(true));
+    const channel = (a.link as unknown as { channel: { bufferedAmount: number; sendBudget?: number } }).channel;
+    // A WebRTC channel queues freely: before, an app at 48 frames a second over a slower link filled it to 16 MiB, and
+    // the chat's messages waited behind its data for 10 to 32 seconds.
+    channel.bufferedAmount = LIMITS.sendHighWaterMark / 4;
+    expect(a.link.sendAppData(app, 1)).toBe("too-fast");
+    channel.bufferedAmount = LIMITS.sendHighWaterMark / 4 - 1;
+    expect(a.link.sendAppData(app, 1)).toBeNull();
+    // A channel with a send budget gives app data a quarter of it, as files/3 does.
+    channel.sendBudget = 120 * 1024;
+    channel.bufferedAmount = 30 * 1024;
+    expect(a.link.sendAppData(app, 2)).toBe("too-fast");
+    channel.bufferedAmount = 0;
+    expect(a.link.sendAppData(app, 3)).toBeNull();
+    await vi.waitFor(() => expect(b.events.filter(event => "d" in event)).toEqual([{ app, d: 1 }, { app, d: 3 }]));
+    // The chat's own messages still go while an app is refused.
+    channel.bufferedAmount = 30 * 1024;
+    expect(await a.link.sendMessage("hello")).toBeNull();
+  });
+
+  it("gives an app's data its own quarter above what a file going in the chat holds", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { a, b, app } = pair({ a: { largeFilesSupport: true }, b: { largeFilesSupport: true } });
+      await live(a, b);
+      await vi.waitFor(() => expect(a.link.supportsApps && b.link.supportsApps && a.link.supportsLargeFiles).toBe(true));
+      a.link.openApp(app, "1.0.0"); b.link.openApp(app, "1.0.0");
+      await vi.waitFor(() => expect(a.link.peerApps.has(app) && b.link.peerApps.has(app)).toBe(true));
+      const channel = (a.link as unknown as { channel: { bufferedAmount: number; sendBudget?: number } }).channel;
+      // A file going keeps a WebRTC channel at its 1 MiB line: before, an app's frame was refused for the whole
+      // transfer, and a Chess move waited for the file to end.
+      expect(a.link.sendFileData("f".repeat(22), 0, new Uint8Array(16 * 1024))).toBe(true);
+      channel.bufferedAmount = LIMITS.sendHighWaterMark;
+      expect(a.link.sendAppData(app, 1)).toBeNull();
+      channel.bufferedAmount = LIMITS.sendHighWaterMark + LIMITS.sendHighWaterMark / 4;
+      expect(a.link.sendAppData(app, 2)).toBe("too-fast");
+      // While files wait for room, they still hold their share however long the channel takes to drain.
+      const waiting = a.link.filesWritable();
+      expect(waiting).toBeDefined();
+      vi.setSystemTime(Date.now() + 60_000);
+      channel.bufferedAmount = LIMITS.sendHighWaterMark - 1;
+      expect(a.link.sendAppData(app, 3)).toBeNull();
+      channel.bufferedAmount = 0;
+      await waiting;
+      // A channel with a send budget: files keep to a quarter of it, an app's data to the next quarter.
+      channel.sendBudget = 120 * 1024;
+      expect(a.link.sendFileData("f".repeat(22), 16 * 1024, new Uint8Array(16 * 1024))).toBe(true);
+      channel.bufferedAmount = 30 * 1024;
+      expect(a.link.sendAppData(app, 4)).toBeNull();
+      channel.bufferedAmount = 60 * 1024;
+      expect(a.link.sendAppData(app, 5)).toBe("too-fast");
+      // Once the file is done, an app's data is back to a quarter.
+      vi.setSystemTime(Date.now() + 60_000);
+      channel.bufferedAmount = 30 * 1024;
+      expect(a.link.sendAppData(app, 6)).toBe("too-fast");
+      await vi.waitFor(() => expect(b.events.filter(event => "d" in event)).toEqual([{ app, d: 1 }, { app, d: 3 }, { app, d: 4 }]));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("an app that does not offer apps/1 gets no frame, and what it sends is dropped", async () => {

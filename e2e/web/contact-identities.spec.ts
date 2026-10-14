@@ -1,5 +1,5 @@
 import { mkdirSync } from "node:fs";
-import { expect, test, type Peer } from "../support/fixtures";
+import { expect, headerControl, test, type Peer } from "../support/fixtures";
 import { closeIdentities, headerMarks, shareIdentity, theirCards, turnTheirs, backToTheirCards, setLoadPublicProfiles } from "../support/identities";
 import { LocalNostrRelay, NOSTR_TEST_RELAY } from "../support/nostrRelay";
 import { addNostrIdentity, injectNostrSigner } from "../support/nostrSigner";
@@ -193,14 +193,16 @@ test("a contact's identities: two marks and +1 in the chat list, a stack in the 
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
   await shot(bob, "sidebar-min-closed");
-  // A phone: one mark and "+2" in the header, and the panel is a sheet from the bottom, the screen's width.
+  // A phone: the header keeps the name, a call and ⋮; the identities are a row of ⋮ that says each in words, and the
+  // panel is a sheet from the bottom, the screen's width.
   await page.setViewportSize({ width: 390, height: 844 });
   await go(bob, bobsChat);
-  await expect.poll(visibleMarks).toBe(1);
-  await expect(stack.getByTestId("chat-identity-more-1")).toBeVisible();
-  await expect(stack.getByTestId("chat-identity-more-1")).toHaveText("+2");
+  await expect(stack).toHaveCount(0);
+  const identities = await headerControl(page, "chat-identity-badges");
+  await expect(identities).toHaveAttribute("data-count", "3");
+  await expect(identities).toContainText("GitHub (SSH key)");
   await shot(bob, "phone-header");
-  await stack.click();
+  await identities.click();
   await expect(panel).toBeVisible();
   const sheet = await box("chat-identities");
   expect(sheet.width).toBeCloseTo(390, 0);
@@ -253,32 +255,29 @@ test("a contact who shared no proof: the header still has their Ghostly mark, wh
   await expect(panel).toHaveCount(0);
   await expect(stack).toBeFocused();
 
-  // A phone, and the longest name a chat takes: the name gives way, the mark stays whole beside it, clear of the
-  // header's buttons, and opens the sheet on their Ghostly card.
+  // A phone, and the longest name a chat takes: the name has the row beside the call and ⋮, clear of both, and the
+  // identities are a row of ⋮ that opens the sheet on their Ghostly card.
   await page.setViewportSize({ width: 390, height: 844 });
   const name = page.getByTitle("Click to set a name");
   await name.click();
   await page.getByPlaceholder("Set a name...").fill("A contact with a very long nam");
   await page.getByPlaceholder("Set a name...").press("Enter");
   await expect(name).toHaveText("A contact with a very long nam");
-  await expect(mark).toBeVisible();
+  await expect(mark).toHaveCount(0);
   const box = async (l: ReturnType<typeof page.getByTestId>) => (await l.boundingBox())!;
-  const [n, m] = [await box(name), await box(mark)];
-  expect(await name.evaluate(e => e.scrollWidth > e.clientWidth), "the name is cut, not the mark").toBe(true);
-  expect(n.width).toBeGreaterThan(40);
-  expect(n.x + n.width).toBeLessThanOrEqual(m.x);
-  const mw = await box(stack);
-  expect(mw.x + mw.width).toBeLessThanOrEqual(390);
-  for (const id of ["call-audio", "call-video", "chat-options"]) {
-    const button = page.getByTestId(id);
-    if (await button.isVisible()) expect(mw.x + mw.width, `the mark is clear of ${id}`).toBeLessThanOrEqual((await box(button)).x);
-  }
-  // Nothing lies over it.
-  expect(await mark.evaluate(e => { const r = e.getBoundingClientRect(); return e.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); })).toBe(true);
+  const n = await box(name);
+  expect(n.width).toBeGreaterThan(160);
+  for (const id of ["call-audio", "chat-options"]) expect(n.x + n.width, `the name is clear of ${id}`).toBeLessThanOrEqual((await box(page.getByTestId(id))).x);
   await shot(bob, "ghostly-phone-header");
-  await stack.click();
+  const identities = await headerControl(page, "chat-identity-badges");
+  await expect(identities).toHaveAttribute("data-count", "0");
+  await identities.click();
   await expect(panel).toBeVisible();
   await expect(panel.getByTestId("chat-identity-ghostly")).toHaveAttribute("aria-checked", "true");
   expect((await box(panel)).width).toBeCloseTo(390, 0);
   await shot(bob, "ghostly-phone-panel");
+  // Closed, it gives the focus back to ⋮, which it was opened from (the menu's row is gone by then).
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+  await expect(page.getByTestId("chat-options")).toBeFocused();
 });

@@ -7,10 +7,12 @@
  * - The frame loads twice: the runner, then the app the runner writes into itself after `writing`. Any other load is a
  *   navigation, and tears the app down.
  * - Requests are `{id, type, args}`, at most 64 KiB as JSON and 50 a second; answers `{id, ok, value | error}`; events
- *   `{event, data}`. An unknown type is refused.
+ *   `{event, data}`. An unknown type is refused. An app that sends ten times the rate is stopped. `file` answers at
+ *   most 16 MiB a second, one read at a time.
  *
  * `createBroker` is the protocol alone (tested without a browser); `startApp` frames it in a page.
  */
+import type { AppFileAt } from "@ghostly/browser/engine/apps";
 import { MINI_APP_LIMITS, type MiniAppContext, type MiniAppErrorCode, type MiniAppJson, type MiniAppPeerEvent, type MiniAppRequestType } from "@ghostly/core/miniApp";
 import type { AppsPlatform } from "../platform";
 
@@ -18,6 +20,8 @@ import type { AppsPlatform } from "../platform";
 export interface AppLaunch {
   /** `<publisher key in z-base32>/<name>`. */
   ref: string;
+  /** The digest of the version it runs (the entry's): what the engine judges while it runs. */
+  digest: string;
   version: string;
   title: string;
   /** What the person granted at install: `chat`, `name`. */
@@ -36,7 +40,8 @@ export interface AppView {
 
 /**
  * Why an app stopped: it asked (`closed`), its frame loaded when it should not have (`navigated`), it broke the
- * protocol before it started (`protocol`), it never started (`timeout`), or the client stopped it (`stopped`).
+ * protocol before it started or sent far past the request rate (`protocol`), it never started (`timeout`), or the
+ * client stopped it (`stopped`).
  */
 export type AppStopReason = "closed" | "navigated" | "protocol" | "timeout" | "stopped";
 
@@ -47,6 +52,12 @@ export const BROKER_REQUESTS: readonly MiniAppRequestType[] = ["context", "file"
 
 /** How long the runner has to say `writing` once it has the port. */
 export const START_TIMEOUT_MS = 15_000;
+
+/**
+ * How many messages in one second stop the app: ten times the rate. Past the rate a request is refused, yet the page
+ * still receives it; only closing the port ends that, and an app this far over is not one that miscounted.
+ */
+export const STOP_REQUESTS_PER_SECOND = 10 * MINI_APP_LIMITS.requestsPerSecond;
 
 /** The deepest JSON a request may carry: a value deeper than this is refused rather than walked. */
 const MAX_DEPTH = 64;
@@ -59,6 +70,11 @@ interface BrokerOptions {
   post(message: unknown, transfer?: Transferable[]): void;
   /** Tears the frame down: called once, with why. */
   stopped(reason: AppStopReason): void;
+  /**
+   * The opener hands a file's bytes to the app itself (Desktop: Rust, from its own file storage): a `file` answer says
+   * where they lie (`{id, ok, file: AppFileAt}`) when the host can, instead of carrying them. Every check is the same.
+   */
+  byReference?: boolean;
   now?: () => number;
 }
 
@@ -174,9 +190,15 @@ function storageKey(value: unknown): string {
   return value as string;
 }
 
-export function createBroker({ host, launch, view, post, stopped, now = Date.now }: BrokerOptions): Broker {
+export function createBroker({ host: platform, launch, view, post, stopped, byReference = false, now = Date.now }: BrokerOptions): Broker {
+  const host = platform.running?.(launch.digest) ?? platform;
   let phase: AppPhase = "loading";
   const recent: number[] = [];
+  /** The `file` answers of the last second (when, how many bytes) and their sum: what `fileBytesPerSecond` counts. */
+  const served: { at: number; bytes: number }[] = [];
+  let servedBytes = 0;
+  /** The `file` read in progress: reads go one at a time, so each is counted before the next one starts. */
+  let reading: Promise<unknown> = Promise.resolve();
   const scope = launch.chat?.linkId ?? "alone";
   const chatAllowed = !!launch.chat && launch.permissions.includes("chat");
   let appId: string | null = null;
@@ -217,7 +239,7 @@ export function createBroker({ host, launch, view, post, stopped, now = Date.now
     stopped(reason);
   };
 
-  const answer = async (type: string, args: unknown[]): Promise<{ value?: MiniAppJson | ArrayBuffer; transfer?: Transferable[] }> => {
+  const answer = async (type: string, args: unknown[]): Promise<{ value?: MiniAppJson | ArrayBuffer; transfer?: Transferable[]; file?: AppFileAt }> => {
     switch (type as MiniAppRequestType) {
       case "context": {
         // After the chat open answered: before it, a contact whose app is already open would read as not open, and the
@@ -230,8 +252,27 @@ export function createBroker({ host, launch, view, post, stopped, now = Date.now
       case "file": {
         const path = args[0];
         if (typeof path !== "string" || path.length === 0 || path.length > 1024) refuse("bad-path");
-        const bytes = await host.file(launch.ref, path as string);
-        const buffer = bytes.slice().buffer as ArrayBuffer;
+        // Bounded in bytes too: 50 reads a second of a 16 MiB file made the page copy 800 MB a second.
+        const read = reading.then(async () => {
+          if (phase === "stopped") refuse("stopped");
+          const at = now();
+          while (served.length && served[0]!.at <= at - 1000) servedBytes -= served.shift()!.bytes;
+          if (servedBytes >= MINI_APP_LIMITS.fileBytesPerSecond) refuse("too-fast");
+          const where = byReference && host.fileAt ? await host.fileAt(launch.ref, path as string) : null;
+          const file = where ?? await host.file(launch.ref, path as string);
+          const size = where ? where.length : (file as Uint8Array).byteLength;
+          served.push({ at, bytes: size });
+          servedBytes += size;
+          return file;
+        });
+        reading = read.catch(() => {});
+        const got = await read;
+        if (!(got instanceof Uint8Array)) return { file: got };
+        const bytes = got;
+        // The host's copy is the caller's (AppsPlatform.file): handed over as it is when it is the whole buffer, where
+        // copying it again doubled what a read cost the page.
+        const whole = bytes.byteOffset === 0 && bytes.buffer instanceof ArrayBuffer && bytes.byteLength === bytes.buffer.byteLength;
+        const buffer = whole ? bytes.buffer as ArrayBuffer : bytes.slice().buffer as ArrayBuffer;
         return { value: buffer, transfer: [buffer] };
       }
       case "storage.get": {
@@ -278,6 +319,8 @@ export function createBroker({ host, launch, view, post, stopped, now = Date.now
     const at = now();
     recent.push(at);
     while (recent.length && recent[0]! <= at - 1000) recent.shift();
+    // Before anything of the message is read: stopping closes the port, so `recent` never holds more than this.
+    if (recent.length > STOP_REQUESTS_PER_SECOND) return stop("protocol");
 
     const id = data && typeof data === "object" && Number.isSafeInteger((data as { id?: unknown }).id) && (data as { id: number }).id >= 0 ? (data as { id: number }).id : null;
     const fail = (error: MiniAppErrorCode) => { if (id !== null) post({ id, ok: false, error }); };
@@ -300,8 +343,9 @@ export function createBroker({ host, launch, view, post, stopped, now = Date.now
       return stop("closed");
     }
 
-    answer(type, args).then(({ value, transfer }) => {
+    answer(type, args).then(({ value, transfer, file }) => {
       if (phase === "stopped") return;
+      if (file) return post({ id, ok: true, file });
       post(value === undefined ? { id, ok: true } : { id, ok: true, value }, transfer);
     }, (error: unknown) => {
       if (phase === "stopped") return;
@@ -351,7 +395,8 @@ export function startApp({ container, host, launch, view, onStop, startTimeoutMs
 }): RunningApp {
   const runner = runnerFor(host, launch);
   const frame = document.createElement("iframe");
-  frame.setAttribute("sandbox", "allow-scripts");
+  // Scripts, and the pointer for mouse look (Esc always gives it back): nothing else of what a page may do.
+  frame.setAttribute("sandbox", "allow-scripts allow-pointer-lock");
   frame.setAttribute("referrerpolicy", "no-referrer");
   frame.setAttribute("allow", "");
   frame.title = launch.title;

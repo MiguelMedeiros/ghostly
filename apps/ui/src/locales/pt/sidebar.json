@@ -4,6 +4,24 @@
   "copyInvite": "Copiar código de convite",
   "deleteAllChats": "Excluir todas as conversas",
   "deleteChat": "Excluir conversa",
+  "folder": {
+    "byLatest": "Ordenar pela mensagem mais recente",
+    "create": "Criar",
+    "delete": "Excluir pasta",
+    "deleteBody": "As conversas dela não são excluídas. Elas voltam para a lista, sem pasta.",
+    "deleteTitle": "Excluir a pasta “{{name}}”?",
+    "empty": "Nenhuma conversa nesta pasta ainda",
+    "move": "Mover para pasta…",
+    "nameLabel": "Nome da pasta",
+    "new": "Nova pasta…",
+    "newTitle": "Nova pasta",
+    "none": "Sem pasta",
+    "options": "Opções da pasta {{name}}",
+    "others": "Outras conversas",
+    "rename": "Renomear pasta",
+    "unreadCount": "{{count}} não lidas em {{name}}",
+    "unreadOne": "1 não lida em {{name}}"
+  },
   "group": {
     "adminAnswered": "O app do admin respondeu…",
     "answerFailed": "Não deu certo. Tente de novo.",
@@ -12,6 +30,8 @@
     "inviterAway": "{{contact}} ainda não está conectado. Tente de novo em instantes.",
     "inviterAwayUnknown": "O contato que convidou você ainda não está conectado. Tente de novo em instantes.",
     "letting": "Um membro está deixando você entrar…",
+    "takenBack": "Convite retirado",
+    "unanswered": "O app de quem convidou não respondeu. Aceite de novo, ou recuse.",
     "waitingAdmin": "Aguardando o app do admin…",
     "waitingIn": "Aguardando para entrar…"
   },
@@ -22,6 +42,8 @@
   "newMenu": {
     "chat": "Conversa",
     "chatHint": "Uma pessoa, com um convite",
+    "folder": "Pasta",
+    "folderHint": "Uma seção da sua lista de conversas",
     "group": "Grupo",
     "groupHint": "Um link que qualquer pessoa pode abrir",
     "label": "Criar um grupo ou uma conversa"

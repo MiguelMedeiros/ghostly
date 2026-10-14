@@ -24,6 +24,7 @@
   "scan": "Scanner QR",
   "submit": "Rejoindre",
   "title": "Rejoindre une discussion",
+  "tooManyLinks": "Trop de liens d'invitation ouverts. Supprimez une discussion restée sans réponse, ou collez l'invitation dans Rejoindre.",
   "typo": "Ce code contient une faute de frappe. Vérifiez-le ou redemandez le code.",
   "update": "Cette invitation vient d’une version plus récente de Ghostly. Mettez à jour pour rejoindre."
 }

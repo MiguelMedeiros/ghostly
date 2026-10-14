@@ -101,6 +101,22 @@ describe("the first run", () => {
     expect(localStorage.getItem("gb-sessions-imported")).toBe("1");
   });
 
+  it("on a full localStorage, throws nothing, removes no link for want of its chat, and imports once there is room", async () => {
+    const write = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = () => { throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); };
+    engine.answers.exportLinks = [{ seedB64: "seed-1", peerPubKeyZ32: "peer-1", encKeyB64: "enc", createdAt: 1 }];
+    await start([link({ createdAt: 1 })]);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(engine.calls.filter(([m]) => m === "removeLink")).toEqual([]);
+    expect(storage.listSessions()).toEqual([]);
+
+    localStorage.setItem = write;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(storage.listSessions()).toHaveLength(1);
+    expect(localStorage.getItem("gb-sessions-imported")).toBe("1");
+    expect(engine.calls.filter(([m]) => m === "removeLink")).toEqual([]);
+  });
+
   it("does nothing until the peer has reported its state", async () => {
     sync.startSessionSync();
     await vi.advanceTimersByTimeAsync(5_000);

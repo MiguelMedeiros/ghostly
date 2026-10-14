@@ -19,6 +19,12 @@ object SharedCopies {
     }.toSet()
   }
 
+  /**
+   * Whether a share has nothing for the page: no file copied, no text, no title (as the page's `isEmptyShare`). Such a
+   * share is never handed over: the page would drop it anyway.
+   */
+  fun nothingIn(title: String, text: String, files: Int): Boolean = files == 0 && text.isBlank() && title.isBlank()
+
   /** What earlier runs left under the root: everything but the folders of shares numbered after `since`. */
   fun stale(root: File, since: Long): List<File> =
     root.listFiles()?.filter { (it.name.toLongOrNull() ?: Long.MIN_VALUE) <= since } ?: emptyList()

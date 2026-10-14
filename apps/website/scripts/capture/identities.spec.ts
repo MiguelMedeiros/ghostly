@@ -153,7 +153,8 @@ test("identities proved, shared and verified, desktop and phone", async ({ brows
   await casper.context.close();
   const phone = await open(browser, relay, baseURL!, "mCasper", { mobile: true, profile });
   await go(phone, withBoo);
-  await expect(phone.page.getByTestId("chat-identity-badges")).toBeVisible({ timeout: 60_000 });
+  // On a phone the contact's marks are a row of the chat's ⋮, which `openIdentities` opens.
+  await expect(phone.page.getByTestId("chat-options")).toBeVisible({ timeout: 60_000 });
   await openIdentities(phone);
   await expect(phone.page.getByTestId("chat-identities-received").getByTestId("chat-identity-received")).toHaveCount(4, { timeout: 90_000 });
   await settled(phone);

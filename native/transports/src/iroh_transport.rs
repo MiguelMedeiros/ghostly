@@ -8,7 +8,7 @@ use std::{net::SocketAddr, time::Duration};
 pub const ALPN: &[u8] = b"ghostly/paired-chat/1";
 pub const MAX_FRAME: usize = 60 * 1024;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Address {
     pub id: String,
     pub relay: Option<String>,

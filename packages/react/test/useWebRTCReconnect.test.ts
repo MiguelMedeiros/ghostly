@@ -11,7 +11,9 @@ import { ICE_DISCONNECT_GRACE_MS, ICE_RESTART_GATHER_MS, ICE_RESTART_RETRY_MS, R
  * Reconnecting (WISP 601): a call dropped when a participant's network changed (Wi-Fi to mobile data, a VPN going up),
  * a known issue of 1.0.1. A connected call whose path is lost now restarts ICE on its own connection: the side whose
  * offer was answered sends a restart offer (`r`), the other answers it, and the call window says "Reconnecting..."
- * meanwhile. With an older contact (no `x` on its offer or answer) the call ends as it did.
+ * meanwhile. With a contact that does not restart (no `x` on its offer or answer: an older app, the headless CLI) the
+ * window says "Reconnecting..." all the same while ICE says the path is lost, nothing is sent, and the call ends as
+ * it did.
  */
 
 let devices: FakeMediaDevices;
@@ -433,21 +435,70 @@ describe("a restart offer with no call on", () => {
   });
 });
 
-describe("with a contact on an older app (no `x`)", () => {
-  it("the caller's call ends on a failed connection as before, and no restart offer is sent", async () => {
+describe("with a contact that does not restart ICE (no `x`: an older app, the headless CLI)", () => {
+  it("the caller's call says Reconnecting when its path is lost, sends no restart offer, and ends on a failed connection", async () => {
     const call = renderCall();
     await placed(call, false);
+    expect(call.fastPoll()).toBe(false);
     act(() => pc().setIceState("disconnected"));
-    expect(call.result.current.reconnecting).toBe(false);
+    // The window says so at once (a bot whose machine went away is silent, and the clock would run on).
+    expect(call.result.current.reconnecting).toBe(true);
+    expect(call.result.current.callState).toBe("connected");
+    // Nothing reads a restart offer here: a compatibility chat does not poll faster for one.
+    expect(call.fastPoll()).toBe(false);
     await pass(ICE_DISCONNECT_GRACE_MS + ICE_RESTART_RETRY_MS);
     act(() => { window.dispatchEvent(new Event("online")); });
     await settle();
     expect(restartOffers(call)).toEqual([]);
+    expect(pc().iceRestarts).toBe(0);
     expect(call.result.current.callState).toBe("connected");
+    expect(call.result.current.reconnecting).toBe(true);
 
     act(() => pc().setIceState("failed"));
     expect(call.result.current.callState).toBe("idle");
+    expect(call.result.current.reconnecting).toBe(false);
     expect(call.addCallEventMessage.mock.lastCall?.[0]).toBe("call_ended");
+    expect(restartOffers(call)).toEqual([]);
+  });
+
+  it("the answerer's call says Reconnecting when its path is lost", async () => {
+    const call = renderCall();
+    await answered(call, false);
+    act(() => pc().setIceState("disconnected"));
+    expect(call.result.current.reconnecting).toBe(true);
+    expect(call.result.current.callState).toBe("connected");
+  });
+
+  it("the call goes on with its clock when ICE comes back by itself", async () => {
+    const call = renderCall();
+    await placed(call, false);
+    const startedAt = call.result.current.callStartedAt;
+    await pass(10_000);
+    act(() => pc().setIceState("disconnected"));
+    expect(call.result.current.reconnecting).toBe(true);
+    await pass(5000);
+    act(() => pc().setIceState("connected"));
+    expect(call.result.current.reconnecting).toBe(false);
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.result.current.callStartedAt).toBe(startedAt);
+    // The time it had to come back is not counted against it any more.
+    await pass(RECONNECT_TIMEOUT_MS);
+    expect(call.result.current.callState).toBe("connected");
+    expect(signals(call).filter((s) => s.t === "h")).toEqual([]);
+  });
+
+  it("the call ends with its end line when the path is not back in time, though ICE never said failed", async () => {
+    const call = renderCall();
+    await placed(call, false);
+    await pass(10_000);
+    act(() => pc().setIceState("disconnected"));
+    await pass(RECONNECT_TIMEOUT_MS - 1);
+    expect(call.result.current.callState).toBe("connected");
+    await pass(1);
+    expect(call.result.current.callState).toBe("idle");
+    expect(call.result.current.reconnecting).toBe(false);
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_ended", false, 10_000 + RECONNECT_TIMEOUT_MS);
+    expect(signals(call).slice(-1)[0]).toMatchObject({ t: "h" });
     expect(restartOffers(call)).toEqual([]);
   });
 
@@ -456,6 +507,30 @@ describe("with a contact on an older app (no `x`)", () => {
     await answered(call, false);
     act(() => pc().setIceState("failed"));
     expect(call.result.current.callState).toBe("idle");
+    expect(call.result.current.reconnecting).toBe(false);
+  });
+
+  it("media that cannot restart ICE says Reconnecting too, whatever the contact said", async () => {
+    const media: CallMedia = {
+      createPeerConnection: (config) => new FakePeerConnection(config) as unknown as RTCPeerConnection,
+      getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+    };
+    const call = renderCall(media);
+    await placed(call);
+    act(() => pc().setIceState("disconnected"));
+    expect(call.result.current.reconnecting).toBe(true);
+    await pass(ICE_DISCONNECT_GRACE_MS);
+    expect(restartOffers(call)).toEqual([]);
+  });
+
+  it("a call that is not up yet says nothing", async () => {
+    const call = renderCall();
+    act(() => { void call.result.current.startCall(false); });
+    devices.userMedia[0].grant();
+    await settle();
+    call.receive(remote.answer(Date.now() + 1));
+    await settle();
+    act(() => pc().setIceState("disconnected"));
     expect(call.result.current.reconnecting).toBe(false);
   });
 });

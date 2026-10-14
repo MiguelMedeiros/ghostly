@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { InstalledAppView } from "@ghostly/browser/engine/apps";
+import type { BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { appCardId, statusCardText, type AppCard } from "@ghostly/core";
 import { appsRunning, openApp, stopTakenDown, type OpenAppOptions } from "./open";
 
@@ -11,23 +11,29 @@ import { appsRunning, openApp, stopTakenDown, type OpenAppOptions } from "./open
  */
 
 let apps: readonly InstalledAppView[] | null = null;
+/** The built-in apps this profile is offered (`appBuiltIns`): read with the installed ones, each time. */
+let offers: readonly BuiltInAppOffer[] = [];
 let loading: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 const tell = () => { for (const listener of [...listeners]) listener(); };
 
 // After any update check (the engine's scheduled one included), once a screen has read the list or an app runs: a
-// version found removed or revoked shows as stopped, and a running one is stopped (`stopTakenDown`).
+// version found removed or revoked shows as stopped, and a running one is stopped (`stopTakenDown`). The engine says
+// the same after an uninstall, to every page: the app's frames stop wherever they run.
 engine.onAppsChecked(() => { if (apps !== null || appsRunning()) void refreshInstalledApps(); });
 
 /** Reads the list again. */
 export function refreshInstalledApps(): Promise<void> {
-  loading = engine.call("appList").then((list) => { apps = list; tell(); stopTakenDown(list); }, () => { apps ??= []; tell(); }).finally(() => { loading = null; });
+  // An engine from before built-in apps (the extension's, another tab's) has no `appBuiltIns`: none offered.
+  const builtIns = engine.call("appBuiltIns").catch((): BuiltInAppOffer[] => []);
+  loading = engine.call("appList").then(async (list) => { offers = await builtIns; apps = list; tell(); stopTakenDown(list); }, () => { apps ??= []; tell(); }).finally(() => { loading = null; });
   return loading;
 }
 
 /** For tests: forget what was read. */
 export function forgetInstalledApps(): void {
   apps = null;
+  offers = [];
   loading = null;
 }
 
@@ -36,6 +42,26 @@ export function useInstalledApps(enabled: boolean): readonly InstalledAppView[] 
   const list = useSyncExternalStore((listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => apps, () => apps);
   useEffect(() => { if (enabled && apps === null && !loading) void refreshInstalledApps(); }, [enabled]);
   return enabled ? list : null;
+}
+
+/**
+ * The apps that come with Ghostly and are neither installed nor removed here (WISP 1200 § Built-in apps): shown with the
+ * installed ones, opened through the install screen. Empty until the installed apps are read.
+ */
+export function useBuiltInApps(enabled: boolean): readonly BuiltInAppOffer[] {
+  const installed = useInstalledApps(enabled);
+  const list = useSyncExternalStore((listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => offers, () => offers);
+  return enabled && installed !== null ? list : NONE;
+}
+const NONE: readonly BuiltInAppOffer[] = [];
+
+/**
+ * The app installed here under `ref`, if any: the one an app card with that ref opens (WISP 405 § An app). The card and
+ * its row both name it from here, so what is read out is what is shown. No `ref` (not an app card): nothing is asked.
+ */
+export function useInstalledApp(ref: string | undefined): InstalledAppView | undefined {
+  const installed = useInstalledApps(ref !== undefined);
+  return ref === undefined ? undefined : installed?.find((a) => a.ref === ref);
 }
 
 /**

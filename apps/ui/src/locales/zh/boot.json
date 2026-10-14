@@ -1,6 +1,10 @@
 {
   "copied": "已复制",
   "copy": "复制详情",
+  "lockdown": "锁定模式似乎已开启，它会关闭 Ghostly 所需的功能。请为此网站关闭它，然后重新加载。",
+  "lockdownHow": "如何为此网站关闭它",
+  "lockdownOtherBrowser": "iPhone 或 iPad 上的其他浏览器：设置 › 隐私与安全性 › 锁定模式 › 配置网页浏览，为该浏览器关闭。",
+  "lockdownSafari": "Safari：轻点地址栏中的“大小”(aA)，再点“网站设置”，关闭锁定模式（Mac 上：Safari › 此网站的设置）。",
   "missingCrypto": "Web Crypto 已关闭。它只在安全（https）地址上可用。",
   "missingIndexedDB": "IndexedDB 已关闭或被拦截，无法保存聊天和密钥。",
   "missingLocks": "缺少 Web Locks，Ghostly 无法确保只运行一次。",

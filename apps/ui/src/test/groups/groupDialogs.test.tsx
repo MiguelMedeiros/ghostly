@@ -116,6 +116,33 @@ describe("GroupMembersDialog", () => {
     expect(engine.callsTo("makeGroupAdmin")).toEqual([{ groupId: "group-1", key: ALICE }]);
   });
 
+  it("gives the focus back to the Remove or Hand over admin that asked, and to the list once a removed row is gone", async () => {
+    const { user, engine } = members_(groupView({ status: "active", isAdmin: true, members }));
+    let removed!: () => void;
+    engine.on("removeGroupMember", () => new Promise<void>(done => { removed = done; })).on("makeGroupAdmin", () => undefined);
+    const remove = within(row(BOB)).getByTestId("group-remove-member"), promote = within(row(BOB)).getByTestId("group-make-admin");
+    // It fell to the page each time: Escape, Cancel, and a confirmed Remove.
+    remove.focus();
+    await user.keyboard("{Enter}");
+    expect(within(screen.getByTestId("group-remove-dialog")).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    act(() => { screen.getByTestId("group-remove-dialog").dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(remove).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await user.click(within(screen.getByTestId("group-remove-dialog")).getByRole("button", { name: "Cancel" }));
+    expect(remove).toHaveFocus();
+    promote.focus();
+    await user.keyboard("{Enter}");
+    act(() => { screen.getByTestId("group-make-admin-dialog").dispatchEvent(new Event("cancel", { cancelable: true })); });
+    expect(promote).toHaveFocus();
+    remove.focus();
+    await user.keyboard("{Enter}");
+    await user.click(within(screen.getByTestId("group-remove-dialog")).getByRole("button", { name: "Remove" }));
+    expect(screen.getByTestId("group-member-list")).toHaveFocus();
+    await act(async () => { removed(); });
+    act(() => engine.update({ groups: [groupView({ status: "active", isAdmin: true, members: members.filter(m => m.key !== BOB) })] }));
+    expect(screen.getByTestId("group-member-list")).toHaveFocus();
+  });
+
   it("gives a community group's member the link's QR too, and none of the admin's controls", async () => {
     const link = encodeCommunityLink({ g: "AbCdEfGhIjKlMnOpQrStUv", host: createIdentity().pubKeyZ32 });
     const { user } = members_(groupView({ status: "active", isAdmin: false, profile: "community", entryLink: link, members: [member({ key: ME, me: true, online: true }), member({ key: ALICE, nick: "Alice", role: "admin" })] }));
@@ -134,6 +161,16 @@ describe("GroupMembersDialog", () => {
       const { user, unmount } = members_(groupView({ status: "active", isAdmin: true, profile, members, entryLink: "https://app.ghostly.tools/#/join/group2/g/k" }));
       await user.click(within(row(BOB)).getByTestId("group-remove-member"));
       expect(screen.getByTestId("group-remove-dialog"), profile).toHaveAccessibleDescription("They won't get the group's new messages. They can still join again with the group's link: a new link keeps them out.");
+      unmount();
+    }
+  });
+
+  it("says, while a private group's link works, that handing the admin role over ends it; a community's link goes on", async () => {
+    for (const [profile, ends] of [["mesh", true], ["community", false]] as const) {
+      const { user, unmount } = members_(groupView({ status: "active", isAdmin: true, profile, members, entryLink: "https://app.ghostly.tools/#/join/group2/g/k" }));
+      await user.click(within(row(BOB)).getByTestId("group-make-admin"));
+      const body = "You will no longer be the admin. Only Bob can then rename the group, change its picture and link, invite or remove members, and give the role back.";
+      expect(screen.getByTestId("group-make-admin-dialog"), profile).toHaveAccessibleDescription(ends ? `${body} The link shared so far stops working. Bob can share a new one.` : body);
       unmount();
     }
   });
@@ -273,6 +310,12 @@ describe("GroupLinkPanel", () => {
     expect(screen.getByTestId("group-link-copy")).toHaveTextContent("Copied");
   });
 
+  it("reads the link left to right from its start in a right-to-left language", () => {
+    renderApp(<GroupLinkPanel group={admin({ entryLink })} />, { language: "ar" });
+    // An Arabic page drew the field's end, the https:// and the site out of sight.
+    expect(screen.getByTestId("group-link-url")).toHaveAttribute("dir", "ltr");
+  });
+
   it("says when copying did not work", async () => {
     const { user } = renderApp(<GroupLinkPanel group={admin({ entryLink })} />);
     vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("denied"));
@@ -302,10 +345,14 @@ describe("GroupLinkPanel", () => {
     expect(within(ask).getByRole("button", { name: "Cancel" })).toHaveFocus();
     await user.click(within(ask).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByTestId("group-link-ask-dialog")).not.toBeInTheDocument();
-    await user.click(screen.getByTestId(button));
-    // Escape, as the browser says it to the topmost dialog.
+    // The button that asked has the focus back, so the keyboard goes on from there: it fell to the page.
+    expect(screen.getByTestId(button)).toHaveFocus();
+    // From the keyboard: Enter on the button asks, Escape (as the browser says it to the topmost dialog) calls it off.
+    await user.keyboard("{Enter}");
+    expect(within(screen.getByTestId("group-link-ask-dialog")).getByRole("button", { name: "Cancel" })).toHaveFocus();
     act(() => { screen.getByTestId("group-link-ask-dialog").dispatchEvent(new Event("cancel", { cancelable: true })); });
     expect(screen.queryByTestId("group-link-ask-dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId(button)).toHaveFocus();
     expect(engine.callsTo("enableGroupLink")).toEqual([]);
     expect(engine.callsTo("disableGroupLink")).toEqual([]);
     await user.click(screen.getByTestId(button));
@@ -422,6 +469,19 @@ describe("NewGroupDialog", () => {
     await user.type(screen.getByTestId("new-group-name"), "Family{Enter}");
     expect(engine.callsTo("createGroup")).toEqual([{ name: "Family", profile: "mesh" }]);
     expect(onCreated).toHaveBeenCalledWith("small");
+  });
+
+  it("keeps Create off for a name with nothing visible in it, and says a refused name in the app's words", async () => {
+    const { user, engine } = open();
+    engine.on("createGroup", () => { throw new Error("A group's name is 1 to 64 characters on one line"); });
+    await user.type(screen.getByTestId("new-group-name"), "\u200B");
+    expect(screen.getByTestId("new-group-create")).toBeDisabled();
+    await user.type(screen.getByTestId("new-group-name"), "{Enter}");
+    expect(engine.callsTo("createGroup")).toEqual([]);
+    // One the engine still refuses (a race, another app's rule): said in words a person reads.
+    await user.type(screen.getByTestId("new-group-name"), "Climbing");
+    await user.click(screen.getByTestId("new-group-create"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Type a name with letters or emoji" + "Up to 64 characters, on one line.");
   });
 
   it("shows why a group could not be created, and lets the user try again", async () => {

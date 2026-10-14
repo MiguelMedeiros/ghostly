@@ -1,4 +1,5 @@
 import { act, fireEvent, screen } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppBrand } from "../../components/AppBrand";
 import { BRAND_MOTION_KEY, resetBrandLaunch } from "../../lib/brandMotion";
@@ -60,6 +61,23 @@ describe("the logo at the top of the chat list", () => {
     open().unmount();
     open();
     expect(playing()).toEqual([null, null]);
+  });
+
+  it("leaves no timer running when the list goes away while the logo still moves", () => {
+    const list = open();
+    expect(playing()).toEqual(["breathe", "open"]);
+    list.unmount();
+    // Left running, it set state on a list that was gone: after a test file's teardown that is "window is not defined".
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("rests after its motion in StrictMode too, where the list's effects run twice", () => {
+    renderApp(<StrictMode><AppBrand onHome={() => {}} /></StrictMode>);
+    expect(playing()).toEqual(["breathe", "open"]);
+    act(() => { vi.advanceTimersByTime(900); });
+    expect(playing()).toEqual([null, null]);
+    hover();
+    expect(playing()).toEqual(["sway", "hover"]);
   });
 
   it("on hover plays the other motion, never the same twice in a row, and not over one still playing", () => {

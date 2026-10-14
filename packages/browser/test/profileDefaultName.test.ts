@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setStorageProfile } from "../../../apps/ui/src/lib/storage";
 import { builtInNameBefore, clearRestoredMark, createProfile, currentProfile, listProfiles, registerProfile, registryKey, renameProfile, setDefaultProfileName, setRestoredProfileName, storedProfileName } from "../../../apps/ui/src/lib/profiles";
-import { createProfileBackup, openProfileBackup, restoreOpenedBackup, restoreProfileBackup } from "../../../apps/ui/src/lib/profileBackup";
+import { createProfileBackup, openProfileBackup, restoreOpenedBackup, restoreProfileBackup, type OpenedProfileBackup } from "../../../apps/ui/src/lib/profileBackup";
 // covers: profiles.create, backup.profile.file, app.i18n
 
 class FakeStorage {
@@ -61,13 +61,22 @@ it("backed up in Portuguese and restored, the first profile never renamed follow
   expect(shownName(back.id)).toBe("Pessoal");
 });
 
+/**
+ * The active profile's bundle, made and opened once per test. Made without a passphrase: these tests read the name the
+ * restore lists, and a sealed bundle would cost a key derivation to make it, one to open it and one more per restore,
+ * which on a busy host took the tests that restore several past vitest's timeout.
+ */
+let bundle: Promise<OpenedProfileBackup> | undefined;
+beforeEach(() => { bundle = undefined; });
+
 /** A bundle of the active profile as an app from before the marker made it: this name, no `builtIn`, these settings. */
-async function oldBackup(name: string, language?: string) {
-  const opened = await openProfileBackup(await createProfileBackup(PASSPHRASE), PASSPHRASE);
-  const payload = opened.payload as unknown as { profile: { name: string; builtIn?: boolean }; storage: Record<string, string> };
+async function oldBackup(name: string, language?: string): Promise<OpenedProfileBackup> {
+  bundle ??= createProfileBackup(null).then((bytes) => openProfileBackup(bytes));
+  const opened = await bundle;
+  const payload = structuredClone(opened.payload) as unknown as { profile: { name: string; builtIn?: boolean }; storage: Record<string, string> };
   payload.profile = { name };
   if (language) payload.storage.app_settings = JSON.stringify({ language }); else delete payload.storage.app_settings;
-  return opened;
+  return { ...opened, payload: payload as unknown as OpenedProfileBackup["payload"] };
 }
 
 it("the backup says whether its name is the built-in one", async () => {

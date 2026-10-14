@@ -28,5 +28,9 @@
     "sharedOne": "Compartido con 1 contacto",
     "stopped": "Detenido"
   },
+  "window": {
+    "failed": "La solicitud falló.",
+    "unreachable": "Este servicio no está accesible. Los servicios existen mientras su fantasma está en línea."
+  },
   "yourApps": "Tus apps"
 }

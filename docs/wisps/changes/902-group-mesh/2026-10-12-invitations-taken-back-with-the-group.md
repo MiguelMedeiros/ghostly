@@ -1,0 +1,1 @@
+An admin's app takes back the invitations nobody answered (`group-decline` over each contact chat) when it deletes or leaves the group, and when it hands the admin role on. Before, they stayed on the invitees' lists with nobody able to honour them.

@@ -29,7 +29,7 @@ test.beforeAll(async () => { listeners = await startListeners(); });
 test.afterAll(async () => { await listeners?.close(); });
 
 interface Hook {
-  open(launch: { ref: string; version: string; title: string; permissions: string[]; entry: string; chat?: { linkId: string } | null; unguarded?: boolean }): number;
+  open(launch: { ref: string; version: string; title: string; permissions: string[]; entry: string; chat?: { linkId: string } | null; files?: Record<string, string>; unguarded?: boolean }): number;
   status(handle: number): { phase: string; stopped: string | null };
   stored(ref: string, scope: string): Record<string, unknown>;
   calls(): { op: string; ref: string; scope?: string; key?: string }[];
@@ -54,8 +54,8 @@ async function appPage(page: Page): Promise<void> {
   });
 }
 
-async function open(page: Page, ref: string, entry: string, extra: { permissions?: string[]; chat?: { linkId: string }; unguarded?: boolean } = {}): Promise<number> {
-  return page.evaluate(({ ref, entry, extra }) => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.open({ ref, version: "1.0.0", title: ref, permissions: extra.permissions ?? [], entry, chat: extra.chat ?? null, unguarded: extra.unguarded }), { ref, entry, extra });
+async function open(page: Page, ref: string, entry: string, extra: { permissions?: string[]; chat?: { linkId: string }; files?: Record<string, string>; unguarded?: boolean } = {}): Promise<number> {
+  return page.evaluate(({ ref, entry, extra }) => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.open({ ref, version: "1.0.0", title: ref, permissions: extra.permissions ?? [], entry, chat: extra.chat ?? null, files: extra.files, unguarded: extra.unguarded }), { ref, entry, extra });
 }
 
 const stored = (page: Page, ref: string, scope = "alone") => page.evaluate(({ ref, scope }) => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.stored(ref, scope), { ref, scope });
@@ -205,6 +205,57 @@ test("the broker answers 50 requests a second and refuses one over 64 KiB", {
   expect(await status(page, handle)).toEqual({ phase: "running", stopped: null });
 });
 
+test("an app that keeps sending far past the request rate is stopped, and the page stays smooth", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page }) => {
+  await appPage(page);
+  const ref = "evilpublisherkey/storm";
+  const handle = await open(page, ref, appEntry("storm"));
+  await expect.poll(() => status(page, handle), { timeout: 30_000 }).toEqual({ phase: "stopped", stopped: "protocol" });
+  await expect(page.locator("iframe")).toHaveCount(0);
+  // Only the first second's 50 reached the host, and the page's timers run on time once the app is gone.
+  const calls = await page.evaluate(() => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.calls());
+  expect(calls.filter((c) => c.ref === ref && c.op === "storage.get").length).toBeLessThanOrEqual(50);
+  const gap = await page.evaluate(() => new Promise<number>((done) => {
+    let longest = 0;
+    let last = performance.now();
+    const started = last;
+    const timer = setInterval(() => {
+      const now = performance.now();
+      longest = Math.max(longest, now - last);
+      last = now;
+      if (now - started > 2_000) { clearInterval(timer); done(longest); }
+    }, 10);
+  }));
+  expect(gap).toBeLessThan(500);
+});
+
+test("an app that reads its own 16 MiB file 50 times a second gets one a second, and the page stays smooth", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page }, testInfo) => {
+  await appPage(page);
+  const ref = "evilpublisherkey/file-flood";
+  const handle = await open(page, ref, appEntry("fileFlood"), { files: { "big.bin": "x".repeat(16 * 1024 * 1024) } });
+  // Watched once the hook has its 16 MiB (encoding it is the test's, not the app's), before the frame has loaded: the
+  // longest the page's timers wait while the app reads.
+  await page.evaluate(() => {
+    const watch = ((window as unknown as { __gap: { longest: number } }).__gap = { longest: 0 });
+    let last = performance.now();
+    setInterval(() => { const now = performance.now(); watch.longest = Math.max(watch.longest, now - last); last = now; }, 10);
+  });
+  await expect.poll(() => stored(page, ref), { timeout: 60_000 }).toHaveProperty("report");
+  const report = (await stored(page, ref)).report as { ok: number; refused: string[] };
+  const gap = await page.evaluate(() => (window as unknown as { __gap: { longest: number } }).__gap.longest);
+  testInfo.annotations.push({ type: "file flood", description: JSON.stringify({ ...report, gap: Math.round(gap) }) });
+  // 16 MiB of answers a second: the first read of each second, at most one more where a second's edge falls between.
+  expect(report.ok).toBeGreaterThanOrEqual(3);
+  expect(report.ok).toBeLessThanOrEqual(6);
+  expect(report.refused).toEqual(["too-fast"]);
+  // Measured on a 4-core host: 36-40 ms; 453-473 ms while every read was answered (149 of 150, 2.3 GB copied).
+  expect(gap).toBeLessThan(300);
+  expect(await status(page, handle)).toEqual({ phase: "running", stopped: null });
+});
+
 test("an app in a chat talks to its contact's app through the broker, and keeps its data in that chat", {
   tag: ["@feature:apps.web-sandbox"],
 }, async ({ page }) => {
@@ -260,6 +311,32 @@ test("the runner refuses to run outside its sandboxed frame, and its server send
   await appPage(page);
   expect(await page.evaluate(() => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.runnerAvailable())).toBe(true);
   expect(RTC_PROBES.length).toBeGreaterThan(10);
+});
+
+test("an app may ask for the pointer after a click (mouse look): its sandbox no longer refuses it", {
+  tag: ["@feature:apps.web-sandbox"],
+}, async ({ page }) => {
+  await appPage(page);
+  const ref = "gamepublisherkey/look";
+  // What the frame's sandbox decides shows in the refusal's name: SecurityError ("the frame is sandboxed and the
+  // 'allow-pointer-lock' permission is not set") before; past it, a browser driven by a test still refuses for want of
+  // window focus (WrongDocumentError), or gives the lock. A person's click in a focused window gets it, and Esc frees it.
+  const entry = `<!doctype html><title>look</title><body style="margin:0"><div id=pad style="width:100vw;height:100vh;background:#123"></div><script>
+    const g = window.ghostly, pad = document.getElementById("pad");
+    pad.addEventListener("click", () => {
+      try {
+        const asked = pad.requestPointerLock();
+        if (asked && asked.then) asked.then(() => g.storage.set("lock", "held"), (e) => g.storage.set("lock", e.name));
+      } catch (e) { g.storage.set("lock", e.name); }
+    });
+    g.storage.set("ready", true);
+  </script>`;
+  await open(page, ref, entry);
+  await expect.poll(() => stored(page, ref)).toMatchObject({ ready: true });
+  await expect(page.locator(`iframe[data-app="${ref}"]`)).toHaveAttribute("sandbox", "allow-scripts allow-pointer-lock");
+  await page.frameLocator(`iframe[data-app="${ref}"]`).locator("#pad").click();
+  await expect.poll(async () => (await stored(page, ref)).lock).toBeDefined();
+  expect(["held", "WrongDocumentError"]).toContain((await stored(page, ref)).lock);
 });
 
 test("Chess, as it is built, runs under the runner's lock", {

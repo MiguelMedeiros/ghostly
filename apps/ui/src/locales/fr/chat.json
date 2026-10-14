@@ -70,6 +70,7 @@
     "codeRelays": "Les relais cités par ce code ne sont pas interrogés.",
     "communityGroup": "Groupe communautaire",
     "communityHint": "Toute personne ayant ce lien peut rejoindre. Vous lisez ce qui est envoyé tant que vous êtes membre.",
+    "deleteToJoin": "Ses messages sont encore sur cet appareil. Pour rejoindre avec ce lien, ouvrez le groupe et choisissez d'abord « {{action}} ».",
     "fromContact": "De votre contact",
     "fromName": "De ~{{name}}",
     "groupHint": "Rejoindre demande à l'admin du groupe de vous laisser entrer ; son app répond quand elle est en ligne.",
@@ -77,6 +78,7 @@
     "homeserver": "Serveur",
     "inGroup": "Vous êtes dans ce groupe.",
     "join": "Rejoindre",
+    "joinAgain": "Rejoindre à nouveau",
     "joinGroup": "Rejoindre le groupe",
     "joinHint": "Rejoindre crée une discussion avec l'auteur de cette invitation. Rien n'est envoyé avant que vous rejoigniez.",
     "joining": "Connexion au groupe…",
@@ -226,6 +228,7 @@
   "media": {
     "downloadSize": "Télécharger {{size}}",
     "noRoom": "Espace insuffisant : {{size}} libres",
+    "noRoomToPlay": "Pas assez d'espace disque libre pour le lire ici. Téléchargez-le.",
     "notYet": "La lecture est possible une fois l'envoi terminé.",
     "wantsToSend": "{{name}} veut l'envoyer · {{size}} libres"
   },

@@ -17,6 +17,12 @@
 
 HyperDHT is a native layer-1 candidate of the one chat ([400](400-chat.md), [100](100-transports.md#the-dht-floor-upgrade-and-downgrade-revision-02)). Its DHT is not the chat's layer 0: layer 0 is Pkarr on the Mainline DHT, and a HyperDHT lookup is part of dialling this transport. Its public key is published in the layer-0 capability record ([03](03-capabilities.md#layer-0-capability-record)), so it can be tried without a WebRTC session first. A failed attempt leaves the chat `on-dht`; a dropped session sends it there until a transport is back.
 
+## Frames (revision 2026-10-12)
+
+The session runs on one NoiseSecretStream as frames, each a 4-byte big-endian length word and that many bytes, at most 60 KiB and never empty. The first frame each way is the preface `ghostly/paired-chat/1`. A frame is UTF-8 text (a JSON frame of the session), unless the top bit of its length word is set: then it is a binary message ([100](100-transports.md#text-and-binary-messages-revision-2026-10-12)) of the length in the other 31 bits. A stream that brings an empty frame, one over 60 KiB, text that is not UTF-8 or a binary frame before the preface is closed.
+
+An app before this revision reads a marked frame as one over 60 KiB and closes the stream, so binary messages go only where the session agreed a capability that needs them, which such an app never lists. Where it carries them: the CLI's HyperDHT, a browser's through a HyperDHT relay, and the Desktop's (its sidecar hands a binary message to the app in base64 on its private pipe; the wire is the frame above).
+
 ## Browser profile: through a HyperDHT relay (revision 0.3)
 
 A browser has no UDP, so it cannot run HyperDHT itself. It can reach it through a **HyperDHT relay**: a server that runs the UDP half of HyperDHT and talks to the browser over one WebSocket (Holepunch's `@hyperswarm/dht-relay` protocol, [implementation](../../infra/services/hyperdht-relay/)). The chat session and its wire are the Desktop's: the same preface, the same length-prefixed frames, the same binding. A browser and a Desktop talk HyperDHT to each other.

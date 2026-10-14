@@ -1,6 +1,10 @@
 {
   "copied": "Copied",
   "copy": "Copy details",
+  "lockdown": "Lockdown Mode looks to be on, and it turns off what Ghostly needs. Turn it off for this site, then reload.",
+  "lockdownHow": "How to turn it off for this site",
+  "lockdownOtherBrowser": "Other browsers on iPhone or iPad: Settings › Privacy & Security › Lockdown Mode › Configure Web Browsing, and turn it off for that browser.",
+  "lockdownSafari": "Safari: tap aA in the address bar, then Website Settings, and turn Lockdown Mode off (on a Mac: Safari › Settings for This Website).",
   "missingCrypto": "Web Crypto is off. It works only on a secure (https) address.",
   "missingIndexedDB": "IndexedDB is off or blocked, so chats and keys can't be saved.",
   "missingLocks": "Web Locks is missing, so Ghostly can't make sure it runs only once.",

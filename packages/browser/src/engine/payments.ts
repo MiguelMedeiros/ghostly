@@ -1,5 +1,5 @@
 import type { UsdtWallet } from "./paymentAdapters/usdtWallet";
-import { WALLET_NETWORKS, assertTokenUnits, decodeBolt11, engineError, formatPaymentAmount, sparkInvoiceDetails, validatePaymentTarget, walletNetworkOf, type SparkNetwork, type PaymentMethodName, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { RateWindow, WALLET_NETWORKS, assertTokenUnits, decodeBolt11, engineError, formatPaymentAmount, sparkInvoiceDetails, validatePaymentTarget, walletNetworkOf, type SparkNetwork, type PaymentMethodName, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { eachNetwork, perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { assertConfirmedReal, crossNetwork, paymentNetwork } from "./paymentAdapters/walletInstances";
 import { paymentAlias, paymentWireId } from "../shared/paymentIds";
@@ -34,6 +34,9 @@ import { SwapUnsettledError, assertAmount, type CashuWallet } from "./wallet";
  * taken back.
  */
 const UNIT = "sat";
+/** A contact's requests in one chat: the new ones taken per minute, and how many may wait to be paid. */
+const REQUESTS_PER_MINUTE = 20;
+const OPEN_REQUESTS = 50;
 
 /**
  * What the desk needs of a link: a chat's or an edge's GhostLink, or a member of a community group reached
@@ -164,8 +167,22 @@ const fedimintSats = (msats: number) => Math.floor(msats / 1000);
 type Each<T extends object> = T | PerNetwork<T>;
 /** The distinct wallets of a per-network set (one object may stand for both). */
 const distinct = <T>(each: PerNetwork<T>): T[] => [...new Set(WALLET_NETWORKS.map((n) => each[n]))];
+/**
+ * Every payment this device keeps, with the copy of them the pages get. The copy is made again only after a payment
+ * changed: a state about anything else (typing, a file's progress) carries the one already made.
+ */
+class PaymentBook extends Map<string, StoredPayment> {
+  private shown: Record<string, PaymentView> | null = null;
+  override set(id: string, payment: StoredPayment): this { this.shown = null; return super.set(id, payment); }
+  override delete(id: string): boolean { this.shown = null; return super.delete(id); }
+  override clear(): void { this.shown = null; super.clear(); }
+  views(): Record<string, PaymentView> {
+    // The token is money: it stays with the peer and never reaches a page.
+    return this.shown ??= Object.fromEntries([...this].map(([id, { token: _token, ...view }]) => [id, view]));
+  }
+}
 export class PaymentDesk {
-  private readonly payments = new Map<string, StoredPayment>();
+  private readonly payments = new PaymentBook();
   private readonly paying = new Map<string, Promise<void>>();
   private readonly receiving = new Map<string, Promise<void>>();
   private readonly reclaims = new Map<string, Promise<Reclaimed | undefined>>();
@@ -232,10 +249,8 @@ export class PaymentDesk {
   /** Every payment as stored, tokens included: for the engine's own reading, never for a page. */
   records(): StoredPayment[] { return [...this.payments.values()]; }
 
-  views(): Record<string, PaymentView> {
-    // The token is money: it stays with the peer and never reaches a page.
-    return Object.fromEntries([...this.payments].map(([id, { token: _token, ...view }]) => [id, view]));
-  }
+  /** What the pages see of every payment. The same record until a payment changes: read it, never write to it. */
+  views(): Readonly<Record<string, PaymentView>> { return this.payments.views(); }
 
   async forgetLink(linkId: string): Promise<void> {
     const paymentStore = await store(STORES.payments, "readwrite");
@@ -245,6 +260,7 @@ export class PaymentDesk {
       this.payments.delete(payment.id);
       void wrap(paymentStore.delete(payment.id));
     }
+    this.requestsFrom.delete(linkId);
   }
 
   // -- what the user does --------------------------------------------------------
@@ -648,10 +664,27 @@ export class PaymentDesk {
       endpoints: [...(payment.invoice ? [[ENDPOINT.bolt11, payment.invoice] as [string, string]] : []), ...(payment.mints?.length ? [[ENDPOINT.cashu, cashuRequestPayload(payment.mints)] as [string, string]] : [])] };
   }
 
+  /** New requests taken from each chat's contact lately. */
+  private readonly requestsFrom = new Map<string, RateWindow>();
+
+  /**
+   * Whether this chat has room for one more request of its contact: twenty new ones a minute, and fifty waiting to be
+   * paid at most. One left out is not lost: the contact's app sends its open requests again on every session.
+   */
+  private roomForRequest(linkId: string): boolean {
+    let recent = this.requestsFrom.get(linkId);
+    if (!recent) this.requestsFrom.set(linkId, recent = new RateWindow(REQUESTS_PER_MINUTE, 60_000));
+    if (!recent.take()) return false;
+    let open = 0;
+    for (const p of this.payments.values()) if (p.linkId === linkId && p.kind === "request" && p.direction === "in" && p.state === "pending" && ++open >= OPEN_REQUESTS) return false;
+    return true;
+  }
+
   /** `held`: picked up from the contact's storage while it was away (WISP 404): only what this device allows counts, and only Cashu or Lightning. */
   async onPaymentRequest(linkId: string, request: PaymentRequest, held = false): Promise<void> {
     // Already here from this contact (sent again, or held and live both): once. Another chat's id is not this one.
     if (this.find(linkId, request.id)?.linkId === linkId) return;
+    if (!this.roomForRequest(linkId)) return;
     if (held && (findEndpoint(request.endpoints, ENDPOINT.usdt) || findEndpoint(request.endpoints, ENDPOINT.arkade) || findEndpoint(request.endpoints, ENDPOINT.bark) || findEndpoint(request.endpoints, ENDPOINT.bitcoin) || findEndpoint(request.endpoints, ENDPOINT.fedimint) || findEndpoint(request.endpoints, ENDPOINT.spark))) return;
     if(findEndpoint(request.endpoints,ENDPOINT.usdt))return this.receiveUsdtRequest(linkId,request);
     const amount = parseSats(request.amount.value, request.amount.asset);
@@ -864,8 +897,12 @@ export class PaymentDesk {
       if (done) { this.payments.set(record.id, record); this.host.onChange(); }
       return;
     }
-    if (done) await this.creditCashu(record, link);
-    else if (!this.payments.has(record.id)) link?.sendPaymentResult({ id: record.id, ok: false, error: "The mint did not confirm the ecash" });
+    if (done) { await this.creditCashu(record, link); return; }
+    if (this.payments.has(record.id)) return;
+    const reason = "The mint did not confirm the ecash";
+    link?.sendPaymentResult({ id: record.id, ok: false, error: reason });
+    // The chat line a refusal on the spot writes, under the same id: a redeem that ends without the ecash is never silent.
+    try { await this.host.storeMessage({ linkId: record.linkId, id: `peer_${record.createdAt}_refused`, text: `Could not receive ${record.amount.toLocaleString()} sats: ${reason}`, sender: "peer", timestamp: record.createdAt, via: "datalink" }); } catch { /* the refusal already went to the contact */ }
   }
 
   async onPaymentResult(linkId: string, result: PaymentResult): Promise<void> {
@@ -1031,6 +1068,16 @@ export class PaymentDesk {
     await this.host.storeMessage({linkId:review.linkId,id:`me_${review.createdAt}`,text:`${formatPaymentAmount(review.amount,review.decimals)} ${review.asset}`,sender:'me',timestamp:review.createdAt,via:'datalink',paymentId:review.id});
     if(link.supportsUsdtPayments&&review.state!=='failed')await this.sendTo(link, {id:review.id,timestamp:review.createdAt,requestId:review.requestId,amount:{value:String(review.amount),asset:unit},endpoint:[ENDPOINT.usdt,JSON.stringify({txid:review.txid})]});
   }
+  /**
+   * One payment pays one request: a receipt for a request that already has one, under another payment id,
+   * is not another payment. Nothing is stored or shown for it; a paid request is answered again.
+   */
+  private repeatedReceipt(link:PaymentLink|null|undefined,request:StoredPayment,id:string):boolean {
+    let repeated=false;
+    for(const p of this.payments.values())if(p.id!==id && p.kind==="payment" && p.direction==="in" && p.requestId===request.id && p.linkId===request.linkId && p.state!=="failed"){repeated=true;break;}
+    if(repeated && request.state==="settled")link?.sendPaymentResult({id:request.id,ok:true});
+    return repeated;
+  }
   private async receiveUsdt(linkId:string,payment:Payment) {
     const request=payment.requestId?this.payments.get(payment.requestId):undefined;
     if(!this.host.getLink(linkId)?.supportsUsdtPayments||request?.target?.method!=='usdt'||request.linkId!==linkId||request.direction!=='out'||request.kind!=='request'||payment.amount.asset!==request.unit||payment.amount.value!==String(request.amount))return;
@@ -1038,6 +1085,7 @@ export class PaymentDesk {
     if(existing && (existing.direction!=='in'||existing.linkId!==linkId||existing.requestId!==request.id))return;
     let txid:string;try{txid=JSON.parse(payment.endpoint[1]).txid;}catch{return;}
     if(typeof txid!=='string'||!/^0x[a-fA-F0-9]{64}$/.test(txid)||existing?.state==='settled')return;
+    if(this.repeatedReceipt(this.host.getLink(linkId),request,payment.id))return;
     // One transaction pays one request, however its hash is spelled.
     txid=txid.toLowerCase();
     if([...this.payments.values()].some(p=>p.txid?.toLowerCase()===txid&&(p.linkId!==linkId||(p.kind==='request'?p.id!==request.id:p.requestId!==request.id))))return;
@@ -1102,8 +1150,7 @@ export class PaymentDesk {
     let txid:string;try {txid=JSON.parse(payment.endpoint[1]).txid;}catch{return;}
     if([...this.payments.values()].some(p=>p.txid===txid && (p.linkId!==linkId || (p.kind==="request" ? p.id!==request.id : p.requestId!==request.id))))return;
     if(typeof txid!=="string" || !/^[a-f0-9]{64}$/.test(txid) || existing?.state==="settled")return;
-    // One receipt waits per request: the address is what pays it (the indexer finds the money without one), so more under fresh ids add nothing but calls to our server.
-    if(!existing && [...this.payments.values()].some(p=>p.kind==="payment" && p.direction==="in" && p.requestId===request.id && p.state==="pending"))return;
+    if(this.repeatedReceipt(link,request,payment.id))return;
     await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid});
     await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on Ark — checking provider`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
     await this.reconcileArkReceipts();
@@ -1156,6 +1203,7 @@ export class PaymentDesk {
     const existing=this.payments.get(payment.id);
     if(existing && (existing.linkId!==linkId || existing.direction!=="in" || existing.requestId!==request.id))return;
     if(existing || parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
+    if(this.repeatedReceipt(link,request,payment.id))return;
     await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:request.state==="settled"?"settled":"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid:request.txid});
     await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on Bark${request.state==="settled"?"":" — checking wallet"}`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
     await this.reconcileBarkReceipts();
@@ -1213,6 +1261,7 @@ export class PaymentDesk {
     if(existing || parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
     let hint:unknown;try {hint=JSON.parse(payment.endpoint[1]).txid;}catch{return;}
     if(typeof hint!=="string" || !/^[0-9a-f]{64}$/.test(hint))return;
+    if(this.repeatedReceipt(link,request,payment.id))return;
     const settled=request.state==="settled";
     await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:settled?"settled":"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid:settled?request.txid:hint});
     await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on-chain${settled?"":" — waiting for a confirmation"}`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
@@ -1377,6 +1426,7 @@ export class PaymentDesk {
     const existing=this.payments.get(payment.id);
     if(existing && (existing.linkId!==linkId || existing.direction!=="in" || existing.requestId!==request.id))return;
     if(existing || parseSats(payment.amount.value,payment.amount.asset)!==request.amount)return;
+    if(this.repeatedReceipt(link,request,payment.id))return;
     const settled=request.state==="settled";
     await this.save({id:payment.id,linkId,kind:"payment",direction:"in",amount:request.amount,unit:UNIT,state:settled?"settled":"pending",createdAt:payment.timestamp,target:request.target,requestId:request.id,txid:request.txid});
     await this.host.storeMessage({linkId,id:`peer_${payment.timestamp}`,text:`${request.amount} ${arkSats(request.target.network)} on Spark${settled?"":" — checking wallet"}`,sender:"peer",timestamp:payment.timestamp,via:"datalink",paymentId:payment.id});
@@ -1476,6 +1526,17 @@ export class PaymentDesk {
     const payment = this.payments.get(id);
     if (payment?.kind !== "request" || payment.direction !== "out" || payment.state !== "pending") return;
     await this.save({ ...payment, state: "failed" });
+  }
+
+  /**
+   * A contact's receipt that still waits for its money, dropped by hand (its chat line was deleted here): the
+   * request it answers can take another receipt. Money that does arrive still pays the request.
+   */
+  async dropReceipt(id: string): Promise<void> {
+    const payment = this.payments.get(id), request = payment?.requestId ? this.payments.get(payment.requestId) : undefined;
+    if (payment?.kind !== "payment" || payment.direction !== "in" || payment.state !== "pending" || !payment.target) return;
+    if (request?.kind !== "request" || request.direction !== "out" || request.linkId !== payment.linkId || request.target?.method !== payment.target.method) return;
+    await this.save({ ...payment, state: "failed", error: "Removed here" });
   }
 
   /**

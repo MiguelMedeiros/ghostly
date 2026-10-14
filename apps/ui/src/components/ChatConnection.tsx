@@ -48,8 +48,11 @@ type LabelState = "status" | "offline" | "issue" | "publication" | "discovery" |
  *
  * It is the header's only connection element: while a first pairing is on its way (`pairing`), the icon is the
  * pairing scene in small, its name says the stage, and the panel says how far it got, with a way to the scene.
+ *
+ * On a phone held upright (`phone`) the header keeps the name and three buttons, this one, a call and ⋮: it is as
+ * large as the two beside it there, a 44px target.
  */
-export function ChatConnection({ peerKey, paired = true, myKey, status, pairing, testIdPrefix = "" }: {
+export function ChatConnection({ peerKey, paired = true, myKey, status, pairing, testIdPrefix = "", phone }: {
   peerKey: string;
   paired?: boolean;
   /** This side's key in the chat. */
@@ -60,6 +63,8 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   pairing?: { progress: PairingProgressState; onShow?(): void };
   /** Before its control's test ids, where a second copy is on screen (a mini-app's header: `app-`), so the chat's stay unique. */
   testIdPrefix?: string;
+  /** A phone's header: as large as the call and ⋮ beside it. */
+  phone?: boolean;
 }) {
   const state = useSyncExternalStore(subscribe, snapshot);
   const link = paired ? state?.links.find(l => l.peerPubKeyZ32 === peerKey) : undefined, pair = link?.pairing;
@@ -193,9 +198,9 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
       data-pairing={stage} data-status={status} data-busy={glyph || connecting || retrying || undefined} aria-label={t("connection.panel.titleWith", { label })} aria-describedby={`${id}-tip`}
       onPointerEnter={e => { if (e.pointerType !== "touch") setTip(true); }} onPointerLeave={() => setTip(false)}
       onFocus={e => { if (e.currentTarget.matches(":focus-visible")) setTip(true); }} onBlur={() => setTip(false)}
-      className={`relative flex cursor-pointer list-none items-center justify-center rounded-full p-2 transition-colors max-md:px-2 max-md:py-2.5 hover:bg-surface-hover [&::-webkit-details-marker]:hidden ${focus} ${kind === "failure" ? "text-danger" : kind === "offline" ? "text-text-muted hover:text-accent" : "text-text-secondary hover:text-accent"}`}>
-      {glyph ? <PairingGlyph stage={stage!} direction={direction} size={18} /> : <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={18} weight={2} />}
-      {!glyph && (dots[kind] || retrying) && <span aria-hidden="true" data-testid="connection-dot" className={`pointer-events-none absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-panel-header max-md:end-1.5 max-md:top-1.5 ${dots[kind] ?? "bg-text-muted"} ${connecting || retrying ? "motion-safe:animate-pulse" : ""}`} />}
+      className={`relative flex cursor-pointer list-none items-center justify-center rounded-full transition-colors ${phone ? "h-11 w-11" : "p-2 max-md:px-2 max-md:py-2.5"} hover:bg-surface-hover [&::-webkit-details-marker]:hidden ${focus} ${kind === "failure" ? "text-danger" : kind === "offline" ? "text-text-muted hover:text-accent" : "text-text-secondary hover:text-accent"}`}>
+      {glyph ? <PairingGlyph stage={stage!} direction={direction} size={phone ? 20 : 18} /> : <ConnectionIcon kind={iconKind} transport={liveOn} holding={holding} size={phone ? 20 : 18} weight={2} />}
+      {!glyph && (dots[kind] || retrying) && <span aria-hidden="true" data-testid="connection-dot" className={`pointer-events-none absolute end-1 top-1 h-2 w-2 rounded-full ring-2 ring-panel-header ${phone ? "end-2 top-2" : "max-md:end-1.5 max-md:top-1.5"} ${dots[kind] ?? "bg-text-muted"} ${connecting || retrying ? "motion-safe:animate-pulse" : ""}`} />}
     </summary>
     <div role="dialog" aria-label={t("connection.panel.title")} className="absolute end-0 top-full max-md:fixed max-md:inset-x-2 max-md:top-[calc(3.5rem_+_env(safe-area-inset-top))] max-md:w-auto z-40 mt-2 w-[min(20rem,calc(100vw-1rem))] max-h-[70dvh] overflow-y-auto rounded-xl border border-border bg-panel-header p-3 text-xs leading-5 text-text-muted shadow-xl">
       <div className="flex items-center gap-2 px-1 font-medium text-text-primary" data-testid="connection-state">

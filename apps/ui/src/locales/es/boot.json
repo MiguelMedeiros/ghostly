@@ -1,6 +1,10 @@
 {
   "copied": "Copiado",
   "copy": "Copiar detalles",
+  "lockdown": "Parece que el Modo de Aislamiento está activado, y apaga lo que Ghostly necesita. Desactívalo para este sitio y recarga.",
+  "lockdownHow": "Cómo desactivarlo para este sitio",
+  "lockdownOtherBrowser": "Otros navegadores en iPhone o iPad: Ajustes › Privacidad y seguridad › Modo de Aislamiento › Configurar navegación web, y desactívalo para ese navegador.",
+  "lockdownSafari": "Safari: toca aA en la barra de direcciones, luego Ajustes del sitio web, y desactiva el Modo de Aislamiento (en un Mac: Safari › Ajustes de este sitio web).",
   "missingCrypto": "Web Crypto está desactivado. Solo funciona en una dirección segura (https).",
   "missingIndexedDB": "IndexedDB está desactivado o bloqueado, así que no se pueden guardar chats ni claves.",
   "missingLocks": "Falta Web Locks, así que Ghostly no puede asegurarse de ejecutarse una sola vez.",

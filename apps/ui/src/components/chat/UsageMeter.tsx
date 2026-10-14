@@ -72,22 +72,26 @@ export function UsageDetails({ entry, now }: { entry: UsageEntry; now: number })
   const ago = agoIn(language);
   // "18:00 · in 3 h": the time, and how long until then.
   const when = (at: number) => `${resetTime(at, now, language)} · ${untilIn(language)(at, now)}`;
-  const rows: [string, ReactNode, string][] = [
+  // A reset that has passed is no time to come: "reset 1 d ago", muted, as what was left before it says nothing now.
+  const past = (at: number | undefined): at is number => at !== undefined && at <= now;
+  const wasReset = (at: number) => t("cards.usage.wasReset", { ago: ago(at / 1000, now / 1000) });
+  type Row = [term: string, value: ReactNode, key: string, past?: boolean];
+  const rows: Row[] = [
     [t("cards.usage.leftLabel"), <><span dir="ltr">{usageLeft(card)}%</span>{card.window && <> · <bdi>{card.window}</bdi></>}</>, "left"],
-    ...(card.used !== undefined && card.limit !== undefined ? [[t("cards.usage.usedLabel"), t("cards.usage.used", { used: card.used, limit: card.limit }), "used"] as [string, ReactNode, string]] : []),
-    ...(card.resetsAt ? [[t("cards.usage.resetsLabel"), when(card.resetsAt), "resets"] as [string, ReactNode, string]] : []),
-    ...(card.account ? [[t("cards.usage.accountLabel"), <bdi>{card.account}</bdi>, "account"] as [string, ReactNode, string]] : []),
-    ...(card.windows ?? []).map((w, i) => [w.window, <>{t("cards.usage.left", { left: w.left })}{w.resetsAt && <> · {t("cards.usage.resets", { time: resetTime(w.resetsAt, now, language) })}</>}</>, `window-${i}`] as [string, ReactNode, string]),
+    ...(card.used !== undefined && card.limit !== undefined ? [[t("cards.usage.usedLabel"), t("cards.usage.used", { used: card.used, limit: card.limit }), "used"] as Row] : []),
+    ...(card.resetsAt ? [[t("cards.usage.resetsLabel"), past(card.resetsAt) ? wasReset(card.resetsAt) : when(card.resetsAt), "resets", past(card.resetsAt)] as Row] : []),
+    ...(card.account ? [[t("cards.usage.accountLabel"), <bdi>{card.account}</bdi>, "account"] as Row] : []),
+    ...(card.windows ?? []).map((w, i) => [w.window, <>{t("cards.usage.left", { left: w.left })}{w.resetsAt && <> · {past(w.resetsAt) ? wasReset(w.resetsAt) : t("cards.usage.resets", { time: resetTime(w.resetsAt, now, language) })}</>}</>, `window-${i}`, past(w.resetsAt)] as Row),
     [t("cards.usage.updatedLabel"), ago(usageReadAt(entry) / 1000, now / 1000), "updated"],
   ];
   return (
     <div data-testid="usage-details" data-level={level} className="flex flex-col gap-1.5 text-xs leading-snug">
       {level === "stale" && <p data-testid="usage-details-stale" className="m-0 text-text-muted">{t("cards.usage.staleHint")}</p>}
       <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-        {rows.map(([term, value, key]) => (
-          <div key={key} data-testid={`usage-details-${key}`} className="contents">
+        {rows.map(([term, value, key, old]) => (
+          <div key={key} data-testid={`usage-details-${key}`} data-past={old ? "" : undefined} className="contents">
             <dt className="text-text-muted"><bdi>{term}</bdi></dt>
-            <dd className="m-0 min-w-0 text-text-primary [overflow-wrap:anywhere]">{value}</dd>
+            <dd className={`m-0 min-w-0 [overflow-wrap:anywhere] ${old ? "text-text-muted" : "text-text-primary"}`}>{value}</dd>
           </div>
         ))}
       </dl>

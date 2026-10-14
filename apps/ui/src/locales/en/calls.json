@@ -7,6 +7,8 @@
   "cameraOff": "Camera off",
   "connected": "Connected",
   "connecting": "Connecting...",
+  "contactCannot": "Your contact's app cannot take calls",
+  "contactOutdated": "Your contact needs an updated Ghostly for calls",
   "decline": "Decline",
   "devices": {
     "back": "{{name}} is back",
@@ -37,6 +39,16 @@
   "reconnecting": "Reconnecting...",
   "rejected": "Call rejected",
   "selfView": "Drag to move, pull a corner to resize, double-click to reset",
+  "share": {
+    "blocked": "Screen sharing is blocked",
+    "blockedNext": "Allow screen recording for this app in your system's privacy settings.",
+    "contactCannot": "Your contact's app cannot show a screen in this call",
+    "failed": "Could not share the screen",
+    "failedNext": "Try again.",
+    "noScreen": "There is no screen to share",
+    "notHere": "Screen sharing is not available here",
+    "notOnLinux": "Screen sharing is not available on Linux yet"
+  },
   "shareScreen": "Share screen",
   "sharing": {
     "both": "You and {{name}} are sharing your screens",
@@ -66,6 +78,7 @@
   },
   "turnCameraOff": "Turn camera off",
   "turnCameraOn": "Turn camera on",
+  "unavailableHere": "Calls are not available in this app",
   "unmute": "Unmute",
   "video": "Video call",
   "wakeGaveUp": "{{name}} did not open Ghostly.",
@@ -74,5 +87,6 @@
     "chat": "Back to the chat",
     "full": "Back to full screen",
     "small": "Keep the call in a small window"
-  }
+  },
+  "you": "You"
 }

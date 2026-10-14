@@ -7,6 +7,8 @@
   "cameraOff": "Câmera desligada",
   "connected": "Conectado",
   "connecting": "Conectando...",
+  "contactCannot": "O app do seu contato não recebe chamadas",
+  "contactOutdated": "Seu contato precisa atualizar o Ghostly para chamadas",
   "decline": "Recusar",
   "devices": {
     "back": "{{name}} voltou",
@@ -37,6 +39,16 @@
   "reconnecting": "Reconectando...",
   "rejected": "Chamada rejeitada",
   "selfView": "Arraste para mover, puxe um canto para redimensionar, clique duas vezes para restaurar",
+  "share": {
+    "blocked": "O compartilhamento de tela está bloqueado",
+    "blockedNext": "Permita a gravação de tela para este app nos ajustes de privacidade do sistema.",
+    "contactCannot": "O app do seu contato não consegue mostrar uma tela nesta chamada",
+    "failed": "Não foi possível compartilhar a tela",
+    "failedNext": "Tente de novo.",
+    "noScreen": "Não há tela para compartilhar",
+    "notHere": "Compartilhar a tela não está disponível aqui",
+    "notOnLinux": "Compartilhar a tela ainda não está disponível no Linux"
+  },
   "shareScreen": "Compartilhar tela",
   "sharing": {
     "both": "Você e {{name}} estão compartilhando as telas",
@@ -66,6 +78,7 @@
   },
   "turnCameraOff": "Desligar câmera",
   "turnCameraOn": "Ligar câmera",
+  "unavailableHere": "Chamadas não estão disponíveis neste app",
   "unmute": "Ativar som",
   "video": "Chamada de vídeo",
   "wakeGaveUp": "{{name}} não abriu o Ghostly.",
@@ -74,5 +87,6 @@
     "chat": "Voltar para a conversa",
     "full": "Voltar para a tela cheia",
     "small": "Manter a chamada em uma janela pequena"
-  }
+  },
+  "you": "Você"
 }

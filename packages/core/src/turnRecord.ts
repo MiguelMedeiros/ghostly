@@ -5,7 +5,7 @@ import { bytesEqual, concatBytes, fromBase64Url, randomBytes, toBase64Url, utf8E
 import { decodeDnsAnswers, decodeTxtPacket, encodeTxtPacket } from "./dns";
 import { identityFromSeed, verify, type Identity } from "./identity";
 import { openRelayPayload, signRelayPayload } from "./pkarr";
-import { stripHidden } from "./text";
+import { hasVisible, stripHidden } from "./text";
 
 /*
  * The turn record (WISP 06 § The turn, § Record): one Pkarr packet under a key only holders of the device-set secret
@@ -107,9 +107,52 @@ export interface TurnFields {
   active: number;
   /** By slot, four entries; null for a slot nobody holds. */
   slots: (TurnSlot | null)[];
-  /** 8 random bytes, made by the active device each time its engine starts. */
+  /** 8 bytes, made anew for every record: random, and in an ordinary record the verifier mark (`turnInstance`). */
   instance: Uint8Array;
   release?: TurnRelease;
+}
+
+/*
+ * The verifier mark (WISP 06 § Record, § Forced takeover). A standby that keeps a frozen copy checks a forced
+ * takeover's lock password against the password proof verifier it kept, and the lock password may have changed on the
+ * active device since. So the active device says in every record it writes which verifier the profile has now, in the
+ * record's `instance`:
+ *
+ *   instance = random(3) || 0x67 0x76 || mark(3)
+ *   mark     = SHA-256("ghostly-turn-verifier/1" || 0x0a || setup || 0x0a || record)[0..3]
+ *
+ * over the verifier's two fields as stored (base64url text), both empty for a profile that has none. The record's
+ * version and layout are unchanged: a reader from before takes the 8 bytes as the random value they were, so every
+ * device of a set goes on reading the turn whichever app wrote it. An `instance` from such an app carries the two
+ * marker bytes by chance once in 65,536 records; a reader then takes it as stated and refuses (the safe side). The
+ * random bytes come first, so of two records at one sequence the lower `instance` is still a matter of chance.
+ */
+const VERIFIER_DOMAIN = "ghostly-turn-verifier/1";
+const VERIFIER_TAG = Uint8Array.of(0x67, 0x76);
+const VERIFIER_TAG_AT = 3, VERIFIER_MARK_AT = 5;
+
+/** The mark of a verifier (its `setup` and `record` as stored), or of a profile that has none (null). 3 bytes. */
+export function turnVerifierMark(verifier: { setup: string; record: string } | null | undefined): Uint8Array {
+  return sha256(utf8Encode(`${VERIFIER_DOMAIN}\n${verifier?.setup ?? ""}\n${verifier?.record ?? ""}`)).slice(0, 3);
+}
+
+/**
+ * A record's `instance` that states `mark` (`turnVerifierMark`), or, with no mark, one that states nothing: 8 random
+ * bytes that never carry the marker (a tombstone, a record written where the profile's verifier is not at hand).
+ */
+export function turnInstance(mark?: Uint8Array | null, random: (length: number) => Uint8Array = randomBytes): Uint8Array {
+  if (mark && mark.length !== 3) throw new Error("A verifier mark is 3 bytes");
+  const instance = random(8).slice(0, 8);
+  if (instance.length !== 8) throw new Error("An instance is 8 bytes");
+  if (mark) { instance.set(VERIFIER_TAG, VERIFIER_TAG_AT); instance.set(mark, VERIFIER_MARK_AT); }
+  else if (turnStatedVerifier(instance)) instance[VERIFIER_TAG_AT] ^= 0xff;
+  return instance;
+}
+
+/** The verifier mark an `instance` states, or null when it states none (a record written by an app from before). */
+export function turnStatedVerifier(instance: Uint8Array): Uint8Array | null {
+  if (instance.length !== 8 || instance[VERIFIER_TAG_AT] !== VERIFIER_TAG[0] || instance[VERIFIER_TAG_AT + 1] !== VERIFIER_TAG[1]) return null;
+  return instance.slice(VERIFIER_MARK_AT);
 }
 
 /** A record as read: its fields, its sequence number, and the body's bytes. */
@@ -149,7 +192,8 @@ const isZero = (bytes: Uint8Array): boolean => bytes.every((b) => b === 0);
  * A device's name as its slot holds it: UTF-8, cut at a character boundary to 16 bytes, and with no NUL (the padding).
  * A character is what a person sees as one (a grapheme), so a cut never leaves half an emoji or a lone joiner.
  * A name is display text a device chooses for itself and every device of the set shows: it is cleaned as a nickname is
- * (`sanitizeDisplayText`: no control, invisible or direction-changing character) and trimmed, made and read alike.
+ * (`sanitizeDisplayText`: no control, invisible or direction-changing character, and empty when nothing of it shows)
+ * and trimmed, made and read alike.
  */
 export function turnName(name: string): string {
   const clean = stripHidden(name).trim();
@@ -163,7 +207,8 @@ export function turnName(name: string): string {
     out += character;
     length += size;
   }
-  return out.trimEnd();
+  // A name with nothing to see in it is no name: whoever shows it falls back, as for an empty one.
+  return hasVisible(out) ? out.trimEnd() : "";
 }
 
 function u32(value: number): Uint8Array {

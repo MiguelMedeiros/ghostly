@@ -141,6 +141,9 @@ const REMOTE_PICTURE = `
 const callState = (p: DesktopPerson) => p.app.attribute('[data-testid="call-status"]', "data-state");
 
 /** Whether the call shows the other side's picture at all (a voice call hides the element). */
+/** Whether an avatar of the call window wears the ring of who is speaking: "true", "false", or null when it reads no level. */
+const SPEAKING = `return document.querySelector('[data-testid="' + arguments[0] + '"]')?.getAttribute("data-speaking") ?? null;`;
+
 const REMOTE_SHOWN = `
   const video = document.querySelector('[data-testid="remote-video"]');
   return !!video && !video.classList.contains("hidden");`;
@@ -174,7 +177,7 @@ async function until<T>(read: () => Promise<T>, done: (value: T) => boolean, tim
 }
 
 test("two Desktop apps on a Mac pair, call with media both ways, share a screen, share an app, and say why not on the DHT", {
-  tag: ["@client:desktop", "@feature:calls.paired", "@feature:calls.video", "@feature:calls.audio", "@feature:calls.screen-share", "@feature:calls.upgrade", "@feature:calls.paired.negotiate", "@feature:calls.paired.live-only",
+  tag: ["@client:desktop", "@feature:calls.paired", "@feature:calls.video", "@feature:calls.audio", "@feature:calls.speaking", "@feature:calls.screen-share", "@feature:calls.upgrade", "@feature:calls.paired.negotiate", "@feature:calls.paired.live-only",
     "@feature:services.add", "@feature:services.share", "@feature:services.open", "@feature:services.paired.negotiate", "@feature:services.desktop-viewer"],
 }, async ({}, testInfo) => {
   test.skip(process.platform !== "darwin", "macOS only: the system WKWebView");
@@ -273,6 +276,18 @@ test("two Desktop apps on a Mac pair, call with media both ways, share a screen,
       // Connected, over the video section a voice call negotiates empty: the button is on.
       await expect.poll(() => alice.app.execute(SHARE_BUTTON), { timeout: 60_000, message: "A can share in a voice call" }).toEqual({ disabled: false, title: "Share screen" });
       expect(await bob.app.execute<boolean>(REMOTE_SHOWN), "a voice call shows no picture").toBe(false);
+      // Who is speaking: WKWebView measures each stream itself (an analyser on it). The tone goes both ways, so on
+      // both sides the contact's avatar and one's own are ringed; muted, A's ring is gone on both sides.
+      for (const p of [alice, bob]) {
+        for (const avatar of ["call-peer-avatar", "call-self-avatar"]) {
+          await expect.poll(() => p.app.execute<string | null>(SPEAKING, avatar), { timeout: 30_000, message: `${p.name}'s ${avatar} is ringed` }).toBe("true");
+        }
+      }
+      await alice.press("Mute");
+      await expect.poll(() => alice.app.execute<string | null>(SPEAKING, "call-self-avatar"), { timeout: 30_000, message: "A's own ring is off while muted" }).toBeNull();
+      await expect.poll(() => bob.app.execute<string | null>(SPEAKING, "call-peer-avatar"), { timeout: 30_000, message: "B sees A fall silent" }).toBe("false");
+      await alice.press("Unmute");
+      await expect.poll(() => bob.app.execute<string | null>(SPEAKING, "call-peer-avatar"), { timeout: 30_000, message: "B sees A speak again" }).toBe("true");
 
       await alice.app.click('[data-testid="share-screen"]');
       await expect.poll(() => alice.app.execute(SHARE_BUTTON), { timeout: 30_000 }).toEqual({ disabled: false, title: "Stop sharing" });

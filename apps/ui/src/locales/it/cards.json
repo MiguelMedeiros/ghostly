@@ -45,7 +45,7 @@
       "status": "Stato"
     },
     "hideOlder": "Nascondi le vecchie",
-    "info": "I bot pubblicano schede attività in chat e gruppi e le tengono aggiornate. Questa bacheca raccoglie quelle di tutte le chat. Le attività completate e fermate restano un giorno; Fermate riunisce quelle fallite e quelle annullate. Una scheda mostra soltanto l'attività: lo stato lo cambia il suo bot. Apri una scheda per vederla nella sua chat.",
+    "info": "Le schede attività dei bot, da tutte le chat. Le attività completate e fermate restano un giorno. Una scheda mostra soltanto l'attività: lo stato lo cambia il suo bot.",
     "me": "Tu",
     "noMatch": "Nessuna attività corrisponde",
     "none": "Nessuna",
@@ -151,7 +151,8 @@
     "title": "Utilizzo",
     "updatedLabel": "Aggiornato",
     "used": "{{used}} di {{limit}} usati",
-    "usedLabel": "Usato"
+    "usedLabel": "Usato",
+    "wasReset": "rinnovata {{ago}}"
   },
   "working": {
     "label": "Al lavoro",

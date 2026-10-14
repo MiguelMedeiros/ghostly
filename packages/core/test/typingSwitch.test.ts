@@ -26,7 +26,7 @@ function startApp(name: string, side: Side, contact: { side: Side; name: string 
     params: side.params,
     rtcAvailable: true,
     pairing: { credentials: { seedB64: side.seedB64, peerKey: identityFromSeedB64(contact.side.seedB64).pubKeyZ32 }, pinPeer: async () => {}, trustOnFirstUse: true },
-    native: { peerDescriptors: { "iroh/1": { id: `${contact.name}:iroh/1`, relay: "https://relay.test./", addresses: [] } }, peerTransports: ["webrtc/1", "iroh/1"], peerFallback: true, automatic: true },
+    native: { peerDescriptors: { "iroh/1": { id: native.key("iroh/1", contact.name), relay: "https://relay.test./", addresses: [] } }, peerTransports: ["webrtc/1", "iroh/1"], peerFallback: true, automatic: true },
     transport: pkarr.transport(),
     pollIntervals: RELAY_POLL_INTERVALS,
     autoConnect: true,

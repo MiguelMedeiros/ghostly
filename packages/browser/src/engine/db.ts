@@ -25,6 +25,9 @@ function newestMessages(index: IDBIndex, query: IDBKeyRange, count: number): Pro
   });
 }
 
+/** A write that waits for no disk sync of its own (in a browser, the engine's default already; on Node, the CLI's store). */
+const RELAXED: IDBTransactionOptions = { durability: "relaxed" };
+
 /**
  * Durable local state of the browser peer. Identity seeds live here the same
  * way Desktop keeps them in its WebView storage: local to this profile, never
@@ -42,8 +45,9 @@ export const db = {
       tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Link storage failed"));
     });
   },
-  async patchLink(linkId: string, patch: Partial<StoredLink>): Promise<void> {
-    const tx = (await openDb()).transaction(STORES.links, "readwrite");
+  /** `relaxed`: for what a power cut may cost (a round trip, a note made again later), no disk sync of its own. */
+  async patchLink(linkId: string, patch: Partial<StoredLink>, relaxed = false): Promise<void> {
+    const tx = (await openDb()).transaction(STORES.links, "readwrite", relaxed ? RELAXED : undefined);
     const links = tx.objectStore(STORES.links);
     const request = links.get(linkId);
     request.onsuccess = () => { if (!request.result) { tx.abort(); return; } links.put({ ...request.result, ...patch, id: linkId }); };
@@ -210,7 +214,9 @@ export const db = {
     await wrap((await store(STORES.messages, "readwrite")).put(message));
   },
   async updateDelivery(linkId: string, id: string, delivery: NonNullable<StoredMessage["delivery"]>, deliveryError?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>): Promise<void> {
-    const tx = (await openDb()).transaction(STORES.messages, "readwrite");
+    // `sent` and `delivered` are relaxed (written, with no disk sync of their own): a mark lost to a power cut is made
+    // again, the outbox sends what is not `delivered` once more under the same id and the receipt comes back.
+    const tx = (await openDb()).transaction(STORES.messages, "readwrite", delivery === "sent" || delivery === "delivered" ? RELAXED : undefined);
     const messages = tx.objectStore(STORES.messages);
     const request = messages.get([linkId, id]);
     request.onsuccess = () => {
@@ -218,6 +224,11 @@ export const db = {
       // Receipts are terminal; timeout/disconnect/send races cannot undo them.
       // Do not resurrect deleted messages or attach new states to old history.
       if (!message?.delivery || message.delivery === "delivered") return;
+      // What the row already says is not written again (a text going out is marked `sending` as it is stored, then
+      // again as it goes): each write is the whole row, and on Node a disk sync.
+      const same = message.delivery === delivery && message.deliveryError === deliveryError
+        && Object.entries(extra ?? {}).every(([key, value]) => message[key as keyof StoredMessage] === value);
+      if (same) return;
       messages.put({ ...message, ...extra, delivery, deliveryError });
     };
     await new Promise<void>((resolve, reject) => {
@@ -228,10 +239,11 @@ export const db = {
   /**
    * Changes one message row in place, in one transaction: `change` sees the row as stored and gives the fields to
    * set (`null`: leave it). A row that is not there is not made. Used for what the delivery states do not carry
-   * (the message's details record), on rows in any state.
+   * (the message's details record), on rows in any state. `relaxed`: for what can be made again or is only a note
+   * (a receipt's mark, the details record), written with no disk sync of its own.
    */
-  async patchMessage(linkId: string, id: string, change: (message: StoredMessage) => Partial<StoredMessage> | null): Promise<StoredMessage | undefined> {
-    const tx = (await openDb()).transaction(STORES.messages, "readwrite");
+  async patchMessage(linkId: string, id: string, change: (message: StoredMessage) => Partial<StoredMessage> | null, relaxed = false): Promise<StoredMessage | undefined> {
+    const tx = (await openDb()).transaction(STORES.messages, "readwrite", relaxed ? RELAXED : undefined);
     const messages = tx.objectStore(STORES.messages);
     const request = messages.get([linkId, id]);
     let result: StoredMessage | undefined;
@@ -248,6 +260,29 @@ export const db = {
       tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Message storage failed"));
     });
     return result;
+  },
+  /**
+   * `patchMessage` on these rows of one history, all in one transaction: one disk sync for all of them. Resolves to
+   * the rows changed, in the order of `ids`.
+   */
+  async patchMessages(linkId: string, ids: readonly string[], change: (message: StoredMessage) => Partial<StoredMessage> | null): Promise<StoredMessage[]> {
+    const tx = (await openDb()).transaction(STORES.messages, "readwrite");
+    const messages = tx.objectStore(STORES.messages);
+    const results: (StoredMessage | undefined)[] = [];
+    ids.forEach((id, i) => {
+      const request = messages.get([linkId, id]);
+      request.onsuccess = () => {
+        const message = request.result as StoredMessage | undefined;
+        const patch = message && change(message);
+        if (!patch) return;
+        messages.put((results[i] = { ...message, ...patch }));
+      };
+    });
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Message storage failed"));
+    });
+    return results.filter((row): row is StoredMessage => !!row);
   },
   async deleteMessage(linkId: string, messageId: string): Promise<void> {
     await wrap((await store(STORES.messages, "readwrite")).delete([linkId, messageId]));

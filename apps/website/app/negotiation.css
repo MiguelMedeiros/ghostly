@@ -105,12 +105,33 @@
    so it fades in; data-leaving fades it out (together a DUR.slow cross-fade). ── */
 .ng-scene {
   display: grid;
+  grid-template-rows: auto 1fr auto;
   gap: 16px;
   animation: ng-fade var(--ng-fade, 0.3s) var(--ease-move) both;
   transition: opacity var(--ng-fade, 0.3s) var(--ease-move);
 }
 .ng-scene[data-leaving] {
   opacity: 0;
+}
+/* The frame: every scenario's finished picture lies unseen in the cell the playing one is drawn in, so the tallest
+   sets the height and the page below never moves. The playing scene fills that height: its stage takes what is
+   left between the phase caption and the sub-caption. */
+.ng-frame {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.ng-frame > .ng-scene {
+  grid-area: 1 / 1;
+}
+.ng-scene[data-sizer] {
+  visibility: hidden;
+  pointer-events: none;
+}
+.ng-scene[data-sizer],
+.ng-scene[data-sizer] *,
+.ng-scene[data-sizer] *::before {
+  animation: none !important;
+  transition: none !important;
 }
 .ng-step {
   margin: 0;
@@ -532,6 +553,8 @@
 @media (max-width: 720px) {
   .ng-stage {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    /* The peers keep their own height; the result card takes the rest of the frame. */
+    grid-template-rows: auto 1fr;
     gap: 10px;
     min-height: 0;
   }

@@ -159,6 +159,65 @@ test("a person on the web calls a headless bot, and the bot calls back: audio bo
   }
 });
 
+/** What the page's call connection has sent so far on each kind of media, and what its video lane was agreed as. */
+async function pageSent(page: Page): Promise<{ audio: number; video: number; lane: string | null }> {
+  return page.evaluate(async () => {
+    const pc = (window as unknown as { __calls: RTCPeerConnection[] }).__calls.at(-1)!;
+    const sent = { audio: 0, video: 0, lane: pc.getTransceivers().find((t) => t.receiver.track.kind === "video")?.currentDirection ?? null };
+    (await pc.getStats()).forEach((s: { type: string; kind: "audio" | "video"; bytesSent: number }) => { if (s.type === "outbound-rtp") sent[s.kind] += s.bytesSent; });
+    return sent;
+  });
+}
+
+test("a person video-calls a headless bot: the bot says it takes no picture, and the page uploads no camera", { tag: ["@feature:headless.calls", "@feature:headless.web-interop", "@feature:calls.paired", "@feature:calls.video"] }, async ({ peer, relay }) => {
+  const url = await relay.listen();
+  const bot = new HeadlessBot();
+  try {
+    await bot.start(url, "Voice bot");
+    await bot.run("call", "auto", "on");
+    const person = await peer("caller");
+    const invite = await bot.run("invite", "create", "--label", "person");
+    await person.page.getByRole("button", { name: "Join chat", exact: true }).first().click();
+    await pasteInvite(person.page, invite.invite as string);
+    await bot.run("chat", "wait", invite.chat as string, "--until", "live", "--timeout", "120");
+    await expect(person.page.getByTestId("call-video")).toBeEnabled({ timeout: 90_000 });
+    // The page's own microphone and camera (Chromium's fake ones); its call connections are kept for their counters.
+    await person.page.evaluate(() => {
+      const w = window as unknown as { __calls: RTCPeerConnection[] };
+      w.__calls = [];
+      const Native = window.RTCPeerConnection;
+      const Kept = function (this: unknown, config?: RTCConfiguration) {
+        const pc = new Native(config);
+        w.__calls.push(pc);
+        return pc;
+      } as unknown as typeof RTCPeerConnection;
+      Kept.prototype = Native.prototype;
+      window.RTCPeerConnection = Kept;
+    });
+
+    await person.page.getByTestId("call-video").click();
+    expect(await bot.event((e) => e.type === "call.incoming")).toMatchObject({ chat: invite.chat, video: true, auto: true });
+    await bot.event((e) => e.type === "call.connected");
+    await expect(person.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+
+    // The voice goes; the camera, on since the call was placed, does not. Before `vr`, some 30 kB of it went each second.
+    await expect.poll(async () => (await pageSent(person.page)).audio, { timeout: 20_000 }).toBeGreaterThan(5_000);
+    await person.page.waitForTimeout(5_000);
+    expect(await pageSent(person.page)).toMatchObject({ video: 0, lane: "inactive" });
+    // The person still sees their own picture.
+    await expect(person.page.getByTestId("call-self-view")).toBeVisible();
+    // And can turn that camera off without hanging up.
+    await person.page.getByTestId("call-camera").click();
+    await expect(person.page.getByTestId("call-self-view")).toBeHidden();
+    await expect(person.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+
+    await person.page.getByTestId("call-hang-up").click();
+    expect(await bot.event((e) => e.type === "call.ended")).toMatchObject({ chat: invite.chat, reason: "remote-hangup" });
+  } finally {
+    await bot.stop();
+  }
+});
+
 test("the bot's first answer is refused as libdatachannel refuses one: the bot offers again and the page starts over", { tag: ["@feature:headless.calls", "@feature:headless.web-interop", "@feature:calls.paired"] }, async ({ peer, relay }) => {
   const url = await relay.listen();
   // The bot refuses the first answer it gets, as libdatachannel 0.24.5 can (packages/cli/src/calls/manager.ts, `redial`).

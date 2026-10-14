@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { servicesPlatform } from "../../lib/platform";
@@ -83,6 +83,31 @@ describe("a voice message that will not play as it is", () => {
     expect(logged.some((line) => line.startsWith("[voice] play(): NotSupportedError"))).toBe(true);
     expect(logged.some((line) => line.startsWith("[voice] decode"))).toBe(true);
     expect(screen.getByTestId("voice-bubble")).toHaveAttribute("data-state", "idle");
+  });
+
+  it("saves one this device has no player for through the save dialog, not the link the desktop WebView cancels", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const saveFile = vi.spyOn(servicesPlatform!, "saveFile").mockResolvedValue(true);
+    audio.canPlay = () => "";
+    decoder.decodes = false;
+    const message = voice({}, "audio/mp4");
+    show(message);
+    await clickPlay();
+    const save = screen.getByTestId("voice-save");
+    // The click's own download is stopped: on Linux Desktop it is cancelled without a word.
+    expect(fireEvent.click(save)).toBe(false);
+    await waitFor(() => expect(saveFile).toHaveBeenCalledWith(message.file!.id, "Voice message.m4a"));
+  });
+
+  it("says why when the save dialog could not write the voice message", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(servicesPlatform!, "saveFile").mockRejectedValue(new Error("No space left on device (os error 28)"));
+    audio.canPlay = () => "";
+    decoder.decodes = false;
+    show(voice({}, "audio/mp4"));
+    await clickPlay();
+    fireEvent.click(screen.getByTestId("voice-save"));
+    await waitFor(() => expect(screen.getByTestId("voice-problem")).toHaveTextContent("Couldn't save the file there. Try again and choose another folder. Save"));
   });
 
   it("does not try the decoder twice: a WAV that fails too is a plain failure", async () => {

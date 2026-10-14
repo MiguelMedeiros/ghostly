@@ -71,6 +71,51 @@ it("hosts every endpoint, each under its own number, in one process", async () =
   expect(alive(runtime.child.pid!)).toBe(true);
 });
 
+it("carries a binary message both ways, as base64 on the line", async () => {
+  const runtime = sidecar();
+  runtime.send({ type: "start", endpoint: 1, seedB64: seed(1) });
+  runtime.send({ type: "start", endpoint: 2, seedB64: seed(2) });
+  const b = await runtime.next({ type: "started", endpoint: 2 });
+  await runtime.next({ type: "started", endpoint: 1 });
+  runtime.send({ type: "connect", endpoint: 1, descriptor: b.descriptor });
+  const result = await runtime.next({ type: "result", endpoint: 1 });
+  const incoming = await runtime.next({ type: "open", endpoint: 2, incoming: true });
+
+  const bytes = Buffer.from([0x04, 0, 255, 10]).toString("base64");
+  runtime.send({ type: "send", endpoint: 1, id: result.id, bytes });
+  const frame = await runtime.next({ type: "frame", endpoint: 2 });
+  expect(frame).toEqual({ type: "frame", endpoint: 2, id: incoming.id, bytes });
+  runtime.send({ type: "send", endpoint: 2, id: incoming.id, text: "and text" });
+  expect(await runtime.next({ type: "frame", endpoint: 1 })).toEqual({ type: "frame", endpoint: 1, id: result.id, text: "and text" });
+  expect(alive(runtime.child.pid!)).toBe(true);
+});
+
+it("answers each send once its socket has room, and a refused one with an error that names it", async () => {
+  // A link slower than the app sends: each frame waits 300 ms in the socket's buffer.
+  const runtime = sidecar({ FAKE_ENDPOINT_DELAY_MS: "300" });
+  runtime.send({ type: "start", endpoint: 1, seedB64: seed(1) });
+  runtime.send({ type: "start", endpoint: 2, seedB64: seed(2) });
+  const b = await runtime.next({ type: "started", endpoint: 2 });
+  await runtime.next({ type: "started", endpoint: 1 });
+  runtime.send({ type: "connect", endpoint: 1, descriptor: b.descriptor });
+  const result = await runtime.next({ type: "result", endpoint: 1 });
+  await runtime.next({ type: "open", endpoint: 2, incoming: true });
+
+  const frame = "x".repeat(60 * 1024);
+  runtime.send({ type: "send", endpoint: 1, id: result.id, seq: 1, text: frame });
+  runtime.send({ type: "send", endpoint: 1, id: result.id, seq: 2, text: frame });
+  // The first fits in the socket's room and is answered at once; the second waits until the socket drained.
+  await runtime.next({ type: "sent", endpoint: 1, id: result.id, seq: 1 });
+  expect(runtime.events.some(e => e.type === "frame")).toBe(false);
+  await runtime.next({ type: "sent", endpoint: 1, id: result.id, seq: 2 });
+  expect(runtime.events.filter(e => e.type === "frame" && e.endpoint === 2)).toHaveLength(2);
+
+  // A send the runtime cannot make is answered, under its number, not dropped unseen.
+  runtime.send({ type: "send", endpoint: 1, id: 999, seq: 3, text: "nowhere" });
+  expect(await runtime.next({ type: "error", endpoint: 1, seq: 3 })).toMatchObject({ command: "send", id: 999 });
+  expect(alive(runtime.child.pid!)).toBe(true);
+}, 15_000);
+
 it("refuses a ninth endpoint and an invalid seed without stopping the others", async () => {
   const runtime = sidecar();
   for (let n = 1; n <= 8; n++) runtime.send({ type: "start", endpoint: n, seedB64: seed(n) });

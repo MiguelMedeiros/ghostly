@@ -8,7 +8,7 @@ import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { createPortal } from "react-dom";
 import { ChatHoldDialog, ChatHoldLine } from "../components/ChatHoldDialog";
 import { ContactIdentitiesPanel } from "../components/identities/ContactIdentitiesPanel";
-import { FaceCorner, IdentityStack } from "../components/identities/ContactMarks";
+import { FaceCorner, IdentityMenuItem, IdentityStack } from "../components/identities/ContactMarks";
 import { shownContactName, useChosenProfile, useContactFace } from "../components/identities/contactFace";
 import { IdentityShareLine } from "../components/identities/IdentityShareLine";
 import { ChatServicesDialog } from "../components/ChatServicesDialog";
@@ -51,7 +51,7 @@ import { IncomingCallNotification } from "../components/IncomingCallNotification
 import { useIsLocked, useRingOnLockScreen } from "../contexts/LockScreenContext";
 import { handOverCall, takeHandedCall } from "../lib/lockedRing";
 import { contactStatus } from "../lib/contactStatus";
-import { callLineId } from "../lib/callLines";
+import { callLineId, callsBlockedText } from "../lib/callLines";
 import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
@@ -76,6 +76,8 @@ import type { ChatParams, CallEventType, ChatMessage } from "../lib/types";
 import type { WalletNetwork } from "../lib/platform";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { MuteMenu, MuteMenuItem } from "../components/ChatMute";
+import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMenu";
+import { setChatFolder } from "../lib/chatFolders";
 import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
 import { useWakeCall } from "../hooks/useWakeCall";
 import { useIncomingCallNotice } from "../hooks/useIncomingCallNotice";
@@ -92,6 +94,8 @@ import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
 import { TasksButton } from "../components/chat/TasksButton";
+import { activeTaskCount, cardEntries } from "../lib/statusCards";
+import { usePhoneHeader } from "../hooks/usePhoneHeader";
 import { UsageButton } from "../components/chat/UsageMeter";
 import { useUsageOf } from "../hooks/useUsage";
 import { WorkingLine } from "../components/chat/WorkingMark";
@@ -105,6 +109,7 @@ import { PinMoveItems, PinMoveNote } from "../components/chat/PinOrder";
 import { usePinMoveNote } from "../hooks/usePinMoveNote";
 import { usePageShown } from "../hooks/usePageShown";
 import { clearChatNotification } from "../lib/notifications";
+import { useWindowAway, windowAway } from "../lib/windowAway";
 import { showChatOnScreen } from "../lib/appBadge";
 import { problemText, type Problem, problemLine } from "../lib/problemText";
 
@@ -243,11 +248,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Out of sight, a ringing call is a system notification too.
   useIncomingCallNotice(callState === "incoming" && callRings(sessionId), sessionId, t("pwa.wakeCall"));
 
-  // A chat on a call is kept loaded by `App` wherever the person goes next,
-  // so the call itself — and the signaling that ends it — survives the trip.
-  useEffect(() => {
-    onCallChange(sessionId, callState !== "idle");
-  }, [onCallChange, sessionId, callState]);
   useEffect(() => () => onCallChange(sessionId, false), [onCallChange, sessionId]);
 
   const incomingHasVideo = (() => {
@@ -261,7 +261,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const deliveryPeer = platform?.getPeer(session?.peerPubKeyB64 ?? "");
   const pairedReady = deliveryPeer?.pairing?.status === "ready";
   // A paired chat calls over its live session (`calls/1`); why it cannot right now, if it cannot.
-  const callsBlocked = paired ? (deliveryPeer?.callsUnavailable === undefined ? t("calls.needLive") : deliveryPeer.callsUnavailable) : null;
+  const callsBlocked = paired ? callsBlockedText(t, deliveryPeer?.callsUnavailable) : null;
   // The one chat (WISP 400): live over layer 1, or not; what cannot go now waits (a clock beside its time) or is held.
   const chatLive = pairedReady && deliveryPeer?.dataLink === "open";
   // A security rejection (a stream authenticated another key than the pinned one) stops the chat on both layers until the person acts.
@@ -420,6 +420,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const presses = useMemo(() => compactPresses(messages, m => m.ref), [messages]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showMute, setShowMute] = useState(false);
+  const [showFolders, setShowFolders] = useState(false);
   const [showTechInfo, setShowTechInfo] = useState(false);
   const labelInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null);
@@ -527,8 +528,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   useEffect(() => {
     if (!visible || !pageShown) return;
     markSessionAsRead(sessionId);
-    clearChatNotification(sessionId);
   }, [visible, pageShown, sessionId, messages.length]);
+  // Its notification goes once the window has the focus too: one on screen behind another app's has just been told of
+  // the message (AttentionFeedback), and taking it back then would take it back before anyone saw it. The window is
+  // asked as it is now (`useWindowAway` runs this again when it comes back): its watch may start after this mounts.
+  const away = useWindowAway();
+  useEffect(() => {
+    if (visible && !windowAway()) clearChatNotification(sessionId);
+  }, [visible, away, sessionId, messages.length]);
   // Nor does the icon count it meanwhile: a message landing here would show on it until the line above ran (appBadge).
   useEffect(() => (visible && pageShown ? showChatOnScreen(sessionId) : undefined), [visible, pageShown, sessionId]);
 
@@ -536,6 +543,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const canWakeForCall = paired && !chatLive && !!chatLink?.peerWakes && !!chatLink.id && !chatStop;
   const placeCall = webrtc.startCall;
   const wakeCall = useWakeCall(chatLink?.id, paired && !callsBlocked, placeCall);
+
+  // A chat on a call is kept loaded by `App` wherever the person goes next,
+  // so the call itself — and the signaling that ends it — survives the trip.
+  // So is one waking its contact for a call: the wait, and the call it places, go on there too.
+  useEffect(() => {
+    onCallChange(sessionId, callState !== "idle" || wakeCall.waking);
+  }, [onCallChange, sessionId, callState, wakeCall.waking]);
 
   // What the contact last said on the session wins over a name read out of an older message.
   const contactNick = profileNick !== undefined ? profileNick : peerNick;
@@ -567,6 +581,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Whether the bot is working (WISP 405 § Showing a card): a line in the header that opens the Tasks panel.
   const working = useWorkingOf(params?.peerPubKeyB64);
   const [tasksOpen, setTasksOpen] = useState(false);
+  // A phone held upright: the header keeps the name, the connection, a voice call and ⋮; the video call, the bot's
+  // Tasks and the contact's identities are rows of the ⋮ menu, and the running tasks are counted on ⋮.
+  // The connection stays in the row: it is the one mark that changes by itself, and a failure has to be seen.
+  const phoneHeader = usePhoneHeader();
+  const tasks = useMemo(() => { const entries = cardEntries(messages); return { any: entries.length > 0, active: activeTaskCount(entries) }; }, [messages]);
   useEffect(() => setTasksOpen(false), [sessionId]);
 
   if (!params) {
@@ -580,6 +599,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const handleDelete = () => {
     if (confirmDelete) {
       deleteSession(params.sessionId);
+      setChatFolder(params.sessionId, undefined);
       // The chat list keeps its own copy: without this it shows the deleted chat until its next refresh.
       window.dispatchEvent(new Event("session-updated"));
       nav.home();
@@ -608,6 +628,20 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Until live: the connection icon tells the pairing; the "connected" moment belongs to the scene.
   const pairingShown = pairing.show && !!pairing.progress && pairing.progress.stage !== "live";
 
+  // The call buttons, in the header and (the video call on a phone) in the ⋮ menu: why they are off, and what they start.
+  const callBlocked = webrtc.otherCallOn && webrtc.callState === "idle" ? t("calls.onAnother") : canWakeForCall ? null : callsBlocked;
+  const callBusy = webrtc.callState !== "idle" || wakeCall.waking;
+  const startCall = (withVideo: boolean) => (callsBlocked && canWakeForCall ? void wakeCall.ring(withVideo) : webrtc.startCall(withVideo));
+  // Waking the contact for a call, or why it gave up. In the chat's column while it is on screen; elsewhere over whatever
+  // is (`callLayer`), as a call's own window is, with its Cancel: the column is hidden then.
+  const wakeNotice = (wakeCall.waking || wakeCall.gaveUp) && (
+    <div role="status" data-testid="wake-call" data-state={wakeCall.waking ? "waking" : "gave-up"}
+      className="top-notice flex items-center gap-3 rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
+      <span>{wakeCall.waking ? t("calls.waking", { name: shownName }) : t("calls.wakeGaveUp", { name: shownName })}</span>
+      {wakeCall.waking && <button type="button" onClick={wakeCall.cancel} data-testid="wake-call-cancel" className="text-accent hover:text-accent-hover cursor-pointer">{t("common.cancel")}</button>}
+    </div>
+  );
+
   return (
     // The chat's column, and beside it (over it when narrow) the contact's identities: the page is their container.
     <CueChat.Provider value={sessionId}>
@@ -617,24 +651,18 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     <PinMoveNote text={pinNote} />
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
     <div data-file-drop className={`chat-column relative flex-1 ${chatApp?.shown && (chatApp.wide || chatApp.view === "full") ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
-      {(wakeCall.waking || wakeCall.gaveUp) && (
-        <div role="status" data-testid="wake-call" data-state={wakeCall.waking ? "waking" : "gave-up"}
-          className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
-          <span>{wakeCall.waking ? t("calls.waking", { name: shownName }) : t("calls.wakeGaveUp", { name: shownName })}</span>
-          {wakeCall.waking && <button type="button" onClick={wakeCall.cancel} data-testid="wake-call-cancel" className="text-accent hover:text-accent-hover cursor-pointer">{t("common.cancel")}</button>}
-        </div>
-      )}
+      {visible && wakeNotice}
       {/* Our call rang out (RING_MS): it ended by itself, and says why. */}
       {webrtc.noAnswer && (
         <div role="status" data-testid="call-no-answer"
-          className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
+          className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl">
           {t("calls.noAnswer")}
         </div>
       )}
       {/* A call could not use the microphone or camera (refused, or none there): it says why, and how to fix it. */}
       {webrtc.mediaProblem && (
         <div role="alert" data-testid="call-media-problem" data-problem={webrtc.mediaProblem}
-          className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] w-max max-w-[calc(100%-2rem)] rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
+          className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
           <span className="block font-medium">{t(webrtc.mediaProblem === "denied" ? "calls.mediaDenied" : "calls.mediaUnavailable")}</span>
           <span className="block text-text-secondary">{t(webrtc.mediaProblem === "denied" ? "calls.mediaDeniedNext" : "calls.mediaUnavailableNext")}</span>
         </div>
@@ -643,18 +671,20 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           contact hears nothing until Ghostly is back on screen, and the call is still on. */}
       {webrtc.micPaused && !webrtc.mediaProblem && (
         <div role="status" data-testid="call-mic-paused"
-          className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] w-max max-w-[calc(100%-2rem)] rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
+          className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
           {t("calls.micPaused")}
         </div>
       )}
-      {/* Chat Header. On a phone every button can be there at once (the connection, a call, a video call, a bot's Tasks,
-          ⋮): the back button, the avatar, the buttons' sides and the gaps are a little narrower there, so the name keeps
-          eight characters on a 375px phone (it had a letter or two). The buttons stay as tall, and touch each other. */}
+      {/* Chat Header. On a phone held upright (`phoneHeader`) it is the back button, the avatar, the name with the room
+          it needs, the connection, a voice call and ⋮, and one quiet line under the name; the video call, a bot's Tasks
+          and the contact's identities are in the ⋮ menu. Wider (a phone on its side, a narrow window), every button is
+          in the row, a little narrower than on a desktop. On the narrowest phone (320px) the back button gives 8px to
+          the name, so "Cérebro (Mac)" and a bot's status under it still fit beside three buttons. */}
       <div className="h-14 header-safe flex items-center justify-between px-4 max-md:ps-1 max-md:pe-1 bg-panel-header border-b border-border shrink-0">
         <div className="flex items-center gap-3 max-md:gap-1 min-w-0">
           <button
             onClick={nav.up}
-            className="md:hidden w-9 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0"
+            className={`md:hidden ${phoneHeader ? "w-11 max-[340px]:w-9" : "w-9"} h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0`}
             title={t("common.back")}
             data-testid="chat-back"
           >
@@ -723,7 +753,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                   </svg>
                 )}
               </p>
-              {paired && <IdentityStack peerKey={params.peerPubKeyB64} name={shownName} open={showIdentities} onOpen={() => { setIdentityCard(undefined); setShowIdentities(open => !open); }}
+              {paired && !phoneHeader && <IdentityStack peerKey={params.peerPubKeyB64} name={shownName} open={showIdentities} onOpen={() => { setIdentityCard(undefined); setShowIdentities(open => !open); }}
                 footer={face ? t("chat.shownWith", { provider: face.providerName, key: truncatedPeerKey }) : undefined} />}
               {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}
                 className="shrink-0 rounded bg-surface-hover px-1.5 py-0.5 text-[10px] leading-none text-text-muted whitespace-nowrap max-md:hidden">{t("chat.compat.label")}</span>}
@@ -732,7 +762,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             {/* The contact's key, or "typing…" while they write (presence, not connection). Everything about the
                 connection, pairing included, is the icon beside the calls. */}
             <div className="flex min-w-0 items-center gap-1.5">
-              <ChatSubtitle peerKey={paired ? params.peerPubKeyB64 : undefined} keyLabel={truncatedPeerKey} />
+              {/* A bot's line on a phone is its meter and what it is doing: its key is in the ⋮ menu, with its identities. */}
+              <ChatSubtitle peerKey={paired ? params.peerPubKeyB64 : undefined} keyLabel={phoneHeader && paired && (usage || working) ? "" : truncatedPeerKey} />
               {/* A bot's usage (WISP 405 § Usage): what is left of its quota and when it resets; a tap says more. */}
               {usage && <UsageButton entry={usage} />}
               {/* What the bot is working on, from its running tasks; it opens the Tasks panel while the chat shows a card. */}
@@ -744,26 +775,26 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           {/* The chat's one connection control: its icon, and one panel with the choice and the rest under Details. */}
           <ChatConnection key={sessionId} peerKey={params.peerPubKeyB64} paired={paired} myKey={techInfo?.myPubKey} status={statusLabel}
             pairing={pairingShown && pairing.progress ? { progress: pairing.progress, onShow: pairing.scene
-              ? () => scrollIntoViewGently(document.getElementById(pairingSceneId)) : undefined } : undefined} />
-          <CallButtons blocked={webrtc.otherCallOn && webrtc.callState === "idle" ? t("calls.onAnother") : canWakeForCall ? null : callsBlocked} busy={webrtc.callState !== "idle" || wakeCall.waking}
-            onCall={(withVideo) => (callsBlocked && canWakeForCall ? void wakeCall.ring(withVideo) : webrtc.startCall(withVideo))} />
+              ? () => scrollIntoViewGently(document.getElementById(pairingSceneId)) : undefined } : undefined}
+            phone={phoneHeader} />
+          <CallButtons phone={phoneHeader} blocked={callBlocked} busy={callBusy} onCall={startCall} />
           {/* Only while a bot's card is here (WISP 405 · Status Cards). */}
-          <TasksButton rows={messages} open={tasksOpen} onOpenChange={setTasksOpen} />
+          <TasksButton rows={messages} open={tasksOpen} onOpenChange={setTasksOpen} returnFocus={phoneHeader ? optionsRef : undefined} />
           {/* Options dropdown */}
           <div className="relative" ref={menuRef}>
             <button
               ref={optionsRef}
               onClick={() => setMenuOpen(!menuOpen)}
               onKeyDown={openOnArrow(() => setMenuOpen(true))}
-              className="p-2 max-md:px-1.5 max-md:py-2.5 text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer"
+              className={`relative ${phoneHeader ? "w-11 h-11 flex items-center justify-center" : "p-2 max-md:px-1.5 max-md:py-2.5"} text-text-secondary hover:text-accent rounded-full hover:bg-surface-hover transition-colors cursor-pointer`}
               title={t("chat.options")}
               aria-haspopup="true"
               aria-expanded={menuOpen}
               data-testid="chat-options"
             >
               <svg
-                width="18"
-                height="18"
+                width={phoneHeader ? 20 : 18}
+                height={phoneHeader ? 20 : 18}
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -775,13 +806,34 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 <circle cx="12" cy="5" r="1" />
                 <circle cx="12" cy="19" r="1" />
               </svg>
+              {/* The bot's running tasks, counted where its Tasks are on a phone. */}
+              {phoneHeader && tasks.active > 0 && (
+                <span data-testid="chat-tasks-count" aria-hidden="true"
+                  className="absolute top-1 end-1 min-w-4 h-4 px-1 rounded-full bg-accent text-on-accent text-[10px] font-bold leading-4 text-center">{tasks.active > 99 ? "99+" : tasks.active}</span>
+              )}
             </button>
             <Menu testId="chat-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef} focusFirst>
+              {phoneHeader && <>
+                <MenuItem testId="call-video" disabled={!!callBlocked || callBusy} title={callBlocked ?? undefined} onClick={() => { closeMenu(); startCall(true); }}
+                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>}>
+                  {t("calls.video")}
+                </MenuItem>
+                {tasks.any && (
+                  <MenuItem testId="chat-tasks" onClick={() => { closeMenu(); setTasksOpen(true); }}
+                    icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6h11M9 12h11M9 18h11" /><path d="m3.5 6 1.2 1.2L7 5M3.5 12l1.2 1.2L7 11M3.5 18l1.2 1.2L7 17" /></svg>}>
+                    {tasks.active ? t("cards.panel.buttonCount", { count: tasks.active }) : t("cards.panel.button")}
+                  </MenuItem>
+                )}
+                {paired && <IdentityMenuItem peerKey={params.peerPubKeyB64} name={shownName} keyLabel={truncatedPeerKey}
+                  onOpen={() => { closeMenu(); setIdentityCard(undefined); setShowIdentities(true); }} />}
+                <MenuSeparator />
+              </>}
               <MenuItem testId="chat-pin-toggle" onClick={() => { setSessionPinned(sessionId, !isSessionPinned(sessionId)); closeMenu(); }} icon={<PinIcon active={isSessionPinned(sessionId)} />}>
                 {isSessionPinned(sessionId) ? t("chat.menu.unpin") : t("chat.menu.pin")}
               </MenuItem>
               <PinMoveItems chat={sessionId} onMoved={place => { announcePinMove(place); closeMenu(); }} />
               <MuteMenuItem chat={sessionId} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />
+              <FolderMenuItem chat={sessionId} onChoose={() => { closeMenu(); setShowFolders(true); }} />
               <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>
               {/* Until the contact's session is ready, not just while the card is up: the card goes as soon as the
                   contact arrives, and this stays the way to copy the invite again until the chat is live. */}
@@ -811,7 +863,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                   closeMenu();
                   void continueInNewChat(sessionId).then(next => {
                     if (next) void sendMessage(next.message).finally(() => nav.conversation(chatPath(next.sessionId)));
-                  });
+                  }, () => {});
                 }}
                   icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5" /><path d="M16 19h6m-3-3 3 3-3 3" /></svg>}>
                   {t("chat.menu.continueNew")}
@@ -832,6 +884,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               </MenuItem>
             </Menu>
             <MuteMenu chat={sessionId} open={showMute} onClose={() => setShowMute(false)} anchorRef={menuRef} />
+            <ChatFolderMenu chat={sessionId} open={showFolders} onClose={() => setShowFolders(false)} anchorRef={menuRef} returnFocus={optionsRef} />
           </div>
         </div>
       </div>
@@ -1007,6 +1060,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         />,
         callLayer ?? document.body,
       )}
+
+      {!visible && wakeNotice && !locked && createPortal(wakeNotice, callLayer ?? document.body)}
 
       {/* Active call overlay */}
       {(webrtc.callState === "offering" ||

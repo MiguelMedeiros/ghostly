@@ -104,12 +104,58 @@ function guardSecrets(fields: unknown, params: Params, verb: string): void {
   if (typeof params.text === "string") check(params.text);
 }
 
-/** The latest message of mine in this chat or group with a card of this kind and id: the one an update edits. */
+/** How many cards a process remembers the message of; one past them is found in the history again. */
+export const CARDS_REMEMBERED = 1_000;
+
+/** Per card (its chat or group, its kind and its id): the message of mine that carries it, as this process last saw it. */
+const carriers = new WeakMap<ApiContext, Map<string, string>>();
+const carrierKey = (linkId: string, kind: string, id: string) => `${linkId}\n${kind}\n${id}`;
+
+function carriersOf(ctx: ApiContext): Map<string, string> {
+  let map = carriers.get(ctx);
+  if (map) return map;
+  carriers.set(ctx, (map = new Map()));
+  const cards = map;
+  // A newer card of mine stands for its id from the moment it is stored, whoever sent it (`engine call` too).
+  ctx.hub.onEvent((event) => {
+    if (event.type !== "message.sent" && event.type !== "group.sent") return;
+    const message = event.message as { id?: unknown; card?: { kind?: unknown; id?: unknown } } | undefined;
+    const card = message?.card;
+    if (typeof message?.id !== "string" || typeof card?.id !== "string" || (card.kind !== "task" && card.kind !== "routine" && card.kind !== "usage")) return;
+    carried(cards, carrierKey(event.type === "group.sent" ? `group:${String(event.group)}` : String(event.chat), card.kind, card.id), message.id);
+  });
+  return map;
+}
+
+function carried(cards: Map<string, string>, key: string, messageId: string): void {
+  cards.delete(key);
+  cards.set(key, messageId);
+  if (cards.size > CARDS_REMEMBERED) cards.delete(cards.keys().next().value!);
+}
+
+/**
+ * The latest message of mine in this chat or group with a card of this kind and id: the one an update edits. A card
+ * this process sent or found before is read by its message's key, so its updates cost the same in a long chat as in a
+ * short one; only a card not seen yet (the first update after a start, a one-shot) is looked for in the whole history.
+ */
 async function cardMessage(ctx: ApiContext, target: Target, kind: Kind, id: string): Promise<StoredMessage> {
+  const cards = carriersOf(ctx), key = carrierKey(target.linkId, kind, id);
+  const carries = (message: StoredMessage | undefined): message is StoredMessage => message?.sender === "me" && message.card?.kind === kind && message.card.id === id;
+  const known = cards.get(key);
+  if (known !== undefined) {
+    const message = await node(ctx).getMessage(target.linkId, known);
+    if (carries(message)) return message;
+    // Deleted since, or it carries another card now: the history says which message stands for the id.
+    cards.delete(key);
+  }
   const messages = target.group ? await node(ctx).groupMessages({ groupId: target.id }) : await node(ctx).getMessages(target.linkId);
+  // A card stored while the history was read is newer than what was read: that one stands for the id.
+  if (cards.has(key)) return cardMessage(ctx, target, kind, id);
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i]!;
-    if (message.sender === "me" && message.card?.kind === kind && message.card.id === id) return message;
+    if (!carries(message)) continue;
+    carried(cards, key, message.id);
+    return message;
   }
   throw new CliError("not_found", `No ${kind} ${JSON.stringify(id)} of yours in this ${target.group ? "group" : "chat"}: send it first with ghostly ${kind} send`);
 }
@@ -149,12 +195,14 @@ async function sendCard(ctx: ApiContext, params: Params, kind: Kind): Promise<Re
   if (target.group) {
     const result = await node(ctx).sendGroupMessage({ groupId: target.id, text, card });
     if (result.error || !result.messageId) throw new CliError(result.refused ? "refused" : "unavailable", result.error ?? "Nothing to send");
+    carried(carriersOf(ctx), carrierKey(target.linkId, kind, id), result.messageId);
     const edges = wait === "sent" ? await waitForGroupFrame(ctx, target.id, result.messageId, undefined, ms) : undefined;
     return answer(target, kind, id, result.messageId, { card, ...(edges !== undefined && { edges }) });
   }
   const result = await node(ctx).sendMessage({ linkId: target.linkId, text, card });
   if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
   if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
+  carried(carriersOf(ctx), carrierKey(target.linkId, kind, id), result.messageId);
   let message = await node(ctx).getMessage(target.linkId, result.messageId);
   if (wait !== "none") message = await waitForMessage(ctx, target.linkId, result.messageId, wait, ms);
   return answer(target, kind, id, result.messageId, { card, delivery: message?.delivery ?? null });
@@ -211,7 +259,7 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
     pace.last = Date.now();
     await editCard(ctx, target, message.id, card, text);
   }
-  let edited = target.group ? (await node(ctx).groupMessages({ groupId: target.id })).find((m) => m.id === message.id) : await node(ctx).getMessage(target.linkId, message.id);
+  let edited = await node(ctx).getMessage(target.linkId, message.id);
   if (wait === "confirmed" && edited?.edit?.pending) edited = await waitForEdit(ctx, target.linkId, message.id, ms);
   const edges = wait === "sent" && edited?.edit ? await waitForGroupFrame(ctx, target.id, message.id, edited.edit.seq, ms) : undefined;
   return answer(target, kind, id, message.id, {

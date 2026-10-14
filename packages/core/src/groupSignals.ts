@@ -99,6 +99,8 @@ export class CarriedTransport implements PkarrTransport {
   /** My last packet while the edge is down: what a member that just became reachable is handed. */
   private mine: Uint8Array | null = null;
   private lastTimestamp = 0n;
+  /** The date each packet `stamp` signed carries: the relays' transport takes it rather than check the signature again. */
+  private readonly dated = new WeakMap<Uint8Array, bigint>();
   /** My newest packet, wherever it went: what the edge hands the member over itself once it is ready (`linkReady`). */
   private newest: Uint8Array | null = null;
   /** The newest packet of the member's that came through a carrier, and the timestamp of the one a read last returned. */
@@ -162,7 +164,9 @@ export class CarriedTransport implements PkarrTransport {
   private stamp(identity: Identity, records: GhostRecord[]): Uint8Array {
     const now = BigInt(Date.now()) * 1000n;
     this.lastTimestamp = now > this.lastTimestamp ? now : this.lastTimestamp + 1n;
-    return createRelayPayload(identity, records, this.lastTimestamp);
+    const payload = createRelayPayload(identity, records, this.lastTimestamp);
+    this.dated.set(payload, this.lastTimestamp);
+    return payload;
   }
 
   /**
@@ -174,8 +178,12 @@ export class CarriedTransport implements PkarrTransport {
    */
   // `publishPayload` does not move `RelayTransport.nextTimestamp` for this key: a packet the relays' transport dates
   // later (the goodbye after `stop()`) is dated by its own clock, past this one unless both fall in one millisecond.
+  // Signed here, it says its date (`signedAt`): about 200 ms a minute of a hub's CPU went to checking its own packets.
   private toRelays(identity: Identity, records: GhostRecord[], payload: Uint8Array, options?: PkarrRequestOptions): Promise<void> {
-    return this.inner.publishPayload ? this.inner.publishPayload(identity.pubKeyZ32, payload, options) : this.inner.publish(identity, records, options);
+    const signedAt = this.dated.get(payload);
+    return this.inner.publishPayload
+      ? this.inner.publishPayload(identity.pubKeyZ32, payload, signedAt === undefined ? options : { ...options, signedAt })
+      : this.inner.publish(identity, records, options);
   }
 
   /**

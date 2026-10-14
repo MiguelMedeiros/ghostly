@@ -21,7 +21,7 @@ export const GROUP_FILE_LIMITS = {
   serveAtOnce: 3,
   /** File announcements a member sends to one group in a minute. */
   announcePerMinute: 8,
-  /** File announcements taken from one member of a group in `announceWindowMs`; past it, shown as text, unfetched. */
+  /** File announcements of one member of a group fetched by themselves in `announceWindowMs`; past it, kept for a Download. */
   announceTaken: 30,
   announceWindowMs: 10 * 60_000,
   /** Holders remembered per file. */
@@ -33,8 +33,12 @@ export const GROUP_FILE_LIMITS = {
   heardAhead: 256,
   /** Message ids in one `group-have`. */
   haveIds: 32,
-  /** A private group's `group-have` goes on an edge at most this often; a community's, from a member, every `communityHaveEveryMs`. */
-  haveEveryMs: 10_000,
+  /**
+   * `group-have` frames a private group's edge takes in `haveWindowMs`: what is to say is gathered for a second, then
+   * goes. A community's, from a member, goes every `communityHaveEveryMs`.
+   */
+  haveFrames: 10,
+  haveWindowMs: 10_000,
   communityHaveEveryMs: 60_000,
   /**
    * How long a want waits for an offer before the next holder is asked; a transfer that does not move for as long is

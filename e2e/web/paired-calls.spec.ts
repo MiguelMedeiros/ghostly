@@ -368,7 +368,8 @@ test("in Arabic a voice call's state line keeps a space between its words and th
   expect(await gap()).toBe(8);
   await alice.page.getByTestId("call-minimize").click();
   await expect(alice.page.getByTestId("call-window")).toHaveAttribute("data-mini", "true");
-  expect(await gap()).toBe(8);
+  // The small window lays its line out itself (index.css, `.call-mini .call-top p`), with 6 px between the two.
+  expect(await gap()).toBe(6);
 
   await alice.page.getByTestId("call-hang-up").click();
   await expect(bob.page.getByTitle("End call")).toHaveCount(0);

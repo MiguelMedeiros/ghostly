@@ -13,6 +13,9 @@ import { useHandoffView } from "../lib/handoff";
 import { activeProfileId, listProfiles, switchProfile } from "../lib/profiles";
 import { deviceWakeWords, useStandbyPush } from "../lib/wakePush";
 import { useComputerAwake } from "../lib/keepAwake";
+import { said } from "../lib/notices";
+import { problemText, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 
 const LINK = "min-h-11 px-2 text-sm text-text-muted underline underline-offset-2 hover:text-accent cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded";
 /** A part of the screen with more than a line in it: an offer, the progress of a move, the new device list. */
@@ -59,13 +62,14 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
   // Desktop: a handoff that runs here (this device takes the profile, or gives it in pass 2) keeps the computer awake.
   useComputerAwake();
   return (
-    <div role="status" data-testid="device-standby" data-state={gate.state} data-unfinished={unfinished ? "true" : undefined} className="h-dvh w-full min-w-0 flex-1 overflow-y-auto bg-chat-bg">
+    <main data-testid="device-standby" data-state={gate.state} data-unfinished={unfinished ? "true" : undefined} className="h-dvh w-full min-w-0 flex-1 overflow-y-auto bg-chat-bg">
       <div className="mx-auto flex min-h-full w-full max-w-md flex-col justify-center gap-5 px-4 py-8 text-center">
         <div className="space-y-2">
           <div className="text-5xl" aria-hidden="true">👻</div>
-          <h1 data-testid="device-standby-title" className="text-lg font-semibold text-text-primary break-words">{title}</h1>
+          {/* The state is the only thing read aloud when it changes: a live region around the whole screen read all of it again at each change of a link or of a move. */}
+          <h1 data-testid="device-standby-title" aria-live="polite" className="text-lg font-semibold text-text-primary break-words">{title}</h1>
           <p className="flex items-start justify-center gap-1.5 text-sm text-text-secondary">
-            <span className="min-w-0 break-words">{hint}</span>
+            <span data-testid="device-standby-hint" aria-live="polite" className="min-w-0 break-words">{hint}</span>
             <InfoButton open={open} onToggle={() => setOpen(!open)} controls={id} testId="device-standby-info" className="mt-px" />
           </p>
           {open && (
@@ -99,7 +103,7 @@ export function DeviceStandby({ gate }: { gate: DeviceGateView }) {
           </nav>
         )}
       </div>
-    </div>
+    </main>
   );
 }
 
@@ -202,7 +206,11 @@ function Takeover({ gate, info }: { gate: DeviceGateView; info: TakeoverInfo }) 
 function SetNotice({ names }: { names: string[] }) {
   const { t, language } = useI18n();
   const [busy, setBusy] = useState(false);
-  const answer = (wrong: boolean) => { setBusy(true); void engine.call("deviceSetNoticeSeen", { wrong }).finally(() => setBusy(false)); };
+  const [error, setError] = useState<Problem | null>(null);
+  const answer = (wrong: boolean) => {
+    setBusy(true); setError(null);
+    void engine.call("deviceSetNoticeSeen", { wrong }).catch((cause: unknown) => setError(problemText(cause, t))).finally(() => setBusy(false));
+  };
   return (
     <div className={`${PANEL} space-y-3`} data-testid="device-set-notice">
       <p data-testid="device-set-notice-title" className="font-semibold text-text-primary break-words">{t("devices.standby.notice.title", { devices: listNames(names, language) })}</p>
@@ -211,6 +219,7 @@ function SetNotice({ names }: { names: string[] }) {
         <button type="button" data-testid="device-set-notice-wrong" disabled={busy} onClick={() => answer(true)} className={`${SCREEN_QUIET} sm:order-1`}>{t("devices.standby.notice.wrong")}</button>
         <button type="button" data-testid="device-set-notice-ok" disabled={busy} onClick={() => answer(false)} className={`${SCREEN_BUTTON} max-sm:order-first sm:order-2`}>{t("devices.standby.notice.ok")}</button>
       </div>
+      {error && <Notice problem={error} testId="device-set-notice-error" className="" />}
     </div>
   );
 }
@@ -218,16 +227,28 @@ function SetNotice({ names }: { names: string[] }) {
 /**
  * "Not finished" (WISP 06 § Adding a device): the active device never listed this one. Try again looks for its record
  * once more; Remove takes the device set off this device, which then opens the profile it had before, as it was.
+ * A press that changes nothing says why under the buttons.
  */
 function Unfinished() {
   const { t } = useI18n();
   const [busy, setBusy] = useState(false);
-  const act = (work: () => Promise<unknown>) => { setBusy(true); void work().then(() => tryAgain(), () => setBusy(false)); };
+  // What a press that changed nothing came to: the other device has not listed this one yet, or the engine's refusal.
+  const [problem, setProblem] = useState<Problem | null>(null);
+  const act = (work: () => Promise<boolean>) => {
+    setBusy(true); setProblem(null);
+    void work().then(
+      (done) => { if (done) return tryAgain(); setProblem(said("devices.join.unfinished", t)); setBusy(false); },
+      (cause: unknown) => { setProblem(problemText(cause, t)); setBusy(false); },
+    );
+  };
   return (
-    <Actions>
-      <button type="button" data-testid="device-standby-finish" disabled={busy} onClick={() => act(async () => { if (!(await engine.call("deviceEnrollFinish")).finished) throw new Error("not yet"); })} className={SCREEN_BUTTON}>{t("devices.standby.unfinished.retry")}</button>
-      <button type="button" data-testid="device-standby-remove" disabled={busy} onClick={() => act(() => engine.call("deviceEnrollRemove"))} className={SCREEN_QUIET}>{t("devices.standby.unfinished.remove")}</button>
-    </Actions>
+    <div className="space-y-3">
+      <Actions>
+        <button type="button" data-testid="device-standby-finish" disabled={busy} onClick={() => act(async () => (await engine.call("deviceEnrollFinish")).finished)} className={SCREEN_BUTTON}>{t("devices.standby.unfinished.retry")}</button>
+        <button type="button" data-testid="device-standby-remove" disabled={busy} onClick={() => act(async () => { await engine.call("deviceEnrollRemove"); return true; })} className={SCREEN_QUIET}>{t("devices.standby.unfinished.remove")}</button>
+      </Actions>
+      {problem && <Notice problem={problem} testId="device-standby-unfinished-notice" className="text-sm" />}
+    </div>
   );
 }
 

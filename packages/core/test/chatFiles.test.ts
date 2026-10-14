@@ -42,6 +42,8 @@ class Disk {
   bytes: number[] | null;
   failAt = Infinity;
   discarded = false;
+  /** The check of the digest waits for this, as one over a large file takes a while. */
+  checking?: Promise<void>;
   /** Every target opened on it, without keeping one alive. */
   opened: WeakRef<IncomingTarget>[] = [];
   /** Each write takes this long (ms), as storage slower than the wire does: what arrives queues up behind it. */
@@ -64,7 +66,7 @@ class Disk {
         if (this.bytes) for (const b of chunk) this.bytes.push(b);
       },
       flush: async () => { this.durable = this.length; },
-      verify: async (digest) => this.hash.copy().digest("base64url") === digest,
+      verify: async (digest) => { await this.checking; return this.hash.copy().digest("base64url") === digest; },
       discard: async () => { this.discarded = true; this.length = this.durable = 0; this.hash = createHash("sha256"); if (this.bytes) this.bytes.length = 0; },
     };
     this.opened.push(new WeakRef(target));
@@ -98,6 +100,8 @@ function wire(options: {
   writable?: boolean;
   /** Storage that takes this long (ms) for each write. */
   writeMs?: number;
+  /** Storage that takes this long (ms) to open a received file, as a database lookup does. */
+  openMs?: number;
 } = {}) {
   let open = true;
   const queued = { a: 0, b: 0 };
@@ -151,6 +155,7 @@ function wire(options: {
       },
       decide: (file, again) => side.decide(file, again),
       openTarget: async (record) => {
+        if (options.openMs) await new Promise((resolve) => setTimeout(resolve, options.openMs));
         let disk = side.disks.get(record.id);
         if (!disk) { disk = new Disk(!!options.keepBytes, options.writeMs); side.disks.set(record.id, disk); }
         return disk.target();
@@ -657,6 +662,70 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect(w.b.sent.filter((f) => f.t === "pf-accept").map((f) => f.offset)).toEqual([0, 5 * FILE_LIMITS.chunkBytes]);
   });
 
+  /**
+   * A sender facing a receiver that is not the app: it confirms every byte, and answers each `pf-sum` with
+   * `pf-accept {offset: 0}` instead of `pf-done`, `laps` times at most.
+   */
+  function rewound(size: number, laps: number, resend?: ChatFilesHost["resend"]) {
+    const seen = { data: 0, sums: 0, aborts: 0, record: undefined as FileTransferRecord | undefined };
+    const src = source(size);
+    const files: ChatFiles = new ChatFiles({
+      send: (frame) => {
+        const answer = (reply: Record<string, unknown>) => setImmediate(() => void files.handle({ ...reply, id: frame.id }));
+        if (frame.t === "pf-offer") answer({ t: "pf-accept", offset: 0 });
+        else if (frame.t === "pf-data") { const bytes = Buffer.from(frame.data as string, "base64url").length; seen.data += bytes; answer({ t: "pf-got", offset: (frame.offset as number) + bytes }); }
+        else if (frame.t === "pf-sum") { if (++seen.sums <= laps) answer({ t: "pf-accept", offset: 0 }); }
+        else if (frame.t === "pf-abort") seen.aborts++;
+        return true;
+      },
+      decide: async () => "accept",
+      openTarget: async () => { throw new Error("nothing is received here"); },
+      openSource: async () => src,
+      changed: (record) => { seen.record = record; },
+      ...(resend && { resend }),
+    });
+    files.attach();
+    return { files, seen };
+  }
+
+  it("a receiver that asks for a file from the start again and again is sent a bounded part of it again, then the sender ends it", async () => {
+    const limits = FILE_LIMITS as { -readonly [K in keyof typeof FILE_LIMITS]: number }, before = limits.resendBytes;
+    limits.resendBytes = 2 * FILE_LIMITS.chunkBytes;
+    try {
+      const size = 8 * FILE_LIMITS.chunkBytes, { files, seen } = rewound(size, 50);
+      files.offer(file("rewind-0001", size));
+      await until(() => seen.record && seen.record.state !== "active" && seen.record.state !== "verifying" && seen.record.state !== "offered" && seen.record.state !== "queued" || seen.sums > 50);
+      // The file once, then twice its size and `resendBytes` again: nothing after that, and the receiver hears it ended.
+      expect(seen.data).toBe(3 * size + limits.resendBytes);
+      expect(seen.record).toMatchObject({ state: "failed", error: "Your contact asked for the same part of this file too many times" });
+      expect(seen.aborts).toBe(1);
+      expect(files.sent("rewind-0001")).toBe(seen.data);
+    } finally { limits.resendBytes = before; }
+  });
+
+  it("a host with a budget for what it sends is asked before a part goes again, and its no ends the transfer", async () => {
+    const size = 8 * FILE_LIMITS.chunkBytes, asked: number[] = [];
+    // One lap again is fine with this host; the next byte is not.
+    const { files, seen } = rewound(size, 50, (record, sent) => { asked.push(sent); return record.id === "budget-0001" && sent <= 2 * size; });
+    files.offer(file("budget-0001", size));
+    await until(() => seen.record?.state === "failed" || seen.sums > 50);
+    expect(seen.data).toBe(2 * size);
+    expect(seen.record?.state).toBe("failed");
+    expect(seen.aborts).toBe(1);
+    // Never asked within the file's size: an ordinary transfer does not pass through the host's budget.
+    expect(Math.min(...asked)).toBe(size + FILE_LIMITS.chunkBytes);
+  });
+
+  it("a receiver that asks for an earlier part a few times (a restart, a drop) still gets the whole file", async () => {
+    const size = 8 * FILE_LIMITS.chunkBytes, { files, seen } = rewound(size, 2);
+    files.offer(file("again-0001", size));
+    await until(() => seen.sums === 3);
+    await files.handle({ t: "pf-done", id: "again-0001" });
+    expect(seen.record?.state).toBe("done");
+    expect(files.sent("again-0001")).toBe(3 * size);
+    expect(seen.aborts).toBe(0);
+  });
+
   it("the last frames lost with nothing after them: the sender offers again after a quiet spell", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     let lose = true;
@@ -669,6 +738,36 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     await vi.advanceTimersByTimeAsync(FILE_LIMITS.idleMs);
     await until(() => state(w.a, "out", "quiet-01") === "done");
   });
+
+  it("the session drops after the file checked out there: on the next one the sender hears so and ends it done", async () => {
+    let lose = true;
+    const w = wire({ drop: (frame) => lose && frame.t === "pf-done" });
+    w.attach();
+    send(w, file("sum-0001", 50_000));
+    await until(() => state(w.b, "in", "sum-0001") === "done");
+    lose = false;
+    w.drop(); w.attach();
+    await until(() => state(w.a, "out", "sum-0001") === "done");
+  });
+
+  for (const back of ["after", "before"] as const) {
+    it(`the session drops while the receiver checks the digest, which ends ${back} it is back: the file ends done on both sides`, async () => {
+      const w = wire();
+      const disk = new Disk(false);
+      let release!: () => void;
+      disk.checking = new Promise<void>((resolve) => { release = resolve; });
+      w.b.disks.set("chk-0001", disk);
+      w.attach();
+      send(w, file("chk-0001", 50_000));
+      await until(() => state(w.b, "in", "chk-0001") === "verifying");
+      w.drop();
+      if (back === "before") { release(); await until(() => state(w.b, "in", "chk-0001") === "done"); }
+      w.attach();
+      if (back === "after") release();
+      await until(() => state(w.a, "out", "chk-0001") === "done");
+      expect(state(w.b, "in", "chk-0001")).toBe("done");
+    });
+  }
 
   it("a digest that does not match deletes the file on arrival and says so on both sides", async () => {
     const w = wire();
@@ -704,6 +803,48 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect([...w.b.records.values()].filter((r) => r.state === "active").length).toBe(3);
     expect([...w.a.records.values()].filter((r) => r.waitingFor === "busy").length).toBe(2);
     await until(() => [...w.a.records.values()].every((r) => r.state === "done"), 30_000);
+  });
+
+  it("files sent all at once still arrive three at a time when opening where each is written takes a while", async () => {
+    // Opening a received file reads the database first: the offers behind it, and the files queued behind one that
+    // ended, came in meanwhile and each went, until ten sent 1 MiB windows at once and the session's receive queue
+    // overflowed.
+    const w = wire({ openMs: 5 });
+    w.attach();
+    let sending = 0, receiving = 0;
+    const sample = setInterval(() => {
+      sending = Math.max(sending, [...w.a.records.values()].filter((r) => r.state === "active").length);
+      receiving = Math.max(receiving, [...w.b.records.values()].filter((r) => r.state === "active" || r.state === "verifying").length);
+    }, 0);
+    try {
+      for (let i = 0; i < 10; i++) send(w, file(`burst-0${i}`, 256 * 1024));
+      await until(() => [...w.a.records.values()].length === 10 && [...w.a.records.values()].every((r) => r.state === "done"), 30_000);
+    } finally { clearInterval(sample); }
+    expect(receiving).toBeLessThanOrEqual(FILE_LIMITS.maxActiveIncoming);
+    expect(sending).toBeLessThanOrEqual(FILE_LIMITS.maxActiveIncoming);
+  });
+
+  it("what a chat's files have sent and not seen confirmed stays within one window for them all", async () => {
+    // Three files at once with a 1 MiB window each were 3 MiB in flight, and as base64 text more than a session's
+    // receive queue takes (`SESSION_RECEIVE_PENDING`): a receiver that stalled a moment ended the session.
+    const w = wire({ writeMs: 1 });
+    w.attach();
+    const sizes = new Map<string, number>();
+    for (let i = 0; i < 3; i++) { sizes.set(`shared-0${i}`, 3 * 1024 * 1024); send(w, file(`shared-0${i}`, 3 * 1024 * 1024)); }
+    let most = 0;
+    const sample = setInterval(() => {
+      let total = 0;
+      for (const id of sizes.keys()) {
+        const sent = w.a.sent.filter((f) => f.t === "pf-data" && f.id === id).reduce((end, f) => Math.max(end, (f.offset as number) + FILE_LIMITS.chunkBytes), 0);
+        total += Math.max(0, Math.min(sent, sizes.get(id)!) - (w.a.records.get(`out:${id}`)?.confirmed ?? 0));
+      }
+      most = Math.max(most, total);
+    }, 0);
+    try {
+      await until(() => [...sizes.keys()].every((id) => state(w.a, "out", id) === "done"), 60_000);
+    } finally { clearInterval(sample); }
+    expect(most).toBeGreaterThan(FILE_LIMITS.windowBytes);
+    expect(most).toBeLessThanOrEqual(FILE_LIMITS.chatWindowBytes);
   });
 
   it("no more than 16 offers wait for an answer; the 17th is refused", async () => {

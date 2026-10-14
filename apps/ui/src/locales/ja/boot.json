@@ -1,6 +1,10 @@
 {
   "copied": "コピーしました",
   "copy": "詳細をコピー",
+  "lockdown": "ロックダウンモードがオンになっているようです。Ghostly に必要な機能がオフになります。このサイトでオフにしてから再読み込みしてください。",
+  "lockdownHow": "このサイトでオフにする方法",
+  "lockdownOtherBrowser": "iPhone や iPad のほかのブラウザ：設定 › プライバシーとセキュリティ › ロックダウンモード › Webブラウズを構成 で、そのブラウザをオフにします。",
+  "lockdownSafari": "Safari：アドレスバーの「ぁあ」をタップし、「Webサイトの設定」でロックダウンモードをオフにします（Mac では Safari › このWebサイトの設定）。",
   "missingCrypto": "Web Crypto がオフです。安全な (https) アドレスでのみ動作します。",
   "missingIndexedDB": "IndexedDB がオフかブロックされているため、チャットと鍵を保存できません。",
   "missingLocks": "Web Locks がないため、Ghostly が一つだけ動いていることを確かめられません。",

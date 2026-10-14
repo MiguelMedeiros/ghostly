@@ -4,22 +4,23 @@ import { useI18n } from "../../contexts/I18nContext";
 import { externalLinkProps } from "../../lib/externalLink";
 import { agoIn } from "../../lib/relativeTime";
 import { STATUS_TONE, isFinished } from "../../lib/statusCards";
-import { boardCardLabel, partsDone, progressText, type BoardGrouping, type BoardTask } from "../../lib/taskBoard";
+import { boardCardLabel, chatNames, partsDone, progressText, type BoardGrouping, type BoardTask } from "../../lib/taskBoard";
 import type { PrChecks } from "@ghostly/core";
 import { MemberFace, type MemberFaceOf } from "../chat/SenderAvatar";
 
 /*
  * A task on the Tasks board (WISP 405 · Status Cards § The Tasks board): two lines. Its title on one line (whole in its
  * tooltip, and unfolded while the keys are on it) with how long ago it last changed; then at most three chips: who sent
- * it, where, and its pull request. A thin bar along its foot is its progress. The rest is behind Details. The card is a
- * button that opens its chat on its message; it changes nothing: the bot that owns a task changes its status.
+ * it, where (the chat it changed last in, and "+1" for each other chat it was sent to), and its pull request. A thin
+ * bar along its foot is its progress. The rest is behind Details. The card is a button that opens its chat on its
+ * message; it changes nothing: the bot that owns a task changes its status.
  */
 
 /** A pull request's checks at a glance: a still mark in the status tones, with its words for a screen reader. */
 const CHECKS_MARK: Record<PrChecks, { mark: string; tone: string }> = {
   passing: { mark: "✓", tone: "text-success" },
   failing: { mark: "✕", tone: "text-danger-ink" },
-  pending: { mark: "●", tone: "text-amber-500" },
+  pending: { mark: "●", tone: "text-warn-ink" },
 };
 
 const chip = "inline-flex min-w-0 items-center gap-1 rounded-full bg-text-primary/[0.07] px-1.5 py-px text-[11px] leading-4 text-text-secondary";
@@ -49,8 +50,9 @@ export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKey
   const progress = taskProgress(card);
   const age = agoIn(language)(task.at / 1000, now / 1000);
   const words = progressText(t, task);
-  // A 1:1 chat's bot is its contact: one chip says both.
-  const sameName = task.bot === task.chat;
+  const everywhere = chatNames(task);
+  // A 1:1 chat's bot is its contact: one chip says both. Grouped by chat, the column says the chat and the chip the others.
+  const chats = everywhere.filter((chat) => grouping === "bot" ? true : grouping === "chat" ? chat !== task.chat : chat !== task.bot);
   const prTitle = card.pr && [t("cards.board.card.openPr", { host: cardLinkHost(card.pr.url) }), card.pr.state && t(`cards.board.card.prState.${card.pr.state}`),
     card.pr.checks && t(`cards.board.card.checks.${card.pr.checks}`)].filter(Boolean).join(" · ");
   const chips: ReactNode[] = [
@@ -65,10 +67,11 @@ export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKey
         {face && <MemberFace face={face} size={14} />}
         <bdi className="min-w-0 truncate">{task.bot}</bdi>
       </span>] : []),
-    ...(grouping !== "chat" && !(sameName && grouping !== "bot") ? [
-      <span key="chat" data-testid="board-card-chat" className={chip}>
+    ...(chats.length ? [
+      <span key="chat" data-testid="board-card-chat" title={chats.join(", ")} className={chip}>
         <svg aria-hidden="true" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-        <bdi className="min-w-0 truncate">{task.chat}</bdi>
+        <bdi className="min-w-0 truncate">{chats[0]}</bdi>
+        {chats.length > 1 && <span data-testid="board-card-chats-more" className="shrink-0 tabular-nums">+{chats.length - 1}</span>}
       </span>] : []),
     ...(card.pr ? [
       // The only thing on a card that leaves the app: an https link (the reader's rule), opened outside, by its host.
@@ -126,7 +129,7 @@ export function BoardCard({ task, grouping, face, now, onOpen, onOpenPart, onKey
             <dt className="font-semibold">{t("cards.board.card.botLabel")}</dt>
             <dd className="m-0 min-w-0 [overflow-wrap:anywhere]"><bdi>{task.bot}</bdi></dd>
             <dt className="font-semibold">{t("cards.board.card.chatLabel")}</dt>
-            <dd className="m-0 min-w-0 [overflow-wrap:anywhere]"><bdi>{task.chat}</bdi></dd>
+            <dd data-testid="board-card-chats" className="m-0 min-w-0 [overflow-wrap:anywhere]"><bdi>{everywhere.join(", ")}</bdi></dd>
             {card.branch && <><dt className="font-semibold">{t("cards.task.branch")}</dt><dd className="m-0 min-w-0 font-mono [overflow-wrap:anywhere]"><bdi>{card.branch}</bdi></dd></>}
             {(card.pr?.state || card.pr?.checks) && <><dt className="font-semibold">{t("cards.board.card.prLabel")}</dt>
               <dd data-testid="board-card-pr-standing" className="m-0">{[card.pr.state && t(`cards.board.card.prState.${card.pr.state}`), card.pr.checks && t(`cards.board.card.checks.${card.pr.checks}`)].filter(Boolean).join(" · ")}</dd></>}

@@ -61,7 +61,7 @@ One per side, per chat ([WISP 03](wisps/03-capabilities.md#layer-0-capability-re
 `paired-chat/1` ([WISP 401](wisps/401-paired-chat.md)) runs on whichever stream connected. The handshake agrees on a version, binds the transport's own handshake (DTLS fingerprint, TLS exporter or Noise hash) and checks the pinned participation key.
 
 - The transcript-bound `pair-offer` lists what the session carries: `chat/1`, `files/2`, `payments/1`, `transport-switch/1`, `hold/1`, proofs, and more.
-- Once ready, each side sends `{"t":"paired-capabilities","c":[...]}` with `calls/1`, `services/1`, `files/3`, `typing/1`, `react/1`, `edit/1`, `wake/1` and `pin/1`. A capability is on only while both sides list it.
+- Once ready, each side sends `{"t":"paired-capabilities","c":[...]}` with `calls/1`, `services/1`, `files/3`, `files/4` (on a session that carries binary messages), `typing/1`, `react/1`, `edit/1`, `wake/1` and `pin/1`. A capability is on only while both sides list it.
 - Liveness: `paired-ping` / `paired-pong`. Name and picture: `paired-nick`, `paired-avatar`. Typing: `{"t":"paired-typing","s":"start"|"stop"}` under `typing/1`, a `start` optionally with `kind` (`recording`, `thinking`) and a bot's `status` line, never stored and never on the DHT ([WISP 401](wisps/401-paired-chat.md#typing)).
 - Link previews: `pv` (`{u, t?, d?, s?, i?}`) on `paired-message`, made by the sender's app; the reader fetches nothing, and the DHT and held items carry the text without it ([WISP 401](wisps/401-paired-chat.md#link-previews)).
 - Replies: `r` (`{i, s, f}`: the original's id, a cleaned line of it, its author) on `paired-message` and on a file's offer; the DHT envelope carries the id only ([WISP 400](wisps/400-chat.md#replies)).
@@ -151,9 +151,9 @@ The advertisement is authenticated twice: by the secretbox (only the link peer c
 
 ## 4. Calls
 
-`_call` carries `{ "t": "o" | "a" | "h" | "v" | "r", "ts", "o", "u", "p", "f", "s", "m", "c", "ss", "v", "k", "ap", "vp", "x", "re" }`: ICE credentials, DTLS fingerprint, setup role, media order, the candidates (at most two in a `_call` record, one host and one server reflexive; up to eight in a `paired-call` frame, local networks first and VPN tunnels last, relay ones included), the SSRCs, what picture the sender has on, and the payload types its SDP gives Opus and VP8 when they are not 111 and 96 (§4.2). Each side rebuilds a full SDP around these values, because a real SDP does not fit in a packet.
+`_call` carries `{ "t": "o" | "a" | "h" | "v" | "r", "ts", "o", "u", "p", "f", "s", "m", "c", "ss", "v", "k", "ap", "vp", "x", "re", "vr" }`: ICE credentials, DTLS fingerprint, setup role, media order, the candidates (at most two in a `_call` record, one host and one server reflexive; up to eight in a `paired-call` frame, local networks first and VPN tunnels last, relay ones included), the SSRCs, what picture the sender has on, and the payload types its SDP gives Opus and VP8 when they are not 111 and 96 (§4.2). Each side rebuilds a full SDP around these values, because a real SDP does not fit in a packet.
 
-Receivers validate a signal before any of it reaches an SDP, whether it came from `_call` or a `call` frame: ICE ufrag/pwd are RFC 8839 ice-chars (4-256 and 22-256 long), `f` is 64 hex digits, `s` is `actpass`, `active` or `passive`, `m` holds one or two distinct `a`/`v`, `ss` holds at most two uint32s, `v` is 0 or 1, `k` is `c` or `s`, `ap` and `vp` are dynamic payload types (35-63 or 96-127) and not the same one, and each of at most eight candidates is parsed and re-serialized from its parts (non-UDP ones are dropped, malformed ones reject the signal). Signals whose `ts` is more than 120 s away from the receiver's clock are ignored, so a stale packet does not ring.
+Receivers validate a signal before any of it reaches an SDP, whether it came from `_call` or a `call` frame: ICE ufrag/pwd are RFC 8839 ice-chars (4-256 and 22-256 long), `f` is 64 hex digits, `s` is `actpass`, `active` or `passive`, `m` holds one or two distinct `a`/`v`, `ss` holds at most two uint32s, `v` is 0 or 1, `k` is `c` or `s`, `vr` means something only as 0 (§4.4), `ap` and `vp` are dynamic payload types (35-63 or 96-127) and not the same one, and each of at most eight candidates is parsed and re-serialized from its parts (non-UDP ones are dropped, malformed ones reject the signal). Signals whose `ts` is more than 120 s away from the receiver's clock are ignored, so a stale packet does not ring.
 
 `o` is an offer, `a` the answer to it, `h` ends a call or declines an incoming one, `v` says what picture the sender has on (§4.1), and `r` is an offer that restarts ICE on a call that is up (§4.3). A receiver acts on a signal only when its `ts` is newer than the last one it acted on. An answer names what it answers by that offer's `ts`: `o` on the answer to a call's offer, `re` on the answer to a restart offer (§4.3). Each is taken for the offer it names and no other. An answer to a call's offer that names none (an app up to 1.0.2) is taken when it was heard after the receiver's own offer went out, or, read from a record, when its `ts` is newer than that offer's. `ts` is the sender's clock: how old a signal on a live session is, is counted on the receiver's clock from when it came ([WISP 601](wisps/601-webrtc-media.md)). An offer that arrives while a call is under way does not ring a second call (a caller may offer again on a call that never connected: [WISP 601](wisps/601-webrtc-media.md#paired-profile)).
 
@@ -217,6 +217,18 @@ A call whose path is lost (a network change) restarts ICE on the connection it h
 A `"t": "r"` signal is a restart offer: the fields of an offer (`u`, `p`, `f`, `s`, `m`, `c`, `ss`, and `v`/`k`), validated the same way, with new ICE credentials and candidates and the DTLS fingerprint the call already has. Only the side whose offer was answered sends it, and only when the other side said `x`. The receiver applies it to the call's own connection and answers with `"t": "a"` and `re`; the sender takes only the answer to its latest restart offer. A restart offer never rings and never starts a call: with no call on, on the side that placed the call, or with another fingerprint, it is dropped. The rebuilt SDP of every description of one connection has the same session id (from the fingerprint), a restart a version later. Timing and what the person sees: [WISP 601](wisps/601-webrtc-media.md#paired-profile), "Reconnecting".
 
 Compatible with older peers in both directions: a peer before v4 drops `"t": "r"` as an unknown type, ignores `x`, and never sends `x`, so a v4 peer never sends it a restart offer and the call ends on a failed connection as it always did.
+
+### 4.4 A side that takes no picture (v5)
+
+A peer with nowhere to show a picture (a bot on the headless CLI) says so on its offer or its answer:
+
+| Key | Meaning |
+|---|---|
+| `vr` | on an offer or an answer: `0` when the sender takes no picture and sends none. Any other value says nothing |
+
+The receiver rebuilds that signal's video section as `a=inactive`, with no stream and no SSRC on it, in place of `a=sendrecv`. Its own half of the section is then closed: its WebRTC engine sends nothing on it, whatever track is put there, so a camera or a screen turned on mid-call (§4.1) uploads nothing either. Without `vr` a camera kept uploading (about 250 kbit/s against some 10 kbit/s of voice) to a peer that dropped every packet, since nothing in a signal said the answer's section was not `sendrecv`. The section is still listed in `m`: an answer has every section of its offer. A hang-up and a `"t": "v"` signal carry no `vr`.
+
+Compatible with older peers in both directions: a peer before v5 keeps only the fields it knows, so it drops `vr` and rebuilds the section `sendrecv` as before, and it never sends `vr`, so a v5 peer sends it a picture as it always did.
 
 ## 5. The data link (v1)
 
@@ -298,6 +310,7 @@ both     → { "t": "pf-room", "max" }                                          
 - The sender offers again on every session until the transfer ends; the receiver answers where it stands (an offset, a wait, done, or a refusal), so a drop, a transport switch or a restart of either side resumes from the last byte the receiver stored. A receiver makes what it stored durable every 8 MiB, and resumes from there after a restart.
 - A receiver takes a file of up to 25 MiB by itself while the files it took that way from the contact stay under 500 MiB; anything else waits for its person (`pf-wait` `consent`). A file larger than its free space is refused with `no-room` and the space left. At most 16 offers wait for an answer and 3 files arrive at once per contact; an offer nobody answers ends after seven days.
 - The receiver checks the digest on what it stored; a mismatch deletes the file and is refused with `damaged`. Either side pauses (`pf-offer` `paused`, `pf-wait` `paused`) and cancels (`pf-abort`, `pf-refuse` `cancelled`).
+- **`files/4`** ([WISP 501 § files/4](wisps/501-paired-files.md#files4-a-files-bytes-as-bytes-revision-2026-10-12)): while both sides also list `files/4`, which an app offers only on a session that carries binary messages, each `pf-data` goes as one binary message instead, `0x04 | id length (1) | id | offset (8, big endian) | data`: 16,416 bytes for a full chunk where the JSON frame is 21,920, so a file costs 0.2% more than its size on the wire, not a third more. Every other frame stays as above. Binary messages travel on WebRTC, and on HyperDHT from the Desktop, the CLI and a browser through a relay (a frame whose length word has its top bit set, [WISP 103](wisps/103-hyperdht.md#frames-revision-2026-10-12)); Iroh still carries text only.
 - Received files are written to file storage as they arrive (the origin-private file system in browsers, real files on Desktop), never held whole in memory.
 
 ### 6.3 Payments
@@ -375,6 +388,7 @@ A second profile, `group-community/1`, is for a group whose link (`group2/<group
 ```
 → { "t": "group-invite", "g", "name", "admin", "e", "n" }               contact chat: an admin invites
 ← { "t": "group-accept", "g", "key" }   |   { "t": "group-decline", "g" }
+→ { "t": "group-decline", "g" }                                         contact chat: the inviter takes its invitation back
 → { "t": "group-full", "g", "n", "max", "why"? }                        entry session: no room yet (in place of group-invite)
 → { "t": "group-chain", "g", "commits": [ … ] } *                       long chains, 24 commits at a time
 → { "t": "group-welcome", "g", "name", "commits": [ … ], "secrets": [ { "e", "s": { "e", "n", "c" } } ] }

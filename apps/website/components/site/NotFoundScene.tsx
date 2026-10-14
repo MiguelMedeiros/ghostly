@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { GHOST_PATH } from "@/components/ghost/Ghost";
+import { useCalm } from "@/lib/useCalm";
 
 interface FloatingGhostData {
   id: number;
@@ -92,10 +93,13 @@ function GhostParticles() {
 }
 
 export function NotFoundScene() {
+  const calm = useCalm();
   const [ghostPosition, setGhostPosition] = useState({ x: 0, y: 0 });
   const [isSearching, setIsSearching] = useState(true);
 
+  // Reduced motion: a still. No timer moves the ghost or dims its beam, and no ghost floats by.
   useEffect(() => {
+    if (calm) return;
     const interval = setInterval(() => {
       setGhostPosition({
         x: Math.sin(Date.now() / 1000) * 20,
@@ -111,7 +115,7 @@ export function NotFoundScene() {
       clearInterval(interval);
       clearInterval(searchInterval);
     };
-  }, []);
+  }, [calm]);
 
   return (
     <main className="min-h-screen bg-[#060a10] flex flex-col items-center justify-center px-4 relative overflow-hidden">
@@ -119,16 +123,20 @@ export function NotFoundScene() {
       <div className="absolute inset-0 bg-[linear-gradient(rgba(34,211,238,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.03)_1px,transparent_1px)] bg-[size:50px_50px] [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_70%)]" />
 
       {/* Floating ghost particles */}
-      <GhostParticles />
+      {!calm && <GhostParticles />}
 
       {/* Main content */}
       <div className="relative z-10 text-center max-w-2xl mx-auto">
         {/* Ghost with flashlight */}
         <div
           className="relative inline-block mb-8"
-          style={{
-            transform: `translate(${ghostPosition.x}px, ${ghostPosition.y}px)`,
-          }}
+          style={
+            calm
+              ? undefined
+              : {
+                  transform: `translate(${ghostPosition.x}px, ${ghostPosition.y}px)`,
+                }
+          }
         >
           <svg
             width="120"
@@ -159,7 +167,7 @@ export function NotFoundScene() {
               ry="25"
               fill="url(#flashlight-beam)"
               className={`transition-opacity duration-500 ${
-                isSearching ? "opacity-100" : "opacity-40"
+                calm || isSearching ? "opacity-100" : "opacity-40"
               }`}
               style={{
                 transformOrigin: "40px 45px",

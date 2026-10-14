@@ -1,4 +1,4 @@
-import { act, screen } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import { createIdentity, encodeGroupEntryLink } from "@ghostly/core";
@@ -53,6 +53,25 @@ describe("the group header's Share link", () => {
     await user.click(screen.getByTestId("group-share"));
     expect(engine.callsTo("enableGroupLink")).toEqual([{ groupId: ID }]);
     expect(await screen.findByTestId("group-share-dialog")).toBeInTheDocument();
+  });
+
+  it("stays open when the link is turned off in it, saying so; turned on again from the members, it does not come back by itself", async () => {
+    const { user, engine } = openGroup(admin({ entryLink: LINK }));
+    engine.on("enableGroupLink", () => { queueMicrotask(() => engine.update({ groups: [admin({ entryLink: LINK })] })); return { link: LINK }; })
+      .on("disableGroupLink", () => { queueMicrotask(() => engine.update({ groups: [admin()] })); });
+    await user.click(screen.getByTestId("group-share"));
+    const dialog = await screen.findByTestId("group-share-dialog");
+    await user.click(within(dialog).getByTestId("group-link-disable"));
+    await user.click(screen.getByTestId("group-link-ask-confirm"));
+    expect(await screen.findByTestId("group-link-enable")).toBeInTheDocument();
+    expect(screen.getByTestId("group-share-dialog")).toHaveTextContent("The link is off");
+    await user.click(screen.getByTestId("group-share-done"));
+    expect(screen.queryByTestId("group-share-dialog")).not.toBeInTheDocument();
+    // The members panel turns it on again: the link shows there, and nothing opens over it.
+    await user.click(screen.getByTestId("group-members"));
+    await user.click(within(screen.getByTestId("group-members-dialog")).getByTestId("group-link-enable"));
+    expect(await within(screen.getByTestId("group-members-dialog")).findByTestId("group-link-url")).toHaveValue(URL_OF);
+    expect(screen.queryByTestId("group-share-dialog")).not.toBeInTheDocument();
   });
 
   it("says so when the link cannot be turned on", async () => {

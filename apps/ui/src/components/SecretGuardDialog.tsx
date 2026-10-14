@@ -47,7 +47,7 @@ export function SecretGuardDialog({ finding, recipient, onCancel, onConfirm }: {
       <button ref={cancel} type="button" data-testid="secret-guard-cancel" onClick={onCancel}
         className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
       <button ref={confirm} type="button" data-testid="secret-guard-send" onClick={onConfirm}
-        className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger">
+        className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger-ink hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger">
         {t(finding.kind === "cashu" ? "secretGuard.send" : "secretGuard.sendAnyway")}
       </button>
     </div>

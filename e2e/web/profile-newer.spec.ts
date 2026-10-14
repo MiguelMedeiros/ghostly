@@ -57,8 +57,8 @@ test("a profile last used by a newer Ghostly says so in place of the chat list, 
 
   // The versions are behind the ⓘ.
   await notice.getByTestId("profile-unavailable-info").click();
-  await expect(notice.getByTestId("profile-unavailable-text")).toContainText(`This profile's data is at version ${stored.version}.`);
-  await expect(notice.getByTestId("profile-unavailable-text")).toContainText(`reads up to version ${stored.before}.`);
+  await expect(notice.getByTestId("profile-unavailable-text")).toContainText(`Its data is version ${stored.version};`);
+  await expect(notice.getByTestId("profile-unavailable-text")).toContainText(`reads up to ${stored.before}.`);
 
   // A chat's own address shows the same, not the chat.
   await page.goto("/#/settings");

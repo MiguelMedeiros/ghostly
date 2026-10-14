@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { generateVapidKeys } from "@ghostly/core";
 import { groupChat, setChatMute } from "../../lib/chatMute";
@@ -106,6 +106,51 @@ describe("the push worker's table", () => {
     await waitFor(() => expect(platform.syncTable.mock.lastCall![1]).toEqual([
       { token: "tokenaaaaaaaaaaaaaaaaa", path: "/chat/chata" }, { token: "tokenbbbbbbbbbbbbbbbbb", path: "/chat/chatb" },
     ]));
+  });
+
+  it("is written when what it holds changes, not at every state the engine builds", async () => {
+    const platform = fakePlatform();
+    setPushPlatform(platform);
+    session("chata", "peer-a");
+    const wake = { ...keys, vapid: generateVapidKeys() };
+    // Every state has new `links` and `groups`, as the engine builds them (typing, a file's progress, a contact connecting).
+    const state = (token: string, note: string) => engineState({
+      settings: { online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true, wake },
+      links: [linkView({ id: "l-a", peerPubKeyZ32: "peer-a", wakeToken: token, discoveryError: note })],
+      groups: [{ id: "g1", name: "g1", profile: "mesh", createdAt: 1, isAdmin: false, members: [], invited: [], memberLinks: {}, lastMessageAt: Number(note), canSend: true, wakeTokens: ["tokenmember1aaaaaaaaaa"] }] as never,
+    });
+    fakeEngine.setState(state("tokenaaaaaaaaaaaaaaaaa", "0"));
+    renderHook(() => useWakeTableSync({ title: "Ghostly", body: "New message" }));
+    await waitFor(() => expect(platform.syncTable).toHaveBeenCalledTimes(1));
+
+    for (let i = 1; i <= 20; i++) await act(async () => { fakeEngine.setState(state("tokenaaaaaaaaaaaaaaaaa", String(i))); });
+    await moment();
+    expect(platform.syncTable).toHaveBeenCalledTimes(1);
+
+    // A new token (the subscription was replaced): the table follows.
+    await act(async () => { fakeEngine.setState(state("tokenzzzzzzzzzzzzzzzzz", "21")); });
+    await waitFor(() => expect(platform.syncTable).toHaveBeenCalledTimes(2));
+    expect(platform.syncTable.mock.lastCall![1]).toEqual([{ token: "tokenzzzzzzzzzzzzzzzzz", path: "/chat/chata" }, { token: "tokenmember1aaaaaaaaaa", path: "/group/g1" }]);
+    // A chat saved on this page (a first pairing gives it its contact) and a mute still write it at once.
+    window.dispatchEvent(new Event("session-updated"));
+    expect(platform.syncTable).toHaveBeenCalledTimes(3);
+  });
+
+  it("a mute that ends by itself: the contact is told to wake the chat again, with no new state to wait for", async () => {
+    const platform = fakePlatform();
+    setPushPlatform(platform);
+    session("chatm", "peer-m");
+    setChatMute("chatm", Date.now() + 150);
+    fakeEngine.on("setWakeMuted", () => undefined);
+    fakeEngine.setState(engineState({
+      settings: { online: true, nick: "Ghost", relays: [], iceServers: [], mints: [], mintsInitialized: true, wake: { ...keys, vapid: generateVapidKeys() } },
+      links: [linkView({ id: "l-m", peerPubKeyZ32: "peer-m", wakeToken: "tokenmmmmmmmmmmmmmmmmm", wakeMuted: true })],
+    }));
+    renderHook(() => useWakeTableSync({ title: "Ghostly", body: "New message" }));
+    await waitFor(() => expect(platform.syncTable).toHaveBeenCalled());
+    expect(fakeEngine.callsTo("setWakeMuted")).toEqual([]);
+    await waitFor(() => expect(fakeEngine.callsTo("setWakeMuted")).toEqual([{ linkId: "l-m", muted: false }]));
+    expect(platform.syncTable.mock.lastCall![1]).toEqual([{ token: "tokenmmmmmmmmmmmmmmmmm", path: "/chat/chatm" }]);
   });
 
   it("a contact that held it was deleted or muted: a new subscription with a new key pair, or off without notifications", async () => {

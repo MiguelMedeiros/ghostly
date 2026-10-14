@@ -5,7 +5,7 @@ import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { groupReply, pairedWireReply, receivedPairedReply, replyRef } from "../src/shared/replies";
 import type { StoredMessage } from "../src/shared/types";
-import { FakeNativeNet } from "./helpers/fakeNative";
+import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
 // covers: chat.replies.wire, groups.protocol.replies
 
 /**
@@ -28,7 +28,7 @@ async function setup() {
   await db.putLink({ ...invitation.mine, id, profile: "paired-chat/1", participationSeed: mine, createdAt: 1,
     pairedPeerKey: identityFromSeedB64(theirs).pubKeyZ32, peerTrust: { version: 1 },
     peerTransports: ["iroh/1"], peerFallback: true, preferredTransport: "iroh/1", transportFallback: true,
-    peerDescriptors: { "iroh/1": { id: "contact:iroh/1" } } });
+    peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "contact") } });
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
   const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false,
     nativeTransports: { "iroh/1": async () => net.endpoint("iroh/1", "app") } });
@@ -37,7 +37,7 @@ async function setup() {
   const contact = new GhostLink({
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
-    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": { id: "app:iroh/1" } } },
+    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "app") } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
     events: { onPairingState: state => { contactState = state; }, onMessage: message => { contactGot.push(message); } },
   });
@@ -138,6 +138,29 @@ describe("a received reply in a long history", () => {
     await t.store({ linkId, id: "k2:0:2", text: "and?", sender: "peer", member: "k2", timestamp: Date.now(), via: "datalink", replyTo: { id: "k3:0:1", snippet: "a line", from: "peer", member: "k3" } });
     expect((await t.row("k2:0:2"))?.replyTo).toEqual({ id: "k3:0:1", snippet: "a line", from: "peer", member: "k3" });
     expect(t.whole()).toBe(0);
+  });
+
+  it("a reply I send finds its original by its id: in a group or a chat, it reads no whole history unless the keyed reads miss in a chat", async () => {
+    const replyFor = (node: GhostlyNode, linkId: string, id: string) => (node as unknown as { replyFor(l: string, m: string): Promise<unknown> }).replyFor(linkId, id);
+    const group = `group:${crypto.randomUUID()}`;
+    const g = await keeper(group, history(group, i => ({ id: `k1:0:${i}`, member: "k1" })));
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: false });
+    cleanup.push(async () => { await node.shutdown(); });
+    expect(await replyFor(node, group, "k1:0:7")).toEqual({ id: "k1:0:7", snippet: "line 7", from: "peer", member: "k1", messageId: "k1:0:7" });
+    expect(await replyFor(node, group, "k3:0:1")).toMatch(/not in this chat/);
+    expect(g.whole()).toBe(0);
+    const chat = `replies-${crypto.randomUUID()}`, wire = (i: number) => `${"W".repeat(20)}${String(i).padStart(2, "0")}`;
+    const c = await keeper(chat, [
+      ...history(chat, i => ({ id: `peer_${wire(i)}`, wireId: wire(i) })),
+      { linkId: chat, id: "me_9", text: "a.txt", sender: "me", timestamp: 1_700_000_001_000, via: "datalink", file: { id: `${chat}-out-${"F".repeat(22)}`, name: "a.txt", size: 1, mime: "text/plain" } },
+    ]);
+    // By the row's id, and by the wire id both sides know a text by: keyed reads only.
+    expect(await replyFor(node, chat, `peer_${wire(7)}`)).toMatchObject({ id: wire(7), snippet: "line 7", messageId: `peer_${wire(7)}` });
+    expect(await replyFor(node, chat, wire(8))).toMatchObject({ id: wire(8), snippet: "line 8", messageId: `peer_${wire(8)}` });
+    expect(c.whole()).toBe(0);
+    // A file's wire id is not a row's id: the whole chat, once.
+    expect(await replyFor(node, chat, "F".repeat(22))).toMatchObject({ id: "F".repeat(22), messageId: "me_9" });
+    expect(c.whole()).toBe(1);
   });
 
   it("in a group, a press on my open buttons still reads who already answered", async () => {

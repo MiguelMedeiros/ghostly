@@ -60,8 +60,8 @@ describe("a profile that cannot be opened", () => {
     await view.user.click(more);
     expect(more).toHaveAttribute("aria-expanded", "true");
     const story = screen.getByTestId("profile-unavailable-text");
-    expect(story).toHaveTextContent("This profile's data is at version 12. This app, Ghostly 0.0.0-test, reads up to version 11.");
-    expect(story).toHaveTextContent("nothing was changed or deleted: your chats, keys and wallets are still there");
+    expect(story).toHaveTextContent("Its data is version 12; Ghostly 0.0.0-test reads up to 11.");
+    expect(story).toHaveTextContent("Nothing was opened, sent or changed: your chats, keys and wallets are still there");
 
     // Looking for the newer version is one press away; a client with none out yet says what else opens the profile.
     await view.user.click(screen.getByTestId("profile-unavailable-check"));
@@ -84,7 +84,7 @@ describe("a profile that cannot be opened", () => {
     const view = renderGate();
     fail({ reason: "newer", supportedVersion: 11 });
     await view.user.click(screen.getByRole("button", { name: "More info" }));
-    expect(screen.getByTestId("profile-unavailable-text")).toHaveTextContent("This profile's data is at version >11.");
+    expect(screen.getByTestId("profile-unavailable-text")).toHaveTextContent("Its data is version >11;");
   });
 
   it("any other failure: that the data did not open, the reason and what to try, the system's words behind the ⓘ, and Try again", async () => {
@@ -109,7 +109,7 @@ describe("a profile that cannot be opened", () => {
     }
     await view.user.click(screen.getByRole("button", { name: "More info" }));
     const story = screen.getByTestId("profile-unavailable-text");
-    expect(story).toHaveTextContent("Nothing was changed or deleted. While the data is closed, Ghostly connects to nobody and sends nothing for this profile.");
+    expect(story).toHaveTextContent("Nothing was changed or deleted. While closed, this profile connects to nobody and sends nothing.");
     expect(story).toHaveTextContent("What the system said: UnknownError: Internal error opening backing store");
   });
 

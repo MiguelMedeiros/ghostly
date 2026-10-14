@@ -73,6 +73,11 @@ export class EngineServer implements PeerServer {
     return this.changes;
   }
 
+  /** Whether a chat's or group's history changed after `mark` (`historyMark`); with none, since this engine was made. */
+  historyChanged(id: string, mark = 0): boolean {
+    return (this.changedAt.get(id) ?? 0) > mark;
+  }
+
   /**
    * `read`: the chats and groups whose whole history the client read itself, after `mark` (`historyMark`). One that has
    * not changed since is not read and sent again: the client hears only what changes in it from now on.

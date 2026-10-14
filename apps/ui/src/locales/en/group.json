@@ -20,6 +20,10 @@
     "sendFailed": "Could not send",
     "shareHint": "Share the group's link",
     "shareLink": "Share link",
+    "takenBack": "{{contact}} took back the invitation to {{name}}",
+    "takenBackNext": "Ask {{contact}} for a new invitation or the group's link.",
+    "takenBackNextUnknown": "Ask the group's admin for a new invitation or the group's link.",
+    "takenBackUnknown": "The invitation to {{name}} was taken back",
     "unnamed": "A group"
   },
   "connection": {
@@ -63,6 +67,7 @@
     "forked": "The membership history forked",
     "gone": "{{name}} is no longer a member",
     "joined": "{{name}} joined",
+    "left": "{{name}} left",
     "pictureChanged": "{{name}} changed the group's picture",
     "pictureChangedNoName": "The group's picture was changed",
     "pictureChangedYou": "You changed the group's picture",
@@ -76,6 +81,15 @@
     "rotated": "Keys rotated: a fresh epoch",
     "youJoined": "You joined.",
     "youJoinedAgain": "You joined again."
+  },
+  "forget": {
+    "invitation": "The invitation goes from this device. {{contact}} is told you declined.",
+    "invitationKept": "The invitation and the group's history go from this device. {{contact}} is told you declined.",
+    "invitationKeptUnknown": "The invitation and the group's history go from this device. The contact who sent it is told you declined.",
+    "invitationUnknown": "The invitation goes from this device. The contact who sent it is told you declined.",
+    "joining": "You stop asking to join, and the group goes from this device.",
+    "kept": "The group and its history go from this device.",
+    "takenBack": "The invitation goes from this device. It was taken back, so nobody is told."
   },
   "hubs": {
     "auto": "Hub if always on",
@@ -116,6 +130,8 @@
   "leave": {
     "blocked": "Nobody is online to become admin",
     "blockedCommunity": "Nobody is online to take your leave",
+    "blockedCommunityAdminForgetNext": "Wait for a member to be online, or remove the members first, or make one of them admin.",
+    "blockedCommunityAdminNext": "Wait for a member to be online, or remove the members first.",
     "blockedCommunityNext": "Try again in a moment.",
     "blockedNext": "Make someone admin, or wait for a member.",
     "body": "The group and its history go from this device. You will not read what is said after, and to come back someone has to let you in again.",
@@ -125,7 +141,8 @@
     "forgetTitleUnnamed": "Delete this group?",
     "successor": "You are the admin: {{name}} becomes the admin when you leave.",
     "title": "Leave {{name}}?",
-    "titleUnnamed": "Leave this group?"
+    "titleUnnamed": "Leave this group?",
+    "unsaidNext": "It goes from this device anyway. The others will still list you as a member."
   },
   "link": {
     "broken": "This link to a group does not work",
@@ -137,6 +154,7 @@
     "disableTitle": "Turn the link off?",
     "enable": "Turn on the link",
     "enableFailed": "Could not turn the link on",
+    "endsOnHandover": "The link shared so far stops working. {{name}} can share a new one.",
     "full": "The group is full ({{count}} of {{count}}). Nobody joins until someone leaves.",
     "fullShort": "The group is full",
     "hideQr": "Hide QR",
@@ -187,7 +205,7 @@
     "invited": "Invited…",
     "makeAdmin": "Hand over admin",
     "missing": "{{count}} missing",
-    "missingHint": "Messages of this epoch that nobody could recover",
+    "missingHint": "Messages of this epoch that have not arrived yet",
     "needsBothHint": "Groups need both apps connected and updated",
     "needsUpdate": "Needs an updated Ghostly",
     "noContacts": "Every paired contact is already in, or you have none yet.",

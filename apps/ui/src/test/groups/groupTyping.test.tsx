@@ -37,6 +37,21 @@ describe("GroupChat: who is typing", () => {
     expect(screen.getByTestId("group-members")).toHaveTextContent("4 members");
   });
 
+  it("a screen reader is told who is typing, never the member count again each time they stop", async () => {
+    openGroup(active());
+    const button = await screen.findByTestId("group-members");
+    // The count is there the whole time: outside the line's live region, which is empty while nobody types.
+    const live = button.querySelector("[aria-live]")!;
+    expect(live).toHaveAttribute("role", "status");
+    expect(live).toHaveTextContent("");
+    expect(button).toHaveTextContent("4 members");
+    act(() => fakeEngine.update({ groups: [active([{ key: ANA }])] }));
+    expect(live).toHaveTextContent("Ana is typing…");
+    act(() => fakeEngine.update({ groups: [active()] }));
+    expect(live).toHaveTextContent("");
+    expect(button).toHaveTextContent("4 members");
+  });
+
   it("says recording and thinking the same way, plain typing when they differ, and a bot's status after its name", async () => {
     openGroup(active([{ key: ANA, kind: "recording" }]));
     expect(await screen.findByTestId("group-typing")).toHaveTextContent("Ana is recording audio…");

@@ -4,8 +4,8 @@ import { toBase64Url, toZ32 } from "./bytes";
 import { canonicalJsonBytes, readCanonicalJson, type JsonValue } from "./canonicalJson";
 import { findAppForbiddenKey, isAppUrl } from "./appBundle";
 import {
-  APP_PREFIXES, isAppHash, isAppKey, isAppRef, readAppRevocation, readAppSignature, signAppObject, verifyAppSignature,
-  type AppSignature, type SignedAppRevocation,
+  APP_PREFIXES, isAppHash, isAppKey, isAppRef, readAppRevocationShape, readAppSignature, signAppObject, verifyAppRevocation, verifyAppSignature,
+  type AppRevocationsChecked, type AppSignature, type SignedAppRevocation,
 } from "./appStatements";
 import type { Signer } from "./signer";
 
@@ -145,6 +145,14 @@ function checkRemoval(value: unknown, options: AppFormatOptions): Check {
 
 const STORE_REQUIRED = ["ghostlyStore", "key", "name", "kind", "sequence", "expires", "apps", "removed", "revoked"] as const;
 
+/** Runs a check written in steps to its end, in one go. */
+function inOneRun<T>(steps: Generator<void, T>): T {
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
 /**
  * Checks an index's fields and bounds, and every revocation it carries (one that does not verify refuses the index:
  * the store copied it, so a broken one is the store's fault). The signature and `expires` are `readAppStore`'s. An
@@ -152,6 +160,15 @@ const STORE_REQUIRED = ["ghostlyStore", "key", "name", "kind", "sequence", "expi
  * statement and keeps its exact keys.
  */
 export function checkAppStoreIndex(value: unknown, options: AppFormatOptions = {}): Check {
+  const fields = inOneRun(checkAppStoreFieldsSteps(value, options));
+  return fields.ok ? inOneRun(checkAppStoreRevocationsSteps(value as unknown as AppStoreIndex)) : fields;
+}
+
+/**
+ * The first half of `checkAppStoreIndex`: the fields and bounds, and the shape of every revocation, with no signature
+ * checked. A step after each listing, removal and revocation (see `readAppStoreSteps`).
+ */
+function* checkAppStoreFieldsSteps(value: unknown, options: AppFormatOptions = {}): Generator<void, Check> {
   if (!isObject(value)) return { ok: false, reason: "bad-field", detail: "The index is not an object" };
   if (value.ghostlyStore !== undefined && value.ghostlyStore !== 1) return { ok: false, reason: "unsupported-format", detail: "ghostlyStore is not 1" };
   const keys = keysOf(value, STORE_REQUIRED, ["description"], options);
@@ -172,13 +189,25 @@ export function checkAppStoreIndex(value: unknown, options: AppFormatOptions = {
     const ref = (listing as { ref: string }).ref;
     if (refs.has(ref)) return { ok: false, reason: "duplicate-app", detail: ref };
     refs.add(ref);
+    yield;
   }
   if (!Array.isArray(removed) || removed.length > APP_STORE_LIMITS.removed) return bad("removed");
-  for (const entry of removed) { const checked = checkRemoval(entry, options); if (!checked.ok) return checked; }
+  for (const entry of removed) { const checked = checkRemoval(entry, options); if (!checked.ok) return checked; yield; }
   if (!Array.isArray(revoked) || revoked.length > APP_STORE_LIMITS.revoked) return bad("revoked");
   for (const entry of revoked) {
-    const read = readAppRevocation(entry);
+    const read = readAppRevocationShape(entry);
     if (!read.ok) return { ok: false, reason: "bad-revocation", detail: read.detail ?? read.reason };
+    yield;
+  }
+  return fine;
+}
+
+/** The second half: the signature of each revocation of an index whose fields hold, one step each. */
+function* checkAppStoreRevocationsSteps(index: AppStoreIndex, checked?: AppRevocationsChecked): Generator<void, Check> {
+  for (const revocation of index.revoked) {
+    const verified = verifyAppRevocation(revocation, checked);
+    if (!verified.ok) return { ok: false, reason: "bad-revocation", detail: verified.reason };
+    yield;
   }
   return fine;
 }
@@ -191,25 +220,41 @@ export interface AppStoreReading {
   expired: boolean;
 }
 
+export type AppStoreRead = { ok: true; store: AppStoreReading } | { ok: false; reason: AppStoreRefusal; detail?: string };
+
 /**
- * Reads `ghostly-store.json` with its `ghostly-store.sig`, in this order: size, JSON, canonical bytes, fields and
- * revocations, the signature statement, the key the reader holds for this store (when it holds one), the signature,
- * then `expires` against `now` (seconds): more than 90 days ahead is refused, past is `expired`. A key it does not know
- * is ignored (a later store's optional field) and stays in the bytes the signature covers.
+ * Reads `ghostly-store.json` with its `ghostly-store.sig`, in this order: size, JSON, canonical bytes, fields and the
+ * shape of each revocation, the signature statement, the key the reader holds for this store (when it holds one), the
+ * signature, the signature of each revocation, then `expires` against `now` (seconds): more than 90 days ahead is
+ * refused, past is `expired`. The index's own signature comes before its revocations': an index nobody signed costs
+ * its reader one signature check, whatever it carries. A key it does not know is ignored (a later store's optional
+ * field) and stays in the bytes the signature covers.
  */
-export function readAppStore(indexBytes: Uint8Array, sigBytes: Uint8Array, now: number, heldKey?: string):
-  { ok: true; store: AppStoreReading } | { ok: false; reason: AppStoreRefusal; detail?: string } {
+export function readAppStore(indexBytes: Uint8Array, sigBytes: Uint8Array, now: number, heldKey?: string): AppStoreRead {
+  return inOneRun(readAppStoreSteps(indexBytes, sigBytes, now, heldKey));
+}
+
+/**
+ * `readAppStore` in steps, for a reader that shares its thread (a page): it stops after each listing, removal and
+ * revocation, and after each revocation's signature check, so the caller can let the thread go between two `next()`
+ * and an index of 4096 revocations never holds it for seconds. With `checked`, a revocation it holds is not checked again.
+ */
+export function* readAppStoreSteps(indexBytes: Uint8Array, sigBytes: Uint8Array, now: number, heldKey?: string, checked?: AppRevocationsChecked): Generator<void, AppStoreRead> {
   if (indexBytes.length > APP_STORE_LIMITS.indexBytes) return { ok: false, reason: "too-large" };
   const read = readCanonicalJson(indexBytes);
   if (!read.ok) return read;
-  const checked = checkAppStoreIndex(read.value);
-  if (!checked.ok) return checked;
+  yield;
+  const fields = yield* checkAppStoreFieldsSteps(read.value);
+  if (!fields.ok) return fields;
   const index = read.value as unknown as AppStoreIndex;
   const statement = readAppSignature(sigBytes);
   if (!statement.ok) return statement;
   if (heldKey !== undefined && index.key !== heldKey) return { ok: false, reason: "store-key", detail: "Another key than the store's" };
   const signed = verifyAppSignature(APP_PREFIXES.store, indexBytes, statement.signature, index.key);
   if (!signed.ok) return signed;
+  yield;
+  const revocations = yield* checkAppStoreRevocationsSteps(index, checked);
+  if (!revocations.ok) return revocations;
   if (index.expires > now + APP_STORE_LIMITS.expiresAheadS) return { ok: false, reason: "expires-too-far" };
   return { ok: true, store: { index, digest: toBase64Url(sha256(indexBytes)), expired: index.expires < now } };
 }

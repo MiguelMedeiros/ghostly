@@ -197,8 +197,8 @@ describe("a profile backup's file", () => {
   it("what a backup holds, and what it does not, is behind the ⓘ", async () => {
     const { user } = renderApp(<ProfileBackups canSwitch={false} />);
     await user.click(screen.getAllByTestId("row-info")[0]);
-    expect(screen.getByTestId("profile-backups")).toHaveTextContent("files of any size");
-    expect(screen.getByTestId("profile-backups")).toHaveTextContent("Not in it: S3 storage keys");
+    expect(screen.getByTestId("profile-backups")).toHaveTextContent("Everything except S3 keys");
+    expect(screen.getByTestId("profile-backups")).toHaveTextContent("return from their recovery phrase");
   });
 
   it("a file made without a passphrase asks for none, and says it was not protected", async () => {

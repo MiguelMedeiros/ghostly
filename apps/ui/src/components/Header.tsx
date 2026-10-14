@@ -42,7 +42,7 @@ export function Header({ onBurn, showBurn, confirmBurn, onCancelBurn }: HeaderPr
           ) : (
             <button
               onClick={onBurn}
-              className="px-3 py-1.5 bg-danger/20 text-danger border border-danger/30 rounded text-xs font-bold uppercase tracking-wider hover:bg-danger/30 transition-colors cursor-pointer"
+              className="px-3 py-1.5 bg-danger/20 text-danger-ink border border-danger/30 rounded text-xs font-bold uppercase tracking-wider hover:bg-danger/30 transition-colors cursor-pointer"
             >
               Burn
             </button>
