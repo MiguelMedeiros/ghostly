@@ -426,6 +426,63 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(toBob).toEqual([cut, 0]);
   });
 
+  it("a holder that served damaged bytes is not asked again however often it says it holds the file", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    carol.online = false;
+    await t.world.run(2_000);
+    const size = 200_000;
+    const { messageId } = await t.send(alice, id, pattern(size, 12));
+    await t.world.until(() => t.done(bob, id, messageId), 60_000);
+    alice.online = false;
+    t.files.get(bob)!.store.corrupt = true;
+    t.world.reopen(carol);
+    const damaged = () => t.seen.filter(s => s.from === "carol" && s.to === "bob" && s.frame.t === "pf-refuse" && s.frame.why === "damaged").length;
+    await t.world.until(() => damaged() === 1, 5 * 60_000);
+    for (let i = 0; i < 30; i++) { t.say(bob, carol, id, { t: "group-have", g: id, ids: [messageId] }); await t.world.run(2_000); }
+    expect(damaged()).toBe(1);
+    const data = t.seen.filter(s => s.from === "bob" && s.to === "carol" && s.frame.t === "pf-data").length;
+    expect(data * 16 * 1024).toBeLessThanOrEqual(2 * size);
+  });
+
+  it("a holder whose damaged bytes come in two parts, the first stalled, is not asked for the file again and again", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    carol.online = false;
+    await t.world.run(2_000);
+    const size = 600_000, cut = 256 * 1024;
+    const { messageId } = await t.send(alice, id, pattern(size, 13));
+    await t.world.until(() => t.done(bob, id, messageId), 60_000);
+    alice.online = false;
+    // Bob's copy is bad, and what he serves from 0 stops past the first 256 KiB; what he serves from there comes whole.
+    t.files.get(bob)!.store.corrupt = true;
+    const from = new Map<unknown, unknown>();
+    t.hold = (sender, to, frame) => {
+      if (sender === carol && frame.t === "pf-accept") from.set(frame.id, frame.offset);
+      return sender === bob && to === carol && frame.t === "pf-data" && from.get(frame.id) === 0 && (frame.offset as number) >= cut;
+    };
+    t.world.reopen(carol);
+    await t.world.run(10 * GROUP_FILE_LIMITS.wantWaitMs);
+    const damaged = t.seen.filter(s => s.from === "carol" && s.to === "bob" && s.frame.t === "pf-refuse" && s.frame.why === "damaged").length;
+    expect(damaged).toBe(1);
+    expect(t.seen.filter(s => s.from === "carol" && s.to === "bob" && s.frame.t === "pf-accept").length).toBe(2);
+  });
+
+  it(`a member's group-have is taken at most ${GROUP_FILE_LIMITS.haveFrames} times in ${GROUP_FILE_LIMITS.haveWindowMs / 1000} seconds on an edge`, async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    t.files.get(bob)!.settings.autoDownloads = false;
+    t.hold = (from, to, frame) => from === alice && to === carol && frame.t === "pf-offer";
+    const { messageId } = await t.send(alice, id, pattern(20_000, 14));
+    await t.world.until(() => !!t.got(bob, id, messageId).message?.file && t.seen.some(s => s.from === "carol" && s.to === "alice" && s.frame.t === "group-want"), 60_000);
+    alice.online = false;
+    const asked = () => t.seen.filter(s => s.from === "carol" && s.to === "bob" && s.frame.t === "group-want").length;
+    await t.world.until(() => asked() === 1 && t.got(carol, id, messageId).transfer?.wait === "nobody", 5 * 60_000);
+    // Bob says he holds it, again and again, and answers `gone` each time he is asked.
+    for (let i = 0; i < 50; i++) { t.say(bob, carol, id, { t: "group-have", g: id, ids: [messageId] }); await t.world.run(100, 100); }
+    expect(asked()).toBeLessThanOrEqual(1 + GROUP_FILE_LIMITS.haveFrames);
+  });
+
   it("an offer nobody asked for is refused, and nothing is stored", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
