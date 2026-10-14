@@ -627,16 +627,17 @@ export function listSessions(cache?: SessionCache): ChatSession[] {
   return sessions;
 }
 
-/** Per chat's key: its id and its contact's key, read once. Neither changes while the chat is stored under that key. */
-const contacts = new Map<string, { id: string; peer: string }>();
+/** A chat's key, its id, its contact's key and my seed in it. None changes while the chat is stored under that key. */
+type ChatKeys = { key: string; id: string; peer: string; seed: string };
+/** Per chat's key, read once. */
+const contacts = new Map<string, ChatKeys>();
 
 /**
- * The chat with this contact, as `listSessions()` would find it first, without reading any chat's messages: each chat's
- * stored copy is parsed once, the first time it is looked through, and a long chat's whole history is never merged in.
- * An attention event, a call offer, finds its chat this way.
+ * Every chat's keys, as `listSessions()` counts chats, without reading any chat's messages: each chat's stored copy is
+ * parsed once, the first time it is looked through, and a long chat's whole history is never merged in.
  */
-export function sessionIdForPeer(peerPubKeyB64: string): string | undefined {
-  const ids: string[] = [];
+function chatKeys(): ChatKeys[] {
+  const all: ChatKeys[] = [];
   const seen = new Set<string>();
   for (const key of sessionKeys()) {
     seen.add(key);
@@ -646,16 +647,60 @@ export function sessionIdForPeer(peerPubKeyB64: string): string | undefined {
         const session = JSON.parse(readKey(key) ?? "null") as ChatSession | null;
         // As `listSessions` counts a chat.
         if (!session?.id || !session.mySeedB64 || !session.peerPubKeyB64 || !session.encKeyB64) continue;
-        contacts.set(key, contact = { id: session.id, peer: session.peerPubKeyB64 });
+        contacts.set(key, contact = { key, id: session.id, peer: session.peerPubKeyB64, seed: session.mySeedB64 });
       } catch {
         continue;
       }
     }
-    if (contact.peer === peerPubKeyB64) ids.push(contact.id);
+    all.push(contact);
   }
   for (const key of contacts.keys()) if (!seen.has(key)) contacts.delete(key);
-  // Two chats with this contact: the one the list shows first.
-  return ids.length > 1 ? listSessions().find((s) => s.peerPubKeyB64 === peerPubKeyB64)?.id : ids[0];
+  return all;
+}
+
+/** Of the chats that match, the one the list shows first (`listSessions` is read only when there are two). */
+function firstOf(matches: ChatKeys[]): ChatKeys | undefined {
+  if (matches.length < 2) return matches[0];
+  const ids = new Set(matches.map((m) => m.id));
+  const id = listSessions().find((s) => ids.has(s.id))?.id;
+  return matches.find((m) => m.id === id);
+}
+
+/** The chat with this contact, as `listSessions()` would find it first. An attention event, a call offer, finds its chat this way. */
+export function sessionIdForPeer(peerPubKeyB64: string): string | undefined {
+  return firstOf(chatKeys().filter((c) => c.peer === peerPubKeyB64))?.id;
+}
+
+/**
+ * Each chat's id, my seed in it and its contact's key, in no order, read as `sessionIdForPeer` reads them: what an
+ * invite's ownership check needs, with no chat's messages.
+ */
+export function knownChatKeys(): { id: string; seedB64: string; peerPubKeyZ32: string }[] {
+  return chatKeys().map((c) => ({ id: c.id, seedB64: c.seed, peerPubKeyZ32: c.peer }));
+}
+
+/** Per chat's key: its names, with the stored text they were read from. */
+const names = new Map<string, { raw: string; label?: string; nick?: string }>();
+
+/**
+ * The names of the chat with this contact (the chat's label, the contact's nickname), from the chat `sessionIdForPeer`
+ * finds; that chat's stored copy is parsed again only when it changed. Undefined with no chat.
+ */
+export function chatNamesForPeer(peerPubKeyB64: string): { label?: string; nick?: string } | undefined {
+  const chat = firstOf(chatKeys().filter((c) => c.peer === peerPubKeyB64));
+  const raw = chat && readKey(chat.key);
+  if (!chat || !raw) return undefined;
+  let known = names.get(chat.key);
+  if (known?.raw !== raw) {
+    try {
+      const session = JSON.parse(raw) as ChatSession;
+      names.set(chat.key, known = { raw, label: session.label, nick: session.nick });
+    } catch {
+      return undefined;
+    }
+  }
+  for (const key of names.keys()) if (!contacts.has(key)) names.delete(key);
+  return { label: known.label, nick: known.nick };
 }
 
 /**
