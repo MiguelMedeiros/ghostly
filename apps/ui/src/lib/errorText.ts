@@ -390,6 +390,8 @@ const RULES: readonly Rule[] = [
   exact("An edit cannot be empty", "errors.group.editEmpty"),
   exact("Too long to edit in this group", "errors.group.editTooLong"),
   exact("Only the admin can invite", "errors.group.adminInvites"),
+  // An Invite, Remove, Hand over or Rotate on a device where managing the group is off (packages/core/src/groupCommits.ts).
+  exact("Managing this group is off on this device. Turn on Manage groups from this device first.", "errors.group.adminOff", "errors.group.adminOffNext"),
   exact("This contact is already a member", "errors.group.alreadyMember"),
   { match: /^A group holds (?<max>\d+) members at most$/, key: "errors.group.full" },
   exact("Connect to this contact first. Their app needs groups (an updated Ghostly).", "errors.group.connectFirst", "errors.group.connectFirstNext"),
