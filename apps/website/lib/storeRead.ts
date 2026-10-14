@@ -1,6 +1,7 @@
 import { readAppStore } from "./store-core/appStore";
-import { APP_ICON_PATH, appViewOf, readAppBundle, type AppBundle, type AppPermission, type AppViewMode } from "./store-core/appBundle";
+import { APP_ICON_PATH, APP_PERMISSIONS, appViewOf, readAppBundle, type AppBundle, type AppPermission, type AppViewMode } from "./store-core/appBundle";
 import { appFingerprint, appRef, appRefPublisher, type SignedAppRevocation } from "./store-core/appStatements";
+import { APPS_RELEASE, versionAtLeast } from "./appsGate";
 
 /*
  * The official store, as the /apps pages show it (WISP 1200 · Stores). The index, its signature and the bundles its
@@ -54,7 +55,10 @@ export interface StoreApp {
   version: string;
   sequence: number;
   digest: string;
+  /** Every permission the manifest asks for, in `APP_PERMISSIONS`' order with the internet last, as the page lists them. */
   permissions: AppPermission[];
+  /** The Ghostly release it needs, as "1.2" or "1.4.1": its `runtime.host`, never before Apps (`APPS_RELEASE`). */
+  release: string;
   /** As the manifest names them: a later client's name too, which the app accepts (WISP 1200 · Manifest). */
   clients: string[];
   view: AppViewMode;
@@ -87,6 +91,16 @@ export type StoreView =
   | { ok: false; reason: string };
 
 export const slugOf = (ref: string) => `${ref.slice(53)}.${appRefPublisher(ref).slice(0, 16)}`;
+
+/** Every permission the reader knows, as an app's page lists them: the internet last, the line about who can learn about the person. */
+const PAGE_ORDER: readonly AppPermission[] = [...APP_PERMISSIONS.filter((p) => p !== "internet"), "internet"];
+
+/** `runtime.host` (">=1.4", ">=1.4.1") as the release a page names, or Apps' own (1.2) when it is earlier. */
+export function releaseOf(host: string): string {
+  const release = host.replace(/^>=/, "");
+  const full = release.split(".").length === 2 ? `${release}.0` : release;
+  return versionAtLeast(full, APPS_RELEASE) ? release : APPS_RELEASE.replace(/\.0$/, "");
+}
 
 function revokedBy(revocations: SignedAppRevocation[], ref: string, digest: string, sequence: number): boolean {
   return revocations.some(({ statement }) =>
@@ -176,7 +190,8 @@ export function readStore(bytes: StoreBytes, now: number, key: string): StoreVie
       version: manifest.version,
       sequence: manifest.sequence,
       digest,
-      permissions: [...manifest.permissions],
+      permissions: PAGE_ORDER.filter((p) => manifest.permissions.includes(p)),
+      release: releaseOf(manifest.runtime.host),
       clients: [...manifest.runtime.clients],
       view: appViewOf(manifest),
       license: manifest.license,
