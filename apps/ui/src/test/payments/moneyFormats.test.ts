@@ -263,6 +263,21 @@ describe("USDT addresses", () => {
     // A bad checksum is nobody's address.
     expect(findMoney(`my USDT address is ${EVM_BAD_CASE}`)).toBeNull();
   });
+
+  it("a transfer of another token is never read as USDT, whatever the message says", () => {
+    const WBTC = "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599", SEPOLIA_USDC = "0x1c7d4b196cb0c7b01d743fbc6116a902379c7238";
+    // Where the chain's USDT is known, another contract is not a USDT card: the message stays text.
+    expect(findMoney(`pay me the USDT: ethereum:${WBTC}@1/transfer?address=${EVM}&uint256=100000000`)).toBeNull();
+    expect(findMoney(`USDT please ethereum:${SEPOLIA_USDC}@11155111/transfer?address=${EVM}&uint256=2500000`)).toBeNull();
+    // Where it is not known, the contract cannot be checked: no amount read with USDT's decimals, and the QR is
+    // the recipient's address, never that contract's transfer.
+    for (const chain of ["", "@137", "@31337"]) {
+      const request = findUsdtAddress(`USDT: ethereum:${WBTC}${chain}/transfer?address=${EVM}&uint256=100000000`)?.request;
+      expect(request?.recipient).toBe(EVM);
+      expect(request?.amount).toBeUndefined();
+      expect(request?.uri).toBeUndefined();
+    }
+  });
 });
 
 describe("false positives: ordinary text stays text", () => {

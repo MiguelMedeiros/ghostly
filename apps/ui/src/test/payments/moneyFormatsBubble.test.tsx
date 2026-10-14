@@ -206,4 +206,11 @@ describe("a USDT address", () => {
     expect(within(card).getByTestId("money-network-unknown")).toHaveTextContent("ask for a link that names the chain");
     expect(within(card).queryByTestId("usdt-pay")).toBeNull();
   });
+
+  it.each([false, true])("a transfer of another token with USDT in the message is no USDT card (a USDT wallet: %s)", (hasUsdt) => {
+    if (hasUsdt) wallets({ testnet: { usdt: { configured: true, locked: false, network: "sepolia", provider: "https://sepolia.test", chainId: 11155111, token: SEPOLIA_TEST_USDT, decimals: 6, balance: "5000000", gasBalance: "1" } } });
+    bubble(`USDT please ethereum:0x1c7d4b196cb0c7b01d743fbc6116a902379c7238@11155111/transfer?address=${EVM}&uint256=2500000`);
+    expect(screen.queryByTestId("usdt-bubble")).toBeNull();
+    expect(screen.queryByTestId("money-amount")).toBeNull();
+  });
 });
