@@ -29,6 +29,8 @@ export function asCliError(error: unknown): CliError {
     && Object.hasOwn(EXIT, (error as { code: string }).code)) return new CliError((error as { code: ErrorCode }).code, String((error as { message: unknown }).message));
   // A contact the chat's link could not reach (its `GhostlyHttpError` "unreachable"): not there now, not the engine failing.
   if (error instanceof Error && (error as { code?: unknown }).code === "unreachable") return new CliError("unavailable", error.message);
+  const known = engineKnown(error);
+  if (known) return known;
   const local = localFileError(error);
   if (local) return local;
   const unopened = profileOpenError(error);
@@ -37,6 +39,27 @@ export function asCliError(error: unknown): CliError {
   if (/real money|confirmedReal|Mainnet/i.test(message) && /confirm/i.test(message)) return new CliError("confirm", message);
   if (/other network|cross-network|network does not match/i.test(message)) return new CliError("refused", message);
   return new CliError("engine", message);
+}
+
+/**
+ * The engine's known errors (`EngineError`, packages/core engineErrors.ts) a bot branches on, by their `engineCode`: a
+ * host or the network not answering is `unavailable` (try again later), one too slow `timeout`, a value the person gave
+ * `bad_request`, money that is not there `refused`. Any other keeps `engine`. Read by its shape, as `profileOpenError`.
+ */
+const ENGINE_CODES: Record<string, ErrorCode> = {
+  mintUnreachable: "unavailable", lnurlUnreachable: "unavailable", hostUnreachable: "unavailable", networkUnreachable: "unavailable", usdtRpcUnavailable: "unavailable",
+  hostTimedOut: "timeout", networkTimedOut: "timeout",
+  invalidMintUrl: "bad_request", mintNotHttps: "bad_request", invalidMaxFee: "bad_request",
+  notEnoughSats: "refused", ecashAlreadySpent: "refused",
+};
+
+function engineKnown(error: unknown): CliError | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const { engineCode, values } = error as { engineCode?: unknown; values?: { host?: unknown } };
+  if (typeof engineCode !== "string" || !Object.hasOwn(ENGINE_CODES, engineCode)) return undefined;
+  // The app's reason for a Lightning address it could not read (a browser's CORS) is no reason in a terminal.
+  if (engineCode === "lnurlUnreachable" && typeof values?.host === "string") return new CliError("unavailable", `Could not reach ${values.host}`);
+  return new CliError(ENGINE_CODES[engineCode], error.message);
 }
 
 /**
