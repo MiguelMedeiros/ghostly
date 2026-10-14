@@ -68,6 +68,7 @@
   "services": "الخدمات المشتركة",
   "servicesNeedApp": "يتطلب إضافة Ghostly للمتصفح أو تطبيق سطح المكتب",
   "servicesShared": "{{count}} مشتركة في هذه الدردشة",
+  "sharedTextFile": "نص مشارك",
   "skinTone": "لون البشرة",
   "takePhoto": "التقاط صورة",
   "tooLong": "النص طويل جدًا للإرسال ({{count}} حرفًا، والحد {{max}}).",
