@@ -1086,6 +1086,7 @@
     "packages/browser/src/engine/paymentAdapters/providers/lightningCards.ts": ["wallet.lightning.*","devices.handoff.wallets"],
     "packages/browser/src/engine/paymentAdapters/providers/lnd.ts": ["wallet.lightning.lnd.*"],
     "packages/browser/src/engine/paymentAdapters/providers/nwc.ts": ["wallet.lightning.nwc.*"],
+    "packages/browser/src/engine/paymentAdapters/providers/nwcProvider.ts": ["wallet.lightning.nwc.*"],
     "packages/browser/src/engine/paymentAdapters/providers/webln.ts": ["wallet.lightning.webln.*"],
     "packages/browser/src/engine/paymentAdapters/providers/{bdk,bdkSdk,bdkPhrase}.ts": ["wallet.onchain.bdk.*","wallet.onchain.sources","payments.bitcoin.*"],
     "packages/browser/src/engine/paymentAdapters/providers/{bitcoinService,onchain}.ts": ["wallet.onchain.*","payments.bitcoin.*","sdk.plugin.*"],
