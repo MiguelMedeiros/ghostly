@@ -253,11 +253,21 @@ function filesCap(channel: FrameChannel): number {
   return channel.sendBudget ? channel.sendBudget / 4 : LIMITS.sendHighWaterMark;
 }
 
+/** Files on a channel (`GhostLink.filesUsing`). */
+interface FilesUse { channel: FrameChannel; at: number; waiting: number; appAhead: number }
+
 /**
  * How long after files last wrote on a channel, or last waited for room on it, an app's data keeps its own quarter above
  * their line (WISP 1200 § In a chat): a file waiting for `pf-got` holds its share meanwhile.
  */
 const FILES_IN_USE_MS = 2_000;
+
+/**
+ * How far an app's data may get ahead of a file's bytes while the file waits for room on the channel (WISP 1200 § In a
+ * chat): a frame goes only while the app has sent less than this more than the file since. A small frame (a Chess move)
+ * still goes at once; one streaming at its limit gets about half the link, and the file the other half.
+ */
+const APP_AHEAD_OF_FILES = 16 * 1024;
 
 /** Largest `paired-message` frame sent with a preview: a session fails on a frame over 60 KiB (`PairedSession`). */
 export const MAX_PAIRED_MESSAGE_FRAME = 56 * 1024;
@@ -3251,19 +3261,26 @@ export class GhostLink {
    * kept to send later. While the channel already holds a quarter of what it may queue (its send budget, or the high
    * water mark of a WebRTC channel), the frame is refused with `too-fast`, so the chat's messages and pings never wait
    * behind an app's data on a link slower than it sends (WISP 1200 § In a chat). While a file goes, that quarter sits
-   * above what files may hold (`filesWritable`): files keep the channel at their own line for the whole transfer.
+   * above what files may hold (`filesWritable`): files keep the channel at their own line for the whole transfer. While
+   * the file waits for room, the app gets no further than `APP_AHEAD_OF_FILES` ahead of it, so it cannot refill the
+   * channel each time it drains to files' line and keep the file from moving.
    */
   sendAppData(app: string, data: unknown): AppSendError | null {
     if (!this.apps.open.has(app)) return "not-open";
     if (appDataBytes(data) > APP_DATA_MAX_BYTES) return "too-large";
     if (!this.channel || !this.isDataLinkOpen) return "offline";
     if (!this.supportsApps) return "peer-closed";
-    const files = this.filesUse?.channel === this.channel && (this.filesUse.waiting > 0 || Date.now() - this.filesUse.at < FILES_IN_USE_MS)
-      ? filesCap(this.channel) : 0;
-    if (this.channel.bufferedAmount >= files + (this.channel.sendBudget ?? LIMITS.sendHighWaterMark) / 4) return "too-fast";
+    const use = this.filesUse?.channel === this.channel ? this.filesUse : null;
+    const files = use && (use.waiting > 0 || Date.now() - use.at < FILES_IN_USE_MS) ? use : null;
+    if (use && !files) use.appAhead = 0;
+    if (this.channel.bufferedAmount >= (files ? filesCap(this.channel) : 0) + (this.channel.sendBudget ?? LIMITS.sendHighWaterMark) / 4) return "too-fast";
+    if (files && files.waiting > 0 && files.appAhead >= APP_AHEAD_OF_FILES) return "too-fast";
     const refused = this.apps.canSend(app, data);
     if (refused) return refused;
-    try { this.channel.send(JSON.stringify(appDataFrame(app, data))); return null; } catch { return "offline"; }
+    const frame = JSON.stringify(appDataFrame(app, data));
+    try { this.channel.send(frame); } catch { return "offline"; }
+    if (files) files.appAhead = Math.min(files.appAhead + frame.length, APP_AHEAD_OF_FILES + APP_DATA_MAX_BYTES);
+    return null;
   }
   /** What the contact had open is gone (`apps/1` is no longer agreed, or this link stopped): each app hears it now. */
   private appsEnded(): void {
@@ -3305,15 +3322,21 @@ export class GhostLink {
   sendFileData(id: string, offset: number, data: Uint8Array): boolean {
     if (!this.supportsLargeFiles || !this.channel) return false;
     try {
-      this.channel.send(this.supportsBinaryFiles ? encodeFileData(id, offset, data) : JSON.stringify({ t: "pf-data", id, offset, data: toBase64Url(data) }));
-      this.filesUsing(this.channel).at = Date.now();
+      const frame = this.supportsBinaryFiles ? encodeFileData(id, offset, data) : JSON.stringify({ t: "pf-data", id, offset, data: toBase64Url(data) });
+      this.channel.send(frame);
+      const use = this.filesUsing(this.channel);
+      use.at = Date.now();
+      use.appAhead = Math.max(0, use.appAhead - (typeof frame === "string" ? frame.length : frame.byteLength));
       return true;
     } catch { return false; }
   }
-  /** Files on a channel: when they last wrote on it, and how many wait for room. An app's data gets room above theirs. */
-  private filesUse: { channel: FrameChannel; at: number; waiting: number } | null = null;
-  private filesUsing(channel: FrameChannel): { channel: FrameChannel; at: number; waiting: number } {
-    if (this.filesUse?.channel !== channel) this.filesUse = { channel, at: 0, waiting: 0 };
+  /**
+   * Files on a channel: when they last wrote on it, how many wait for room, and how many bytes an app's data has sent
+   * on it beyond theirs since. An app's data gets room above theirs.
+   */
+  private filesUse: FilesUse | null = null;
+  private filesUsing(channel: FrameChannel): FilesUse {
+    if (this.filesUse?.channel !== channel) this.filesUse = { channel, at: 0, waiting: 0, appAhead: 0 };
     return this.filesUse;
   }
   /**
