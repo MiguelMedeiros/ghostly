@@ -1,7 +1,7 @@
 import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import type { WalletNetwork } from "@ghostly/core";
-import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletType } from "@ghostly/browser/shared/types";
+import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletOffer, WalletType } from "@ghostly/browser/shared/types";
 import { bool, chatOf, inviteTaken, node, num, oneOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
 import { CliError, type ErrorCode } from "./errors";
@@ -24,6 +24,37 @@ const CHAT_METHODS = ["cashu", "lightning", ...METHODS.filter((m) => m !== "cash
 export const NODE_GAPS: Partial<Record<WalletType, string>> = {
   bark: "Bark's SDK ships a browser build only: its WebAssembly needs a browser window. Use it from the app.",
 };
+
+/** Sources the engine lists that live in a browser page (`window.webln`): a headless Ghostly never offers them. */
+const BROWSER_SOURCES = new Set(["webln"]);
+
+/** The sources of an offer a headless Ghostly can connect. */
+const nodeSources = (offer: WalletOffer | undefined) => offer?.providers?.filter((p) => !BROWSER_SOURCES.has(p.id));
+
+/**
+ * What `wallet create` was given checked against the offer's own form, before the engine is asked: a source, a field
+ * or a flag left out, or one the wallet does not take, is the person's value, said naming the flag. Before, the engine
+ * refused it in the app's words ("Enter connection uri", "Nothing was saved; try again") as `engine`, or the flag was
+ * dropped without a word.
+ */
+function createChecked(type: WalletType, n: WalletNetwork, offer: WalletOffer | undefined, provider: string | undefined, values: Record<string, string>, params: Params): void {
+  if (type !== "lightning" && type !== "bitcoin") {
+    if (provider || Object.keys(values).length) throw new CliError("usage", `--provider and --value name a lightning or bitcoin source: not with ${type}`);
+    if (offer?.needs === "invite" && !str(params, "invite")?.trim()) throw new CliError("bad_request", `${type} needs --invite <fed11…>`);
+    if (offer?.needs === "apiKey" && !str(params, "apiKey")?.trim()) throw new CliError("bad_request", `${type} on ${n} needs --api-key <key> (or api-key=… on --stdin)`);
+    return;
+  }
+  // None offered on this network: the engine says why.
+  const sources = nodeSources(offer);
+  if (!sources?.length) return;
+  if (!provider) throw new CliError("bad_request", `${type} needs --provider: one of ${sources.map((p) => p.id).join(", ")} (ghostly wallet list)`);
+  const source = sources.find((p) => p.id === provider);
+  if (!source) throw new CliError("bad_request", `No ${type} source ${JSON.stringify(provider)} on ${n} (ghostly wallet list)`);
+  const unknown = Object.keys(values).find((name) => !source.fields.some((f) => f.name === name));
+  if (unknown) throw new CliError("bad_request", `${provider} takes no --value ${unknown}: ${source.fields.length ? `its fields are ${source.fields.map((f) => f.name).join(", ")}` : "it has no fields"}`);
+  const missing = source.fields.find((f) => !f.optional && !f.defaults?.[n] && !values[f.name]?.trim());
+  if (missing) throw new CliError("bad_request", `${provider} needs --value ${missing.name}=<${missing.options?.map((o) => o.value).join("|") ?? missing.placeholder ?? missing.label.toLowerCase()}>`);
+}
 
 const network = (params: Params, fallback: WalletNetwork = "testnet") => oneOf(params, "network", NETWORKS, fallback);
 
@@ -153,7 +184,7 @@ const WALLETS: Record<string, Method> = {
     const offers = (s.wallet.offers ?? []).filter((o) => !only || o.network === only).map((o) => {
       const gap = NODE_GAPS[o.type];
       return { type: o.type, network: o.network, available: o.available && !gap, reason: gap ?? o.reason ?? null, exists: !!o.exists, several: !!o.several, needs: o.needs ?? null,
-        ...(o.providers ? { providers: o.providers.map((p) => ({ id: p.id, label: p.label, fields: p.fields.map((f) => ({ name: f.name, label: f.label, kind: f.kind, optional: !!f.optional })) })) } : {}) };
+        ...(o.providers ? { providers: nodeSources(o)!.map((p) => ({ id: p.id, label: p.label, fields: p.fields.map((f) => ({ name: f.name, label: f.label, kind: f.kind, optional: !!f.optional })) })) } : {}) };
     });
     return { wallets, offers };
   },
@@ -169,12 +200,12 @@ const WALLETS: Record<string, Method> = {
     const raw = params.values ?? {};
     if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.values(raw).some((v) => typeof v !== "string")) throw new CliError("bad_request", "values must be an object of strings");
     Object.assign(values, raw);
-    const provider = str(params, "provider");
-    const offered = state(ctx).wallet.offers?.find((o) => o.type === type && o.network === n)?.providers;
-    if (provider && offered && !offered.some((p) => p.id === provider)) throw new CliError("bad_request", `No ${type} source ${JSON.stringify(provider)} on ${n} (ghostly wallet list)`);
+    // On-chain is BDK unless another source is named.
+    const provider = str(params, "provider") ?? (type === "bitcoin" ? "bdk" : undefined);
     // BDK asks for a recovery phrase and makes a new wallet from one the app draws: here, one drawn now.
-    if (type === "bitcoin" && (provider ?? "bdk") === "bdk" && !values.mnemonic) values.mnemonic = generateMnemonic(wordlist, 128);
-    const made = await node(ctx).walletCreate({ type, network: n, ...(provider ? { providerId: provider } : type === "bitcoin" ? { providerId: "bdk" } : {}), ...(Object.keys(values).length ? { values } : {}), ...(str(params, "invite") ? { invite: str(params, "invite") } : {}), ...(str(params, "apiKey") ? { apiKey: str(params, "apiKey") } : {}) });
+    if (type === "bitcoin" && provider === "bdk" && !values.mnemonic) values.mnemonic = generateMnemonic(wordlist, 128);
+    createChecked(type, n, state(ctx).wallet.offers?.find((o) => o.type === type && o.network === n), provider, values, params);
+    const made = await node(ctx).walletCreate({ type, network: n, ...(provider ? { providerId: provider } : {}), ...(Object.keys(values).length ? { values } : {}), ...(str(params, "invite") ? { invite: str(params, "invite") } : {}), ...(str(params, "apiKey") ? { apiKey: str(params, "apiKey") } : {}) });
     return walletJson(made, state(ctx));
   },
 
