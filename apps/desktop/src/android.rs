@@ -125,9 +125,9 @@ pub async fn cancel_notification(id: &str) -> Result<(), String> {
         .map(drop)
 }
 
-/// Takes away every message notification still there.
-pub async fn cancel_notifications() -> Result<(), String> {
-    call_async::<Value>("cancelNotifications", json!({}))
+/// Takes away every message notification still there but those posted as `keep` (the page knows their chats).
+pub async fn cancel_notifications(keep: &[String]) -> Result<(), String> {
+    call_async::<Value>("cancelNotifications", json!({ "keep": keep }))
         .await
         .map(drop)
 }
@@ -197,6 +197,17 @@ impl Incoming {
     }
 }
 
+/// The latest notification tapped, until the page takes it (`native_notification_tap`): the tap that starts the app
+/// comes before the page listens for `notification-open`.
+#[derive(Default)]
+pub struct NotificationTap(Mutex<Option<String>>);
+
+impl NotificationTap {
+    pub fn take(&self) -> Option<String> {
+        self.0.lock().unwrap().take()
+    }
+}
+
 fn received(kind: &str, value: String) {
     let Some(app) = APP.get() else {
         return;
@@ -214,6 +225,7 @@ fn received(kind: &str, value: String) {
             }
         }
         "notification" => {
+            *app.state::<NotificationTap>().0.lock().unwrap() = Some(value.clone());
             let _ = app.emit_to("main", OPEN_EVENT, value);
         }
         // The activity stopped ("hidden") or came back ("visible"): Android's WebView never changes the page's own

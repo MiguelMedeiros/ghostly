@@ -198,6 +198,7 @@ macro_rules! commands {
             notifications::native_clear_notification,
             notifications::native_clear_notifications,
             notifications::native_notification_permission,
+            notifications::native_notification_tap,
             notifications::native_private_notification,
             notifications::open_notification_settings,
             oidc::oidc_loopback_cancel,
@@ -296,7 +297,8 @@ pub fn run() {
     #[cfg(target_os = "android")]
     let builder = builder
         .plugin(android::init())
-        .manage(android::Incoming::default());
+        .manage(android::Incoming::default())
+        .manage(android::NotificationTap::default());
 
     builder
         // The Ghostly window stays on the app's own pages, whatever is dropped on it.
