@@ -470,6 +470,8 @@ export class DhtDelivery {
     if (this.options.credentials.peerKey && this.state.peerMode) void this.tick(); else this.schedule();
   }
   get isLive(): boolean { return this.live; }
+  /** Someone else used the invite first (`DhtDeliveryState.inviteTaken`). */
+  get inviteTaken(): boolean { return !!this.state.inviteTaken; }
   /** The chat is open with the app in front: on the DHT, its mailbox is read at the signaling pace. */
   setActive(active: boolean): void {
     if (active === this.active) return;
@@ -760,6 +762,8 @@ export class DhtDelivery {
     if (this.state.inviteTaken || !expected || sender !== expected) return;
     if (this.state.peerPinned || this.state.confirmed || this.state.wasLive || this.live) return;
     traceLink(this.from, "invite-taken", {});
+    // Nothing is awaited from that contact now: the first contact's fast reads end here.
+    this.fastUntil = 0;
     await this.persist({ ...this.state, inviteTaken: true });
     this.changed();
   }
@@ -949,13 +953,13 @@ export class DhtDelivery {
   }
   /**
    * How long ago this side's invite was made (or joined), while nobody used it (or its inviter never answered,
-   * `unanswered`) and it is no longer awaited (`AWAITING_PEER_MS`).
+   * `unanswered`) and it is no longer awaited (`AWAITING_PEER_MS`, or at once once someone else took it, `inviteTaken`).
    */
   private unusedInviteAge(now: number): number | undefined {
     const madeAt = this.options.inviteMadeAt;
     if (madeAt === undefined || ((this.options.credentials.peerKey || this.state.peerSequence) && !this.unanswered)) return undefined;
     const age = now - Math.min(madeAt, this.startedAt);
-    return age >= AWAITING_PEER_MS ? age : undefined;
+    return age >= AWAITING_PEER_MS || this.state.inviteTaken ? age : undefined;
   }
   private schedule(): void {
     if (!this.running || this.ticking) return;
