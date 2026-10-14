@@ -293,7 +293,6 @@
     "bitcoinAddress": "₿ Adresse Bitcoin",
     "ecash": "⚡ Ecash",
     "invoice": "⚡ Facture Lightning",
-    "invoiceSats": "⚡ Facture Lightning · {{amount}} sats",
     "lightningAddress": "Adresse Lightning",
     "lightningOffer": "⚡ Offre Lightning",
     "payment": "⚡ {{what}} {{amount}}",
