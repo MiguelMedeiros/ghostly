@@ -452,6 +452,40 @@ export const fileStore = {
     });
     return ids;
   },
+  /** The id of every stored file whose bytes are a Blob in its record. */
+  async blobIds(): Promise<string[]> {
+    const files = await store(STORES.files, "readonly"), ids: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const request = files.openCursor();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return resolve();
+        if ((cursor.value as StoredFile).blob) ids.push(String(cursor.key));
+        cursor.continue();
+      };
+    });
+    return ids;
+  },
+  /**
+   * A file whose Blob was copied to file storage (`kind`, under its id): its record without the Blob from now on. Written
+   * back without the Blob it read, so not what WebKit loses (see above); what changed about it since (`fileState`) stays.
+   * False when the record is gone or holds no Blob any more: the copy is the caller's to remove.
+   */
+  async movedToBytes(id: string, kind: NonNullable<StoredFile["bytes"]>): Promise<boolean> {
+    let moved = false;
+    await transact([STORES.files], stores => {
+      const read = stores[STORES.files].get(id);
+      read.onsuccess = () => {
+        const record = read.result as StoredFile | undefined;
+        if (!record?.blob) return;
+        const { blob: _blob, ...rest } = record;
+        stores[STORES.files].put({ ...rest, bytes: kind } satisfies StoredFile);
+        moved = true;
+      };
+    });
+    return moved;
+  },
   async delete(id: string): Promise<void> {
     await transact([STORES.files, STORES.fileState], stores => {
       stores[STORES.files].delete(id);
