@@ -921,6 +921,25 @@ pub fn takes_pictures(sdp: &str) -> bool {
     true
 }
 
+/// A description with every section's DTLS role (`a=setup:`) said as `setup`.
+///
+/// The Desktop's offer says `active`, not webrtc-rs's `actpass`: the offerer is the DTLS client and starts the
+/// handshake on the pair its own ICE nominated. A peer that was the client sent its first flight on the first pair
+/// that worked for it, which webrtc-rs drops until it has a selected pair of its own; the peer sent it again a second
+/// later, and the call connected that much late. The answer to an `active` offer is `passive`.
+fn with_setup(sdp: &str, setup: &str) -> String {
+    sdp.split_inclusive('\n')
+        .map(|line| {
+            if line.starts_with("a=setup:") {
+                let end = &line[line.trim_end().len()..];
+                format!("a=setup:{setup}{end}")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect()
+}
+
 /// The local description as the page's signal needs it (`extractParamsFromSdp`): each media section with an
 /// SSRC line, and every candidate gathered, `udp` in lower case as browsers write it, at the end.
 pub fn describe(sdp: &str, gathered: &[String], ssrcs: (u32, u32)) -> String {
@@ -1473,7 +1492,7 @@ impl Call {
             .create_offer(options)
             .await
             .map_err(|e| e.to_string())?;
-        self.local(offer).await
+        Ok(with_setup(&self.local(offer).await?, "active"))
     }
 
     /// Our answer to the peer's offer (rebuilt from its signal), gathered. `restart`: the offer is the peer's ICE
@@ -1484,6 +1503,8 @@ impl Call {
         }
         let offer = RTCSessionDescription::offer(offer.to_owned()).map_err(|e| e.to_string())?;
         let pictures = takes_pictures(&offer.sdp);
+        // webrtc-rs answers `active` whatever the offer said; its DTLS is the server all the same.
+        let active = offer.sdp.lines().any(|l| l.trim_end() == "a=setup:active");
         self.pc
             .set_remote_description(offer)
             .await
@@ -1494,12 +1515,19 @@ impl Call {
             .create_answer(None)
             .await
             .map_err(|e| e.to_string())?;
-        self.local(answer).await
+        let answer = self.local(answer).await?;
+        Ok(if active {
+            with_setup(&answer, "passive")
+        } else {
+            answer
+        })
     }
 
-    /// The peer's answer to our offer.
+    /// The peer's answer to our offer. Our offer said `active`, so the answer's side is the DTLS server, as a Desktop
+    /// before this one is while its answer says `active`.
     pub async fn accept(&self, answer: &str) -> Result<(), String> {
-        let answer = RTCSessionDescription::answer(answer.to_owned()).map_err(|e| e.to_string())?;
+        let answer = RTCSessionDescription::answer(with_setup(answer, "passive"))
+            .map_err(|e| e.to_string())?;
         let pictures = takes_pictures(&answer.sdp);
         self.pc
             .set_remote_description(answer)
@@ -2228,6 +2256,69 @@ mod tests {
         assert!(takes_pictures(
             "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=inactive\r\n"
         ));
+    }
+
+    /// The offerer is the DTLS client, so its handshake starts on the pair its own ICE picked: a peer that was
+    /// the client sent its first flight on the first pair that worked for it, webrtc-rs dropped it until it had
+    /// nominated its own, and the call connected a second later (the peer's DTLS resend). The answer to such an
+    /// offer is passive, and an answer that still says active (a Desktop before this, whose DTLS is the server
+    /// all the same) is read as passive: both connect.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_offerer_is_the_dtls_client_whoever_answers() {
+        if let Some(missing) = missing() {
+            eprintln!("skipped: {missing}");
+            return;
+        }
+        let setup = |sdp: &str| {
+            sdp.lines()
+                .filter_map(|l| l.trim_end().strip_prefix("a=setup:"))
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+        let call = || {
+            Call::new(
+                OPUS_PT,
+                VP8_PT,
+                true,
+                Devices::default(),
+                &[],
+                Arc::new(|_| {}),
+            )
+        };
+        for released in [false, true] {
+            let a = call().await.unwrap();
+            let offer = a.offer(false).await.unwrap();
+            assert_eq!(setup(&offer), ["active", "active"], "{offer}");
+            let b = call().await.unwrap();
+            let answer = if released {
+                // As a Desktop before this answers: webrtc-rs's own answer, active whatever the offer said.
+                let offer = RTCSessionDescription::offer(offer.clone()).unwrap();
+                b.pc.set_remote_description(offer).await.unwrap();
+                let answer = b.pc.create_answer(None).await.unwrap();
+                b.local(answer).await.unwrap()
+            } else {
+                b.answer(&offer, false).await.unwrap()
+            };
+            let said = if released { "active" } else { "passive" };
+            assert_eq!(setup(&answer), [said, said], "{answer}");
+            a.accept(&answer).await.unwrap();
+            let stats = || {
+                format!(
+                    "released {released}: a {} b {}",
+                    serde_json::to_string(&a.stats()).unwrap(),
+                    serde_json::to_string(&b.stats()).unwrap()
+                )
+            };
+            until(
+                "both hear",
+                30,
+                || a.stats().audio_received > 20 && b.stats().audio_received > 20,
+                stats,
+            )
+            .await;
+            a.close().await;
+            b.close().await;
+        }
     }
 
     /// The last level a call told its page for each side (`{"levels":{"mic":0.4}}`).
