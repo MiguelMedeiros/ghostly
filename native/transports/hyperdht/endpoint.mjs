@@ -7,6 +7,31 @@ const BINARY = 0x80000000
 const PREFACE = 'ghostly/paired-chat/1'
 /** How long a closing channel waits for what it sent last to go out before the stream is destroyed anyway. */
 const CLOSE_FLUSH_MS = 300
+/**
+ * Bytes a channel may hold before `send` throws: above what every sender here lets itself queue (the CLI's 1 MiB high
+ * water mark and an app's quarter above it; the Desktop page's send budget over the sidecar's `SEND_ROOM`), so it
+ * trips only for one that ignores its own line.
+ */
+const MAX_BUFFERED = 2 * 1024 * 1024
+/**
+ * `drained()` resolves once a channel holds no more than this: no more than the sidecar's `SEND_ROOM`, so its wait for
+ * room never spins on a `drained()` that resolves at once.
+ */
+const DRAINED_AT = 64 * 1024
+/**
+ * How often a wait in `drained()` looks again. Each stream says `drain` only once its own queue is empty, which on a fast
+ * link comes first; on a slow one this finds the queue at `DRAINED_AT` before it runs dry.
+ */
+const DRAIN_POLL_MS = 10
+
+/**
+ * What a connection's stream still holds: secret-stream's queue and the UDX stream's under it. Both are streamx
+ * streams, which count it in `_writableState.buffered` (hyperdht is pinned; hyperdhtEndpointBuffered.test.ts reads it).
+ * secret-stream has no `writableLength`: read from there, it was always 0.
+ */
+function held(socket) {
+  return (socket._writableState?.buffered ?? 0) + (socket.rawStream?._writableState?.buffered ?? 0)
+}
 
 /** Native UDP + NoiseSecretStream. The binding comes from the authenticated
  * stream itself, never from an application frame supplied by the other peer. */
@@ -36,25 +61,32 @@ export async function createHyperEndpoint(seed, options = {}) {
     const channel = {
       // It carries binary messages (WISP 100 § Text and binary messages): a capability that needs them may be offered.
       binary: true,
-      get bufferedAmount() { return socket.writableLength || 0 },
+      get bufferedAmount() { return held(socket) },
       get onMessage() { return reader },
       set onMessage(value) { reader = value; if (value) for (const text of pending.splice(0)) value(text) },
       get onClose() { return closeHandler },
       set onClose(value) { closeHandler = value; if (closed) value?.() },
       send(data) {
         const binary = data instanceof Uint8Array
-        if (closed || !(binary || typeof data === 'string') || !data.length || (binary ? data.length : Buffer.byteLength(data)) > MAX_FRAME || this.bufferedAmount > 120 * 1024)
+        if (closed || !(binary || typeof data === 'string') || !data.length || (binary ? data.length : Buffer.byteLength(data)) > MAX_FRAME || this.bufferedAmount > MAX_BUFFERED)
           throw new Error('Native channel is closed or exceeds its frame budget')
         const payload = binary ? Buffer.from(data.buffer, data.byteOffset, data.byteLength) : Buffer.from(data)
         const header = Buffer.alloc(4); header.writeUInt32BE((binary ? BINARY : 0) + payload.length)
         socket.write(Buffer.concat([header, payload]))
       },
       drained() {
-        if (!this.bufferedAmount) return Promise.resolve()
+        if (this.bufferedAmount <= DRAINED_AT) return Promise.resolve()
+        if (closed) return Promise.reject(new Error('Native channel closed'))
         return new Promise((resolve, reject) => {
-          const done = () => { socket.off('close', gone); resolve() }
-          const gone = () => { socket.off('drain', done); reject(new Error('Native channel closed')) }
-          socket.once('drain', done); socket.once('close', gone)
+          const raw = socket.rawStream
+          const check = () => { if (this.bufferedAmount <= DRAINED_AT) finish(resolve) }
+          const gone = () => finish(() => reject(new Error('Native channel closed')))
+          const poll = setInterval(check, DRAIN_POLL_MS)
+          poll.unref?.()
+          function finish(settle) {
+            clearInterval(poll); socket.off('drain', check); raw?.off('drain', check); socket.off('close', gone); settle()
+          }
+          socket.on('drain', check); raw?.on('drain', check); socket.once('close', gone)
         })
       },
       // What was sent last (a goodbye, as an app stops) goes out before the stream ends: destroyed at once, it was
