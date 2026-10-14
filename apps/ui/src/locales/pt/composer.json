@@ -21,6 +21,7 @@
   "dropFiles": "Solte para enviar",
   "emoji": "Emoji",
   "emojiCategories": "Categorias de emoji",
+  "emojiNotLoading": "Os emoji não puderam ser carregados.",
   "expressions": "Emoji e GIFs",
   "filePreparing": "Preparando {{name}}…",
   "gif": "GIF",
