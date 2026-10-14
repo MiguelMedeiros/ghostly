@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostLink, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, SWITCH_RETIRE_MS, type GhostLinkEvents, type GhostLinkOptions } from "../src/ghostlink";
 import { createLink, type LinkParams } from "../src/invite";
 import { createIdentity } from "../src/identity";
-import { CHUNK_KIND, encodeChunk, type FrameChannel } from "../src/frames";
+import { CHUNK_KIND, LIMITS, encodeChunk, type FrameChannel } from "../src/frames";
 import { MAX_NICK_LENGTH, sanitizeNick } from "../src/text";
 import { randomBytes, toBase64Url, utf8Decode, utf8Encode } from "../src/bytes";
 import type { HostedHttpService, LocalFetch } from "../src/http";
@@ -220,6 +220,20 @@ describe("paired chat messages from the peer", () => {
     expect(send).not.toHaveBeenCalled();
     send.mockImplementation(() => { throw new Error("closed"); });
     expect(await t.a.sendMessage("hi")).toMatch(/closed before sending/);
+  });
+
+  it("refuses a 16 KiB text whose frame passes the contact's frame limit once JSON escapes it, and the session stays open", async () => {
+    const t = linkedPair();
+    await t.ready();
+    // 16,384 UTF-8 bytes: each U+0001 is six characters in the frame's JSON, ~98 K against the 60 K a session takes.
+    const controls = `j1 ${"\u0001".repeat(16_381)}`;
+    expect(utf8Encode(controls).length).toBe(LIMITS.maxChatMessageBytes);
+    expect(await t.a.sendMessage(controls)).toBe("Message too long once encoded. Shorten it or send it as a file.");
+    // Quotes are two characters each: ~33 K, which goes.
+    const quotes = "\"".repeat(LIMITS.maxChatMessageBytes);
+    expect(await t.a.sendMessage(quotes)).toBeNull();
+    await vi.waitFor(() => expect(t.onMessageB).toHaveBeenCalledWith(expect.objectContaining({ text: quotes })));
+    expect(t.a.isDataLinkOpen && t.b.isDataLinkOpen).toBe(true);
   });
 
   it("remembers at most 128 unacknowledged messages: a receipt for an evicted one is ignored", async () => {
