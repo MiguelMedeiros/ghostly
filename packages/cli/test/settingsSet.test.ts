@@ -26,4 +26,15 @@ describe("settings set", () => {
     const shown = ok(await ghostly(["--home", dir, "settings", "get"]));
     for (const name of names) expect(Object.hasOwn(shown, name), name).toBe(false);
   });
+
+  it("says a TURN server the CLI does not use on stderr: stdout holds the settings alone", { timeout: 60_000 }, async () => {
+    // The warning was a `warning` key of the settings JSON, with nothing on stderr.
+    const dir = home("settings-ice-warning");
+    const servers = [{ urls: "turns:turn.example:5349", username: "u", credential: "c" }];
+    const result = await ghostly(["--home", dir, "settings", "set", "iceServers", JSON.stringify(servers)]);
+    const set = ok(result);
+    expect(Object.hasOwn(set, "warning")).toBe(false);
+    expect(result.stderr).toContain("ghostly: The CLI reaches TURN over UDP only: it does not use turns:turn.example:5349");
+    expect(set).toEqual(ok(await ghostly(["--home", dir, "settings", "get"])));
+  });
 });

@@ -67,6 +67,7 @@
     "forked": "O histórico de membros se bifurcou",
     "gone": "{{name}} não é mais membro",
     "joined": "{{name}} entrou",
+    "left": "{{name}} saiu",
     "pictureChanged": "{{name}} alterou a foto do grupo",
     "pictureChangedNoName": "A foto do grupo foi alterada",
     "pictureChangedYou": "Você alterou a foto do grupo",
@@ -83,6 +84,8 @@
   },
   "forget": {
     "invitation": "O convite sai deste dispositivo. {{contact}} fica sabendo que você recusou.",
+    "invitationKept": "O convite e o histórico do grupo saem deste dispositivo. {{contact}} fica sabendo que você recusou.",
+    "invitationKeptUnknown": "O convite e o histórico do grupo saem deste dispositivo. O contato que o enviou fica sabendo que você recusou.",
     "invitationUnknown": "O convite sai deste dispositivo. O contato que o enviou fica sabendo que você recusou.",
     "joining": "Você deixa de pedir para entrar, e o grupo sai deste dispositivo.",
     "kept": "O grupo e o histórico dele saem deste dispositivo.",

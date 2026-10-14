@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PairingProgress } from "@ghostly/core";
+import { AWAITING_PEER_MS, type PairingProgress } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, findChat, findGroup, hideStateSecrets, mentionsFor, redactSettings, type ApiContext } from "../src/api";
 import { chatOrGroup, findChatOrGroup } from "../src/apiKit";
@@ -404,6 +404,97 @@ describe("invite create", () => {
   });
 });
 
+describe("the chat on screen of a daemon", () => {
+  /** A daemon whose invites are `inv1`, `inv2`…, and `join` the chats it joins; `pair` pairs one, `drop` deletes one. */
+  function daemon() {
+    let links: LinkView[] = [];
+    const listeners = new Set<(s: EngineState) => void>();
+    const stateOf = () => ({ links, groups: [] }) as unknown as EngineState;
+    const push = () => { for (const l of [...listeners]) l(stateOf()); };
+    let n = 0;
+    const node = {
+      getState: stateOf, setActiveLink: vi.fn(), renameLink: vi.fn(),
+      createLink: vi.fn(async () => { const linkId = `inv${++n}`; links = [...links, link(linkId, { pairingProgress: { stage: "waiting" } } as Partial<LinkView>)]; return { linkId, inviteCode: "ghostly1" + linkId }; }),
+      joinLink: vi.fn(async () => { links = [...links, link("join")]; return { linkId: "join" }; }),
+    };
+    const ctx = {
+      runtime: { server: { node }, paths: { name: "default" } },
+      hub: { onEvent: () => () => {}, onState: (l: (s: EngineState) => void) => { listeners.add(l); return () => listeners.delete(l); }, lastSeq: 0, replay: () => [] },
+      mode: "daemon", version: "test",
+    } as unknown as ApiContext;
+    return {
+      ctx, node, listeners,
+      pair: (id: string) => { links = links.map((l) => l.id === id ? { ...l, peerParticipationKey: "peer-" + id } : l); push(); },
+      drop: (id: string) => { links = links.filter((l) => l.id !== id); push(); },
+      shown: () => node.setActiveLink.mock.calls.map(([p]) => p.linkId),
+    };
+  }
+
+  it("an invite is the chat on screen until it is paired, then none is: an away contact is read at the background pace", async () => {
+    const d = daemon();
+    await callApi(d.ctx, "invite.create", {});
+    expect(d.shown()).toEqual(["inv1"]);
+    d.pair("inv1");
+    expect(d.shown()).toEqual(["inv1", null]);
+    // Nothing more to watch, and later states change nothing.
+    expect(d.listeners.size).toBe(0);
+    d.pair("inv1");
+    expect(d.shown()).toEqual(["inv1", null]);
+
+    // The joiner's side the same, and a chat deleted before it paired too; a state from before the chat was made, not.
+    await callApi(d.ctx, "invite.join", { invite: "ghostly1abc" });
+    d.pair("join");
+    await callApi(d.ctx, "invite.create", {});
+    for (const l of [...d.listeners]) l({ links: [], groups: [] } as unknown as EngineState);
+    expect(d.shown()).toEqual(["inv1", null, "join", null, "inv2"]);
+    d.pair("inv1");
+    d.drop("inv2");
+    expect(d.shown()).toEqual(["inv1", null, "join", null, "inv2", null]);
+    expect(d.listeners.size).toBe(0);
+  });
+
+  it("a newer invite keeps the mark when an older one pairs, and a chat someone chose stays on screen", async () => {
+    const d = daemon();
+    await callApi(d.ctx, "invite.create", {});
+    await callApi(d.ctx, "invite.create", {});
+    d.pair("inv1");
+    expect(d.shown()).toEqual(["inv1", "inv2"]);
+    expect(d.listeners.size).toBe(1);
+
+    await callApi(d.ctx, "engine.call", { method: "setActiveLink", params: { linkId: "inv2" } });
+    d.pair("inv2");
+    expect(d.shown()).toEqual(["inv1", "inv2", "inv2"]);
+    expect(d.listeners.size).toBe(0);
+  });
+  it("an invite nobody joins leaves the screen once its wait for a peer is over, and a newer invite keeps its own wait", async () => {
+    vi.useFakeTimers();
+    try {
+      const d = daemon();
+      await callApi(d.ctx, "invite.create", {});
+      await vi.advanceTimersByTimeAsync(AWAITING_PEER_MS - 60_000);
+      // A newer invite takes the mark with a wait of its own: the older one's end does not clear it.
+      await callApi(d.ctx, "invite.create", {});
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(d.shown()).toEqual(["inv1", "inv2"]);
+      await vi.advanceTimersByTimeAsync(AWAITING_PEER_MS - 60_000);
+      expect(d.shown()).toEqual(["inv1", "inv2", null]);
+      expect(d.listeners.size).toBe(0);
+      // Paired late, it is not marked again.
+      d.pair("inv2");
+      expect(d.shown()).toEqual(["inv1", "inv2", null]);
+
+      // One paired in time leaves no timer behind that clears a chat someone chose later.
+      await callApi(d.ctx, "invite.create", {});
+      d.pair("inv3");
+      await callApi(d.ctx, "engine.call", { method: "setActiveLink", params: { linkId: "inv1" } });
+      await vi.advanceTimersByTimeAsync(AWAITING_PEER_MS);
+      expect(d.shown()).toEqual(["inv1", "inv2", null, "inv3", null, "inv1"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("the engine passthrough", () => {
   it("reaches only the app's calls", async () => {
     const { ctx, node } = fake();
@@ -453,11 +544,15 @@ describe("a pending chat's invite code is a secret", () => {
     expect(chatJson(link("c")).invite).toBeNull();
     // Array.map hands the index as the second argument: it must never read as "show".
     expect(JSON.stringify([link("a"), link("b", { inviteCode: CODE } as never)].map(chatJson as never))).not.toContain(CODE);
-    for (const [method, params] of [["chat.get", {}], ["chat.rename", { name: "Alice" }], ["chat.connect", {}], ["chat.disconnect", {}], ["chat.transport", { transport: "dht" }], ["chat.wait", { until: "text", timeout: 1 }]] as const) {
+    for (const [method, params] of [["chat.get", {}], ["chat.rename", { name: "Alice" }], ["chat.disconnect", {}], ["chat.transport", { transport: "dht" }], ["chat.wait", { until: "text", timeout: 1 }]] as const) {
       const hidden = await callApi(ctx, method, { chat: "chat-one", ...params });
       expect(JSON.stringify(hidden), method).not.toContain(CODE);
       expect(hidden, method).toMatchObject({ invite: "<hidden>" });
     }
+    // Nobody took the invite: connect says so at once, without the code.
+    const refused = await callApi(ctx, "chat.connect", { chat: "chat-one" }).catch((error: unknown) => error as Error);
+    expect(refused).toMatchObject({ code: "unavailable" });
+    expect(JSON.stringify(refused) + (refused as Error).message).not.toContain(CODE);
     const listed = await callApi(ctx, "chat.list", {}) as { chats: { id: string; invite: string | null }[] };
     expect(JSON.stringify(listed)).not.toContain(CODE);
     expect(Object.fromEntries(listed.chats.map((c) => [c.id, c.invite]))).toEqual({ "chat-zero": null, "chat-one": "<hidden>", "chat-two": null });
@@ -501,6 +596,16 @@ describe("settings", () => {
     for (const server of [{}, { url: "stun:stun.example.org" }])
       await expect(callApi(ctx, "settings.set", { iceServers: [server] })).rejects.toMatchObject({ code: "bad_request", message: "iceServers: Each ICE server needs urls: one address, or several comma-separated (turn:host:port)" });
     await expect(callApi(ctx, "settings.set", { iceServers: [{ urls: "turn:t.example.org:3478" }] })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("username and credential") });
+  });
+
+  it("take TCP and TLS TURN servers for the apps, and say the CLI does not use them", async () => {
+    const { ctx, node } = fake();
+    const turn = (urls: string) => ({ urls, username: "u", credential: "c" });
+    const udp = await callApi(ctx, "settings.set", { iceServers: [turn("turn:t.example.org:3478"), turn("turn:t.example.org:3478?transport=udp")] }) as Record<string, unknown>;
+    expect(udp.warning).toBeUndefined();
+    const tcp = await callApi(ctx, "settings.set", { iceServers: [turn("turn:t.example.org:3478, turn:t.example.org:3478?transport=tcp"), turn("turns:t.example.org:443?transport=tcp")] }) as Record<string, unknown>;
+    expect(node.updateSettings).toHaveBeenLastCalledWith({ settings: { iceServers: [turn("turn:t.example.org:3478, turn:t.example.org:3478?transport=tcp"), turn("turns:t.example.org:443?transport=tcp")] } });
+    expect(tcp.warning).toBe("The CLI reaches TURN over UDP only: it does not use turn:t.example.org:3478?transport=tcp, turns:t.example.org:443?transport=tcp (the apps do). Add a turn: server over UDP for the CLI");
   });
 });
 

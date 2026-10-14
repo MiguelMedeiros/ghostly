@@ -4,7 +4,7 @@ import { toBase64Url } from "../src/bytes";
 import { confirmationTag, epochKeys, newEpochSecret } from "../src/groupCrypto";
 import {
 // covers: groups.protocol.community-commits, groups.community.join, groups.community.remove, groups.community.leave, groups.community.late-joiner
-  COMMUNITY_LIMITS, CommunitySession, communityCommitHash, communityGroupId, communityRoster, communityUntaggedHash, leaveStatement, rosterHash, shortHash,
+  COMMUNITY_LIMITS, CommunitySession, communityCommitHash, communityGroupId, communityRoster, communityUntaggedHash, leaveStatement, leftStatement, rosterHash, shortHash,
   signCommunity, verifyCommunityChain, verifyCommunityCommit,
   type CommunityCommit, type CommunityFrame, type CommunityIncomingMessage, type CommunityState,
 } from "../src/groupCommunity";
@@ -302,6 +302,52 @@ describe("community sessions", { timeout: 60_000 }, () => {
       expect(dave.session.wasRemoved(bob.session.myKey)).toBe(true);
       expect(net.texts(dave)).toEqual(how === "leave" ? ["bob 1", "thanks all, leaving now", "alice 1"] : ["alice 1"]);
     }
+  });
+
+  it("what a member signs after it left, from a copy of its state, is not heard nor handed on, even with a mark of its own", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol"), mallory = await net.admit(alice, "mallory");
+    const dave = await net.admit(alice, "dave");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(alice, mallory); await net.meet(alice, dave);
+    dave.online = false;
+    await say(net, bob, "bob before");
+    // Bob keeps a copy of his state (a modified app, or a backup restored), then leaves; Alice commits it and writes.
+    await bob.session.flush();
+    const kept = clone(bob.saved);
+    await bob.session.leave(); await net.settle();
+    expect(await alice.session.commitPendingLeaves()).toBe(1);
+    await net.settle();
+    await say(net, alice, "alice after");
+    expect(carol.session.wasRemoved(bob.session.myKey)).toBe(true);
+    // From the copy, Bob signs for the epoch he still holds the secret of; Mallory hands it on as a hub would.
+    const said: CommunityFrame[] = [];
+    const copy = new CommunitySession(kept, { save: async () => {}, broadcast: (f: CommunityFrame) => { said.push(f); return 1; }, direct: () => {}, addressed: () => {}, message: () => {}, changed: () => {}, clock: () => net.now() });
+    expect("id" in (await copy.sendText("bob AFTER he left", "bob"))).toBe(true);
+    const after = said.find(f => f.t === "group-msg")!;
+    // A mark of the leave signed by someone other than its committer is not taken.
+    const leave = alice.saved.chain[alice.saved.chain.length - 1];
+    expect(leave.k).toBe("leave");
+    const h = communityCommitHash(leave), hi = { [`${(after as { e: number }).e}:${(after as { h: string }).h}`]: 1_000 };
+    const forged = { t: "group-left", v: 2, g: alice.session.id, h, hi, sig: toBase64Url(sign(leftStatement(alice.session.id, h, hi), identityFromSeedB64(mallory.seedB64).seed)) };
+    expect(await carol.session.handle(mallory.session.myKey, clone(forged))).toBe(false);
+    expect(await carol.session.handle(mallory.session.myKey, clone(after))).toBe(false);
+    expect(net.texts(carol)).toEqual(["bob before", "alice after"]);
+    // Nor is it kept for a catch-up: Dave, away all along, gets Bob's line from before his leave, not the later one.
+    dave.online = true;
+    await net.meet(dave, carol);
+    expect(net.texts(dave)).toEqual(["bob before", "alice after"]);
+    // A removed member, for comparison: nothing of his is heard after the commit.
+    const erin = await net.admit(alice, "erin");
+    await net.meet(alice, erin);
+    await erin.session.flush();
+    const erinKept = clone(erin.saved);
+    await alice.session.remove(erin.session.myKey); await net.settle();
+    const erinSaid: CommunityFrame[] = [];
+    const erinCopy = new CommunitySession(erinKept, { save: async () => {}, broadcast: (f: CommunityFrame) => { erinSaid.push(f); return 1; }, direct: () => {}, addressed: () => {}, message: () => {}, changed: () => {}, clock: () => net.now() });
+    await erinCopy.sendText("erin after", "erin");
+    expect(await carol.session.handle(mallory.session.myKey, clone(erinSaid.find(f => f.t === "group-msg")!))).toBe(false);
+    expect(net.texts(carol)).not.toContain("erin after");
   });
 
   it("what was said on the branch of a leave that lost reaches a member who was never on that branch", async () => {

@@ -27,6 +27,15 @@ export type Method = (ctx: ApiContext, params: Params) => Promise<unknown>;
 export const node = (ctx: ApiContext): GhostlyNode => ctx.runtime.server.node;
 export const state = (ctx: ApiContext): EngineState => node(ctx).getState();
 
+/**
+ * The time of a send the engine names its row after (`me_<timestamp>`: a file, a payment, a request), its own even
+ * within one millisecond (a bot paying or sending several times at once over the socket, `file send` run in
+ * parallel), or the chat keeps only one. One clock for all of them: they share the row names. A file's resend after a
+ * drop finds its row by it, as a forward does.
+ */
+let lastSentAt = 0;
+export const sentAt = () => (lastSentAt = Math.max(Date.now(), lastSentAt + 1));
+
 // ---------- parameters ----------
 
 export function str(params: Params, name: string, required: true): string;
@@ -151,6 +160,14 @@ export function findChatOrGroup(links: readonly LinkView[], groups: readonly Gro
 }
 
 export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).links, str(params, "chat", true));
+
+/**
+ * A chat whose invite nobody took yet: nobody is there to pay or to dial, and its stage says so. Before, `chat pay`
+ * waited 15 s and `chat connect` 25 s for the contact, then answered `engine`.
+ */
+export function inviteTaken(link: LinkView): void {
+  if (link.profile && link.inviteCode && !link.peerParticipationKey) throw new CliError("unavailable", "Nobody joined this chat yet: its invite is still waiting to be taken");
+}
 
 /** A chat or a group as `findChatOrGroup` reads it. `linkId` is what the engine calls it. */
 export function chatOrGroup(ctx: ApiContext, ref: string): { id: string; linkId: string; group: boolean } {

@@ -54,6 +54,10 @@ export const WEBSITE_INPUTS = [
   "apps/ui/src/components/walletCardTypes.ts",
   "apps/ui/src/components/wallet-deck.css",
   "apps/ui/src/components/wallet-cards.css",
+  // The brand test (brand.test.mjs) compares the app's lockup and themes, and the README's logos, with the brand page's.
+  "apps/ui/src/components/AppBrand.tsx",
+  "docs/assets/readme/",
+  "apps/ui/src/index.css",
   // The store pages' readers: sync-store-core.mjs's FILES, which `sync-store-core.mjs --check` compares.
   "packages/core/src/appStore.ts",
   "packages/core/src/appBundle.ts",
@@ -136,16 +140,19 @@ export async function testedAs({ sha, tree, repo, api }) {
   return null;
 }
 
+// A writer's base change, and GitHub's own when the old base branch was deleted (it tried: failed counts too).
+const BASE_CHANGES = new Set(["base_ref_changed", "automatic_base_change_succeeded", "automatic_base_change_failed"]);
+
 /**
  * Whether any of these pull requests ever had its base changed (by a writer, or by GitHub when the old base was
- * deleted). Only the issue events list `base_ref_changed`, not the timeline. A full page is a doubt: it counts as yes.
+ * deleted). Only the issue events list these, not the timeline. A full page is a doubt: it counts as yes.
  * @param {(path: string) => Promise<any>} api
  * @param {{ number: number }[]} pulls
  */
 async function retargeted(api, pulls) {
   for (const { number } of pulls) {
     const events = await api(`issues/${number}/events?per_page=100`);
-    if (events.length >= 100 || events.some((e) => e.event === "base_ref_changed")) return true;
+    if (events.length >= 100 || events.some((e) => BASE_CHANGES.has(e.event))) return true;
   }
   return false;
 }

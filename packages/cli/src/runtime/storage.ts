@@ -181,8 +181,10 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   const saved = snapshotFound ? (deserialize(readFileSync(snapshotPath)) as Snapshot) : null;
   // A snapshot of format 2 reads its values from the rows it names, once: they move into the trees at this open.
   const rows: RowFile | null = sqlite && saved?.format === 2 && rowsFound ? openRowFile(sqlite, rowsPath) : null;
+  /** Stores kept on disk that a snapshot of format 1 had inline, written straight into rows.db by `restore`. */
+  let restoredToDisk = false;
   try {
-    if (saved) restore(classes, raw._databases, saved, order, { trees, rows, made: rows ? rowRecords(rows) : null, rowsFound, attach: attachTrees });
+    if (saved) restoredToDisk = restore(classes, raw._databases, saved, order, { trees, rows, made: rows ? rowRecords(rows) : null, rowsFound, attach: attachTrees, onDisk });
   } catch (error) {
     rows?.close();
     trees?.db.close();
@@ -198,12 +200,13 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   // what came between (an upgrade that rewrote them). The process that left it died while it folded.
   const folded = named !== undefined && snapshotName !== undefined && named !== snapshotName;
   if (folded) { rmSync(journalPath, { force: true }); journal = null; }
-  const replayed = journal ? replay(raw._databases, journal, order, { applied: seq, onTrees }) : { end: 0, closed: !folded, seq: 0 };
+  // Trees just written from a snapshot of format 1 hold that snapshot and nothing after it: the whole journal replays.
+  const replayed = journal ? replay(raw._databases, journal, order, { applied: restoredToDisk ? 0 : seq, onTrees }) : { end: 0, closed: !folded, seq: 0 };
   // What the journal had for the trees and SQLite did not: written now, numbered as its last entry.
   seq = Math.max(seq, replayed.seq);
   if (trees) { trees.complete(null, seq); trees.apply(seq); }
   // Stores kept on disk still in memory (a snapshot of format 1 or 2, and the journal replayed over it): moved now.
-  let moved = false;
+  let moved = restoredToDisk;
   if (trees) for (const db of raw._databases.values()) for (const store of db.rawObjectStores.values()) if (!store.deleted && disk(store) && !onTrees(store)) { toDisk(store); moved = true; }
   restoring = false;
   /** Whether the journal on disk says the store is closed: nothing was written since its mark, or there is none. */
@@ -713,9 +716,14 @@ export function keyOrder(cmp: (a: Key, b: Key) => number): (a: Key, b: Key) => n
  * built whole from sorted arrays: storing record by record compared every key down the tree, a 70,000-message profile
  * took seconds. A snapshot not in order (never written so) is stored record by record.
  */
-interface RestoreDisk { trees: TreeFile | null; rows: RowFile | null; made: ReturnType<typeof rowRecords> | null; rowsFound: boolean; attach: (store: RawStore) => void }
+interface RestoreDisk {
+  trees: TreeFile | null; rows: RowFile | null; made: ReturnType<typeof rowRecords> | null; rowsFound: boolean; attach: (store: RawStore) => void;
+  /** The stores kept in rows.db: one a snapshot of format 1 has inline is written there at once, never into memory. */
+  onDisk: (db: string, store: string) => boolean;
+}
 
-function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snapshot: Snapshot, cmp: (a: Key, b: Key) => number, disk: RestoreDisk) {
+/** Whether it wrote a store of format 1 into rows.db (the snapshot is to be written again, of format 3). */
+function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snapshot: Snapshot, cmp: (a: Key, b: Key) => number, disk: RestoreDisk): boolean {
   if (snapshot?.format !== 1 && snapshot?.format !== 2 && snapshot?.format !== 3) throw new Error("This profile was last used by a newer version of ghostly (its store has a format this version does not read). Update ghostly to open it.");
   if (snapshot.format !== 1 && !disk.trees) throw new Error(`This profile keeps its messages in rows.db, which needs Node 22.13 or newer (this is ${process.version}). Update Node to open it.`);
   // Gone, or without what the snapshot names (made empty by an open that failed): the same, and never read as no messages.
@@ -725,6 +733,7 @@ function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snaps
   const kept = (db: string, store: SnapshotStore) => disk.trees!.has(db, store.name) && store.indexes.every((index) => disk.trees!.has(db, store.name, index.name));
   if (snapshot.format === 3 && (!disk.rowsFound || snapshot.databases.some((db) => db.stores.some((store) => store.onDisk && !kept(db.name, store))))) throw missing;
   const intern = interner();
+  let written = false;
   for (const saved of snapshot.databases) {
     const db = new classes.Database(saved.name, saved.version);
     for (const s of saved.stores) {
@@ -748,8 +757,16 @@ function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snaps
         }
         continue;
       }
+      const ordered = s.records.every(([key], at) => at === 0 || cmp(s.records[at - 1][0], key) < 0);
+      if (ordered && disk.trees && disk.onDisk(saved.name, s.name)) {
+        recordsToDisk(disk.trees, saved.name, store, s.records, cmp);
+        s.records = [];
+        disk.attach(store);
+        written = true;
+        continue;
+      }
       const records = s.records.map(([key, value]): RawRecord => ({ key, value: blobsFromDisk(value) }));
-      if (records.some((record, at) => at > 0 && cmp(records[at - 1].key, record.key) >= 0)) {
+      if (!ordered) {
         for (const record of records) store.storeRecord(record, false);
         continue;
       }
@@ -758,6 +775,32 @@ function restore(classes: RawClasses, databases: Map<string, RawDatabase>, snaps
     }
     databases.set(saved.name, db);
   }
+  return written;
+}
+
+/** How many of a snapshot's records go to rows.db at a time, each with its index entries. */
+const MOVE_BATCH = 2048;
+
+/**
+ * A store of a snapshot of format 1 that is kept on disk, written into rows.db from the snapshot's records (in key
+ * order), a batch at a time with its index entries, in one SQLite transaction: building fake-indexeddb's trees first and
+ * copying them out held every message in those trees beside the snapshot at the update's first start (1.1 GB at
+ * 175,000, where the released start took 720 MB). Each batch's values are let go of in the snapshot once written.
+ */
+function recordsToDisk(trees: TreeFile, db: string, store: RawStore, saved: [Key, unknown][], cmp: (a: Key, b: Key) => number) {
+  const indexes = [...store.rawIndexes.values()];
+  const id = trees.treeId(db, store.name), ids = indexes.map((index) => trees.treeId(db, store.name, index.name));
+  trees.db.exec("BEGIN");
+  try {
+    for (const tree of [id, ...ids]) trees.clearRows(tree);
+    for (let from = 0; from < saved.length; from += MOVE_BATCH) {
+      const batch = saved.slice(from, from + MOVE_BATCH).map(([key, value]): RawRecord => ({ key, value: blobsFromDisk(value) }));
+      saved.fill(undefined as never, from, from + MOVE_BATCH);
+      for (const record of batch) trees.row(id, record, false, true);
+      indexes.forEach((index, at) => { for (const entry of indexEntries(index, batch, cmp)) trees.row(ids[at]!, entry, true, index.records.keysAreUnique); });
+    }
+    trees.db.exec("COMMIT");
+  } catch (error) { trees.db.exec("ROLLBACK"); throw error; }
 }
 
 /**

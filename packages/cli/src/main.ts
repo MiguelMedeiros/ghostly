@@ -10,7 +10,7 @@ import { asCliError, CliError, EXIT } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import type { RuntimeOptions } from "./runtime/engine";
-import { allowlist, checkCursor, checkWebhook, eventHandler, readCursor } from "./listen";
+import { allowlist, checkCursor, checkWebhook, eventHandler, Feed, readCursor } from "./listen";
 import { resolve } from "node:path";
 import { format } from "node:util";
 import { secretsFromStdin } from "./secretInput";
@@ -34,6 +34,15 @@ interface Globals { home: string; profile: string; paths: ProfilePaths; pretty: 
 let pretty = false;
 function print(value: unknown): void {
   process.stdout.write(JSON.stringify(value, null, pretty ? 2 : undefined) + "\n");
+}
+
+/** Done, with something to know (a voice note sent without its waveform): said on stderr, the JSON stays the answer. */
+function printAnswer(result: Record<string, unknown>): void {
+  if (typeof result?.warning === "string") {
+    process.stderr.write(`ghostly: ${result.warning}\n`);
+    delete result.warning;
+  }
+  print(result);
 }
 
 function globals(parsed: Parsed): Globals {
@@ -94,11 +103,15 @@ export function chatOnly(method: string, params: Record<string, unknown>): boole
  */
 const READS: ReadonlySet<string> = new Set([
   "status", "profile.get", "settings.get", "events.replay", "chat.list", "chat.get", "chat.history", "chat.details",
-  "group.list", "group.get", "group.history", "file.list", "wallet.list", "wallet.history", "payment.list", "identity.list", "service.list",
+  "group.list", "group.get", "group.history", "file.list", "wallet.list", "wallet.history", "payment.list", "identity.list", "identity.providers",
+  "identity.contact", "service.list", "service.peer", "call.list", "app.served",
 ]);
 
-function readOnly(method: string, params: Record<string, unknown>): boolean {
+/** Whether a one-shot for this call opens the profile offline; test/readOnlyCommands.test.ts names every table command. */
+export function readOnly(method: string, params: Record<string, unknown>): boolean {
   if (method === "engine.call") return typeof params.method === "string" && ENGINE_READS.includes(params.method);
+  // `call auto` with no on|off says what auto-answer is.
+  if (method === "call.auto") return params.on === undefined;
   return READS.has(method);
 }
 
@@ -320,7 +333,9 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       if (parsed.options.passphrase === true) throw new CliError("usage", "The passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE, never the command line");
       if (unsealed && (parsed.options["passphrase-file"] !== undefined || process.env.GHOSTLY_BACKUP_PASSPHRASE)) throw new CliError("usage", "A passphrase is set (--passphrase-file or GHOSTLY_BACKUP_PASSPHRASE) and --no-passphrase was given: choose one");
       const light = parsed.options.light === true ? { light: true } : {};
-      const made = await withSession(g, (s) => s.call("profile.backup", unsealed ? { path: resolve(out), noPassphrase: true, ...light } : { path: resolve(out), passphrase: backupPassphrase(parsed.options["passphrase-file"]), ...light }));
+      // The passphrase is read before the profile opens, and the backup only reads the store: offline.
+      const params = unsealed ? { path: resolve(out), noPassphrase: true, ...light } : { path: resolve(out), passphrase: backupPassphrase(parsed.options["passphrase-file"]), ...light };
+      const made = await withSession(g, (s) => s.call("profile.backup", params), { offline: true });
       if (unsealed) process.stderr.write("Not encrypted: this file holds the profile's keys, chats and wallet secrets in the clear. Anyone who gets it gets everything in it, including any money in its wallets.\n");
       print(made);
       return;
@@ -507,10 +522,9 @@ async function listenCommand(argv: string[]): Promise<void> {
   const cursor = parsed.options.cursor as string | undefined;
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
-  let since = (parsed.options.since as number | undefined) ?? readCursor(cursor);
-  let handle: ((event: GhostlyEvent) => void) | null = null;
+  const since = (parsed.options.since as number | undefined) ?? readCursor(cursor);
   const start = async (call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>) => {
-    handle = eventHandler({
+    return eventHandler({
       types, turns,
       exec: parsed.options.exec as string | undefined,
       webhook: parsed.options.webhook as string | undefined,
@@ -518,32 +532,42 @@ async function listenCommand(argv: string[]): Promise<void> {
       // With a hook, events go to the hook; --print shows them too.
       print: parsed.options.print === true || (!parsed.options.exec && !parsed.options.webhook),
       write: (line) => process.stdout.write(line + "\n"),
+      drained: () => new Promise<void>((resolve) => {
+        const done = () => { process.stdout.off("drain", done); process.stdout.off("close", done); resolve(); };
+        process.stdout.on("drain", done);
+        process.stdout.on("close", done);
+      }),
       allow: from.length || groups.length ? await allowlist(from, groups, call, peerOf) : undefined,
     });
   };
-  const onEvent = (event: GhostlyEvent) => { since = event.seq; handle?.(event); };
   requireProfile(g);
   const client = await connectDaemon(g.paths.socket);
   if (client) await warnVersion(client);
   if (client) {
     // The subscription takes the connection: a chat's contact key is asked on a connection of its own.
-    await start((m, p) => client.call(m, p), async (chat) => {
+    const handle = await start((m, p) => client.call(m, p), async (chat) => {
       const c = await connectDaemon(g.paths.socket, 1000);
       if (!c) return null;
       try { return ((await c.call("chat.get", { chat })) as { peer?: string }).peer || null; } finally { c.close(); }
     }).catch((error) => { client.close(); throw error; });
-    // Followed until stopped; a daemon that restarts is picked up again after the last event seen.
+    // Followed until stopped; a daemon that restarts is picked up again after the last event seen, and so is the
+    // subscription the feed closed while the output or the hooks fell behind.
     let current: DaemonClient | null = client;
+    const reconnect = (wait: number) => void (async () => {
+      while (!current && !feed.paused) {
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        wait = 1000;
+        if (current || feed.paused) return;
+        const next = await connectDaemon(g.paths.socket, 1000);
+        if (next) { current = next; await follow(next).catch(() => { if (current === next) current = null; }); }
+      }
+    })();
+    const feed = new Feed(handle, since, () => { const c = current; current = null; c?.destroy(); }, () => reconnect(0));
     const follow = async (c: DaemonClient) => {
-      await c.subscribe(since, onEvent, () => {
+      await c.subscribe(feed.since, feed.take, () => {
+        if (current !== c) return;
         current = null;
-        void (async () => {
-          while (!current) {
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            const next = await connectDaemon(g.paths.socket, 1000);
-            if (next) { current = next; await follow(next).catch(() => { current = null; }); }
-          }
-        })();
+        reconnect(1000);
       });
     };
     await follow(client);
@@ -555,14 +579,31 @@ async function listenCommand(argv: string[]): Promise<void> {
   const [{ keepServing, openHost, serve }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
   const host: Host = await openHost(g.paths, "daemon", VERSION);
   const call = (m: string, p: Record<string, unknown>) => callApi(host.ctx, m, p);
-  await start(call, async (chat) => ((await call("chat.get", { chat })) as { peer?: string }).peer || null).catch(async (error) => { await host.close(); throw error; });
+  const handle = await start(call, async (chat) => ((await call("chat.get", { chat })) as { peer?: string }).peer || null).catch(async (error) => { await host.close(); throw error; });
   const served = await serve(host).catch(async (error) => { await host.close(); throw error; });
   keepServing();
   const stop = stopper(async () => { await served.close(); await host.close(); });
   host.ctx.stop = stop;
   onStopSignals(stop);
-  for (const event of host.ctx.hub.replay(since ?? host.ctx.hub.lastSeq)) onEvent(event);
-  host.ctx.hub.onEvent(onEvent);
+  // The hub's listener comes off while the feed is paused, and back after a replay from the last event taken. What a
+  // replay gave and the feed did not take yet waits for the resume: one read of the journal per catch-up, not one per
+  // pause; the journal is read again only for what came meanwhile.
+  let off: (() => void) | null = null, left: GhostlyEvent[] = [];
+  const open = (from: number | undefined) => {
+    for (;;) {
+      const events = left.length ? left : host.ctx.hub.replay(from ?? host.ctx.hub.lastSeq);
+      left = [];
+      if (!events.length) break;
+      for (let i = 0; i < events.length; i++) {
+        feed.take(events[i]);
+        if (feed.paused) { left = events.slice(i + 1); return; }
+      }
+      from = feed.since;
+    }
+    off = host.ctx.hub.onEvent(feed.take);
+  };
+  const feed = new Feed(handle, since, () => { off?.(); off = null; }, open);
+  open(since);
   host.ctx.hub.emit("daemon.started", `daemon.started:${process.pid}:${Date.now()}`, { pid: process.pid, version: VERSION, listen: true });
 }
 
@@ -603,7 +644,7 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
     try { parsedValue = JSON.parse(value); } catch { parsedValue = value; }
     // A text setting (nick) keeps the word as given when it reads as JSON of another kind (2024, true, null).
     if ((await engineApi()).SETTABLE[key] === "string" && typeof parsedValue !== "string") parsedValue = value;
-    print(await withSession(g, (s) => s.call("settings.set", { [key]: parsedValue })));
+    printAnswer(await withSession(g, (s) => s.call("settings.set", { [key]: parsedValue })) as Record<string, unknown>);
     return;
   }
   throw new CliError("usage", "ghostly settings get | settings set <key> <json-value>");
@@ -697,9 +738,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
   pretty = g.pretty;
   const args = positionals(command, parsed.positionals);
   if (command.run) {
-    const result = await command.run(parsed, args);
-    if (typeof result.warning === "string") { process.stderr.write(`ghostly: ${result.warning}\n`); delete result.warning; }
-    print(result);
+    printAnswer(await command.run(parsed, args));
     return;
   }
   const params = command.params?.(parsed, args) ?? {};
@@ -710,7 +749,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     else if (params.stdin) params.evidence = await readStdin();
     delete params.evidenceFile; delete params.stdin;
   }
-  const secretWarning = await secretsFromStdin(command.method, params, readStdin);
+  const secretWarning = await secretsFromStdin(command.method, params, readStdin, process.stdin.isTTY === true);
   if (secretWarning) process.stderr.write(`ghostly: ${secretWarning}\n`);
   const result = await withSession(g, async (s) => {
     const result = await s.call(command.method, params) as Record<string, unknown>;
@@ -720,12 +759,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     }
     return result;
   }, { deferGroups: chatOnly(command.method, params), offline: readOnly(command.method, params) });
-  // Done, with something to know (a voice note sent without its waveform): said on stderr, the JSON stays the answer.
-  if (typeof result?.warning === "string") {
-    process.stderr.write(`ghostly: ${result.warning}\n`);
-    delete result.warning;
-  }
-  print(result);
+  printAnswer(result);
 }
 
 /**

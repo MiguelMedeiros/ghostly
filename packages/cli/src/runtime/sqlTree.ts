@@ -169,7 +169,11 @@ export class TreeFile {
     if (lower !== undefined) { where.push("pv >= ?"); args.push(buffer(lower)); }
     if (upper !== undefined) { where.push("pv < ?"); args.push(buffer(upper)); }
     // Named: with no ANALYZE, SQLite plans this on the primary key's `tree = ?` and reads every entry of the index.
-    return (this.db.prepare(`SELECT key, value FROM entries INDEXED BY entries_by_value WHERE ${where.join(" AND ")}`).all(...args) as { key: Uint8Array; value: Uint8Array }[])
+    const sql = `SELECT key, value FROM entries INDEXED BY entries_by_value WHERE ${where.join(" AND ")}`;
+    // Prepared once each (four forms): an overwrite asks this of every index, once per record it writes over.
+    let statement = this.pages.get(sql);
+    if (!statement) this.pages.set(sql, (statement = this.db.prepare(sql)));
+    return (statement.all(...args) as { key: Uint8Array; value: Uint8Array }[])
       .map((row) => ({ key: deserialize(row.key), value: thaw(row.value) }));
   }
   /** @internal */
@@ -291,6 +295,13 @@ export class SqlTree {
   *getAllRecords(descending = false): Generator<Entry> { yield* this.getRecords(undefined, descending); }
 
   *getRecords(range: Range | undefined, descending = false): Generator<Entry> {
+    // One key of a store (fake-indexeddb's `get`, before every record a transaction writes over): looked up, not
+    // every entry of the layers merged, which made such a transaction quadratic.
+    if (this._keysAreUnique && range && onlyBytes(range) !== undefined) {
+      const found = this.get({ key: range.lower, value: undefined });
+      if (found) yield found;
+      return;
+    }
     const [lower, upper] = bounds(range);
     let hidden = false;
     const map = new Map<string, Entry | null>();
@@ -325,8 +336,10 @@ export class SqlTree {
    */
   deleteByValue(range: Range): Entry[] {
     const [lower, upper] = bounds(range);
+    // One record key (an overwrite's, IDBKeyRange.only): the layers' entries for it looked up, not every one walked.
+    const only = onlyBytes(range);
     const candidates = this.index
-      ? [...this.file.withValue(this.id, lower, upper), ...this.overlayWithValue(lower, upper)]
+      ? [...this.file.withValue(this.id, lower, upper), ...this.overlayWithValue(lower, upper, only)]
       : [...this.getAllRecords()];
     const deleted: Entry[] = [], seen = new Set<string>();
     for (const candidate of candidates) {
@@ -341,13 +354,18 @@ export class SqlTree {
     return deleted;
   }
 
-  /** The entries of the layers whose record key's bytes are between these (as `withValue`). */
-  private overlayWithValue(lower: string | undefined, upper: string | undefined): Entry[] {
+  /**
+   * The entries of the layers whose record key's bytes are between these (as `withValue`), or are `only`'s. A
+   * transaction that wrote over k records walked every entry of its layer k times: 16,000 took 6.6 s.
+   */
+  private overlayWithValue(lower: string | undefined, upper: string | undefined, only?: string): Entry[] {
     const out: Entry[] = [];
+    const take = (layer: Layer, ids: Set<string>) => { for (const bytes of ids) { const entry = layer.puts.get(bytes); if (entry) out.push(entry); } };
     for (const layer of this.active ? [...this.pending, this.active] : this.pending) {
+      if (only !== undefined) { const ids = layer.byValue.get(only); if (ids) take(layer, ids); continue; }
       for (const [value, ids] of layer.byValue) {
         if ((lower !== undefined && value < lower) || (upper !== undefined && value >= upper)) continue;
-        for (const bytes of ids) { const entry = layer.puts.get(bytes); if (entry) out.push(entry); }
+        take(layer, ids);
       }
     }
     return out;
@@ -406,6 +424,13 @@ function bounds(range: Range | undefined): [string | undefined, string | undefin
     range?.lower === undefined ? undefined : keyBytes(range.lower) + (range.lowerOpen ? AFTER : ""),
     range?.upper === undefined ? undefined : keyBytes(range.upper) + (range.upperOpen ? "" : AFTER),
   ];
+}
+
+/** A range of one key (IDBKeyRange.only, or a bound with the same key at both ends, both in): that key's bytes. */
+function onlyBytes(range: Range): string | undefined {
+  if (range.lower === undefined || range.upper === undefined || range.lowerOpen || range.upperOpen) return undefined;
+  const lower = keyBytes(range.lower);
+  return keyBytes(range.upper) === lower ? lower : undefined;
 }
 
 function holdsBlob(value: unknown, depth = 0): boolean {

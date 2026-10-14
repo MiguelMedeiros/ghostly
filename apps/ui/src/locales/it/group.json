@@ -67,6 +67,7 @@
     "forked": "La cronologia dei membri si è biforcata",
     "gone": "{{name}} non è più un membro",
     "joined": "{{name}} è entrato",
+    "left": "{{name}} è uscito",
     "pictureChanged": "{{name}} ha cambiato la foto del gruppo",
     "pictureChangedNoName": "La foto del gruppo è stata cambiata",
     "pictureChangedYou": "Hai cambiato la foto del gruppo",
@@ -83,6 +84,8 @@
   },
   "forget": {
     "invitation": "L'invito viene eliminato da questo dispositivo. {{contact}} saprà che hai rifiutato.",
+    "invitationKept": "L'invito e la cronologia del gruppo vengono eliminati da questo dispositivo. {{contact}} saprà che hai rifiutato.",
+    "invitationKeptUnknown": "L'invito e la cronologia del gruppo vengono eliminati da questo dispositivo. Il contatto che l'ha inviato saprà che hai rifiutato.",
     "invitationUnknown": "L'invito viene eliminato da questo dispositivo. Il contatto che l'ha inviato saprà che hai rifiutato.",
     "joining": "Smetti di chiedere di entrare, e il gruppo viene eliminato da questo dispositivo.",
     "kept": "Il gruppo e la sua cronologia vengono eliminati da questo dispositivo.",

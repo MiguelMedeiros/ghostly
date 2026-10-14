@@ -1,11 +1,11 @@
-import { groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
 import { CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, findChat, findGroup, groupOf, list, messageOf, node, num, oneOf, state, str, waitForState,
+  bool, chatOf, chatOrGroup, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -108,6 +108,33 @@ export function mentionsFor(text: string, refs: readonly string[], group: GroupV
   return out;
 }
 
+/** Per host: stops watching the invite it marked as the chat on screen. */
+const inviteShown = new WeakMap<ApiContext, () => void>();
+
+/**
+ * Marks a new invite as the chat on screen (native listeners, the quick pace) only until it is paired: a paired chat
+ * keeps its listeners anyway, and a daemon nobody looks at reads an away contact at the background pace, as its
+ * other chats and the same chat after a restart do. Nor past its wait for a peer (`AWAITING_PEER_MS`): an invite
+ * nobody joined is then read at the background pace like the daemon's other ones, which it no longer holds back.
+ */
+function showUntilPaired(ctx: ApiContext, linkId: string): void {
+  inviteShown.get(ctx)?.();
+  node(ctx).setActiveLink({ linkId });
+  // Gone only once a state had it: one pushed before the invite was made does not end it.
+  let seen = false;
+  const done = (s: EngineState) => {
+    const link = s.links.find((l) => l.id === linkId);
+    if (link) seen = true;
+    return link ? !!link.peerParticipationKey : seen;
+  };
+  const stop = () => { off(); clearTimeout(timer); if (inviteShown.get(ctx) === stop) inviteShown.delete(ctx); };
+  const hide = () => { stop(); node(ctx).setActiveLink({ linkId: null }); };
+  const timer = setTimeout(hide, AWAITING_PEER_MS);
+  timer.unref?.();
+  const off = ctx.hub.onState((s) => { if (done(s)) hide(); });
+  inviteShown.set(ctx, stop);
+}
+
 // ---------- methods ----------
 
 const METHODS: Record<string, Method> = {
@@ -155,6 +182,7 @@ const METHODS: Record<string, Method> = {
   },
   async "settings.set"(ctx, params) {
     const patch: Record<string, unknown> = {};
+    let warning: string | undefined;
     for (const [key, value] of Object.entries(params)) {
       // The table's own keys only: every object has `constructor` and `toString`, which are no settings.
       const kind = Object.hasOwn(SETTABLE, key) ? SETTABLE[key] : undefined;
@@ -168,12 +196,15 @@ const METHODS: Record<string, Method> = {
         const servers = value.map(iceServerSetting);
         for (const server of servers) { const problem = iceServerProblem(server); if (problem) throw new CliError("bad_request", `${key}: ${problem}`); }
         patch[key] = servers;
+        // libdatachannel (libjuice) skips TURN over TCP and TLS without a word; the apps' browsers use them, so they stay.
+        const unused = servers.flatMap((server) => server.urls.split(/[\s,]+/)).filter((url) => /^turns:|\?transport=tcp$/i.test(url));
+        if (unused.length) warning = `The CLI reaches TURN over UDP only: it does not use ${unused.join(", ")} (the apps do). Add a turn: server over UDP for the CLI`;
         continue;
       }
       patch[key] = value;
     }
     await node(ctx).updateSettings({ settings: patch });
-    return redactSettings(state(ctx).settings);
+    return { ...redactSettings(state(ctx).settings), ...(warning ? { warning } : {}) };
   },
 
   async "invite.create"(ctx, params) {
@@ -181,7 +212,7 @@ const METHODS: Record<string, Method> = {
     const { linkId, inviteCode } = await node(ctx).createLink();
     if (label) await node(ctx).renameLink({ linkId, label });
     // Native listeners start for the chat on screen (or a paired one): a new invite is the chat a bot waits on.
-    node(ctx).setActiveLink({ linkId });
+    showUntilPaired(ctx, linkId);
     // Its first records must be out before a one-shot leaves. A daemon publishes them later too: it answers at once when
     // the relays' request budget holds them back (a few invites in a minute), and says when they go.
     const progressOf = (s: EngineState) => s.links.find((l) => l.id === linkId)?.pairingProgress;
@@ -206,7 +237,7 @@ const METHODS: Record<string, Method> = {
     }
     const label = str(params, "label");
     if (label) await node(ctx).renameLink({ linkId, label });
-    node(ctx).setActiveLink({ linkId });
+    showUntilPaired(ctx, linkId);
     return { chat: linkId };
   },
 
@@ -385,6 +416,7 @@ const METHODS: Record<string, Method> = {
   async "chat.connect"(ctx, params) {
     const link = chatOf(ctx, params);
     await releaseHold(ctx, link.id, "connect");
+    inviteTaken(link);
     await node(ctx).connect({ linkId: link.id });
     return chatJson(findChat(state(ctx).links, link.id));
   },
@@ -584,6 +616,8 @@ const METHODS: Record<string, Method> = {
     }
     if (method === "getMessages") return node(ctx).getMessages(str(args ?? {}, "linkId", true));
     if (method === "getState") return state(ctx);
+    // Someone chose the chat on screen: an invite's mark no longer clears it.
+    if (method === "setActiveLink") inviteShown.get(ctx)?.();
     const target = (node(ctx) as unknown as Record<string, (p?: unknown) => unknown>)[method];
     if (typeof target !== "function") throw new CliError("not_found", `The engine has no call ${method}`);
     if (args === undefined) args = undefined;

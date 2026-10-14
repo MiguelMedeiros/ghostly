@@ -370,3 +370,30 @@ describe("what waits for the chat to carry it (WISP 400, \"Sends when live\")", 
     await again.stop();
   });
 });
+
+describe("a chat with many queued messages and the contact away", () => {
+  it("reads the chat's history once per check, not once per older message it looks at", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const n = 60;
+    const rows: StoredMessage[] = Array.from({ length: n }, (_, i) => {
+      const wireId = `w${String(i).padStart(21, "0")}`;
+      return { linkId: "many", id: `me_${wireId}`, wireId, text: `m${i}`, sender: "me", timestamp: i + 1, via: "pkarr", delivery: "queued" };
+    });
+    const read = vi.fn(async () => rows.map(row => ({ ...row })));
+    const get = vi.fn(async (id: string) => { const row = rows.find(r => r.id === id); return row && { ...row }; });
+    const store = { read, get, update: async (id: string, delivery: NonNullable<StoredMessage["delivery"]>, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>) => {
+      const row = rows.find(r => r.id === id);
+      if (row && row.delivery !== "delivered") Object.assign(row, extra, { delivery, deliveryError: error });
+    } };
+    const send = vi.fn(async () => null);
+    const box = new Outbox(store, send, 20_000, undefined, { resender: { ready: () => false } });
+    await box.recover();
+    read.mockClear();
+    // Every queued message's first check comes due: each looks at the ones written before it.
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs[0]);
+    expect(send).not.toHaveBeenCalled();
+    expect(rows.every(r => r.delivery === "queued")).toBe(true);
+    expect(read.mock.calls.length, "a whole-history read per check, not per message looked at").toBeLessThanOrEqual(n);
+    await box.stop();
+  });
+});

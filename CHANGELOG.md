@@ -4,6 +4,103 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.2.4
+
+### Security
+
+- Chats: someone holding a copy of a fresh invite, opening it at the same time as the real contact, can no longer stop the inviter's chat. A live session that began before the contact's key was pinned is now always checked against that key.
+
+### Fixed
+
+**Apps**
+
+- An app opened on its own (from the Apps page) on a phone keeps its bar and its Close below the status bar. In the web app installed on an iPhone they sat under the clock, and Close could not be pressed.
+- Export, offered before an app is uninstalled, wrote the app's data as indented JSON all at once: data kept in two or more chats could fail to export at all, and ten chats froze the page for seconds. The file now holds the same data written compactly, one entry a line, one chat at a time.
+- An app that read a large file of its own bundle many times a second (16 MiB, 50 times a second) made Ghostly copy hundreds of megabytes a second, so the page stalled for most of a second and grew by about a gigabyte. File reads now go one at a time and add up to at most 16 MiB a second per app; past that `ghostly.file` answers `too-fast` until the second has gone.
+- A file an app reads from its own bundle (`ghostly.file`) was copied twice on the web page's thread before the app got it. It is now copied once, which halves what each read of a large file costs.
+
+**Wallets**
+
+- In the extension and the desktop app, Open in wallet on a `bitcoin:` link whose label or message has ' ( ) ! * or ~ (such as "Bob's shop" or "Thanks!") said "Couldn't open a wallet". The link now carries those characters percent-encoded, and the wallet opens.
+- Ecash a contact sent whose coins the mint holds pending (in a payment of theirs) is now refused at once, with "Could not receive…" in the chat and the contact told, instead of being kept and asked about every 30 seconds for good. A redeem that stays pending after the mint stopped answering is asked about every 10 minutes and let go after an hour.
+- The same ecash sent again under another note is now one redeem: it is refused with "This ecash is already being received" instead of counting again in the sats on their way (20 copies of a 1,000-sat coin showed 20,000 sats, in the wallet, Remove wallet and the device move). A redeem that ends without the ecash now says "Could not receive N sats" in the chat too.
+- Sending or redeeming ecash at a mint no longer waits while the wallet checks every unfinished swap there with a slow mint: it waits for one check at most.
+
+**Calls**
+
+- In a video call to a contact that takes no picture (a bot on the headless Ghostly), the camera button stays, so you can turn your camera off without hanging up. Before, the camera stayed on for your own picture the whole call, with its light on and, on Ghostly Desktop for Linux, about twice the call's processor use.
+- Desktop on Linux: the contact's picture in a video call no longer stays blank for the rest of the call when one picture is lost on its way to the call window, or one takes too long to decode. The pictures after it now show within a second.
+
+**Chat**
+
+- Search in a chat or a group keeps every letter typed right after it opens. Before, the letters typed before the screen's next frame were selected and the next key replaced them, so on a busy phone "line" could read "ne" or "e".
+- When both sides of a chat dial each other at once (two Desktops or CLIs with no WebRTC pairing for the first time, or both apps back after a restart) and one side's dial stalls, the connection that already worked carries the chat after half a second. Before, it waited up to 2 s more for the stalled dial to be made again (3 s at most).
+- A file whose bytes had all arrived when the connection dropped now finishes as soon as the chat is back. Before, the sender could show it as sending for good, though the contact already had the whole file.
+- A chat first stored by a release before 1.0 no longer shows "Dropped and came back N times" in English in its connection history, whatever the app's language: that drop now reads like any other.
+- With many chats, the page's storage could fill up and a chat's new messages were no longer kept there across a reload. When a chat's copy does not fit, the other chats' copies (least recently active first) now keep only their last messages, which the app also keeps in its database, to make room.
+- When the page's storage is full and a chat's copy cannot be kept there, a notice above the chat list now says "Storage full" and what to do: new messages still show, and deleting chats or profiles you no longer need keeps them after a reload. Before, nothing said so.
+- Once the page's storage was full (many chats, or another profile on the same browser), a contact's new messages were marked delivered on their side but never shown here, not in the chat list, not in the chat, not after a reload, and your own sends stayed on the clock. They now show and count as unread, and your sends turn delivered, however full the storage is.
+- On Linux, a message in a chat open in a Ghostly window that is on screen but not focused (on a second monitor, behind another app, on another workspace) shows its notification again. Before, the app took the notification back about 55 ms after showing it, so nobody saw it. It now stays until the window gets the focus with that chat or group open.
+- On Linux, Download Video in the right-click menu of a playing video no longer saves a copy into Downloads under a made-up name, with no dialog and no sign in the app. A received file is saved through the app's own Save, which asks where and keeps the file's name.
+- Scrolling through a long chat on a slower phone or computer froze the page for a moment every hundred messages or so, as each older page came in. Pages are now a quarter the size and the page holds half as many messages at once, so the longest freeze is about a third of what it was.
+- An app left open for a while makes its next invite on keys already known to the network again, so it pairs as fast as one made just after start. Before, the ready invite aged out after 15 minutes but was still refreshed every 4, on keys no invite would use.
+- A transport change that did not connect is now told in the app's language: the chat's line, its Why row, the connection history, the lines on why a chat is not live and the header's notice. Each says why in a few words ("Iroh did not connect in time", "Your transport choices don't match") and, where there is one, what to do next. The engine's own English stays behind the ⓘ.
+- On the desktop app, Save on a voice message that can't play on this computer did nothing: no file, no word. It now opens the system's save dialog, like Download in the message's menu, and says why when the file could not be saved.
+- Desktop for Windows: texts sent from the app now reach the contact in every chat. The Windows app sent them the old way, which a current chat does not read, so the contact (often the web app) never got them, calls stayed greyed out, and the app could show "You joined the chat" in a chat it made. Texts it sent before this release went nowhere: send them again.
+
+**Everywhere**
+
+- An app with many chats, back after a restart while its contacts are online, now brings every chat back within minutes. Before, its messages to the relays used up their limit, and the few looks left went to the chats already reconnecting. Some contacts were then looked for once in 10 minutes and their chats stayed down, and those contacts showed offline after 6 minutes. Now a look the limit has held back for a minute goes before the app's next messages, the oldest first. A daemon with 30 chats and 5 groups had 21 of its 30 chats back 10 minutes after a restart, and now has all 30 back in about 5 minutes.
+- An app with many chats, back after a restart while its groups reconnect, no longer leaves some chats unread for many minutes. Its chats that are not connected yet now look for their contacts in turn, and a look the relays' limit held back goes again as soon as the limit allows. Before, the same chats took every look the limit allowed. A daemon with 30 chats and 5 groups looked for some contacts once in 10 minutes, and 5 of its 30 chats stayed down although both sides were online. Now it looks for every contact again within minutes, and 28 of the 30 chats come back.
+- An idle chat no longer writes to the disk every time it keeps its DHT mailbox alive. Before, each keep-alive (every four minutes per chat) and each one the relays' limit held back (every 30 seconds on an app at its limit, as a daemon with 30 chats often is) rewrote the chat's saved state with a disk sync. That was 16 writes an hour per idle chat, and 242 at the limit, for nothing sent. Now it is 1 and 2.
+- In a private group, a member whose app closed while another member's app was connecting to it is reached directly again once it comes back online. Before, the other app kept that member on a slower relayed connection until it restarted, and past four such members the rest stayed unreachable.
+- With no network, the app no longer redraws the chat list every second or two for chats that never synced. Each failed look for such a chat made the page read every stored chat again: about 540 reads a second with 50 chats. Now a chat shows its first sync under way during its first look only, and a failed look changes nothing on screen.
+- In a chat's connection panel, an Iroh or HyperDHT option this app could not start now says why in a few words of the app's language, as the line below the choices does ("All native connections in use", "HyperDHT relay unreachable"): its tooltip, its screen-reader description and the second line under it on a phone. Before, they read the engine's whole English sentence in every language.
+
+**CLI**
+
+- `wallet add-mint` with something that is not a URL, or a mint not on https, answers code `bad_request` with the same words ("That is not a valid mint URL", "Mints must use https"), as `service add` does. Before, it answered `engine`, which a bot reads as the engine failing and may retry.
+- An empty `--profile` (a script's `ghostly -p "$BOT" …` with `BOT` unset, or `--profile=`) ran the command as the current profile, so a script meant for its bot could send, make invites and change settings as the person's own profile. An empty `--home` (or `GHOSTLY_HOME`) used the current folder and made a new profile there. Both options are now a usage error when empty, and an empty variable counts as unset.
+- Files a bot sends at once (`file send` run in parallel, or many requests on the daemon's socket) are each their own message in its chat. Before, files sent in the same millisecond shared one message: the sender's chat and `file list` kept only one of them, and the others were not sent again after a drop.
+- `chat history`, `group history` and `wallet history` take only a whole number for `--limit`. Before, `--limit 1.5` on a chat or a group answered code `engine` (as if the engine had failed, which a bot may retry) and `wallet history` took it; now each answers `bad_request`, "limit must be a whole number from 1 to 10000".
+- A daemon reads a contact that is away at the same slow pace as its other chats. The chat of its last `invite create` or `invite join` stayed the chat "on screen" for good, so while that contact was away the daemon read it 2.5 to 3 times as often, about 18 of a Pkarr relay's 30 requests a minute. It now stops once the chat is paired.
+- Payments and requests a bot makes at once (`chat pay` or `chat request` run in parallel, or many requests on the daemon's socket) are each their own message in its chat. Before, two of them made in the same millisecond, or one of them and a file sent then, shared one message: the sender's chat kept only one of them.
+- `ghostly profile restore` on a file that is no Ghostly backup (a wrong file, an empty download) says "This is not a Ghostly backup" at once, with or without a passphrase, instead of asking for one. A backup that is encrypted and given no passphrase now names restore's own options, not backup's `--no-passphrase`.
+
+**Groups**
+
+- Being in several communities with the same people costs the relays less. A device that is the door of several communities now checks them for newcomers about as often as it would check one, and a member connected in several reads their hub lists less often. In 4 communities shared by 3 people, the member's idle relay requests drop from 24 to 8 a minute, and each hub's from 76-100 to 66. Someone who opens a community's link is still let in within seconds.
+- People who share several communities no longer see some of them stay unconnected for minutes. A device that was a hub of several communities spent the relays' allowance on idle checks of each community's door, lobby and hub list, and the connections its members needed in the other communities got what was left: with 4 communities on one relay, or 8 on two, some stayed down for 10 minutes and more, and messages sent there reached nobody. A hub's idle checks now wait while connections are being set up. They keep their pace while someone is coming in.
+- In a community, what a member wrote just before leaving now reaches the members who were away when they open the app again. Before, they came back to "… is no longer a member" without that member's last messages, while those who were online had read them. A removed member's messages still do not reach them.
+- Back in a private group, the messages you missed from one member come in about a minute every time: when your app happened to ask that member first, it waited a whole extra minute before asking anyone else for the older ones, so 256 missed messages took over two minutes in about half the returns.
+- Someone who accepted an invitation to a private group and closed the app (or lost the chat) while the admin's app was letting them in could wait on "Joining…" for good: the admin's app had added them, but the welcome never reached them and was never sent again, and the admin could not invite them again. Their app says its accept again, as it does, and now gets the welcome.
+
+**Desktop**
+
+- On Desktop (and Android), a chat over Iroh no longer drops its connection when the app hands it frames faster than the link carries them (a file or a mini-app sending to a contact on a slow link): each frame now waits for room on the connection instead of being refused once 32 were queued, and the chat's send budget counts it until it is written, so files and apps see the real queue and keep to their share.
+- On Linux, a notification server that stops answering no longer holds back every later message's sound and notification: the app does not wait for a notification before the next event, and gives up on a server that has not answered in 5 seconds.
+- On Linux, while the notification server is not answering, notifications no longer wait in line, 5 seconds each, behind the ones before them: different chats' notifications wait side by side, and a chat's notification that a newer one replaces is not sent at all. Five notifications in that moment took 25 seconds to get through, and now take 10.
+- On Linux, each notification given up on a notification server that stopped answering no longer leaves a D-Bus connection and a thread behind for good: the connection given up on is closed, and its click listener ends with it.
+
+**Website**
+
+- At the end of every page on ghostly.tools, the sleeping ghost in the footer kept the whole page laying itself out and repainting 60 times a second for as long as you stayed there, more on longer pages (up to about 60% of a mid-range phone's main thread on a long WISP page). Its hem now rests while it sleeps; only its z's move.
+- On a phone 320 to 349 px wide, the ghostly.tools home page now fits its first screen and its download panel to the screen, in place of cutting their text and buttons at the right edge.
+- On a computer, the little ghost that follows the pointer on ghostly.tools kept the page laying itself out 60 times a second for 45 to 57 seconds after every time the pointer stopped, up to about 14% of a core on a long WISP page. Its float and its z's kept doing it about 30 times a second for as long as it was on screen. It now moves and floats without laying out the page, and rests a few seconds after it reaches its spot.
+- On a phone narrower than 375 px, the "On this page" list of a WISP wraps inside its box. A heading that names a source file set the width of every entry, so on the public-profiles reference they ran past the box's border and off the screen.
+
+### For developers
+
+- Private groups (WISP 902): the admin's `remove` commit made on a member's own leave goes with `left`, the admin's signature that the member asked to leave, on the `group-commit` frame. Members keep it and hand it on with the commit. A removal the admin chose carries none.
+
+**Apps**
+
+- Behind the apps flag: with three apps or more running at once, an app reading one of its own files no longer reads its whole bundle (up to 16 MiB) back and checks it again. The engine kept the checked bundles of two apps only, so each read pushed out the one the next app needed: a 2-byte or missing file cost 18 ms of reading and hashing. Now each app started keeps its checked bundle, and a read takes well under a millisecond.
+
+**CLI**
+
+- Flags the help gives as either/or are refused together, as a usage error (exit 2) that names both, where one of them won without a word: `profile picture <jpeg> --clear` and `group picture <group> <jpeg> --clear` cleared the picture, `task send --progress n --steps a/b` and `usage send --left n --used n --limit n` sent a card with both, `group link --off --reset` dropped the reset, and `group hub --pin --exclude` pinned.
+
 ## 1.2.3
 
 ### Security

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, CHAT_RESERVE_MOST_SHARE, CHAT_RESERVE_PER_CHAT, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
 import type { PkarrRequestOptions, PkarrTransport } from "../src/transport";
 // covers: core.relay-client
 
@@ -373,6 +373,45 @@ describe("relay transport publishing in bursts", () => {
     await expect(relay.publish(id, [{ label: "_ts", value: "1" }])).rejects.toThrow("budget");
     expect(requests).toBe(30);
   });
+  it("signs no packet every relay's budget holds back, nor dates one: the wait is said before", async () => {
+    let requests = 0;
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: (async () => {
+      requests++; return new Response(null, { status: 204 });
+    }) as typeof fetch });
+    // Each signature reads the seed: counted.
+    let signed = 0;
+    const id = createIdentity();
+    const counted = new Proxy(id, { get: (target, name) => { if (name === "seed") signed++; return Reflect.get(target, name); } });
+    for (let i = 0; i < 30; i++) await relay.publish(counted, [{ label: "_ts", value: String(i) }]);
+    expect(signed).toBe(30);
+    const dated = (relay as unknown as { lastTimestamp: Map<string, bigint> }).lastTimestamp.get(id.pubKeyZ32);
+    // A daemon at its budget signed ~500 packets a minute that never went out; now each costs nothing but the wait.
+    for (let i = 0; i < 5; i++) await expect(relay.publish(counted, [{ label: "_ts", value: "late" }])).rejects.toSatisfy(isDiscoveryBudgetError);
+    expect(signed).toBe(30);
+    expect(requests).toBe(60);
+    expect((relay as unknown as { lastTimestamp: Map<string, bigint> }).lastTimestamp.get(id.pubKeyZ32)).toBe(dated);
+    // Where `put` takes it past the relays too (the CLI's DHT), it is signed whatever the budgets say.
+    let put = 0;
+    await relay.publishDated(counted, [{ label: "_ts", value: "dht" }], async () => { put++; }, {}, false, true);
+    expect([signed, put]).toEqual([31, 1]);
+  });
+
+  it("signs a publish one relay takes while another rate limits this address", async () => {
+    let calls = 0;
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: (async (input: RequestInfo | URL) => {
+      calls++;
+      return new URL(String(input)).host === "a.test" ? new Response(null, { status: 429, headers: { "retry-after": "60" } }) : new Response(null, { status: 204 });
+    }) as typeof fetch });
+    let signed = 0;
+    const id = createIdentity();
+    const counted = new Proxy(id, { get: (target, name) => { if (name === "seed") signed++; return Reflect.get(target, name); } });
+    await relay.publish(counted, [{ label: "_ts", value: "1" }]);
+    await relay.publish(counted, [{ label: "_ts", value: "2" }]);
+    expect(signed).toBe(2);
+    // a.test is left alone for its minute after the first 429: the second went to b.test only.
+    expect(calls).toBe(3);
+  });
+
   it("tells the relay which packet it replaces, and insists when the relay never saw it", async () => {
     const id = createIdentity();
     const seen: (string | null)[] = [];
@@ -654,21 +693,54 @@ describe("relay transport: a chat before its groups", () => {
       await relay.resolve(other, { urgent: true });
       for (let i = 0; i < REQUESTS_PER_MINUTE; i++) { vi.setSystemTime(start + i * 100); await group.resolve(id.pubKeyZ32).catch(() => {}); }
       expect(log).toHaveLength(REQUESTS_PER_MINUTE - CHAT_RESERVE);
-      // One chat is live (it reads at the connected pace, a background read): the other still waits, the reserve holds.
+      // One chat is live (it reads at the connected pace, a background read, which leaves the other its reserve too): the
+      // other still waits, the reserve holds.
       vi.setSystemTime(start + 20_000);
-      await relay.resolve(contact, { background: true });
+      await relay.resolve(contact, { background: true }).catch(() => {});
       vi.setSystemTime(start + 30_000);
       await group.resolve(id.pubKeyZ32);
       // A group's own background read of a key is no chat going live.
       await group.resolve(other, { background: true }).catch(() => {});
       await group.resolve(id.pubKeyZ32);
-      expect(log).toHaveLength(REQUESTS_PER_MINUTE - CHAT_RESERVE + 1);
+      expect(log).toHaveLength(REQUESTS_PER_MINUTE - CHAT_RESERVE);
       // Both live: the edges take the rest of the minute at once. Dev: nothing until a minute after the chats' last fast
       // read.
       await relay.resolve(other, { background: true });
       for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await group.resolve(id.pubKeyZ32).catch(() => {});
       expect(log).toHaveLength(REQUESTS_PER_MINUTE);
     } finally { vi.useRealTimers(); }
+  });
+
+  it("keeps more for several chats that need the relays at once, and background looks leave it too", async () => {
+    // An app back after a restart, four chats looking fast for their contacts at once (none has published yet: 404).
+    const log: { at: number }[] = [];
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      log.push({ at: Date.now() });
+      if (init?.method === "PUT") return new Response(null, { status: 204 });
+      return String(input).endsWith(id.pubKeyZ32) ? new Response(createRelayPayload(id, [{ label: "_ts", value: "1" }], 3n) as BodyInit) : new Response(null, { status: 404 });
+    }) as typeof fetch });
+    const group = withRequestOptions(relay, { group: true });
+    const contacts = Array.from({ length: 4 }, () => createIdentity().pubKeyZ32);
+    for (const contact of contacts) await relay.resolve(contact, { urgent: true });
+    // The groups, and the background looks of chats whose contacts are away and their presence, stop short of what the
+    // four keep: a read, an offer or answer, and the read for its answer each.
+    for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await group.resolve(id.pubKeyZ32).catch(() => {});
+    for (let i = 0; i < 5; i++) await relay.resolve(createIdentity().pubKeyZ32, { background: true }).catch(() => {});
+    await expect(relay.publish(createIdentity(), [{ label: "_ts", value: "1" }], { background: true })).rejects.toThrow("budget");
+    expect(4 * CHAT_RESERVE_PER_CHAT).toBeGreaterThan(CHAT_RESERVE);
+    expect(log).toHaveLength(REQUESTS_PER_MINUTE - 4 * CHAT_RESERVE_PER_CHAT);
+    // The chats' own requests take the rest.
+    for (let i = 0; i < 4 * CHAT_RESERVE_PER_CHAT; i++) await relay.resolve(contacts[i % 4], { urgent: true });
+    expect(log).toHaveLength(REQUESTS_PER_MINUTE);
+  });
+
+  it("leaves the groups part of the minute however many chats need the rest", async () => {
+    const { relay, log, group } = counting();
+    // Thirty chats looked fast for their contacts within the minute (their reads went elsewhere: the need is what counts).
+    for (let i = 0; i < REQUESTS_PER_MINUTE; i++) relay["chatNeed"](createIdentity().pubKeyZ32).urgentAt = Date.now();
+    for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await group.resolve(id.pubKeyZ32).catch(() => {});
+    expect(log).toHaveLength(REQUESTS_PER_MINUTE - Math.floor(REQUESTS_PER_MINUTE * CHAT_RESERVE_MOST_SHARE));
+    expect(log.length).toBeGreaterThan(0);
   });
 
   it("does not keep a reserve for a chat that is not waiting for anything", async () => {

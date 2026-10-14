@@ -24,6 +24,8 @@ export function Home() {
     setIsCreating(true);
     try {
       nav.conversation(chatPath(await createPairedChat()));
+    } catch {
+      // Not stored (no room left): `createPairedChat` said so for the whole app.
     } finally { setIsCreating(false); }
   };
 
@@ -98,7 +100,7 @@ export function Home() {
             {t("devices.join.already")}
           </button>
         )}
-        {joining && <JoinDialog onClose={() => setJoining(false)} onJoin={keys => {setJoining(false);nav.conversation(chatPath(ensureSession(keys)));}}
+        {joining && <JoinDialog onClose={() => setJoining(false)} onJoin={keys => {const id = ensureSession(keys); setJoining(false); nav.conversation(chatPath(id));}}
           onOpenChat={id => { setJoining(false); nav.conversation(chatPath(id)); }}
           onJoinGroup={async link => { const { groupId } = await engine.call("joinGroupByLink", { link }); setJoining(false); nav.conversation(groupPath(groupId)); }} />}
       </div>

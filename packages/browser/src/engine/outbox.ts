@@ -7,6 +7,11 @@ import type { StoredMessage } from "../shared/types";
 export type Delivery = "sending" | "sent" | "queued" | "waiting" | "held" | "delivered" | "failed";
 export interface OutboxStore {
   read(): Promise<StoredMessage[]>;
+  /**
+   * One message by its id, without reading the chat's history. Optional: without it a look at one message reads the
+   * whole history and picks it out, which a chat with hundreds of messages queued did hundreds of times per check.
+   */
+  get?(id: string): Promise<StoredMessage | undefined>;
   /** `extra` also changes the path the message takes and its resend deadline (`resendUntil: undefined` clears it). */
   update(id: string, delivery: Delivery, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>): Promise<void>;
 }
@@ -146,6 +151,11 @@ export class Outbox {
   /** The link has not closed since this turn began: what the turn sends goes on the link the turn looked at. */
   private get sameLink(): boolean { return !this.stopped && this.closed === this.began; }
 
+  /** One message as stored now: by its id when the store can, else picked out of the chat's history. */
+  private async one(id: string): Promise<StoredMessage | undefined> {
+    return this.store.get ? this.store.get(id) : (await this.store.read()).find(m => m.id === id);
+  }
+
   /** A new message a turn could not send (the link closed under it, or the ones before it still wait): it waits too. */
   private async waitsItsTurn(message: StoredMessage): Promise<void> {
     await this.store.update(message.id, "waiting", "Waits for the messages before it to go.", { via: "datalink", resendUntil: message.resendUntil ?? this.now() + this.policy.windowMs });
@@ -246,7 +256,7 @@ export class Outbox {
     this.busy.add(id);
     let again: boolean;
     try {
-      let message = read ?? (await this.store.read()).find(m => m.id === id);
+      let message = read ?? await this.one(id);
       if (!message?.wireId || !message.delivery || message.delivery === "delivered") return;
       const wait = this.waiting.get(id);
       if (wait?.timer) { clearTimeout(wait.timer); wait.timer = undefined; }
@@ -271,7 +281,7 @@ export class Outbox {
     // The chat went live while this send was on its way (on the DHT, or on a link that just closed): a reader that
     // is live now may not look at the DHT for minutes, so it goes again on the new link, under the same id.
     if (again) {
-      const message = (await this.store.read()).find(m => m.id === id);
+      const message = await this.one(id);
       if (message) await this.again(message);
     }
   }
@@ -282,7 +292,7 @@ export class Outbox {
    * nothing about it is unconfirmed; it counts no attempt until it goes.
    */
   async wait(id: string, reason: string): Promise<void> {
-    const message = (await this.store.read()).find(m => m.id === id);
+    const message = await this.one(id);
     if (!message || this.stopped) return;
     await this.store.update(id, "waiting", reason, { resendUntil: message.resendUntil ?? this.now() + this.policy.windowMs });
     this.schedule(id);
@@ -379,7 +389,7 @@ export class Outbox {
    */
   private async attempt(id: string, passed?: StoredMessage[]): Promise<boolean> {
     if (this.stopped || this.busy.has(id)) return true;
-    const message = (await this.store.read()).find(m => m.id === id);
+    const message = await this.one(id);
     if (!message || (message.delivery !== "queued" && message.delivery !== "waiting") || message.via === "hold") { this.forget(id); return true; }
     if ((message.resendUntil ?? Infinity) <= this.now()) {
       if (message.delivery === "waiting") { this.forget(id); await this.store.update(id, "failed", `Your contact was not reachable within ${days(this.policy.windowMs)}. It was not sent; Retry sends it.`); }
@@ -396,7 +406,7 @@ export class Outbox {
 
   /** After a failed attempt: queued again, unless its window or its attempts are spent. */
   private async requeue(id: string, reason: string): Promise<void> {
-    const message = (await this.store.read()).find(m => m.id === id);
+    const message = await this.one(id);
     if (message && message.delivery !== "delivered") await this.queue(message, reason);
   }
 
@@ -445,7 +455,7 @@ export class Outbox {
       void this.turn(async () => {
         if (this.receipts.get(id) !== timer) return;
         this.receipts.delete(id);
-        const message = (await this.store.read()).find(m => m.id === id);
+        const message = await this.one(id);
         if (message?.via === "pkarr") await this.expired(message);
         else await this.requeue(id, "No receipt received yet.");
       }).catch(() => {});

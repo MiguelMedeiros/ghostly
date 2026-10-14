@@ -9,6 +9,7 @@ import type { PairingCredentials } from "./pairedSession";
 import { measureRecords, MAX_DNS_PACKET_BYTES, PKARR_FUTURE_SKEW_MS, type GhostRecord, type SignedPacket } from "./pkarr";
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
+import { AWAITING_PEER_MS, unusedInviteWait } from "./link";
 import { REACTION_LIMITS, readDhtReactions, validReactionNumber, type WireReaction } from "./reactions";
 import { readForwarded } from "./forwards";
 import { validEditNumber } from "./pairedEdits";
@@ -205,6 +206,7 @@ export class DhtDelivery {
   private fastUntil = 0;
   private live = false;
   private active = false;
+  private readonly startedAt = Date.now();
   /** The next read was asked for (a refresh, a fresh packet of the contact): it is not a background one. */
   private urgent = false;
   /** Reads left that are signaling: the contact is leaving DHT only, and the live link waits on them (`expect`). */
@@ -273,6 +275,8 @@ export class DhtDelivery {
      * burst of an app coming back (bug hunt r7a). A text, a receipt, a new mode or a new capability revision still go at once.
      */
     firstControlAfterMs?: number;
+    /** This side made the invite, then: once no longer awaited, its mailbox is read less often while nobody uses it (`unusedInviteWait`). */
+    inviteMadeAt?: number;
   }) {
     // `peerRejected`, saved by apps before WISP 403 revision 0.3, stopped the chat for good on an envelope anyone
     // holding the invite could forge: it is dropped, not honoured.
@@ -896,11 +900,21 @@ export class DhtDelivery {
   get pollMs(): number {
     if (this.options.pollMs) return this.options.pollMs;
     const now = Date.now();
+    // An invite nobody used, no longer awaited: the older it is, the less often its mailbox is read.
+    const unused = this.unusedInviteAge(now);
+    if (unused !== undefined && !this.active && now >= this.fastUntil) return unusedInviteWait(unused, this.mode === "dht" ? DHT_POLL_MS : STREAM_POLL_MS);
     if (this.mode === "dht" || (this.state.peerMode === "dht" && now < this.leavingUntil) || now < this.fastUntil) return DHT_POLL_MS;
     if (this.live) return LIVE_POLL_MS;
     // Our text awaits its receipt: the receipt is what the person is looking at.
     if (this.state.pending && this.state.pending.expires > now) return DHT_POLL_MS;
     return this.active ? ACTIVE_DHT_POLL_MS : STREAM_POLL_MS;
+  }
+  /** How long ago this side's invite was made, while nobody used it and it is no longer awaited (`AWAITING_PEER_MS`). */
+  private unusedInviteAge(now: number): number | undefined {
+    const madeAt = this.options.inviteMadeAt;
+    if (madeAt === undefined || this.options.credentials.peerKey || this.state.peerSequence) return undefined;
+    const age = now - Math.min(madeAt, this.startedAt);
+    return age >= AWAITING_PEER_MS ? age : undefined;
   }
   private schedule(): void {
     if (!this.running || this.ticking) return;

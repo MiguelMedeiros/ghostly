@@ -31,25 +31,42 @@ class MemoryFiles implements GroupFileStore {
 }
 
 /**
+ * Senders, and the settings of one more member that sends nothing. That member holds none of the files (automatic
+ * downloads off) or serves none (serving off): its edge stays free, yet no file can be asked of it, and it must not send
+ * every waiting file back to asking at each file that ends. Nor must a group past 8 senders, whose free edges every
+ * waiting file may have asked already.
+ */
+const cases: [string, number, { autoDownloads?: boolean; serveFiles?: boolean } | undefined][] = [
+  ["8 senders", 8, undefined],
+  ["8 senders and a member with automatic downloads off", 8, { autoDownloads: false }],
+  ["8 senders and a member with serving off", 8, { serveFiles: false }],
+  ["12 senders", 12, undefined],
+  ["15 senders (a group of 16)", 15, undefined],
+  ["14 senders and a member with automatic downloads off", 14, { autoDownloads: false }],
+  ["14 senders and a member with serving off", 14, { serveFiles: false }],
+];
+
+/**
  * A member back from away in a busy group asks for every file it missed. Each file that ended asked every file still
  * waiting again, each ask going through every want for its edges, and each reported its unchanged row to the engine:
  * 450 small files from 15 members cost the desk 1.1 million asks and 26 s of main-thread time. Here the files' bytes
  * take longer than the catch-up of their announcements, as they do over a network, so they all wait at once.
  */
 describe("a member back from away in a busy group", { timeout: 10 * 60_000 }, () => {
-  it("asks for the files it missed about once each, and reports each file's row only when it changes", async () => {
+  it.each(cases)("asks for the files it missed about once each, and reports each file's row only when it changes: %s", async (_, senders, other) => {
     const world = new CommunityWorld();
     const files = new Map<Peer, { store: MemoryFiles; transfers: Map<string, FileTransferView> }>();
     const add = (name: string) => {
       const f = { store: new MemoryFiles(), transfers: new Map<string, FileTransferView>() };
-      const peer = world.add(name, p => ({ groupFiles: { store: f.store, transfers: f.transfers, settings: () => ({ autoDownloads: true, serveFiles: true }),
+      const settings = { autoDownloads: true, serveFiles: true, ...(name === "other" && other) };
+      const peer = world.add(name, p => ({ groupFiles: { store: f.store, transfers: f.transfers, brief: () => {}, settings: () => settings,
         sendFiles: (linkId, frame) => world.sendFiles(p, linkId, frame) } }));
       files.set(peer, f);
       return peer;
     };
-    const senders = 8, each = 30;
-    const [admin, ...rest] = ["admin", ...Array.from({ length: senders - 1 }, (_, i) => `m${i}`), "zed"].map(add);
-    const zed = rest.at(-1)!, members = [admin, ...rest.slice(0, -1)], all = [admin, ...rest];
+    const each = 30;
+    const [admin, ...rest] = ["admin", ...Array.from({ length: senders - 1 }, (_, i) => `m${i}`), ...(other ? ["other"] : []), "zed"].map(add);
+    const zed = rest.at(-1)!, members = [admin, ...rest.slice(0, senders - 1)], all = [admin, ...rest];
     const id = await admin.groups.create("Files", "mesh");
     const link = await admin.groups.enableLink(id);
     for (const p of rest) await p.groups.joinByLink(link);

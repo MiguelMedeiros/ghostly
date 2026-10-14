@@ -41,6 +41,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This message was edited 100 times, the most one takes.", "packages/browser/src/engine/node.ts", "This message was edited ${most} times, the most one takes."],
   ["That message is not in this chat, or cannot be replied to", "packages/browser/src/engine/node.ts"],
   ["That message cannot be replied to", "packages/browser/src/engine/node.ts"],
+  ["There is no room left on this device for a new chat", "apps/ui/src/lib/storage.ts"],
   ["Someone else joined with this invite first. Ask your contact for a new one.", "packages/core/src/ghostlink.ts"],
   ["Chat has been burned", "packages/browser/src/platform/useChat.ts"],
   ["No transport both apps allow is available yet", `${CORE}/ghostlink.ts`],
@@ -56,6 +57,18 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Native connection limit reached", "native/transports/hyperdht/endpoint.mjs"],
   ["HyperDHT handshake timed out", "native/transports/hyperdht/endpoint.mjs"],
   ["Noise handshake failed", "native/transports/hyperdht/endpoint.mjs"],
+  // The same dial failed on this side, by its own runtime.
+  ["Iroh connection timed out", "native/transports/src/iroh_transport.rs"],
+  ["Iroh connection timed out", "native/transports/iroh-web/src/lib.rs"],
+  ["HyperDHT connection timed out", "apps/desktop/src/hyperdht.rs"],
+  ["Native stream timed out", "apps/desktop/src/paired_transport.rs"],
+  ["Native stream timed out", "native/transports/iroh-web/src/lib.rs"],
+  ["Native channel closed", "native/transports/hyperdht/endpoint.mjs"],
+  ["Native channel did not reach the application", "apps/ui/src/desktop/nativeTransports.ts"],
+  // A dial past the contact's two channels: its endpoint destroys the stream, and the dialer's stream reads a reset
+  // (libudx's own words, measured on a local HyperDHT testnet).
+  ["connection reset by peer", "native/transports/hyperdht/endpoint.mjs", "if (stopped || channels.size >= 2) { socket.destroy();"],
+  ["PEER_NOT_FOUND: Peer not found", "node_modules/hyperdht/lib/errors.js", "static PEER_NOT_FOUND(msg = 'Peer not found')"],
   ["It did not connect", `${BROWSER}/engine/node.ts`],
   ["The peer closed this connection. Check that both transport preferences allow a common transport, then reconnect.", `${CORE}/ghostlink.ts`],
   ["Your contact needs an updated app to negotiate a transport change.", `${CORE}/ghostlink.ts`],

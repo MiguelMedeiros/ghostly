@@ -426,7 +426,7 @@ test("the review pictures: a bot room's routines and tasks at every width, both 
     const error = "RuntimeError: HTTP 429: This request would exceed your account's rate limit. Please try again later.";
     await zero.run("routine", "send", group, "--id", "zero-nas", "--name", "Zero · zero NAS backup freshness watchdog", "--schedule", "every 15 min", "--next", String(now + 11 * min), "--run", "ok", ...sent);
     await zero.run("routine", "send", group, "--id", "zero-log", "--name", "Zero · Murray Rothbot zero log auto-remediation", "--schedule", "every hour", "--next", String(now + 26 * min), "--run", "ok", ...sent);
-    await coordinator.run("task", "send", group, "--id", "ux", "--title", "Status cards: a cleaner layout for the tasks and routines in the chat", "--progress", "45", "--steps", "2/5",
+    await coordinator.run("task", "send", group, "--id", "ux", "--title", "Status cards: a cleaner layout for the tasks and routines in the chat", "--steps", "2/5",
       "--step", "Tasks panel", ...json({ startedAt: now - 12 * min }), ...sent);
     await zero.run("routine", "send", group, "--id", "zero-daily", "--name", "Zero · Murray Rothbot daily product/quality review", "--schedule", "weekdays at 10:30", "--cron", "30 10 * * 1-5",
       "--next", String(now + 23 * hr), ...json({ lastRun: { at: now - 29 * min, result: "failed", summary: error }, runs: [{ at: now - 29 * min, result: "failed", summary: error }, { at: now - 13 * hr, result: "ok", summary: "12 issues checked" }] }), ...sent);

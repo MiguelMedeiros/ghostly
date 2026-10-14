@@ -167,6 +167,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Each platform builds its own frontend: on Windows the platform swap once matched nothing and the app shipped the
+      # old chat (ghostly#1864). Seconds; before anything is uploaded.
+      - name: Desktop build carries its Desktop wiring
+        run: npm run build && npm run check:desktop-bundle
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:

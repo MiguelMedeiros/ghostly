@@ -14,6 +14,7 @@ import { COMMUNITY_TIMINGS, Communities, dialedKey, metaLines, type CommunityTim
 import { MESH_HUB_TIMINGS, MeshHubs, removalEpoch, type MeshHubTimings } from "./meshHubs";
 import { GroupTypings } from "./groupTyping";
 import { GroupAuthorOrder } from "./groupAuthorOrder";
+import { GroupLineOrder } from "./groupLineOrder";
 import { MeshSignals } from "./meshSignals";
 import { GroupFileDesk, groupFileText, groupOfFile, type GroupFileMembership, type GroupFilesHost } from "./groupFiles";
 
@@ -484,6 +485,8 @@ export class Groups {
   private readonly frames = new FramesTaken();
   /** Each member's messages in the order that member wrote them, though catch-up answers race (WISP 400, requirement 10). */
   private readonly authorOrder: GroupAuthorOrder;
+  /** The lines of each history among the messages of their moment (`GroupLineOrder`). */
+  private readonly lineOrder: GroupLineOrder;
   /** Hubs of the private groups past 16 members (WISP 902 · Group Mesh § Hubs). */
   private readonly hubs: MeshHubs;
   /** Groups whose edges are being reconciled because their hubs changed: one at a time. */
@@ -504,7 +507,14 @@ export class Groups {
     this.hubs = new MeshHubs(host, { stored: id => this.stored.get(id), save: group => { if (this.stored.get(group.id) === group) void this.store.putGroup(group).catch(() => {}); } }, hubTimings);
     this.typings = new GroupTypings(host);
     // A member some of whose messages are still on their way (and not known gone): its rows wait for them.
-    this.authorOrder = new GroupAuthorOrder(host, MESSAGE_LINK, (groupId, sender) => {
+    this.lineOrder = new GroupLineOrder(host);
+    // What it places again, the line order follows: the places are taken before anything is awaited.
+    const placeAgain = host.placeAgain && (async (linkId: string, ids: readonly string[]) => {
+      const done = host.placeAgain!(linkId, ids);
+      this.lineOrder.moved(linkId, ids);
+      await done;
+    });
+    this.authorOrder = new GroupAuthorOrder({ placeAgain }, MESSAGE_LINK, (groupId, sender) => {
       const session = this.sessions.get(groupId);
       return !!session && session.missing(sender, this.gapsGone.get(groupId)?.get(sender)?.[session.epoch]) > 0;
     });
@@ -958,6 +968,7 @@ export class Groups {
     this.lastPeerMessageAt.delete(groupId);
     this.lastMentionAt.delete(groupId);
     this.authorOrder.forget(groupId);
+    this.lineOrder.forget(MESSAGE_LINK(groupId));
     await this.store.deleteGroup(groupId);
     await this.store.putGroup(group);
     // The files go with the history, not when the admin has heard: its app may be away for the week the tombstone stays.
@@ -1163,6 +1174,7 @@ export class Groups {
     this.hereActed.delete(groupId);
     this.signals.forget(groupId);
     this.authorOrder.forget(groupId);
+    this.lineOrder.forget(MESSAGE_LINK(groupId));
     for (const linkId of [...this.host.edges(groupId).values(), ...this.host.entries(groupId).values()]) await this.host.closeEdge(linkId);
     await this.store.deleteGroup(groupId);
     if (owed && !this.stored.has(groupId)) {
@@ -2319,7 +2331,10 @@ export class Groups {
           ...(m.frame && { frame: m.frame }) };
         // A copy handed on stripped came first: the whole one adds what it lacked (WISP 902 · Group Mesh § Catch-up).
         const completed = !!m.completes && !!this.host.completeMessage;
+        // Its place is taken as the store is called, before anything is awaited: the line order follows it from there.
+        const placing = completed ? undefined : this.lineOrder.placing(MESSAGE_LINK(state.id), { id: m.id, epoch: m.epoch, line: false }, this.now());
         const stored = completed ? (await this.host.completeMessage!(message), false) : await this.host.storeMessage(message);
+        placing?.(stored !== false);
         // On its row now: new, or the whole copy of one stored before. A copy I had already changes no row.
         if (m.frame && (completed || stored !== false)) await this.frameKept(state.id, m.id, m.frame);
         // Mine are followed too: a member's rows placed again take along the lines written after them, mine included.
@@ -2374,7 +2389,16 @@ export class Groups {
       for (const [key] of after) if (!rosterHas(before, key) && key !== session.myKey) await this.event(groupId, "joined", `${name(key)} joined`, when, top.e, key);
       const gone = before.filter(([key]) => !rosterHas(after, key)).map(([key]) => key);
       this.hubs.removed(groupId, gone, this.now());
-      for (const key of gone) await this.event(groupId, "gone", `${name(key)} is no longer a member`, when, top.e, key);
+      // One who left on their own: the admin's remove carries its `left` mark (WISP 902 § Admission and departure).
+      const left = (key: string) => {
+        const chain = session.state.chain;
+        for (let e = chain.length - 1; e > 0; e--) if (chain[e].k === "remove" && chain[e].s === key) return !!session.state.leftMarks?.[e];
+        return false;
+      };
+      for (const key of gone) {
+        if (left(key)) await this.event(groupId, "left", `${name(key)} left`, when, top.e, key);
+        else await this.event(groupId, "gone", `${name(key)} is no longer a member`, when, top.e, key);
+      }
       if (top.k === "role") await this.event(groupId, "admin", `${name(top.s!)} ${top.s === session.myKey ? "are" : "is"} now the admin`, when, top.e, top.s);
       if (top.k === "rotate") await this.event(groupId, "rotated", "Keys rotated: a fresh epoch", when, top.e);
     }
@@ -2432,7 +2456,8 @@ export class Groups {
   /** A line in the group's history; lines at the same time (two members gone in one change) get distinct ones, see `eventTime`. */
   private async event(groupId: string, event: GroupEvent, text: string, timestamp: number, epoch: number, member?: string): Promise<void> {
     timestamp = eventTime(this.eventTimes, groupId, timestamp);
-    await this.host.storeMessage({ linkId: MESSAGE_LINK(groupId), id: `event:${epoch}:${event}:${timestamp}`, text, sender: "peer", event, member, timestamp, via: "datalink" });
+    const id = `event:${epoch}:${event}:${timestamp}`, placing = this.lineOrder.placing(MESSAGE_LINK(groupId), { id, epoch, line: true }, this.now());
+    placing(await this.host.storeMessage({ linkId: MESSAGE_LINK(groupId), id, text, sender: "peer", event, member, timestamp, via: "datalink" }) !== false);
   }
   private readonly eventTimes = new Map<string, Set<number>>();
 }

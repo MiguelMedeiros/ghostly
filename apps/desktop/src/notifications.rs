@@ -324,7 +324,7 @@ mod mac {
 #[cfg(target_os = "linux")]
 mod linux {
     use std::collections::{HashMap, VecDeque};
-    use std::sync::{Arc, LazyLock, Mutex, OnceLock};
+    use std::sync::{mpsc, Arc, LazyLock, Mutex, OnceLock};
     use std::time::Duration;
     use zbus::blocking::{connection, Connection, MessageIterator};
     use zbus::names::OwnedUniqueName;
@@ -336,19 +336,52 @@ mod linux {
     const BUS: &str = "org.freedesktop.DBus";
     /// The newest few, as the page keeps (lib/notifications.ts): an older one's click only closes it.
     const KEPT: usize = 64;
-    /// A server answers in milliseconds. One that stops answering (frozen, or stopped) has each call give up after
-    /// this, so it holds neither the thread nor NOTIFIER, and the notifications after it, for good.
+    /// A server answers in milliseconds. One that stops answering (frozen, or stopped) is waited for no longer than
+    /// this, so it holds neither the thread nor NOTIFIER, and the notifications after it, for good. The call is not
+    /// given up: the bus holds it for the server, which shows the notification when it wakes, and its answer still
+    /// names the notification there.
     const ANSWER_WITHIN: Duration = Duration::from_secs(5);
 
     /// A notification of ours: the server that showed it (its unique name on the bus), its id there and ours.
     /// A server that restarts numbers from 1 again, under another unique name.
     type Shown = (Option<OwnedUniqueName>, u32, String);
 
+    /// What is done with a notification of ours once the server answers the call that shows it.
+    enum Then {
+        Nothing,
+        /// The chat's newest message came meanwhile: it takes the place of the one just shown.
+        Show(String),
+        /// The chat was read meanwhile.
+        Close,
+    }
+
+    #[derive(Default)]
+    struct State {
+        /// Our notifications not yet closed, oldest first.
+        shown: VecDeque<Shown>,
+        /// Ours whose call the server has not answered yet: one at a time for each, so a server that wakes shows
+        /// none twice, and each one's number is known.
+        sending: HashMap<String, Then>,
+    }
+
+    impl State {
+        fn shown_as(&mut self, server: Option<OwnedUniqueName>, server_id: u32, id: &str) {
+            // A server that is gone closes nothing: what it showed is forgotten at the next one's first.
+            // Newest last, and once: the one it replaced is this one now.
+            self.shown.retain(|(shown_by, theirs, ours)| {
+                *shown_by == server && *theirs != server_id && ours != id
+            });
+            self.shown.push_back((server, server_id, id.to_string()));
+            if self.shown.len() > KEPT {
+                self.shown.pop_front();
+            }
+        }
+    }
+
     /// One connection for every notification, and one thread that hears their clicks.
     pub(super) struct Notifier {
         connection: Connection,
-        /// Our notifications not yet closed, oldest first.
-        shown: Arc<Mutex<VecDeque<Shown>>>,
+        state: Arc<Mutex<State>>,
     }
 
     impl Notifier {
@@ -357,7 +390,7 @@ mod linux {
             bus: connection::Builder<'static>,
             open: impl Fn(String) + Send + 'static,
         ) -> zbus::Result<Self> {
-            let connection = bus.method_timeout(ANSWER_WITHIN).build()?;
+            let connection = bus.build()?;
             // Subscribed before the first notification is shown, so no click comes before the listener.
             let rule = zbus::MatchRule::builder()
                 .msg_type(zbus::message::Type::Signal)
@@ -367,8 +400,8 @@ mod linux {
                 .path(PATH)?
                 .build();
             let signals = MessageIterator::for_match_rule(rule, &connection, None)?;
-            let shown: Arc<Mutex<VecDeque<Shown>>> = Arc::default();
-            let heard = Arc::clone(&shown);
+            let state: Arc<Mutex<State>> = Arc::default();
+            let heard = Arc::clone(&state);
             std::thread::Builder::new()
                 .name("notification-clicks".into())
                 .spawn(move || {
@@ -394,7 +427,7 @@ mod linux {
                             _ => continue,
                         };
                         let ours = {
-                            let mut shown = heard.lock().unwrap();
+                            let shown = &mut heard.lock().unwrap().shown;
                             shown
                                 .iter()
                                 .position(|(server, id, _)| {
@@ -407,15 +440,16 @@ mod linux {
                         }
                     }
                 })?;
-            Ok(Self { connection, shown })
+            Ok(Self { connection, state })
         }
 
         /// The server's id of our notification `id`, while it is shown, and by the server there is now: the
         /// number a server that is gone gave it is another app's notification by now, or nobody's.
         fn server_id(&self, id: &str) -> Option<u32> {
             let (shown_by, server_id) = {
-                let shown = self.shown.lock().unwrap();
-                let (shown_by, server_id, _) = shown.iter().find(|(_, _, ours)| ours == id)?;
+                let state = self.state.lock().unwrap();
+                let (shown_by, server_id, _) =
+                    state.shown.iter().find(|(_, _, ours)| ours == id)?;
                 (shown_by.clone()?, *server_id)
             };
             let owner = self
@@ -433,16 +467,131 @@ mod linux {
         }
 
         /// Shown again under the same `id` (a chat's next messages), it takes the place of the one still there.
+        /// Ok also when the server has not answered within ANSWER_WITHIN: the notification is on its way.
         pub(super) fn show(&self, id: &str, body: &str) -> zbus::Result<()> {
+            {
+                let mut state = self.state.lock().unwrap();
+                if let Some(then) = state.sending.get_mut(id) {
+                    *then = Then::Show(body.to_string());
+                    return Ok(());
+                }
+                state.sending.insert(id.to_string(), Then::Nothing);
+            }
             let replaces = self.server_id(id).unwrap_or(0);
-            // The installed app's desktop entry and icon (Ghostly.desktop, ghostly.png); the sound stays the
-            // local audio controller's, as on macOS.
-            let hints = HashMap::from([
-                ("desktop-entry", Value::from("Ghostly")),
-                ("suppress-sound", Value::from(true)),
-            ]);
-            let actions = ["default", "Ghostly"];
-            let reply = self.connection.call_method(
+            let (answered, answer) = mpsc::channel();
+            tauri::async_runtime::spawn(send(
+                self.connection.inner().clone(),
+                Arc::clone(&self.state),
+                id.to_string(),
+                replaces,
+                body.to_string(),
+                answered,
+            ));
+            awaited(answer)
+        }
+
+        /// Takes our notification `id` back from the server; nothing when it is gone already.
+        pub(super) fn clear(&self, id: &str) -> zbus::Result<()> {
+            if let Some(then) = self.state.lock().unwrap().sending.get_mut(id) {
+                *then = Then::Close;
+                return Ok(());
+            }
+            let server_id = self.server_id(id);
+            self.state
+                .lock()
+                .unwrap()
+                .shown
+                .retain(|(_, _, ours)| ours != id);
+            let Some(server_id) = server_id else {
+                return Ok(());
+            };
+            let (answered, answer) = mpsc::channel();
+            let connection = self.connection.inner().clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = answered.send(close(&connection, server_id).await);
+            });
+            awaited(answer)
+        }
+    }
+
+    /// The first answer to a call, when it comes within ANSWER_WITHIN; Ok when it has not come by then.
+    fn awaited(answer: mpsc::Receiver<zbus::Result<()>>) -> zbus::Result<()> {
+        match answer.recv_timeout(ANSWER_WITHIN) {
+            Ok(answer) => answer,
+            Err(mpsc::RecvTimeoutError::Timeout) => Ok(()),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(zbus::Error::Failure(
+                "Notification delivery unavailable".into(),
+            )),
+        }
+    }
+
+    /// Shows `body` as our notification `id`, then the chat's newest message that came before the server answered,
+    /// or closes it when the chat was read meanwhile. `answered` hears the first answer.
+    async fn send(
+        connection: zbus::Connection,
+        state: Arc<Mutex<State>>,
+        id: String,
+        mut replaces: u32,
+        mut body: String,
+        answered: mpsc::Sender<zbus::Result<()>>,
+    ) {
+        let mut answered = Some(answered);
+        loop {
+            let shown = notify(&connection, replaces, &body).await;
+            if let Some(answered) = answered.take() {
+                let _ = answered.send(shown.as_ref().map(drop).map_err(Clone::clone));
+            }
+            let then = {
+                let mut state = state.lock().unwrap();
+                match &shown {
+                    Ok((server, server_id)) => match state.sending.remove(&id) {
+                        Some(Then::Close) => {
+                            state.shown.retain(|(_, _, ours)| *ours != id);
+                            Some(Then::Close)
+                        }
+                        then => {
+                            state.shown_as(server.clone(), *server_id, &id);
+                            if let Some(Then::Show(_)) = then {
+                                state.sending.insert(id.clone(), Then::Nothing);
+                            }
+                            then
+                        }
+                    },
+                    Err(_) => {
+                        state.sending.remove(&id);
+                        None
+                    }
+                }
+            };
+            let Ok((_, server_id)) = shown else {
+                return;
+            };
+            match then {
+                Some(Then::Show(newest)) => (replaces, body) = (server_id, newest),
+                Some(Then::Close) => {
+                    let _ = close(&connection, server_id).await;
+                    return;
+                }
+                _ => return,
+            }
+        }
+    }
+
+    /// The server that showed it and its id there.
+    async fn notify(
+        connection: &zbus::Connection,
+        replaces: u32,
+        body: &str,
+    ) -> zbus::Result<(Option<OwnedUniqueName>, u32)> {
+        // The installed app's desktop entry and icon (Ghostly.desktop, ghostly.png); the sound stays the
+        // local audio controller's, as on macOS.
+        let hints = HashMap::from([
+            ("desktop-entry", Value::from("Ghostly")),
+            ("suppress-sound", Value::from(true)),
+        ]);
+        let actions = ["default", "Ghostly"];
+        let reply = connection
+            .call_method(
                 Some(SERVER),
                 PATH,
                 Some(SERVER),
@@ -457,39 +606,24 @@ mod linux {
                     hints,
                     -1i32,
                 ),
-            )?;
-            let server_id: u32 = reply.body().deserialize()?;
-            let server = reply.header().sender().map(|name| name.to_owned().into());
-            let mut shown = self.shown.lock().unwrap();
-            // A server that is gone closes nothing: what it showed is forgotten at the next one's first.
-            // Newest last, and once: the one it replaced is this one now.
-            shown.retain(|(shown_by, theirs, ours)| {
-                *shown_by == server && *theirs != server_id && ours != id
-            });
-            shown.push_back((server, server_id, id.to_string()));
-            if shown.len() > KEPT {
-                shown.pop_front();
-            }
-            Ok(())
-        }
+            )
+            .await?;
+        let server_id: u32 = reply.body().deserialize()?;
+        let server = reply.header().sender().map(|name| name.to_owned().into());
+        Ok((server, server_id))
+    }
 
-        /// Takes our notification `id` back from the server; nothing when it is gone already.
-        pub(super) fn clear(&self, id: &str) -> zbus::Result<()> {
-            let server_id = self.server_id(id);
-            self.shown.lock().unwrap().retain(|(_, _, ours)| ours != id);
-            let Some(server_id) = server_id else {
-                return Ok(());
-            };
-            self.connection
-                .call_method(
-                    Some(SERVER),
-                    PATH,
-                    Some(SERVER),
-                    "CloseNotification",
-                    &server_id,
-                )
-                .map(drop)
-        }
+    async fn close(connection: &zbus::Connection, server_id: u32) -> zbus::Result<()> {
+        connection
+            .call_method(
+                Some(SERVER),
+                PATH,
+                Some(SERVER),
+                "CloseNotification",
+                &server_id,
+            )
+            .await
+            .map(drop)
     }
 
     /// Let go (its call gave up, or its connection broke): the connection is closed, so the click listener's
@@ -532,7 +666,9 @@ mod linux {
                 return false;
             };
             match self.in_turn(id, || notifier.show(id, body)) {
-                // A newer one of the same id is shown in its place.
+                // A newer one of the same id is shown in its place. Also on its way to a server that has not
+                // answered yet: the plugin's would be a second notification, which the app can neither replace nor
+                // close.
                 None | Some(Ok(())) => true,
                 // The bus answered (no notification server, or it refused): the connection is good.
                 Some(Err(zbus::Error::MethodError(..))) => false,
@@ -685,8 +821,26 @@ mod linux {
             }
         }
 
+        /// Stops a server as SIGSTOP does (a hung mako, swaync or gnome-shell): it reads nothing until thawed, and
+        /// the bus holds what is sent to it.
+        #[derive(Clone, Default)]
+        struct Freezer(Arc<(Mutex<bool>, std::sync::Condvar)>);
+
+        impl Freezer {
+            fn set(&self, frozen: bool) {
+                *self.0 .0.lock().unwrap() = frozen;
+                self.0 .1.notify_all();
+            }
+
+            /// Blocks the server's only thread while it is frozen.
+            fn wait(&self) {
+                let (frozen, thawed) = &*self.0;
+                drop(thawed.wait_while(frozen.lock().unwrap(), |frozen| *frozen));
+            }
+        }
+
         /// A notification server that keeps a list, as GNOME, KDE and swaync do: what it still shows, by its id.
-        struct Listing(Arc<Mutex<Vec<(u32, String)>>>, u32);
+        struct Listing(Arc<Mutex<Vec<(u32, String)>>>, u32, Freezer);
 
         #[zbus::interface(name = "org.freedesktop.Notifications")]
         impl Listing {
@@ -702,6 +856,7 @@ mod linux {
                 _hints: HashMap<String, OwnedValue>,
                 _timeout: i32,
             ) -> u32 {
+                self.2.wait();
                 let mut shown = self.0.lock().unwrap();
                 if let Some(kept) = shown.iter_mut().find(|(id, _)| *id == replaces_id) {
                     kept.1 = body;
@@ -713,6 +868,7 @@ mod linux {
             }
 
             fn close_notification(&mut self, id: u32) {
+                self.2.wait();
                 self.0.lock().unwrap().retain(|(shown, _)| *shown != id);
             }
         }
@@ -727,7 +883,7 @@ mod linux {
                 .connect()
                 .name(SERVER)
                 .unwrap()
-                .serve_at(PATH, Listing(Arc::clone(&listed), 0))
+                .serve_at(PATH, Listing(Arc::clone(&listed), 0, Freezer::default()))
                 .unwrap()
                 .build()
                 .unwrap();
@@ -890,7 +1046,7 @@ mod linux {
                 bus.connect()
                     .name(SERVER)
                     .unwrap()
-                    .serve_at(PATH, Listing(Arc::clone(listed), 0))
+                    .serve_at(PATH, Listing(Arc::clone(listed), 0, Freezer::default()))
                     .unwrap()
                     .build()
                     .unwrap()
@@ -929,7 +1085,32 @@ mod linux {
             );
         }
 
-        /// A notification server that stops answering (frozen, or stopped with SIGSTOP) has the bus hold our call.
+        /// Every later message's sound was held back for as long as the server was frozen: the call waited with
+        /// no end, holding the thread and NOTIFIER. Now it is waited for no longer than ANSWER_WITHIN, and not as
+        /// an error: the notification is on its way, so the plugin sends no second one.
+        #[test]
+        fn a_frozen_server_holds_the_call_no_longer_than_answer_within() {
+            let bus = Bus::start();
+            let (_server, _listed, freezer) = frozen_listing(&bus);
+            freezer.set(true);
+            let notifier = Notifier::new(bus.connect(), |_| {}).unwrap();
+            let (done, waited) = mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = done.send(
+                    notifier
+                        .show("chat-a", "New message")
+                        .map_err(|error| error.to_string()),
+                );
+            });
+            let shown = waited.recv_timeout(ANSWER_WITHIN + Duration::from_secs(5));
+            freezer.set(false);
+            assert_eq!(
+                shown.expect("the call is still waiting for the frozen server"),
+                Ok(())
+            );
+        }
+
+        /// A notification server that stops answering for good: the bus holds our call.
         struct Frozen;
 
         #[zbus::interface(name = "org.freedesktop.Notifications")]
@@ -950,29 +1131,80 @@ mod linux {
             }
         }
 
-        /// Every later message's sound was held back for as long as the server was frozen: the call waited with
-        /// no end, holding the thread and NOTIFIER. Now it gives up after ANSWER_WITHIN, as an
-        /// error that is not the server's answer, so the next notification connects again.
-        #[test]
-        fn a_frozen_server_gives_the_call_up() {
-            let bus = Bus::start();
-            let _server = bus
+        /// What a listing server still shows, by its id.
+        type Listed = Arc<Mutex<Vec<(u32, String)>>>;
+
+        /// A listing server on a bus of its own, which the test freezes and thaws.
+        fn frozen_listing(bus: &Bus) -> (zbus::blocking::Connection, Listed, Freezer) {
+            let listed: Listed = Arc::default();
+            let freezer = Freezer::default();
+            let server = bus
                 .connect()
                 .name(SERVER)
                 .unwrap()
-                .serve_at(PATH, Frozen)
+                .serve_at(PATH, Listing(Arc::clone(&listed), 0, freezer.clone()))
                 .unwrap()
                 .build()
                 .unwrap();
+            (server, listed, freezer)
+        }
+
+        /// What the server lists once it has worked through what the bus held for it.
+        fn settled(listed: &Listed, expected: &[(u32, &str)]) {
+            let expected: Vec<(u32, String)> = expected
+                .iter()
+                .map(|(id, body)| (*id, body.to_string()))
+                .collect();
+            let until = std::time::Instant::now() + Duration::from_secs(10);
+            while *listed.lock().unwrap() != expected && std::time::Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            std::thread::sleep(Duration::from_millis(300));
+            assert_eq!(*listed.lock().unwrap(), expected);
+        }
+
+        /// A server that hung and came back showed every notification the app had given up on as a new one, which
+        /// the app could neither replace nor close. Now the late answer is still ours: the chat's newest message
+        /// replaces it, sent once, and reading the chat closes it.
+        #[test]
+        fn a_frozen_server_s_late_answer_is_still_the_chat_s_notification() {
+            let bus = Bus::start();
+            let (_server, listed, freezer) = frozen_listing(&bus);
             let notifier = Notifier::new(bus.connect(), |_| {}).unwrap();
-            let (done, given_up) = mpsc::channel();
-            std::thread::spawn(move || {
-                let _ = done.send(notifier.show("chat-a", "New message"));
-            });
-            let shown = given_up
-                .recv_timeout(ANSWER_WITHIN + Duration::from_secs(5))
-                .expect("the call is still waiting for the frozen server");
-            assert!(matches!(shown, Err(error) if !matches!(error, zbus::Error::MethodError(..))));
+            notifier.show("chat-b", "another chat").unwrap();
+            settled(&listed, &[(1, "another chat")]);
+
+            freezer.set(true);
+            // Not given up: the bus holds it for the server, and only its answer tells its number.
+            notifier.show("chat-a", "frozen 1").unwrap();
+            notifier.show("chat-a", "frozen 2").unwrap();
+            notifier.show("chat-a", "frozen 3").unwrap();
+            freezer.set(false);
+            settled(&listed, &[(1, "another chat"), (2, "frozen 3")]);
+
+            notifier.show("chat-a", "thawed").unwrap();
+            settled(&listed, &[(1, "another chat"), (2, "thawed")]);
+            notifier.clear("chat-a").unwrap();
+            settled(&listed, &[(1, "another chat")]);
+        }
+
+        /// The chat was read while the server was frozen: its notification goes when the server comes back, the
+        /// one shown before and the one still on its way.
+        #[test]
+        fn a_chat_read_while_the_server_is_frozen_is_closed_when_it_answers() {
+            let bus = Bus::start();
+            let (_server, listed, freezer) = frozen_listing(&bus);
+            let notifier = Notifier::new(bus.connect(), |_| {}).unwrap();
+            notifier.show("chat-a", "before").unwrap();
+            notifier.show("chat-b", "another chat").unwrap();
+            settled(&listed, &[(1, "before"), (2, "another chat")]);
+
+            freezer.set(true);
+            notifier.clear("chat-b").unwrap();
+            notifier.show("chat-a", "frozen").unwrap();
+            notifier.clear("chat-a").unwrap();
+            freezer.set(false);
+            settled(&listed, &[]);
         }
 
         /// Each notification given up on a frozen server left its connection on the bus for good: the click
@@ -991,7 +1223,8 @@ mod linux {
                 .unwrap();
             let notifier = Notifier::new(bus.connect(), |_| {}).unwrap();
             let name = notifier.connection.unique_name().unwrap().to_string();
-            assert!(notifier.show("chat-a", "New message").is_err());
+            // On its way: the bus holds the call for the frozen server, and the notifier is let go meanwhile.
+            assert!(notifier.show("chat-a", "New message").is_ok());
             drop(notifier);
 
             let other = bus.connect().build().unwrap();
@@ -1078,7 +1311,7 @@ mod linux {
                 .connect()
                 .name(SERVER)
                 .unwrap()
-                .serve_at(PATH, Listing(Arc::clone(&listed), 0))
+                .serve_at(PATH, Listing(Arc::clone(&listed), 0, Freezer::default()))
                 .unwrap()
                 .build()
                 .unwrap();
@@ -1097,7 +1330,7 @@ mod linux {
             // And reading the chats takes them both back.
             notifiers.clear("chat-a");
             notifiers.clear("chat-b");
-            assert_eq!(listed.lock().unwrap().clone(), []);
+            settled(&listed, &[]);
         }
     }
 }
