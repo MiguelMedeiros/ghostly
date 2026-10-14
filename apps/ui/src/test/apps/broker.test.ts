@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
-import { BROKER_REQUESTS, createBroker, STOP_REQUESTS_PER_SECOND, isJsonValue, jsonValueOf, runnerFor, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
+import { BROKER_REQUESTS, createBroker, PICK_AFTER_CANCEL_MS, STOP_REQUESTS_PER_SECOND, isJsonValue, jsonValueOf, runnerFor, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 
 // covers: apps.web-sandbox
@@ -580,6 +580,23 @@ describe("linked files (WISP 1200 · Linked files)", () => {
     expect(await ask("files.pick")).toMatchObject({ ok: false, error: "too-fast" });
     decide();
     expect(await first).toMatchObject({ ok: true });
+  });
+
+  it("pick: after the person cancels, the app waits before it may ask again", async () => {
+    const { ask, run, host, clock } = setup({ permissions: ["files"] });
+    run();
+    expect(await ask("files.pick")).toMatchObject({ ok: false, error: "cancelled" });
+    // Asking again at once would put the picker back in front of the person each time they close it.
+    expect(await ask("files.pick")).toMatchObject({ ok: false, error: "too-fast" });
+    clock.t += PICK_AFTER_CANCEL_MS - 1;
+    expect(await ask("files.pick")).toMatchObject({ ok: false, error: "too-fast" });
+    expect(host.calls.filter((c) => c.op === "files.pick")).toHaveLength(1);
+    clock.t += 1;
+    host.nextPick = [{ path: "a.mp4", bytes: bytes(1) }];
+    expect(await ask("files.pick")).toMatchObject({ ok: true });
+    // A pick that answered holds nothing off.
+    expect(await ask("files.pick")).toMatchObject({ ok: false, error: "cancelled" });
+    expect(host.calls.filter((c) => c.op === "files.pick")).toHaveLength(3);
   });
 
   it("read: a range of a linked file as an ArrayBuffer, handed over, by an id the client gave", async () => {
