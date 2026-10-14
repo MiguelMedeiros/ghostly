@@ -529,17 +529,19 @@ export class Groups {
     this.hubs = new MeshHubs(host, { stored: id => this.stored.get(id), save: group => { if (this.stored.get(group.id) === group) void this.store.putGroup(group).catch(() => {}); } }, hubTimings);
     this.typings = new GroupTypings(host);
     // A member some of whose messages are still on their way (and not known gone): its rows wait for them.
-    this.lineOrder = new GroupLineOrder(host);
+    this.lineOrder = new GroupLineOrder(host, linkId => {
+      const groupId = linkId.slice(MESSAGE_LINK("").length), session = this.sessions.get(groupId);
+      // Only messages of an epoch before the current one go above a line.
+      return !!session && [...session.lacking().keys()].some(sender => this.onTheirWay(groupId, sender, session.epoch));
+    });
     // What it places again, the line order follows: the places are taken before anything is awaited.
     const placeAgain = host.placeAgain && (async (linkId: string, ids: readonly string[]) => {
       const done = host.placeAgain!(linkId, ids);
       this.lineOrder.moved(linkId, ids, this.now());
       await done;
     });
-    this.authorOrder = new GroupAuthorOrder({ placeAgain }, MESSAGE_LINK, (groupId, sender) => {
-      const session = this.sessions.get(groupId);
-      return !!session && session.missing(sender, this.gapsGone.get(groupId)?.get(sender)?.[session.epoch]) > 0;
-    });
+    // In any epoch: across a join, the older messages a catch-up hands on are in the epoch before.
+    this.authorOrder = new GroupAuthorOrder({ placeAgain }, MESSAGE_LINK, (groupId, sender) => this.onTheirWay(groupId, sender));
     this.signals = new MeshSignals(host, { session: id => this.sessions.get(id), stored: id => this.stored.get(id), now: () => this.now() });
     const files = host.groupFiles;
     if (files) {
@@ -2173,6 +2175,12 @@ export class Groups {
     entry.of.add(via);
     entry.at = now;
     return true;
+  }
+
+  /** Whether some of a member's messages are still on their way (not known gone): in any epoch, or in those below `below`. */
+  private onTheirWay(groupId: string, sender: string, below = Infinity): boolean {
+    const gone = this.gapsGone.get(groupId)?.get(sender);
+    return Object.entries(this.sessions.get(groupId)?.missOf(sender) ?? {}).some(([e, gaps]) => Number(e) < below && gaps.some(n => n > (gone?.[e] ?? -1)));
   }
 
   /**
