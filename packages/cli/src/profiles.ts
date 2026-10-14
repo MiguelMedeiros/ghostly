@@ -25,6 +25,12 @@ export function checkProfileName(name: string): string {
   return name;
 }
 
+/** The name a profile shows its contacts (`--name`, `profile.set`): a string of up to 64 characters. */
+export function checkShownName(name: unknown): string {
+  if (typeof name !== "string" || [...name].length > 64) throw new CliError("bad_request", "name must be a string of up to 64 characters");
+  return name;
+}
+
 export function currentProfile(home: string, option?: string): string {
   if (option === "") throw new CliError("usage", "--profile needs a profile name");
   if (option !== undefined) return checkProfileName(option);
