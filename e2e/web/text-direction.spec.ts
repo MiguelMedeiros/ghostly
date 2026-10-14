@@ -2,6 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import { chat, connect, expect, link, say, test, walletCard } from "../support/fixtures";
 import { mockEthereum } from "../support/ethereum";
 import { mockMainnetMints } from "../support/mint";
+import { strangerInvoice } from "../support/bolt11";
 
 /**
  * What people write reads in its own direction, whatever the app's language: an English message in the Arabic app
@@ -93,4 +94,36 @@ test("in Arabic a page's Back arrow points to the start edge, as it does in Engl
   await useLanguage(page, "ar");
   await expect(arrow).toBeVisible();
   expect(await mirrored()).toBe(true);
+});
+
+test("in Arabic an invoice card's amount reads ⚡, the number, then its unit, from the right", { tag: ["@feature:app.i18n", "@feature:payments.lightning.invoice-card"] }, async ({ peer }) => {
+  const [alice, bob] = await Promise.all([peer("alice", { mobile: true, viewport: PHONE }), peer("bob", { mobile: true, viewport: PHONE })]);
+  await link(alice, bob);
+  await connect(alice, bob);
+  await useLanguage(alice.page, "ar");
+
+  await say(bob, strangerInvoice(250_000, "1 cup coffee", "lnbcrt"));
+  const card = chat(alice).getByTestId("invoice-bubble").last();
+  const amount = card.getByTestId("money-amount");
+  await expect(amount).toHaveText("250,000");
+  // One isolate around the number and "sats" took the direction of "sats": «تجريبية sats 250,000» from the right.
+  const words = await amount.evaluate((element) => {
+    const box = (node: Node, from = 0, to?: number) => {
+      const range = document.createRange();
+      range.setStart(node, from);
+      range.setEnd(node, to ?? node.textContent!.length);
+      const { left, right } = range.getBoundingClientRect();
+      return { left, right };
+    };
+    // The line's text nodes, whatever wraps them: ⚡, the number, the unit.
+    const walker = document.createTreeWalker(element.closest("p")!, NodeFilter.SHOW_TEXT), nodes: Node[] = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    const [bolt, number, unit] = nodes, text = unit.textContent!, space = text.indexOf(" ");
+    return { bolt: box(bolt), number: box(number), sats: box(unit, 0, space), test: box(unit, space + 1), text };
+  });
+  expect(words.text).toBe("sats تجريبية");
+  expect(words.number.right).toBeLessThanOrEqual(words.bolt.left);
+  // Apart from the number, by the unit's start margin.
+  expect(words.number.left - words.sats.right).toBeGreaterThanOrEqual(2);
+  expect(words.test.right).toBeLessThanOrEqual(words.sats.left);
 });
