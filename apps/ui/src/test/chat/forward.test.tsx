@@ -194,8 +194,16 @@ describe("choosing several", () => {
     const { user } = renderApp(<Timeline messages={messages} />);
     await user.click(screen.getAllByTestId("message-options")[0]!);
     await user.click(screen.getByTestId("message-select-start"));
-    act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
+    // An Escape something else answered (a menu, a field) is not the choice's.
+    const spent = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    spent.preventDefault();
+    act(() => { window.dispatchEvent(spent); });
+    expect(screen.getByTestId("select-bar")).toBeInTheDocument();
+    // The one that ends it is spent: a notice at the top that also answers Escape stays.
+    const escape = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    act(() => { window.dispatchEvent(escape); });
     expect(screen.queryByTestId("select-bar")).toBeNull();
+    expect(escape.defaultPrevented).toBe(true);
     await user.click(screen.getAllByTestId("message-options")[0]!);
     await user.click(screen.getByTestId("message-select-start"));
     await user.click(screen.getByTestId("select-cancel"));
