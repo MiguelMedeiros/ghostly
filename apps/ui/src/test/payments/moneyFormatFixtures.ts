@@ -44,10 +44,11 @@ const hexBytes = (hex: string) => Uint8Array.from(hex.match(/../g)!.map((b) => p
 const tu64 = (value: number) => { const out: number[] = []; for (let v = BigInt(value); v > 0n; v >>= 8n) out.unshift(Number(v & 0xffn)); return out; };
 
 /** A BOLT 12 offer with the fields given, written as a TLV stream in bech32 without a checksum. */
-export function bolt12Offer(fields: { chains?: (keyof typeof GENESIS)[]; amountMsat?: number; currency?: string; description?: string; issuer?: string } = {}): string {
+export function bolt12Offer(fields: { chains?: (keyof typeof GENESIS)[]; amountMsat?: number; currency?: string | Uint8Array; description?: string; issuer?: string } = {}): string {
   const records: [number, number[]][] = [];
   if (fields.chains) records.push([2, fields.chains.flatMap((c) => [...hexBytes(GENESIS[c])])]);
-  if (fields.currency) records.push([6, [...new TextEncoder().encode(fields.currency)]]);
+  // A string as UTF-8, or the field's raw bytes (an empty or broken one).
+  if (fields.currency !== undefined) records.push([6, [...(typeof fields.currency === "string" ? new TextEncoder().encode(fields.currency) : fields.currency)]]);
   if (fields.amountMsat !== undefined) records.push([8, tu64(fields.amountMsat)]);
   if (fields.description !== undefined) records.push([10, [...new TextEncoder().encode(fields.description)]]);
   if (fields.issuer) records.push([18, [...new TextEncoder().encode(fields.issuer)]]);
