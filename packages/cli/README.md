@@ -280,6 +280,8 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
 - A message's `timestamp` is its place in the history, which `chat history` and `group history` are ordered by: when
   this profile sent it, or when it arrived here. A received message also has `sentAt`, the time its sender's clock
   said, which orders nothing (a clock can be wrong).
+- A message's `from` is `me`, `peer`, or `system` for a group's own line in `group history` (`event`: created, joined,
+  renamed, …; the stream says it as `group.event`): nobody wrote it, whatever `member` key it carries.
 - `seq` grows by one per event in the profile, across restarts; `id` is the same whenever the same fact is reported.
   Dedupe by `id`; resume with `--since <seq>`, or let `--cursor <file>` remember the last event handled.
 - Types: `daemon.started`, `chat.created`, `chat.removed`, `chat.renamed`, `chat.pairing` (`stage`: publishing,
