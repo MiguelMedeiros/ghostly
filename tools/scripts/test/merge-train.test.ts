@@ -32,6 +32,8 @@ function fakeRepo() {
   const runs = new Map<string, object[]>();
   /** CI's runs on a commit before the newest one (newest first), and the files each pull request changes (unset: one source file). */
   const earlier = new Map<string, object[][]>();
+  /** What started the newest run on a commit, where it is not a push to dev. */
+  const kinds = new Map<string, { event: string; head_branch: string }>();
   const files = new Map<number, string[]>();
   /** The draft gate's jobs per commit (the fast tier), and CI's runs still going on each head, which the train may cancel. */
   const drafts = new Map<string, object[]>();
@@ -77,9 +79,14 @@ function fakeRepo() {
     pulls: async (base: string) => [...pulls.values()].filter((p) => p.open && p.base === base).map((p) => ({ ...p, labels: [...p.labels] })),
     mergedPulls: async (base: string) => [...pulls.values()].filter((p) => p.merged && p.base === base).map((p) => ({ ...p, labels: [...p.labels] })),
     events: async (n: number) => events.get(n) ?? [],
-    /** The newest run on the commit, then the ones before it (`earlier`): the first the train counts. */
-    ciJobs: async (sha: string, counts: (jobs: object[]) => boolean | Promise<boolean> = () => true) => {
-      for (const jobs of [runs.get(sha) ?? [], ...(earlier.get(sha) ?? [])]) if (await counts(jobs)) return jobs;
+    /**
+     * The newest run on the commit, then the ones before it (`earlier`): the first the train counts. Each is a push to
+     * dev unless `kinds` says what the newest one was (a pull request's run on the same commit).
+     */
+    ciJobs: async (sha: string, counts: (jobs: object[], run: { event: string; head_branch: string }) => boolean | Promise<boolean> = () => true) => {
+      const push = { event: "push", head_branch: "dev" };
+      for (const [jobs, run] of [[runs.get(sha) ?? [], kinds.get(sha) ?? push], ...(earlier.get(sha) ?? []).map((jobs) => [jobs, push])] as [object[], typeof push][])
+        if (await counts(jobs, run)) return jobs;
       return [];
     },
     pullFiles: async (n: number) => (readState(pulls.get(n)?.body) ? readState(pulls.get(n)!.body).prs.flatMap((m: { number: number }) => files.get(m.number) ?? [`packages/core/src/fix${m.number}.ts`]) : (files.get(n) ?? [`packages/core/src/fix${n}.ts`])),
@@ -232,7 +239,7 @@ function fakeRepo() {
   const flight = () => (batch() ? members() : [...pulls.values()].filter((p) => p.open && alone(p.number)?.sha === p.sha).map((p) => p.number));
   let stamp = 0;
   const run = (opts = {}) => tick({ gh, git, base: "dev", login: "train", stamp: String(stamp++), pause: async () => {}, ...opts });
-  return { gh, git, pulls, comments, runs, earlier, files, drafts, going, cancelled, cancelAccess, pushed, tips, landed, conflicts, unrebasable, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, add, settle, batch, members, alone, flight, run };
+  return { gh, git, pulls, comments, runs, earlier, kinds, files, drafts, going, cancelled, cancelAccess, pushed, tips, landed, conflicts, unrebasable, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, add, settle, batch, members, alone, flight, run };
 }
 
 describe("the line", () => {
@@ -1720,6 +1727,24 @@ describe("a green CI run planned for other files", () => {
     expect(r.log.join("\n")).toMatch(/HOLD .*itself is red/);
   });
 
+  it("does not count a pull request's green run on dev's commit that skipped those jobs for its own files", async () => {
+    // A branch at dev's tip opened into an epic, or a fork's: its run on dev's commit was planned from its own files.
+    for (const kind of [{ event: "pull_request", head_branch: "x-at-dev-tip" }, { event: "pull_request", head_branch: "dev" }]) {
+      const repo = fakeRepo();
+      repo.add(11);
+      repo.add(12);
+      await repo.run();
+      repo.runs.set("dev0", greenForDocs);
+      repo.kinds.set("dev0", kind);
+      repo.earlier.set("dev0", [red]);
+      repo.settle([11, 12]);
+      const r = await repo.run();
+      expect(r.log.join("\n")).toMatch(/`dev`: a green CI run skipped what a push turns on/);
+      expect(r.log.join("\n")).toMatch(/HOLD .*itself is red/);
+      expect(repo.members()).toEqual([11, 12]);
+    }
+  });
+
   it("does not count a `tested` shape on an epic: only a push to dev may plan less", async () => {
     const repo = fakeRepo();
     repo.add(11, { base: "epic/x" });
@@ -1734,9 +1759,9 @@ describe("a green CI run planned for other files", () => {
 
   it("is passed over over REST: the run before it is read, and the files are the pull request's, renames by both names", async () => {
     const sent: string[] = [];
-    const wf = (id: number) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" } });
+    const wf = (id: number, event: string) => ({ id, event, head_branch: "dev", path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" } });
     const answers: Record<string, object> = {
-      "/actions/workflows/ci.yml/runs?head_sha=abc&per_page=100": { workflow_runs: [wf(5001), wf(5002)] },
+      "/actions/workflows/ci.yml/runs?head_sha=abc&per_page=100": { workflow_runs: [wf(5001, "push"), wf(5002, "pull_request")] },
       "/actions/runs/5002/jobs?filter=latest&per_page=100&page=1": { jobs: greenForDocs },
       "/actions/runs/5001/jobs?filter=latest&per_page=100&page=1": { jobs: red },
       "/pulls/21/files?per_page=100&page=1": [{ filename: "docs/NOTES.md" }, { filename: "packages/core/src/new.ts", previous_filename: "packages/core/src/old.ts" }],
@@ -1752,9 +1777,10 @@ describe("a green CI run planned for other files", () => {
     expect(await gh.pullFiles(22)).toBeNull();
     expect(ciState(await gh.ciJobs("abc"))).toBe("success"); // nobody asked: the newest, as before
     const seen: string[] = [];
-    const counts = async (jobs: { name: string }[]) => (seen.push(ciState(jobs)), skippedGates(jobs).length === 0);
+    // Each run is asked about with what started it: a push to dev's `tested` plan counts, a pull request's run does not.
+    const counts = async (jobs: { name: string }[], run: { event: string }) => (seen.push(`${run.event} ${ciState(jobs)}`), skippedGates(jobs).length === 0);
     expect(ciState(await gh.ciJobs("abc", counts))).toBe("failure");
-    expect(seen).toEqual(["success", "failure"]);
+    expect(seen).toEqual(["pull_request success", "push failure"]);
     expect(ciState(await gh.ciJobs("abc", () => false))).toBe("none");
     // Each run's jobs are read once for the three questions.
     expect(sent.filter((p) => p.includes("/jobs"))).toEqual(["/actions/runs/5002/jobs?filter=latest&per_page=100&page=1", "/actions/runs/5001/jobs?filter=latest&per_page=100&page=1"]);
