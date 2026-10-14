@@ -183,8 +183,10 @@ the look:
   story's ghosts, the boo transition, the footer's `GhostPet` and the
   404 draw it. Rounded, cloth-like folds are gone. The hem stirs, it does not
   ripple: over 3.2 s the notches move sideways and the points up or down by
-  about a unit (the corners and sides stay put), the loop rests off screen
-  (`IdleLoops`), and reduced motion shows `GHOST_PATH` itself. The eyes take
+  about a unit (the corners and sides stay put), three times when the ghost
+  appears, then it rests on `GHOST_PATH` (a hem morphed for good lays the
+  page out at every frame). It waits off screen (`IdleLoops`), and reduced
+  motion shows `GHOST_PATH` itself. The eyes take
   the app's ink (`PAIR.eye`) and its blink: every 5 s, shut at 97%.
 - **Colour and line.** `PAIR` in `lib/motion.ts` (`--pair-*` in site.css)
   holds the app's eye ink, mesh and node tones and stroke widths. A network
