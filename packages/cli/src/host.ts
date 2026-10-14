@@ -188,13 +188,16 @@ function connection(ctx: ApiContext, socket: Socket): void {
     if (request.method === "events.subscribe") {
       const params = (request.params ?? {}) as { since?: unknown };
       const since = typeof params.since === "number" ? params.since : ctx.hub.lastSeq;
+      // A journal that cannot be replayed is the answer, never a subscription that then says nothing.
+      let replay: GhostlyEvent[];
+      try { replay = ctx.hub.replay(since); } catch (error) { write({ id, error: asCliError(error).toJSON() }); return; }
       // Live events queue while the journal replays, so none falls between the two.
       const queued: GhostlyEvent[] = [];
       let replaying = true;
       unsubscribes.push(ctx.hub.onEvent((event) => { if (replaying) queued.push(event); else write({ event }); }));
       write({ id, result: { subscribed: true, lastSeq: ctx.hub.lastSeq } });
       let last = since;
-      for (const event of ctx.hub.replay(since)) { write({ event }); last = event.seq; }
+      for (const event of replay) { write({ event }); last = event.seq; }
       replaying = false;
       for (const event of queued) if (event.seq > last) write({ event });
       return;
