@@ -63,13 +63,14 @@ export function IncomingCallNotification({
     return () => { if (before?.isConnected && (!document.activeElement || document.activeElement === document.body)) before.focus({ preventScroll: true }); };
   }, []);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 max-md:bg-chat-bg backdrop-blur-sm animate-fade-in">
+    // A plain dimmed overlay: a backdrop blur is drawn again with every frame anything under it moves.
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 max-md:bg-chat-bg animate-fade-in">
       <div ref={box} role="alertdialog" aria-modal="true" aria-labelledby={nameId} aria-describedby={onCall ? `${kindId} ${hintId}` : kindId} tabIndex={-1}
         data-testid="incoming-call" data-on-call={onCall || undefined}
         className="incoming-call bg-surface-alt rounded-2xl p-8 shadow-2xl max-w-sm w-full mx-4 text-center space-y-6 focus:outline-none">
         {/* Avatar */}
         <div className="flex flex-col items-center gap-3">
-          <div aria-hidden="true" className="w-20 h-20 rounded-full bg-surface-hover flex items-center justify-center animate-pulse-dot">
+          <div aria-hidden="true" className="w-20 h-20 rounded-full bg-surface-hover flex items-center justify-center animate-ring-pulse">
             <span className="text-text-muted text-2xl">
               {initial(peerName)}
             </span>

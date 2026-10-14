@@ -925,6 +925,19 @@ html .toast-place.toast-place-page[data-at="top"] {
   animation: pulse-dot 1.5s ease-in-out infinite;
 }
 
+/*
+ * A call ringing in: its avatar pulses a few times, then rests fully shown. A pulse for the whole ring redrew the
+ * window every frame (a core of the GPU process); the ring sound says it goes on.
+ */
+@keyframes ring-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.animate-ring-pulse {
+  animation: ring-pulse 1.5s ease-in-out 3;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
 }
