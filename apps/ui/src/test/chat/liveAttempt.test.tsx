@@ -13,7 +13,7 @@ describe("why a chat is not live (WISP 100)", () => {
   const text = (attempt: LiveAttempt | undefined, dialer?: "you" | "contact") => liveAttemptText(attempt, dialer, "Bea", () => "17:02");
 
   it("says what the dialling side tried, why each did not connect, and when it tries again", () => {
-    expect(text({ at: 1, side: "dialled", retryAt: 2, failed: [
+    expect(text({ at: 1, side: "dialled", retryAt: Date.now() + 60_000, failed: [
       { transport: "webrtc/1", error: "The offer was not answered" },
       { transport: "iroh/1", error: "The contact has no Iroh relay" },
     ] }, "you")).toEqual({ label: "Last attempt at 17:02", lines: [
@@ -22,6 +22,11 @@ describe("why a chat is not live (WISP 100)", () => {
     // Nothing to try yet: why, instead of a list, in the app's words.
     expect(text({ at: 1, side: "dialled", failed: [], reason: "No transport both apps allow is available yet" }, "you")?.lines)
       .toEqual(["No way to connect in common."]);
+  });
+
+  it("drops a retry time that has passed: nothing dialled when it came", () => {
+    expect(text({ at: 1, side: "dialled", retryAt: Date.now() - 60_000, failed: [{ transport: "hyperdht/1", error: "Couldn't connect" }] }, "contact")?.lines)
+      .toEqual(["Bea's app connects to this one: this app answers.", "HyperDHT: Couldn't connect."]);
   });
 
   it("says on the answering side that the contact dials, and what of it reached this app", () => {
@@ -47,7 +52,7 @@ describe("the connection panel of a chat on the DHT", () => {
   }
 
   it("says under Details why it is not live, from this side's last attempt", () => {
-    panel({ liveDialer: "you", liveAttempt: { at: Date.UTC(2026, 8, 25, 19, 58), side: "dialled", retryAt: Date.UTC(2026, 8, 25, 19, 59),
+    panel({ liveDialer: "you", liveAttempt: { at: Date.UTC(2026, 8, 25, 19, 58), side: "dialled", retryAt: Date.now() + 60_000,
       failed: [{ transport: "webrtc/1", error: "The offer was not answered" }, { transport: "iroh/1", error: "The contact has no Iroh relay" }] } });
     expect(screen.getByTestId("connection-options")).toHaveAttribute("aria-label", "Connection options: On DHT · retrying live");
     const block = screen.getByTestId("connection-not-live");
