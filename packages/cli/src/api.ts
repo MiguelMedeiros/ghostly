@@ -590,8 +590,10 @@ const METHODS: Record<string, Method> = {
   async "group.leave"(ctx, params) {
     const group = groupOf(ctx, params);
     if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass yes (--yes) to go on");
-    await node(ctx).leaveGroup({ groupId: group.id });
-    return { left: group.id };
+    const { admin } = await node(ctx).leaveGroup({ groupId: group.id });
+    // The member who became the admin, named from the roster read before leaving: the group is gone from the state now.
+    const next = admin ? group.members.find((m) => m.key === admin) : undefined;
+    return { left: group.id, ...(admin ? { admin: { key: admin, name: next?.nick ?? null } } : {}) };
   },
   async "group.forget"(ctx, params) {
     const group = groupOf(ctx, params);

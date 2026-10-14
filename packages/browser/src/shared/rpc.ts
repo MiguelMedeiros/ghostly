@@ -377,7 +377,8 @@ export interface EngineApi {
    * § The Tasks board): one row per message with a card. Read from the store's card index, never from the histories.
    */
   statusCardIndex(): CardIndexRow[];
-  leaveGroup(params: { groupId: string }): void;
+  /** `admin`: the member a leaving admin handed the role to. */
+  leaveGroup(params: { groupId: string }): { admin?: string };
   removeGroupMember(params: { groupId: string; key: string }): void;
   makeGroupAdmin(params: { groupId: string; key: string }): void;
   setGroupHub(params: { groupId: string; key: string; role: "pin" | "exclude" | null }): void;

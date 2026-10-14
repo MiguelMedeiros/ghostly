@@ -953,16 +953,17 @@ export class Groups {
    * Leaves, and the group is gone from this device at once: its row, its history, its files and every
    * edge but the one to the admin, which stays until the admin's commit removing me comes back (or a
    * week passes), so a leave said while the admin was away still reaches it. An admin with other
-   * members hands the role to one who is online first; alone, the group simply goes.
+   * members hands the role to one who is online first; alone, the group simply goes. Answers the member the role went
+   * to, when it went to one.
    */
-  async leave(groupId: string): Promise<void> {
+  async leave(groupId: string): Promise<string | undefined> {
     if (this.isCommunity(groupId)) return this.communities.leave(groupId);
     const session = this.session(groupId);
     const group = this.stored.get(groupId)!;
-    if (session.status !== "active") return this.forget(groupId);
-    if (session.others.length === 0) { await session.leave(); return this.forget(groupId); }
+    if (session.status !== "active") { await this.forget(groupId); return; }
+    if (session.others.length === 0) { await session.leave(); await this.forget(groupId); return; }
+    const next = session.isAdmin ? this.successor(groupId) : undefined;
     if (session.isAdmin) {
-      const next = this.successor(groupId);
       if (!next) throw new Error("You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first.");
       await session.transferAdmin(next);
     }
@@ -1006,6 +1007,7 @@ export class Groups {
     if (contact) { try { this.host.sendOnLink(contact, { t: "group-leave", g: groupId }); } catch { /* the edge already carried it, or nobody is there */ } }
     this.reconcileEdges(groupId);
     this.host.emit();
+    return next;
   }
 
   /** The admin heard me: the tombstone of a group I left can go. */
