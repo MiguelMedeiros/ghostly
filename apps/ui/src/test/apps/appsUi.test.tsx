@@ -373,6 +373,23 @@ describe("with the apps flag on", () => {
     expect(fakeEngine.callsTo("appUpdateAccept")).toEqual([]);
   });
 
+  it("says what the files permission lets the app do, never its bare name, here and on an update that adds it", async () => {
+    const files: AppPreview["asks"] = ["chat", "files"];
+    fakeEngine.on("appPreview", () => preview({ asks: files, manifest: { ...preview().manifest, permissions: files } }));
+    const { user, unmount } = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
+    const line = await screen.findByTestId("app-permission-files");
+    expect(line).toHaveTextContent("Read the files and folders you pick, and share them with your contact in the chat");
+    await user.click(within(line).getByTestId("app-permission-files-info"));
+    expect(screen.getByTestId("app-permission-files-text")).toHaveTextContent("Only what you pick");
+    unmount();
+
+    fakeEngine.on("appUpdateAccept", () => installed()).on("appList", () => []);
+    renderApp(<InstalledAppDialog onClose={() => {}} onOpen={() => {}}
+      app={installed({ pending: { sequence: 8, version: "1.3.0", added: ["files"] } })} />);
+    const update = await screen.findByTestId("app-update");
+    expect(within(update).getByTestId("app-permission-files")).toHaveTextContent("Read the files and folders you pick");
+  });
+
   it("says in Safari, and only there, that an app can still contact other servers", async () => {
     const safari = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
     vi.spyOn(navigator, "userAgent", "get").mockReturnValue(safari);

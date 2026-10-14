@@ -90,6 +90,8 @@
     "notListed": "Não está em nenhuma das suas lojas",
     "perm": {
       "chat": "Conversar com o mesmo app do lado do seu contato",
+      "files": "Ler os arquivos e pastas que você escolher, e compartilhá-los com seu contato no chat",
+      "filesInfo": "Só o que você escolher, nunca o resto do seu dispositivo. O app do seu contato pode ler o que ele compartilha enquanto vocês dois estiverem com ele aberto.",
       "internet": "Usar a internet",
       "internetInfo": "O app e os servidores com que ele fala podem saber seu endereço IP e o que você faz nele.",
       "name": "Ver seu nome nesta conversa",
