@@ -55,7 +55,7 @@ export function IconsSection() {
         <ul className="br-moods" aria-label={t.moods}>
           {MOODS.map((m) => (
             <li key={`${m.who}-${m.mood}`}>
-              <Ghost who={m.who} mood={m.mood} size={72} float={false} title={`${m.who === "boo" ? "Boo" : "Casper"}, ${m.mood}`} />
+              <Ghost who={m.who} mood={m.mood} size={72} float={false} still title={`${m.who === "boo" ? "Boo" : "Casper"}, ${m.mood}`} />
               <span className="caption">{m.mood}</span>
             </li>
           ))}

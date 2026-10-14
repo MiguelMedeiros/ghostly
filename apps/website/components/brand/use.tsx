@@ -101,8 +101,8 @@ export function ApplicationsSection() {
         <Sub title={t.social} note={t.socialText}>
           <div className="br-app-social" role="img" aria-label={`A square post: "${brand.foundation.taglineShort}" ${t.socialLine}`}>
             <div className="br-app-social-ghosts" aria-hidden="true">
-              <Ghost who="boo" mood="happy" size={92} float={false} />
-              <Ghost who="casper" mood="talk" size={92} float={false} />
+              <Ghost who="boo" mood="happy" size={92} float={false} still />
+              <Ghost who="casper" mood="talk" size={92} float={false} still />
             </div>
             <p className="br-app-social-title">{brand.foundation.taglineShort}</p>
             <p className="br-app-social-line">{t.socialLine}</p>
