@@ -1079,7 +1079,8 @@ export class GroupSession {
 
   /**
    * What to tell a member whose edge just opened: where I am, what I have from everyone and what never arrived below
-   * that. `ask`: the members whose messages I want this one to hand on, since their own edges to me are down.
+   * that. `ask`: the members whose messages I want this one to hand on, since their own edges to me are down. `to`: the
+   * member it goes to, whose frames for a while may be its answer, a catch-up (never `live`).
    */
   syncFrame(ask: readonly string[] = [], to?: string): GroupSyncFrame {
     if (to) this.answering.set(to, this.now() + ANSWER_WINDOW_MS);
