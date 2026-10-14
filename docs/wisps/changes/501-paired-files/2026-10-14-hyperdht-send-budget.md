@@ -1,0 +1,1 @@
+The Desktop's HyperDHT channel takes 256 KiB queued instead of 120 KiB: its frames count until the runtime says they went, a longer trip than Rust's answer, and a file's quarter of 120 KiB held two 16 KiB chunks on the way, which slowed a file by about 25%. No wire change.
