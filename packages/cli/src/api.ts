@@ -13,7 +13,7 @@ import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 import { STATUS_CARD_METHODS } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
-import { endTyping, keepTyping, sayTyping } from "./typing";
+import { endTyping, keepOneShot, keepTyping, sayTyping } from "./typing";
 import { GROUP_ADMIN_METHODS } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
 import { IDENTITY_METHODS } from "./identities";
@@ -299,7 +299,8 @@ const METHODS: Record<string, Method> = {
    * WISP 401 § Typing: said on the live session only, and a start only while `sendTyping` is on; it holds 6 s there.
    * `kind` (typing, recording, thinking) and `status` (a short line, e.g. "Transcribing your audio…") say what this
    * side is doing; a new one reaches the contact at once.
-   * `for`: kept that many seconds (a one-shot stays that long), until a message to the chat or a stop.
+   * `for`: kept that many seconds (a one-shot stays that long once the chat is live, and stops when it is not live
+   * within `ONE_SHOT_LIVE_GRACE_MS`), until a message to the chat or a stop.
    */
   async "chat.typing"(ctx, params) {
     const link = chatOf(ctx, params);
@@ -312,10 +313,11 @@ const METHODS: Record<string, Method> = {
     node(ctx).setTyping({ linkId: link.id, typing, ...word });
     const until = seconds ? Date.now() + seconds * 1000 : null;
     const kept = seconds ? keepTyping(ctx, { linkId: link.id }, seconds * 1000, word) : null;
-    if (kept && ctx.mode === "one-shot") await kept;
+    const open = (s: EngineState) => s.links.find((l) => l.id === link.id)?.dataLink === "open";
+    if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, { linkId: link.id }, kept, open);
     return {
       chat: link.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
-      live: link.dataLink === "open", sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
+      live: open(state(ctx)), sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
     };
   },
   /** WISP 400 § Reactions: one emoji per person per message, a new one replaces mine; `remove` takes mine back. */
@@ -566,10 +568,11 @@ const METHODS: Record<string, Method> = {
     sayTyping(ctx, target, typing, word);
     const until = seconds ? Date.now() + seconds * 1000 : null;
     const kept = seconds ? keepTyping(ctx, target, seconds * 1000, word) : null;
-    if (kept && ctx.mode === "one-shot") await kept;
+    const reached = (s: EngineState) => (s.groups.find((g) => g.id === group.id) ?? group).members.filter((m) => !m.me && m.online && !m.viaHub).length;
+    if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, target, kept, (s) => reached(s) > 0);
     return {
       group: group.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
-      reached: group.members.filter((m) => !m.me && m.online && !m.viaHub).length, sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
+      reached: reached(state(ctx)), sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
     };
   },
   async "group.leave"(ctx, params) {

@@ -54,7 +54,9 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
   } as unknown as ApiContext;
   const transfer = (id: string, t: FileTransferView) => { s.transfers = { ...s.transfers, [id]: t }; for (const l of states) l(s); };
   const event = (e: Partial<GhostlyEvent>) => { for (const l of events) l({ seq: 0, id: "x", at: 1, type: "x", ...e }); };
-  return { ctx, node, s, dir, emitted, transfer, event, setLink };
+  /** A chat's link changes, and the engine says its state changed. */
+  const linkChanged = (linkId: string, fields: Partial<LinkView>) => { setLink(linkId, fields); for (const l of states) l(s); };
+  return { ctx, node, s, dir, emitted, transfer, event, setLink, linkChanged };
 }
 
 describe("file wait", () => {
@@ -156,6 +158,39 @@ describe("typing --for", () => {
     await vi.advanceTimersByTimeAsync(1_100);
     await typing;
     expect(node.setTyping).toHaveBeenLastCalledWith({ linkId: "chat-one", typing: false });
+  });
+
+  // Without a daemon, `--for 600` on a chat whose contact is away held the terminal, and the profile, for 10 minutes
+  // with nobody to see it: `typing --stop` and `send` from another shell answered busy.
+  it("a one-shot whose chat is not live within 15 s stops there, and says it was not live", async () => {
+    vi.useFakeTimers();
+    const { ctx, node, setLink } = fake("one-shot");
+    setLink("chat-one", { dataLink: "connecting", textDelivery: "dht" });
+    let answer: { live?: boolean } | undefined;
+    const typing = callApi(ctx, "chat.typing", { chat: "Alice", for: 600 }).then((a) => { answer = a as { live: boolean }; });
+    await vi.advanceTimersByTimeAsync(14_900);
+    expect(answer).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(200);
+    await typing;
+    expect(answer).toMatchObject({ typing: true, live: false });
+    const calls = node.setTyping.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(node.setTyping, "nothing kept on after it").toHaveBeenCalledTimes(calls);
+  });
+
+  it("a one-shot whose chat comes live within 15 s stays the whole time", async () => {
+    vi.useFakeTimers();
+    const { ctx, setLink, linkChanged } = fake("one-shot");
+    setLink("chat-one", { dataLink: "connecting", textDelivery: "dht" });
+    let answer: { live?: boolean } | undefined;
+    const typing = callApi(ctx, "chat.typing", { chat: "Alice", for: 30 }).then((a) => { answer = a as { live: boolean }; });
+    await vi.advanceTimersByTimeAsync(3_000);
+    linkChanged("chat-one", { dataLink: "open", textDelivery: "stream" });
+    await vi.advanceTimersByTimeAsync(26_900);
+    expect(answer).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(200);
+    await typing;
+    expect(answer).toMatchObject({ typing: true, live: true });
   });
 });
 
