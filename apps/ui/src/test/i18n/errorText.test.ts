@@ -489,6 +489,12 @@ describe("errors in the app's language", () => {
       title: "Não há espaço suficiente neste dispositivo", next: "Libere espaço e escolha o arquivo de novo." });
   });
 
+  it("a picked file that changed on disk before its copy says it cannot be read and what to do, not the browser's English", () => {
+    const pt = translators.pt;
+    const changed = "Could not read the file: The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired.";
+    expect(knownErrorParts(changed, pt)).toEqual({ title: "Não foi possível ler o arquivo", next: "Envie de novo ou escolha o arquivo outra vez.", detail: changed });
+  });
+
   it("a group's file every holder served damaged says so, and that the group is asked again, not a contact", () => {
     const damaged = "Every copy of this file arrived damaged and was deleted. Ask for it again later.";
     expect(knownErrorParts(damaged, translators.pt)).toEqual({ title: "O arquivo chegou danificado", next: "Peça de novo ao grupo mais tarde." });
