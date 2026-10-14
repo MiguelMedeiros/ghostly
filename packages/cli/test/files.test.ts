@@ -1,7 +1,8 @@
 import { mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { FILE_BYTES_STEP } from "@ghostly/browser/shared/fileBytes";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { fitName, mimeOf, saveName } from "../src/files";
 import { findMember, pictureFrom } from "../src/groupAdmin";
@@ -33,6 +34,20 @@ describe("the Node file store", () => {
     expect(await store.size("f1")).toBeNull();
     expect(await store.room()).toBeGreaterThan(0);
     await expect(store.size("../escape")).rejects.toThrow(/Invalid file id/);
+  });
+
+  it("stages a file in one read: its digest is hashed as it is copied, the same as one read from disk", async () => {
+    const store = new NodeFileBytes(folder());
+    const digest = vi.spyOn(store, "digest");
+    // Over two steps and a part, and empty.
+    const bytes = new Uint8Array(FILE_BYTES_STEP * 2 + 12_345).map((_, i) => (i * 31) & 0xff);
+    const staged = await store.stage("big", new Blob([bytes]));
+    const empty = await store.stage("empty", new Blob([]));
+    expect(digest).not.toHaveBeenCalled();
+    expect(staged).toBe(await store.digest("big"));
+    expect(empty).toBe(await store.digest("empty"));
+    expect(await store.size("big")).toBe(bytes.length);
+    expect(await store.size("empty")).toBe(0);
   });
 
   it("fits a name in the 255 bytes a file system takes, keeping its extension", () => {
