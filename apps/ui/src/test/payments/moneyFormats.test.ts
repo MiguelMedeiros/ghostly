@@ -193,6 +193,16 @@ describe("BOLT 12 offers", () => {
     expect(decodeBolt12Offer(text)).toBeNull();
   });
 
+  // Its amount was read as millisats when the code could not be read: 1,000,000 units of a currency showed "1,000 sats".
+  it.each([
+    ["empty", new Uint8Array()],
+    ["not UTF-8", Uint8Array.of(0xff, 0x53, 0x44)],
+    ["not three letters", "US"],
+    ["not an ISO 4217 code's letters", "u$d"],
+  ])("refuses an offer whose offer_currency is %s, never reading its amount as sats", (_, currency) => {
+    expect(decodeBolt12Offer(bolt12Offer({ currency, amountMsat: 1_000_000, description: "Dinner" }))).toBeNull();
+  });
+
   it("finds an offer in a message, bare or with lightning:", () => {
     const offer = bolt12Offer({ chains: ["regtest"], description: "tip jar" });
     expect(findMoney(`my tip jar: lightning:${offer} thanks`)).toMatchObject({ type: "bolt12", offer: { offer, network: "testnet" }, rest: "my tip jar:  thanks" });
