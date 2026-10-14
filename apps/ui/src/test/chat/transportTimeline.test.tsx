@@ -180,6 +180,10 @@ describe("a transport change that did not land, in the app's language", () => {
     ["hyperdht/1", "PEER_NOT_FOUND: Peer not found"], ["hyperdht/1", "connection reset by peer"],
     ["hyperdht/1", "HyperDHT connection timed out"], ["hyperdht/1", "Native channel closed"], ["iroh/1", "Iroh connection timed out"],
     ["iroh/1", "Native stream timed out"], ["iroh/1", "Native channel did not reach the application"],
+    // A contact's app seen but not answering (frozen, asleep), and the Desktop's HyperDHT runtime's own words.
+    ["hyperdht/1", "PEER_CONNECTION_FAILED: Could not connect to peer"], ["hyperdht/1", "HOLEPUNCH_ABORTED: Holepunch aborted"],
+    ["hyperdht/1", "A native connection attempt is already running"], ["hyperdht/1", "HyperDHT endpoint closed"],
+    ["hyperdht/1", "HyperDHT runtime stopped"], ["hyperdht/1", "Native runtime stopped"], ["hyperdht/1", "HyperDHT failed"],
   ];
 
   it.each(dials)("%s %s: the not-live line, a failed switch's line and its Why row say it in each language, with a next step", (transport, error) => {
@@ -206,6 +210,9 @@ describe("a transport change that did not land, in the app's language", () => {
     expect(why("PEER_NOT_FOUND: Peer not found")).toBe("O app do seu contato não está acessível pelo HyperDHT. Ele pode estar fechado: tente de novo quando seu contato estiver online. A conversa continuou em WebRTC.");
     expect(liveAttemptText({ at: 1, side: "dialled", failed: [{ transport: "hyperdht/1", error: "connection reset by peer" }] }, "you", "Ana", at, pt)!.lines)
       .toContain("HyperDHT: O app do seu contato não tem conexão nativa livre.");
+    // A frozen or asleep contact's app: seen, dialled, not answering.
+    expect(liveAttemptText({ at: 1, side: "dialled", failed: [{ transport: "hyperdht/1", error: "PEER_CONNECTION_FAILED: Could not connect to peer" }] }, "you", "Ana", at, pt)!.lines)
+      .toContain("HyperDHT: O app do seu contato não está respondendo pelo HyperDHT.");
   });
 });
 
