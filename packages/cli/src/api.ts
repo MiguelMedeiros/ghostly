@@ -168,8 +168,7 @@ const METHODS: Record<string, Method> = {
   },
   async "profile.set"(ctx, params) {
     const patch: Partial<Settings> = {};
-    const name = params.name;
-    if (name !== undefined) patch.nick = checkShownName(name).trim();
+    if (params.name !== undefined) patch.nick = checkShownName(params.name);
     if (params.shareProfile !== undefined) patch.shareProfile = bool(params, "shareProfile");
     await node(ctx).updateSettings({ settings: patch });
     return METHODS["profile.get"](ctx, {});
@@ -188,6 +187,8 @@ const METHODS: Record<string, Method> = {
       if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("bad_request", `${key} must be a list of strings`);
       if (kind === "string" && typeof value !== "string") throw new CliError("bad_request", `${key} must be a string`);
       if (kind === "boolean" && typeof value !== "boolean") throw new CliError("bad_request", `${key} must be true or false`);
+      // The name contacts see: `profile set --name`'s rule.
+      if (key === "nick") { patch.nick = checkShownName(value, key); continue; }
       if (kind === "ice") {
         if (!(Array.isArray(value) && value.every((v) => v && typeof v === "object"))) throw new CliError("bad_request", `${key} must be a list of ICE servers`);
         // WebRTC's own form (`urls` a list) is taken; a server without urls is said here, not as the engine's TypeError.
