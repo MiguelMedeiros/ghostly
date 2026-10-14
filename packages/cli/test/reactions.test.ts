@@ -59,6 +59,22 @@ describe("react on a group", () => {
     expect(node.react).not.toHaveBeenCalled();
     await expect(callApi(ctx, "chat.react", { chat: "Nobody", message: "x", emoji: "👍" })).rejects.toMatchObject({ code: "not_found", message: 'No chat "Nobody"' });
   });
+
+  it.each([
+    ["chat.send", { text: "hi" }, "group send Crew [text...]"],
+    ["chat.edit", { message: "m1", text: "x" }, "group edit Crew <message> <text...>"],
+    ["chat.typing", {}, "group typing Crew"],
+    ["chat.history", {}, "group history Crew"],
+    ["chat.get", {}, "group show Crew"],
+    ["chat.rename", { name: "x" }, "group rename Crew <name...>"],
+    ["chat.remove", { yes: true }, "group forget Crew --yes"],
+  ] as const)("%s on a group says so too, with the group command", async (method, params, command) => {
+    const { ctx } = fake();
+    await expect(callApi(ctx, method, { chat: "Crew", ...params })).rejects.toMatchObject({
+      code: "not_found", message: `"Crew" is a group, not a chat: ghostly ${command}`, details: { group: "g1" },
+    });
+    await expect(callApi(ctx, method, { chat: "Nobody", ...params })).rejects.toMatchObject({ code: "not_found", message: 'No chat "Nobody"' });
+  });
 });
 
 describe("reactions on a message", () => {

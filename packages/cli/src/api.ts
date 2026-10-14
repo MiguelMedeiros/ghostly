@@ -259,15 +259,15 @@ const METHODS: Record<string, Method> = {
     return { chats: state(ctx).links.map((link) => chatJson(link, showSecret)).sort((a, b) => b.lastMessageAt - a.lastMessageAt || b.createdAt - a.createdAt) };
   },
   async "chat.get"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group show");
     return { ...chatDetailsJson(link, bool(params, "showSecret")), heldUntil: holdOf(ctx, link.id) };
   },
   async "chat.history"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group history");
     return historyOf(ctx, link.id, params, (m) => chatMessageJson(m, link));
   },
   async "chat.send"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group send", "[text...]");
     const text = str(params, "text", true);
     checkTextSize(text);
     if (!bool(params, "force")) {
@@ -293,7 +293,7 @@ const METHODS: Record<string, Method> = {
    * once the chat is live and both apps offer edit/1; `--wait confirmed` waits for the contact to confirm it.
    */
   async "chat.edit"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group edit", "<message> <text...>");
     const messageId = str(params, "message", true);
     const text = str(params, "text", true);
     if (!bool(params, "force")) {
@@ -316,7 +316,7 @@ const METHODS: Record<string, Method> = {
    * within `ONE_SHOT_LIVE_GRACE_MS`), until a message to the chat or a stop.
    */
   async "chat.typing"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group typing");
     const typing = !bool(params, "stop");
     const { kind, status } = typingWord(params, typing);
     const word = { ...(kind !== "typing" ? { kind } : {}), ...(status ? { status } : {}) };
@@ -335,7 +335,7 @@ const METHODS: Record<string, Method> = {
   },
   /** WISP 400 § Reactions: one emoji per person per message, a new one replaces mine; `remove` takes mine back. */
   async "chat.react"(ctx, params) {
-    const link = notAGroup(ctx, params, () => chatOf(ctx, params), "group react", "<message> <emoji>");
+    const link = chatNotGroup(ctx, params, "group react", "<message> <emoji>");
     return { chat: link.id, ...(await react(ctx, link.id, params)) };
   },
   /**
@@ -413,12 +413,12 @@ const METHODS: Record<string, Method> = {
     return details;
   },
   async "chat.rename"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group rename", "<name...>");
     await node(ctx).renameLink({ linkId: link.id, label: str(params, "name") ?? "" });
     return chatJson(findChat(state(ctx).links, link.id));
   },
   async "chat.remove"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group forget", "--yes");
     if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass yes (--yes) to go on");
     await node(ctx).removeLink({ linkId: link.id });
     return { removed: link.id };
@@ -698,8 +698,13 @@ function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, command: s
     let group: GroupView;
     try { group = findGroup(state(ctx).groups, ref); } catch { throw error; }
     const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
-    throw new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat: ghostly ${command} ${shown} ${rest}`, { group: group.id });
+    throw new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat: ghostly ${command} ${shown}${rest ? ` ${rest}` : ""}`, { group: group.id });
   }
+}
+
+/** The chat a chat command with a group twin names: a group's name says so, with `command`, the twin (see `notAGroup`). */
+function chatNotGroup(ctx: ApiContext, params: Params, command: string, rest = "") {
+  return notAGroup(ctx, params, () => chatOf(ctx, params), command, rest);
 }
 
 /**
