@@ -18,7 +18,7 @@ import { randomBytes, toBase64Url, toZ32, utf8Encode } from "./bytes";
 import { fitSignedPairedSignal, fitSignedPairedSignalWith, verifyPairedSignal } from "./pairedSignal";
 import { deviceFrameCapability, signDeviceTransports, unsignedDeviceTransports, verifyDeviceTransports, type DeviceCapability, type DeviceFrame } from "./deviceLink";
 import { parseRtcSignal, type SignalSight } from "./signal";
-import { PairedSession, type PairingState, type PairingCredentials, type PaymentMethodName } from "./pairedSession";
+import { PairedSession, SESSION_FRAME_MAX, type PairingState, type PairingCredentials, type PaymentMethodName } from "./pairedSession";
 import { DataLink, type DataLinkState } from "./datalink";
 import type { DirectEvidence } from "./directPath";
 import {
@@ -285,6 +285,18 @@ export function pairedMessageFrame(id: string, ts: number, m: string, preview?: 
   if (!preview) return plain;
   const withPreview = JSON.stringify({ t: "paired-message", id, ts, m, pv: preview, ...r });
   return withPreview.length <= MAX_PAIRED_MESSAGE_FRAME ? withPreview : plain;
+}
+
+/** A text whose `paired-message` frame would pass what a session takes: it never arrives, and is refused at send. */
+export const PAIRED_FRAME_TOO_LARGE = "Message too long once encoded. Shorten it or send it as a file.";
+
+/**
+ * The `paired-message` frame of this text fits a session (`SESSION_FRAME_MAX`, UTF-16 units of the JSON). Within 16 KiB
+ * of UTF-8 a text can still pass it: JSON writes each control character as six (`\u0001`). The preview is left out,
+ * as the frame drops one that does not fit.
+ */
+export function pairedMessageFits(ts: number, m: string, reply?: WireReply, forwarded?: number, card?: StatusCard): boolean {
+  return pairedMessageFrame("A".repeat(22), ts, m, undefined, reply, forwarded, card).length <= SESSION_FRAME_MAX;
 }
 
 /**
@@ -2696,8 +2708,11 @@ export class GhostLink {
       if (this.pairedPending.size >= 128) this.pairedPending.delete(this.pairedPending.keys().next().value!);
       const id = stableId ?? toBase64Url(randomBytes(16));
       if (!/^[A-Za-z0-9_-]{22}$/.test(id)) return "Invalid message ID";
+      // Past the contact's frame limit its session would end on it, and again on each retry.
+      const frame = pairedMessageFrame(id, timestamp, trimmed, preview, reply, forwarded, card);
+      if (frame.length > SESSION_FRAME_MAX) return PAIRED_FRAME_TOO_LARGE;
       this.pairedPending.set(id, timestamp);
-      try { this.channel.send(pairedMessageFrame(id, timestamp, trimmed, preview, reply, forwarded, card)); return null; }
+      try { this.channel.send(frame); return null; }
       catch { this.pairedPending.delete(id); return "The connection closed before sending. Reconnect and retry."; }
     }
     if (this.channel && trimmed.length <= LIMITS.maxChatMessageBytes / 4) {

@@ -215,6 +215,7 @@ const RULES: readonly Rule[] = [
 
   // A send or an edit a chat refused (engine/node.ts sendMessage, editMessage, replyRef; platform/useChat.ts).
   { match: /^Message exceeds (?<max>\d+) UTF-8 bytes\.$/, key: "errors.chat.tooLong", next: "errors.chat.tooLongNext" },
+  exact("Message too long once encoded. Shorten it or send it as a file.", "errors.chat.tooLong", "errors.chat.tooLongNext"),
   { match: /^This message was edited (?<max>\d+) times, the most one takes\.$/, key: "errors.chat.editTooMany", next: "errors.chat.editTooManyNext" },
   { match: /^That message (?:is not in this chat, or )?cannot be replied to$/, key: "errors.chat.replyGone", next: "errors.chat.replyGoneNext" },
   // A chat made or joined that the storage had no room for (lib/storage.ts ensureSession).
