@@ -91,7 +91,7 @@ export function folderName(name: string): string {
   return name.replace(/\s+/g, " ").trim().slice(0, FOLDER_NAME_MAX).trim();
 }
 
-const newId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+const newId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 8) + Date.now().toString(36);
 
 /** The folders, in the person's order. */
 export function chatFolders(): ChatFolder[] {
