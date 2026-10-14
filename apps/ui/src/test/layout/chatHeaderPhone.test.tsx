@@ -49,6 +49,22 @@ describe("a chat's header on a phone", () => {
     expect(menu.getByTestId("chat-identity-badges")).toHaveTextContent("Identities with Cérebro (Mac)");
   });
 
+  it("says on the ⋮ row why a video call cannot start, as the voice call says it to a screen reader", async () => {
+    viewport(390, 844);
+    const { user } = openChat();
+    const voice = await screen.findByTestId("call-audio");
+    const reason = voice.getAttribute("title") ?? "";
+    expect(reason, "the chat cannot call here").not.toBe("Audio call");
+    expect(voice).toHaveAttribute("aria-disabled", "true");
+    expect(voice).toHaveAccessibleDescription(reason);
+
+    await user.click(screen.getByTestId("chat-options"));
+    const row = within(screen.getByTestId("chat-options-menu")).getByTestId("call-video");
+    expect(row).toBeDisabled();
+    // A phone has no hover: the reason is the row's second line, not only its title.
+    expect(row).toHaveTextContent(`Video call${reason}`);
+  });
+
   it("opens the connection's panel from its button in the header, and gives the focus back to it as it closes", async () => {
     viewport(390, 844);
     const { user } = openChat();
