@@ -3,6 +3,14 @@ import type { OidcHost } from "@ghostly/browser/host";
 import { DESKTOP_RELAY } from "@ghostly/browser/proofs/oidc/popup";
 
 /**
+ * The language of the page the browser lands on after a sign-in, which Rust serves in its own words
+ * (apps/desktop/src/oidc.rs `page`): the app's language, as a tag.
+ */
+export function signInPageLanguage(): string {
+  return document.documentElement.lang || navigator.language;
+}
+
+/**
  * Sign-in for an identity proof in the system browser: providers refuse
  * embedded WebViews. The provider returns to the web app's static callback
  * page, registered once per provider, which forwards the fragment to Rust's
@@ -13,7 +21,7 @@ import { DESKTOP_RELAY } from "@ghostly/browser/proofs/oidc/popup";
 export const desktopOidc: OidcHost = {
   platform: "desktop",
   async open() {
-    const port = await invoke<number>("oidc_loopback_start");
+    const port = await invoke<number>("oidc_loopback_start", { lang: signInPageLanguage() });
     return {
       redirectUri: DESKTOP_RELAY,
       statePrefix: port === 0 ? "a." : `d.${port}.`,

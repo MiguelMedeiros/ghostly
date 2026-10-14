@@ -1,11 +1,13 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ghostly } from "./support/cli";
+import { ghostly, home } from "./support/cli";
 // covers: headless.cli
 
 /** Help per command and per group, as a person or a bot asks for it: `help <words>` or `<words> --help`. */
 describe("help", () => {
   it("for a group lists its commands, whichever way it is asked", async () => {
-    for (const args of [["help", "file"], ["file", "--help"], ["file", "-h"]]) {
+    for (const args of [["help", "file"], ["file", "--help"], ["file", "-h"], ["file", "--help=true"]]) {
       const { code, stdout } = await ghostly(args);
       expect(code, args.join(" ")).toBe(0);
       expect(stdout).toContain("ghostly file:");
@@ -16,7 +18,7 @@ describe("help", () => {
   });
 
   it("for one command shows its usage, what it does and its options", async () => {
-    for (const args of [["help", "file", "save"], ["file", "save", "--help"], ["file", "save", "c1-in-x", "--help"]]) {
+    for (const args of [["help", "file", "save"], ["file", "save", "--help"], ["file", "save", "c1-in-x", "--help"], ["file", "save", "c1-in-x", "--help=true"]]) {
       const { code, stdout } = await ghostly(args);
       expect(code, args.join(" ")).toBe(0);
       expect(stdout).toContain("Usage: ghostly file save [<chat>] <file>");
@@ -27,6 +29,16 @@ describe("help", () => {
     expect(typing.stdout).toMatch(/--for <n>/);
     const daemon = await ghostly(["help", "daemon"]);
     expect(daemon.stdout).toContain("daemon restart");
+    // `daemon` itself first, with its own options, then the commands under it: its --timeout was shown nowhere.
+    for (const args of [["help", "daemon"], ["daemon", "--help"]]) {
+      const { stdout } = await ghostly(args);
+      expect(stdout, args.join(" ")).toMatch(/^Usage: ghostly daemon \[--detach\] \[--timeout s\]\n/);
+      expect(stdout, args.join(" ")).toMatch(/--timeout <n>\s+Seconds --detach waits for it to start/);
+      expect(stdout, args.join(" ")).toContain("ghostly daemon: 3 more commands (ghostly help daemon <command> for one)");
+      expect(stdout.indexOf("--detach waits"), args.join(" ")).toBeLessThan(stdout.indexOf("daemon status"));
+    }
+    // One command in a group is "1 command".
+    expect((await ghostly(["help", "store"])).stdout).not.toContain("1 commands");
     const send = await ghostly(["send", "bob", "hi", "--help"]);
     expect(send.stdout).toContain("Usage: ghostly send <chat>");
     // Next to the text: what `--` does to the options after it.
@@ -58,11 +70,78 @@ describe("help", () => {
     expect((await ghostly(["help", "listen"])).stdout).toContain("[--print]");
   });
 
+  it("--help=false is the command, and a global boolean's --no- form may come before the command", async () => {
+    // `--no-pretty status` was "Unknown command: --no-pretty status"; `--help=true` ran the command (a `chat remove --yes` too).
+    for (const args of [["--no-pretty", "version"], ["version", "--help=false"]]) {
+      const { code, stdout, json } = await ghostly(args);
+      expect(code, args.join(" ")).toBe(0);
+      expect(json, args.join(" ")).toHaveProperty("version");
+      expect(stdout.trim().split("\n")).toHaveLength(1);
+    }
+  });
+
+  it("a word every object has (constructor, toString) is no command: unknown, and no profile is opened for it", async () => {
+    // The commands are looked up in a table, where `constructor` was found too: `ghostly constructor` said
+    // "ghostly undefined", and `ghostly constructor bob hi` opened the profile to answer "No method undefined" (exit 3).
+    const dir = home("own-names");
+    for (const args of [["constructor"], ["constructor", "bob", "hi"], ["toString", "bob"], ["__proto__", "bob", "hi"]]) {
+      const result = await ghostly(["--home", dir, ...args]);
+      expect(result.code, args.join(" ")).toBe(2);
+      expect(result.json, args.join(" ")).toMatchObject({ error: { code: "usage", message: `Unknown command: ${args.slice(0, 2).join(" ")} (ghostly help)` } });
+    }
+    expect(existsSync(join(dir, "profiles"))).toBe(false);
+  });
+
   it("a line of only global options names no command: it is the help, not an unknown command", async () => {
-    for (const args of [["--pretty"], ["-p", "bot"], ["--profile", "bot"], ["--profile=bot", "--pretty"], ["--home", "/h"]]) {
+    for (const args of [["--pretty"], ["--no-pretty"], ["-p", "bot"], ["--profile", "bot"], ["--profile=bot", "--pretty"], ["--home", "/h"]]) {
       const { code, stdout } = await ghostly(args);
       expect(code, args.join(" ")).toBe(0);
       expect(stdout, args.join(" ")).toContain("Usage: ghostly <command>");
+    }
+  });
+
+  it("help help is help's own usage, not an unknown command", async () => {
+    for (const args of [["help", "help"], ["help", "help", "--pretty"]]) {
+      const { code, stdout } = await ghostly(args);
+      expect(code, args.join(" ")).toBe(0);
+      expect(stdout, args.join(" ")).toMatch(/^Usage: ghostly help \[<command>\.\.\.\]\n\n {2}Help for every command/);
+    }
+  });
+
+  it("version --pretty is indented, as every command's answer is", async () => {
+    for (const args of [["version", "--pretty"], ["--pretty", "version"], ["--version", "--pretty"], ["--pretty", "--version"]]) {
+      const { code, stdout } = await ghostly(args);
+      expect(code, args.join(" ")).toBe(0);
+      expect(stdout, args.join(" ")).toMatch(/^\{\n {2}"version": "[^"]+"\n\}\n$/);
+    }
+    expect((await ghostly(["version"])).stdout).toMatch(/^\{"version":"[^"]+"\}\n$/);
+  });
+
+  it("version refuses a stray word or an unknown option, as every command does", async () => {
+    // `version --json` (a typo) answered 0 with the version, as `version now foo` did.
+    for (const [args, message] of [
+      [["version", "now", "foo"], "Too many arguments: ghostly version"],
+      [["--version", "extra"], "Too many arguments: ghostly version"],
+      [["version", "--nope"], "Unknown option --nope"],
+      [["--version", "--json"], "Unknown option --json"],
+    ] as const) {
+      const result = await ghostly([...args]);
+      expect(result.code, args.join(" ")).toBe(2);
+      expect(result.json, args.join(" ")).toEqual({ error: { code: "usage", message } });
+    }
+    // Global options still go with it.
+    for (const args of [["version", "-p", "bot"], ["--home", "/h", "--version"]]) {
+      const { code, json } = await ghostly(args);
+      expect(code, args.join(" ")).toBe(0);
+      expect(json, args.join(" ")).toHaveProperty("version");
+    }
+  });
+
+  it("a global option that takes a value, given none, says so as a command's option does", async () => {
+    for (const [args, name] of [[["-p"], "profile"], [["--profile"], "profile"], [["--home"], "home"], [["--pretty", "-p"], "profile"], [["send", "-p"], "profile"]] as const) {
+      const result = await ghostly([...args]);
+      expect(result.code, args.join(" ")).toBe(2);
+      expect(result.json, args.join(" ")).toEqual({ error: { code: "usage", message: `--${name} needs a value` } });
     }
   });
 
@@ -72,7 +151,7 @@ describe("help", () => {
     expect(one.code).toBe(0);
     expect(one.stdout).toContain("Usage: ghostly version");
     expect((await ghostly(["version"])).json).toHaveProperty("version");
-    expect((await ghostly(["--pretty", "--version"])).json).toHaveProperty("version");
+    expect(JSON.parse((await ghostly(["--pretty", "--version"])).stdout)).toHaveProperty("version");
   });
 
   it("shows an option only in the form the command takes, its text apart from it however long it is", async () => {

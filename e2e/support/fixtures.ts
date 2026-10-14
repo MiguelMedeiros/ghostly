@@ -232,6 +232,26 @@ export const test = base.extend<Fixtures>({
   },
 });
 
+/** A phone held upright: a chat's header keeps the name, the connection, a voice call and ⋮ there (`usePhoneHeader` in the app). */
+export const phoneHeader = (page: Page): Promise<boolean> => page.evaluate(() => matchMedia("(max-width: 480px)").matches);
+
+/**
+ * A control of a 1:1 chat's header that is a row of ⋮ on an upright phone: the video call (`call-video`), a bot's Tasks
+ * (`chat-tasks`) and the contact's identities (`chat-identity-badges`). On screen when this resolves: on such a phone
+ * ⋮ is opened for it. A click on the row closes the menu by itself. The connection (`connection-options`) is in the
+ * header at every width.
+ */
+export async function headerControl(page: Page, id: string): Promise<Locator> {
+  const control = page.getByTestId(id);
+  if ((await phoneHeader(page)) && !(await control.isVisible())) await page.getByTestId("chat-options").filter({ visible: true }).click();
+  return control;
+}
+
+/** The chat on screen is live: its connection control says "Connected · <transport>". */
+export async function expectConnected(page: Page, timeout = 90_000): Promise<void> {
+  await expect(page.getByTestId("connection-options")).toHaveAccessibleName(/Connected · /, { timeout });
+}
+
 /** `host` creates a chat, `guest` joins it with the invite code. Resolves once both have the chat open. */
 export async function link(host: Peer, guest: Peer): Promise<void> {
   await host.page.getByTitle("New Chat").click();

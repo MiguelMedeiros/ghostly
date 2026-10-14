@@ -15,9 +15,9 @@
     "renewalOpen": "Ghostly 打开时",
     "renewalRegtest": "在 regtest 上关闭",
     "small": "{{amount}} {{unit}} 已过期，数额太小，无法单独取回。它们会与下一批过期的币一起取回。",
-    "smallInfo": "一次取回只生成一枚新币，而 Ark 服务器不会生成低于最小面额的币。这些 sats 仍然属于你：等更多币过期后，“取回”会把它们一起取回。",
+    "smallInfo": "一次取回只生成一枚币，而 Ark 服务器不会生成低于最小面额的币。这些 sats 仍然属于你。",
     "sweeping": "{{amount}} {{unit}} 已过期。Ark 服务器清扫其批次后即可取回。",
-    "sweepingInfo": "Ark 币存放在会过期的批次中；Ghostly 在打开时会在过期前为其续期。已过期的币仍然属于你，但 Ark 服务器会先把它们的批次收回到链上（清扫）。这需要等待新的比特币区块，通常要一小时或更久。在此之前它们既不能花费也不能取回；之后，“取回”会把它们移入新的批次。",
+    "sweepingInfo": "已过期的币仍然属于你。Ark 服务器会先把它们的批次收回到链上，通常要一小时以上。之后，“取回”会把它们移入新的批次。",
     "useProvider": "使用此服务商"
   },
   "away": {
@@ -696,6 +696,10 @@
     "orTestnet": "或者用“新建”创建 Testnet Spark 钱包：它运行在 regtest 上，sats 没有价值，也不需要密钥。",
     "phraseNote": "Spark 的运营方不持有你的任何资产：凭短语可在任何 Spark 钱包中找回 sats。付款记录来自备份文件。",
     "regtestLabel": "Regtest · Breez 的测试 Spark · 没有价值的 sats",
+    "status": {
+      "failed": "失败",
+      "pending": "待处理"
+    },
     "to": "Spark 地址或发票",
     "toPlaceholder": "Spark 地址或发票（{{prefix}}）",
     "tokenInvoice": "该 Spark 发票针对的是代币，不是 sats。",

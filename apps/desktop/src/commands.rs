@@ -219,8 +219,10 @@ pub fn diagnostic_log(line: String) {
 }
 
 /// A request to a local app the profile shares (`space`, the page's database name): only to an
-/// address the person allowed in a native dialog, see `local_access`.
+/// address the person allowed in a native dialog, see `local_access`. `lang` is the language the
+/// page is shown in, for that dialog when this request is the first for its address.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn local_fetch<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     access: State<'_, LocalAccess>,
@@ -229,6 +231,7 @@ pub async fn local_fetch<R: tauri::Runtime>(
     method: String,
     headers: Vec<(String, String)>,
     body_b64: Option<String>,
+    lang: Option<String>,
 ) -> Result<LocalResponse, String> {
     local_fetch::fetch_shared(
         &access,
@@ -237,24 +240,26 @@ pub async fn local_fetch<R: tauri::Runtime>(
         method,
         headers,
         body_b64,
-        |origin, reason| ask_to_share(app.clone(), origin, reason),
+        |origin, reason| ask_to_share(app.clone(), origin, reason, lang),
     )
     .await
 }
 
 /// The person shares a local app (`origin`, `http://localhost:3400`): Rust asks them in a native
 /// dialog, which the page can neither draw nor answer. True once the address is on the list.
+/// `lang` is the language the page is shown in: the dialog says its own words in it (`dialog_words`).
 #[tauri::command]
 pub async fn local_service_allow<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     access: State<'_, LocalAccess>,
     space: String,
     origin: String,
+    lang: Option<String>,
 ) -> Result<bool, String> {
     let origin = local_access::parse_origin(&origin)?;
     Ok(access
         .ensure(&space, &origin, Reason::Share, |origin, reason| {
-            ask_to_share(app.clone(), origin, reason)
+            ask_to_share(app.clone(), origin, reason, lang)
         })
         .await
         .is_ok())
@@ -276,25 +281,27 @@ async fn ask_to_share<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     origin: String,
     reason: Reason,
+    lang: Option<String>,
 ) -> bool {
     #[cfg(feature = "e2e-driver")]
     {
-        let _ = (app, reason);
+        let _ = (app, reason, lang);
         diagnostics::log(&format!("local access: {origin} allowed (e2e build)"));
         true
     }
     #[cfg(not(feature = "e2e-driver"))]
     {
         use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-        let (title, text) = local_access::dialog_text(&origin, reason);
+        let words =
+            local_access::dialog_words(&origin, reason, lang.as_deref().unwrap_or_default());
         let dialog = app
             .dialog()
-            .message(text)
-            .title(title)
+            .message(words.text)
+            .title(words.title)
             .kind(MessageDialogKind::Warning)
             .buttons(MessageDialogButtons::OkCancelCustom(
-                "Allow".into(),
-                "Don't allow".into(),
+                words.allow.into(),
+                words.deny.into(),
             ));
         // A dialog of the Ghostly window's own; a mobile app has one window, which the dialog always covers.
         #[cfg(desktop)]
@@ -395,8 +402,9 @@ pub fn open_service_window<R: tauri::Runtime>(
     peer: String,
     service: String,
     title: String,
+    unreachable: Option<String>,
 ) -> Result<(), String> {
-    viewer::open(&app, peer, service, title)
+    viewer::open(&app, peer, service, title, unreachable)
 }
 
 #[tauri::command]
@@ -756,6 +764,8 @@ mod tests {
             "lightning:lnbc2500u1pvjluezpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypq",
             "bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.0001&label=Coffee%20shop&lightning=lnbc1x",
             "bitcoin:BC1QAR0SRRR7XFKVY5L643LYDNW9RE59GTZZWF5MDQ?ark=tark1q",
+            // A label and message as the app writes them (apps/ui/src/lib/parse/money-bitcoin.ts bip21Uri).
+            "bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.0001&label=Bob%27s%20%28Tue%29&message=Thanks%21%2A%7E",
             longest.as_str(),
             // Nothing after the scheme opens only the wallet (the extension asks for one character more).
             "lightning:",

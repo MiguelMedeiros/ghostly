@@ -100,7 +100,7 @@ A release is not finished while it is a draft: GitHub keeps showing the previous
 
    Only the two publish jobs can ask for an OIDC token, and both run in the GitHub environment `npm`. The checks that install a package from npm run in jobs without a token.
 
-7. Publishing it also starts `Web image latest` (`.github/workflows/web-latest.yml`), which points the web image's `latest` (what `infra/docker-compose.yml` pulls by default) at the release's image. It moves only to GitHub's Latest release and never back: a release with a newer one published leaves it where it is, and the run's summary says why. A draft, or a tag built again, never touches it. If the release was published before the Release workflow's web image was pushed, run it again: `gh workflow run web-latest.yml -f tag=v1.0.0`. A security autorelease dispatches it itself.
+7. Publishing it also starts `Web image latest` (`.github/workflows/web-latest.yml`), which points the web image's `latest` (what `infra/docker-compose.yml` pulls by default) at the release's image. It moves only to GitHub's Latest release and never back: a release with a newer one published leaves it where it is, and the run's summary says why. A draft, or a tag built again, never touches it. If the release was published before the Release workflow's web image was pushed, run it again: `gh workflow run web-latest.yml -f tag=v1.0.0`. A security autorelease dispatches it itself, from the default branch.
 
 ### npm trusted publishing
 
@@ -136,6 +136,6 @@ A fix for a security flaw in a released version never goes through a public issu
 
 ## Security patch releases
 
-The security routine pushes its fixes to a `claude/security-auto-*` branch with the patch version already bumped. Once CI passes there, `security-autorelease.yml` (which runs from `main`) checks the branch with `tools/scripts/autorelease-gate.mjs`, fast-forwards `main` to it, tags it, runs the `Release` workflow with `publish: true` and marks the release Latest. The repository variable `SECURITY_AUTORELEASE` chooses what may ship this way: `all` (the default), `deps` or `off`. See [SECURITY-REVIEW.md](SECURITY-REVIEW.md).
+The security routine pushes its fixes to a `claude/security-auto-*` branch with the patch version already bumped. Once CI passes there, `security-autorelease.yml` (which runs from the default branch, `dev`) checks the branch with `main`'s `tools/scripts/autorelease-gate.mjs`, fast-forwards `main` to it, tags it, runs the `Release` workflow with `publish: true` and marks the release Latest. The gate refuses a branch that holds commits of `dev` that `main` does not have (one rebased onto `dev`, or cut from it): only what the routine put on top of `main` ships. The repository variable `SECURITY_AUTORELEASE` chooses what may ship this way: `all` (the default), `deps` or `off`. See [SECURITY-REVIEW.md](SECURITY-REVIEW.md).
 
 After one, merge `main` back into `dev`, and deploy (step 5).

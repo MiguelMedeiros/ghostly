@@ -9,6 +9,7 @@ What Ghostly does today, in one list. Each part has its own guide: [Chat](CHAT.m
 - Replies, edits of your own texts, emoji reactions, forwards to up to five chats and groups at once, a typing indicator that also says recording or a bot's status (1:1 and private groups, can be turned off) and WhatsApp-style delivery marks.
 - Rich text with lists, quotes, headings and links, @mentions in groups, link previews made by the sender, location cards, and cards for invites, Nostr keys, identities and payment codes.
 - Voice messages you can lock, pause, discard and play at 1.5× or 2×, and download as MP3. GIFs, emoji, message details, per-chat mute.
+- Folders in the chat list: your own sections of chats and groups, each with its unread added up, that fold to their header.
 - Files of any size, resumable and checked by digest, pasted or dropped into the chat. Videos and audio files play inside the chat (on Desktop, from the stored file, whatever the size). Large files ask the receiver first; a stuck one can be sent again. A file sent while your contact is away shows in their chat at once, in its place among your texts, and its bytes follow once you are both live.
 - Scrolled up, a new message stays put and a ↓ pill counts it. A long chat opens at once on its last messages.
 - Voice and video calls, with screen sharing inside the call (not yet on Linux Desktop, which calls with its own media: WebKitGTK has no WebRTC). Choose the microphone, camera and speaker in Settings → Audio & video, or during a call.

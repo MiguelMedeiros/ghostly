@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ClipboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ClipboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
@@ -21,8 +21,10 @@ function usePictures(files: File[]): (string | undefined)[] {
  * Files pasted or dropped into a chat, before they go: the picture (or the name and size of a
  * file), a caption, Send and Cancel. Another paste adds to them; each can be taken out.
  */
-export function AttachmentSheet({ files, alert, status, onPaste, onRemove, onSend, onCancel }: {
+export function AttachmentSheet({ files, alert, status, returnFocus, onPaste, onRemove, onSend, onCancel }: {
   files: File[];
+  /** The message field: the focus goes there on close when nothing had it as the sheet opened (a share, a paste on the page). */
+  returnFocus?: RefObject<HTMLElement | null>;
   /** What the composer has to say meanwhile (a paste that could not be read): here, where it is seen and announced. */
   alert?: ReactNode;
   /** What the composer is doing meanwhile (another paste being read). */
@@ -40,7 +42,7 @@ export function AttachmentSheet({ files, alert, status, onPaste, onRemove, onSen
   const [broken, setBroken] = useState<ReadonlySet<File>>(new Set());
   const pictures = usePictures(files);
   const backdrop = useBackdropDismiss(onCancel);
-  useDialogFocus(ref, onCancel);
+  useDialogFocus(ref, onCancel, undefined, returnFocus);
   // After the dialog has noted what had the focus (the message field gets it back on close): typing goes to the caption.
   const captionRef = useRef<HTMLInputElement>(null);
   const composition = useComposition();

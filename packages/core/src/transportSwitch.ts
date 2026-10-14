@@ -1,4 +1,4 @@
-import { rankTransports, relayedTransports, transportOrder, TRANSPORTS, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
+import { checkedDescriptors, rankTransports, relayedTransports, transportOrder, TRANSPORTS, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
 
 export interface TransportPolicy {
   revision: number;
@@ -28,9 +28,8 @@ function parsePolicy(raw: unknown): TransportPolicy | null {
     !TRANSPORTS.includes(p.preferred) || typeof p.fallback !== "boolean" || !Array.isArray(p.available) ||
     p.available.length > 3 || new Set(p.available).size !== p.available.length || p.available.some(t => !TRANSPORTS.includes(t)) ||
     !p.descriptors || typeof p.descriptors !== "object" || JSON.stringify(p.descriptors).length > 4096) return null;
-  const descriptors: TransportDescriptors = {};
-  for (const t of ["iroh/1", "hyperdht/1"] as const) if (p.descriptors[t]) descriptors[t] = p.descriptors[t];
-  return { revision: p.revision, intent: p.intent, preferred: p.preferred, fallback: p.fallback, available: [...p.available], descriptors };
+  return { revision: p.revision, intent: p.intent, preferred: p.preferred, fallback: p.fallback, available: [...p.available],
+    descriptors: checkedDescriptors(p.descriptors) };
 }
 
 /** Runs only inside a participation-authenticated channel. Both roles may propose;

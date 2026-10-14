@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { IntentLink } from "@/components/site/IntentLink";
 import { useEffect, useMemo, useState } from "react";
 import { BLOCKS, DIMS, PRESETS, type Block, type PresetId } from "@/lib/composition";
 import { LEVELS, type Level } from "@/lib/status";
@@ -96,15 +96,15 @@ export function BlockGrid({
             const number = w?.number ?? slug.split("-")[0];
             const name = w?.name ?? REF_NAMES[slug];
             return name ? (
-              <Link key={slug} href={`/wisps/${slug}`}>
+              <IntentLink key={slug} href={`/wisps/${slug}`}>
                 <span className="mono">{number}</span> {name}
-              </Link>
+              </IntentLink>
             ) : null;
           })}
           {bl.refs?.map((slug) => (
-            <Link key={slug} href={`/wisps/${slug}`}>
+            <IntentLink key={slug} href={`/wisps/${slug}`}>
               {t.docs}: {REF_NAMES[slug] ?? slug}
-            </Link>
+            </IntentLink>
           ))}
         </p>
       </div>

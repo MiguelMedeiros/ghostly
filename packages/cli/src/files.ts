@@ -4,11 +4,11 @@ import { basename, extname, join, resolve } from "node:path";
 import { GROUP_FILE_LIMITS, LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, type VoiceMeta } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
-import { removeStored } from "@ghostly/browser/shared/storedFiles";
+import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
-import type { GroupView, LinkView, MessageFile } from "@ghostly/browser/shared/types";
+import type { GroupView, MessageFile } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
-import { bool, chatOf, findGroup, list, node, num, oneOf, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, findChatOrGroup, list, node, num, oneOf, sentAt, state, str, waitForState, type ApiContext, type Method, type Params } from "./apiKit";
 import { groupSendRefused } from "./api";
 import { CliError } from "./errors";
 import { endTyping } from "./typing";
@@ -34,29 +34,17 @@ export function mimeOf(path: string, given?: string): string {
   return sanitizeMime(given ?? TYPES[extname(path).toLowerCase()] ?? "application/octet-stream");
 }
 
-/** A chat's files as the timeline shows them, with where each transfer stands. */
-export function filesOf(messages: { id: string; file?: MessageFile; sender: string; timestamp: number }[], transfers: Record<string, unknown>) {
+/** A chat's files as the timeline shows them, with where each transfer stands (`transferOf`, by file id). */
+export function filesOf(messages: { id: string; file?: MessageFile; sender: string; timestamp: number }[], transferOf: (fileId: string) => unknown) {
   return messages.filter((m) => m.file).map((m) => ({
     messageId: m.id, from: m.sender, timestamp: m.timestamp,
     file: { id: m.file!.id, name: m.file!.name, size: m.file!.size, mime: m.file!.mime, ...(m.file!.voice ? { voice: m.file!.voice } : {}), ...(m.file!.image ? { image: m.file!.image } : {}) },
-    transfer: transfers[m.file!.id] ?? null,
+    transfer: transferOf(m.file!.id) ?? null,
   }));
 }
 
-/**
- * The chat a file command names, or else a group (`group:<id>`, or a group's id, prefix or name where no chat has it),
- * as `forward` reads them. A name that is neither says what a chat would.
- */
-function chatOrGroupOf(ctx: ApiContext, params: Params): { link: LinkView } | { group: GroupView } {
-  const ref = str(params, "chat", true);
-  if (ref.startsWith("group:")) return { group: findGroup(state(ctx).groups, ref.slice("group:".length)) };
-  try {
-    return { link: chatOf(ctx, params) };
-  } catch (error) {
-    if (!(error instanceof CliError) || error.code !== "not_found") throw error;
-    try { return { group: findGroup(state(ctx).groups, ref) }; } catch { throw error; }
-  }
-}
+/** The chat or the group a file command names (`findChatOrGroup`). */
+const chatOrGroupOf = (ctx: ApiContext, params: Params) => findChatOrGroup(state(ctx).links, state(ctx).groups, str(params, "chat", true));
 
 /**
  * The chat or group a file belongs to: a file id starts with its chat's id (a group's file with `group-<id>-`), so it
@@ -157,6 +145,16 @@ export function fitName(name: string): string {
   return (stem.join("").trimEnd() || "file") + extension;
 }
 
+/**
+ * The name `file save --dir` writes a file under. Its sender chose it, and the folder is one scripts and people run
+ * tools in: a name that starts with a dash is an option to the tool a `*` hands it to ("-rf", "--checkpoint-action=…"),
+ * so it gets a `_` first, as a Windows device name does in `sanitizeFileName`.
+ */
+export function saveName(name: string): string {
+  const clean = sanitizeFileName(name);
+  return fitName(clean.startsWith("-") ? `_${clean}` : clean);
+}
+
 const ACTIONS = ["accept", "decline", "pause", "resume", "cancel", "resend", "request"] as const;
 
 export const FILE_METHODS: Record<string, Method> = {
@@ -186,7 +184,7 @@ export const FILE_METHODS: Record<string, Method> = {
     const image = voice ? undefined : await readImageMeta(source, mime);
     const wireId = toBase64Url(randomBytes(12));
     const file: MessageFile = { id: `${link.id}-out-${wireId}`, name: sanitizeFileName(str(params, "name") ?? basename(path)), size: info.size, mime, ...(voice ? { voice } : {}), ...(image ? { image } : {}) };
-    const timestamp = Date.now();
+    const timestamp = sentAt();
     const bytes = await fileBytes();
     const digest = await bytes.stage(file.id, source);
     await fileStore.put({
@@ -208,22 +206,35 @@ export const FILE_METHODS: Record<string, Method> = {
 
   async "file.list"(ctx, params) {
     const target = chatOrGroupOf(ctx, params);
-    if ("group" in target) return { group: target.group.id, files: filesOf(await node(ctx).groupMessages({ groupId: target.group.id }), state(ctx).transfers) };
-    return { chat: target.link.id, files: filesOf(await node(ctx).getMessages(target.link.id), state(ctx).transfers) };
+    const views = state(ctx).transfers;
+    // A file that finished before this run has no transfer in the engine's state: its record says it is done. Nor has a
+    // group's file waiting for a Download: its record says it is not here.
+    const keptOf = async (linkId: string) => new Map((await fileStore.listForLink(linkId).catch(() => [])).flatMap((f) => {
+      const kept = f.transfer?.state === "done" ? { ...f.transfer, direction: f.direction } : waitingGroupFile(f);
+      return kept ? [[f.id, kept] as const] : [];
+    }));
+    if ("group" in target) {
+      const kept = await keptOf(`group:${target.group.id}`);
+      return { group: target.group.id, files: filesOf(await node(ctx).groupMessages({ groupId: target.group.id }), (id) => views[id] ?? kept.get(id)) };
+    }
+    const kept = await keptOf(target.link.id);
+    return { chat: target.link.id, files: filesOf(await node(ctx).getMessages(target.link.id), (id) => views[id] ?? kept.get(id)) };
   },
 
   /**
    * files/3: answer an offer, or pause, resume or cancel a transfer, either way; `resend` a file sent from here that
    * stopped moving (or failed), `request` again one that stopped arriving. Without a chat, the file's id names it.
-   * A group's file (WISP 503) takes `accept` (download one this device did not fetch by itself) and `request`.
+   * A group's file (WISP 503) takes `accept` (download one this device did not fetch by itself), `request`, and `cancel`,
+   * `decline`, `pause` and `resume` for one that is coming.
    */
   async "file.action"(ctx, params) {
     const fileId = str(params, "file", true);
     const { linkId, where } = fileChat(ctx, params, fileId);
     const action = oneOf(params, "action", ACTIONS, "accept");
     if ("group" in where) {
-      if (action !== "accept" && action !== "request") throw new CliError("bad_request", "A group's file is downloaded (file accept) or asked for again (file request)");
-      if (state(ctx).transfers[fileId]?.state === "done") throw new CliError("refused", "Nothing to ask for: the file is all here");
+      if (action === "resend") throw new CliError("bad_request", "A group's file is downloaded (file accept) or asked for again (file request)");
+      // One all here has no transfer in the engine's state, only its record.
+      if ((state(ctx).transfers[fileId] ?? (await fileStore.get(fileId).catch(() => undefined))?.transfer)?.state === "done") throw new CliError("refused", action === "accept" || action === "request" || action === "resume" ? "Nothing to ask for: the file is all here" : "Nothing to stop: the file is all here");
       try { await node(ctx).fileAction({ linkId, fileId, action }); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
       return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
     }
@@ -260,7 +271,7 @@ export const FILE_METHODS: Record<string, Method> = {
     return { ...where, file: fileId, state: "done", size: transfer.size };
   },
 
-  /** Writes a received (or sent) file to disk: into `dir` under its own name, or to `path`. Never over a file unless `force`. */
+  /** Writes a received (or sent) file to disk: into `dir` under its own name (`saveName`), or to `path`. Never over a file unless `force`. */
   async "file.save"(ctx, params) {
     const fileId = str(params, "file", true);
     if (params.chat !== undefined) fileChat(ctx, params, fileId);
@@ -270,7 +281,7 @@ export const FILE_METHODS: Record<string, Method> = {
     if (stored.leftOut) throw new CliError("not_found", "Not in this backup: the light backup this profile was restored from left the file out");
     const transfer = state(ctx).transfers[fileId] ?? stored.transfer;
     if (transfer && transfer.state !== "done") throw new CliError("unavailable", `The file is not all here yet (${transfer.transferred} of ${transfer.size} bytes)`);
-    const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), fitName(sanitizeFileName(stored.metadata.name)));
+    const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.name));
     const flags = bool(params, "force") ? "w" : "wx";
     let out;
     try { out = await open(target, flags, 0o600); } catch (error) {

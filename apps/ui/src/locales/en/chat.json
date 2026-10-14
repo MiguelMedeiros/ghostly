@@ -70,6 +70,7 @@
     "codeRelays": "The relays this code names are not asked.",
     "communityGroup": "Community group",
     "communityHint": "Anyone with this link can join. You read what is sent while you are a member.",
+    "deleteToJoin": "Its messages are still on this device. To join with this link, open the group and choose \"{{action}}\" first.",
     "fromContact": "From your contact",
     "fromName": "From ~{{name}}",
     "groupHint": "Joining asks the group's admin to let you in; their app answers when it is online.",
@@ -77,6 +78,7 @@
     "homeserver": "Homeserver",
     "inGroup": "You are in this group.",
     "join": "Join",
+    "joinAgain": "Join again",
     "joinGroup": "Join group",
     "joinHint": "Joining makes a chat with whoever made this invite. Nothing is sent until you join.",
     "joining": "Joining…",
@@ -226,6 +228,7 @@
   "media": {
     "downloadSize": "Download {{size}}",
     "noRoom": "Not enough space: {{size}} free",
+    "noRoomToPlay": "Not enough free disk space to play it here. Download it instead.",
     "notYet": "It plays once it has been sent.",
     "wantsToSend": "{{name}} wants to send it · {{size}} free"
   },

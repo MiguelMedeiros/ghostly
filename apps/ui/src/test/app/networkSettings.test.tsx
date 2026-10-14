@@ -37,7 +37,7 @@ describe("Settings, Network: Pkarr relays", () => {
     const { engine, user } = renderApp(<NetworkSettings />);
     act(() => engine.update({ transport: { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS }, settings: { relays: RELAYS } }));
     expect(screen.queryByTestId("network-read-relays")).toBeNull();
-    expect(await info(user, screen.getByTestId("network-relays-field"))).toHaveTextContent(/Browsers cannot reach the Mainline DHT directly/);
+    expect(await info(user, screen.getByTestId("network-relays-field"))).toHaveTextContent(/Browsers cannot reach the Mainline DHT/);
   });
 });
 

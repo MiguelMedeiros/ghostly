@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { rankTransports, relayedTransports, TRANSPORTS, type PairedTransport, type TransportDescriptors } from "../src/pairedTransports";
+import { checkedDescriptors, rankTransports, relayedTransports, TRANSPORTS, type PairedTransport, type TransportDescriptors } from "../src/pairedTransports";
 import { TransportSwitch, type TransportPolicy } from "../src/transportSwitch";
 // covers: transport.relayed, transport.preference, transport.switch
 
@@ -87,4 +87,31 @@ it("lets an explicit choice of the relayed transport stand", () => {
   expect(h.switches.every(s => !s.pending)).toBe(true);
   expect(h.prepare[0]).toHaveBeenCalledTimes(1);
   h.switches.forEach(s => s.stop());
+});
+
+it("keeps a contact's descriptors only in the shape the adapters make", () => {
+  const id = "ab".repeat(32), publicKey = "cd".repeat(32);
+  // What each adapter says: a Desktop's Iroh and HyperDHT, a browser's relayed ones, a capability record's.
+  for (const descriptors of [
+    { "iroh/1": { id, relay: "https://use1-1.relay.n0.iroh.link./", addresses: ["192.168.1.10:4433", "[2001:db8::1]:4433", "[fe80::1%3]:4433"] }, "hyperdht/1": { publicKey } },
+    { "iroh/1": { id, relay: "https://relay.test./", addresses: [], relayed: true }, "hyperdht/1": { publicKey, relayed: true, relay: "wss://relay.test/" } },
+    { "iroh/1": { id, relay: null, addresses: ["127.0.0.1:1"] }, "hyperdht/1": { publicKey, relay: "ws://127.0.0.1:4601", relayed: true } },
+    { "iroh/1": { id, relay: "http://localhost:4602/", addresses: [] } },
+    {},
+  ]) expect(checkedDescriptors(descriptors)).toEqual(descriptors);
+  // No relay said is no relay, as the adapters read it.
+  expect(checkedDescriptors({ "iroh/1": { id, addresses: [] } })).toEqual({ "iroh/1": { id, relay: null, addresses: [] } });
+  for (const iroh of [
+    null, "iroh", [id], { id: 42, relay: "http://192.168.1.10:8080/x" }, { id, relay: null }, { id: id.toUpperCase(), relay: null, addresses: [] },
+    { id, relay: "http://192.168.1.10:8080/x", addresses: [] }, { id, relay: "ftp://relay.test/", addresses: [] }, { id, relay: 7, addresses: [] },
+    { id, relay: `https://${"a".repeat(121)}`, addresses: [] }, { id, relay: null, addresses: "10.0.0.1:1" }, { id, relay: null, addresses: [7] },
+    { id, relay: null, addresses: ["relay.test:443"] }, { id, relay: null, addresses: ["10.0.0.1"] }, { id, relay: null, addresses: Array(9).fill("10.0.0.1:1") },
+    { id, relay: null, addresses: [], relayed: "yes" },
+  ]) expect(checkedDescriptors({ "iroh/1": iroh, "hyperdht/1": { publicKey } })).toEqual({ "hyperdht/1": { publicKey } });
+  for (const hyper of [
+    null, "hyper", { publicKey: "not a key", relay: "ftp://relay.test" }, { publicKey: publicKey.slice(2) }, { publicKey, relay: "ws://192.168.1.10/" },
+    { publicKey, relay: null }, { publicKey, relayed: 1 },
+  ]) expect(checkedDescriptors({ "hyperdht/1": hyper })).toEqual({});
+  for (const none of [undefined, null, "x", 7, [], [{ "iroh/1": { id, relay: null, addresses: [] } }]]) expect(checkedDescriptors(none)).toEqual({});
+  expect(checkedDescriptors({ "webrtc/1": "w", "evil/9": { x: 1 }, "hyperdht/1": { publicKey, more: { x: 1 } } })).toEqual({ "hyperdht/1": { publicKey } });
 });

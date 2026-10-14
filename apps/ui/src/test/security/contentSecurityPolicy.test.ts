@@ -2,7 +2,8 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { IMAGE_HOSTS, IMAGE_REDIRECTS } from "@ghostly/browser/profiles/public";
-import { NET_RUNNER_CSP, NET_RUNNER_HEADERS, RUNNER_CSP, RUNNER_HEADERS } from "../../../../web/runnerPolicy";
+import { CALLBACK_PATH } from "@ghostly/browser/proofs/oidc/popup";
+import { NET_RUNNER_CSP, NET_RUNNER_HEADERS, OPENER_KEPT_PATH, OPENER_POLICY, RUNNER_CSP, RUNNER_HEADERS } from "../../../../web/runnerPolicy";
 
 // covers: files.voice.play
 
@@ -116,7 +117,7 @@ describe("the mini-app runner (WISP 1200, \"The runner's CSP\")", () => {
     const desktop = /pub const RUNNER_CSP: &str = "([^"]*)";/.exec(read("apps/desktop/src/app_sandbox.rs"))![1]!.replace(/\\\n/g, "");
     expect(desktop).toBe(RUNNER_CSP);
     const d = directives(RUNNER_CSP);
-    expect(d.get("sandbox")).toEqual(["allow-scripts"]);
+    expect(d.get("sandbox")).toEqual(["allow-scripts", "allow-pointer-lock"]);
     expect(d.get("frame-ancestors")).toEqual(["'self'"]);
     for (const name of ["default-src", "connect-src", "frame-src", "worker-src", "form-action", "base-uri"]) expect(d.get(name), name).toEqual(["'none'"]);
     expect(d.get("script-src")).toEqual(["'unsafe-inline'", "'wasm-unsafe-eval'"]);
@@ -160,11 +161,56 @@ describe("the mini-app runner (WISP 1200, \"The runner's CSP\")", () => {
   });
 });
 
+// covers: app.web-opener
+describe("the web app's opener policy", () => {
+  // Without it, a page of another site that opened one of the app's addresses with window.open kept a handle on that
+  // window for as long as both stayed open: it could point the window at another address later, and post to its frames.
+  const nginx = read("apps/web/nginx.conf");
+  const locations = [...nginx.matchAll(/location\s+([^{]+?)\s*\{([^}]*)\}/g)].map(([, match, body]) => ({ match: match!.trim(), body: body! }));
+  const sent = (text: string) => [...text.matchAll(/^\s*add_header Cross-Origin-Opener-Policy "([^"]+)" always;$/gm)].map((m) => m[1]);
+  const pages = locations.filter((l) => !/^\s*return\s/.test(l.body.trim())); // a redirect, no page
+
+  it("every location that answers with a file sends it, once, but the sign-in's return page", () => {
+    expect(OPENER_POLICY).toBe("same-origin-allow-popups");
+    expect(pages.map((l) => l.match).sort()).toEqual(["/", "/assets/", "= /app-frame-net.html", "= /app-frame.html", "= /oidc-callback.html", "= /sw.js", "^~ /.well-known/"]);
+    for (const location of pages) expect(sent(location.body), location.match).toEqual(location.match === `= ${OPENER_KEPT_PATH}` ? [] : [OPENER_POLICY]);
+  });
+
+  it("is a line of each location: the shared file goes to the return page too, and nothing outside a location reaches one", () => {
+    expect(sent(read("apps/web/nginx-headers.conf"))).toEqual([]);
+    expect(nginx.replace(/location\s+[^{]+\{[^}]*\}/g, "")).not.toContain("add_header");
+  });
+
+  it("the page served without it is the one the sign-in returns to, and Vite's servers send the same on the runner", () => {
+    expect(OPENER_KEPT_PATH).toBe(CALLBACK_PATH);
+    expect(RUNNER_HEADERS["Cross-Origin-Opener-Policy"]).toBe(OPENER_POLICY);
+    expect(NET_RUNNER_HEADERS["Cross-Origin-Opener-Policy"]).toBe(OPENER_POLICY);
+  });
+});
+
 describe("HTTPS only", () => {
   // Both sites are served over HTTPS by Cloudflare, which added no Strict-Transport-Security of its own, so a browser
   // given the bare name could try plain HTTP first. The servers say it themselves.
   it("the web app's server and the website send Strict-Transport-Security for a year", () => {
     expect(read("apps/web/nginx-headers.conf")).toMatch(/^add_header Strict-Transport-Security "max-age=31536000" always;$/m);
     expect(read("apps/website/next.config.ts")).toMatch(/key: "Strict-Transport-Security", value: "max-age=31536000"/);
+  });
+});
+
+describe("the web app's window", () => {
+  // A page of another site that opened the app would keep a handle to its window, and could set its address again and
+  // again (an invite link each time) without a reload. The header cuts that handle; `-allow-popups` keeps the windows
+  // the app opens itself (a sign-in). The sign-in's return page is opened by the provider inside such a window, which
+  // the app closes afterwards, so it stays without the header.
+  const locations = [...read("apps/web/nginx.conf").matchAll(/location\s+([^{]+?)\s*\{([^}]*)\}/g)].map((m) => ({ match: m[1]!, body: m[2]! }));
+  const opener = (match: string) => /add_header Cross-Origin-Opener-Policy "([^"]+)" always;/.exec(locations.find((l) => l.match === match)!.body)?.[1];
+
+  it("the app's pages cut the handle of a site that opened them, and keep the app's own popups", () => {
+    expect(opener("/")).toBe("same-origin-allow-popups");
+  });
+
+  it("the sign-in's return page keeps the popup's ties and every other header", () => {
+    expect(opener("= /oidc-callback.html")).toBeUndefined();
+    expect(locations.find((l) => l.match === "= /oidc-callback.html")!.body).toContain("include /etc/nginx/ghostly-headers.conf;");
   });
 });

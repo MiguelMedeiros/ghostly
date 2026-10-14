@@ -432,6 +432,7 @@ export class ProviderSources<P extends Connectable> {
     if (!provider) return;
     // A kind of source with nothing to read shows no balance: what it shows is read.
     if (!this.options.refresh) { if (!this.view.read) { this.view = { ...this.view, read: true }; this.options.changed(); } return; }
+    const before = this.view;
     try {
       const details = await this.options.refresh(provider);
       if (provider !== this.provider) return;
@@ -441,7 +442,10 @@ export class ProviderSources<P extends Connectable> {
       if (provider !== this.provider) return;
       this.view = { ...this.view, error: `Could not read the balance: ${redact(error, this.secrets)}` };
     }
-    this.options.changed();
+    // A read that says what the view already did (the same balance, or none) changes nothing: every 15 s it made a
+    // whole wallet view and engine state, with no wallet at all.
+    const after = this.view as unknown as Record<string, unknown>, was = before as unknown as Record<string, unknown>;
+    if (Object.keys({ ...was, ...after }).some(key => was[key] !== after[key])) this.options.changed();
     if (this.provider) this.timer = setTimeout(() => void this.refresh(), this.options.refreshMs ?? 15_000);
   }
 

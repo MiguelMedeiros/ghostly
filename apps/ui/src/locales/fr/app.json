@@ -1,10 +1,15 @@
 {
   "name": "Ghostly",
+  "pageNotLoaded": {
+    "hint": "Vérifiez votre connexion, puis réessayez. Si cela échoue encore, rechargez Ghostly.",
+    "title": "Cette page ne s'est pas chargée.",
+    "tryAgain": "Réessayer"
+  },
   "profileUnavailable": {
     "detail": "Ce que le système a dit :",
-    "info": "Rien n'a été modifié ni supprimé. Tant que les données sont fermées, Ghostly ne se connecte à personne et n'envoie rien pour ce profil. Cette app est Ghostly {{app}} et lit les données de profil jusqu'à la version {{supported}}.",
+    "info": "Rien n'a été modifié ni supprimé. Tant qu'il est fermé, ce profil ne se connecte à personne et n'envoie rien. Ghostly {{app}} lit les données de profil jusqu'à la version {{supported}}.",
     "newerHint": "Mettez l'app à jour pour l'ouvrir.",
-    "newerInfo": "Les données de ce profil sont à la version {{stored}}. Cette app, Ghostly {{app}}, lit jusqu'à la version {{supported}}. Un Ghostly plus récent a ouvert le profil et fait avancer ses données, et un plus ancien ne peut pas les lire sans risque. Rien n'est donc ouvert ni envoyé, et rien n'a été modifié ni supprimé : vos discussions, vos clés et vos portefeuilles sont toujours là. Mettez cette app à jour, ou ouvrez le profil avec la plus récente.",
+    "newerInfo": "Ses données sont à la version {{stored}} ; Ghostly {{app}} lit jusqu'à la {{supported}}. Rien n'a été ouvert, envoyé ni modifié : vos discussions, vos clés et vos portefeuilles sont toujours là.",
     "newerTitle": "Ce profil a été utilisé en dernier par une version plus récente de Ghostly.",
     "noUpdate": "Aucune version plus récente n'est encore sortie. Ouvrez ce profil avec l'app qui l'a utilisé en dernier.",
     "reason": {

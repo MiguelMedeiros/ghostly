@@ -6,7 +6,7 @@ import { paymentStateLabel } from "./paymentWords";
 import { BackupRows } from "./wallet/BackupRows";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
-import { useI18n } from "../contexts/I18nContext";
+import { useI18n, type Translate } from "../contexts/I18nContext";
 import { satsIn } from "./NetworkTag";
 import { fillNodes } from "../lib/fillNodes";
 import { formatAmount } from "../lib/amount";
@@ -16,6 +16,15 @@ import { problemText } from "../lib/problemText";
 /** Spark transfers cost nothing today; the cap only stops a surprise, and the review shows the real fee. */
 const feeCap = (amount: number) => Math.max(100, Math.ceil(amount / 100));
 const WHEN: Intl.DateTimeFormatOptions = { dateStyle: "short", timeStyle: "short" };
+/** What a history row says of a movement that is not completed, in the app's language; a completed one says nothing. */
+const statusOf = (t: Translate, status: string) => {
+ switch (status) {
+  case "completed": return "";
+  case "pending": return t("wallet.spark.status.pending");
+  case "failed": return t("wallet.spark.status.failed");
+  default: return status;
+ }
+};
 
 /**
  * Spark: wallet to wallet, instant and off-chain, through the Breez SDK. Its address is the wallet's identity, the
@@ -55,7 +64,7 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
   {!ready ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="spark-connecting"><p className="text-text-primary">{t("wallet.panel.connecting", { wallet: "Spark" })}</p>{spark?.error ? <Notice problem={problemText(spark.error, t)} tone="muted" /> : <Notice>{t("wallet.spark.connectingNote")}</Notice>}</div>
   : <div className="space-y-4">
    <p className="text-text-primary" data-testid="spark-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(spark.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>
-    {mainnet ? <span className="block text-xs text-danger mt-1" data-testid="spark-mainnet-label">{t("wallet.spark.mainnetLabel")}</span> : <span className="block text-xs text-yellow-500 mt-1">{t("wallet.spark.regtestLabel")}</span>}</p>
+    {mainnet ? <span className="block text-xs text-danger mt-1" data-testid="spark-mainnet-label">{t("wallet.spark.mainnetLabel")}</span> : <span className="block text-xs text-warn-ink mt-1">{t("wallet.spark.regtestLabel")}</span>}</p>
    <Actions value={action} onChange={setAction} />
    {action === "receive" && <div className="bg-surface rounded-xl p-4 space-y-4 animate-fade-in">
     <Address value={spark.address} testId="spark-address" note={t("wallet.spark.addressNote")} />
@@ -76,7 +85,7 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
     <ul className="divide-y divide-border" data-testid="spark-history">
      {spark.history.map(entry => <li key={entry.id} className="flex items-center gap-3 py-2 text-sm" data-testid="spark-history-row">
       <span className={entry.direction === "in" ? "text-green-500" : "text-text-primary"}>{entry.direction === "in" ? "+" : "−"}{formatAmount(entry.amount, t.language)} <span className="text-xs text-text-muted">{unit}</span></span>
-      <span className="flex-1 min-w-0 truncate text-text-muted text-xs">{[entry.via === "spark" ? "Spark" : entry.via === "lightning" ? "Lightning" : entry.via === "onchain" ? t("wallet.spark.via.onchain") : t("wallet.spark.via.other"), entry.memo, entry.status !== "completed" ? entry.status : "", entry.fee ? t("wallet.spark.fee", { fee: entry.fee }) : ""].filter(Boolean).join(" · ")}</span>
+      <span className="flex-1 min-w-0 truncate text-text-muted text-xs">{[entry.via === "spark" ? "Spark" : entry.via === "lightning" ? "Lightning" : entry.via === "onchain" ? t("wallet.spark.via.onchain") : t("wallet.spark.via.other"), entry.memo, statusOf(t, entry.status), entry.fee ? t("wallet.spark.fee", { fee: formatAmount(entry.fee, t.language) }) : ""].filter(Boolean).join(" · ")}</span>
       <span className="text-text-muted text-xs tabular-nums">{formatAt(entry.at, WHEN, t.language)}</span>
      </li>)}
     </ul>

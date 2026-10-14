@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { IntentLink, PageLink } from "@/components/site/IntentLink";
 import { Shell } from "@/components/site/Shell";
 import { Icon } from "@/components/site/icons";
 import { LevelBadge } from "@/components/site/Level";
@@ -85,7 +86,7 @@ export function DevelopersPage() {
           </Reveal>
           <ol className="dvx-path">
             {t.path.steps.map((s, i) => (
-              <Reveal as="article" key={s.title} className="dvx-step">
+              <Reveal as="li" key={s.title} className="dvx-step">
                 <span className="dvx-step-num mono" aria-hidden="true">
                   {String(i + 1).padStart(2, "0")}
                 </span>
@@ -99,9 +100,9 @@ export function DevelopersPage() {
                           {l.label} ↗
                         </a>
                       ) : (
-                        <Link className="link-arrow" href={l.href}>
+                        <IntentLink className="link-arrow" href={l.href}>
                           {l.label} →
-                        </Link>
+                        </IntentLink>
                       )}
                     </li>
                   ))}
@@ -169,9 +170,9 @@ export function DevelopersPage() {
             <Reveal as="article" key={k} className="card devnext-card">
               <h3 className="h-card">{t.next[k].title}</h3>
               <p className="muted">{t.next[k].body}</p>
-              <Link className="link-arrow" href={href}>
+              <PageLink className="link-arrow" href={href}>
                 {t.next[k].cta} →
-              </Link>
+              </PageLink>
             </Reveal>
           ))}
         </div>

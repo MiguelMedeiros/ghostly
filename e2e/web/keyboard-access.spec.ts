@@ -4,7 +4,8 @@ import { pair } from "../support/paired";
 
 /**
  * Ghostly with the keys alone: the first Tab offers to skip the chat list, every chat and group in the list is a stop
- * that Enter or Space opens, and a ringing call is a dialog that takes the focus (not the answer) and keeps the keys.
+ * that Enter or Space opens, a ringing call is a dialog that takes the focus (not the answer) and keeps the keys, and
+ * so does the call one starts.
  */
 
 /** Presses Tab until the focus is on `testId`, as someone on the keys would: at most `max` presses. */
@@ -90,4 +91,25 @@ test("with the keys alone: skip the list, open a chat and a group from it, answe
   for (const p of [alice.page, bob.page]) await expect(p.getByTestId("call-state-spoken")).toHaveText("Connected");
   await bob.page.getByTestId("call-hang-up").click();
   await expect(page.getByTestId("call-window")).toHaveCount(0);
+
+  // A call started with the keys: the focus goes into the whole-screen call and Tab stays in it, never on the chat
+  // under it; once the call is over the focus is back on the button that started it.
+  const start = bob.page.getByTestId("call-audio");
+  await expect(start).toBeEnabled();
+  await start.focus();
+  await bob.page.keyboard.press("Enter");
+  const call = bob.page.getByTestId("call-window");
+  await expect(call).toBeFocused();
+  await expect(call).toHaveAttribute("role", "dialog");
+  const stops: (string | null)[] = [];
+  for (let i = 0; i < 12; i++) {
+    await bob.page.keyboard.press("Tab");
+    stops.push(await bob.page.evaluate(() => document.activeElement?.closest('[data-testid="call-window"]') ? document.activeElement.getAttribute("data-testid") : null));
+  }
+  expect(stops).not.toContain(null);
+  expect(stops.slice(0, 2)).toEqual(["call-minimize", "call-mute"]);
+  expect(stops).toContain("call-hang-up");
+  await ring.getByRole("button", { name: "Decline" }).click();
+  await expect(call).toHaveCount(0);
+  await expect(start).toBeFocused();
 });

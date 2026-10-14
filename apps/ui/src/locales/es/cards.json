@@ -45,7 +45,7 @@
       "status": "Estado"
     },
     "hideOlder": "Ocultar antiguas",
-    "info": "Los bots publican tarjetas de tarea en chats y grupos y las mantienen al día. Este tablero reúne las de todos los chats. Las tareas hechas y detenidas se quedan un día; Detenidas reúne las fallidas y las canceladas. Una tarjeta solo muestra la tarea: su bot cambia el estado. Abre una tarjeta para verla en su chat.",
+    "info": "Las tarjetas de tarea de los bots, de todos los chats. Las tareas hechas y detenidas se quedan un día. Una tarjeta solo muestra la tarea: su bot cambia el estado.",
     "me": "Tú",
     "noMatch": "Ninguna tarea coincide",
     "none": "Ninguna",
@@ -151,7 +151,8 @@
     "title": "Uso",
     "updatedLabel": "Actualizado",
     "used": "{{used}} de {{limit}} usados",
-    "usedLabel": "Usado"
+    "usedLabel": "Usado",
+    "wasReset": "se renovó {{ago}}"
   },
   "working": {
     "label": "Trabajando",

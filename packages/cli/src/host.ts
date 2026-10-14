@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import { createInterface } from "node:readline";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { announceJoins } from "./announce";
+import { reportAppFrames } from "./appEvents";
 import { callApi, type ApiContext } from "./api";
 import { CallManager } from "./calls/manager";
 import { asCliError, CliError } from "./errors";
@@ -16,6 +17,13 @@ import { flushCardUpdates } from "./statusCards";
 
 /** The longest request line the daemon reads (WISP 1100 § Framing). */
 export const MAX_LINE = 16 * 1024 * 1024;
+
+/**
+ * How many of a chat's newest messages the start reads to see whether the events are in step with its history: the
+ * whole history of every chat and group, read at every start, took a daemon's start and its memory with every message
+ * the profile ever stored (1 s and 70 MB at 100,000).
+ */
+export const BASELINE_NEWEST = 100;
 
 export interface Host {
   ctx: ApiContext;
@@ -44,16 +52,25 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
     const now = node.getState();
     // The histories read here are the attach's too: one that changes before the hub is attached is read again then.
     const mark = runtime.server.historyMark;
-    const histories = new Map<string, readonly StoredMessage[]>();
-    for (const link of now.links) histories.set(link.id, await node.getMessages(link.id));
-    for (const group of now.groups) histories.set(`group:${group.id}`, await node.groupMessages({ groupId: group.id }));
-    hub.baseline(now, histories);
+    const histories = new Map<string, readonly StoredMessage[]>(), newest = new Map<string, readonly StoredMessage[]>();
+    const whole = (id: string) => (id.startsWith("group:") ? node.groupMessages({ groupId: id.slice(6) }) : node.getMessages(id));
+    // A store that was closed holds every note the hub made, and a history the engine has not touched since is as it
+    // was closed: its newest messages say whether the hub is in step with it. Otherwise the whole history is read.
+    const closed = !runtime.store.recovered;
+    for (const id of [...now.links.map((link) => link.id), ...now.groups.map((group) => `group:${group.id}`)]) {
+      const page = closed && !runtime.server.historyChanged(id) ? await node.messagePage({ linkId: id, limit: BASELINE_NEWEST }) : null;
+      if (page && !page.more) histories.set(id, page.messages);
+      else if (page && hub.inStep(id, page.messages)) newest.set(id, page.messages);
+      else histories.set(id, await whole(id));
+    }
+    hub.baseline(now, histories, { newest, whole });
     announceJoins(hub, node);
     // Calls (WISP 1100 § Calls): only a daemon answers and places them; a one-shot still reports one that rings.
     calls = new CallManager({ engine: node, emit: (type, id, fields) => hub.emit(type, id, fields), profileDir: paths.dir, answers: mode === "daemon" });
     const manager = calls;
     hub.onCallSignal((chat, signal) => manager.onSignal(chat, signal));
-    runtime.server.attach(hub.sink, { mark, ids: histories.keys() });
+    reportAppFrames(hub, node, paths.dir);
+    runtime.server.attach(hub.sink, { mark, ids: [...histories.keys(), ...newest.keys()] });
   } catch (error) {
     await runtime.close().catch(() => {});
     release();
@@ -125,12 +142,21 @@ let guarded = false;
 /**
  * A daemon says an error nobody caught (with its stack, on stderr: the daemon's log when detached) and keeps serving:
  * one request gone wrong must not take the profile offline. One-shot commands do not call this; they still fail loudly.
+ *
+ * `outputs`: what it writes to. A write there that fails (a pipe whose reader is gone: the process that started the
+ * daemon died) is dropped, not an error nobody caught: saying it would be one more failed write, and the next, with
+ * no turn left for anything else (a full core, and no stop on SIGTERM).
  */
-export function keepServing(proc: Pick<NodeJS.Process, "on"> = process, write: (text: string) => void = (text) => { process.stderr.write(text); }): void {
+export function keepServing(
+  proc: Pick<NodeJS.Process, "on"> = process,
+  write: (text: string) => void = (text) => { process.stderr.write(text); },
+  outputs: Pick<NodeJS.WriteStream, "on">[] = proc === process ? [process.stdout, process.stderr] : [],
+): void {
   if (proc === process) { if (guarded) return; guarded = true; }
   const log = (what: string) => (error: unknown) => {
     try { write(`ghostly: ${what}, the daemon keeps serving: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`); } catch { /* stderr is gone */ }
   };
+  for (const output of outputs) output.on("error", () => { /* nobody reads it any more */ });
   proc.on("unhandledRejection", log("unhandled rejection"));
   proc.on("uncaughtException", log("uncaught exception"));
 }

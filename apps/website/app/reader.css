@@ -322,6 +322,8 @@
 }
 .reader-toc ol {
   display: grid;
+  /* An auto track takes the longest unbreakable entry's width (a source path), and every entry runs past the box. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   margin-top: 12px;
   columns: 2;
@@ -333,6 +335,7 @@
 }
 .reader-toc a {
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 .reader-toc a:hover {
   color: var(--cyan);

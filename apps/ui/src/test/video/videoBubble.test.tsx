@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NO_ROOM_TO_PLAY } from "@ghostly/browser/shared/fileBytes";
 import { MessageBubble } from "../../components/MessageBubble";
 import { VideoBubble } from "../../components/video/VideoBubble";
 import { videoBox } from "../../lib/videoPlayer";
@@ -144,6 +145,19 @@ describe("a video in the chat", () => {
     expect(screen.queryByTestId("video-player")).toBeNull();
     expect(screen.getByTestId("video-poster")).toBeInTheDocument();
     expect(revoke).toHaveBeenCalledWith(url);
+  });
+
+  it("its poster is made 200 px before it scrolls into the chat list's view, not only once it shows", () => {
+    const inits: (IntersectionObserverInit | undefined)[] = [];
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(_callback: IntersectionObserverCallback, init?: IntersectionObserverInit) { inits.push(init); }
+      observe() {}
+      disconnect() {}
+    });
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    renderApp(<div data-testid="list" data-message-list><VideoBubble file={video()} sender="peer" peerName="Ana" /></div>);
+    expect(inits).toEqual([{ root: screen.getByTestId("list"), rootMargin: "200px 0px" }]);
+    vi.unstubAllGlobals();
   });
 
   it("scrolled out of view it stops and lets go of its bytes; played again, it goes on from there", async () => {
@@ -369,6 +383,22 @@ describe("a video in the chat", () => {
     fireEvent.click(screen.getByTestId("video-play"));
     await flush();
     expect(screen.getByTestId("video-problem")).toHaveTextContent("Too large to play here. Download it to watch.");
+  });
+
+  it("no room on the disk for the player's copy of it: it is saved instead of played", async () => {
+    const streamFile = vi.spyOn(servicesPlatform!, "streamFile").mockRejectedValue(new Error(NO_ROOM_TO_PLAY));
+    const saveFile = vi.spyOn(servicesPlatform!, "saveFile").mockResolvedValue(true);
+    const file = video();
+    show(file);
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    expect(streamFile).toHaveBeenCalledWith(file.id);
+    // Not read into the page instead: the player would copy that too.
+    expect(getFile).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("video-player")).toBeNull();
+    expect(screen.getByTestId("video-problem")).toHaveTextContent("Not enough free disk space to play it here. Download it instead.");
+    fireEvent.click(screen.getByTestId("video-download"));
+    await waitFor(() => expect(saveFile).toHaveBeenCalledWith(file.id, file.name));
   });
 });
 

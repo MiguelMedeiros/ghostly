@@ -1,5 +1,5 @@
 import { composerRow } from "./composer";
-import { expect, type Peer } from "./fixtures";
+import { expect, headerControl, type Peer } from "./fixtures";
 
 /**
  * A chat's identities, the way a person uses them. The contact's: the panel (apps/ui/src/components/identities/
@@ -27,7 +27,8 @@ export async function openIdentities(peer: Peer) {
   const panel = peer.page.getByTestId("chat-identities");
   if (await panel.count()) return panel;
   await closePicker(peer);
-  await headerMarks(peer).click();
+  // On an upright phone the marks are a row of ⋮.
+  await (await headerControl(peer.page, "chat-identity-badges")).click();
   await expect(panel).toBeVisible();
   return panel;
 }

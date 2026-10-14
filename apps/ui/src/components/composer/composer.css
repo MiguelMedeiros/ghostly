@@ -61,6 +61,9 @@
   color: var(--color-text-primary);
   font-size: 15px;
   line-height: 22px;
+  /* A message wraps: the field never scrolls sideways. Right to left, WebKitGTK kept a few pixels of sideways overflow
+     in the empty field once the window narrowed with the chat open, and drew both scrollbars across it. */
+  overflow-x: hidden;
 }
 .composer-textarea::placeholder { color: var(--color-text-muted); }
 /* The message field with the keyboard focus: the well is ringed (the field itself has no edge of its own). */

@@ -34,7 +34,7 @@ vi.mock("../../lib/apps/broker", async (actual) => ({
 const REF = "yz7moxucbd4u8aqtk5ir8khn4emft7zskr7qo7x876ntwxfiegoo/chess";
 const host = {
   runnerUrl: "/app-frame.html",
-  entry: async () => ({ ref: REF, version: "1.2.0", title: "Chess", permissions: ["chat"], entry: "<!doctype html>" }),
+  entry: async () => ({ ref: REF, digest: "d", version: "1.2.0", title: "Chess", permissions: ["chat"], entry: "<!doctype html>" }),
 } as unknown as AppsPlatform;
 
 let run: InstalledAppView["run"] = { status: "ok" };
@@ -106,6 +106,37 @@ describe("an app running when its version is taken down", () => {
     await checked({ status: "ok" });
     expect(started[0]!.stop).not.toHaveBeenCalled();
     expect(screen.queryByTestId("mini-app-stopped")).not.toBeInTheDocument();
+  });
+
+  it("uninstalled while it runs, in a chat and alone: it is stopped and its place goes, with no notice", async () => {
+    chatPanel();
+    await act(() => open(REF, "link-1"));
+    await open(REF, null);
+    // The person uninstalled it (on this page or another): the engine says so as it does after a check.
+    fakeEngine.on("appList", () => []);
+    await checked({ status: "ok" });
+    expect(started[0]!.stop).toHaveBeenCalled();
+    expect(started[1]!.stop).toHaveBeenCalled();
+    expect(chatApp("link-1")).toBeUndefined();
+    expect(screen.queryByTestId("mini-app-stopped")).not.toBeInTheDocument();
+    expect(document.querySelector("[data-place=alone]")).toBeNull();
+  });
+
+  it("after an update came while it ran: the version it runs is the one judged, not the one installed", async () => {
+    chatPanel();
+    await act(() => open(REF, "link-1"));
+    // The check installed a newer version, fine to run, and found the one that still runs here revoked.
+    const updated = (stopped: InstalledAppView["stopped"]) => fakeEngine.on("appList", () => [{ ...installed(), sequence: 8, digest: "d2", ...(stopped && { stopped }) }]);
+    updated(undefined);
+    await checked({ status: "ok" });
+    expect(started[0]!.stop).not.toHaveBeenCalled();
+    updated([{ digest: "other", run: { status: "revoked" } }]);
+    await checked({ status: "ok" });
+    expect(started[0]!.stop).not.toHaveBeenCalled();
+    updated([{ digest: "d", run: { status: "revoked" } }]);
+    await checked({ status: "ok" });
+    expect(started[0]!.stop).toHaveBeenCalled();
+    expect(screen.getByTestId("mini-app-stopped")).toHaveTextContent("Chess was stopped: its maker revoked this version");
   });
 
   it("alone: stops it and says why in its place", async () => {

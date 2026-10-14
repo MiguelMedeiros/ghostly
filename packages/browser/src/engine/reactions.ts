@@ -18,13 +18,15 @@ export interface ReactionsHost {
   changed(chat: string, id: string, note?: ReactionNote): Promise<void> | void;
   /** Someone reacted to a message of mine: a quiet notice (the pages mute it with the chat). */
   notify?(chat: string, key: string): void;
+  /** Whether `by` is still someone this group takes reactions from, asked again for one that waited (absent: yes). */
+  believed?(chat: string, by: string): boolean;
   now?(): number;
 }
 
 /** Why a reaction is not kept: said to whoever asked for it. */
 export type ReactionRefusal = string;
 
-/** Where a received reaction went: shown, older than what is shown, waiting for its message, or dropped (no room). */
+/** Where a received reaction went: shown, older than what is shown, waiting (for its message, or for a group member's next window), or dropped (no room). */
 export type ReactionOutcome = "applied" | "stale" | "waiting" | "dropped";
 
 const isGroup = (chat: string) => chat.startsWith("group:");
@@ -88,6 +90,10 @@ export class Reactions {
   private queue = Promise.resolve();
   /** A group member's reactions taken per window (chat and member key), as a paired chat's session limits them. */
   private readonly memberPace = new Map<string, ReactionWindow>();
+  /** Per group chat, per member: its reactions past the window, by message, waiting for room (`hold`). */
+  private readonly held = new Map<string, Map<string, Map<string, WireReaction>>>();
+  private readonly heldTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private stopped = false;
   /**
    * This side's highest number per chat: read from its history the first time I react in it, then each number given
    * out. It only has to grow, so a row deleted since leaves it too high and nothing is wrong.
@@ -131,14 +137,21 @@ export class Reactions {
   /**
    * A reaction that came from `by` (`peer`, or a member's key), already authenticated as theirs. A message not here
    * yet keeps it for five minutes; past the room for that sender, it is dropped (and, on a 1:1 session, not confirmed).
+   * Past `REACTION_LIMITS.receive` a window from one group member, the rest wait for the next window (`hold`): a
+   * community's catch-up hands back every reaction of a member at once, and one dropped is never handed again.
    */
   receive(chat: string, by: string, reaction: WireReaction): Promise<ReactionOutcome> {
     if (isGroup(chat)) {
       const key = `${chat}\n${by}`;
       let pace = this.memberPace.get(key);
       if (!pace) this.memberPace.set(key, pace = new ReactionWindow(REACTION_LIMITS.receive, REACTION_LIMITS.windowMs, () => this.now()));
-      if (!pace.take()) return Promise.resolve("dropped");
+      // Behind those that wait already, so a member's reactions are taken in the order they came.
+      if (this.held.get(chat)?.has(by) || !pace.take()) return Promise.resolve(this.hold(chat, by, reaction, pace));
     }
+    return this.take(chat, by, reaction);
+  }
+
+  private take(chat: string, by: string, reaction: WireReaction): Promise<ReactionOutcome> {
     return this.run(async () => {
       const target = await this.find(chat, reaction.id);
       if (!target) return this.wait(chat, by, reaction);
@@ -146,6 +159,67 @@ export class Reactions {
       await this.write(chat, target, by, reaction);
       return "applied";
     });
+  }
+
+  /**
+   * A reaction past what a group member's window takes: kept, the highest number per message, `REACTION_LIMITS.held` a
+   * group at most (the oldest go first), and taken when the window has room. The work stays what the window allows.
+   */
+  private hold(chat: string, by: string, reaction: WireReaction, pace: ReactionWindow): ReactionOutcome {
+    let group = this.held.get(chat);
+    if (!group) this.held.set(chat, group = new Map());
+    let waiting = group.get(by);
+    if (!waiting) group.set(by, waiting = new Map());
+    const known = waiting.get(reaction.id);
+    if (known && known.n >= reaction.n) return "stale";
+    waiting.delete(reaction.id);
+    waiting.set(reaction.id, reaction);
+    let count = 0;
+    for (const member of group.values()) count += member.size;
+    for (const [member, reactions] of group) {
+      if (count <= REACTION_LIMITS.held) break;
+      while (count > REACTION_LIMITS.held && reactions.size) { reactions.delete(reactions.keys().next().value!); count--; }
+      if (!reactions.size && member !== by) group.delete(member);
+    }
+    this.takeLater(chat, by, pace);
+    return waiting.has(reaction.id) ? "waiting" : "dropped";
+  }
+
+  private takeLater(chat: string, by: string, pace: ReactionWindow): void {
+    const key = `${chat}\n${by}`;
+    if (this.heldTimers.has(key) || this.stopped) return;
+    this.heldTimers.set(key, setTimeout(() => { void this.takeHeld(chat, by).catch(() => {}); }, Math.max(50, pace.wait())));
+  }
+
+  /** The window of a member has room again: its reactions that waited are taken, oldest first, as many as it allows. */
+  private async takeHeld(chat: string, by: string): Promise<void> {
+    const key = `${chat}\n${by}`;
+    this.heldTimers.delete(key);
+    const group = this.held.get(chat), waiting = group?.get(by), pace = this.memberPace.get(key);
+    if (this.stopped || !group || !waiting || !pace) return;
+    for (const [id, reaction] of [...waiting]) {
+      // Out of the group meanwhile (the member, or me): nothing of it is believed.
+      if (this.host.believed && !this.host.believed(chat, by)) { waiting.clear(); break; }
+      if (!pace.take()) break;
+      // Unless a higher one took its place while the last was applied.
+      if (waiting.get(id) !== reaction) continue;
+      waiting.delete(id);
+      await this.take(chat, by, reaction).catch(() => {});
+    }
+    if (waiting.size) { this.takeLater(chat, by, pace); return; }
+    if (group.get(by) === waiting) group.delete(by);
+    if (!group.size) this.held.delete(chat);
+  }
+
+  /** The engine stops: what waits for a window is let go, and no timer is left. */
+  stop(): void {
+    this.stopped = true;
+    this.dropHeld();
+  }
+
+  private dropHeld(chat?: string): void {
+    for (const [key, timer] of this.heldTimers) if (chat === undefined || key.startsWith(`${chat}\n`)) { clearTimeout(timer); this.heldTimers.delete(key); }
+    if (chat === undefined) this.held.clear(); else this.held.delete(chat);
   }
 
   /** A message was kept: the reactions that waited for it are shown now. */
@@ -189,6 +263,7 @@ export class Reactions {
 
   /** A chat is gone: nothing waits for it any more, and my highest number in it is read again if it comes back. */
   forget(chat: string): void {
+    this.dropHeld(chat);
     this.waiting.delete(chat);
     this.last.delete(chat);
   }

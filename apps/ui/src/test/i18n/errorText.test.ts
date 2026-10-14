@@ -29,6 +29,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The Ghostly peer did not start. Reopen the extension to retry.", "apps/extension/src/background.ts"],
   ["The membership history forked. Membership changes are halted; the admin must re-form the group.", "packages/core/src/groupSession.ts", "Membership changes are halted; the admin must re-form the group."],
   ["The membership history forked", "packages/browser/src/engine/groups.ts"],
+  // What every call outside LIMITED_MODE_METHODS is answered with in limited mode (engine/server.ts): a file, a group, a device action.
+  ["Ghostly could not check which device is active yet. This works once it can.", "packages/browser/src/engine/node.ts"],
   ["Listener given to a chat in use: this one was quiet. Open this chat to take one back; your messages and transport identity are saved.", "packages/browser/src/engine/node.ts"],
   ["Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.", "packages/browser/src/engine/node.ts"],
   ["Native adapter could not start. Reopen this chat to retry.", "packages/browser/src/engine/node.ts"],
@@ -39,17 +41,48 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This message was edited 100 times, the most one takes.", "packages/browser/src/engine/node.ts", "This message was edited ${most} times, the most one takes."],
   ["That message is not in this chat, or cannot be replied to", "packages/browser/src/engine/node.ts"],
   ["That message cannot be replied to", "packages/browser/src/engine/node.ts"],
+  ["There is no room left on this device for a new chat", "apps/ui/src/lib/storage.ts"],
   ["Someone else joined with this invite first. Ask your contact for a new one.", "packages/core/src/ghostlink.ts"],
   ["Chat has been burned", "packages/browser/src/platform/useChat.ts"],
   ["No transport both apps allow is available yet", `${CORE}/ghostlink.ts`],
   ["No permitted transport could connect", `${CORE}/ghostlink.ts`],
+  // A transport change that did not land, and the dials it names.
+  ["no permitted transport connected", `${CORE}/ghostlink.ts`],
+  ["Transport change failed: iroh/1 did not connect in time. Retry or choose another transport.", `${CORE}/ghostlink.ts`, ". Retry or choose another transport."],
+  ["iroh/1 did not connect in time", `${CORE}/ghostlink.ts`, " did not connect in time"],
+  ["Transport change timed out. Your previous connection is kept when available; retry or choose another transport.", `${CORE}/transportSwitch.ts`],
+  ["Transport change cancelled", `${CORE}/ghostlink.ts`],
+  ["Transport preferences do not overlap. Enable fallback or choose the same supported transport on both sides.", `${CORE}/transportSwitch.ts`],
+  ["Peer native address unavailable; reconnect WebRTC once to exchange endpoints", `${CORE}/ghostlink.ts`],
+  ["Native connection limit reached", "native/transports/hyperdht/endpoint.mjs"],
+  ["HyperDHT handshake timed out", "native/transports/hyperdht/endpoint.mjs"],
+  ["Noise handshake failed", "native/transports/hyperdht/endpoint.mjs"],
+  // The same dial failed on this side, by its own runtime.
+  ["Iroh connection timed out", "native/transports/src/iroh_transport.rs"],
+  ["Iroh connection timed out", "native/transports/iroh-web/src/lib.rs"],
+  ["HyperDHT connection timed out", "apps/desktop/src/hyperdht.rs"],
+  ["Native stream timed out", "apps/desktop/src/paired_transport.rs"],
+  ["Native stream timed out", "native/transports/iroh-web/src/lib.rs"],
+  ["Native channel closed", "native/transports/hyperdht/endpoint.mjs"],
+  ["Native channel did not reach the application", "apps/ui/src/desktop/nativeTransports.ts"],
+  // A dial past the contact's two channels: its endpoint destroys the stream, and the dialer's stream reads a reset
+  // (libudx's own words, measured on a local HyperDHT testnet).
+  ["connection reset by peer", "native/transports/hyperdht/endpoint.mjs", "if (stopped || channels.size >= 2) { socket.destroy();"],
+  ["PEER_NOT_FOUND: Peer not found", "node_modules/hyperdht/lib/errors.js", "static PEER_NOT_FOUND(msg = 'Peer not found')"],
+  ["It did not connect", `${BROWSER}/engine/node.ts`],
   ["The peer closed this connection. Check that both transport preferences allow a common transport, then reconnect.", `${CORE}/ghostlink.ts`],
   ["Your contact needs an updated app to negotiate a transport change.", `${CORE}/ghostlink.ts`],
   ["Calls need a live connection", `${CORE}/ghostlink.ts`],
+  ["Screen sharing is blocked. Allow screen recording for this app in your system's privacy settings.", "packages/react/src/useWebRTC.ts"],
+  ["There is no screen to share", "packages/react/src/useWebRTC.ts"],
+  ["Screen sharing is not available here", "packages/react/src/useWebRTC.ts"],
+  ["Could not share the screen. Try again.", "packages/react/src/useWebRTC.ts"],
+  ["Your contact's app cannot show a screen in this call", "packages/react/src/useWebRTC.ts"],
+  ["Screen sharing is not available on Linux yet", "apps/ui/src/desktop/nativeCalls.ts"],
   ["Your contact's app cannot take calls", `${CORE}/ghostlink.ts`],
   ["Your contact needs an updated Ghostly for calls", `${CORE}/ghostlink.ts`],
   ["Calls are not available in this app", `${CORE}/ghostlink.ts`],
-  ["All eight native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "packages/browser/src/engine/node.ts"],
+  ["All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.", "packages/browser/src/engine/node.ts"],
   ["Could not reach the HyperDHT relay", `${BROWSER}/platform/hyperdhtRelay.ts`],
   ["The HyperDHT relay did not answer", `${BROWSER}/platform/hyperdhtRelay.ts`],
   ["The HyperDHT relay closed the connection", `${BROWSER}/platform/hyperdhtRelay.ts`],
@@ -96,6 +129,12 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Your contact has too many files waiting. Try again later.", `${CORE}/chatFiles.ts`],
   ["The file arrived damaged and was deleted. Send it again.", `${CORE}/chatFiles.ts`],
   ["Not accepted in time", `${CORE}/chatFiles.ts`],
+  ["The file arrived damaged and was deleted. Ask for it again.", `${CORE}/chatFiles.ts`],
+  ["The offer expired", `${CORE}/chatFiles.ts`],
+  ["Not delivered in time", `${CORE}/chatFiles.ts`],
+  ["Your contact asked for the same part of this file too many times", `${CORE}/chatFiles.ts`],
+  ["Could not store the file: This device has no space left for the file", `${CORE}/chatFiles.ts`, "Could not store the file: "],
+  ["Could not store the file: The stored copy is gone", `${CORE}/chatFiles.ts`, "Could not store the file: "],
   ["Your contact could not take this file", `${CORE}/chatFiles.ts`],
   ["That file is too large (max 64 MB).", `${BROWSER}/platform/services.ts`, "That file is too large (max "],
   ["That is not a valid mint URL", CODES],
@@ -160,6 +199,10 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This pays with real money: confirm it with Send real money first. Nothing was sent.", CODES],
   ["Could not create the Spark wallet: the network is down. Nothing was saved; try again.", `${BROWSER}/engine/paymentAdapters/walletInstances.ts`, ". Nothing was saved; try again."],
   ["You were removed from this group", `${CORE}/groupSession.ts`],
+  ["A group's name is 1 to 64 characters on one line", `${BROWSER}/engine/node.ts`, "A group's name is 1 to "],
+  ["A group's name is 1 to 64 characters", `${CORE}/groupMeta.ts`, "A group's name is 1 to "],
+  ["This picture cannot be used", `${CORE}/groupMeta.ts`],
+  ["This hub setting cannot be used", `${CORE}/groupMeta.ts`],
   ["You left this group", `${CORE}/groupSession.ts`],
   ["Member 3r69cgd5 holds a different membership history for epoch 4. Membership changes are halted; the admin must re-form the group.", `${CORE}/groupSession.ts`, " holds a different membership history for epoch "],
   ["Member 3r69cgd5 holds a different membership history for epoch 4. Membership changes are halted; the admin must re-form the group.", `${CORE}/groupSession.ts`, ". Membership changes are halted; the admin must re-form the group."],
@@ -186,8 +229,13 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Nobody in the group is connected right now to take your leave. Try again in a moment.", `${BROWSER}/engine/community.ts`],
   ["Only the admin can share a link to the group", `${BROWSER}/engine/groups.ts`],
   ["This is not a link to a group", `${BROWSER}/engine/groups.ts`],
+  ["There are no digits to confirm", `${BROWSER}/devices/enroll.ts`],
+  ["Only an enrollment that did not finish is removed here", `${BROWSER}/devices/links.ts`],
   ["You are already joining this group", `${BROWSER}/engine/groups.ts`],
   ["This group is joined with its current link", `${BROWSER}/engine/groups.ts`],
+  ["You have an invitation to this group. Answer it first.", `${BROWSER}/engine/groups.ts`],
+  ["You are out of this group and its history is still here. Delete it from this device to join with a link.", `${BROWSER}/engine/groups.ts`],
+  ["This link names a private group of yours, not a community", `${BROWSER}/engine/groups.ts`],
   ["Go online to join a group", `${BROWSER}/engine/node.ts`],
   ["Only the admin can change the members of this group", `${CORE}/groupSession.ts`],
   ["Only the admin can do that", `${CORE}/groupCommunity.ts`],
@@ -322,7 +370,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["The clipboard's picture is damaged", "apps/desktop/src/clipboard.rs"],
   ["Clipboard unavailable", "apps/desktop/src/clipboard.rs"],
   ["That paste is gone. Paste it again.", "apps/desktop/src/clipboard.rs"],
-  ["Could not read the file: Permission denied (os error 13)", "apps/desktop/src/clipboard.rs", "Could not read the file: {e}"],
+  ["Could not read the pasted file: Permission denied (os error 13)", "apps/desktop/src/clipboard.rs", "Could not read the pasted file: {e}"],
+  ["Could not read the file: The file changed while it was being copied", `${CORE}/chatFiles.ts`, "Could not read the file: "],
   ["This browser cannot wake Ghostly while it is closed.", "apps/ui/src/lib/wakePush.ts"],
   ["Your signer holds a different key than this identity. Nothing was published.", "apps/ui/src/lib/nostr.ts"],
   ["This device cannot decode the recording", "apps/ui/src/lib/voiceMp3.ts"],
@@ -421,8 +470,17 @@ describe("errors in the app's language", () => {
     expect(errorText("That picture is too large to paste", pt)).toBe("Isso é grande demais para colar. Envie com + → Documento.");
     expect(errorText("That paste is gone. Paste it again.", pt)).toBe("Essa colagem expirou. Cole de novo.");
     expect(errorText("Clipboard unavailable", pt)).toBe("Não foi possível ler a área de transferência. Anexe com +.");
-    expect(errorText("Could not read the file: Permission denied (os error 13)", pt)).toBe("Não foi possível ler o arquivo colado. Anexe com +.");
-    expect(knownErrorParts("Could not read the file: Permission denied (os error 13)", pt)?.detail).toBe("Could not read the file: Permission denied (os error 13)");
+    expect(errorText("Could not read the pasted file: Permission denied (os error 13)", pt)).toBe("Não foi possível ler o arquivo colado. Anexe com +.");
+    expect(knownErrorParts("Could not read the pasted file: Permission denied (os error 13)", pt)?.detail).toBe("Could not read the pasted file: Permission denied (os error 13)");
+    // A file sent with + whose copy could not be read is not a paste, and is sent again.
+    expect(knownErrorParts("Could not read the file: The file changed while it was being copied", english)).toEqual({
+      title: "The file cannot be read", next: "Send it again, or pick the file again.", detail: "Could not read the file: The file changed while it was being copied" });
+  });
+
+  it("an action refused in limited mode says why and what to do, in the language", () => {
+    const refused = new Error("Ghostly could not check which device is active yet. This works once it can.");
+    expect(knownErrorParts(refused, translators.pt)).toEqual({ title: "Não foi possível verificar qual dispositivo está ativo", next: "Isso volta a funcionar quando a verificação der certo. Confira sua conexão." });
+    expect(knownErrorParts(refused, english)).toEqual({ title: "Can't check which device is active", next: "This works once the check does. Check your connection." });
   });
 
   it("each rule has a sample, so none stops matching unseen", () => {

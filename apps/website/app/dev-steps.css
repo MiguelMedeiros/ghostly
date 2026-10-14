@@ -369,8 +369,6 @@ html.js:not(.calm) .psx {
   stroke-width: 0.8;
 }
 .sx-coin {
-  font-size: 11px;
-  font-weight: 700;
   fill: var(--c-plate);
 }
 .sx-trio {

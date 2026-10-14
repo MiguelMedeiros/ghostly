@@ -59,7 +59,7 @@ for (const { name, use } of VIEWPORTS) {
       const words = page.locator(".statement-word");
       expect(await words.count()).toBeGreaterThan(3);
       for (const o of await words.evaluateAll((els) => els.map((el) => getComputedStyle(el).opacity))) expect(Number(o)).toBe(1);
-      await expect(page.locator("#download")).toHaveAttribute("data-state", "done");
+      await expect(page.locator("#finale")).toHaveAttribute("data-state", "done");
 
       // Nothing keeps moving: no SMIL, no boo, no running animation longer than a frame.
       await page.evaluate(() => scrollTo({ top: 0, behavior: "instant" }));

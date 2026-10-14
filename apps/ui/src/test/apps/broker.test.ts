@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
-import { BROKER_REQUESTS, createBroker, isJsonValue, jsonValueOf, runnerFor, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
+import { BROKER_REQUESTS, createBroker, STOP_REQUESTS_PER_SECOND, isJsonValue, jsonValueOf, runnerFor, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 
 // covers: apps.web-sandbox
@@ -13,16 +13,17 @@ import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 const REF = "pubkeyalpha/chess";
 const LINK = "link-1";
 
-function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }) {
+function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }, { byReference = false } = {}) {
   const host = memoryHost();
   const posted: { message: Record<string, unknown>; transfer?: Transferable[] }[] = [];
   const stops: AppStopReason[] = [];
   const broker = createBroker({
     host,
-    launch: { ref: REF, version: "1.0.0", title: "Chess", permissions: ["chat"], entry: "<p>app</p>", chat: { linkId: LINK, name: "Ana" }, ...launch },
+    launch: { ref: REF, digest: "d", version: "1.0.0", title: "Chess", permissions: ["chat"], entry: "<p>app</p>", chat: { linkId: LINK, name: "Ana" }, ...launch },
     view: { theme: () => "dark", locale: () => "pt-BR" },
     post: (message, transfer) => posted.push({ message: message as Record<string, unknown>, transfer }),
     stopped: (reason) => stops.push(reason),
+    byReference,
     now: () => clock.t,
   });
   let next = 1;
@@ -232,6 +233,40 @@ describe("requests", () => {
     await vi.waitFor(() => expect(posted.find((p) => p.message.id === 99)?.message).toMatchObject({ ok: true }));
   });
 
+  it("stops an app that sends ten times the rate: nothing more of it is read or answered", async () => {
+    const { broker, host, run, posted, stops, clock } = setup();
+    run();
+    clock.t += 1_001;
+    for (let id = 1; id <= STOP_REQUESTS_PER_SECOND; id++) broker.message({ id, type: "storage.keys", args: [] });
+    expect(stops).toEqual([]);
+    expect(broker.phase).toBe("running");
+    // The one over: read by nothing (a getter on it would throw), the app stopped, its chat closed.
+    const unread = Object.defineProperty({}, "id", { enumerable: true, get() { throw new Error("read"); } });
+    broker.message(unread);
+    expect(stops).toEqual(["protocol"]);
+    expect(broker.phase).toBe("stopped");
+    const before = posted.length;
+    for (let id = 1_000; id < 2_000; id++) broker.message({ id, type: "storage.keys", args: [] });
+    await new Promise((done) => setTimeout(done, 0));
+    expect(posted.length).toBe(before);
+    expect(posted.filter((p) => p.message.error === "too-fast").length).toBe(STOP_REQUESTS_PER_SECOND - MINI_APP_LIMITS.requestsPerSecond);
+    expect(host.calls.filter((c) => c.op === "storage.keys").length).toBe(MINI_APP_LIMITS.requestsPerSecond);
+    expect(host.calls.filter((c) => c.op === "chat.close").length).toBe(1);
+    expect(stops).toEqual(["protocol"]);
+  });
+
+  it("keeps an app that bursts under ten times the rate, second after second", async () => {
+    const { broker, run, stops, clock, ask } = setup();
+    run();
+    for (let second = 0; second < 5; second++) {
+      clock.t += 1_001;
+      for (let i = 0; i < STOP_REQUESTS_PER_SECOND; i++) broker.message({ junk: i });
+    }
+    expect(stops).toEqual([]);
+    clock.t += 1_001;
+    expect(await ask("storage.keys")).toMatchObject({ ok: true });
+  });
+
   it("context: the version, the chat, the client's theme and language, the name only with its permission", async () => {
     const named = setup({ permissions: ["chat", "name"] });
     named.run();
@@ -250,6 +285,82 @@ describe("requests", () => {
     expect(posted[posted.length - 1]!.transfer).toEqual([answer.value]);
     expect(await ask("file", ["../other/app"])).toMatchObject({ ok: false });
     expect(host.calls.filter((c) => c.op === "file").every((c) => c.ref === REF)).toBe(true);
+  });
+
+  it("file: the host's copy is handed over as it is, not copied again; a view on a larger buffer is copied", async () => {
+    // The engine's file() is already a fresh copy: copying it again doubled what a read cost the page.
+    const { host, run, ask } = setup();
+    run();
+    const whole = new Uint8Array([1, 2, 3]);
+    vi.spyOn(host, "file").mockResolvedValueOnce(whole);
+    expect((await ask("file", ["a.bin"])).value).toBe(whole.buffer);
+    const shared = new Uint8Array([9, 4, 5, 6, 9]);
+    vi.spyOn(host, "file").mockResolvedValueOnce(shared.subarray(1, 4));
+    const part = (await ask("file", ["b.bin"])).value as ArrayBuffer;
+    expect(part).not.toBe(shared.buffer);
+    expect(new Uint8Array(part)).toEqual(new Uint8Array([4, 5, 6]));
+  });
+
+  it("file: the in-memory host answers a copy, so a transfer leaves its files whole", async () => {
+    const host = memoryHost();
+    const stored = new Uint8Array([1, 2, 3]);
+    host.files.set(REF, new Map([["a.bin", stored]]));
+    const read = await host.file(REF, "a.bin");
+    expect(read).toEqual(stored);
+    expect(read.buffer).not.toBe(stored.buffer);
+  });
+
+  it("file by reference (Desktop): where the bytes lie instead of the bytes, with the same checks and budget", async () => {
+    const { host, broker, run, ask, posted, clock } = setup({}, { t: 1_000 }, { byReference: true });
+    run();
+    const MiB = 1024 * 1024;
+    host.files.set(REF, new Map([["big.bin", new Uint8Array(6 * MiB)], ["icon.png", new Uint8Array([9])]]));
+    const where = { space: "ghostly-a", id: "app-d", offset: 4096, length: 6 * MiB, sha256: "h" };
+    const asked: string[] = [];
+    host.fileAt = async (ref, path) => { asked.push(`${ref} ${path}`); return path === "big.bin" ? where : null; };
+    const read = vi.spyOn(host, "file");
+    const answer = await ask("file", ["big.bin"]);
+    expect(answer).toEqual({ id: answer.id, ok: true, file: where });
+    expect(posted[posted.length - 1]!.transfer).toBeUndefined();
+    expect(read).not.toHaveBeenCalled();
+    // Where the host cannot say (the icon, kept in memory), the bytes as before.
+    expect(new Uint8Array((await ask("file", ["icon.png"])).value as ArrayBuffer)).toEqual(new Uint8Array([9]));
+    expect(asked).toEqual([`${REF} big.bin`, `${REF} icon.png`]);
+    expect(await ask("file", ["../other/app"])).toMatchObject({ ok: false });
+    // The bytes it names count toward the 16 MiB a second as bytes carried do.
+    clock.t += 1_001;
+    for (let id = 50; id < 54; id++) broker.message({ id, type: "file", args: ["big.bin"] });
+    await vi.waitFor(() => expect(posted.filter((p) => (p.message.id as number) >= 50).length).toBe(4));
+    expect(posted.filter((p) => (p.message.id as number) >= 50).map((p) => p.message.ok === true ? "ok" : p.message.error)).toEqual(["ok", "ok", "ok", "too-fast"]);
+  });
+
+  it("file: at most a bundle's worth of bytes a second, read one file at a time", async () => {
+    // 50 reads a second of a 16 MiB file made the page copy 800 MB a second and stall for most of a second.
+    const { host, broker, run, posted, clock } = setup();
+    run();
+    const big = new Uint8Array(6 * 1024 * 1024);
+    host.files.set(REF, new Map([["big.bin", big], ["small.txt", new Uint8Array([7])]]));
+    let reading = 0;
+    let most = 0;
+    const file = host.file;
+    host.file = async (ref, path) => {
+      most = Math.max(most, ++reading);
+      try { return await file(ref, path); } finally { reading--; }
+    };
+    clock.t += 1_001;
+    for (let id = 1; id <= 10; id++) broker.message({ id, type: "file", args: ["big.bin"] });
+    await vi.waitFor(() => expect(posted.filter((p) => (p.message.id as number) >= 1).length).toBe(10));
+    const answers = (from: number) => posted.filter((p) => (p.message.id as number) >= from).map((p) => p.message);
+    // 6 + 6 + 6 MiB: the third read starts under 16 MiB and is answered whole; the rest are refused unread.
+    expect(answers(1).filter((a) => a.ok === true).length).toBe(3);
+    expect(answers(1).filter((a) => a.error === "too-fast").length).toBe(7);
+    expect(host.calls.filter((c) => c.op === "file").length).toBe(3);
+    expect(most).toBe(1);
+    expect(MINI_APP_LIMITS.fileBytesPerSecond).toBe(16 * 1024 * 1024);
+    // A second later the budget is whole again.
+    clock.t += 1_001;
+    broker.message({ id: 100, type: "file", args: ["small.txt"] });
+    await vi.waitFor(() => expect(posted.find((p) => p.message.id === 100)?.message).toMatchObject({ ok: true }));
   });
 
   it("close ends the app, and closes it in the chat", async () => {
@@ -395,4 +506,26 @@ describe("the runner, from what the person granted", () => {
     run();
     for (const type of ["internet", "permissions", "runner"]) expect(await ask(type, ["internet"])).toMatchObject({ ok: false, error: "unknown-type" });
   });
+});
+
+it("asks the engine as the version it runs: every call goes to the platform of its entry's digest", async () => {
+  const platform = memoryHost();
+  const bound = memoryHost();
+  const digests: string[] = [];
+  platform.running = (digest) => { digests.push(digest); return bound; };
+  const broker = createBroker({
+    host: platform,
+    launch: { ref: REF, digest: "digest-7", version: "1.0.0", title: "Chess", permissions: ["chat"], entry: "<p>app</p>", chat: { linkId: LINK } },
+    view: { theme: () => "dark", locale: () => "en" },
+    post: () => {},
+    stopped: () => {},
+  });
+  broker.load();
+  broker.message({ id: 0, type: "writing", args: [] });
+  broker.load();
+  broker.message({ id: 1, type: "storage.set", args: ["k", 1] });
+  broker.message({ id: 2, type: "chat.send", args: [1] });
+  await vi.waitFor(() => expect(bound.calls.map((c) => c.op)).toEqual(expect.arrayContaining(["chat.open", "storage.set", "chat.send"])));
+  expect(digests).toEqual(["digest-7"]);
+  expect(platform.calls).toEqual([]);
 });

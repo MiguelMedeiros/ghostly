@@ -6,7 +6,7 @@ import { encrypt, tryDecrypt } from "./crypto";
 import { identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify, type Identity } from "./identity";
 import type { LinkParams } from "./invite";
 import type { PairingCredentials } from "./pairedSession";
-import type { TransportDescriptors } from "./pairedTransports";
+import { RELAY_URL, type TransportDescriptors } from "./pairedTransports";
 import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import { sanitizeNick } from "./text";
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrTransport } from "./transport";
@@ -111,11 +111,6 @@ const HEX64 = /^[0-9a-f]{64}$/;
 const SIG = /^[A-Za-z0-9_-]{86}$/;
 const Z32 = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
 const KEY = /^[A-Za-z0-9_-]{43}$/;
-/**
- * A relay server's URL, short: https, or wss for a browser's relay; plain http or ws only on this machine's loopback,
- * as a test relay is (the same rule as the relay settings).
- */
-const RELAY = /^((https|wss):\/\/[^\s]{1,120}|(http|ws):\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?(\/[^\s]{0,100})?)$/;
 const hexToKey = (hex: string) => toBase64Url(Uint8Array.from(hex.match(/../g)!, b => parseInt(b, 16)));
 const keyToHex = (key: string) => Array.from(fromBase64Url(key), b => b.toString(16).padStart(2, "0")).join("");
 
@@ -127,10 +122,10 @@ export function capsDescriptors(descriptors: TransportDescriptors | undefined): 
   const out: CapsDescriptors = {};
   const iroh = descriptors?.["iroh/1"] as { id?: unknown; relay?: unknown } | undefined;
   if (iroh && typeof iroh.id === "string" && HEX64.test(iroh.id))
-    out["iroh/1"] = { id: hexToKey(iroh.id), ...(typeof iroh.relay === "string" && RELAY.test(iroh.relay) ? { relay: iroh.relay } : {}) };
+    out["iroh/1"] = { id: hexToKey(iroh.id), ...(typeof iroh.relay === "string" && RELAY_URL.test(iroh.relay) ? { relay: iroh.relay } : {}) };
   const hyper = descriptors?.["hyperdht/1"] as { publicKey?: unknown; relay?: unknown } | undefined;
   if (hyper && typeof hyper.publicKey === "string" && HEX64.test(hyper.publicKey))
-    out["hyperdht/1"] = { publicKey: hexToKey(hyper.publicKey), ...(typeof hyper.relay === "string" && RELAY.test(hyper.relay) ? { relay: hyper.relay } : {}) };
+    out["hyperdht/1"] = { publicKey: hexToKey(hyper.publicKey), ...(typeof hyper.relay === "string" && RELAY_URL.test(hyper.relay) ? { relay: hyper.relay } : {}) };
   return out;
 }
 
@@ -158,11 +153,11 @@ function parseDescriptors(value: unknown): CapsDescriptors | null {
   const out: CapsDescriptors = {};
   const iroh = raw["iroh/1"], hyper = raw["hyperdht/1"];
   if (iroh !== undefined) {
-    if (!iroh || typeof iroh.id !== "string" || !KEY.test(iroh.id) || (iroh.relay !== undefined && (typeof iroh.relay !== "string" || !RELAY.test(iroh.relay)))) return null;
+    if (!iroh || typeof iroh.id !== "string" || !KEY.test(iroh.id) || (iroh.relay !== undefined && (typeof iroh.relay !== "string" || !RELAY_URL.test(iroh.relay)))) return null;
     out["iroh/1"] = { id: iroh.id, ...(iroh.relay !== undefined ? { relay: iroh.relay as string } : {}) };
   }
   if (hyper !== undefined) {
-    if (!hyper || typeof hyper.publicKey !== "string" || !KEY.test(hyper.publicKey) || (hyper.relay !== undefined && (typeof hyper.relay !== "string" || !RELAY.test(hyper.relay)))) return null;
+    if (!hyper || typeof hyper.publicKey !== "string" || !KEY.test(hyper.publicKey) || (hyper.relay !== undefined && (typeof hyper.relay !== "string" || !RELAY_URL.test(hyper.relay)))) return null;
     out["hyperdht/1"] = { publicKey: hyper.publicKey, ...(hyper.relay !== undefined ? { relay: hyper.relay as string } : {}) };
   }
   return out;

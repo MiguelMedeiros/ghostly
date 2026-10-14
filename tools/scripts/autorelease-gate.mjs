@@ -10,6 +10,7 @@
  *
  * Refuses when the branch:
  * - moved since CI ran, or is not on top of the current main
+ * - carries commits of dev that main does not have (it was rebased onto dev, or cut from it)
  * - touches CI, release, the scanner, this gate or the advisory allowlist
  * - adds a dependency, or takes an existing one from somewhere else (only versions may change)
  * - changes more than MAX_LINES lines outside lock files
@@ -24,7 +25,17 @@ import { appendFileSync } from "node:fs";
 const MAX_LINES = 600;
 const MIN_HOURS = 20;
 const PROTECTED = [/^\.github\//, /^tools\/scripts\/(security-scan|autorelease-gate)\.mjs$/];
-const LOCKFILES = new Set(["package-lock.json", "apps/website/package-lock.json", "Cargo.lock"]);
+// Every lock file the repository ships from: the app and its workspace, the website, the Desktop's HyperDHT sidecar, the
+// HyperDHT relay for browsers and Iroh for browsers. One that is missing here is read as code: a dependency added to it
+// would pass, and its lines would count against MAX_LINES.
+const LOCKFILES = new Set([
+  "package-lock.json",
+  "apps/website/package-lock.json",
+  "native/transports/hyperdht/package-lock.json",
+  "infra/services/hyperdht-relay/package-lock.json",
+  "Cargo.lock",
+  "native/transports/iroh-web/Cargo.lock",
+]);
 const VERSION_FILES = new Set([
   "package.json",
   "apps/web/package.json",
@@ -65,6 +76,13 @@ if (head.commit.sha !== sha) refuse("the branch moved after CI ran");
 const compare = await api(`/compare/main...${sha}`);
 if (compare.behind_by !== 0) refuse(`not on top of main (behind by ${compare.behind_by})`);
 if (compare.files.length >= 300) refuse("too many files changed");
+
+// `dev` holds main (main is merged back after each release), so a commit on dev's tip is on top of main too, with all
+// that dev has not released under it. The newest commit the branch shares with dev must be one main already has: a
+// branch the security routine cut from main shares nothing newer, one rebased onto dev shares dev's tip.
+const shared = (await api(`/compare/dev...${sha}`)).merge_base_commit.sha;
+const unreleased = (await api(`/compare/main...${shared}`)).ahead_by;
+if (unreleased !== 0) refuse(`carries ${unreleased} commit${unreleased === 1 ? "" : "s"} of dev that main does not have`);
 
 const files = compare.files.map((f) => f.filename);
 for (const f of compare.files) {
@@ -109,7 +127,7 @@ const cargoSources = (text) => {
   return sources;
 };
 for (const lock of files.filter((f) => LOCKFILES.has(f))) {
-  const sources = lock === "Cargo.lock" ? cargoSources : npmSources;
+  const sources = lock.endsWith("Cargo.lock") ? cargoSources : npmSources;
   const before = sources(await raw(lock, "main"));
   const after = sources(await raw(lock, sha));
   const added = [...after.keys()].filter((n) => !before.has(n));

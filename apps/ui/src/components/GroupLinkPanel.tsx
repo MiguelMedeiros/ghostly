@@ -80,18 +80,19 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
     {error && <Notice problem={error} className="mt-2 text-xs" />}
   </div>;
 
-  const field = <input readOnly value={url} aria-label={t("group.link.title")} data-testid="group-link-url" onFocus={e => e.currentTarget.select()}
+  const field = <input readOnly dir="ltr" value={url} aria-label={t("group.link.title")} data-testid="group-link-url" onFocus={e => e.currentTarget.select()}
     className={`min-w-0 flex-1 rounded-lg bg-input-bg px-3 font-mono text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent ${large ? "py-2.5 text-xs" : "py-1.5 text-[11px]"}`} />;
   const copyButton = <button onClick={() => void copy()} data-testid="group-link-copy"
-    className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg font-semibold ${large ? "min-h-11 flex-1 bg-surface-alt px-4 text-sm text-text-primary hover:bg-surface-hover" : "bg-surface-alt px-2.5 py-1.5 text-xs text-text-primary hover:bg-surface-hover"}`}>
+    className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg font-semibold ${large ? "min-h-11 flex-1 bg-surface-alt px-4 text-sm text-text-primary hover:bg-surface-hover" : "bg-surface-alt px-2.5 py-1.5 text-xs text-text-primary hover:bg-surface-hover max-md:min-h-11 max-md:px-3"}`}>
     <CopyIcon /><span>{said === "copied" ? t("group.link.copied") : t("common.copy")}</span>
   </button>;
   const shareButtonEl = <button ref={shareButton} onClick={() => void share()} data-testid="group-link-share"
-    className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover ${large ? "min-h-11 flex-1 px-4 text-sm" : "px-2.5 py-1.5 text-xs"}`}>
+    className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover ${large ? "min-h-11 flex-1 px-4 text-sm" : "px-2.5 py-1.5 text-xs max-md:min-h-11 max-md:px-3"}`}>
     <ShareIcon /><span>{said === "shared" ? t("group.link.shared") : t("group.link.share")}</span>
   </button>;
   // For every member who sees the panel, not the admin alone: a community group's member hands its link out too.
-  const qrToggle = <button onClick={() => setShowQr(v => !v)} aria-expanded={showQr} data-testid="group-link-qr-toggle" className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary">{showQr ? t("group.link.hideQr") : t("group.link.showQr")}</button>;
+  // On a phone the panel's everyday buttons (Share, Copy, this one) are a thumb's height, as the two that end the link.
+  const qrToggle = <button onClick={() => setShowQr(v => !v)} aria-expanded={showQr} data-testid="group-link-qr-toggle" className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary max-md:min-h-11 max-md:px-3">{showQr ? t("group.link.hideQr") : t("group.link.showQr")}</button>;
   // On a phone the two that end the shared link are a thumb's height, on a row of their own: not one mis-tap from Show QR.
   const adminControls = group.isAdmin && <div className={`flex flex-wrap gap-1 max-md:basis-full max-md:gap-2 ${large ? "justify-center" : ""}`}>
     <button disabled={busy} onClick={() => setAsking("reset")} data-testid="group-link-reset"
@@ -110,7 +111,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
     {qr}
     <div className="flex">{field}</div>
     <div className="flex gap-2">{shareButtonEl}{copyButton}</div>
-    <p data-testid="group-link-note" className={`rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed ${full ? "text-amber-500" : "text-text-secondary"}`}>{note}</p>
+    <p data-testid="group-link-note" className={`rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed ${full ? "text-warn-ink" : "text-text-secondary"}`}>{note}</p>
     {adminControls}
     {error && <Notice problem={error} className="text-center text-xs" />}
   </div>;
@@ -119,7 +120,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
     <h3 className="text-xs font-bold uppercase tracking-wider text-accent">{t("group.link.title")}</h3>
     <div className="mt-2 flex">{field}</div>
     <div className="mt-2 flex flex-wrap items-center gap-1.5">{shareButtonEl}{copyButton}{qrToggle}{adminControls}</div>
-    <p data-testid="group-link-note" className={`mt-2 text-xs ${full ? "text-amber-500" : "text-text-muted"}`}>{note}</p>
+    <p data-testid="group-link-note" className={`mt-2 text-xs ${full ? "text-warn-ink" : "text-text-muted"}`}>{note}</p>
     {showQr && qr}
     {error && <Notice problem={error} className="mt-2 text-xs" />}
   </div>;

@@ -45,9 +45,29 @@ describe("transport switch: peer policy parsing", () => {
 
   it("keeps only native descriptors from a peer policy", () => {
     const h = peers();
-    h.switches[0].handle({ t: "paired-policy", context: "ctx", policy: { ...good, descriptors: { "iroh/1": "i", "webrtc/1": "w", "__proto__x": 1 } } });
-    expect(h.switches[0].peerPolicy?.descriptors).toEqual({ "iroh/1": "i" });
+    const iroh = { id: "ab".repeat(32), relay: "https://relay.test./", addresses: ["192.168.1.10:4433", "[fe80::1]:4433"] };
+    h.switches[0].handle({ t: "paired-policy", context: "ctx", policy: { ...good, descriptors: { "iroh/1": iroh, "webrtc/1": "w", "__proto__x": 1 } } });
+    expect(h.switches[0].peerPolicy?.descriptors).toEqual({ "iroh/1": iroh });
     expect(h.peer[0]).toHaveBeenLastCalledWith(expect.objectContaining({ revision: 5 }));
+  });
+
+  it("leaves out a descriptor that is not what an adapter makes, and keeps the policy", () => {
+    const h = peers();
+    const hyper = { publicKey: "cd".repeat(32), relayed: true, relay: "wss://relay.test/" };
+    for (const [iroh, hyperdht] of [
+      [{ id: 42, relay: "http://192.168.1.10:8080/x" }, { publicKey: "not a key", relay: "ftp://relay.test" }],
+      [{ id: "ab".repeat(32), relay: "http://192.168.1.10:8080/x", addresses: [] }, { publicKey: "cd".repeat(32), relay: "ws://192.168.1.10/" }],
+      [{ id: "ab".repeat(32), relay: null, addresses: ["relay.test:443"] }, { publicKey: "CD".repeat(32) }],
+      [{ id: "ab".repeat(32), relay: null, addresses: Array(9).fill("10.0.0.1:1") }, { publicKey: "cd".repeat(32), relayed: "yes" }],
+      ["iroh", ["cd".repeat(32)]],
+    ] as const) {
+      h.switches[0].handle({ t: "paired-policy", context: "ctx", policy: { ...good, revision: 6, descriptors: { "iroh/1": iroh, "hyperdht/1": hyperdht } } });
+      expect(h.switches[0].peerPolicy?.descriptors).toEqual({});
+    }
+    expect(h.switches[0].peerPolicy?.revision).toBe(6);
+    // One bad descriptor does not take the other with it, and a field no adapter makes is not kept.
+    h.switches[0].handle({ t: "paired-policy", context: "ctx", policy: { ...good, revision: 7, descriptors: { "iroh/1": { id: "x" }, "hyperdht/1": { ...hyper, more: { x: 1 } } } } });
+    expect(h.switches[0].peerPolicy?.descriptors).toEqual({ "hyperdht/1": hyper });
   });
 
   it("ignores an older revision and accepts a newer one", () => {

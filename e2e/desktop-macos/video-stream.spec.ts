@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import { makeBigVideo, type BigVideo } from "../support/bigVideo";
 import { forgetSharedData, openMacDesktop, type MacDesktop } from "../support/desktopMac";
-import { fullscreenInPage, playFromStore, servePieces, servedRequests, storeInApp } from "../support/streamCheck";
+import { framesAfterSeek, fullscreenInPage, playFromStore, servePieces, servedRequests, storeInApp } from "../support/streamCheck";
 
 /**
  * A video too large for the page (#381: over 64 MiB, `NATIVE_BLOB_MAX`) plays and seeks in the Desktop app on a Mac,
@@ -57,7 +57,10 @@ test("a 100 MB video plays and seeks from the stored file, a range at a time", {
   expect(report.playedTo).toBeGreaterThan(1);
   expect(report.seekedTo).toBeGreaterThanOrEqual(89.5);
   expect(report.playedAfterSeek).toBeGreaterThan(91);
-  if (report.frames! >= 0) expect(report.frames).toBeGreaterThan(report.framesBeforeSeek!);
+  // New frames after the seek, where WKWebView counts them. A count still at 0 after a second of playing says nothing
+  // of the seek: then the engine at least holds a frame of where it played to.
+  expect(framesAfterSeek(report)).not.toBe("no new frame");
+  if (framesAfterSeek(report) === "not counted") expect(report.readyAfterSeek).toBeGreaterThanOrEqual(2);
 
   const served = servedRequests(readFileSync(`${DIR}/requests.log`, "utf8"));
   test.info().annotations.push({ type: "requests", description: JSON.stringify(served.slice(0, 60)) });

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { AppStoreSummary, InstalledAppView } from "@ghostly/browser/engine/apps";
+import type { AppStoreSummary, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import type { AppListing } from "@ghostly/core";
 import { Block, Page, PageAction, Section } from "../components/layout";
 import { Button, Notice } from "../components/wallet/ui";
@@ -14,7 +14,7 @@ import { AppInstallDialog, InstalledAppDialog } from "../components/apps/AppInst
 import { AddAppDialog } from "../components/apps/AddAppDialog";
 import { AppChatPicker } from "../components/apps/AppChatPicker";
 import { useAppsState } from "../lib/apps/flag";
-import { refreshInstalledApps, useInstalledApps } from "../lib/apps/installed";
+import { refreshInstalledApps, useBuiltInApps, useInstalledApps } from "../lib/apps/installed";
 import { openApp, type OpenAppOptions } from "../lib/apps/open";
 import { appErrorText } from "../lib/apps/errors";
 import { date } from "../lib/identities";
@@ -31,7 +31,9 @@ function appHint(app: InstalledAppView, t: Translate): { text: string; tone: "mu
   if (app.run.status === "revoked" || app.run.status === "removed") return { text: t("apps.app.stopped"), tone: "danger" };
   if (app.run.status === "needs-files") return { text: t("apps.app.needsFiles"), tone: "warning" };
   if (app.pending) return { text: t("apps.app.updateAsks"), tone: "warning" };
-  if (app.unknownPublisher) return { text: `${app.tagline} · ${t("apps.install.unknownPublisher")}`, tone: "muted" };
+  // The version this client's own list pins is no stranger's (WISP 1200 § Built-in apps).
+  // What the row is there to say comes first: on a phone the one line is cut at its end, and a tagline is long.
+  if (app.unknownPublisher && !app.builtIn) return { text: `${t("apps.install.unknownPublisher")} · ${app.tagline}`, tone: "muted" };
   return { text: app.tagline, tone: "muted" };
 }
 
@@ -53,6 +55,29 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
         </span>
       </button>
       {app.run.status === "ok" && <Button data-testid="installed-app-open" onClick={onOpen}>{t("apps.page.open")}</Button>}
+    </div>
+  );
+}
+
+/**
+ * An app that comes with Ghostly and was never opened here (WISP 1200 § Built-in apps): nothing of it is installed yet.
+ * Open is the install screen with what it asks; Remove takes it off the list for good (it stays in the store).
+ */
+function BuiltInRow({ app, busy, onOpen, onRemove }: { app: BuiltInAppOffer; busy: boolean; onOpen: () => void; onRemove: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" data-testid="built-in-app" data-ref={app.ref}>
+      <div className="flex items-center gap-3 min-w-0 flex-[1_1_12rem]">
+        <AppIcon />
+        <span className="min-w-0">
+          <span dir="auto" className="block text-sm text-text-primary truncate">{app.title}</span>
+          <span dir="auto" data-testid="built-in-app-hint" className="block text-xs text-text-muted truncate">{t("apps.builtIn.hint")} · {app.tagline}</span>
+        </span>
+      </div>
+      <div className="flex items-center gap-2 ms-auto">
+        <Button data-testid="built-in-app-remove" disabled={busy} aria-label={t("apps.builtIn.removeNamed", { title: app.title })} onClick={onRemove}>{t("apps.builtIn.remove")}</Button>
+        <Button variant="primary" data-testid="built-in-app-open" disabled={busy} aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={onOpen}>{t("apps.page.open")}</Button>
+      </div>
     </div>
   );
 }
@@ -130,7 +155,7 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
             <Fingerprint value={store.fingerprint} />
           </span>
           {!read && <span className="block text-xs text-text-muted">{t("apps.store.notRead")}</span>}
-          {store.expired && store.fetchedAt !== undefined && <span data-testid="app-store-stale" className="block text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires ?? 0) })}</span>}
+          {store.expired && store.fetchedAt !== undefined && <span data-testid="app-store-stale" className="block text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires ?? 0, t.language) })}</span>}
           {store.problem && <span data-testid="app-store-problem" className="block text-xs text-danger">{t("apps.store.problem")}</span>}
         </button>
         <div className="flex items-center gap-2">
@@ -185,32 +210,36 @@ export function Apps() {
   const available = state === "on";
   const { t } = useI18n();
   const installed = useInstalledApps(available);
+  const builtIns = useBuiltInApps(available);
   const [stores, setStores] = useState<AppStoreSummary[] | null>(null);
   const [adding, setAdding] = useState(false);
   const [details, setDetails] = useState<string | null>(null);
   const [installing, setInstalling] = useState<{ store: string; listing: AppListing } | null>(null);
+  // A built-in app opened for the first time: its install screen, then it opens.
+  const [first, setFirst] = useState<BuiltInAppOffer | null>(null);
+  const [removing, setRemoving] = useState(false);
   const [picking, setPicking] = useState<{ app: InstalledAppView; options?: OpenAppOptions } | null>(null);
   // Installed from a listing or a pasted link: what had the focus is gone, so it goes to the app's row (its Open), not the page.
   const [justInstalled, setJustInstalled] = useState<string | null>(null);
   useEffect(() => {
-    if (!justInstalled || installing) return;
+    if (!justInstalled || installing || first) return;
     const row = document.querySelector(`[data-testid=installed-app][data-ref="${CSS.escape(justInstalled)}"]`);
     const target = row?.querySelector<HTMLElement>("[data-testid=installed-app-open]") ?? row?.querySelector<HTMLElement>("button");
     if (!target) return;
     target.focus({ preventScroll: true });
     setJustInstalled(null);
-  }, [justInstalled, installing, installed]);
+  }, [justInstalled, installing, first, installed]);
   // An app uninstalled or a store removed: the control that had the focus went with its row, so the focus goes to Add
   // rather than being lost on the page. Only once the row is gone and its screen closed, and only if nothing has it.
   const [gone, setGone] = useState<{ app: string } | { store: string } | null>(null);
   useEffect(() => {
     if (!gone || details) return;
-    if ("app" in gone ? installed?.some((a) => a.ref === gone.app) : stores?.some((s) => s.key === gone.store)) return;
+    if ("app" in gone ? installed?.some((a) => a.ref === gone.app) || builtIns.some((a) => a.ref === gone.app) : stores?.some((s) => s.key === gone.store)) return;
     setGone(null);
     const active = document.activeElement;
     if (active && active !== document.body && active.isConnected) return;
     document.querySelector<HTMLElement>("[data-testid=apps-add]")?.focus({ preventScroll: true });
-  }, [gone, details, installed, stores]);
+  }, [gone, details, installed, builtIns, stores]);
   const notice = useToast();
   const { show } = notice;
   const fail = useCallback((e: unknown) => show(appErrorText(e, t)), [show, t]);
@@ -231,14 +260,22 @@ export function Apps() {
     else setPicking({ app, ...(options && { options }) });
   };
   const shown = details ? installed?.find((a) => a.ref === details) : undefined;
+  // Removed, never opened: nothing to export, and the store still has it. It is not offered again.
+  const removeBuiltIn = async (app: BuiltInAppOffer) => {
+    setRemoving(true);
+    try { await engine.call("appUninstall", { ref: app.ref }); setGone({ app: app.ref }); await refreshInstalledApps(); } catch (e) { fail(e); } finally { setRemoving(false); }
+  };
   return (
     <Page title={t("apps.title")} width="md" testId="apps-page" overlay={<Toast toast={notice.toast} onDismiss={notice.dismiss} place="page" />}
       trailing={<PageAction label={t("apps.page.add")} title={t("apps.page.addHint")} testId="apps-add" onClick={() => setAdding(true)} />}>
       <p className="text-sm text-text-secondary">{t("apps.page.intro")}</p>
       <Section title={t("apps.page.installed")} testId="apps-installed">
         {installed === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
-          : installed.length === 0 ? <Block testId="apps-none"><Notice>{t("apps.page.none")}</Notice></Block>
-            : installed.map((app) => <InstalledRow key={app.ref} app={app} onDetails={() => setDetails(app.ref)} onOpen={() => open(app)} />)}
+          : installed.length === 0 && builtIns.length === 0 ? <Block testId="apps-none"><Notice>{t("apps.page.none")}</Notice></Block>
+            : <>
+              {installed.map((app) => <InstalledRow key={app.ref} app={app} onDetails={() => setDetails(app.ref)} onOpen={() => open(app)} />)}
+              {builtIns.map((app) => <BuiltInRow key={app.ref} app={app} busy={removing} onOpen={() => setFirst(app)} onRemove={() => void removeBuiltIn(app)} />)}
+            </>}
       </Section>
       <Section title={t("apps.page.stores")} testId="apps-stores">
         {stores === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
@@ -249,6 +286,10 @@ export function Apps() {
       {adding && <AddAppDialog onClose={() => setAdding(false)} onStoreAdded={() => void reloadStores()} onInstalled={(app) => setJustInstalled(app.ref)} />}
       {shown && <InstalledAppDialog app={shown} onClose={() => setDetails(null)} onOpen={open} onUninstalled={() => setGone({ app: shown.ref })} />}
       {picking && <AppChatPicker app={picking.app} options={picking.options} onClose={() => setPicking(null)} />}
+      {first && (
+        <AppInstallDialog source={{ builtIn: first.ref }} title={first.title} openAfter onClose={() => setFirst(null)}
+          onInstalled={(app) => { setJustInstalled(app.ref); open(app); }} />
+      )}
       {installing && (
         <AppInstallDialog source={{ store: installing.store, ref: installing.listing.ref }} title={installing.listing.title} onClose={() => setInstalling(null)}
           onInstalled={(app) => setJustInstalled(app.ref)} />

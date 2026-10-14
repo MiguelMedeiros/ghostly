@@ -4,6 +4,24 @@
   "copyInvite": "Copier le code d'invitation",
   "deleteAllChats": "Supprimer toutes les discussions",
   "deleteChat": "Supprimer la discussion",
+  "folder": {
+    "byLatest": "Trier par dernier message",
+    "create": "Créer",
+    "delete": "Supprimer le dossier",
+    "deleteBody": "Ses discussions ne sont pas supprimées. Elles reviennent dans la liste, sans dossier.",
+    "deleteTitle": "Supprimer le dossier « {{name}} » ?",
+    "empty": "Aucune discussion dans ce dossier pour l'instant",
+    "move": "Déplacer vers un dossier…",
+    "nameLabel": "Nom du dossier",
+    "new": "Nouveau dossier…",
+    "newTitle": "Nouveau dossier",
+    "none": "Aucun dossier",
+    "options": "Options du dossier {{name}}",
+    "others": "Autres discussions",
+    "rename": "Renommer le dossier",
+    "unreadCount": "{{count}} non lus dans {{name}}",
+    "unreadOne": "1 non lu dans {{name}}"
+  },
   "group": {
     "adminAnswered": "L'app de l'admin a répondu…",
     "answerFailed": "Cela n'a pas abouti. Réessayez.",
@@ -12,6 +30,8 @@
     "inviterAway": "{{contact}} n'est pas encore connecté. Réessayez dans un instant.",
     "inviterAwayUnknown": "Le contact qui vous a invité n'est pas encore connecté. Réessayez dans un instant.",
     "letting": "Un membre vous fait entrer…",
+    "takenBack": "Invitation retirée",
+    "unanswered": "L'app de la personne qui vous a invité n'a pas répondu. Acceptez à nouveau, ou refusez.",
     "waitingAdmin": "En attente de l'app de l'admin…",
     "waitingIn": "En attente d'être admis…"
   },
@@ -22,6 +42,8 @@
   "newMenu": {
     "chat": "Discussion",
     "chatHint": "Une personne, avec une invitation",
+    "folder": "Dossier",
+    "folderHint": "Une section de votre liste de discussions",
     "group": "Groupe",
     "groupHint": "Un lien que tout le monde peut ouvrir",
     "label": "Créer un groupe ou une discussion"

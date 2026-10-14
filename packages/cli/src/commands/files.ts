@@ -1,4 +1,4 @@
-import { GROUP_FILE_LIMITS } from "@ghostly/core";
+import { GROUP_FILE_LIMITS } from "@ghostly/core/groupFiles";
 import { type Command, here, reply } from "./shared";
 
 /** Files: one entry per command, in alphabetical order (test/commands.test.ts checks). */

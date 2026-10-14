@@ -105,6 +105,35 @@ describe("a private group catches up a member from whoever is there", { timeout:
     for (const { to, at } of syncs) expect(syncs.filter(s => s.to === to && s.at > at - 60_000 && s.at <= at).length).toBeLessThanOrEqual(8);
   });
 
+  it("a member back with all its edges up at once gets 256 of one author in about a minute, though the gossip turn asks the author", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
+    const dave = peers[3]!;
+    const syncs: { to: string; at: number }[] = [];
+    world.drop = (from, to, frame) => { if (from === dave && frame.t === "group-sync") syncs.push({ to: to.name, at: world.now }); return false; };
+    // A restarted app's first gossip turn asks the same member each time (its turns start over): the second time, that
+    // member is the author, whatever its key made it.
+    let author = peers[0]!, asked = "";
+    for (let round = 0; round < 2; round++) {
+      dave.online = false;
+      await world.run(2_000);
+      const mine = (t: string) => t.startsWith(`${author.name} ${round}.`);
+      for (let i = 0; i < 256; i++) await author.groups.send(id, `${author.name} ${round}.${i}`);
+      await world.run(2_000);
+      const back = world.now;
+      syncs.length = 0;
+      await world.restart(dave);
+      await world.until(() => world.texts(dave, id).filter(mine).length === 256, 10 * 60_000, 1000,
+        () => `round ${round}: dave has ${world.texts(dave, id).filter(mine).length} of 256`);
+      const took = world.now - back;
+      // The syncs as the edges open (at 1 s) ask for nothing yet; the gossip turn's comes next.
+      asked = syncs.find(s => s.at - back >= 2_000)?.to ?? "";
+      // The author's answer (its last 32) shows the 224 below them: another member is asked ten seconds later, not a gossip turn.
+      expect(took, `round ${round}, the gossip turn asked ${asked}`).toBeLessThan(MESH_GOSSIP_MS + 3 * MESH_GAP_AGAIN_MS);
+      author = peers.find(p => p.name === asked) ?? author;
+    }
+    expect(asked).toBe(author.name);
+  });
+
   it("a member asks each other member once for messages nobody holds, not every gossip turn", async () => {
     const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
     const [alice, , , dave] = peers;
@@ -119,6 +148,22 @@ describe("a private group catches up a member from whoever is there", { timeout:
     await world.run(MESH_GOSSIP_MS * 6);
     expect(world.texts(dave, id).filter(t => t.startsWith("alice "))).toHaveLength(2);
     // Bob and Carol, once each; Alice is not asked for her own.
+    expect(asks.sort()).toEqual(["bob", "carol"]);
+  });
+
+  it("a member asks each other member once for messages nobody holds, though their author goes on writing", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
+    const [alice, , , dave] = peers;
+    const aliceKey = world.view(alice, id)!.myKey!;
+    const asks: string[] = [];
+    world.drop = (from, to, frame) => {
+      if (from === dave && frame.t === "group-sync" && Array.isArray(frame.ask) && frame.ask.includes(aliceKey)) asks.push(to.name);
+      return from === alice && frame.t === "group-msg" && (frame.n as number) < 10;
+    };
+    for (let i = 0; i < 12; i++) await alice.groups.send(id, `alice ${i}`);
+    // A message every twenty seconds for six gossip turns: each arrives, and none of them is one of the ten missing.
+    for (let i = 12; i < 30; i++) { await alice.groups.send(id, `alice ${i}`); await world.run(MESH_GOSSIP_MS / 3); }
+    expect(world.texts(dave, id).filter(t => t.startsWith("alice "))).toHaveLength(20);
     expect(asks.sort()).toEqual(["bob", "carol"]);
   });
 

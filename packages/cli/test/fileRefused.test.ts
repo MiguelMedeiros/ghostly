@@ -36,4 +36,13 @@ describe("file send refused by the engine", () => {
     expect(node.sendFile).toHaveBeenCalledOnce();
     expect(await fileStore.listForLink("chat-one")).toEqual([]);
   });
+
+  it("a chat or group nobody has is not_found, naming both", async () => {
+    const node = { getState: () => ({ links: [link], groups: [], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState, sendFile: vi.fn() };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+    const path = join(dir, "note.txt");
+    writeFileSync(path, "boo");
+    await expect(callApi(ctx, "file.send", { chat: "alcie", path })).rejects.toMatchObject({ code: "not_found", message: 'No chat or group "alcie" (ghostly chat list, ghostly group list)' });
+    expect(node.sendFile).not.toHaveBeenCalled();
+  });
 });

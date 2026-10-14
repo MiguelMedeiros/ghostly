@@ -1,5 +1,5 @@
 import { useEffect, useId, useState } from "react";
-import { FAILURES, dayText, handoffErrorKey, handoffErrorWallet, sizeText, useHandoffView, walletNameOf } from "../../lib/handoff";
+import { FAILURES, dayText, handoffProblem, sizeText, useHandoffView, walletNameOf } from "../../lib/handoff";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
 import { meteredConnection } from "@ghostly/browser/devices/handoffHost";
@@ -11,7 +11,7 @@ import { InfoButton } from "../layout/Section";
 import { DeviceDialog, field, primaryButton, quietButton } from "./DeviceDialog";
 import { type Problem, problemText } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
-import { said, nextOf } from "../../lib/notices";
+import { nextOf } from "../../lib/notices";
 
 /*
  * The handoff's screens (WISP 06 § User experience, "Handoff progress", "Failures"): Use here with the password on a
@@ -44,7 +44,7 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
     // A wake push went to the other device (a phone that suspended the app): the person opens Ghostly there.
     : view.step === "connecting" ? (view.woken ? t("devices.handoff.fail.woken", { device }) : t("devices.handoff.step.connecting", { device }))
       : view.step === "authorizing" ? t("devices.handoff.step.authorizing")
-        : view.step === "copying" ? t("devices.handoff.step.copying", { done: sizeText(view.bytes, t), total: sizeText(view.total, t) })
+        : view.step === "copying" ? t("devices.handoff.step.copy")
           : view.step === "paused" ? t("devices.handoff.step.paused", { percent })
             : view.step === "ready" ? t("devices.handoff.step.ready")
               : view.step === "rest" ? t("devices.handoff.step.rest")
@@ -54,6 +54,8 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
                       : view.step === "finishing" ? t("devices.handoff.step.finishing")
                         : done ? (view.role === "taker" ? t("devices.handoff.step.done") : t("devices.handoff.step.doneGiver", { device }))
                           : t("devices.handoff.step.connecting", { device });
+  // Beside the line and not in it: the line is read aloud when it changes, and the bytes change at every read of the copy.
+  const amount = view.step === "copying" ? t("devices.handoff.step.copyAmount", { done: sizeText(view.bytes, t), total: sizeText(view.total, t) }) : undefined;
   const cancellable = !failed && ["connecting", "authorizing", "copying", "paused", "ready", "rest", "checking"].includes(view.step);
   const current = STEP_OF[view.step];
   const at = current ? STEPS.indexOf(current) : done ? STEPS.length : -1;
@@ -79,11 +81,14 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
                 {state === "now" ? (
                   <span className="min-w-0 flex-1 space-y-1.5">
                     <span className="flex items-start gap-1.5">
-                      <span data-testid="handoff-line" role="status" className="min-w-0 break-words text-text-primary">{line}</span>
+                      <span className="min-w-0 break-words text-text-primary">
+                        <span data-testid="handoff-line" role="status">{line}</span>
+                        {amount && <span data-testid="handoff-amount"> · {amount}</span>}
+                      </span>
                       {step === "settling" && <InfoButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="handoff-settle-info" className="mt-px" />}
                     </span>
                     {(view.step === "copying" || view.step === "rest" || view.step === "paused") && view.total > 0 && (
-                      <span role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-label={t("devices.handoff.step.copy")} className="block h-1.5 w-full overflow-hidden rounded-full bg-border">
+                      <span role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} aria-valuetext={amount} aria-label={t("devices.handoff.step.copy")} className="block h-1.5 w-full overflow-hidden rounded-full bg-border">
                         <span className="block h-full bg-accent transition-[width]" style={{ width: `${percent}%` }} />
                       </span>
                     )}
@@ -129,7 +134,7 @@ export function UseHereDialog({ device, onClose, onStarted }: { device: string; 
   const submit = async () => {
     setBusy(true); setError(null);
     try { onStarted(await engine.call("deviceHandoffPull", { password, later: later ? HANDOFF_LATER_BYTES : 0 })); onClose(); }
-    catch (cause) { const key = handoffErrorKey(cause); setError(key ? said(key, t, { device, wallet: handoffErrorWallet(cause) ?? "" }) : problemText(cause, t)); }
+    catch (cause) { setError(handoffProblem(cause, t, { device }) ?? problemText(cause, t)); }
     finally { setBusy(false); }
   };
   return (
@@ -155,7 +160,13 @@ export function HandoffOffer({ view }: { view: HandoffView }) {
   const { t } = useI18n();
   const device = view.device || t("devices.join.otherDevice");
   const [busy, setBusy] = useState(false);
-  const act = (work: () => Promise<unknown>) => { setBusy(true); void work().finally(() => setBusy(false)); };
+  const [error, setError] = useState<Problem | null>(null);
+  // The engine refuses when the offer is gone or the copy has nowhere to go: said under the buttons, as Use here's dialog does.
+  const act = (work: () => Promise<unknown>) => {
+    setBusy(true); setError(null);
+    void work().catch((cause: unknown) => { setError(handoffProblem(cause, t, { device }) ?? problemText(cause, t)); })
+      .finally(() => setBusy(false));
+  };
   return (
     <div data-testid="handoff-offer" className="space-y-3">
       <div className="space-y-1">
@@ -166,6 +177,7 @@ export function HandoffOffer({ view }: { view: HandoffView }) {
         <button type="button" data-testid="handoff-decline" disabled={busy} onClick={() => act(() => engine.call("deviceHandoffCancel"))} className={`${quietButton} max-sm:order-last`}>{t("devices.handoff.notNow")}</button>
         <button type="button" data-testid="handoff-accept" disabled={busy} onClick={() => act(() => engine.call("deviceHandoffAccept", { later: meteredConnection() ? HANDOFF_LATER_BYTES : 0 }))} className={primaryButton}>{t("devices.handoff.useHere")}</button>
       </div>
+      {error && <Notice problem={error} testId="handoff-offer-error" className="" />}
     </div>
   );
 }
@@ -178,8 +190,7 @@ export function MoveDialog({ device, deviceKey, onClose }: { device: string; dev
   const view = useHandoffView(started);
   useEffect(() => {
     void engine.call("deviceHandoffPush", { key: deviceKey }).then(() => setStarted(true), (cause: unknown) => {
-      const key = handoffErrorKey(cause);
-      setError(key ? said(key, t, { device, wallet: handoffErrorWallet(cause) ?? "" }) : problemText(cause, t));
+      setError(handoffProblem(cause, t, { device }) ?? problemText(cause, t));
     });
   }, [deviceKey, device, t]);
   return (

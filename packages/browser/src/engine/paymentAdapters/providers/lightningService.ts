@@ -116,6 +116,8 @@ export class LightningService {
   private passes: Promise<void> = Promise.resolve();
   private stopped = false;
   private recent: LightningOpView[] = [];
+  /** Operations written in this run (`put`): a reconcile pass that wrote one is news, recent or not. */
+  private writes = 0;
   /** Lightning addresses and LNURLs resolved, until an amount is chosen for them. */
   private readonly lnurls = new Map<string, { params: LnurlPayParams; at: number }>();
 
@@ -277,6 +279,7 @@ export class LightningService {
   private async reconcileOnce(): Promise<void> {
     if (this.stopped) return;
     let again = 0;
+    const writes = this.writes;
     try {
       const provider = this.sources.active, providerId = this.sources.activeId;
       for (const op of await this.list()) {
@@ -327,8 +330,8 @@ export class LightningService {
         }
       }
     } finally {
-      await this.loadRecent();
-      this.events.changed();
+      // Only a pass that settled something, or whose recent list reads otherwise, is news to the wallet view.
+      if (await this.loadRecent() || this.writes !== writes) this.events.changed();
       if (again) this.schedule(again);
     }
   }
@@ -353,7 +356,7 @@ export class LightningService {
   }
 
   private async get(direction: LightningOp["direction"], hash: string) { return wrap<LightningOp | undefined>((await store(STORES.settings, "readonly")).get(opKey(direction, hash))); }
-  private async put(op: LightningOp) { await transact([STORES.settings], (s) => { s[STORES.settings].put(op, opKey(op.direction, op.paymentHash)); }); }
+  private async put(op: LightningOp) { this.writes++; await transact([STORES.settings], (s) => { s[STORES.settings].put(op, opKey(op.direction, op.paymentHash)); }); }
   list(): Promise<LightningOp[]> { return readLightningJournal(); }
 
   /** Crash recovery: a spend journaled as `sending` never got its answer written, so its outcome is unknown. */
@@ -362,8 +365,11 @@ export class LightningService {
     this.schedule(0);
   }
 
-  private async loadRecent() {
+  /** True when the recent list reads otherwise than before. */
+  private async loadRecent(): Promise<boolean> {
+    const was = this.recent;
     this.recent = (await this.list()).filter((op) => this.owns(op)).sort((a, b) => b.createdAt - a.createdAt).slice(0, RECENT)
       .map(({ ref: _ref, note: _note, selfSettled: _self, ...view }) => view);
+    return JSON.stringify(was) !== JSON.stringify(this.recent);
   }
 }

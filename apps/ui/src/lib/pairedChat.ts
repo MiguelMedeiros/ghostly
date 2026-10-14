@@ -1,6 +1,7 @@
 import { createChatInvite, type LinkParams } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { ensureSession } from "./storage";
+import { reportChatNotStored } from "./chatNotStored";
 
 /**
  * Default for new chats: a `ghostly1` invite (WISP 801); this side keeps the participation seed whose public
@@ -10,10 +11,17 @@ import { ensureSession } from "./storage";
  */
 export async function createPairedChat(): Promise<string> {
   const { mine, inviteCode } = await takeInvite();
-  const sessionId = ensureSession(
-    { seedB64: mine.seedB64, peerPubKeyB64: mine.peerPubKeyZ32, encKeyB64: mine.encKeyB64, profile: "paired-chat/1", participationSeedB64: mine.participationSeedB64 },
-    { inviteCode },
-  );
+  let sessionId: string;
+  try {
+    sessionId = ensureSession(
+      { seedB64: mine.seedB64, peerPubKeyB64: mine.peerPubKeyZ32, encKeyB64: mine.encKeyB64, profile: "paired-chat/1", participationSeedB64: mine.participationSeedB64 },
+      { inviteCode },
+    );
+  } catch (cause) {
+    // No room to store it: said once for the whole app, whichever button asked.
+    reportChatNotStored(cause);
+    throw cause;
+  }
   window.dispatchEvent(new Event("session-updated"));
   return sessionId;
 }

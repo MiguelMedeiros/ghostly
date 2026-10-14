@@ -20,6 +20,10 @@
     "sendFailed": "No se pudo enviar",
     "shareHint": "Compartir el enlace del grupo",
     "shareLink": "Compartir enlace",
+    "takenBack": "{{contact}} retiró la invitación a {{name}}",
+    "takenBackNext": "Pide a {{contact}} una nueva invitación o el enlace del grupo.",
+    "takenBackNextUnknown": "Pide al admin del grupo una nueva invitación o el enlace del grupo.",
+    "takenBackUnknown": "Se retiró la invitación a {{name}}",
     "unnamed": "Un grupo"
   },
   "connection": {
@@ -63,6 +67,7 @@
     "forked": "El historial de miembros se bifurcó",
     "gone": "{{name}} ya no es miembro",
     "joined": "{{name}} se unió",
+    "left": "{{name}} salió",
     "pictureChanged": "{{name}} cambió la foto del grupo",
     "pictureChangedNoName": "Se cambió la foto del grupo",
     "pictureChangedYou": "Cambiaste la foto del grupo",
@@ -76,6 +81,15 @@
     "rotated": "Claves renovadas: una nueva época",
     "youJoined": "Te uniste.",
     "youJoinedAgain": "Te uniste de nuevo."
+  },
+  "forget": {
+    "invitation": "La invitación se borra de este dispositivo. {{contact}} sabrá que la rechazaste.",
+    "invitationKept": "La invitación y el historial del grupo se borran de este dispositivo. {{contact}} sabrá que la rechazaste.",
+    "invitationKeptUnknown": "La invitación y el historial del grupo se borran de este dispositivo. El contacto que la envió sabrá que la rechazaste.",
+    "invitationUnknown": "La invitación se borra de este dispositivo. El contacto que la envió sabrá que la rechazaste.",
+    "joining": "Dejas de pedir entrar, y el grupo se borra de este dispositivo.",
+    "kept": "El grupo y su historial se borran de este dispositivo.",
+    "takenBack": "La invitación se borra de este dispositivo. Fue retirada, así que no se avisa a nadie."
   },
   "hubs": {
     "auto": "Hub si está siempre activo",
@@ -116,6 +130,8 @@
   "leave": {
     "blocked": "Nadie está en línea para ser admin",
     "blockedCommunity": "Nadie está en línea para registrar tu salida",
+    "blockedCommunityAdminForgetNext": "Espera a que un miembro esté en línea, o quita antes a los miembros, o haz admin a uno de ellos.",
+    "blockedCommunityAdminNext": "Espera a que un miembro esté en línea, o quita antes a los miembros.",
     "blockedCommunityNext": "Inténtalo en un momento.",
     "blockedNext": "Nombra a alguien admin o espera a un miembro.",
     "body": "El grupo y su historial se van de este dispositivo. No leerás lo que se diga después, y para volver alguien tendrá que dejarte entrar de nuevo.",
@@ -125,7 +141,8 @@
     "forgetTitleUnnamed": "¿Eliminar este grupo?",
     "successor": "Eres el admin: {{name}} pasa a ser el admin cuando salgas.",
     "title": "¿Salir de {{name}}?",
-    "titleUnnamed": "¿Salir de este grupo?"
+    "titleUnnamed": "¿Salir de este grupo?",
+    "unsaidNext": "Se borra de este dispositivo igualmente. Los demás aún te verán como miembro."
   },
   "link": {
     "broken": "Este enlace a un grupo no funciona",
@@ -137,6 +154,7 @@
     "disableTitle": "¿Desactivar el enlace?",
     "enable": "Activar el enlace",
     "enableFailed": "No se pudo activar el enlace",
+    "endsOnHandover": "El enlace compartido hasta ahora deja de funcionar. {{name}} puede compartir uno nuevo.",
     "full": "El grupo está lleno ({{count}} de {{count}}). Nadie entra hasta que alguien salga.",
     "fullShort": "El grupo está lleno",
     "hideQr": "Ocultar QR",
@@ -187,7 +205,7 @@
     "invited": "Invitado…",
     "makeAdmin": "Ceder admin",
     "missing": "{{count}} faltan",
-    "missingHint": "Mensajes de esta época que nadie pudo recuperar",
+    "missingHint": "Mensajes de esta época que aún no llegaron",
     "needsBothHint": "Los grupos necesitan ambas apps conectadas y actualizadas",
     "needsUpdate": "Necesita un Ghostly actualizado",
     "noContacts": "Todos tus contactos emparejados ya están dentro, o aún no tienes ninguno.",

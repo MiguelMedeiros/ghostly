@@ -174,8 +174,8 @@ describe("the Tasks board", () => {
     expect(cardIds("running")).toEqual(["relay"]);
     const done = task({ id: "relay", status: "done", progress: 100 });
     set([{ ...rows[0], card: done, editedAt: NOW }, rows[1], rows[2]]);
-    // The chat's messages changed, as the engine tells every page.
-    act(() => engine.messages("link-1", [{ linkId: "link-1", id: rows[0].id, text: statusCardText(done), sender: "peer", timestamp: rows[0].timestamp, via: "datalink", card: done } as StoredMessage]));
+    // The chat's messages changed, as the engine tells every page: the card's message, edited.
+    act(() => engine.messages("link-1", [{ linkId: "link-1", id: rows[0].id, text: statusCardText(done), sender: "peer", timestamp: rows[0].timestamp, via: "datalink", card: done, edit: { seq: 1, at: NOW, history: [] } } as StoredMessage]));
     await waitFor(() => expect(cardIds("done")).toEqual(["relay", "ci"]));
     expect(cardIds("running")).toEqual([]);
     expect(screen.getByTestId("tasks-summary")).toHaveTextContent("1 active · 3 tasks");
@@ -314,6 +314,7 @@ describe("richer task cards on the board", () => {
     expect(within(card("pass")).getByTestId("board-card-checks")).toHaveTextContent("✓Checks passing");
     expect(within(card("fail")).getByTestId("board-card-checks")).toHaveTextContent("✕Checks failing");
     expect(within(card("wait")).getByTestId("board-card-checks")).toHaveTextContent("●Checks pending");
+    expect(within(card("wait")).getByTestId("board-card-checks").className).toContain("text-warn-ink");
     expect(within(card("pass")).getByTestId("board-card-pr")).toHaveAttribute("title", "Open on github.com · Open · Checks passing");
     expect(within(card("pass")).getByTestId("board-card-open")).toHaveAccessibleName(/PR #612, Open, Checks passing, updated /);
     await user.click(within(card("wait")).getByRole("button", { name: "Details" }));
@@ -373,6 +374,75 @@ describe("richer task cards on the board", () => {
     await user.click(within(epic).getAllByTestId("board-card-part")[1]);
     await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/group/g1"));
     expect(screen.getByTestId("where")).toHaveAttribute("data-jump", rows[1].id);
+  });
+});
+
+describe("a card a bot sent to several chats", () => {
+  /** The Coordinator is a contact and a member of two groups, under a key of its own in each; each group knows its chat. */
+  function everywhere() {
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000, nick: "Coordinator" });
+    const members = (key: string) => [{ key: "me-key", me: true, nick: "Me" }, { key, me: false, nick: "Coordinator" }] as never;
+    const state = {
+      links: [linkView({ id: "link-1", peerPubKeyZ32: PEER, peerNick: "Coordinator" })],
+      groups: [
+        groupView({ id: "g1", name: "Sala de Máquinas", status: "active", memberLinks: { "link-1": "coord-in-g1" }, members: members("coord-in-g1") }),
+        groupView({ id: "g2", name: "Phone", status: "active", memberLinks: { "link-1": "coord-in-g2" }, members: members("coord-in-g2") }),
+      ],
+    };
+    return state;
+  }
+  const blocked = task({ status: "blocked", title: "Wait for the relay" });
+  const copies = () => [
+    row("link-1", blocked, { id: "in-chat", editedAt: NOW - 3 * 60_000 }),
+    row("group:g1", blocked, { id: "in-g1", member: "coord-in-g1", editedAt: NOW - 2 * 60_000 }),
+    row("group:g2", blocked, { id: "in-g2", member: "coord-in-g2", editedAt: NOW - 60_000 }),
+    row("link-1", task({ id: "alone", status: "blocked" })),
+  ];
+
+  it("is one card and counts once in its column and in the header, with the chats it lives in", async () => {
+    const state = everywhere();
+    const { user, engine } = renderApp(<><Tasks /><Where /></>, { route: "/tasks" });
+    engine.on("statusCardIndex", copies).setState(state);
+    await loaded();
+    expect(within(column("blocked")).getByRole("heading")).toHaveTextContent("Blocked2");
+    expect(cardIds("blocked").sort()).toEqual(["alone", "relay"]);
+    expect(screen.getByTestId("tasks-summary")).toHaveTextContent("2 active · 2 tasks");
+
+    const card = column("blocked").querySelector<HTMLElement>('[data-card-id="relay"]')!;
+    expect(within(card).getByTestId("board-card-bot")).toHaveTextContent("Coordinator");
+    // The chat it changed last in, and one more: the bot's own chat is the bot's chip.
+    const chats = within(card).getByTestId("board-card-chat");
+    expect(chats).toHaveTextContent("Phone+1");
+    expect(chats).toHaveAttribute("title", "Phone, Sala de Máquinas");
+    expect(within(card).getByTestId("board-card-open")).toHaveAccessibleName(expect.stringContaining("Blocked, Coordinator in Phone, Sala de Máquinas, updated"));
+    await user.click(within(card).getByTestId("board-card-details-toggle"));
+    expect(within(card).getByTestId("board-card-chats")).toHaveTextContent("Phone, Sala de Máquinas, Coordinator");
+
+    // It opens where it changed last.
+    await user.click(within(card).getByTestId("board-card-open"));
+    expect(screen.getByTestId("where")).toHaveTextContent("/group/g2");
+    expect(screen.getByTestId("where")).toHaveAttribute("data-jump", "in-g2");
+  });
+
+  it("is one bot's: a column for the bot, and a column for each chat it is in", async () => {
+    const state = everywhere();
+    const { user, engine } = renderApp(<Tasks />, { route: "/tasks" });
+    engine.on("statusCardIndex", copies).setState(state);
+    await loaded();
+    await user.click(screen.getByTestId("tasks-group-bot"));
+    expect(screen.getAllByTestId("board-column").map((c) => within(c).getByRole("heading").textContent)).toEqual(["Coordinator2"]);
+    await user.click(screen.getByTestId("tasks-group-chat"));
+    expect(screen.getAllByTestId("board-column").map((c) => within(c).getByRole("heading").textContent).sort()).toEqual(["Coordinator2", "Phone1", "Sala de Máquinas1"]);
+  });
+
+  it("counts once on the way to the board", async () => {
+    const state = everywhere();
+    const { engine } = renderApp(<SidebarTasks active={false} onOpen={() => {}} />);
+    engine.on("statusCardIndex", copies).setState(state);
+    act(() => engine.messages("link-1", [{ linkId: "link-1", id: "x", text: "", sender: "peer", timestamp: 1, via: "datalink", card: blocked } as StoredMessage]));
+    const entry = await screen.findByTestId("sidebar-tasks");
+    await waitFor(() => expect(within(entry).getByTestId("sidebar-tasks-summary")).toHaveTextContent("2 active"));
+    expect(entry).toHaveAccessibleName("Tasks, 2 active");
   });
 });
 
@@ -441,6 +511,39 @@ describe("the way to the board, above the chat list", () => {
     expect(entry).toHaveAccessibleName("Tasks");
     expect(entry).toHaveAttribute("aria-current", "page");
     expect(within(entry).getByTestId("sidebar-tasks-summary")).toHaveTextContent("Nothing running");
+  });
+
+  it("reads the index once while the engine starts, though its chats and groups arrive in several states; one that comes later asks once more", async () => {
+    const answers: (() => void)[] = [];
+    const rows = [row("link-1", task({ id: "relay" }))];
+    fakeEngine.on("statusCardIndex", () => new Promise<CardIndexRow[]>((done) => answers.push(() => done(rows))));
+    const { engine } = renderApp(<SidebarTasks active={false} onOpen={() => {}} />);
+    const reads = () => engine.callsTo("statusCardIndex").length;
+    const settled = () => act(() => new Promise((done) => setTimeout(done, 300)));
+    await waitFor(() => expect(reads()).toBe(1));
+    // The engine starting: its links, then more of them, then its groups, before it answers the first question.
+    act(() => engine.update({ links: [linkView({ id: "link-1" })] }));
+    act(() => engine.update({ links: [linkView({ id: "link-1" }), linkView({ id: "link-2" })] }));
+    act(() => engine.update({ groups: [groupView({ id: "g1" })] }));
+    await settled();
+    expect(reads()).toBe(1);
+    act(() => answers.shift()!());
+    await screen.findByTestId("sidebar-tasks");
+    await settled();
+    expect(reads()).toBe(1);
+
+    // A chat that comes after the answer asks again; two more while that question waits ask once more, not twice.
+    act(() => engine.update({ links: [linkView({ id: "link-1" }), linkView({ id: "link-2" }), linkView({ id: "link-3" })] }));
+    await waitFor(() => expect(reads()).toBe(2));
+    act(() => engine.update({ groups: [groupView({ id: "g1" }), groupView({ id: "g2" })] }));
+    act(() => engine.update({ groups: [groupView({ id: "g1" }), groupView({ id: "g2" }), groupView({ id: "g3" })] }));
+    await settled();
+    expect(reads()).toBe(2);
+    act(() => answers.shift()!());
+    await waitFor(() => expect(reads()).toBe(3));
+    act(() => answers.shift()!());
+    await settled();
+    expect(reads()).toBe(3);
   });
 
   it("reads the cards once at start, and again only when a chat's cards change, not for every message of a bot's chat", async () => {

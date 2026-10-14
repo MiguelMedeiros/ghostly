@@ -82,9 +82,27 @@ export interface PlayReport {
   /** Where the seek landed, and where it had played to after it. */
   seekedTo?: number;
   playedAfterSeek?: number;
+  /**
+   * Frames the engine says it showed (`getVideoPlaybackQuality().totalVideoFrames`; -1 where there is no such count),
+   * once the seek had played on, and before the seek. Each is read once the count had moved, or after waiting for it.
+   */
   frames?: number;
   framesBeforeSeek?: number;
+  /** `readyState` once the seek had played on: 2 or more is a frame of where it is. */
+  readyAfterSeek?: number;
+  /** `document.visibilityState` then: a page nobody sees may count no frame. */
+  visibility?: string;
   events?: string[];
+}
+
+/**
+ * What the frame count says of the seek. "not counted": the engine has no count, or it stayed at 0 through the
+ * second played before the seek too (WKWebView on a GitHub Mac, now and then), which says nothing of the seek.
+ */
+export function framesAfterSeek(report: PlayReport): "new frames" | "no new frame" | "not counted" {
+  const { frames = -1, framesBeforeSeek = -1 } = report;
+  if (frames < 0 || framesBeforeSeek < 0 || (frames === 0 && framesBeforeSeek === 0)) return "not counted";
+  return frames > framesBeforeSeek ? "new frames" : "no new frame";
 }
 
 /**
@@ -107,6 +125,12 @@ export function playFromStore(app: DesktopApp, place: { space: string; id: strin
        tick();
      });
      const frames = () => video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality().totalVideoFrames : -1;
+     // The count follows what is shown, a moment behind the clock: waits for it to pass "floor", for "ms" at most.
+     const framesPast = (floor, ms) => new Promise((resolve) => {
+       const start = performance.now();
+       const tick = () => frames() > floor || performance.now() - start > ms ? resolve() : setTimeout(tick, 50);
+       tick();
+     });
      (async () => {
        const { url, token } = await window.__TAURI_INTERNALS__.invoke("file_bytes_stream_open", { space, id, mime: "video/mp4" });
        video.muted = true;
@@ -123,13 +147,16 @@ export function playFromStore(app: DesktopApp, place: { space: string; id: strin
        await video.play();
        await until(() => video.currentTime > 1, 30000, "playback");
        const playedTo = video.currentTime;
+       if (frames() >= 0) await framesPast(0, 2000);
        const framesBeforeSeek = frames();
        const seeked = new Promise((resolve) => video.addEventListener("seeked", resolve, { once: true }));
        video.currentTime = seekTo;
        await Promise.race([seeked, until(() => false, 30000, "seeked")]);
        const seekedTo = video.currentTime;
        await until(() => video.currentTime > seekTo + 1, 30000, "playback after the seek");
-       const report = { url, duration, playedTo, seekedTo, playedAfterSeek: video.currentTime, frames: frames(), framesBeforeSeek, events };
+       const playedAfterSeek = video.currentTime;
+       if (framesBeforeSeek > 0) await framesPast(framesBeforeSeek, 5000);
+       const report = { url, duration, playedTo, seekedTo, playedAfterSeek, frames: frames(), framesBeforeSeek, readyAfterSeek: video.readyState, visibility: document.visibilityState, events };
        video.pause();
        video.removeAttribute("src");
        video.load();

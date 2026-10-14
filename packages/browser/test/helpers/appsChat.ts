@@ -3,7 +3,7 @@ import { GhostLink, chatAppId, createIdentity, createLink, identityFromSeedB64, 
 import { EngineServer, type EngineClientSink } from "../../src/engine/server";
 import { db } from "../../src/engine/db";
 import type { EngineEvent, RpcResponse } from "../../src/shared/rpc";
-import { FakeNativeNet } from "./fakeNative";
+import { FakeNativeNet, fakeDescriptor } from "./fakeNative";
 
 /**
  * A real engine with one paired 1:1 chat, live with its contact's link over a stand-in for Iroh, as reactions.test.ts
@@ -15,7 +15,7 @@ Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: asyn
 
 export type Call = (method: string, params?: unknown) => Promise<unknown>;
 
-export async function appsChat(cleanup: (() => Promise<void>)[], { apps, contactApps = true, beforeLive }: { apps?: boolean; contactApps?: boolean; beforeLive?: (call: Call, linkId: string, ref: string) => Promise<void> } = {}) {
+export async function appsChat(cleanup: (() => Promise<void>)[], { apps, contactApps = true, beforeLive, appFetch, ref: appRef }: { apps?: boolean | "wire"; contactApps?: boolean; beforeLive?: (call: Call, linkId: string, ref: string) => Promise<void>; appFetch?: typeof fetch; ref?: string } = {}) {
   const net = new FakeNativeNet();
   const invitation = createLink();
   const [mine, theirs] = [createIdentity().seedB64, createIdentity().seedB64];
@@ -24,10 +24,10 @@ export async function appsChat(cleanup: (() => Promise<void>)[], { apps, contact
   await db.putLink({ ...invitation.mine, id, profile: "paired-chat/1", participationSeed: mine, createdAt: 1,
     pairedPeerKey: identityFromSeedB64(theirs).pubKeyZ32, peerTrust: { version: 1 },
     peerTransports: ["iroh/1"], peerFallback: true, preferredTransport: "iroh/1", transportFallback: true,
-    peerDescriptors: { "iroh/1": { id: "contact:iroh/1" } } });
+    peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "contact") } });
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
   const server = new EngineServer({ transport, automaticWallets: false, nativeTransports: { "iroh/1": async () => net.endpoint("iroh/1", "app") },
-    ...(apps !== undefined && { apps }) });
+    ...(apps !== undefined && { apps }), ...(appFetch && { appFetch }) });
   // One page: what the engine tells it, and its calls answered in order.
   const events: EngineEvent[] = [];
   const answers = new Map<number, RpcResponse>();
@@ -46,7 +46,7 @@ export async function appsChat(cleanup: (() => Promise<void>)[], { apps, contact
   const contact = new GhostLink({
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
-    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": { id: "app:iroh/1" } } },
+    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "app") } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
     appsSupport: contactApps,
     events: { onPairingState: state => { contactState = state; }, onAppFrame: event => { contactGot.push(event); } },
@@ -56,7 +56,7 @@ export async function appsChat(cleanup: (() => Promise<void>)[], { apps, contact
   server.node.setActiveLink({ linkId: id });
   const view = () => server.node.getState().links.find(l => l.id === id)!;
   await vi.waitFor(() => expect(view().availableTransports).toHaveLength(1));
-  const ref = `${toZ32(createIdentity().publicKey)}/chess`;
+  const ref = appRef ?? `${toZ32(createIdentity().publicKey)}/chess`;
   // Before the contact's endpoint is there: the chat cannot be live.
   await beforeLive?.(call, id, ref);
   contact.registerEndpoint(net.endpoint("iroh/1", "contact"));

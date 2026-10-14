@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { liftGlobals, parseArgs } from "../src/args";
 import { idSlot, positionals, COMMANDS, TEXT_COMMANDS } from "../src/commands";
+import { GhostlyHttpError } from "@ghostly/core";
 import { asCliError, CliError, EXIT } from "../src/errors";
 // covers: headless.cli
 
@@ -94,6 +95,27 @@ describe("the argument parser", () => {
     expect(liftGlobals(["--profile=bot", "chat", "list"])).toEqual(["chat", "list", "--profile=bot"]);
     expect(liftGlobals(["send", "--home", "/h"])).toEqual(["send", "--home", "/h"]);
     expect(liftGlobals(["--home", "/h", "send", "c", "--", "-dash"])).toEqual(["send", "c", "--home", "/h", "--", "-dash"]);
+    // A global boolean's `--no-` form moves as the option itself does; `--no-home` names no option and stays.
+    expect(liftGlobals(["--no-pretty", "status"])).toEqual(["status", "--no-pretty"]);
+    expect(parseArgs(liftGlobals(["--no-pretty", "status"]).slice(1), {})).toEqual({ positionals: [], options: { pretty: false } });
+    expect(liftGlobals(["--no-home", "status"])).toEqual(["--no-home", "status"]);
+  });
+
+  it("a global option before the command never lands between an option and its value", () => {
+    // They went just before the first `--`, also when that `--` is an option's value: `--pretty profile set --name --`
+    // read `--name --pretty`, and the name contacts see became "--pretty".
+    const lifted = liftGlobals(["--pretty", "profile", "set", "--name", "--"]);
+    expect(lifted).toEqual(["profile", "set", "--pretty", "--name", "--"]);
+    expect(parseArgs(lifted.slice(2), { name: { type: "string", description: "" } })).toEqual({ positionals: [], options: { pretty: true, name: "--" } });
+    const edit = liftGlobals(["-p", "bot", "edit", "c", "m", "--text", "--"]);
+    expect(parseArgs(edit.slice(1), { text: { type: "string", description: "" } })).toEqual({ positionals: ["c", "m"], options: { profile: "bot", text: "--" } });
+    // Before the first option, and so before the `--` that ends them; an id that starts with a dash stays the id.
+    expect(liftGlobals(["--pretty", "send", "c", "--reply", "m1", "--", "-x"])).toEqual(["send", "c", "--pretty", "--reply", "m1", "--", "-x"]);
+    const show = liftGlobals(["--pretty", "chat", "show", HYPHEN_KEY]);
+    expect(parseArgs(show.slice(2), {}, () => true)).toEqual({ positionals: [HYPHEN_KEY], options: { pretty: true } });
+    // The command stays the first word, also when it is `--version`; a `--` right away still ends the options.
+    expect(liftGlobals(["--pretty", "--version"])).toEqual(["--version", "--pretty"]);
+    expect(liftGlobals(["--pretty", "--", "send"])).toEqual(["--pretty", "--", "send"]);
   });
 
   it("takes a file by its id alone, or after its chat, for every file command", () => {
@@ -141,6 +163,12 @@ describe("the argument parser", () => {
     usage("group picture", ["g1"], "Missing <jpeg>: ghostly group picture <group> <jpeg> | --clear");
     usage("forward", ["g1"], `Missing <message>: ghostly ${COMMANDS.forward.usage}`);
     usage("forward", ["g1", "m1"], `Missing --to: ghostly ${COMMANDS.forward.usage}`);
+    // Auto-answer's chats and rate are only kept when it goes on: elsewhere they would be dropped without a word.
+    usage("call auto", ["--from", "bob"], "--from and --rate go with on: ghostly call auto on --from <chat>");
+    usage("call auto", ["--rate", "16000"], "--from and --rate go with on: ghostly call auto on --from <chat>");
+    usage("call auto", ["off", "--from", "bob", "--rate", "16000"], "--from and --rate go with on: ghostly call auto on --from <chat>");
+    expect(params("call auto", ["on", "--from", "bob", "--rate", "16000"])).toEqual({ on: true, from: ["bob"], rate: 16000 });
+    expect(params("call auto", ["off"])).toEqual({ on: false });
     // What may be left out still may: a picture cleared, a chat's own name back, a reaction taken back, the only call.
     expect(params("profile picture", ["--clear"])).toEqual({ path: undefined, clear: true });
     expect(params("group picture", ["g1", "--clear"])).toEqual({ group: "g1", path: undefined, clear: true });
@@ -151,6 +179,74 @@ describe("the argument parser", () => {
     expect(positionals(TEXT_COMMANDS.send, ["alice"])).toEqual({ chat: "alice", text: undefined });
     expect(params("forward", ["g1", "m1", "m2", "--to", "bob"])).toMatchObject({ chat: "g1", messages: ["m1", "m2"], to: ["bob"] });
   });
+
+  it("says a flag left out or out of range as a usage error that names the flag, not the API's parameter", () => {
+    const params = (name: string, argv: string[]) => {
+      const command = COMMANDS[name];
+      const parsed = parseArgs(argv, command.options ?? {}, idSlot(command));
+      return command.params!(parsed, positionals(command, parsed.positionals));
+    };
+    const usage = (name: string, argv: string[], message: string) => {
+      let error: unknown;
+      try { params(name, argv); } catch (caught) { error = caught; }
+      expect(error, name).toBeInstanceOf(CliError);
+      expect((error as CliError).code, name).toBe("usage");
+      expect((error as CliError).message, name).toBe(message);
+    };
+    usage("button update", ["alice", "m1"], `Give --chosen, --close or --text: ghostly ${COMMANDS["button update"].usage}`);
+    usage("button update", ["alice", "m1", "--wait", "confirmed", "--text", ""], `Give --chosen, --close or --text: ghostly ${COMMANDS["button update"].usage}`);
+    usage("chat verify", ["alice"], "--code is needed: ghostly chat verify <chat> --code <code>");
+    usage("chat verify", ["alice", "--code", " "], "--code is needed: ghostly chat verify <chat> --code <code>");
+    for (const [name, target] of [["typing", "alice"], ["group typing", "g1"]] as const) {
+      usage(name, [target, "--for", "9999"], "--for takes a number of seconds from 1 to 600, not 9999");
+      usage(name, [target, "--for", "0"], "--for takes a number of seconds from 1 to 600, not 0");
+      usage(name, [target, "--stop", "--for", "30"], "--for keeps it on: not with --stop");
+      expect(params(name, [target, "--for", "600"])).toMatchObject({ for: 600, stop: false });
+      expect(params(name, [target, "--stop"])).toMatchObject({ for: undefined, stop: true });
+    }
+    // Each of the three is enough for an update, and a code is taken as typed.
+    expect(params("button update", ["alice", "m1", "--chosen", "yes"])).toMatchObject({ chosen: "yes", close: false });
+    expect(params("button update", ["alice", "m1", "--close"])).toMatchObject({ close: true });
+    expect(params("button update", ["alice", "m1", "--text", "Done"])).toMatchObject({ text: "Done" });
+    expect(params("chat verify", ["alice", "--code", "ab cd"])).toEqual({ chat: "alice", code: "ab cd" });
+  });
+
+  it("refuses the two sides of an either/or given together, naming both, where before one won without a word", () => {
+    const params = (name: string, argv: string[]) => {
+      const command = COMMANDS[name];
+      const parsed = parseArgs(argv, command.options ?? {}, idSlot(command));
+      return command.params!(parsed, positionals(command, parsed.positionals));
+    };
+    const pairs: [name: string, argv: string[], message: string][] = [
+      ["profile picture", ["one.jpg", "--clear"], "--clear removes the picture: not with a <jpeg>"],
+      ["group picture", ["g1", "one.jpg", "--clear"], "--clear removes the picture: not with a <jpeg>"],
+      ["task send", ["bob", "--title", "t", "--progress", "10", "--steps", "4/5"], "--progress or --steps, not both"],
+      ["task update", ["bob", "t1", "--progress", "10", "--steps", "4/5"], "--progress or --steps, not both"],
+      ["usage send", ["bob", "--left", "5", "--used", "1", "--limit", "2"], "--left or --used with --limit, not both"],
+      ["usage send", ["bob", "--left", "5", "--used", "1"], "--left or --used with --limit, not both"],
+      ["group link", ["g1", "--off", "--reset"], "--off turns the link off: not with --reset"],
+      ["group hub", ["g1", "m1", "--pin", "--exclude"], "--pin, --exclude or --auto: one of them"],
+      ["group hub", ["g1", "m1", "--exclude", "--auto"], "--pin, --exclude or --auto: one of them"],
+    ];
+    for (const [name, argv, message] of pairs) {
+      let error: unknown;
+      try { params(name, argv); } catch (caught) { error = caught; }
+      expect(error, `${name} ${argv.join(" ")}`).toBeInstanceOf(CliError);
+      expect((error as CliError).code, name).toBe("usage");
+      expect((error as CliError).message, name).toBe(message);
+    }
+    // Each side alone is taken as before.
+    expect(params("profile picture", ["--clear"])).toMatchObject({ path: undefined, clear: true });
+    expect(params("group picture", ["g1", "--clear"])).toMatchObject({ clear: true });
+    expect(params("task send", ["bob", "--title", "t", "--steps", "4/5"]).card).toMatchObject({ done: 4, total: 5 });
+    expect(params("task send", ["bob", "--title", "t", "--progress", "10"]).card).toMatchObject({ progress: 10 });
+    expect(params("usage send", ["bob", "--used", "1", "--limit", "2"]).card).toMatchObject({ used: 1, limit: 2 });
+    expect(params("usage send", ["bob", "--left", "5"]).card).toMatchObject({ left: 5 });
+    expect(params("group link", ["g1", "--reset"])).toEqual({ group: "g1", on: true, reset: true });
+    expect(params("group link", ["g1", "--off"])).toEqual({ group: "g1", on: false, reset: false });
+    for (const role of ["pin", "exclude", "auto"]) expect(params("group hub", ["g1", "m1", `--${role}`])).toMatchObject({ role });
+    expect(params("group hub", ["g1", "m1"])).toMatchObject({ role: "auto" });
+  });
 });
 
 describe("errors", () => {
@@ -159,6 +255,8 @@ describe("errors", () => {
     expect(asCliError(new Error("A Mainnet payment needs you to confirm it as real money")).code).toBe("confirm");
     expect(asCliError(new Error("boom")).toJSON()).toEqual({ code: "engine", message: "boom" });
     expect(asCliError({ code: "not_found", message: "x" }).code).toBe("not_found");
+    // A code is one of the table's own: every object has `constructor`, which is none (and has no exit status).
+    expect(asCliError({ code: "constructor", message: "x" }).code).toBe("engine");
   });
 
   it("say a local path could not be opened as the person's path, not as the engine refusing", async () => {
@@ -170,5 +268,11 @@ describe("errors", () => {
     expect(asCliError(Object.assign(new Error("EISDIR: illegal operation"), { code: "EISDIR", syscall: "open", path: "/tmp" })).code).toBe("bad_request");
     // An engine error that only mentions a file keeps its words.
     expect(asCliError(new Error("The file is gone")).code).toBe("engine");
+  });
+
+  it("say a contact that could not be reached as unavailable, not as the engine failing", () => {
+    // `chat pay` / `chat connect` to a contact that never answers: the link's GhostlyHttpError "unreachable".
+    expect(asCliError(new GhostlyHttpError("unreachable", "Could not connect to the peer")).toJSON()).toEqual({ code: "unavailable", message: "Could not connect to the peer" });
+    expect(asCliError(new GhostlyHttpError("closed", "Connection closed")).code).toBe("engine");
   });
 });

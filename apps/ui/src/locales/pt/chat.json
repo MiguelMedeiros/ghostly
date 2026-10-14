@@ -70,6 +70,7 @@
     "codeRelays": "Os relays que este código indica não são consultados.",
     "communityGroup": "Grupo comunitário",
     "communityHint": "Qualquer pessoa com este link pode entrar. Você lê o que for enviado enquanto for membro.",
+    "deleteToJoin": "As mensagens dele ainda estão neste dispositivo. Para entrar com este link, abra o grupo e escolha \"{{action}}\" primeiro.",
     "fromContact": "Do seu contato",
     "fromName": "De ~{{name}}",
     "groupHint": "Entrar pede ao admin do grupo para deixar você entrar; o app dele responde quando estiver online.",
@@ -77,6 +78,7 @@
     "homeserver": "Servidor",
     "inGroup": "Você está neste grupo.",
     "join": "Entrar",
+    "joinAgain": "Entrar de novo",
     "joinGroup": "Entrar no grupo",
     "joinHint": "Entrar cria uma conversa com quem fez este convite. Nada é enviado até você entrar.",
     "joining": "Entrando…",
@@ -226,6 +228,7 @@
   "media": {
     "downloadSize": "Baixar {{size}}",
     "noRoom": "Espaço insuficiente: {{size}} livres",
+    "noRoomToPlay": "Sem espaço livre em disco para tocar aqui. Baixe o arquivo.",
     "notYet": "Toca depois de enviado.",
     "wantsToSend": "{{name}} quer enviar · {{size}} livres"
   },

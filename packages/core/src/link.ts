@@ -95,6 +95,17 @@ export const DEPARTED_READ_MS = EXPECT_PEER_MS;
 /** A chat whose contact was never seen (an invite just sent) keeps looking at the active pace this long. */
 export const AWAITING_PEER_MS = 10 * 60_000;
 /**
+ * An invite this side made that nobody used, once no longer awaited (`AWAITING_PEER_MS`), is read less often the older
+ * it is: a fifth of its age between reads, up to this. Read at the background pace instead, 15 unused invites (their
+ * keys and their mailboxes) asked the relays for 60 reads a minute for as long as the app ran: the relays' minute went
+ * to invites nobody may ever open, and a join on one was noticed 90 s later (bug hunt 1013-1642, 2026-10-13).
+ */
+export const UNUSED_INVITE_WAIT_MAX_MS = 3 * 60_000;
+/** The wait between reads of an unused invite of age `age` (`UNUSED_INVITE_WAIT_MAX_MS`), never shorter than the pace's `interval`. */
+export function unusedInviteWait(age: number, interval: number): number {
+  return Math.max(interval, Math.min(UNUSED_INVITE_WAIT_MAX_MS, Math.round(age / 5)));
+}
+/**
  * A group link's peer whose packet advertises and carries no `_tr` on every read for this long publishes none: what it
  * said before is forgotten (WISP 902 § Transports). Not at the first such packet: an app with no WebRTC (a Linux
  * Desktop) publishes its `_tr` only once a native endpoint is up, seconds after its first packet of a run, and what it
@@ -191,6 +202,16 @@ export interface LinkSessionOptions {
    * `FIRST_PUBLISH_MAX_MS`.
    */
   firstPublish?: "at-start" | "after-first-poll";
+  /**
+   * When the chat was made, for a saved one: the wait for a peer never seen (`AWAITING_PEER_MS`) counts from then, not
+   * from this start. Counted from each start of the app, every saved chat whose contact had no packet at the relays
+   * (away for a day) was an invite just sent again: 50 of them read every 4 s for ten minutes, not in the background,
+   * and spent both relays' minute in the first seconds of a start, so nothing the app wrote (its DID record, a message
+   * sent at once) went out for a minute (2026-10-08).
+   */
+  awaitingSince?: number;
+  /** Whether this is an invite this side made that nobody used yet: once no longer awaited, read less often (`unusedInviteWait`). */
+  invite?: () => boolean;
 }
 
 /** With `firstPublish: "after-first-poll"`, the first packet goes out by then whatever happened. */
@@ -231,10 +252,16 @@ export class LinkSession {
   private pollAgain = false;
   private publishing: Promise<void> | null = null;
   private publishAgain = false;
+  /** What waits to go out is the presence heartbeat alone (`PRESENCE_HEARTBEAT`): nothing in the packet changed. */
+  private upkeepOnly = false;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private lastActivity = Date.now();
   private readonly startedAt = Date.now();
+  /** From when a peer never seen is awaited (`AWAITING_PEER_MS`): never later than this start, whatever the clock said when the chat was made. */
+  private readonly awaitingSince: number;
+  /** This side's invite, nobody used yet (`LinkSessionOptions.invite`). */
+  private readonly invite: () => boolean;
   private readonly intervals: PollIntervals;
   private fastPollUntil = 0;
   /** An offer to a saved contact is out: from then on its fast window looks less often (`OFFER_FAST_MS`); 0 for none. */
@@ -286,6 +313,8 @@ export class LinkSession {
     this.intervals = options.pollIntervals ?? DHT_POLL_INTERVALS;
     this.events = options.events ?? {};
     this.firstPublish = options.firstPublish ?? "at-start";
+    this.awaitingSince = Math.min(options.awaitingSince ?? this.startedAt, this.startedAt);
+    this.invite = options.invite ?? (() => false);
   }
 
   get peerPresence(): PeerPresence {
@@ -466,8 +495,9 @@ export class LinkSession {
   async setRtcSignal(signal: string | null, reportFailure = false): Promise<void> {
     if (this.rtcSignal === signal) return;
     this.rtcSignal = signal;
-    if (reportFailure) await this.publish();
-    else await this.publish().catch(() => {});
+    // A signal taken back (the session opened, or the attempt ended) is nothing the contact waits for: upkeep.
+    if (reportFailure) await this.publish(signal === null);
+    else await this.publish(signal === null).catch(() => {});
     if (signal) this.pollNow();
   }
 
@@ -498,13 +528,14 @@ export class LinkSession {
     }
     this.lastActivity = Date.now();
     this.sentBuffer = [...this.sentBuffer, { t: timestamp, m: text }];
+    this.upkeepOnly = false;
     try {
       const kept = await this.publishOnce(true);
       if (kept === 0) return "Message could not be published — DHT payload limit exceeded.";
     } catch (error) {
       // The message stays in the buffer; keep trying instead of losing it.
       if (this.publishRetryTimer) clearTimeout(this.publishRetryTimer);
-      this.publishRetryTimer = setTimeout(() => void this.publish().catch(() => {}), this.retryDelay(error));
+      this.publishRetryTimer = setTimeout(() => void this.publish(true).catch(() => {}), this.retryDelay(error));
       // Not an error for the sender: it is queued, and the connection status shows the trouble (a wait for the
       // relays' budget is none).
       if (!isDiscoveryBudgetError(error)) this.events.onStatus?.("error");
@@ -546,6 +577,8 @@ export class LinkSession {
     const stepping = this.fastStepsAfter ? Date.now() - this.fastStepsAfter : -1;
     if (pace === "fast" && stepping >= 0) return Math.min(OFFER_STEP_MAX * interval, Math.max(2 * interval, stepping));
     if (pace === "fast" || pace === "connected" || since < 0) return interval;
+    // An invite nobody used, no longer awaited: the older it is, the less often it is read.
+    if (pace === "background" && this.presence.lastPacketAt === 0 && this.invite()) return unusedInviteWait(Date.now() - this.awaitingSince, interval);
     return Math.min(interval, Math.max(2 * this.intervals.fast, since));
   }
 
@@ -559,6 +592,11 @@ export class LinkSession {
     return Date.now() < this.watchUntil && this.rtcSignal === null && !(this.presence.online && this.presence.lastPacketAt > this.watchFrom);
   }
 
+  /** A contact never seen, whose invite was sent lately (`AWAITING_PEER_MS`): its join is due. */
+  private awaitingPeer(): boolean {
+    return this.presence.lastPacketAt === 0 && Date.now() - this.awaitingSince < AWAITING_PEER_MS;
+  }
+
   /** How urgently this link looks right now. */
   private pace(): keyof PollIntervals {
     // Connected peers signal over the data link; no reason to hurry Pkarr, unless it stopped answering.
@@ -567,7 +605,7 @@ export class LinkSession {
     if (Date.now() < this.fastPollUntil) return "fast";
     if (Date.now() < this.watchUntil) return "active";
     // Someone who just sent an invite may look elsewhere while waiting: the join still comes in quickly.
-    if (!this.active && this.presence.lastPacketAt === 0 && Date.now() - this.startedAt < AWAITING_PEER_MS) return "active";
+    if (!this.active && this.awaitingPeer()) return "active";
     if (!this.active) return "background";
     return Date.now() - this.lastActivity > IDLE_THRESHOLD ? "idle" : "active";
   }
@@ -576,14 +614,19 @@ export class LinkSession {
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     this.heartbeatTimer = setTimeout(() => {
       if (!this.running) return;
-      if (this.getServices() !== undefined) void this.publish().catch(() => {});
+      if (this.getServices() !== undefined) void this.publish(true).catch(() => {});
       this.scheduleHeartbeat();
     }, PRESENCE_HEARTBEAT);
   }
 
-  /** Coalesces publishes: at most one in flight and one queued behind it. */
-  private publish(): Promise<void> {
+  /**
+   * Coalesces publishes: at most one in flight and one queued behind it. `upkeep`: nothing new to say (the heartbeat, a
+   * retry of what waits): with nothing else asked for since, the packet goes as upkeep (`publishOnce`).
+   */
+  private publish(upkeep = false): Promise<void> {
     if (this.silent) return Promise.resolve();
+    if (!upkeep) this.upkeepOnly = false;
+    else if (!this.publishing && !this.publishRetryTimer) this.upkeepOnly = true;
     if (this.publishing) {
       this.publishAgain = true;
       return this.publishing;
@@ -594,14 +637,14 @@ export class LinkSession {
       try {
         do {
           this.publishAgain = false;
-          await this.publishOnce(this.running);
+          await this.publishOnce(this.running, this.upkeepOnly);
         } while (this.publishAgain && this.running);
       } catch (error) {
         // A signal that is not published is a call that never rings: try again. Held back by the relays' request
         // budget, it goes as soon as the budget frees a request, and nothing is wrong meanwhile.
         if (this.running) {
           if (!isDiscoveryBudgetError(error)) this.discoveryResult("publish", error);
-          this.publishRetryTimer = setTimeout(() => void this.publish().catch(() => {}), this.retryDelay(error));
+          this.publishRetryTimer = setTimeout(() => void this.publish(true).catch(() => {}), this.retryDelay(error));
         }
         throw error;
       } finally {
@@ -611,7 +654,7 @@ export class LinkSession {
     return this.publishing;
   }
 
-  private async publishOnce(advertise: boolean): Promise<number> {
+  private async publishOnce(advertise: boolean, upkeep = false): Promise<number> {
     const rtcSignal = advertise ? this.rtcSignal : null;
     const built = buildLinkRecords(
       this.identity.pubKeyZ32,
@@ -630,7 +673,21 @@ export class LinkSession {
     try {
       // An offer or answer not out yet is what the contact waits for (`PkarrRequestOptions.signal`). Written while this
       // link watches for a contact that went away, the packet is what that contact, back, looks for first (`watch`).
-      const options = rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : this.watching() ? { watch: true } : undefined;
+      // The heartbeat of a chat whose data link is up is upkeep nobody waits on: a background write, from the share the
+      // relays' budget keeps for those, so it never takes a request a group's door or edges need. As a chat's write,
+      // the budget refusing it held the groups back for its reserve: a daemon with 30 live chats sat at the budget
+      // while idle, and people joining its group by link waited 80 s to 9 min (bug hunt, 2026-10-08).
+      // So is a packet with nothing in it a contact waits for (no signal, no text) while the contact is not there: its
+      // last read found it away, or none was made yet in this run (an invite just sent awaits its peer: not that). As a
+      // chat's write, the presence of the chats whose contacts were long gone took the relays' minute as the app started,
+      // ahead of the chats whose contacts were online and offering (`CHAT_RESERVE_PER_CHAT` in relay.ts). And so is a
+      // packet that only takes a signal back (`setRtcSignal`): as a chat's write, the 30 chats that went live as the app
+      // started took their offers and answers back in a minute the start had spent, and each, first in line once refused,
+      // held back every read of the chats still waiting for an answer until the minute freed.
+      const awaited = this.connected || this.presence.online || this.sentBuffer.length > 0 || this.callSignal !== null || this.awaitingPeer();
+      const takesBack = !rtcSignal && this.rtcSignalOut !== null;
+      const options = rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : this.watching() ? { watch: true }
+        : (upkeep && (this.connected || takesBack)) || (!rtcSignal && !awaited) ? { background: true } : undefined;
       await this.transport.publish(this.identity, built.records, options);
     } catch (error) {
       const ms = Date.now() - started, waiting = isDiscoveryBudgetError(error);
@@ -674,6 +731,8 @@ export class LinkSession {
     this.polling = true;
     this.events.onPoll?.({ polling: true, nextInMs: 0 });
     const started = Date.now();
+    // A read the relays' budget held back: the next one goes when the budget frees a request.
+    let heldBackMs: number | undefined;
     try {
       // A look that can wait (nobody watching, nothing expected) says so: a transport with a request
       // budget spends only part of it on those, and keeps the rest for links that are signaling.
@@ -684,7 +743,8 @@ export class LinkSession {
       // In its first seconds, when an app that restarts has its offer out (`PkarrRequestOptions.departed`). Not `watch`
       // alone: a packet the contact put just before its goodbye, read only after it, advertises, and looks like it is back.
       const departed = !signal && Date.now() < this.departedUntil;
-      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background: pace === "background" || pace === "connected", urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }) });
+      const background = pace === "background" || pace === "connected";
+      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background, urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }) });
       if (!this.running) return;
       this.discoveryResult("read");
       const ms = Date.now() - started;
@@ -695,6 +755,7 @@ export class LinkSession {
       const read = answered !== undefined && answered >= started;
       if (read) this.lastReadAt = started;
       this.readMissed = !!this.transport.readAnsweredAt && !read;
+      if (this.readMissed) heldBackMs = this.transport.readHeldBackFor?.(this.peerPubKeyZ32);
 
       let receivedNew = false;
       // The packet an inviter puts under the contact's key before they join (`emptyLinkRecords`), so
@@ -772,7 +833,7 @@ export class LinkSession {
       if (this.running) {
         traceLink(this.identity.pubKeyZ32, "poll", { ms: Date.now() - started, error: String(error) });
         // A read the relays' request budget held back (nothing known yet to answer from) is a wait: the next poll reads.
-        if (!isDiscoveryBudgetError(error)) {
+        if (isDiscoveryBudgetError(error)) heldBackMs = error.retryInMs; else {
           this.discoveryResult("read", error);
           this.events.onStatus?.("error");
         }
@@ -788,8 +849,10 @@ export class LinkSession {
       } else if (this.running && !this.pollTimer) {
         const interval = this.nextInterval();
         // The interval is a period, counted from the start of this read: a read that took long (a key
-        // nobody has yet, a relay asking its DHT) does not push the next one further out.
-        const wait = Math.max(MIN_POLL_GAP_MS, interval - (Date.now() - started));
+        // nobody has yet, a relay asking its DHT) does not push the next one further out. A read the budget held back
+        // reads again when it frees a request, where the relays take it in turn per key (`READ_TURN_MS` in relay.ts):
+        // at the next poll, the chats that had just taken a request took the next.
+        const wait = heldBackMs !== undefined ? Math.min(interval, Math.max(BUDGET_RETRY_MIN_MS, heldBackMs)) : Math.max(MIN_POLL_GAP_MS, interval - (Date.now() - started));
         this.events.onPoll?.({ polling: false, nextInMs: wait });
         this.pollTimer = setTimeout(() => {
           this.pollTimer = null;

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appendFileSync } from "node:fs";
-import { GhostLink } from "../src/ghostlink";
+import { ANSWERS_REFUSED_PAUSES, GhostLink } from "../src/ghostlink";
+import { ANSWER_REFUSED_REDIALS } from "../src/datalink";
 import { RELAY_POLL_INTERVALS } from "../src/link";
 import { createIdentity, type Identity } from "../src/identity";
 import { edgeParams } from "../src/groupCrypto";
@@ -45,6 +46,8 @@ class FlakyRelays {
 let fingerprints = 0;
 /** Connections that fail once offer and answer met (a path that does not come up), before any opens. */
 let failConnections = 0;
+/** Answers refused as they go in (libdatachannel's race, `ANSWER_REFUSED_REDIALS`): the connection closes, and setRemoteDescription throws. */
+let refuseAnswers = 0;
 const byFingerprint = new Map<string, FakePeerConnection>();
 function sdp(setup: string): { sdp: string; fingerprint: string } {
   const n = ++fingerprints;
@@ -90,15 +93,22 @@ class FakePeerConnection extends EventTarget {
   private made(setup: string) { const made = sdp(setup); byFingerprint.set(made.fingerprint, this); return made.sdp; }
   async setLocalDescription(description: RTCSessionDescriptionInit) { this.localDescription = description; }
   async setRemoteDescription(description: RTCSessionDescriptionInit) {
+    if (description.type === "answer" && refuseAnswers > 0) {
+      refuseAnswers--;
+      this.close();
+      throw new Error("libdatachannel error while adding remote description: Got a remote candidate without ICE transport");
+    }
     this.remoteDescription = description;
     if (description.type !== "answer") return;
     const answerer = byFingerprint.get(fingerprintOf(description.sdp!));
     if (!answerer || answerer.closed || fingerprintOf(answerer.remoteDescription!.sdp!) !== fingerprintOf(this.localDescription!.sdp!)) return;
     if (failConnections > 0) {
       failConnections--;
-      realSetTimeout(() => {
-        for (const pc of [this, answerer]) { pc.connectionState = "failed"; pc.dispatchEvent(new Event("connectionstatechange")); }
-      }, 0);
+      // ICE gives up half a minute on (this clock is the test's): one that failed as the answer went in would be an
+      // answer refused, offered again at once.
+      setTimeout(() => {
+        for (const pc of [this, answerer]) { if (pc.closed) continue; pc.connectionState = "failed"; pc.dispatchEvent(new Event("connectionstatechange")); }
+      }, 30_000);
       return;
     }
     this.channel.peer = answerer.channel; answerer.channel.peer = this.channel;
@@ -149,6 +159,7 @@ afterEach(async () => {
   await Promise.all(links.splice(0).map(link => link.stop(false)));
   byFingerprint.clear();
   failConnections = 0;
+  refuseAnswers = 0;
   setLinkTraceSink(null);
   vi.useRealTimers();
 });
@@ -235,5 +246,46 @@ describe("a group's edge whose connection failed", () => {
       expect(next, `a dial after the retry due at ${(due - start) / 1000} s`).toBeDefined();
       expect(next! - due).toBeLessThanOrEqual(1_500);
     }
+  }, 120_000);
+
+  // libdatachannel's race on a loaded core refused a whole run of answers: the dialer offered again at once four times,
+  // and then waited the backoff of five failed dials, three minutes, while the member was there (meshSignals on CI,
+  // 2026-10-11: up 34 s after the welcome only because the other side gave WebRTC up; 180 s and more otherwise).
+  it(`goes live within seconds when more answers are refused in a row than it offers again at once for (${ANSWER_REFUSED_REDIALS})`, async () => {
+    const relays = new FlakyRelays();
+    const group = toBase64Url(randomBytes(16));
+    const [one, two] = [createIdentity(), createIdentity()];
+    const steps: string[] = [];
+    setLinkTraceSink(line => { const { step } = JSON.parse(line) as { step: string }; if (step === "answer-refused" || step === "answers-refused-pause") steps.push(step); });
+    const a = edge("one", relays, group, one, two), b = edge("two", relays, group, two, one);
+    // The first answer, the redials at once after it (all refused), and the dial after the first pause too.
+    await run(1_000);
+    refuseAnswers = 1 + ANSWER_REFUSED_REDIALS + 1;
+    const start = Date.now();
+    const took = await untilLive(a, b, 10 * 60_000);
+    report({ scenario: "answers refused", liveMs: took });
+    console.log(`EDGE_RETRY ${steps.filter(s => s === "answer-refused").length} answers refused: live in ${took / 1000} s`);
+    expect(refuseAnswers, "every answer meant to be refused was").toBe(0);
+    expect(steps.filter(s => s === "answers-refused-pause").length).toBe(2);
+    expect(took, `live ${(Date.now() - start) / 1000} s on`).toBeLessThanOrEqual(30_000);
+  }, 120_000);
+
+  it(`past ${ANSWERS_REFUSED_PAUSES} pauses, tells its owner and waits the backoff of failed dials: an answer that never goes in is no stream of offers`, async () => {
+    const relays = new FlakyRelays();
+    const group = toBase64Url(randomBytes(16));
+    const [one, two] = [createIdentity(), createIdentity()];
+    const dials: number[] = [];
+    let out = 0;
+    setLinkTraceSink(line => { const { step, t } = JSON.parse(line) as { step: string; t: number }; if (step === "dial") dials.push(t); if (step === "answers-refused-out") out++; });
+    edge("one", relays, group, one, two); edge("two", relays, group, two, one);
+    await run(1_000);
+    refuseAnswers = 1_000;
+    const start = Date.now();
+    await run(60_000);
+    // The first, the redials at once, one after each pause (2, 4 and 8 s), and then the backoff of failed dials.
+    const inMinute = dials.filter(at => at >= start).length;
+    expect(inMinute).toBeLessThanOrEqual(1 + ANSWER_REFUSED_REDIALS + ANSWERS_REFUSED_PAUSES + 1);
+    // And the owner is told once (a group's edge then goes on over a native transport, node.ts `edgeWithoutRtc`).
+    expect(out).toBe(1);
   }, 120_000);
 });

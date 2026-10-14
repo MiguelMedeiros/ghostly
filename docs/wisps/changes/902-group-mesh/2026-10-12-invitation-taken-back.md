@@ -1,0 +1,1 @@
+`group-decline` also goes from the inviter to the contact, over the chat the invitation went on, and takes the invitation back: the invitee drops it, accepted or not, and keeps a group it held under that id. Before, only the invitee's answer ended an invitation. No new frame; an app from before ignores it in that direction.

@@ -6,6 +6,7 @@ import { formatFileSize } from "../lib/format";
 import { downloadFile } from "../lib/fileDownload";
 import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, stalledAction } from "../lib/fileStatus";
 import { knownPictureSize, pictureBox, PLACEHOLDER_BOX, rememberPictureSize, sameShape } from "../lib/pictureBox";
+import { forgetPicture, readPicture, type HeldPicture } from "../lib/pictureReads";
 import type { FileAction } from "../lib/platform";
 import { AvatarViewer } from "./AvatarViewer";
 import { Highlight } from "./chat/ChatSearch";
@@ -24,9 +25,11 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   const t = useT();
   const peerName = named ?? t("pairing.contact");
   const { platform, transfer, restoring } = useTransfer(file.id);
-  /** The preview's object URL, for this file id. Kept while the bubble shows it: never revoked under the <img>. */
-  const [preview, setPreview] = useState<{ id: string; url: string } | null>(null);
+  /** The preview's object URL, for this file id. Held while the bubble shows it: never revoked under the <img>. */
+  const [preview, setPreview] = useState<{ id: string; url: string; release: () => void } | null>(null);
   const picture = PREVIEWABLE_IMAGE.test(file.mime);
+  /** On screen or near it: true, off it: false, not known yet: null. A picture is read only once it is. */
+  const [visible, setVisible] = useState<boolean | null>(() => (typeof IntersectionObserver === "undefined" ? true : null));
   /** A picture's size found here (its first bytes, or as it loaded), when its sender said none or said wrong. */
   const [found, setFound] = useState<{ id: string; size: ImageMeta } | null>(null);
   /** The preview as it loaded, or that it could not be shown, for this URL. */
@@ -38,7 +41,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
   const whyId = useId();
   /** Its bytes are not on this device: gone, or (`left-out`) left out of the light backup this profile came from. */
   const [missing, setMissing] = useState<boolean | "left-out">(false);
-  /** The file is kept, but too large for this app to hand out: it is saved through the system instead. */
+  /** The file is kept, but nothing of it is shown here (not a picture, or one too large to read): Save without a preview. */
   const [saveOnly, setSaveOnly] = useState(false);
   // Right after a start the engine has not put its transfers back yet: a file still moving is not shown as finished.
   const settled = (transfer === null && !restoring) || transfer?.state === "done";
@@ -66,34 +69,58 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
     if (readable) return;
     setPreview(null);
     setSaveOnly(false);
-  }, [readable]);
+    forgetPicture(file.id);
+  }, [readable, file.id]);
+  // A chat opens with up to a hundred bubbles: a picture is read once its bubble comes near the screen. Near the chat
+  // list's own view: measured against the window, the margin stops at the list's edge and a picture is read only once
+  // it shows. More than a fast wheel notch (400 px) ahead: with less, a notch takes a box from out of the margin to on
+  // screen at once, and it shows grey while it is read.
   useEffect(() => {
-    if (!platform || !readable || blobUrl) return;
+    const root = rootRef.current;
+    if (!picture || !root || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => setVisible(entries.some((entry) => entry.isIntersecting)), { root: root.closest("[data-message-list]"), rootMargin: "400px 0px" });
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [picture]);
+  useEffect(() => {
+    if (!platform || !readable || blobUrl || (picture && !visible)) return;
     let cancelled = false;
-    void platform.getFile(file.id).then(async (blob) => {
-      if (cancelled) return;
-      if (!blob) {
-        if (!settled) return;
-        // Too large to hand out here, or not here at all: only a file this device holds offers Save.
-        const held = await fileHeld(platform, file.id, transfer?.state === "done");
+    const gone = new AbortController();
+    // Only a picture is read, to show it, a few at a time and once a run (lib/pictureReads.ts): any other file asks
+    // whether it is here (its size), not for its bytes. A platform that cannot tell is asked for the file, as before.
+    const read: Promise<HeldPicture | null> = picture ? readPicture(file.id, () => platform.getFile(file.id), gone.signal)
+      : platform.fileHeld ? Promise.resolve(null)
+      : platform.getFile(file.id).then((blob) => {
+        if (!blob) return null;
+        const url = URL.createObjectURL(blob);
+        return { url, blob, release: () => URL.revokeObjectURL(url) };
+      });
+    void read.then(async (shown) => {
+      if (cancelled) { shown?.release(); return; }
+      if (!shown) {
+        // A picture too large to hand out here, or not here at all: only a file this device holds offers Save.
+        // Finished: done, or no transfer at all (a group's file all here shows none).
+        const held = await fileHeld(platform, file.id, settled);
         if (cancelled) return;
-        const saveable = held === "here" && !!platform.saveFile && transfer?.state === "done";
+        const saveable = held === "here" && (picture || !platform.fileHeld ? !!platform.saveFile && settled : true);
+        if (!saveable && !settled) return;
         setSaveOnly(saveable);
         setMissing(saveable ? false : held === "left-out" ? "left-out" : true);
         return;
       }
       // Its sender said nothing of its size: read here from its first bytes, so the box is right before it shows.
-      const size = picture && !file.image && !knownPictureSize(file.id) ? await readImageMeta(blob, file.mime) : undefined;
-      if (cancelled) return;
+      const size = picture && !file.image && !knownPictureSize(file.id) ? await readImageMeta(shown.blob, file.mime) : undefined;
+      if (cancelled) { shown.release(); return; }
       if (size) { rememberPictureSize(file.id, size); setFound({ id: file.id, size }); }
-      setPreview({ id: file.id, url: URL.createObjectURL(blob) });
+      setPreview({ id: file.id, url: shown.url, release: shown.release });
       setMissing(false);
       setSaveOnly(false);
     });
-    return () => { cancelled = true; };
-  }, [platform, file.id, file.mime, file.image, picture, readable, settled, transfer?.state, blobUrl]);
-  // Revoked only once nothing shows it: another file in this bubble, or the bubble gone.
-  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url); }, [preview]);
+    return () => { cancelled = true; gone.abort(); };
+  }, [platform, file.id, file.mime, file.image, picture, visible, readable, settled, transfer?.state, blobUrl]);
+  // Given back only once nothing shows it: another file in this bubble, or the bubble gone. A picture's address stays
+  // kept for the run (lib/pictureReads.ts), so the chat opened again shows it without reading it.
+  useEffect(() => () => { preview?.release(); }, [preview]);
 
   const act = (action: FileAction) => {
     setActionError("");

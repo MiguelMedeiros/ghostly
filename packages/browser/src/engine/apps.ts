@@ -1,15 +1,15 @@
-import { sha256 } from "@noble/hashes/sha2.js";
 import {
-  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRevocationFor, appStoreDecision,
-  appUpdateDecision, canonicalJson, checkAppBeforeRun, isAppKey, isAppRef, planAppUpdate, readAppBundle, readAppRevocation,
-  readAppStore, readCanonicalJson, toBase64Url, utf8Decode, utf8Encode,
-  type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppStoreIndex, type AppStoreKind,
+  APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_ICON_PATH, APP_STATEMENT_LIMITS, APP_STORE_LIMITS, appDigest, appViewOf, appFingerprint, appRef, appRevocationFor, appStoreDecision,
+  appUpdateDecision, canonicalJson, checkAppBeforeRun, isAppHash, isAppKey, isAppRef, planAppUpdate, readAppBundleAsync, readAppRevocation,
+  pacer, readAppStoreSteps, readCanonicalJson, sha256Paced, toBase64Url, utf8Decode, utf8Encode,
+  type AppBundle, type AppListing, type AppManifest, type AppPermission, type AppRemoval, type AppRevocationsChecked, type AppStoreIndex, type AppStoreKind,
+  type AppStoreRead,
   type AppStoreView, type AppViewMode, type AppVersion, type JsonValue, type SignedAppRevocation,
 } from "@ghostly/core";
 import { APP_STORAGE_SCOPE_INDEX, STORES, openDb, store, wrap } from "../shared/idb";
-import { FILE_BYTES_STEP, fileBytes, fileBytesOf, type FileBytes, type FileBytesKind } from "../shared/fileBytes";
+import { FILE_BYTES_STEP, fileBytes, fileBytesOf, fileSpace, type FileBytes, type FileBytesKind } from "../shared/fileBytes";
 import { APP_FETCH_LIMITS, AppFetchError, appPasteUrl, besideUrl, isAppFetchUrl, isGitHubPage, type AppFetcher } from "./appFetch";
-import { DEFAULT_APP_STORES } from "./appDefaults";
+import { BUILT_IN_APPS, DEFAULT_APP_STORES, type BuiltInApp } from "./appDefaults";
 
 /*
  * The engine's app store (WISP 1200 § Updates and rollback, § Stores, § Permissions): the mini-apps installed in this
@@ -26,6 +26,9 @@ import { DEFAULT_APP_STORES } from "./appDefaults";
  * - Nothing installs before the person saw the checked bundle: `preview` fetches, checks and keeps it in memory,
  *   `install` stores it. An update that adds permissions waits for the person (`acceptUpdate`); a lower `sequence` is
  *   never installed; the same `sequence` with another digest is refused and marked.
+ * - An app that comes with Ghostly (`BUILT_IN_APPS`, WISP 1200 § Built-in apps) is offered, not installed: no record, no
+ *   file and no permission until the person opens it and allows what it asks. Once the person removes it, a mark in the
+ *   settings store (`BUILT_IN_APPS_KEY`) keeps it from being offered again; installing it clears the mark.
  */
 
 /** The scope of an app opened alone, outside every chat. Other scopes are the link ids of 1:1 chats. */
@@ -36,7 +39,18 @@ export const APP_STORAGE_LIMITS = {
   keyBytes: 256,
   /** A value, as compact JSON in UTF-8 bytes. */
   valueBytes: 64 * 1024,
-  /** Every key and value of one app in one scope. */
+  /**
+   * Counted for each key beside its own bytes and its value's: what the row costs on the device (the app's reference and
+   * the scope, in the row's own key and in its two indexes). Without it a scope of one-byte values held 20 times its 5 MiB.
+   */
+  rowBytes: 128,
+  /**
+   * How many times a key's bytes count. The device keeps a key four times (the row's own key, its value and both
+   * indexes), three of them as UTF-16, about 10 bytes for each byte of the key: counted once, a scope of 256-byte keys
+   * took 40 to 55 MB for its 5 MiB.
+   */
+  keyTimes: 8,
+  /** Every key and value of one app in one scope, with `rowBytes` for each key and its bytes `keyTimes` over. */
   scopeBytes: 5 * 1024 * 1024,
 } as const;
 
@@ -56,8 +70,19 @@ const REVOCATIONS_SLICE_MS = 10;
  * small; nine large ones beside one app's URLs, or one that changes at every check, would stay for the engine's life.
  */
 const REVOCATION_FILES_KEPT = { max: 64, bytes: APP_FETCH_LIMITS.revocationsBytes } as const;
+/**
+ * Revocations of store indexes whose signature was checked, kept by `appRevocationId` so an index that changes around
+ * them does not have each checked again (the one read longest ago dropped first): four indexes' worth, about 1 MiB.
+ */
+const STORE_REVOCATIONS_KEPT = 4 * APP_STORE_LIMITS.revoked;
 /** A fetched bundle kept for its install screen: at most this many, for this long. */
 const STAGED = { max: 4, ms: 10 * 60 * 1000 } as const;
+/**
+ * Checked bundles kept in memory: the most recently used `min`, and beyond them each one a running app used (`entry`,
+ * `file`, `fileAt`) within `ms`. The engine is not told when an app closes; one not used for that long goes, and is read
+ * and checked again if it still runs.
+ */
+const BUNDLES_KEPT = { min: 2, ms: 60 * 1000 } as const;
 /** The first bytes of a bundle: magic, the manifest's length and the largest manifest. */
 const PEEK_BYTES = APP_BUNDLE_MAGIC.length + 4 + APP_BUNDLE_LIMITS.manifestBytes;
 
@@ -113,8 +138,38 @@ export interface AddedAppStore {
   problem?: string;
 }
 
-/** One key of one app's storage in one scope (`STORES.appStorage`): the value as JSON, and the bytes it counts. */
+/** Where a bundle's file lies in the client's own file storage (`Apps.fileAt`): bytes `offset` to `offset + length` of `id`. */
+export interface AppFileAt { space: string; id: string; offset: number; length: number; sha256: string }
+
+/** One key of one app's storage in one scope (`STORES.appStorage`): the value as JSON, and the bytes of the key and the value. */
 export interface AppStorageRow { ref: string; scope: string; key: string; value: string; size: number }
+/**
+ * What one scope holds, as raw sums: its rows, their keys' bytes and their `size` (key and value). Kept in the scope's
+ * counter row beside the rows, written in the same transaction as each of them, so a write after a start reads no
+ * value to count the scope. Sums, not the count itself: a change of how bytes count (`costOf`) counts them anew.
+ */
+export interface AppScopeCount { rows: number; keyBytes: number; size: number }
+/**
+ * The key of a scope's counter row (`AppScopeCount` as JSON in `value`, `size` 0): an app's key is never empty
+ * (`keyOf`), and the app's own rows of a scope are `keysOf`, which leaves it out.
+ */
+const COUNT_KEY = "";
+const NO_ROWS: AppScopeCount = { rows: 0, keyBytes: 0, size: 0 };
+/**
+ * What rows take of their scope's 5 MiB: `rowBytes` each, their keys `keyTimes` over and their values. Not kept, so a
+ * count from before counts alike.
+ */
+const costOf = ({ rows, keyBytes, size }: AppScopeCount): number =>
+  rows * APP_STORAGE_LIMITS.rowBytes + size + (APP_STORAGE_LIMITS.keyTimes - 1) * keyBytes;
+/** One row as a count, `sign` -1 to take it away. */
+const countOf = ({ key, size }: { key: string; size: number }, sign = 1): AppScopeCount => ({ rows: sign, keyBytes: sign * byteLength(key), size: sign * size });
+const plus = (a: AppScopeCount, b: AppScopeCount): AppScopeCount => ({ rows: a.rows + b.rows, keyBytes: a.keyBytes + b.keyBytes, size: a.size + b.size });
+function readCount(value: unknown): AppScopeCount | null {
+  try {
+    const c = JSON.parse(value as string) as Partial<AppScopeCount>;
+    return [c.rows, c.keyBytes, c.size].every((n) => Number.isSafeInteger(n) && (n as number) >= 0) ? (c as AppScopeCount) : null;
+  } catch { return null; }
+}
 
 /** Whether an installed app may run now: `needs-files` when its bundle is not on this device (a restored profile). */
 export type AppRunStatus =
@@ -150,9 +205,16 @@ export interface InstalledAppView {
   listedBy: AppListedBy[];
   /** No curated store of the person's lists it (phase 1 has no publisher proofs). */
   unknownPublisher: boolean;
+  /** The installed version is the one this client's own list pins (a built-in app): the client vouches for it itself. */
+  builtIn?: true;
   pending?: { sequence: number; version: string; added: AppPermission[] };
   equivocation?: { sequence: number; at: number };
   checkedAt?: number;
+  /**
+   * Versions started here that are no longer the one installed (an update came while they ran) and are now revoked, or
+   * removed by a store: `run` judges the installed version only, and a frame that still runs one of these is stopped too.
+   */
+  stopped?: { digest: string; run: AppRunStatus }[];
 }
 
 export interface AppStoreSummary {
@@ -181,7 +243,9 @@ export interface AppStorePreview { url: string; key: string; fingerprint: string
 export type AppSource =
   | { url: string }
   | { store: string; ref: string }
-  | { card: { ref: string; url: string; sequence?: number; digest?: string } };
+  | { card: { ref: string; url: string; sequence?: number; digest?: string } }
+  /** A built-in app this profile is offered, by reference: read from the bundle the build carries, with no request. */
+  | { builtIn: string };
 
 /** What the install screen shows, from the checked bundle. Nothing is stored yet. */
 export interface AppPreview {
@@ -200,6 +264,8 @@ export interface AppPreview {
   run: AppRunStatus;
   listedBy: AppListedBy[];
   unknownPublisher: boolean;
+  /** Read from the bundle this build carries (a built-in app): no server was asked for it, `from` notwithstanding. */
+  carried?: true;
 }
 
 export type AppCheckOutcome = "updated" | "ask" | "equivocation" | "none";
@@ -210,6 +276,8 @@ export interface AppRunEntry { ref: string; digest: string; version: string; tit
 
 /** An app's storage in one scope, as the WISP's export file. */
 export interface AppDataExport { ghostlyAppData: 1; app: string; scope: string; entries: Record<string, JsonValue> }
+/** One scope of an app's storage as it is kept: each key with its value's JSON text, for an export file written as is. */
+export interface AppDataExportText { app: string; scope: string; entries: [key: string, json: string][] }
 
 export interface AppsHost {
   fetch: AppFetcher;
@@ -219,6 +287,14 @@ export interface AppsHost {
   online(): boolean;
   now?: () => number;
   defaults?: readonly { url: string; key: string }[];
+  /** The apps that come with this build (`BUILT_IN_APPS` when absent). */
+  builtIns?: readonly BuiltInApp[];
+  /**
+   * The bundle this build carries for a built-in app: a file of the client itself, read with no request to any server
+   * but the client's own. Whatever it returns is checked whole against the entry's digest and reference. Absent: this
+   * build carries none, and no built-in app is offered.
+   */
+  readBuiltIn?(app: BuiltInApp): Promise<Uint8Array>;
   /** After every update check (the scheduled one included): the pages read the installed apps again. */
   checked?(results: AppCheckResult[]): void;
 }
@@ -243,6 +319,53 @@ function fail(code: string, words: string): never {
 }
 
 /**
+ * The key, in `STORES.settings`, of what the person did about the apps that come with Ghostly (one of
+ * `PROFILE_SETTINGS_KEYS`: "Clear all data" drops it, and the profile is offered them as a new one is).
+ */
+export const BUILT_IN_APPS_KEY = "appBuiltIns";
+/** The built-in apps the person removed, by reference, and when (WISP 1200 § Built-in apps: removing sticks). */
+export interface BuiltInAppMarks { removed: Record<string, number> }
+/** A built-in app this profile is offered: one the person has neither installed nor removed. Nothing of it is stored. */
+export interface BuiltInAppOffer { ref: string; publisher: string; name: string; fingerprint: string; digest: string; url: string; title: string; tagline: string }
+
+/** The marks as kept, read with nothing taken on trust: a record that is not one is no mark. */
+function builtInMarks(kept: unknown): BuiltInAppMarks {
+  const removed: Record<string, number> = {};
+  const held = (kept as { removed?: unknown } | null | undefined)?.removed;
+  if (held && typeof held === "object") for (const [ref, at] of Object.entries(held)) if (isAppRef(ref) && typeof at === "number") removed[ref] = at;
+  return { removed };
+}
+
+/** Queues, on the settings store of an open transaction, a change of the built-in apps' marks. */
+function markBuiltIns(settings: IDBObjectStore, change: (marks: BuiltInAppMarks) => void): void {
+  const read = settings.get(BUILT_IN_APPS_KEY);
+  read.onsuccess = () => {
+    const marks = builtInMarks(read.result);
+    change(marks);
+    settings.put(marks, BUILT_IN_APPS_KEY);
+  };
+}
+
+const builtInRef = (app: BuiltInApp) => appRef(app.publisher, app.name);
+
+/**
+ * The entries of the built-in list this profile is offered (WISP 1200 § Built-in apps): each reference once, not
+ * installed (`installed`, by reference) and not removed by the person. An entry that is not a whole one (its key, its
+ * name, its digest, a URL off the list of `appFetch.ts`, no title or tagline) is skipped, as a build with no bundle
+ * for it would be.
+ */
+export function builtInsDue(list: readonly BuiltInApp[], installed: ReadonlySet<string>, marks: BuiltInAppMarks): BuiltInApp[] {
+  const due = new Map<string, BuiltInApp>();
+  for (const app of list) {
+    if (!isAppKey(app.publisher) || !isAppHash(app.digest) || !isAppFetchUrl(app.url) || !app.title || !app.tagline) continue;
+    const ref = builtInRef(app);
+    if (!isAppRef(ref) || due.has(ref) || installed.has(ref) || marks.removed[ref] !== undefined) continue;
+    due.set(ref, app);
+  }
+  return [...due.values()];
+}
+
+/**
  * Why a pasted link is not read: a github.com page that is neither a repository nor a file of one (`github-link`), so
  * the person is not told GitHub is off the list; any other host (`host`).
  */
@@ -261,8 +384,13 @@ function withRevocations(app: InstalledApp, read: readonly SignedAppRevocation[]
   return merged.size ? { ...app, revocations: [...merged.values()] } : app;
 }
 
-/** Rows of one app (`[ref]`), or of one app in one scope (`[ref, scope]`), in `STORES.appStorage`. */
+/** Rows of one app (`[ref]`), or of one app in one scope (`[ref, scope]`), in `STORES.appStorage`, counter rows included. */
 const rowsOf = (...prefix: string[]) => IDBKeyRange.bound(prefix, [...prefix, []]);
+/** The app's own rows of one scope: its counter row left out. */
+const keysOf = (ref: string, scope: string) => IDBKeyRange.bound([ref, scope, COUNT_KEY], [ref, scope, []], true);
+
+/** A scope's counter row (`COUNT_KEY`). */
+const counterRow = (ref: string, scope: string, count: AppScopeCount): AppStorageRow => ({ ref, scope, key: COUNT_KEY, value: JSON.stringify(count), size: 0 });
 
 function done(tx: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -291,17 +419,19 @@ export function peekAppManifest(bytes: Uint8Array): { ref: string; sequence: num
 
 export class Apps {
   private readonly staged = new Map<string, Staged>();
-  /** Bundles read back and checked, by digest: the one running is read once, not on every `file`. */
+  /** Bundles read back and checked, by digest, least recently used first (`BUNDLES_KEPT`): the ones running are read once, not on every `file`. */
   private readonly verified = new Map<string, AppBundle>();
+  /** When a running app last used its bundle, by digest (`BUNDLES_KEPT`): an icon drawn is not a use. */
+  private readonly runUsed = new Map<string, number>();
   /** Reads of a bundle under way, by digest: icons drawn at once share one read. */
   private readonly verifying = new Map<string, Promise<AppBundle>>();
   /**
-   * The `icon.png` of each checked bundle, by digest (at most 256 KiB, or null for none): every icon shown on the Apps
+   * The `icon.png` of each checked bundle, by digest (at most 256 KiB and 1024 × 1024 pixels, or null for none): every icon shown on the Apps
    * page, in a chat's cards and in the composer's Apps is read without the whole bundle again.
    */
   private readonly icons = new Map<string, Uint8Array | null>();
-  /** Bytes used per `ref\0scope`, counted once from the rows and kept in step by the writes here. */
-  private readonly usage = new Map<string, number>();
+  /** What each `ref\0scope` holds, read once from its counter row and kept in step by the writes here. */
+  private readonly usage = new Map<string, AppScopeCount>();
   private readonly queues = new Map<string, Promise<unknown>>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** Drops what `staged` holds past `STAGED.ms`, set while it holds anything: a closed install screen sends no call. */
@@ -309,6 +439,13 @@ export class Apps {
   private checking: Promise<AppCheckResult[]> | null = null;
   /** Runs the person started with Run anyway (`<ref> <digest>`), for this engine's life: a removal does not cut them off. */
   private readonly anyway = new Set<string>();
+  /** The apps started here (`entry`), for this engine's life: one of them uninstalled since may still have a frame open. */
+  private readonly ran = new Set<string>();
+  /**
+   * The versions started here (`entry`), by reference: digest to `sequence`, for this engine's life. A frame goes on
+   * running the version it started with whatever is installed since, so that version is the one judged when it asks.
+   */
+  private readonly started = new Map<string, Map<string, number>>();
   private views: Promise<AppStoreView[]> | null = null;
   private readonly held = new Map<string, Promise<InstalledApp | undefined>>();
   private heldStores: Promise<Map<string, AddedAppStore>> | null = null;
@@ -319,6 +456,19 @@ export class Apps {
   private readonly listingMisses = new Map<string, string>();
   /** `ghostly-revoke.json` files checked, by the SHA-256 of their bytes: their revocations, or null when refused, and the bytes the held list counts for. */
   private readonly revocationFiles = new Map<string, { revocations: SignedAppRevocation[] | null; bytes: number }>();
+  /** Revocations read in a store's index and verified, by `appRevocationId`: at most `STORE_REVOCATIONS_KEPT`. */
+  private readonly storeRevocations = new Set<string>();
+  private readonly checkedRevocations: AppRevocationsChecked = {
+    has: (id) => {
+      if (!this.storeRevocations.delete(id)) return false;
+      this.storeRevocations.add(id);
+      return true;
+    },
+    add: (id) => {
+      this.storeRevocations.add(id);
+      if (this.storeRevocations.size > STORE_REVOCATIONS_KEPT) this.storeRevocations.delete(this.storeRevocations.values().next().value!);
+    },
+  };
   private stopped = false;
 
   constructor(private readonly host: AppsHost) {}
@@ -395,29 +545,92 @@ export class Apps {
     return (await this.app(ref)) ?? fail("not-installed", "This app is not installed");
   }
 
+  /** The built-in list's entry of this reference, if it has one. */
+  private builtIn(ref: string): BuiltInApp | undefined {
+    return (this.host.builtIns ?? BUILT_IN_APPS).find((app) => builtInRef(app) === ref);
+  }
+  private async builtInMarks(): Promise<BuiltInAppMarks> {
+    return builtInMarks(await wrap((await store(STORES.settings, "readonly")).get(BUILT_IN_APPS_KEY)));
+  }
+
+  /**
+   * The built-in apps this profile is offered (WISP 1200 § Built-in apps): shown with the installed ones, with nothing
+   * stored and nothing granted. Opening one is an install like any other, from the bundle the build carries.
+   */
+  async builtIns(): Promise<BuiltInAppOffer[]> {
+    const list = this.host.builtIns ?? BUILT_IN_APPS;
+    if (!list.length || !this.host.readBuiltIn) return [];
+    const [installed, marks] = await Promise.all([this.installed(), this.builtInMarks()]);
+    return builtInsDue(list, new Set(installed.map((a) => a.ref)), marks).map((app) => ({
+      ref: builtInRef(app), publisher: app.publisher, name: app.name, fingerprint: appFingerprint(app.publisher), digest: app.digest, url: app.url,
+      title: app.title, tagline: app.tagline,
+    }));
+  }
+
+  /**
+   * The bundle the build carries for a built-in app, checked as a fetched one is, and against its entry: the digest the
+   * list pins and the entry's reference. Anything else in that file is not this app, and nothing of it is kept.
+   */
+  private async bundled(app: BuiltInApp): Promise<{ bundle: AppBundle; bytes: Uint8Array }> {
+    if (!this.host.readBuiltIn) fail("not-carried", "This build does not carry this app");
+    let bytes: Uint8Array;
+    try { bytes = await this.host.readBuiltIn(app); } catch { fail("not-carried", "This build does not carry this app"); }
+    if (!(bytes instanceof Uint8Array) || bytes.length > APP_BUNDLE_LIMITS.bundleBytes) fail("not-carried", "This build does not carry this app");
+    const read = await readAppBundleAsync(bytes);
+    if (!read.ok) fail(read.reason, `This is not an app Ghostly can install${read.detail ? ` (${read.detail})` : ""}`);
+    if (read.bundle.digest !== app.digest || versionOf(read.bundle.manifest, read.bundle.digest).ref !== builtInRef(app)) fail("unlisted", "The app this build carries is not the one it names");
+    return { bundle: read.bundle, bytes };
+  }
+  /** The built-in entry of this reference while the profile is offered it (`builtIns`), else undefined. */
+  private async offered(ref: string): Promise<BuiltInApp | undefined> {
+    const app = this.builtIn(ref);
+    if (!app || !this.host.readBuiltIn) return undefined;
+    return builtInsDue([app], (await this.app(ref)) ? new Set([ref]) : new Set(), await this.builtInMarks())[0];
+  }
+
   /**
    * An installed app that may still run (WISP 1200 § Takedowns): a running app whose version its publisher revoked, or
    * a store of the person's removed (unless this run was started with Run anyway), is cut off with `stopped`, whether
    * or not the page stops its frame.
    */
-  private async stillRunnable(app: InstalledApp): Promise<InstalledApp> {
-    const run = this.runStatus(app, await this.heldViews(), app.revocations);
+  private async stillRunnable(app: InstalledApp, digest?: unknown): Promise<InstalledApp> {
+    const version = this.versionRunning(app, digest);
+    const run = this.runStatus(version, await this.heldViews(), app.revocations);
     if (run.status === "revoked") fail("stopped", "Its publisher revoked this version");
-    if (run.status === "removed" && !this.anyway.has(`${app.ref} ${app.digest}`)) fail("stopped", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
+    if (run.status === "removed" && !this.anyway.has(`${version.ref} ${version.digest}`)) fail("stopped", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     return app;
   }
 
-  private async runningOrFail(ref: unknown): Promise<InstalledApp> {
-    return this.stillRunnable(await this.installedOrFail(ref));
+  /**
+   * The version a frame runs: the one it names by `digest` (what `entry` gave it), which an update installed since does
+   * not change. None named: the installed one. One never started here does not run.
+   */
+  private versionRunning(app: InstalledApp, digest: unknown): AppVersion {
+    if (digest === undefined || digest === app.digest) return app;
+    const sequence = typeof digest === "string" ? this.started.get(app.ref)?.get(digest) : undefined;
+    if (sequence === undefined) fail("stopped", "This version is not running");
+    return { ref: app.ref, sequence, digest: digest as string };
+  }
+
+  /** The versions started here that are not the installed one any more. */
+  private startedBefore(app: InstalledApp): AppVersion[] {
+    return [...this.started.get(app.ref) ?? []].filter(([digest]) => digest !== app.digest).map(([digest, sequence]) => ({ ref: app.ref, sequence, digest }));
+  }
+
+  private async runningOrFail(ref: unknown, digest?: unknown): Promise<InstalledApp> {
+    return this.stillRunnable(await this.installedOrFail(ref), digest);
   }
 
   /**
    * Before an app's frames go to a contact (`appOpen`, `appSend`): refused with `stopped` as its storage is. A reference
-   * not installed here (a bot that speaks an app's messages) is not this store's to refuse.
+   * not installed here (a bot that speaks an app's messages) is not this store's to refuse, unless it ran here and was
+   * uninstalled since: the person removed it, so a frame of it still open says nothing more (`not-installed`). `digest`:
+   * the version the frame runs (`versionRunning`).
    */
-  async chatRunnable({ ref }: { ref: string }): Promise<void> {
+  async chatRunnable({ ref, digest }: { ref: string; digest?: string }): Promise<void> {
     const app = isAppRef(ref) ? await this.app(ref) : undefined;
-    if (app) await this.stillRunnable(app);
+    if (!app && this.ran.has(ref)) fail("not-installed", "This app is not installed");
+    if (app) await this.stillRunnable(app, digest);
   }
   private async putApp(app: InstalledApp): Promise<void> {
     try { await wrap((await store(STORES.apps, "readwrite")).put(app)); } finally { this.held.delete(app.ref); }
@@ -501,7 +714,7 @@ export class Apps {
    */
   private async writeBundle(digest: string, bytes: Uint8Array): Promise<FileBytesKind> {
     const id = bundleId(digest);
-    const expected = toBase64Url(sha256(bytes));
+    const expected = toBase64Url(await sha256Paced(bytes));
     let files: FileBytes | undefined;
     let stored: string | null;
     try {
@@ -549,6 +762,7 @@ export class Apps {
 
   private async removeBundle(kind: FileBytesKind, digest: string): Promise<void> {
     this.verified.delete(digest);
+    this.runUsed.delete(digest);
     this.icons.delete(digest);
     await (await fileBytesOf(kind))?.remove(bundleId(digest)).catch(() => {});
   }
@@ -560,18 +774,25 @@ export class Apps {
   }
 
   /** The installed bundle read back and checked again before it runs (WISP 1200 § Signatures: "again before it runs one"). */
-  private verifiedBundle(app: InstalledApp): Promise<AppBundle> {
+  private verifiedBundle(app: InstalledApp, running: boolean): Promise<AppBundle> {
+    if (running) this.runUsed.set(app.digest, this.now());
     const kept = this.verified.get(app.digest);
-    if (kept) return Promise.resolve(kept);
+    // Used last, dropped last: a running app's `file` reads keep its bundle, and drop the ones no app has used for a while.
+    if (kept) {
+      this.verified.delete(app.digest);
+      this.verified.set(app.digest, kept);
+      this.dropUnusedBundles();
+      return Promise.resolve(kept);
+    }
     const under = this.verifying.get(app.digest);
     if (under) return under;
     const reading = (async () => {
       const bytes = await this.readBundleBytes(app.bytes, app.digest);
       if (!bytes) fail("needs-files", "This app's files are not on this device yet");
-      const read = readAppBundle(bytes);
+      const read = await readAppBundleAsync(bytes);
       if (!read.ok || read.bundle.digest !== app.digest) fail("damaged", "This app's stored files do not match what was installed");
-      if (this.verified.size >= 2) this.verified.delete(this.verified.keys().next().value!);
       this.verified.set(app.digest, read.bundle);
+      this.dropUnusedBundles();
       // A copy: the bundle's files are views into its whole bytes, which would stay in memory for as long as the icon.
       this.icons.set(app.digest, read.bundle.files.get(APP_ICON_PATH)?.slice() ?? null);
       return read.bundle;
@@ -580,28 +801,50 @@ export class Apps {
     return reading;
   }
 
+  /**
+   * Apps running at once do not push each other's bundle out, which every `file` read would then read and check again
+   * whole; one closed (or only drawn as an icon) goes once two newer ones are kept, at the next bundle read or hit.
+   */
+  private dropUnusedBundles(): void {
+    for (const digest of this.verified.keys()) {
+      if (this.verified.size <= BUNDLES_KEPT.min) break;
+      if (this.now() - (this.runUsed.get(digest) ?? -Infinity) < BUNDLES_KEPT.ms) continue;
+      this.verified.delete(digest);
+      this.runUsed.delete(digest);
+    }
+  }
+
   // ---------- network ----------
 
   private async fetchBundle(url: string): Promise<{ bundle: AppBundle; bytes: Uint8Array }> {
     const bytes = await this.host.fetch(url, { maxBytes: APP_BUNDLE_LIMITS.bundleBytes });
-    const read = readAppBundle(bytes);
+    const read = await readAppBundleAsync(bytes);
     if (!read.ok) fail(read.reason, `This is not an app Ghostly can install${read.detail ? ` (${read.detail})` : ""}`);
     return { bundle: read.bundle, bytes };
   }
 
   /**
    * Reads the index at `url`. With the index held for this store, bytes equal to it (by digest) are the held index: its
-   * signature and every revocation in it were checked when it was read, so only its expiry is taken again.
+   * signature and every revocation in it were checked when it was read, so only its expiry is taken again. Any other
+   * index is read with a pause every few ms (the engine shares the page's thread, and an index holds up to 4096
+   * listings and 4096 revocations, each of these a signature check), and a revocation checked in an earlier read, of
+   * this store or another, a preview included, is not checked again.
    */
-  private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">): Promise<ReturnType<typeof readAppStore>> {
+  private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">): Promise<AppStoreRead> {
     const [indexBytes, sigBytes] = await Promise.all([
       this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.storeIndexBytes }),
       this.host.fetch(besideUrl(url, "ghostly-store.sig"), { maxBytes: APP_FETCH_LIMITS.sigBytes }),
     ]);
-    if (held?.index && held.digest !== undefined && toBase64Url(sha256(indexBytes)) === held.digest) {
+    if (held?.index && held.digest !== undefined && toBase64Url(await sha256Paced(indexBytes)) === held.digest) {
       return { ok: true, store: { index: held.index, digest: held.digest, expired: held.index.expires < this.nowS() } };
     }
-    return readAppStore(indexBytes, sigBytes, this.nowS(), heldKey);
+    const steps = readAppStoreSteps(indexBytes, sigBytes, this.nowS(), heldKey, this.checkedRevocations);
+    const pause = pacer(REVOCATIONS_SLICE_MS);
+    for (;;) {
+      const step = steps.next();
+      if (step.done) return step.value;
+      await pause();
+    }
   }
 
   /**
@@ -626,16 +869,16 @@ export class Apps {
    * engine shares the page's thread, and each entry is a signature check. The same bytes are not checked again.
    */
   private async readRevocationsFile(bytes: Uint8Array): Promise<SignedAppRevocation[] | null> {
-    const id = toBase64Url(sha256(bytes));
+    const id = toBase64Url(await sha256Paced(bytes));
     const known = this.revocationFiles.get(id);
     if (known !== undefined) return known.revocations;
     const read = readCanonicalJson(bytes);
     let out: SignedAppRevocation[] | null = null;
     if (read.ok && Array.isArray(read.value) && read.value.length <= APP_STATEMENT_LIMITS.revocations) {
       out = [];
-      let since = performance.now();
+      const pause = pacer(REVOCATIONS_SLICE_MS);
       for (const entry of read.value) {
-        if (performance.now() - since >= REVOCATIONS_SLICE_MS) { await new Promise((resolve) => setTimeout(resolve, 0)); since = performance.now(); }
+        await pause();
         const one = readAppRevocation(entry);
         if (!one.ok) { out = null; break; }
         out.push(one.revocation);
@@ -773,6 +1016,13 @@ export class Apps {
     let urls: string[];
     let expect: { ref: string; sequence?: number; digest?: string; exact?: true } | null = null;
     let fromStore: string | undefined;
+    if ("builtIn" in source) {
+      if (!isAppRef(source.builtIn)) fail("bad-ref", "Not an app reference");
+      const app = (await this.offered(source.builtIn)) ?? fail("not-offered", "This app does not come with Ghostly here");
+      const { bundle, bytes } = await this.bundled(app);
+      // From its public URL, not from the build: what a card sent to a contact names, and where its revocations are read.
+      return this.stage(bundle, bytes, app.url, undefined, true);
+    }
     if ("url" in source) {
       urls = [(typeof source.url === "string" && appPasteUrl(source.url, "app.ghostlyapp")) || notReadable(source.url, "Apps are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS")];
     } else if ("store" in source) {
@@ -787,6 +1037,12 @@ export class Apps {
       if (!isAppRef(ref)) fail("bad-ref", "Not an app reference");
       // A card's URL is on the list or refused (WISP 1200 § Apps sent in a chat): no request goes anywhere else.
       if (!isAppFetchUrl(url)) fail("host", "A card's app is read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit");
+      // A contact's card of the very version this build carries, of a built-in app offered here: no request at all.
+      const carried = typeof digest === "string" ? await this.offered(ref) : undefined;
+      if (carried && carried.digest === digest) {
+        const held = await this.bundled(carried).catch(() => null);
+        if (held) return this.stage(held.bundle, held.bytes, carried.url, undefined, true);
+      }
       urls = [url];
       expect = { ref, ...(typeof sequence === "number" && { sequence }), ...(typeof digest === "string" && { digest }) };
     } else fail("bad-source", "No app to fetch");
@@ -817,7 +1073,7 @@ export class Apps {
     if (oldest) this.sweep = setTimeout(() => this.sweepStaged(), STAGED.ms - (this.now() - oldest.at));
   }
 
-  private async stage(bundle: AppBundle, bytes: Uint8Array, from: string, fromStore?: string): Promise<AppPreview> {
+  private async stage(bundle: AppBundle, bytes: Uint8Array, from: string, fromStore?: string, carried = false): Promise<AppPreview> {
     for (const [digest, s] of this.staged) if (this.now() - s.at > STAGED.ms) this.staged.delete(digest);
     this.staged.delete(bundle.digest);
     while (this.staged.size >= STAGED.max) this.staged.delete(this.staged.keys().next().value!);
@@ -837,6 +1093,7 @@ export class Apps {
       install, asks,
       run: this.runStatus(version, this.storeViews(stores), installed?.revocations),
       listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
+      ...(carried && { carried: true as const }),
     };
   }
 
@@ -881,6 +1138,8 @@ export class Apps {
     // Installed from a store's listing: its updates come from that store from now on; from a URL or a card: from anywhere.
     const next = this.versionRecord(installed, bundle, kind, from, fromStore);
     await this.putApp(next);
+    // The person installed a built-in app they had removed (from a store, a link or a card): it is theirs again.
+    if (!installed && this.builtIn(version.ref)) await this.keepBuiltIn(version.ref);
     if (installed && installed.digest !== digest) await this.removeBundle(installed.bytes, installed.digest);
     if (installed?.pending && next.pending?.digest !== installed.pending.digest && installed.pending.digest !== digest) await this.removeBundle(installed.pending.bytes, installed.pending.digest);
     this.staged.delete(digest);
@@ -914,7 +1173,7 @@ export class Apps {
     const installed = await this.installedOrFail(ref);
     const pending = installed.pending ?? fail("no-update", "No update waits for this app");
     const bytes = await this.readBundleBytes(pending.bytes, pending.digest);
-    const read = bytes ? readAppBundle(bytes) : null;
+    const read = bytes ? await readAppBundleAsync(bytes) : null;
     if (!read?.ok || read.bundle.digest !== pending.digest) {
       const { pending: _p, ...rest } = installed;
       await this.putApp(rest);
@@ -986,8 +1245,9 @@ export class Apps {
       // in that store's listing and takes only the digest it lists: a newer version at the publisher's sources, or at a
       // listing URL that moved on (a repository's HEAD), waits until the store lists it.
       const pinned = app.store;
-      // `peek`: a listing's URL, peeked before it is read whole; `miss`: where a peek that shows nothing to take is kept.
-      const candidates = new Map<string, { digest?: string; peek?: true; miss?: [string, string] }>();
+      // `peek`: a listing's URL, peeked before it is read whole; `miss`: where a peek that shows nothing to take is kept;
+      // `holds`: what a source's peek showed it holds.
+      const candidates = new Map<string, { digest?: string; peek?: true; miss?: [string, string]; holds?: AppVersion }>();
       const newer = (v: { ref: string; sequence: number; digest: string }) => v.ref === app.ref && (v.sequence > highest || (v.sequence >= app.sequence && !known.has(v.digest)));
       for (const s of stores) {
         if (pinned !== undefined && s.key !== pinned) continue;
@@ -1005,7 +1265,7 @@ export class Apps {
           if (candidates.has(url)) continue;
           try {
             const peek = peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true }));
-            if (peek && newer(peek)) candidates.set(url, {});
+            if (peek && newer(peek)) candidates.set(url, { holds: peek });
           } catch { /* this source does not answer now */ }
         }
       }
@@ -1017,6 +1277,7 @@ export class Apps {
         // A listing's URL is peeked first, as a source is: one that does not hold what may be taken (a listing that names
         // a version its URLs do not hold, a raw HEAD that moved on) is not read whole, nor peeked again while the store's
         // index lists the same.
+        let holds = want.holds;
         if (want.peek) {
           let peek: ReturnType<typeof peekAppManifest>;
           try { peek = peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true })); } catch { continue; }
@@ -1024,7 +1285,12 @@ export class Apps {
             if (want.miss) this.listingMisses.set(...want.miss);
             continue;
           }
+          holds = peek;
         }
+        // A version a store of the person's removed, or its publisher revoked, is not taken: known from the peek, so it is
+        // not read whole at every check to be refused again. One under a number held is still read: it marks the app.
+        const twin = holds && (holds.sequence === app.sequence || holds.sequence === app.pending?.sequence);
+        if (holds && !twin && this.runStatus(holds, this.storeViews(stores), app.revocations).status !== "ok") continue;
         let fetched: { bundle: AppBundle; bytes: Uint8Array };
         try { fetched = await this.fetchBundle(url); } catch { continue; }
         const { bundle, bytes } = fetched;
@@ -1065,10 +1331,11 @@ export class Apps {
       }
       // A version installed from elsewhere, or naming other sources: its publisher's revocations beside those too.
       const after = await this.readRevocations(app.ref, [app.from, ...(app.manifest.sources ?? [])], revokeRead);
-      // What its publisher serves now, and of the ones kept those that stop the installed or the waiting version. While no
-      // file answers, every kept one stays (it may name a version not found yet): a file that changes does not pile up.
+      // What its publisher serves now, and of the ones kept those that stop the installed or the waiting version, or one
+      // started here before an update (it may still run). While no file answers, every kept one stays (it may name a
+      // version not found yet): a file that changes does not pile up.
       const revocations = before || after ? [...(before ?? []), ...(after ?? [])] : null;
-      const versions: AppVersion[] = [app, ...(app.pending ? [versionOf(app.pending.manifest, app.pending.digest)] : [])];
+      const versions: AppVersion[] = [app, ...(app.pending ? [versionOf(app.pending.manifest, app.pending.digest)] : []), ...this.startedBefore(app)];
       const stays = (app.revocations ?? []).filter((r) => !revocations || versions.some((v) => appRevocationFor(v, [r])));
       const merged = new Map([...stays, ...(revocations ?? [])].map((r) => [canonicalJson(r), r]));
       // Removed meanwhile: not put back, and the files this check fetched go too. Its store removed meanwhile: not pinned again.
@@ -1097,6 +1364,18 @@ export class Apps {
     const app = await this.installedOrFail(ref);
     const stores = await this.stores();
     if (await this.hasBundle(app.bytes, app.digest)) return this.runCheckOf(app, stores);
+    // The version this build carries (a restored profile's built-in app): its files are here, no source is asked.
+    const carried = this.builtIn(app.ref);
+    if (carried && carried.digest === app.digest) {
+      const held = await this.bundled(carried).catch(() => null);
+      if (held) {
+        const kind = await this.writeBundle(app.digest, held.bytes);
+        const now = await this.app(app.ref);
+        if (!now || now.digest !== app.digest) { await this.removeBundle(kind, app.digest); fail("not-installed", "This app is not installed"); }
+        if (now.bytes !== kind) await this.putApp({ ...now, bytes: kind });
+        return this.runCheckOf({ ...now, bytes: kind }, stores);
+      }
+    }
     // An app installed from a store asks only that store's listing (and the URL it came from), never its sources.
     const urls = [app.from];
     for (const s of stores) {
@@ -1105,6 +1384,9 @@ export class Apps {
     }
     if (app.store === undefined) urls.push(...(app.manifest.sources ?? []));
     for (const url of new Set(urls.filter(isAppFetchUrl))) {
+      // Peeked first, as the update check does: a URL that holds another version (its publisher moved on, a repository's
+      // HEAD) is not read whole only to be skipped, at every open and every check.
+      try { if (peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true }))?.digest !== app.digest) continue; } catch { continue; }
       let fetched: { bundle: AppBundle; bytes: Uint8Array };
       try { fetched = await this.fetchBundle(url); } catch { continue; }
       if (fetched.bundle.digest !== app.digest) continue;
@@ -1143,19 +1425,46 @@ export class Apps {
     if (run.status === "removed" && runAnyway !== true) fail("removed", `Removed by ${run.by[0]!.name}: ${run.by[0]!.reason}`);
     if (run.status === "needs-files") fail("needs-files", "This app's files are not on this device yet");
     if (run.status === "removed") this.anyway.add(`${app.ref} ${app.digest}`);
-    const bundle = await this.verifiedBundle(app);
+    const bundle = await this.verifiedBundle(app, true);
     const entry = bundle.files.get(bundle.manifest.entry) ?? fail("damaged", "The entry is missing");
+    this.ran.add(app.ref);
+    const versions = this.started.get(app.ref) ?? new Map<string, number>();
+    this.started.set(app.ref, versions.set(app.digest, app.sequence));
     return { ref: app.ref, digest: app.digest, version: app.manifest.version, title: app.manifest.title, permissions: [...app.permissions], view: appViewOf(bundle.manifest), entry: utf8Decode(entry) };
   }
 
-  /** A file of the installed bundle, for the broker's `file` (`ghostly.file(path)`). */
-  async file({ ref, path }: { ref: string; path: string }): Promise<Uint8Array> {
+  /**
+   * Where a file of the installed bundle lies in this device's file storage, for a client that hands the bytes to the
+   * app itself (Desktop: Rust reads them, checks their SHA-256 and gives them to the app's window, so they never cross
+   * the Ghostly window). The same checks as `file`; null where the bundle is not in such storage, and for the icon,
+   * which `file` answers from memory.
+   */
+  async fileAt({ ref, path, digest }: { ref: string; path: string; digest?: string }): Promise<AppFileAt | null> {
+    if (path === APP_ICON_PATH) return null;
+    const app = await this.runningOrFail(ref, digest);
+    if (digest !== undefined && digest !== app.digest) fail("no-file", "No such file in this app");
+    if (app.bytes !== "native") return null;
+    const bundle = await this.verifiedBundle(app, true);
+    const file = typeof path === "string" ? bundle.files.get(path) : undefined;
+    const listed = bundle.manifest.files.find((f) => f.path === path);
+    if (!file || !listed) fail("no-file", "No such file in this app");
+    // The bundle was read whole from its stored file (`readBundleBytes`): a file's place in its bytes is its place there.
+    return { space: fileSpace(), id: bundleId(app.digest), offset: file.byteOffset, length: file.length, sha256: listed.sha256 };
+  }
+
+  /**
+   * A file of the installed bundle, for the broker's `file` (`ghostly.file(path)`): a copy, which the broker transfers to
+   * the app as it is. `digest`: the version the frame runs.
+   */
+  async file({ ref, path, digest }: { ref: string; path: string; digest?: string }): Promise<Uint8Array> {
     // Its icon still shows on the Apps page and in chats once it is stopped: a picture the publisher signed, nothing more.
-    const app = path === APP_ICON_PATH ? await this.installedOrFail(ref) : await this.runningOrFail(ref);
+    const app = path === APP_ICON_PATH ? await this.installedOrFail(ref) : await this.runningOrFail(ref, digest);
+    // A version that runs on after its update: its bundle went with the update, and the installed one's files are not its own.
+    if (path !== APP_ICON_PATH && digest !== undefined && digest !== app.digest) fail("no-file", "No such file in this app");
     const icon = path === APP_ICON_PATH ? this.icons.get(app.digest) : undefined;
     if (icon) return icon.slice();
     if (icon === null) fail("no-file", "No such file in this app");
-    const bundle = await this.verifiedBundle(app);
+    const bundle = await this.verifiedBundle(app, path !== APP_ICON_PATH);
     if (typeof path !== "string" || !bundle.files.has(path)) fail("no-file", "No such file in this app");
     return bundle.files.get(path)!.slice();
   }
@@ -1165,6 +1474,7 @@ export class Apps {
   private async view(app: InstalledApp, stores: AddedAppStore[]): Promise<InstalledAppView> {
     const { manifest } = app;
     const listedBy = this.listedBy(app.ref, stores);
+    const stopped = this.startedBefore(app).map((v) => ({ digest: v.digest, run: this.runStatus(v, this.storeViews(stores), app.revocations) })).filter((v) => v.run.status !== "ok");
     return {
       ref: app.ref, name: app.name, publisher: app.publisher, fingerprint: appFingerprint(app.publisher),
       title: manifest.title, tagline: manifest.tagline, ...(manifest.description !== undefined && { description: manifest.description }),
@@ -1172,9 +1482,11 @@ export class Apps {
       from: app.from, icon: manifest.files.some((f) => f.path === "icon.png"),
       installedAt: app.installedAt, updatedAt: app.updatedAt,
       run: await this.runCheckOf(app, stores), listedBy, unknownPublisher: !listedBy.some((s) => s.kind === "curated"),
+      ...(this.builtIn(app.ref)?.digest === app.digest && { builtIn: true as const }),
       ...(app.pending && { pending: { sequence: app.pending.sequence, version: app.pending.manifest.version, added: [...app.pending.added] } }),
       ...(app.equivocation && { equivocation: { sequence: app.equivocation.sequence, at: app.equivocation.at } }),
       ...(app.checkedAt !== undefined && { checkedAt: app.checkedAt }),
+      ...(stopped.length && { stopped }),
     };
   }
 
@@ -1187,17 +1499,31 @@ export class Apps {
 
   /**
    * Uninstalls an app: its bundle (and a waiting update's), its record and its storage in every scope. The person chose
-   * it, after the offer of an export (`exportData`).
+   * it, after the offer of an export (`exportData`). A built-in app is marked removed in the same transaction, and one
+   * the person never opened is only marked: no start and no update offers it again (WISP 1200 § Built-in apps).
    */
   async uninstall({ ref }: { ref: string }): Promise<void> {
-    const app = await this.installedOrFail(ref);
-    const tx = (await openDb()).transaction([STORES.apps, STORES.appStorage], "readwrite");
-    tx.objectStore(STORES.apps).delete(app.ref);
-    tx.objectStore(STORES.appStorage).delete(rowsOf(app.ref));
-    try { await done(tx); } finally { this.held.delete(app.ref); }
-    for (const key of [...this.usage.keys()]) if (key.startsWith(`${app.ref}\0`)) this.usage.delete(key);
+    if (!isAppRef(ref)) fail("bad-ref", "Not an app reference");
+    const app = await this.app(ref);
+    const builtIn = this.builtIn(ref) !== undefined;
+    if (!app && !builtIn) fail("not-installed", "This app is not installed");
+    const tx = (await openDb()).transaction([STORES.apps, STORES.appStorage, ...(builtIn ? [STORES.settings] : [])], "readwrite");
+    tx.objectStore(STORES.apps).delete(ref);
+    tx.objectStore(STORES.appStorage).delete(rowsOf(ref));
+    if (builtIn) markBuiltIns(tx.objectStore(STORES.settings), (marks) => { marks.removed[ref] ??= this.now(); });
+    try { await done(tx); } finally { this.held.delete(ref); }
+    for (const key of [...this.usage.keys()]) if (key.startsWith(`${ref}\0`)) this.usage.delete(key);
+    this.started.delete(ref);
+    if (!app) return;
     await this.removeBundle(app.bytes, app.digest);
     if (app.pending) await this.removeBundle(app.pending.bytes, app.pending.digest);
+  }
+  /** Takes the "removed by the person" mark off a built-in app, if it has one. */
+  private async keepBuiltIn(ref: string): Promise<void> {
+    if ((await this.builtInMarks()).removed[ref] === undefined) return;
+    const tx = (await openDb()).transaction(STORES.settings, "readwrite");
+    markBuiltIns(tx.objectStore(STORES.settings), (marks) => { delete marks.removed[ref]; });
+    await done(tx);
   }
 
   // ---------- storage ----------
@@ -1221,26 +1547,43 @@ export class Apps {
     return run;
   }
 
-  private async usageOf(ref: string, scope: string): Promise<number> {
+  /**
+   * What a scope holds: its counter row, when the number of rows agrees with it (one key count, no value read). A
+   * scope without one (written before it was kept) or where it disagrees (rows written by an older client) is
+   * counted from its rows once.
+   */
+  private async usageOf(ref: string, scope: string): Promise<AppScopeCount> {
     const id = `${ref}\0${scope}`;
-    let used = this.usage.get(id);
-    if (used === undefined) {
-      const rows = await wrap<AppStorageRow[]>((await store(STORES.appStorage, "readonly")).index(APP_STORAGE_SCOPE_INDEX).getAll([ref, scope]));
-      used = rows.reduce((sum, r) => sum + r.size, 0);
-      this.usage.set(id, used);
+    const cached = this.usage.get(id);
+    if (cached) return cached;
+    const rows = await store(STORES.appStorage, "readonly");
+    const [counter, n] = await Promise.all([
+      wrap<AppStorageRow | undefined>(rows.get([ref, scope, COUNT_KEY])),
+      wrap<number>(rows.count(keysOf(ref, scope))),
+    ]);
+    let used = counter ? readCount(counter.value) : n ? null : NO_ROWS;
+    if (!used || used.rows !== n) {
+      // The write that asked keeps the counter row from here on.
+      const all = await wrap<AppStorageRow[]>((await store(STORES.appStorage, "readonly")).getAll(keysOf(ref, scope)));
+      used = all.reduce((sum, r) => plus(sum, countOf(r)), NO_ROWS);
     }
+    this.usage.set(id, used);
     return used;
   }
 
-  async storageGet({ ref, scope, key }: { ref: string; scope: string; key: string }): Promise<{ value: JsonValue } | null> {
-    const app = await this.runningOrFail(ref);
+  async storageGet({ ref, scope, key, digest }: { ref: string; scope: string; key: string; digest?: string }): Promise<{ value: JsonValue } | null> {
+    const app = await this.runningOrFail(ref, digest);
     const row = await wrap<AppStorageRow | undefined>((await store(STORES.appStorage, "readonly")).get([app.ref, this.scopeOf(scope), this.keyOf(key)]));
     return row ? { value: JSON.parse(row.value) as JsonValue } : null;
   }
 
-  /** Keeps a JSON value under a key: at most 64 KiB, and 5 MiB for every key of this app in this scope. */
-  async storageSet({ ref, scope, key, value }: { ref: string; scope: string; key: string; value: unknown }): Promise<void> {
-    const app = await this.runningOrFail(ref);
+  /**
+   * Keeps a JSON value under a key: at most 64 KiB, and 5 MiB for every key of this app in this scope, each counted
+   * as `costOf` says. A scope already past that (filled under an older count) still takes a write that does not grow
+   * it, so the app can make room.
+   */
+  async storageSet({ ref, scope, key, value, digest }: { ref: string; scope: string; key: string; value: unknown; digest?: string }): Promise<void> {
+    const app = await this.runningOrFail(ref, digest);
     const where = this.scopeOf(scope), name = this.keyOf(key);
     let text: string | undefined;
     try { text = JSON.stringify(value); } catch { text = undefined; }
@@ -1252,8 +1595,8 @@ export class Apps {
       const used = await this.usageOf(app.ref, where);
       const rows = await store(STORES.appStorage, "readonly");
       const old = await wrap<AppStorageRow | undefined>(rows.get([app.ref, where, name]));
-      const next = used - (old?.size ?? 0) + size;
-      if (next > APP_STORAGE_LIMITS.scopeBytes) fail("full", "This app's storage in this chat is full (5 MiB)");
+      const next = plus(old ? plus(used, countOf(old, -1)) : used, countOf({ key: name, size }));
+      if (costOf(next) > APP_STORAGE_LIMITS.scopeBytes && costOf(next) > costOf(used)) fail("full", "This app's storage in this chat is full (5 MiB)");
       const writing = await store(STORES.appStorage, "readwrite");
       // The chat may have been deleted while this write waited its turn and read. Asked again here, with nothing awaited
       // before the put: a chat still one now is deleted by a later transaction, which takes this row; one already gone
@@ -1262,40 +1605,69 @@ export class Apps {
         this.usage.delete(`${app.ref}\0${where}`);
         fail("bad-scope", "Not a chat of this profile");
       }
-      await wrap(writing.put({ ref: app.ref, scope: where, key: name, value: text, size } satisfies AppStorageRow));
+      writing.put({ ref: app.ref, scope: where, key: name, value: text, size } satisfies AppStorageRow);
+      await wrap(writing.put(counterRow(app.ref, where, next)));
       this.usage.set(`${app.ref}\0${where}`, next);
     });
   }
 
-  async storageDelete({ ref, scope, key }: { ref: string; scope: string; key: string }): Promise<void> {
-    const app = await this.runningOrFail(ref);
+  async storageDelete({ ref, scope, key, digest }: { ref: string; scope: string; key: string; digest?: string }): Promise<void> {
+    const app = await this.runningOrFail(ref, digest);
     const where = this.scopeOf(scope), name = this.keyOf(key);
     await this.serial(`${app.ref}\0${where}`, async () => {
       const used = await this.usageOf(app.ref, where);
       const old = await wrap<AppStorageRow | undefined>((await store(STORES.appStorage, "readonly")).get([app.ref, where, name]));
       if (!old) return;
-      await wrap((await store(STORES.appStorage, "readwrite")).delete([app.ref, where, name]));
-      this.usage.set(`${app.ref}\0${where}`, used - old.size);
+      const next = plus(used, countOf(old, -1));
+      const writing = await store(STORES.appStorage, "readwrite");
+      writing.delete([app.ref, where, name]);
+      await (next.rows ? wrap(writing.put(counterRow(app.ref, where, next))) : wrap(writing.delete([app.ref, where, COUNT_KEY])));
+      this.usage.set(`${app.ref}\0${where}`, next);
     });
   }
 
-  async storageKeys({ ref, scope }: { ref: string; scope: string }): Promise<string[]> {
-    const app = await this.runningOrFail(ref);
-    const keys = await wrap((await store(STORES.appStorage, "readonly")).getAllKeys(rowsOf(app.ref, this.scopeOf(scope)))) as [string, string, string][];
+  async storageKeys({ ref, scope, digest }: { ref: string; scope: string; digest?: string }): Promise<string[]> {
+    const app = await this.runningOrFail(ref, digest);
+    const keys = await wrap((await store(STORES.appStorage, "readonly")).getAllKeys(keysOf(app.ref, this.scopeOf(scope)))) as [string, string, string][];
     return keys.map((k) => k[2]);
   }
 
   /** An app's storage in every scope, as export files (WISP 1200 § Where installed apps live), offered before an uninstall. */
   async exportData({ ref }: { ref: string }): Promise<AppDataExport[]> {
-    const app = await this.installedOrFail(ref);
-    const rows = await wrap<AppStorageRow[]>((await store(STORES.appStorage, "readonly")).getAll(rowsOf(app.ref)));
-    const scopes = new Map<string, AppDataExport>();
-    for (const row of rows) {
-      const out = scopes.get(row.scope) ?? { ghostlyAppData: 1 as const, app: app.ref, scope: row.scope, entries: {} };
+    return (await this.exportDataText({ ref })).map(({ app, scope, entries }) => {
+      const out: AppDataExport = { ghostlyAppData: 1, app, scope, entries: {} };
       // Defined, not assigned: a key named `__proto__` is kept, where an assignment would set the file's prototype and lose it.
-      Object.defineProperty(out.entries, row.key, { value: JSON.parse(row.value) as JsonValue, enumerable: true, writable: true, configurable: true });
-      scopes.set(row.scope, out);
+      for (const [key, json] of entries) Object.defineProperty(out.entries, key, { value: JSON.parse(json) as JsonValue, enumerable: true, writable: true, configurable: true });
+      return out;
+    });
+  }
+
+  /**
+   * `exportData` with each value as the JSON text it is kept as, for a file written without parsing and writing every
+   * value again. Read a scope at a time, the thread let go between them: ten chats of 5 MiB read at once held it for
+   * the whole read.
+   */
+  async exportDataText({ ref }: { ref: string }): Promise<AppDataExportText[]> {
+    const app = await this.installedOrFail(ref);
+    const scopes: string[] = [];
+    const index = (await store(STORES.appStorage, "readonly")).index(APP_STORAGE_SCOPE_INDEX);
+    await new Promise<void>((resolve, reject) => {
+      const request = index.openKeyCursor(rowsOf(app.ref), "nextunique");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return resolve();
+        scopes.push((cursor.key as [string, string])[1]);
+        cursor.continue();
+      };
+    });
+    const out: AppDataExportText[] = [];
+    for (const [i, scope] of scopes.entries()) {
+      if (i) await new Promise((resolve) => setTimeout(resolve, 0));
+      // The app's own rows: the scope's kept count is not one of its keys.
+      const rows = await wrap<AppStorageRow[]>((await store(STORES.appStorage, "readonly")).getAll(keysOf(app.ref, scope)));
+      if (rows.length) out.push({ app: app.ref, scope, entries: rows.map((row) => [row.key, row.value]) });
     }
-    return [...scopes.values()];
+    return out;
   }
 }

@@ -2,9 +2,9 @@ import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import type { WalletNetwork } from "@ghostly/core";
 import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletType } from "@ghostly/browser/shared/types";
-import { bool, chatOf, node, num, oneOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
+import { bool, chatOf, inviteTaken, node, num, oneOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
-import { CliError } from "./errors";
+import { CliError, type ErrorCode } from "./errors";
 
 /**
  * Wallets and payments (WISP 1100, phase 2): the app's wallet deck and a chat's payment sheet, as methods. Test
@@ -32,6 +32,25 @@ const real = (params: Params): { confirmedReal?: true } => (bool(params, "confir
 
 function netView(s: EngineState, n: WalletNetwork): NetworkWalletsView | undefined {
   return s.wallet.networks?.[n];
+}
+
+/** A Lightning card named by `card` on the network asked: one that is not there is not_found, before the engine is asked. */
+function lightningCard(ctx: ApiContext, params: Params): void {
+  const n = network(params), card = str(params, "card", true);
+  if (!netView(state(ctx), n)?.lightnings?.some((c) => c.card === card)) throw new CliError("not_found", `No Lightning card ${JSON.stringify(card)} on ${n} (ghostly wallet list)`);
+}
+
+/**
+ * The Lightning card `card` names, checked before the engine is asked: given with another type of wallet it is a usage
+ * error, and one not on the network is not_found. Before, the engine dropped it for every type but Lightning, so a card
+ * that named nothing removed the whole wallet of that type and the answer echoed the card as removed.
+ */
+function cardOf(ctx: ApiContext, params: Params, type: WalletType): string | undefined {
+  const card = str(params, "card");
+  if (card === undefined) return undefined;
+  if (type !== "lightning") throw new CliError("usage", `--card names a Lightning card: not with ${type}`);
+  lightningCard(ctx, params);
+  return card;
 }
 
 /**
@@ -93,7 +112,39 @@ export function invoiceNetwork(invoice: string): WalletNetwork | null {
 const isInvoice = (text: string) => /^(lightning:)?ln(bc|tb|tbs|sb|bcrt)[0-9a-z]+$/i.test(text.trim());
 const isLnurl = (text: string) => /^(lightning:)?lnurl[0-9a-z]+$/i.test(text.trim()) || /^[a-z0-9._+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(text.trim());
 
-export const WALLET_METHODS: Record<string, Method> = {
+/**
+ * The engine refusing the mint URL the person typed (not a URL, or not https): their value, so `bad_request`, as
+ * `service add` says; before, it was `engine` (exit 1), which a bot reads as the engine failing and may retry. Read by
+ * its shape: the engine's `EngineError` carries `engineCode`.
+ */
+function badMintUrl(error: unknown): boolean {
+  const code = error instanceof Error ? (error as { engineCode?: unknown }).engineCode : undefined;
+  return code === "invalidMintUrl" || code === "mintNotHttps";
+}
+
+/**
+ * The engine's wallet refusals about what the person asked, by the words it writes (they carry no `engineCode`): a
+ * wallet or card that is not there, a token or invoice that is not one, a wallet already made, no mint or source to do
+ * it with. Before, each was `engine` (exit 1), which a bot reads as the engine failing and may retry.
+ */
+const WALLET_REFUSALS: [RegExp, ErrorCode][] = [
+  [/^There is no .+ to remove$/, "not_found"],
+  [/^That Lightning card is gone\b/, "not_found"],
+  [/^That is not a (valid ecash token|Lightning invoice)$/, "bad_request"],
+  [/^You already have a .+ wallet$/, "refused"],
+  [/^No mint could create an invoice: No mint configured$/, "unavailable"],
+  [/^No Bitcoin source is set up$/, "unavailable"],
+  [/^The faucet did not pay: This wallet has no test mint\b/, "unavailable"],
+  [/^Ghostly cannot ask this wallet's faucet by itself\b/, "unavailable"],
+];
+
+function walletRefusal(error: unknown): unknown {
+  if (!(error instanceof Error) || error instanceof CliError) return error;
+  const code = WALLET_REFUSALS.find(([pattern]) => pattern.test(error.message))?.[1];
+  return code ? new CliError(code, error.message) : error;
+}
+
+const WALLETS: Record<string, Method> = {
   async "wallet.list"(ctx, params) {
     await federationsOpen(ctx);
     const s = state(ctx);
@@ -119,6 +170,8 @@ export const WALLET_METHODS: Record<string, Method> = {
     if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.values(raw).some((v) => typeof v !== "string")) throw new CliError("bad_request", "values must be an object of strings");
     Object.assign(values, raw);
     const provider = str(params, "provider");
+    const offered = state(ctx).wallet.offers?.find((o) => o.type === type && o.network === n)?.providers;
+    if (provider && offered && !offered.some((p) => p.id === provider)) throw new CliError("bad_request", `No ${type} source ${JSON.stringify(provider)} on ${n} (ghostly wallet list)`);
     // BDK asks for a recovery phrase and makes a new wallet from one the app draws: here, one drawn now.
     if (type === "bitcoin" && (provider ?? "bdk") === "bdk" && !values.mnemonic) values.mnemonic = generateMnemonic(wordlist, 128);
     const made = await node(ctx).walletCreate({ type, network: n, ...(provider ? { providerId: provider } : type === "bitcoin" ? { providerId: "bdk" } : {}), ...(Object.keys(values).length ? { values } : {}), ...(str(params, "invite") ? { invite: str(params, "invite") } : {}), ...(str(params, "apiKey") ? { apiKey: str(params, "apiKey") } : {}) });
@@ -128,26 +181,28 @@ export const WALLET_METHODS: Record<string, Method> = {
   async "wallet.remove"(ctx, params) {
     const type = oneOf(params, "type", TYPES, "cashu");
     const n = network(params);
+    const card = cardOf(ctx, params, type);
     try {
-      await node(ctx).walletRemove({ type, network: n, ...(str(params, "card") ? { card: str(params, "card") } : {}), ...(bool(params, "acceptLoss") ? { acceptLoss: true } : {}) });
+      await node(ctx).walletRemove({ type, network: n, ...(card ? { card } : {}), ...(bool(params, "acceptLoss") ? { acceptLoss: true } : {}) });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       // The engine keeps a wallet that holds money here, or that someone still pays into (#303): only the person decides.
       if (!bool(params, "acceptLoss") && /hold|still|awaiting|lose|backup/i.test(message)) throw new CliError("confirm", `${message} (pass acceptLoss, --accept-loss, only if that is intended)`);
       throw error;
     }
-    return { removed: { type, network: n, card: str(params, "card") ?? null } };
+    return { removed: { type, network: n, card: card ?? null } };
   },
 
   async "wallet.faucet"(ctx, params) {
     const type = oneOf(params, "type", TYPES, "cashu");
     if (network(params) !== "testnet") throw new CliError("refused", "Test coins are for Testnet wallets only");
-    return node(ctx).walletTestCoins({ type, network: "testnet", ...(str(params, "card") ? { card: str(params, "card") } : {}) });
+    const card = cardOf(ctx, params, type);
+    return node(ctx).walletTestCoins({ type, network: "testnet", ...(card ? { card } : {}) });
   },
 
   async "wallet.history"(ctx, params) {
     const n = network(params);
-    const limit = num(params, "limit", 50, { min: 1, max: 10_000 });
+    const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
     await federationsOpen(ctx);
     return { network: n, history: (netView(state(ctx), n)?.history ?? []).slice(0, limit) };
   },
@@ -157,7 +212,8 @@ export const WALLET_METHODS: Record<string, Method> = {
     if (!amount) throw new CliError("bad_request", "amount is required");
     const n = network(params);
     await federationsOpen(ctx);
-    const invoice = await node(ctx).walletReceiveLightning({ amount, network: n, ...(str(params, "card") ? { card: str(params, "card") } : {}) });
+    const card = cardOf(ctx, params, "lightning");
+    const invoice = await node(ctx).walletReceiveLightning({ amount, network: n, ...(card ? { card } : {}) });
     return { network: n, amount, invoice: invoice.invoice, expiresAt: invoice.expiresAt, paymentHash: invoice.paymentHash ?? null, source: invoice.source };
   },
 
@@ -176,15 +232,19 @@ export const WALLET_METHODS: Record<string, Method> = {
   },
 
   async "wallet.mint.add"(ctx, params) {
-    return node(ctx).walletAddMint({ url: str(params, "url", true), ...(bool(params, "primary") ? { primary: true } : {}) });
+    return node(ctx).walletAddMint({ url: str(params, "url", true), ...(bool(params, "primary") ? { primary: true } : {}) }).catch((error: unknown) => {
+      throw badMintUrl(error) ? new CliError("bad_request", (error as Error).message) : error;
+    });
   },
 
   async "lightning.default"(ctx, params) {
+    lightningCard(ctx, params);
     await node(ctx).lightningSetReceive({ network: network(params), card: str(params, "card", true) });
     return { network: network(params), receive: str(params, "card", true) };
   },
 
   async "lightning.rename"(ctx, params) {
+    lightningCard(ctx, params);
     await node(ctx).lightningRename({ network: network(params), card: str(params, "card", true), name: str(params, "name", true) });
     return { network: network(params), card: str(params, "card", true), name: str(params, "name", true) };
   },
@@ -221,12 +281,13 @@ export const WALLET_METHODS: Record<string, Method> = {
   /** Ecash to a contact in a chat (the payment sheet's Pay). */
   async "chat.pay"(ctx, params) {
     const link = chatOf(ctx, params);
+    inviteTaken(link);
     const amount = num(params, "amount", 0, { min: 1 });
     if (!amount) throw new CliError("bad_request", "amount is required");
     const n = network(params);
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
     await federationsOpen(ctx);
-    const { paymentId } = await node(ctx).sendPayment({ linkId: link.id, amount, timestamp: Date.now(), network: n, ...(str(params, "memo") ? { memo: str(params, "memo") } : {}), ...real(params) });
+    const { paymentId } = await node(ctx).sendPayment({ linkId: link.id, amount, timestamp: sentAt(), network: n, ...(str(params, "memo") ? { memo: str(params, "memo") } : {}), ...real(params) });
     return { chat: link.id, paymentId };
   },
 
@@ -239,7 +300,7 @@ export const WALLET_METHODS: Record<string, Method> = {
     const rail = params.rail === undefined ? undefined : oneOf(params, "rail", ["cashu", "lightning"] as const, "cashu");
     await federationsOpen(ctx);
     const { paymentId } = await node(ctx).requestPayment({
-      linkId: link.id, amount, timestamp: Date.now(), network: network(params),
+      linkId: link.id, amount, timestamp: sentAt(), network: network(params),
       ...(str(params, "memo") ? { memo: str(params, "memo") } : {}), ...(method ? { method } : {}), ...(rail ? { rail } : {}), ...(str(params, "card") ? { card: str(params, "card") } : {}),
     });
     return { chat: link.id, paymentId };
@@ -283,15 +344,20 @@ export const WALLET_METHODS: Record<string, Method> = {
 
   async "payment.check"(ctx, params) {
     const link = chatOf(ctx, params);
+    if (state(ctx).payments[str(params, "payment", true)]?.linkId !== link.id) throw new CliError("not_found", `No payment ${JSON.stringify(str(params, "payment", true))} in this chat (ghostly payment list --chat ${link.id})`);
     await node(ctx).checkPayment({ linkId: link.id, paymentId: str(params, "payment", true) });
     return { chat: link.id, paymentId: str(params, "payment", true) };
   },
 
   async "payment.reclaim"(ctx, params) {
+    if (!state(ctx).payments[str(params, "payment", true)]) throw new CliError("not_found", `No payment ${JSON.stringify(str(params, "payment", true))} (ghostly payment list)`);
     await node(ctx).reclaimPayment({ paymentId: str(params, "payment", true) });
     const p = state(ctx).payments[str(params, "payment", true)];
     return p ? paymentJson(p) : { paymentId: str(params, "payment", true) };
   },
 };
+
+export const WALLET_METHODS: Record<string, Method> = Object.fromEntries(Object.entries(WALLETS).map(([name, method]) => [name,
+  (ctx: ApiContext, params: Params) => method(ctx, params).catch((error: unknown) => { throw walletRefusal(error); })]));
 
 export type { ApiContext };

@@ -11,8 +11,13 @@ import { CliError } from "./errors";
 export const DEFAULT_PROFILE = "default";
 const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 
+/**
+ * An empty `--home` or `--profile` (an unset variable in a script) is a usage error: taken as not given, it ran the
+ * command in the current folder, or as the current profile. An empty variable of the environment counts as unset.
+ */
 export function ghostlyHome(option?: string): string {
-  return resolve(option ?? process.env.GHOSTLY_HOME ?? join(homedir(), ".ghostly"));
+  if (option === "") throw new CliError("usage", "--home needs a folder");
+  return resolve(option ?? (process.env.GHOSTLY_HOME || join(homedir(), ".ghostly")));
 }
 
 export function checkProfileName(name: string): string {
@@ -21,7 +26,8 @@ export function checkProfileName(name: string): string {
 }
 
 export function currentProfile(home: string, option?: string): string {
-  if (option) return checkProfileName(option);
+  if (option === "") throw new CliError("usage", "--profile needs a profile name");
+  if (option !== undefined) return checkProfileName(option);
   if (process.env.GHOSTLY_PROFILE) return checkProfileName(process.env.GHOSTLY_PROFILE);
   const file = join(home, "current");
   if (existsSync(file)) {

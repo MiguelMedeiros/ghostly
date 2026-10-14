@@ -24,6 +24,7 @@
   "scan": "Scansiona QR",
   "submit": "Unisciti",
   "title": "Unisciti a una chat",
+  "tooManyLinks": "Troppi link di invito aperti. Elimina una chat rimasta senza risposta o incolla l'invito in Unisciti.",
   "typo": "Questo codice contiene un errore di battitura. Controllalo o chiedi di nuovo il codice.",
   "update": "Questo invito è stato creato da un Ghostly più recente. Aggiorna per unirti."
 }

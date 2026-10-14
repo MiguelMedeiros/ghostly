@@ -17,6 +17,11 @@ COPY apps/website/ ./
 COPY docs /app/docs
 COPY packages/core/src /app/packages/core/src
 COPY packages/cli/SKILL.md /app/packages/cli/SKILL.md
+# The Markdown files outside docs/ that a WISP links to: sync-references refuses a link to a file that is not there.
+COPY packages/cli/README.md /app/packages/cli/README.md
+COPY packages/browser/src/proofs/PROOFS.md /app/packages/browser/src/proofs/PROOFS.md
+COPY packages/browser/src/engine/paymentAdapters/PROVIDERS.md /app/packages/browser/src/engine/paymentAdapters/PROVIDERS.md
+COPY e2e/README.md /app/e2e/README.md
 COPY .github/CONTRIBUTING.md .github/SECURITY.md /app/.github/
 
 ENV NEXT_TELEMETRY_DISABLED=1

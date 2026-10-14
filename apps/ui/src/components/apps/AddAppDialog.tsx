@@ -17,8 +17,11 @@ import { date } from "../../lib/identities";
  * added before the person confirms on the next screen.
  */
 
-/** A link written without its scheme, as a repository is usually said (`github.com/owner/repo`): a host the engine reads, and nothing else. */
-const NO_SCHEME = /^(?:(?:www\.)?github\.com|raw\.githubusercontent\.com|cdn\.jsdelivr\.net)(?:[/?#]|$)/i;
+/**
+ * The start of a link written without its scheme, as a repository is usually said (`github.com/owner/repo`), or with
+ * `http://`: a host the engine reads, and nothing else. It is read as its `https://` link, so nothing is asked over http.
+ */
+const LOOSE_SCHEME = /^(?:http:\/\/)?(?=(?:(?:www\.)?github\.com|raw\.githubusercontent\.com|cdn\.jsdelivr\.net)(?:[/?#]|$))/i;
 
 function hostOf(url: string): string {
   try { return new URL(url).host; } catch { return url; }
@@ -42,7 +45,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
     const typed = url.trim();
     if (!typed) return;
     // The engine takes nothing but `https:` (`appPasteUrl`): any other text goes to it as typed, and it refuses it in the dialog's words.
-    const link = NO_SCHEME.test(typed) ? `https://${typed}` : typed;
+    const link = typed.replace(LOOSE_SCHEME, "https://");
     focusBack();
     setBusy(true); setError(null); setStore(null);
     try {
@@ -97,7 +100,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
                 <Fingerprint value={store.fingerprint} />
               </p>
               {store.description && <p dir="auto" className="text-xs text-text-secondary whitespace-pre-line">{store.description}</p>}
-              {store.expired && <p className="text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires) })}</p>}
+              {store.expired && <p className="text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires, t.language) })}</p>}
             </div>
             <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>
             <div className="flex justify-end gap-2">

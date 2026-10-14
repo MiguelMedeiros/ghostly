@@ -289,6 +289,35 @@ describe("call signals", () => {
     expect(offer({ k: "x" })).toBeNull();
   });
 
+  it("a side that takes no picture (`vr: 0`) has its video section rebuilt closed, so nothing is sent on it", () => {
+    const good = JSON.parse(signalFrom(CHROME_OFFER, "o")) as CallSignal;
+    const answer = (patch: Record<string, unknown>) => parseCallSignal(JSON.stringify({ ...good, t: "a", s: "active", v: 0, ...patch }), NOW)!;
+    const video = (sdp: string) => sdp.slice(sdp.indexOf("m=video"));
+    const audio = (sdp: string) => sdp.slice(sdp.indexOf("m=audio"), sdp.indexOf("m=video"));
+
+    const closed = answer({ vr: 0 });
+    expect(closed.vr).toBe(0);
+    const sdp = buildSdpFromSignal(closed);
+    expect(video(sdp)).toContain("\r\na=inactive\r\n");
+    expect(video(sdp)).not.toMatch(/a=sendrecv|a=msid|a=ssrc/);
+    // The section is still there (an answer lists every section of its offer), and the audio one is as it was.
+    expect(extractParamsFromSdp(sdp).m).toEqual(["a", "v"]);
+    expect(audio(sdp)).toContain("\r\na=sendrecv\r\n");
+    expect(audio(sdp)).toBe(audio(buildSdpFromSignal(answer({}))));
+
+    // Without it, and with any other value, the section is open as before.
+    expect(answer({}).vr).toBeUndefined();
+    for (const vr of [1, "0", null, true]) {
+      const open = answer({ vr });
+      expect(open.vr).toBeUndefined();
+      expect(video(buildSdpFromSignal(open))).toContain("\r\na=sendrecv\r\n");
+    }
+    // An offer may say it too; a hang-up and a media state carry none.
+    expect(parseCallSignal(JSON.stringify({ ...good, vr: 0 }), NOW)!.vr).toBe(0);
+    expect(parseCallSignal(JSON.stringify({ t: "v", ts: NOW, v: 0, vr: 0 }), NOW)).toEqual({ t: "v", ts: NOW, v: 0 });
+    expect(parseCallSignal(JSON.stringify({ t: "h", ts: NOW, vr: 0 }), NOW)).toEqual({ t: "h", ts: NOW });
+  });
+
   it("says who is sending a picture, and reads a v1 peer without asking it", () => {
     const video = JSON.parse(signalFrom(CHROME_OFFER, "o")) as CallSignal;
     // v2 answers with `v`: the video section is always there, on or off.

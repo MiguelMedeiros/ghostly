@@ -79,6 +79,24 @@ describe("a first pairing, at desktop pace", () => {
   }, 60_000);
 
   /**
+   * The answer waited for its STUN servers the full 5 s all the same: two CLI daemons whose STUN server swallowed every
+   * request went live 10.1 s after the offer, 2.2 s with one that answers (calls bug hunt, 2026-10-12). It goes after
+   * 2 s with its host candidates, as the offer does.
+   */
+  it.each(["inviter", "joiner"] as const)("an answer whose STUN servers never answer goes after 2 s too · the %s's key is lower", async lower => {
+    rtc.srflxAfterMs = rtc.answerSrflxAfterMs = Infinity;
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+    const made = invitationWhere(lower);
+    const inviter = open(made.inviter, pkarr);
+    await run(10_000);
+    const joiner = open(made.joiner, pkarr);
+    const took = await untilLive(inviter, joiner, 60_000);
+    // Before: 9.2 s (the offer's 2 s, the answer's 5 s). After: 5.7 s either way.
+    expect(took, "live after the join").toBeLessThanOrEqual(6_000);
+    for (const side of [inviter, joiner]) expect(side.progress.at(-1)).toMatchObject({ stage: "live", attempt: 1 });
+  }, 60_000);
+
+  /**
    * The cost: an offer that went without its server reflexive candidate (STUN answered after 3 s) to a contact behind a
    * NAT that lets nothing through without one. The attempt fails, and the next offer waits for STUN as long as it takes.
    */

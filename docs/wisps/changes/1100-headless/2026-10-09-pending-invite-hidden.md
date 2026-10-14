@@ -1,0 +1,1 @@
+A pending chat's invite code is a secret in every answer that carries a chat: `invite` is `"<hidden>"` until the chat is paired, `chat list` and `chat show` print the code only with `--show-secret` (`showSecret` on `chat.list` and `chat.get`), and `engine getState` hides a chat's `inviteCode`. `invite create` answers with the code as before.

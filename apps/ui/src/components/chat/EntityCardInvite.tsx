@@ -3,14 +3,14 @@ import { inviteQrSegments } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
-import { groupLinkUrl, groupPath } from "../../lib/groups";
+import { groupLinkUrl, groupPath, groupStatusText } from "../../lib/groups";
 import { useEngineState } from "../../lib/identities";
 import { showJoinNotice } from "../../lib/joinNotice";
-import { ensureSession } from "../../lib/storage";
+import { NO_ROOM_FOR_CHAT, ensureSession } from "../../lib/storage";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteShareText, readInvite, type JoinOutcome } from "../../lib/url";
 import { CardIcon, EntityCardFrame, cardButton, cardQuiet } from "./EntityCardFrame";
 import { LinkActions } from "./LinkQrDialog";
-import { problemText, type Problem } from "../../lib/problemText";
+import { problemLine, problemText, type Problem } from "../../lib/problemText";
 import { Notice } from "../ui/Notice";
 
 
@@ -53,7 +53,11 @@ export function InviteEntityCard({ code, mine, from }: { code: string; mine: boo
     if (now.kind === "own") return;
     if (now.kind === "joined") { showJoinNotice("join.alreadyIn"); nav.conversation(chatPath(now.sessionId)); return; }
     let sessionId: string;
-    try { sessionId = ensureSession(reading.keys); } catch { setError({ tone: "error", title: t("join.invalid") }); return; }
+    try { sessionId = ensureSession(reading.keys); } catch (cause) {
+      // No room left to store the chat is said as that: the invite is good.
+      setError(cause instanceof Error && cause.message === NO_ROOM_FOR_CHAT ? problemText(cause, t) : { tone: "error", title: t("join.invalid") });
+      return;
+    }
     window.dispatchEvent(new Event("session-updated"));
     nav.conversation(chatPath(sessionId));
   };
@@ -81,7 +85,10 @@ export function InviteEntityCard({ code, mine, from }: { code: string; mine: boo
 /**
  * A group's link (`group1/…`) or a community group's (`group2/…`) in a message. A tap on Join group knocks through
  * the link like the Join dialog does and opens the group, which says it waits for the admin's app; a group this profile
- * is already in just opens. Copy and Show QR hand the link's address over, as the invite card does.
+ * is already in just opens. A group this profile is out of with its history kept (removed, forked, its admission lost)
+ * says so and opens too: a community's offers Join again where the engine lets it in with the same key (removed, lost),
+ * a private group's says what to do first, since the engine refuses its link while that history is here. Copy and Show
+ * QR hand the link's address over, as the invite card does.
  */
 export function GroupEntityCard({ link, community, groupId, mine, from }: { link: string; community: boolean; groupId: string; mine: boolean; from?: string }) {
   const { t } = useI18n();
@@ -90,7 +97,11 @@ export function GroupEntityCard({ link, community, groupId, mine, from }: { link
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   // An invitation not yet answered is not membership: it has no status until it is.
-  const group = state?.groups.find(g => g.id === groupId && g.status);
+  const known = state?.groups.find(g => g.id === groupId && g.status);
+  const group = known?.status === "active" ? known : undefined;
+  // Left is a tombstone the link replaces, so it joins as a group never seen does.
+  const out = known && !group && known.status !== "left" ? known : undefined;
+  const again = community && (out?.status === "removed" || out?.status === "lost");
   const join = async () => {
     setError(null); setBusy(true);
     try {
@@ -100,13 +111,20 @@ export function GroupEntityCard({ link, community, groupId, mine, from }: { link
   };
   const actions = <LinkActions name="entity-group" title={community ? t("chat.entity.communityGroup") : t("chat.entity.groupInvite")} url={groupLinkUrl({ entryLink: link })} />;
   return (
-    <EntityCardFrame testId="entity-group" data={{ "data-community": community ? "true" : undefined, "data-member": group ? "true" : undefined }}
+    <EntityCardFrame testId="entity-group" data={{ "data-community": community ? "true" : undefined, "data-member": group ? "true" : undefined, "data-status": known?.status }}
       label={community ? t("chat.entity.communityGroup") : t("chat.entity.groupInvite")}
       mark={<CardIcon><circle cx="9" cy="8" r="3.2" /><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" /><circle cx="17" cy="9" r="2.4" /><path d="M16 14.2c2.8.3 5 2.6 5 5.8" /></CardIcon>}
-      title={group?.name || (community ? t("chat.entity.aCommunity") : t("chat.entity.aPrivateGroup"))} subtitle={fromLine(t, mine, from)}>
+      title={(group ?? out)?.name || (community ? t("chat.entity.aCommunity") : t("chat.entity.aPrivateGroup"))} subtitle={fromLine(t, mine, from)}>
       {group ? <>
         <p className="m-0" data-testid="entity-group-member">{t("chat.entity.inGroup")}</p>
         <div className="flex flex-wrap items-center gap-1.5"><button type="button" data-testid="entity-group-open" className={cardQuiet} onClick={() => nav.conversation(groupPath(group.id))}>{t("chat.entity.openGroup")}</button>{actions}</div>
+      </> : out ? <>
+        <p className="m-0" data-testid="entity-group-out">{out.statusReason ? problemLine(out.statusReason, t) : groupStatusText(out.status!, t)}</p>
+        {!community && <p className="m-0" data-testid="entity-group-next">{t("chat.entity.deleteToJoin", { action: t("group.menu.forget") })}</p>}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {again && <button type="button" data-testid="entity-group-join" disabled={busy} className={cardButton} onClick={() => void join()}>{busy ? t("chat.entity.joining") : t("chat.entity.joinAgain")}</button>}
+          <button type="button" data-testid="entity-group-open" className={cardQuiet} onClick={() => nav.conversation(groupPath(out.id))}>{t("chat.entity.openGroup")}</button>{actions}
+        </div>
       </> : <>
         <p className="m-0">{community ? t("chat.entity.communityHint") : t("chat.entity.groupHint")}</p>
         <div className="flex flex-wrap items-center gap-1.5"><button type="button" data-testid="entity-group-join" disabled={busy} className={cardButton} onClick={() => void join()}>{busy ? t("chat.entity.joining") : t("chat.entity.joinGroup")}</button>{actions}</div>

@@ -51,7 +51,7 @@ export function JoinHost({ standby = false }: { standby?: boolean }) {
   return <>
     {invalid && (
       <div role="alert" data-testid="device-link-invalid" onClick={() => setInvalid(null)}
-        className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] max-w-[calc(100%_-_2rem)] rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-danger shadow-xl cursor-pointer">
+        className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-danger shadow-xl cursor-pointer">
         {t(invalid)}
       </div>
     )}

@@ -1,5 +1,6 @@
-import { closeSync, openSync, ftruncateSync } from "node:fs";
-import type { Page, Route } from "@playwright/test";
+import { closeSync, openSync, ftruncateSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { BrowserContext, Page, Route } from "@playwright/test";
 import { createLink, decodeInviteCode, encodeInviteCode } from "@ghostly/core";
 import { copyInvite } from "../support/clipboard";
 import { chat, connect, expect, GIF, link, linkLegacy, say, test, type Peer } from "../support/fixtures";
@@ -207,9 +208,20 @@ test("javascript:, data: and other non-web addresses never become links or pictu
   expect(alice.context.pages()).toHaveLength(1);
 });
 
+/** The policy app.ghostly.tools is served with. `vite preview` sends none, and a picture any page could load says nothing of the real app. */
+const POLICY = /Content-Security-Policy "([^"]+)"/.exec(readFileSync(join(import.meta.dirname, "../../apps/web/nginx-headers.conf"), "utf8"))![1]!;
+
+/** Serves the app's page to `context` with the real policy. */
+const underPolicy = (baseURL: string) => async (context: BrowserContext): Promise<void> => {
+  await context.route((url) => url.origin === new URL(baseURL).origin && (url.pathname === "/" || url.pathname === "/index.html"), async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({ response, headers: { ...response.headers(), "content-security-policy": POLICY } });
+  });
+};
+
 // A contact's picture tells its server this device's address when it loads: it waits for a click.
-test("a picture address sent over https shows once asked for, and the server hears nothing before", { tag: ["@feature:chat.paired.image-links"] }, async ({ peer }) => {
-  const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
+test("a picture address sent over https shows once asked for, and the server hears nothing before", { tag: ["@feature:chat.paired.image-links"] }, async ({ peer, baseURL }) => {
+  const [alice, bob] = await Promise.all([peer("alice", { beforeOpen: underPolicy(baseURL!) }), peer("bob", { beforeOpen: underPolicy(baseURL!) })]);
   await link(alice, bob);
   await connect(alice, bob);
   const fetched: string[] = [];
@@ -225,21 +237,25 @@ test("a picture address sent over https shows once asked for, and the server hea
   await expect(reveal).toHaveText("Show picture · img.example.org");
   expect(fetched, "nothing is fetched before the click").toEqual([]);
   await reveal.click();
-  const img = chat(alice).locator(`img[src="${picture}"]`);
+  // The app reads the picture and shows it from a blob: address: the policy lets no <img> load a contact's address.
+  const img = chat(alice).getByTestId("picture-link");
   await expect(img).toBeVisible();
-  expect(await img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(1);
+  await expect(img).toHaveAttribute("src", /^blob:/);
+  await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(1);
+  expect(fetched, "the picture is asked for once").toEqual([picture]);
   // The sender sees their own picture at once.
-  await expect(chat(bob).locator(`img[src="${picture}"]`)).toBeVisible();
+  await expect(chat(bob).getByTestId("picture-link")).toBeVisible();
+  await expect.poll(() => chat(bob).getByTestId("picture-link").evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(1);
   // Only the address alone is a picture: in a sentence it stays a link.
   await say(bob, `see ${picture} here`);
   await expect(chat(alice).getByRole("link", { name: picture })).toBeVisible();
-  await expect(chat(alice).locator(`img[src="${picture}"]`)).toHaveCount(1);
+  await expect(chat(alice).getByTestId("picture-link")).toHaveCount(1);
 
   // A picture that does not load falls back to its address as a link.
   await say(bob, "https://img.example.org/missing.png");
   await chat(alice).getByTestId("image-reveal").click();
   await expect(chat(alice).getByRole("link", { name: "https://img.example.org/missing.png" })).toBeVisible();
-  await expect(chat(alice).locator('img[src="https://img.example.org/missing.png"]')).toHaveCount(0);
+  await expect(chat(alice).getByTestId("picture-link")).toHaveCount(1);
 });
 
 // A picture address over plain http is never embedded or fetched: it is only a link.

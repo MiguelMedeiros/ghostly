@@ -1,10 +1,10 @@
 import { fileURLToPath } from "node:url";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   APP_BUNDLE_LIMITS, APP_BUNDLE_MAGIC, APP_PREFIXES, appDigest, buildAppBundle, canonicalJsonBytes, checkAppManifest, fromBase64Url, isAppLicense, isAppPath,
-  isAppUrl, readAppBundle, toBase64Url, utf8Encode, type AppBundleRefusal, type AppManifest,
+  isAppUrl, readAppBundle, readAppBundleAsync, sha256Paced, toBase64Url, utf8Encode, type AppBundleReading, type AppBundleRefusal, type AppManifest,
 } from "../src/index";
 import {
   DRAFT, ENTRY, appKey, appSigner, byPath, file, fill, fromSegments, handBundle, matchVectorFile, png, toSegments,
@@ -42,7 +42,7 @@ const text = (n: number, lines = false) => Array.from({ length: n }, (_, i) => (
 const LONG_PATH = `data/${"p".repeat(APP_BUNDLE_LIMITS.pathBytes - "data/".length - ".json".length)}.json`;
 
 function limitFiles(): FileInput[] {
-  const files: FileInput[] = [ENTRY, file("icon.png", png(256, 256, APP_BUNDLE_LIMITS.iconBytes)), file(LONG_PATH, "{}")];
+  const files: FileInput[] = [ENTRY, file("icon.png", png(APP_BUNDLE_LIMITS.iconEdge, APP_BUNDLE_LIMITS.iconEdge, APP_BUNDLE_LIMITS.iconBytes)), file(LONG_PATH, "{}")];
   for (let i = 1; i <= APP_BUNDLE_LIMITS.screenshots; i++) files.push(file(`screenshots/${i}.png`, SCREENSHOT));
   for (let i = files.length; i < APP_BUNDLE_LIMITS.files; i++) files.push(file(`data/level-${String(i).padStart(2, "0")}.json`, `{"level":${i}}`));
   return files;
@@ -83,7 +83,7 @@ async function build(): Promise<Vectors> {
     sources: [RAW, PINNED], proofs: [], homepage: "https://example.org/chess", support: "https://example.org/chess/issues", releaseNotes: "Castling fixed.",
     view: "full",
   }, [ENTRY, file("icon.png", ICON), file("screenshots/1.png", SCREENSHOT), file("screenshots/2.jpg", fill(32, 7)), file("data/openings.json", "[\"e4\",\"d4\"]")], publisher)).bytes);
-  addValid("every bound at its limit: 64 files, a 128-byte path, a 256 KiB icon, 8 screenshots, the longest texts and 8 sources", (await buildAppBundle({ ...DRAFT, ...LIMIT_FIELDS }, limitFiles(), publisher)).bytes);
+  addValid("every bound at its limit: 64 files, a 128-byte path, a 256 KiB icon of 1024 × 1024, 8 screenshots, the longest texts and 8 sources", (await buildAppBundle({ ...DRAFT, ...LIMIT_FIELDS }, limitFiles(), publisher)).bytes);
   addValid("an app that asks for the internet", (await buildAppBundle({ ...DRAFT, permissions: ["internet"] }, [ENTRY], publisher)).bytes);
   addValid("a version with no permission and the proprietary licence", (await buildAppBundle({ ...DRAFT, permissions: [], license: "proprietary" }, [ENTRY], publisher)).bytes);
   const big = await largest();
@@ -183,6 +183,8 @@ async function build(): Promise<Vectors> {
   no("a screenshot that is not a picture type", "bad-path", "screenshots/ holds .png, .jpg or .webp", await hand({}, [ENTRY, file("screenshots/1.gif", SCREENSHOT)]));
   no("an icon one byte past 256 KiB", "bad-icon", "From the manifest's size", await hand({}, [file("icon.png", png(256, 256, APP_BUNDLE_LIMITS.iconBytes + 1)), ENTRY]));
   no("an icon that is not square", "bad-icon", "256 × 128", await hand({}, [file("icon.png", png(256, 128)), ENTRY]));
+  no("an icon one pixel past 1024 on a side", "bad-icon", "1025 × 1025 in 64 bytes: the pixels are bounded, not only the bytes", await hand({}, [file("icon.png", png(APP_BUNDLE_LIMITS.iconEdge + 1, APP_BUNDLE_LIMITS.iconEdge + 1)), ENTRY]));
+  no("an icon of 23000 × 23000", "bad-icon", "A small file whose header asks for gigabytes once decoded", await hand({}, [file("icon.png", png(23000, 23000)), ENTRY]));
   no("an icon that is not a PNG", "bad-icon", "Zeros", await hand({}, [file("icon.png", fill(64)), ENTRY]));
   no("an entry that is not HTML", "bad-entry", "The entry is one .html file", await hand({ entry: "main.js" }, [ENTRY, file("main.js", "1")]));
   no("an entry the bundle does not hold", "bad-entry", "play.html is not in files", await hand({ entry: "play.html" }));
@@ -225,6 +227,11 @@ async function build(): Promise<Vectors> {
   };
 }
 
+/** What a reader answered, with each file as where it lies in the bundle (a 16 MiB file is not compared byte by byte). */
+const told = (read: AppBundleReading) => (read.ok
+  ? { ...read.bundle, manifestBytes: bytesToHex(read.bundle.manifestBytes), files: [...read.bundle.files].map(([path, f]) => [path, f.byteOffset, f.length]) }
+  : read);
+
 describe("app bundle vectors", () => {
   it("match the checked-in file, and a reader reads each case as it says", { timeout: 60_000 }, async () => {
     const vectors = matchVectorFile(FILE, await build());
@@ -241,14 +248,64 @@ describe("app bundle vectors", () => {
       expect(appDigest(read.bundle.manifestBytes)).toBe(v.read.digest);
       // Every file's bytes come back by path, in the manifest's order.
       expect([...read.bundle.files.keys()]).toEqual(v.read.manifest.files.map((f) => f.path));
+      expect(told(await readAppBundleAsync(bytes)), v.name).toEqual(told(read));
     }
     const names = new Set<string>();
     for (const v of vectors.invalid) {
       expect(names.has(v.name), `two cases named ${v.name}`).toBe(false);
       names.add(v.name);
-      const read = readAppBundle(fromSegments(v.bytes));
+      const bytes = fromSegments(v.bytes);
+      const read = readAppBundle(bytes);
       expect(read.ok ? "accepted" : read.reason, v.name).toBe(v.refusal);
+      // The reader of a client whose engine shares its page's thread refuses the same, with the same words.
+      expect(told(await readAppBundleAsync(bytes)), v.name).toEqual(told(read));
     }
+  });
+});
+
+describe("the paced hash", () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  // Around what is hashed at once (64 KiB) and around a slice (256 KiB).
+  const sizes = [0, 1, 64 * 1024, 64 * 1024 + 1, 256 * 1024, 256 * 1024 + 1, 3 * 256 * 1024 + 5];
+  const bytesOf = (size: number) => Uint8Array.from({ length: size }, (_, i) => (i * 31 + size) % 251);
+
+  it("is SHA-256, off the thread with crypto.subtle", async () => {
+    for (const size of sizes) expect(bytesToHex(await sha256Paced(bytesOf(size))), String(size)).toBe(bytesToHex(sha256(bytesOf(size))));
+    // A view into a larger buffer is hashed alone.
+    const whole = bytesOf(300_000);
+    expect(bytesToHex(await sha256Paced(whole.subarray(7, 200_007)))).toBe(bytesToHex(sha256(whole.slice(7, 200_007))));
+  });
+
+  it("is SHA-256 in slices where there is no crypto.subtle, or where it fails", async () => {
+    const subtle = vi.spyOn(globalThis.crypto, "subtle", "get").mockReturnValue(undefined as unknown as SubtleCrypto);
+    for (const size of sizes) expect(bytesToHex(await sha256Paced(bytesOf(size))), String(size)).toBe(bytesToHex(sha256(bytesOf(size))));
+    subtle.mockReturnValue({ digest: () => Promise.reject(new Error("OperationError")) } as unknown as SubtleCrypto);
+    expect(bytesToHex(await sha256Paced(bytesOf(300_000)))).toBe(bytesToHex(sha256(bytesOf(300_000))));
+  });
+
+  it("both readers refuse a file whose hash does not hold, without crypto.subtle too", async () => {
+    const { bytes } = await buildAppBundle(DRAFT, [ENTRY, file("data/big.bin", fill(600_000, 3))], publisher);
+    const changed = bytes.slice();
+    changed[changed.length - ENTRY.bytes.length - 1]! ^= 1;
+    const refusal = { ok: false, reason: "file-hash", detail: "data/big.bin" };
+    expect(readAppBundle(changed)).toEqual(refusal);
+    expect(await readAppBundleAsync(changed)).toEqual(refusal);
+    vi.spyOn(globalThis.crypto, "subtle", "get").mockReturnValue(undefined as unknown as SubtleCrypto);
+    expect(await readAppBundleAsync(changed)).toEqual(refusal);
+    expect(told(await readAppBundleAsync(bytes))).toEqual(told(readAppBundle(bytes)));
+  });
+
+  it("lets the thread go between small files, not only inside large ones", async () => {
+    // 60 files of 64 KiB, each hashed at once: read in one run they held the thread for about 50 ms.
+    const { bytes } = await buildAppBundle(DRAFT, [ENTRY, ...Array.from({ length: 60 }, (_, i) => file(`data/${String(i).padStart(2, "0")}.bin`, fill(64 * 1024, i)))], publisher);
+    const yields = vi.spyOn(MessagePort.prototype, "postMessage");
+    // Each read of the clock moves it 1.5 ms: a pause about every fourth file, once 5 ms have run.
+    let clock = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => (clock += 1.5));
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    expect(told(await readAppBundleAsync(bytes))).toEqual(told(readAppBundle(bytes)));
+    expect(yields.mock.calls.length).toBeGreaterThanOrEqual(8);
+    expect(timers).not.toHaveBeenCalled();
   });
 });
 

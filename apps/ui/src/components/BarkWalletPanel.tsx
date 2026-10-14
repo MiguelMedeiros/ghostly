@@ -51,7 +51,7 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
  return <div className="space-y-6" data-testid="bark-wallet">
   {!ready ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="bark-connecting"><p className="text-text-primary">{t("wallet.panel.connecting", { wallet: "Bark" })}</p>{bark?.error ? <Notice problem={problemText(bark.error, t)} tone="muted" /> : <Notice>{t("wallet.bark.connectingNote")}</Notice>}</div>
   : <div className="space-y-4">
-   <p className="text-text-primary" data-testid="bark-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(bark.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>{bark.network !== "bitcoin" && <span className="block text-xs text-yellow-500 mt-1">{t("wallet.bark.testCoins", { network: NETWORKS[network].label })}</span>}</p>
+   <p className="text-text-primary" data-testid="bark-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(bark.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>{bark.network !== "bitcoin" && <span className="block text-xs text-warn-ink mt-1">{t("wallet.bark.testCoins", { network: NETWORKS[network].label })}</span>}</p>
    {!!bark.pending && <Notice tone="warning" testId="bark-pending">{t("wallet.bark.pending", { amount: formatAmount(bark.pending, t.language), unit })}</Notice>}
    {!!bark.exiting && <Notice tone="warning" testId="bark-exiting">{t("wallet.bark.exiting", { amount: formatAmount(bark.exiting, t.language), unit })}</Notice>}
    {bark.scanning && <Notice testId="bark-scanning">{t("wallet.bark.scanning")}</Notice>}
@@ -62,7 +62,7 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
     {via === "ark" ? <Address value={bark.address} uri={bark.address ? paymentUri({ kind: "ark", address: bark.address }) : undefined} testId="bark-address" note={t("wallet.bark.addressNote")} />
      : <Address value={bark.onchainAddress} qr={bark.onchainAddress ? `bitcoin:${bark.onchainAddress}` : undefined} testId="bark-onchain-address" note={t("wallet.bark.onchainNote")} />}
     {!!bark.onchain && <div className="flex items-center gap-3 rounded-xl bg-yellow-500/10 px-3 py-2" data-testid="bark-onchain">
-     <p className="flex-1 text-xs text-yellow-500">{t("wallet.bark.onchain", { amount: formatAmount(bark.onchain, t.language), unit })}</p>
+     <p className="flex-1 text-xs text-warn-ink">{t("wallet.bark.onchain", { amount: formatAmount(bark.onchain, t.language), unit })}</p>
      <Button data-testid="bark-board" disabled={busy} onClick={() => void run(() => wallet.barkBoard())}>{busy ? t("wallet.bark.moving") : t("wallet.bark.board")}</Button>
     </div>}
    </div>}

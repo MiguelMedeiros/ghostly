@@ -1,4 +1,4 @@
-import { FILE_BYTES_STEP, checkFileId, fileSpace, type FileBytes, type FileStream, type FileUsage } from "./fileBytes";
+import { FILE_BYTES_STEP, NO_ROOM_TO_PLAY, checkFileId, fileSpace, type FileBytes, type FileStream, type FileUsage } from "./fileBytes";
 
 /** Tauri's `invoke`, with the raw-body form the file commands take. */
 export type NativeInvoke = (command: string, args?: Record<string, unknown> | Uint8Array, options?: { headers: Record<string, string> }) => Promise<unknown>;
@@ -77,7 +77,10 @@ export class NativeFileBytes implements FileBytes {
    * 127.0.0.1 on Linux, whose WebKitGTK plays no custom scheme. The WebView reads it as a video seeks.
    */
   async stream(id: string, type: string): Promise<FileStream | null> {
-    const opened = await this.invoke("file_bytes_stream_open", this.args(id, { mime: type })).catch(() => null) as { url?: unknown; token?: unknown } | null;
+    const opened = await this.invoke("file_bytes_stream_open", this.args(id, { mime: type })).catch((error: unknown) => {
+      if (String(error) === NO_ROOM_TO_PLAY) throw new Error(NO_ROOM_TO_PLAY);
+      return null;
+    }) as { url?: unknown; token?: unknown } | null;
     if (typeof opened?.url !== "string" || typeof opened.token !== "string") return null;
     const { url, token } = opened as { url: string; token: string };
     let released = false;

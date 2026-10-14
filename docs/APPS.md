@@ -25,6 +25,10 @@ store Ghostly preloads, and how an app gets into it.
 
 Chess is the first app in the official store. Apps are free; there are no payments in them yet.
 
+The contact's side of an app can also be a bot on the [headless CLI](CLI.md#bots) instead of a person: the bot runs
+no app and speaks the app's messages itself, and to you it is the same card and the same app. This comes after
+release 1.2 and is in no release yet.
+
 ## How the official store works
 
 - **It is a Git repository:** [github.com/MiguelMedeiros/ghostly-store](https://github.com/MiguelMedeiros/ghostly-store).

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { axe } from "./axe";
 
 /**
  * The home on a phone (the `phone` project, a Pixel 7): one calm column. The page never scrolls sideways; both ways
@@ -19,22 +20,25 @@ async function walk(page: Page) {
   }
 }
 
-for (const width of [360, 390, 430]) {
+// From the smallest phones (320px, a 344px folding cover screen) up.
+for (const width of [320, 344, 360, 390, 430]) {
   test(`${width}px: nothing is wider than the phone`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
     await page.goto("/", { waitUntil: "networkidle" });
     await walk(page);
     const wide = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(wide).toBeLessThanOrEqual(width);
-    // The page clips sideways overflow, so also look for words and buttons cut by the edge (the wallet deck's track
-    // shows the next card on purpose, and the terminal scrolls in its own box).
+    // The page and the hero and finale clip sideways overflow, so also look for words and buttons cut by the edge:
+    // every element with text of its own, by its box or by the text running out of it (the wallet deck's track shows
+    // the next card on purpose, and the terminal scrolls in its own box).
     const cut = await page.evaluate((width) => {
-      const skip = ".sp-deck-zone, .nx-term, .rail, .sr-only, .particles";
-      return [...document.querySelectorAll("main :is(h1, h2, h3, p, a.btn, li)")]
-        .filter((e) => !e.closest(skip))
+      const skip = ".sp-deck-zone, .nx-term, .rail, .sr-only, .particles, svg, [aria-hidden='true']";
+      return [...document.querySelectorAll("main *")]
+        .filter((e) => !e.closest(skip) && [...e.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent?.trim()))
         .filter((e) => {
           const r = e.getBoundingClientRect();
-          return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== "hidden" && (r.left < -1 || r.right > width + 1);
+          const right = Math.max(r.right, r.left + e.scrollWidth);
+          return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== "hidden" && (r.left < -1 || right > width + 1);
         })
         .map((e) => `${e.tagName.toLowerCase()} "${(e.textContent ?? "").trim().slice(0, 40)}"`);
     }, width);
@@ -72,6 +76,23 @@ test("every chapter is one open picture with its steps taking turns", async ({ p
     const tops = await section.locator(".scene-static-step").evaluateAll((els) => els.map((e) => (e as HTMLElement).offsetTop));
     expect(new Set(tops).size, `${id}: captions stacked`).toBe(1);
   }
+});
+
+// The "open" chapter names its layers in a legend under the copy, each entry lit as its slab arrives. An entry that
+// still waits is quieter, and reads at AA contrast all the same.
+test("the open chapter's legend reads while its last layers still wait", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/", { waitUntil: "networkidle" });
+  const section = page.locator("#open.scene--phone");
+  await expect(section.locator(".open-legend li")).toHaveCount(7);
+  await expect(async () => {
+    await section.evaluate((e) => e.scrollIntoView({ block: "start", behavior: "instant" }));
+    await expect(section.locator(".scene-static-figure")).toBeInViewport({ ratio: 0.5, timeout: 1000 });
+  }).toPass();
+  // Picked by the reader, the first step stays: its beat lights the first layers and leaves the last ones waiting.
+  await section.locator(".scene-progress button").nth(0).tap();
+  await page.waitForTimeout(2_500);
+  expect(await axe(page, ".open-legend")).toEqual([]);
 });
 
 test("a chapter's next step comes by itself, and a tap on a bar shows that step", async ({ page }) => {

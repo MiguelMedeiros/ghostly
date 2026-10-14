@@ -244,6 +244,15 @@ describe("hold pointers: refusals", () => {
     expect(h.bob.readPointer(h.pointerPacket(body({ 4: null })))?.manifestUrl).toBeNull();
   });
 
+  it("refuses a pointer whose manifest is not at an address an item may be at: it is fetched as soon as the pointer is read", () => {
+    const h = setup();
+    for (const url of ["http://192.168.1.1/cgi-bin/luci?reboot=1", "http://10.0.0.5:8080/admin/delete?all=1", "http://169.254.169.254/latest/meta-data/", "http://127.0.0.1:4959/admin",
+      "https://192.168.1.1/m", "https://localhost:8443/m", "http://s3.example/m", "ftp://s3.example/m", "not a url"]) {
+      expect(h.bob.readPointer(h.pointerPacket(body({ 4: url }))), url).toBeNull();
+    }
+    expect(h.bob.readPointer(h.pointerPacket(body({ 4: "http://127.0.0.1:9000/b/m" })), true)?.manifestUrl).toBe("http://127.0.0.1:9000/b/m");
+  });
+
   it("refuses a packet under another key, with no or two pointer records, or too large", () => {
     const h = setup(), good = h.pointerPacket(body());
     expect(h.bob.readPointer({ ...good, pubKeyZ32: h.bob.identity.pubKeyZ32 })).toBeNull();
@@ -340,10 +349,22 @@ describe("manifests and storage addresses", () => {
     expect(readManifest({ entries: [entry({ 3: HOLD_LIMITS.maxBundleBytes })] })).toHaveLength(1);
   });
 
-  it("only trusts HTTPS, or plain HTTP to this very machine", () => {
-    for (const url of ["https://s3.example/o", "http://localhost:9000/o", "http://127.0.0.1/o", "http://[::1]:9000/o"]) expect(isHoldUrl(url)).toBe(true);
-    for (const url of [42, null, "", "not a url", "http://10.0.0.1/o", "http://localhost.evil.example/o", "file:///etc/passwd", "javascript:alert(1)", `https://s3.example/${"a".repeat(2048)}`]) {
-      expect(isHoldUrl(url)).toBe(false);
+  it("only trusts HTTPS at a name or a public address; this machine and its network never, plain HTTP to this machine under test alone", () => {
+    for (const url of ["https://s3.example/o", "https://s3.example:9000/o?X-Amz-Signature=1", "https://8.8.8.8/o"]) expect(isHoldUrl(url)).toBe(true);
+    const local = ["http://localhost:9000/o", "http://127.0.0.1/o", "http://[::1]:9000/o"];
+    for (const url of local) { expect(isHoldUrl(url)).toBe(false); expect(isHoldUrl(url, true)).toBe(true); }
+    for (const url of [42, null, "", "not a url", "http://10.0.0.1/o", "http://192.168.1.1/cgi-bin/luci?reboot=1", "http://169.254.169.254/latest/meta-data/", "http://s3.example/o",
+      "http://localhost.evil.example/o", "file:///etc/passwd", "javascript:alert(1)", `https://s3.example/${"a".repeat(2048)}`,
+      "https://localhost/o", "https://localhost./o", "https://x.localhost:8443/o", "https://127.0.0.1/o", "https://2130706433/o", "https://0x7f.1/o", "https://10.0.0.5:8080/o",
+      "https://192.168.1.1/o", "https://169.254.169.254/o", "https://100.64.0.1/o", "https://0.0.0.0/o", "https://[::1]/o", "https://[fd00::1]/o", "https://[::ffff:10.0.0.1]/o",
+      "https://user:secret@s3.example/o", "https://user@s3.example/o"]) {
+      expect(isHoldUrl(url), String(url)).toBe(false);
+      expect(isHoldUrl(url, true), String(url)).toBe(false);
     }
+  });
+
+  it("holds every address a manifest lists to that rule", () => {
+    for (const url of ["http://127.0.0.1:4959/admin?x", "http://192.168.1.1/o", "https://10.0.0.5/o"]) expect(() => readManifest({ entries: [entry({ 4: url })] })).toThrow(HoldRefusedError);
+    expect(readManifest({ entries: [entry({ 4: "http://127.0.0.1:9000/b/o" })] }, true)).toHaveLength(1);
   });
 });

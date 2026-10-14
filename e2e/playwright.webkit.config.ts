@@ -6,6 +6,7 @@ import { defineConfig, devices } from "@playwright/test";
  * read, the origin-private file system, a download from a file in storage): profile backups to a file. And the
  * mini-app sandbox (apps-sandbox.spec.ts): the runner has to hold in every engine the web app runs in. And installing
  * an app in an in-memory context, which keeps no Blob in IndexedDB as Safari's Private Browsing (apps-private-storage.spec.ts).
+ * And a chat's list taken off screen and shown again, which WebKit starts at the top again (chat-offscreen.spec.ts).
  *
  *   npm run test:e2e:webkit
  *   E2E_WEB_PORT=50310 npm run test:e2e:webkit
@@ -18,7 +19,7 @@ const deployed = process.env.E2E_WEB_URL;
 
 export default defineConfig({
   testDir: "./web",
-  testMatch: ["profile-backup-file.spec.ts", "device-signing-key.spec.ts", "apps-sandbox.spec.ts", "apps-chess.spec.ts", "apps-private-storage.spec.ts"],
+  testMatch: ["profile-backup-file.spec.ts", "device-signing-key.spec.ts", "apps-sandbox.spec.ts", "apps-chess.spec.ts", "apps-private-storage.spec.ts", "chat-offscreen.spec.ts"],
   outputDir: "../test-results/webkit",
   globalSetup: "./support/headlessBuild.ts",
   // One test at a time: Playwright's WebKit keeps one origin-private file system per origin for every browser profile

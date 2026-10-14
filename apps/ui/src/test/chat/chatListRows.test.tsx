@@ -5,6 +5,7 @@ import { Sidebar } from "../../components/Sidebar";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { formatListTime, previewText } from "../../lib/chatList";
+import { languageTag } from "../../lib/documentLanguage";
 import { LOCALES as translations } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
 import { publicKeyLabel } from "../../lib/publicKeyLabel";
@@ -304,6 +305,20 @@ describe("the list's words", () => {
     expect(formatListTime(NOW - 23 * 3_600_000, NOW, "ja", translateWith(translations.ja))).toBe("23時間");
     expect(formatListTime(NOW - 6 * 86_400_000, NOW, "fr", translateWith(translations.fr))).toBe("6 j");
     expect(formatListTime(NOW - 30 * 86_400_000, NOW)).not.toMatch(/^\d+[mhd]$/);
+  });
+
+  it("write a row's date as toLocaleDateString did, with one formatter per language for every row and render", () => {
+    const older = [30, 45, 400].map((d) => NOW - d * 86_400_000);
+    const expected = older.map((ts) => [new Date(ts).toLocaleDateString(languageTag("fr"), { month: "short", day: "numeric" }), new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" })]);
+    const perRow = vi.spyOn(Date.prototype, "toLocaleDateString");
+    const made = vi.spyOn(Intl, "DateTimeFormat");
+    try {
+      // 70 commits of a large list's start, each drawing every row's time.
+      for (let render = 0; render < 70; render++) for (const ts of older) { formatListTime(ts, NOW, "fr"); formatListTime(ts, NOW); }
+      expect(older.map((ts) => [formatListTime(ts, NOW, "fr"), formatListTime(ts, NOW)])).toEqual(expected);
+      expect(perRow).not.toHaveBeenCalled();
+      expect(made.mock.calls.length).toBeLessThanOrEqual(2);
+    } finally { perRow.mockRestore(); made.mockRestore(); }
   });
 
   it("read a pasted token as what it is", () => {
