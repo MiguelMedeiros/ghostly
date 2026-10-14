@@ -399,6 +399,9 @@ with no framing:
   rest of it, then plays padded.
 - Barge-in: `ghostly call flush` (or `call.flush` on the socket API) drops everything queued, at once. Stop writing
   before you flush.
+- A call that ended unanswered (you hung up while it rang, or it rang out) is followed by the next one in that chat
+  no sooner than 2 s later: `call start` refuses sooner with `busy` and `details.retryAfterMs`. The contact's app
+  would not ring a call that comes that fast after a missed one.
 - The socket exists from `call start`/`call answer`, so the program may connect before the media is up. One program
   at a time: a new connection replaces the old one. When the call ends, the program reads EOF and the socket is
   removed.
