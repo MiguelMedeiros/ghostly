@@ -938,6 +938,37 @@ describe("invitations: what the admission exchange ignores", () => {
     expect(bob.views().map(v => v.id).sort()).toEqual([...[47, 48, 49, 50].map(id), "X".repeat(22)]);
   });
 
+  it("an invitation sent again under an id taken back counts toward its chat's four, its own chat's or another's", async () => {
+    const world = new World();
+    const bob = world.add("bob");
+    const admin = createIdentity().pubKeyZ32;
+    const id = (i: number) => `${String(i).padStart(2, "0")}${"D".repeat(20)}`;
+    const invite = (link: string, i: number) => bob.handleContactFrame(link, { t: "group-invite", g: id(i), name: `g${i}`, admin, e: 0, n: 1 });
+    const sent = vi.spyOn((bob as unknown as { host: GroupsHost }).host, "sendOnLink");
+    const waiting = (link: string) => bob.views().filter(v => v.invitation?.linkId === link && !v.invitation.takenBack).map(v => v.id).sort();
+    for (let i = 0; i < 4; i++) await invite("chat-cb", i);
+    for (let i = 0; i < 4; i++) await bob.handleContactFrame("chat-cb", { t: "group-decline", g: id(i) });
+    for (let i = 4; i < 8; i++) await invite("chat-cb", i);
+    // The four taken back, invited again: past the four waiting, each is answered as declined and keeps its mark.
+    for (let i = 0; i < 4; i++) await invite("chat-cb", i);
+    expect(waiting("chat-cb")).toEqual([4, 5, 6, 7].map(id));
+    expect(sent.mock.calls.map(([link, frame]) => [link, frame.g, frame.t])).toEqual([0, 1, 2, 3].map(i => ["chat-cb", id(i), "group-decline"]));
+    expect(bob.views().filter(v => v.invitation?.takenBack).map(v => v.id).sort()).toEqual([0, 1, 2, 3].map(id));
+    // Another chat's taken-back id is no way past it either.
+    await invite("chat-xb", 10);
+    await bob.handleContactFrame("chat-xb", { t: "group-decline", g: id(10) });
+    await invite("chat-cb", 10);
+    expect(waiting("chat-cb")).toEqual([4, 5, 6, 7].map(id));
+    expect(view(bob, id(10)).invitation).toMatchObject({ linkId: "chat-xb", takenBack: true });
+    // One of the four waiting, sent again, still replaces itself.
+    await bob.handleContactFrame("chat-cb", { t: "group-invite", g: id(5), name: "renamed", admin, e: 0, n: 1 });
+    expect(view(bob, id(5)).name).toBe("renamed");
+    // Once one is answered, an id taken back takes its place.
+    await bob.decline(id(4));
+    await invite("chat-cb", 0);
+    expect(waiting("chat-cb")).toEqual([0, 5, 6, 7].map(id));
+  });
+
   it("an invitation's member count and epoch are kept within what a group can be", async () => {
     const world = new World();
     const bob = world.add("bob");
