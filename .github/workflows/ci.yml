@@ -422,6 +422,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     env:
       # Line numbers in a panic's backtrace are all these tests need of debug info: the cache below is half the size
       # and restores in half the time (it was 3 GB and up to 105 s).
@@ -523,10 +524,19 @@ jobs:
       - name: Mark the Cargo restore
         run: touch "$RUNNER_TEMP/cargo-restored"
 
+      # A hung apt fails here with its log, not after the job's 6 h: a merge-train batch waited 31 min on one.
       - name: Wait for the system dependencies
         run: |
           pid=$(cat "$RUNNER_TEMP/apt.pid")
-          while kill -0 "$pid" 2>/dev/null; do sleep 1; done
+          deadline=$((SECONDS + 25 * 60))
+          while kill -0 "$pid" 2>/dev/null; do
+            if ((SECONDS > deadline)); then
+              echo "::error::apt still running after 25 min"
+              cat "$RUNNER_TEMP/apt.log"
+              exit 1
+            fi
+            sleep 1
+          done
           grep -E '^[0-9]{2}:[0-9]{2}:[0-9]{2} ' "$RUNNER_TEMP/apt.log" || true
           tail -n 5 "$RUNNER_TEMP/apt.log"
           # The exit status of a process that is not this shell's child is gone: check the result instead.
