@@ -121,10 +121,24 @@ function engineIds(messages: StoredMessage[]): ReadonlySet<string> {
 /** What each link's messages were last mirrored from: the list, and its session as stored after. */
 const mirrored = new Map<string, { messages: StoredMessage[]; sessionId: string; stored: string | null }>();
 
+/** Whether this link's last mirror went into this session, and nothing has written the session since. */
+function untouched(linkId: string, sessionId: string): boolean {
+  const last = mirrored.get(linkId);
+  return last?.sessionId === sessionId && storedSession(sessionId) === last.stored;
+}
+
 /** Whether this list was mirrored into this session already, and nothing has written the session since. */
 function mirroredAlready(linkId: string, messages: StoredMessage[]): boolean {
   const last = mirrored.get(linkId);
-  return last?.messages === messages && storedSession(last.sessionId) === last.stored;
+  return last?.messages === messages && untouched(linkId, last.sessionId);
+}
+
+/**
+ * Mirrors a list not mirrored yet. The engine's state and the page's change tick (`engine.ts` `tellChanges`) both tell
+ * of a message that arrived, the state often first: the list is mirrored once.
+ */
+function mirrorNew(linkId: string, messages: StoredMessage[]): void {
+  if (!mirroredAlready(linkId, messages)) mirrorMessages(linkId, messages);
 }
 
 function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
@@ -189,8 +203,9 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
   if (moved) session.messages.sort((a, b) => a.timestamp - b.timestamp);
   let changed = dirty;
   // A long history stored whole (before its stored copy kept only its last messages) is stored anew: saving writes only
-  // what changed, so this writes once.
-  if (dirty || (!partial && !added.length && session.messages.length > STORED_MESSAGES)) saveSession(session);
+  // what changed, so this writes once. Not again after a mirror that left it stored, nothing written since: that one
+  // stored it as it is kept.
+  if (dirty || (!partial && !added.length && session.messages.length > STORED_MESSAGES && !untouched(linkId, session.id))) saveSession(session);
   if (added.length) {
     const before = session.messages.length;
     const updated = addMessages(session.id, added, partial);
@@ -336,11 +351,11 @@ export function startSessionSync(): void {
   if (started) return;
   started = true;
   void engine.connect().catch(() => {});
-  engine.onMessages(mirrorMessages);
+  engine.onMessages(mirrorNew);
   engine.subscribe(() => {
     void reconcile();
     // A list mirrored already, into a session nothing wrote since, has nothing new (reconcile mirrors the link's names).
-    for (const [linkId, messages] of engine.messages) if (!mirroredAlready(linkId, messages)) mirrorMessages(linkId, messages);
+    for (const [linkId, messages] of engine.messages) mirrorNew(linkId, messages);
   });
   // Deleting a chat only touches localStorage; notice it without waiting for the peer to speak.
   window.addEventListener("session-updated", () => void reconcile());
