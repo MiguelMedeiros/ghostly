@@ -144,6 +144,8 @@
     "noRoomHere": "Sem espaço neste dispositivo",
     "noRoomHereNext": "Libere espaço e peça de novo.",
     "noRoomNext": "{{free}} livres.",
+    "noRoomToSend": "Não há espaço suficiente neste dispositivo",
+    "noRoomToSendNext": "Libere espaço e escolha o arquivo de novo.",
     "notDelivered": "Não entregue a tempo",
     "notVoice": "Essa gravação não pode ser enviada como mensagem de voz",
     "offerExpired": "A oferta expirou",
