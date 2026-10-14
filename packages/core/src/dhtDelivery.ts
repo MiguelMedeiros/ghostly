@@ -149,6 +149,12 @@ export interface DhtDeliveryState {
    * "the invite was taken" from then on is not the contact's word (`sealedToAnother`).
    */
   wasLive?: true;
+  /**
+   * This side joined, and pinned the inviter from an envelope it put out before anyone joined (sealed with the invite's
+   * key, not to this side): that envelope's sequence. Until the inviter shows it was there since (`DhtDelivery.unanswered`),
+   * the chat is read as an invite nobody used (`unusedInviteWait`), counted from the join.
+   */
+  unanswered?: number;
 }
 export interface DhtDeliveryView {
   mode: DeliveryMode;
@@ -275,7 +281,10 @@ export class DhtDelivery {
      * burst of an app coming back (bug hunt r7a). A text, a receipt, a new mode or a new capability revision still go at once.
      */
     firstControlAfterMs?: number;
-    /** This side made the invite, then: once no longer awaited, its mailbox is read less often while nobody uses it (`unusedInviteWait`). */
+    /**
+     * This side made the invite, or joined one, then: once no longer awaited, its mailbox is read less often while nobody
+     * uses it, or while its inviter never answered the join (`unanswered`) (`unusedInviteWait`).
+     */
     inviteMadeAt?: number;
   }) {
     // `peerRejected`, saved by apps before WISP 403 revision 0.3, stopped the chat for good on an envelope anyone
@@ -298,6 +307,14 @@ export class DhtDelivery {
       error: [this.errors.read, this.errors.publish].filter(Boolean).join(". ") || undefined, pendingUntil: this.state.pending?.expires, maxTextBytes: DHT_TEXT_BYTES,
       ...(this.lastPublished && { lastPublished: this.lastPublished }), ...(this.foreignKeySeenAt && { foreignKeySeenAt: this.foreignKeySeenAt }),
       ...(this.state.inviteTaken && { inviteTaken: true }) };
+  }
+  /**
+   * This side joined, and its inviter never answered (`DhtDeliveryState.unanswered`): no envelope of its newer than the
+   * one that pinned it, none sealed to this side, no text confirmed, never live (as `sealedToAnother` asks too).
+   */
+  get unanswered(): boolean {
+    const pinnedAt = this.state.unanswered;
+    return pinnedAt !== undefined && this.state.peerSequence <= pinnedAt && !this.state.peerPinned && !this.state.confirmed && !this.state.wasLive && !this.live;
   }
   /**
    * Something signed by a participation key other than the pinned one came in over the chat's invite-derived keys (this
@@ -767,6 +784,9 @@ export class DhtDelivery {
     if (message !== null && (!Array.isArray(message) || message.length !== 3 || typeof message[0] !== "string" || !ID.test(message[0]) || !Number.isSafeInteger(message[1]) || message[1] <= 0 || message[1] > issued + 30_000 ||
       typeof message[2] !== "string" || utf8Encode(message[2]).length > DHT_TEXT_BYTES || expires - issued > DHT_MESSAGE_TTL)) return "none";
     if (receipt !== null && (typeof receipt !== "string" || !ID.test(receipt))) return "none";
+    // A joiner pinning its inviter from the envelope the inviter put out before anyone joined: that says nothing of the
+    // inviter being there, whose chat may be deleted or its app gone (bug hunt 1014-0136).
+    const unanswered = !this.options.credentials.peerKey && !!this.options.credentials.expectedPeerKey && !sender && !this.live;
     await this.options.pin(author); this.options.credentials.peerKey = author; this.options.credentials.requireSignedSignals = true;
     // Store content before advancing anti-replay state. Retrying after a crash
     // is safe because the durable message table deduplicates the stable ID.
@@ -801,7 +821,7 @@ export class DhtDelivery {
     // A newer envelope of the contact's that opens here: whatever said the invite was taken was not the contact.
     if (this.state.inviteTaken) traceLink(this.from, "invite-untaken", {});
     const { inviteTaken: _taken, ...kept } = this.state;
-    await this.persist({ ...kept, peerSequence: sequence, peerMode: mode, receipt: nextReceipt, confirmed, ...(peerPinned && { peerPinned }),
+    await this.persist({ ...kept, peerSequence: sequence, peerMode: mode, receipt: nextReceipt, confirmed, ...(peerPinned && { peerPinned }), ...(unanswered && { unanswered: sequence }),
       pending: confirmed && this.state.pending?.message[0] === confirmed ? undefined : this.state.pending,
       ...(newest > (this.state.reactionsTaken ?? 0) && { reactionsTaken: newest }) });
     if (confirmed) await this.options.receipt(confirmed);
@@ -909,10 +929,13 @@ export class DhtDelivery {
     if (this.state.pending && this.state.pending.expires > now) return DHT_POLL_MS;
     return this.active ? ACTIVE_DHT_POLL_MS : STREAM_POLL_MS;
   }
-  /** How long ago this side's invite was made, while nobody used it and it is no longer awaited (`AWAITING_PEER_MS`). */
+  /**
+   * How long ago this side's invite was made (or joined), while nobody used it (or its inviter never answered,
+   * `unanswered`) and it is no longer awaited (`AWAITING_PEER_MS`).
+   */
   private unusedInviteAge(now: number): number | undefined {
     const madeAt = this.options.inviteMadeAt;
-    if (madeAt === undefined || this.options.credentials.peerKey || this.state.peerSequence) return undefined;
+    if (madeAt === undefined || ((this.options.credentials.peerKey || this.state.peerSequence) && !this.unanswered)) return undefined;
     const age = now - Math.min(madeAt, this.startedAt);
     return age >= AWAITING_PEER_MS ? age : undefined;
   }

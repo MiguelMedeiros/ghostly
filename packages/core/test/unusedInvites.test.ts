@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createIdentity } from "../src/identity";
 import { createLink } from "../src/invite";
-import { DhtDelivery, emptyDhtDeliveryState } from "../src/dhtDelivery";
+import { DhtDelivery, emptyDhtDeliveryState, type DhtDeliveryState } from "../src/dhtDelivery";
 import { AWAITING_PEER_MS, LinkSession, RELAY_POLL_INTERVALS, UNUSED_INVITE_WAIT_MAX_MS, type LinkSessionOptions } from "../src/link";
 import type { PkarrTransport } from "../src/transport";
 // covers: invite.create, core.relay-client
@@ -113,5 +113,24 @@ describe("an invite nobody used", () => {
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(saved.reads.length, "paired: every 30 s").toBeGreaterThanOrEqual(19);
     await chat.stop();
+  });
+
+  it("a joined chat whose inviter never answered reads its mailbox as an unused invite's; once answered, or saved before, as a chat's", async () => {
+    const peerKey = createIdentity().pubKeyZ32;
+    const joined = (state: Partial<DhtDeliveryState>) => {
+      const { reads, transport } = counting();
+      const box = new DhtDelivery({ params: createLink().mine, mode: "stream", state: { ...emptyDhtDeliveryState(), peerSequence: 1, ...state }, credentials: { seedB64: createIdentity().seedB64, peerKey, expectedPeerKey: peerKey }, transport,
+        save: async () => {}, pin: async () => {}, message: async () => {}, receipt: async () => {}, changed: () => {}, inviteMadeAt: NOW - 86_400_000 });
+      return { box, reads };
+    };
+    for (const [state, slow] of [[{ unanswered: 1 }, true], [{ unanswered: 1, peerSequence: 2 }, false], [{ unanswered: 1, peerPinned: "can" }, false], [{ unanswered: 1, wasLive: true }, false], [{}, false]] as const) {
+      const { box, reads } = joined(state);
+      expect(box.unanswered, JSON.stringify(state)).toBe(slow);
+      await box.start();
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      if (slow) expect(reads.length, JSON.stringify(state)).toBeLessThanOrEqual(5);
+      else expect(reads.length, JSON.stringify(state)).toBeGreaterThanOrEqual(19);
+      await box.stop();
+    }
   });
 });
