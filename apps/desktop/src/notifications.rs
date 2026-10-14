@@ -889,10 +889,13 @@ mod linux {
 
         /// A chat's notifications used to pile up in the desktop's list, each burst a new one, and none was taken
         /// back. Now a chat has one, which its next burst replaces, and reading the chat closes it.
+        /// `show` returns at the server's first answer, before the call's task marks the chat as answered: a burst
+        /// right after it can still go as that task's replacement, after `show` returned. So the list is read once
+        /// the server has worked through it.
         #[test]
         fn a_chat_has_one_notification_until_it_is_read() {
             let bus = Bus::start();
-            let listed: Arc<Mutex<Vec<(u32, String)>>> = Arc::default();
+            let listed: Listed = Arc::default();
             let _server = bus
                 .connect()
                 .name(SERVER)
@@ -902,39 +905,26 @@ mod linux {
                 .build()
                 .unwrap();
             let notifier = Notifier::new(bus.connect(), |_| {}).unwrap();
-            let listed = || listed.lock().unwrap().clone();
 
             notifier.show("chat-a", "first burst").unwrap();
             notifier.show("chat-b", "another chat").unwrap();
             notifier.show("chat-a", "second burst").unwrap();
             notifier.show("chat-a", "third burst").unwrap();
-            assert_eq!(
-                listed(),
-                [
-                    (1, "third burst".to_string()),
-                    (2, "another chat".to_string())
-                ]
-            );
+            settled(&listed, &[(1, "third burst"), (2, "another chat")]);
 
             // Read in the app: only that chat's goes, and once.
             notifier.clear("chat-a").unwrap();
-            assert_eq!(listed(), [(2, "another chat".to_string())]);
+            settled(&listed, &[(2, "another chat")]);
             notifier.clear("chat-a").unwrap();
             notifier.clear("never-shown").unwrap();
-            assert_eq!(listed(), [(2, "another chat".to_string())]);
+            settled(&listed, &[(2, "another chat")]);
 
             // Its next message is a new notification, which replaces none of another chat's.
             notifier.show("chat-a", "after it was read").unwrap();
-            assert_eq!(
-                listed(),
-                [
-                    (2, "another chat".to_string()),
-                    (3, "after it was read".to_string())
-                ]
-            );
+            settled(&listed, &[(2, "another chat"), (3, "after it was read")]);
             notifier.clear("chat-b").unwrap();
             notifier.clear("chat-a").unwrap();
-            assert_eq!(listed(), []);
+            settled(&listed, &[]);
         }
 
         /// The click the issue measured as lost: the server offers the body as the `default` action, and its
