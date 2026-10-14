@@ -802,6 +802,17 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     say(`ALONE #${p.number}: rebased onto ${built.baseSha.slice(0, 12)} as ${built.sha.slice(0, 12)}${retried ? " (second run)" : ""}`);
     if (built.sha !== p.sha) {
       const pushed = dry ? (say(`(dry run) would push ${built.sha.slice(0, 12)} to ${p.branch} (lease ${p.sha.slice(0, 12)})`), { ok: true }) : await git.pushHead(p.branch, built.sha, p.sha);
+      if (!pushed.ok && WORKFLOW_PUSH_REFUSED.test(pushed.message)) {
+        // As for a batch's push: it leaves the line, saying so. Else every run rebased it and was refused again, and it
+        // waited for good under a comment naming a commit GitHub never took. A diff that lists no workflow (commits
+        // that change one and change it back, which the rebase replays) names the one GitHub refused.
+        const workflows = (await gh.pullFiles(p.number)).filter((f) => f.startsWith(".github/workflows/"));
+        if (!workflows.length) workflows.push(pushed.message.match(/workflow `([^`]+)`/)?.[1] ?? "a workflow");
+        say(`DROP #${p.number} (changes a workflow, which this token may not push)`);
+        done.dropped.push(p.number);
+        await leave(p, LABEL.failed, workflowText(base, workflows));
+        return null;
+      }
       if (!pushed.ok) say(`::warning::Could not push the rebase of #${p.number}: ${pushed.message}`);
     }
     return { number: p.number, members: [p], alone: true };

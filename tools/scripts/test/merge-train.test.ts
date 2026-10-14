@@ -1221,6 +1221,30 @@ describe("one pull request alone", () => {
     expect(repo.pulls.get(11)!.sha).toBe(repo.alone(11)!.sha);
   });
 
+  it("takes a lone pull request that changes a workflow out of the line when GitHub refuses the push of its rebase", async () => {
+    // Else every run rebased it, was refused and kept it in flight, and nothing on it said why.
+    const repo = fakeRepo();
+    repo.add(21, { behind: true });
+    repo.files.set(21, [".github/workflows/ci.yml"]);
+    let tries = 0;
+    repo.git.pushHead = async (branch: string, sha: string) => {
+      tries++;
+      return { ok: false, message: `! [remote rejected] ${sha} -> ${branch} (refusing to allow a GitHub App to create or update workflow \`.github/workflows/ci.yml\` without \`workflows\` permission)` };
+    };
+    const r = await repo.run();
+    expect(r.dropped).toEqual([21]);
+    expect(r.inFlight).toBeNull();
+    expect(repo.pulls.get(21)!.labels).toEqual([LABEL.failed]);
+    expect(repo.comments.get(21)!.map((c) => c.body)).toEqual([expect.stringMatching(/changes a workflow \(\.github\/workflows\/ci\.yml\)/)]);
+    await repo.run();
+    expect(tries).toBe(1);
+    // A diff that lists no workflow (changed and changed back): the comment names the one GitHub refused.
+    repo.add(22, { behind: true });
+    repo.files.set(22, ["README.md"]);
+    expect((await repo.run()).dropped).toEqual([22]);
+    expect(repo.comments.get(22)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
+  });
+
   it("gives a red pull request one more run on a fresh rebase, then queue:failed", async () => {
     const repo = fakeRepo();
     repo.add(11, { behind: true });
