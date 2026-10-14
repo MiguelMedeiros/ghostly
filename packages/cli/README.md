@@ -321,7 +321,8 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
 - Pins (WISP 400 § Pinned message): `chat.pinned` (with `chat`) and `group.pinned` (with `group`) when someone else pins
   or unpins: `{messageId, ref, by, removed}`, with `messageId` the message's id here (null when it is not here, or
   unpinned), `ref` the id both sides know it by, and `by` `peer` or a member key.
-- `--type message.received` keeps one type; `--type message.` (or `message.*`) a family.
+- `--type message.received` keeps one type; `--type message` (or `message.`, `message.*`) a family. A family deeper
+  down ends in "." (`group.typing.`): `group.message` is that type alone.
 - `--from <chat|key>` and `--group <group>` (again for more): an allowlist. Only the chats (id, prefix, name, or the
   contact's `peer` key, which also matches a chat made later) and groups named get through; any other chat's or
   group's event stops before `--exec`, `--webhook` and stdout (the message stays in the chat; the cursor moves past
