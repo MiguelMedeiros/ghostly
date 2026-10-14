@@ -594,15 +594,52 @@ function sessionKeys(): string[] {
 }
 
 /**
- * The sessions as the chat list and the app's badge last read them: both read them all on every `session-updated` and
- * every few seconds, and a chat whose stored text changed (a message came) is parsed, and merged with the messages its
- * stored copy leaves out, once for both. Neither changes one in place.
+ * The sessions as this page last read them for the chat list, the app's badge, the session sync and the open chat: each
+ * reads them on every `session-updated` (and every few seconds), and a chat whose stored text changed (a message came)
+ * is parsed, and merged with the messages its stored copy leaves out, once for all of them. None changes one in place.
  */
 const shownCache: SessionCache = new Map();
 
-/** Every chat, as `listSessions` reads them, for the chat list and the badge: through their one cache. */
+/** Every chat, as `listSessions` reads them, through the page's one cache (`shownCache`). Not to be changed in place. */
 export function listShownSessions(): ChatSession[] {
   return listSessions(shownCache);
+}
+
+/** A chat's session through the page's one cache: as stored (`parsed`), and with its older messages (`session`). */
+function readShown(sessionId: string): { parsed: ChatSession; session: ChatSession } | null {
+  const key = getKey(sessionId);
+  try {
+    const raw = readKey(key);
+    return raw ? readThrough(key, raw, shownCache) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A chat's session as `loadSession` reads it, through the page's one cache (`shownCache`). Not to be changed in place. */
+export function loadShownSession(sessionId: string): ChatSession | null {
+  return readShown(sessionId)?.session ?? null;
+}
+
+/** Reads a chat again from what is stored next time it is asked for (one this page just wrote, or meant to). */
+export function forgetShownSession(sessionId: string): void {
+  shownCache.delete(getKey(sessionId));
+}
+
+/**
+ * A session stored as `raw`, parsed (as stored, `older` and all) and with its older messages (`withWhole`). With a cache,
+ * parsed only when its stored text changed, and the same object while neither it nor its whole history did.
+ */
+function readThrough(key: string, raw: string, cache?: SessionCache): { parsed: ChatSession; session: ChatSession } {
+  const hit = cache?.get(key);
+  const parsed = hit?.raw === raw ? hit.session : JSON.parse(raw) as ChatSession;
+  // With its older messages, the same object while neither it nor its whole history changed (the sync's reconcile
+  // tells an unchanged list by its sessions' identity).
+  const list = parsed.older ? whole.get(parsed.id) : undefined;
+  const known = hit?.session === parsed && list && hit.whole?.list === list ? hit.whole : undefined;
+  const session = !list ? parsed : known?.session ?? withWhole(parsed, list);
+  if (cache && (hit?.session !== parsed || hit.whole?.session !== (list ? session : undefined))) cache.set(key, { raw, session: parsed, ...(list && { whole: { list, session } }) });
+  return { parsed, session };
 }
 
 /** Every chat, pinned first, then the latest first. With a cache, only a session whose stored text changed is parsed. */
@@ -613,14 +650,7 @@ export function listSessions(cache?: SessionCache): ChatSession[] {
     try {
       const raw = readKey(key);
       if (!raw) continue;
-      const hit = cache?.get(key);
-      const parsed = hit?.raw === raw ? hit.session : JSON.parse(raw) as ChatSession;
-      // With its older messages, the same object while neither it nor its whole history changed (the sync's reconcile
-      // tells an unchanged list by its sessions' identity).
-      const list = parsed.older ? whole.get(parsed.id) : undefined;
-      const known = hit?.session === parsed && list && hit.whole?.list === list ? hit.whole : undefined;
-      const session = !list ? parsed : known?.session ?? withWhole(parsed, list);
-      if (cache && (hit?.session !== parsed || hit.whole?.session !== (list ? session : undefined))) cache.set(key, { raw, session: parsed, ...(list && { whole: { list, session } }) });
+      const { session } = readThrough(key, raw, cache);
       seen.add(key);
       if (session.id && session.mySeedB64 && session.peerPubKeyB64 && session.encKeyB64) {
         sessions.push(session);
@@ -759,8 +789,9 @@ function setReadCount(sessionId: string, count: number): void {
 }
 
 export function markSessionAsRead(sessionId: string): void {
-  // As stored: how many there are, without putting the older ones back together.
-  const session = loadStored(sessionId);
+  // As stored: how many there are, without putting the older ones back together. Parsed once for every reader of the
+  // page's cache (the chat list and the open chat mark it on each message that comes).
+  const session = readShown(sessionId)?.parsed;
   if (!session) return;
   setReadCount(sessionId, (session.older ?? 0) + session.messages.length);
 }

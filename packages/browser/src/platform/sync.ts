@@ -6,10 +6,10 @@ import {
   ensureSession,
   findSession,
   forgetInviteCode,
+  forgetShownSession,
   getInviteCode,
-  getPrefix,
   isSessionKey,
-  listSessions,
+  listShownSessions,
   loadSession,
   peerDisplayName,
   sessionLinkParams,
@@ -17,7 +17,6 @@ import {
   storedSession,
   updateSessionLabel,
   wasDeleted,
-  type SessionCache,
 } from "../../../../apps/ui/src/lib/storage";
 import type { ChatMessage, ChatSession } from "../../../../apps/ui/src/lib/types";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
@@ -56,18 +55,18 @@ function notifyWholeAgain(): void {
 }
 
 /**
- * The sessions as this module last read them. Each engine update, `session-updated` and the 5 s tick reads them all:
- * a long chat's session is parsed again only when what is stored for it changed. One changed in place here is saved,
- * then forgotten (read again), so a write that failed does not linger as if it had been made.
+ * Each engine update, `session-updated` and the 5 s tick reads the sessions all, as the chat list, the badge and the open
+ * chat do, through the page's one cache (`listShownSessions`): a long chat's session is parsed again only when what is
+ * stored for it changed, once for all of them. Those sessions are not changed in place here: a copy is, saved, and the
+ * chat forgotten (read again), so a write that failed does not linger as if it had been made.
  */
-const cache: SessionCache = new Map();
-
 function forget(sessionId: string): void {
-  cache.delete(`${getPrefix()}${sessionId}`);
+  forgetShownSession(sessionId);
 }
 
+/** The chat with this contact, as the page's cache holds it: not to be changed in place. */
 export function sessionForPeer(peerPubKeyZ32: string): ChatSession | undefined {
-  return listSessions(cache).find((s) => s.peerPubKeyB64 === peerPubKeyZ32);
+  return listShownSessions().find((s) => s.peerPubKeyB64 === peerPubKeyZ32);
 }
 
 export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myPubKeyZ32: string, modern = false): ChatMessage {
@@ -143,8 +142,10 @@ function mirrorNew(linkId: string, messages: StoredMessage[]): void {
 
 function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
   const link = engine.state?.links.find((l) => l.id === linkId);
-  const session = link && sessionForPeer(link.peerPubKeyZ32);
-  if (!link || !session) return;
+  const shown = link && sessionForPeer(link.peerPubKeyZ32);
+  if (!link || !shown) return;
+  // Changed here (its rows, its sort, what is added), never the one the other readers hold.
+  const session: ChatSession = { ...shown, messages: shown.messages.slice() };
 
   // Every state change mirrors every chat: a long one must cost a pass over its messages, not a search per message,
   // and the session is written once at most, whatever changed.
@@ -305,7 +306,7 @@ async function reconcile(): Promise<void> {
     }
   }
 
-  const sessions = listSessions(cache);
+  const sessions = listShownSessions();
   const last = settled;
   if (last?.state === state && last.sessions.length === sessions.length && sessions.every((s) => last.sessions.includes(s))) return;
   settled = undefined;
@@ -313,7 +314,9 @@ async function reconcile(): Promise<void> {
   let renamed = false;
   let later = false;
 
-  for (const session of sessions) {
+  for (const shown of sessions) {
+    // Changed here (its delivery mode, its latest reaction or identity share), never the one the other readers hold.
+    const session = { ...shown };
     const live = engine.linkByPeer(session.peerPubKeyB64);
     if (live && session.deliveryMode !== live.deliveryMode) { session.deliveryMode = live.deliveryMode; saveSession(session); forget(session.id); }
     if (live && mirrorPeerNick(session, live)) renamed = true;
