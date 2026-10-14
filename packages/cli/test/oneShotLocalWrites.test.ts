@@ -51,7 +51,9 @@ describe("a one-shot that changes only this device", { timeout: 120_000 }, () =>
 
   it("asks the relays nothing, answers at once with a slow relay, and keeps what it changed", async () => {
     relay.requests.length = 0;
-    relay.holdMs = 1_500;
+    // An open that went online waits for a PUT, at least 6 s: twice the 3 s a one-shot gets, which leaves a loaded
+    // runner's process start room (a 1.5 s bound against a 1.5 s hold failed at 1.7 s with nothing asked of the relay).
+    relay.holdMs = 6_000;
     const writes = [
       ["chat", "rename", bob, "Bobby"], ["settings", "set", "sendTyping", "false"], ["settings", "set", "autoDownloads", "false"],
       ["settings", "set", "serveFiles", "false"], ["call", "auto", "on"], ["call", "auto", "off"], ["call", "auto", "on"],
@@ -60,7 +62,7 @@ describe("a one-shot that changes only this device", { timeout: 120_000 }, () =>
     for (const args of writes) {
       const started = Date.now();
       ok(await ghostly(["--home", dir, ...args], { env }));
-      expect(Date.now() - started, args.join(" ")).toBeLessThan(1_500);
+      expect(Date.now() - started, args.join(" ")).toBeLessThan(3_000);
     }
     // A proof not started here: said as before, with nothing asked of the relays either.
     expect((await ghostly(["--home", dir, "identity", "cancel", "no-such-draft"], { env })).code).not.toBe(0);
