@@ -105,8 +105,11 @@ export interface GroupsHost {
   signalIn?(linkId: string, payload: Uint8Array, direct?: boolean): boolean;
   /** My newest packet for this edge while it is down, to hand to a member that may pass it on (`CarriedTransport.latest`). */
   edgeSignal?(linkId: string): Uint8Array | null;
-  /** Resolves false when the message was there already: nothing new came (void: a host that does not say). */
-  storeMessage(message: StoredMessage): Promise<boolean | void>;
+  /**
+   * Resolves false when the message was there already: nothing new came (void: a host that does not say). `live`: it
+   * came straight from its author as it was written (`GroupIncomingMessage.live`), what tells the author's clock.
+   */
+  storeMessage(message: StoredMessage, live?: boolean): Promise<boolean | void>;
   /**
    * A message stored from a copy that was not whole, now whole: its mentions, reply and hop count join the stored one
    * (stored now if it is not there). Absent: `storeMessage`, which keeps the first.
@@ -1869,7 +1872,7 @@ export class Groups {
     if (large || legacy || seen) void this.store.putGroup(group).catch(() => {});
     // Its messages were just asked of another member: it hears where I am once that answer has come (`holdSync`).
     if (!this.holdSync(groupId, peerKey)) {
-      try { this.host.sendOnLink(linkId, session.syncFrame(this.askOf(groupId, session, peerKey))); } catch { return; /* it closed again */ }
+      try { this.host.sendOnLink(linkId, session.syncFrame(this.askOf(groupId, session, peerKey), peerKey)); } catch { return; /* it closed again */ }
     }
     // The admin was away when a member's signed leave went round the hubs: it hears it now.
     if (peerKey === session.admin) { try { for (const bye of session.byesHeld()) this.host.sendOnLink(linkId, bye); } catch { /* next time it opens */ } }
@@ -2098,7 +2101,7 @@ export class Groups {
       asked?.set(key, { via: next, at: now });
       held.set(key, { via: next, at: now });
     }
-    try { this.host.sendOnLink(edges.get(next)!, session.syncFrame([...ask])); } catch { /* it closed: it is told when it opens again, and the others at the next tick */ }
+    try { this.host.sendOnLink(edges.get(next)!, session.syncFrame([...ask], next)); } catch { /* it closed: it is told when it opens again, and the others at the next tick */ }
   }
 
   /**
@@ -2213,7 +2216,7 @@ export class Groups {
         tried.set(key, { mark: lacking.get(key)!, of: new Set([via]), at: now, last: { via, at: now, asked: session.missOf(key) } });
         asked?.set(key, { via, at: now });
       }
-      try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(keys)); } catch { /* it closed: the gossip turn asks another */ }
+      try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(keys, via)); } catch { /* it closed: the gossip turn asks another */ }
     }
     if (!fresh.size || !connected.length) return;
     // The gossip turn's next member that is not one of the authors asked for, when there is another: an author hands on
@@ -2228,7 +2231,7 @@ export class Groups {
     // As `askOf`: this is the gossip turn's ask, and the next waits a whole turn. Sooner, it found this one's answer
     // still on its way (`gapsOf`) and asked nobody, and the turn after that went to a member asked already.
     this.lastGossip.set(groupId, now);
-    try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(keys)); } catch { /* it closed: the gossip turn asks another */ }
+    try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(keys, via)); } catch { /* it closed: the gossip turn asks another */ }
   }
 
   /**
@@ -2276,7 +2279,7 @@ export class Groups {
       const ask = [...away, ...this.gapsOf(groupId, session, via, lacking)];
       // An author is asked for its own with no `ask`: the sync alone names what is missing.
       if (!this.ownGap(groupId, via, lacking) && !ask.length) continue;
-      try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(ask)); } catch { /* it closed: the next turn asks another */ }
+      try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(ask, via)); } catch { /* it closed: the next turn asks another */ }
     }
   }
 
@@ -2374,7 +2377,7 @@ export class Groups {
         const completed = !!m.completes && !!this.host.completeMessage;
         // Its place is taken as the store is called, before anything is awaited: the line order follows it from there.
         const placing = completed ? undefined : this.lineOrder.placing(MESSAGE_LINK(state.id), { id: m.id, epoch: m.epoch, line: false }, this.now());
-        const stored = completed ? (await this.host.completeMessage!(message), false) : await this.host.storeMessage(message);
+        const stored = completed ? (await this.host.completeMessage!(message), false) : await this.host.storeMessage(message, m.live);
         placing?.(stored !== false);
         // On its row now: new, or the whole copy of one stored before. A copy I had already changes no row.
         if (m.frame && (completed || stored !== false)) await this.frameKept(state.id, m.id, m.frame);

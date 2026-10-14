@@ -736,18 +736,27 @@ export class GhostlyNode implements EngineImplementation {
   /** The last place given in each chat while this engine runs (`arrivalKey`). */
   private readonly placedAt = new Map<string, number>();
   /**
-   * Each 1:1 chat's contact: how far the time its latest live messages said was from when they came (`CLOCK_SAMPLES`
-   * of them). What tells a contact's clock that is behind from a message that is late (`writtenAt`).
+   * Each 1:1 chat's contact, and each group's member (`clockOf`): how far the time its latest live messages said was
+   * from when they came (`CLOCK_SAMPLES` of them). What tells a clock that is behind from a message that is late (`writtenAt`).
    */
   private readonly clockLeads = new Map<string, number[]>();
-  /** A contact's row came on the live session of a 1:1 chat: what it says of the contact's clock is kept. */
-  private clockSample(message: StoredMessage): void {
-    if (message.sender !== "peer" || message.sentAt === undefined || message.event || message.via !== "datalink" || message.linkId.startsWith("group:")) return;
-    this.clockLeads.set(message.linkId, [...(this.clockLeads.get(message.linkId) ?? []), message.sentAt - message.timestamp].slice(-CLOCK_SAMPLES));
+  /** Whose clock a row's time is: a 1:1 chat's contact, or the group's member who wrote it. */
+  private clockOf(message: StoredMessage): string {
+    return message.linkId.startsWith("group:") ? `${message.linkId} ${message.member ?? ""}` : message.linkId;
+  }
+  /**
+   * A contact's row came on the live session of a 1:1 chat, or a member's straight from its author (`live`, never one
+   * handed on or caught up): what it says of that clock is kept.
+   */
+  private clockSample(message: StoredMessage, live = false): void {
+    if (message.sender !== "peer" || message.sentAt === undefined || message.event || message.via !== "datalink") return;
+    if (message.linkId.startsWith("group:") && !(live && message.member)) return;
+    const clock = this.clockOf(message);
+    this.clockLeads.set(clock, [...(this.clockLeads.get(clock) ?? []), message.sentAt - message.timestamp].slice(-CLOCK_SAMPLES));
   }
   /** Only a new message, or mine going out, says anything (engine/attention.ts): judged by when it was written. */
   private messageFeedback(type: "message" | "sent", message: StoredMessage, newest = this.newestAt.get(message.linkId)) {
-    const written = writtenAt(message, this.clockLeads.get(message.linkId)), now = Date.now();
+    const written = writtenAt(message, this.clockLeads.get(this.clockOf(message))), now = Date.now();
     const group = type === "message" && message.linkId.startsWith("group:"), lateAt = group ? this.lateAt.get(message.linkId) : undefined;
     const attention = messageAttention(type, { ...message, timestamp: written }, { startedAt: this.feedbackStartedAt, newest, now, ...(lateAt !== undefined && { lateAt }) });
     if (group && !message.event && now - written > CATCH_UP_SLACK_MS) this.lateAt.set(message.linkId, now);
@@ -1337,7 +1346,7 @@ export class GhostlyNode implements EngineImplementation {
       else void this.closeGroupLink(linkId).catch(() => {});
     },
     edgeNick: linkId => this.links.get(linkId)?.presence.nick || undefined,
-    storeMessage: message => this.storeNewMessage(message),
+    storeMessage: (message, live) => this.storeNewMessage(message, live),
     completeMessage: message => this.completeGroupMessage(message),
     // A row of its own, small: written with no disk sync of its own (the frame is a copy others hold too).
     forgetFrame: async (linkId, id) => { await db.patchMessage(linkId, id, stored => stored.frame ? { frame: undefined } : null, true); },
@@ -2829,6 +2838,7 @@ export class GhostlyNode implements EngineImplementation {
     const linkId = `group:${groupId}`;
     this.newestAt.delete(linkId);
     this.lateAt.delete(linkId);
+    for (const clock of this.clockLeads.keys()) if (clock.startsWith(`${linkId} `)) this.clockLeads.delete(clock);
     this.placedAt.delete(linkId);
     this.reactionNotes.delete(linkId);
     this.reactionNotesBefore.delete(linkId);
@@ -7737,8 +7747,11 @@ export class GhostlyNode implements EngineImplementation {
 
   private async storeMessage(message: StoredMessage): Promise<void> { await this.storeNewMessage(message); }
 
-  /** Stores a message; false when it was there already (or deleted here): nothing new came. */
-  private async storeNewMessage(message: StoredMessage): Promise<boolean> {
+  /**
+   * Stores a message; false when it was there already (or deleted here): nothing new came. `straight`: a group's,
+   * straight from its author (`clockSample`).
+   */
+  private async storeNewMessage(message: StoredMessage, straight = false): Promise<boolean> {
     // A payment with a member lands in the group's history, from that member, under an id of the edge's own.
     const edge = this.links.get(message.linkId)?.stored;
     if (edge?.group && edge.groupPeer && !edge.groupEntry)
@@ -7762,9 +7775,9 @@ export class GhostlyNode implements EngineImplementation {
     if (!(await db.addMessage(message))) return false;
     // It waits for the live link: `sendWaiting` finds it by its id (a list not read yet reads it from the history).
     if (live && waitsForLive(message)) void live.waitingSends?.then(known => known.add(message.id), () => {});
-    this.clockSample(message);
+    this.clockSample(message, straight);
     const newest = this.newestAt.get(message.linkId);
-    if (!message.event) this.newestAt.set(message.linkId, Math.max(newest ?? 0, writtenAt(message, this.clockLeads.get(message.linkId))));
+    if (!message.event) this.newestAt.set(message.linkId, Math.max(newest ?? 0, writtenAt(message, this.clockLeads.get(this.clockOf(message)))));
     if (message.sender === "peer") this.messageFeedback("message", message, newest);
     if (live) live.lastMessageAt = Math.max(live.lastMessageAt, message.timestamp);
     // An edit that came before its message is shown now, and confirmed.
