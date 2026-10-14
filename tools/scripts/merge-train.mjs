@@ -10,9 +10,10 @@
 //   (ci.yml planned it from other files: a run for another base) does not count; the run before it does.
 // - One batch per base at a time: up to 12 pull requests from the front of the line, built on the base's tip with one
 //   squash commit per pull request, in order ("<title> (#n)"). One that conflicts drops out: `queue:conflict`, one
-//   comment, `queue` taken off. The batch is a pull request from `batch/<base>-<stamp>`; CI runs on it once, and that
-//   full run is the gate: a pull request boards on its fast tier alone, and its own full CI run still going is
-//   cancelled (when the token may cancel runs; else one log line), which frees runners for the batch.
+//   comment, `queue` taken off (`queue:conflict` comes off once it has `queue` back, as does `queue:failed`). The
+//   batch is a pull request from `batch/<base>-<stamp>`; CI runs on it once, and that full run is the gate: a pull
+//   request boards on its fast tier alone, and its own full CI run still going is cancelled (when the token may cancel
+//   runs; else one log line), which frees runners for the batch.
 // - Green on `dev`: the batch's pull requests are merged one at a time, in the batch's order, each with GitHub's squash
 //   merge at the head the batch holds and with the message of the batch's commit of it. So each shows as merged, with
 //   a commit GitHub wrote and signed. Before the first merge dev's tip must be the batch's base. After each one, dev's
@@ -412,6 +413,13 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       p.labeledAt = queuedAt(events, null);
       p.pushedAt = await gh.headPushedAt(p.sha);
     }
+  }
+  // Queued again after the train dropped it, as its comment says: the drop label no longer holds, and left on it would
+  // read as still dropped next to its place in line. The train's own, so it takes it off (a drop adds it back).
+  for (const p of queued) {
+    if (!inLine(p.labels)) continue;
+    for (const l of [LABEL.conflict, LABEL.failed]) if (p.labels.includes(l)) await w.removeLabel(p.number, l);
+    p.labels = p.labels.filter((l) => l !== LABEL.conflict && l !== LABEL.failed);
   }
   const byNumber = new Map(queued.map((p) => [p.number, p]));
   const line = () => order(queued.filter((p) => !gone.has(p.number)));
