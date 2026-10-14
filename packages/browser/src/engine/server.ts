@@ -15,6 +15,18 @@ export interface EngineClientSink {
   post(message: EngineEvent | RpcResponse): void;
 }
 
+/**
+ * A failed call as the client hears it: the error's message. Only the message travels, so a storage write the browser
+ * refused for want of space (Chromium's QuotaExceededError has an empty message) says so, its name kept for the ⓘ.
+ */
+function errorLine(error: unknown): string {
+  if ((error as { name?: unknown } | null)?.name === "QuotaExceededError") {
+    const message = error instanceof Error ? error.message.trim() : "";
+    return `Not enough space on this device (QuotaExceededError${message ? `: ${message}` : ""})`;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 export class EngineServer implements PeerServer {
   /** The whole engine: never made on a device that is not the active one (`devices/peer.ts` decides, WISP 06 § The gate). */
   readonly gated = false;
@@ -148,7 +160,7 @@ export class EngineServer implements PeerServer {
       if (this.node.limited && !LIMITED_MODE_METHODS.has(String(request.method))) throw new Error(LIMITED_MODE_ERROR);
       response.result = await method.call(this.node, params);
     } catch (error) {
-      response.error = error instanceof Error ? error.message : String(error);
+      response.error = errorLine(error);
     }
     try {
       client.post(response);

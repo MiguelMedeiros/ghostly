@@ -98,6 +98,8 @@ const RULES: readonly Rule[] = [
   exact("Ghostly is starting…", "errors.app.starting"),
   exact("Ghostly is still starting. Try again in a moment.", "errors.app.stillStarting"),
   exact("Lost the Ghostly peer", "errors.app.lostPeer"),
+  // A call whose storage write the browser refused for want of space (engine/server.ts): a group made, a text sent.
+  { match: /^Not enough space on this device \(QuotaExceededError(?:: [\s\S]*)?\)$/, key: "errors.app.noRoom", next: "errors.app.noRoomNext", detail: true },
   // A call refused in limited mode (packages/browser/src/engine/node.ts LIMITED_MODE_ERROR): the banner's own words, and what to do.
   exact("Ghostly could not check which device is active yet. This works once it can.", "devices.limited.title", "errors.app.limitedNext"),
   exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress"),

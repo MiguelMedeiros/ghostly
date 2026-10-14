@@ -4,6 +4,8 @@
     "limitedNext": "Cela fonctionnera de nouveau une fois la vérification réussie. Vérifiez votre connexion.",
     "localAddress": "Ghostly a besoin de votre autorisation pour joindre cette adresse locale",
     "lostPeer": "Le pair Ghostly a été perdu",
+    "noRoom": "Pas assez d'espace sur cet appareil",
+    "noRoomNext": "Libérez de l'espace, puis réessayez.",
     "pickCard": "Choisissez d'abord une carte Lightning",
     "signerKey": "Votre signataire détient une autre clé que cette identité. Rien n'a été publié.",
     "starting": "Ghostly démarre…",
