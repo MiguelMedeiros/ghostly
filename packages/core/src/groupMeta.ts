@@ -206,6 +206,32 @@ export function nextGroupMetaRevision(before: { e: number; r: number } | undefin
   return before && before.e === epoch ? before.r + 1 : 1;
 }
 
+/**
+ * Statements a member keeps from before the one it holds, oldest first, so it can hand a member back from away each
+ * change it missed where it was made, not only the latest (two renames read as one, 2026-10-14). A few, and their
+ * bodies within `GROUP_META_PAST_CHARS` together (a picture is ASCII): one with a large picture is not kept.
+ */
+export const GROUP_META_PAST = 4;
+export const GROUP_META_PAST_CHARS = 48_000;
+
+/** The statements kept from before, once `before` gives way to `after`; none for the same body signed again. */
+export function keepPastGroupMeta(past: readonly GroupMeta[] | undefined, before: GroupMeta | undefined, after: GroupMeta): GroupMeta[] | undefined {
+  const kept = before && before.body !== after.body ? [...past ?? [], before] : [...past ?? []];
+  let chars = kept.reduce((n, m) => n + m.body.length, 0);
+  while (kept.length && (kept.length > GROUP_META_PAST || chars > GROUP_META_PAST_CHARS)) chars -= kept.shift()!.body.length;
+  return kept.length ? kept : undefined;
+}
+
+/**
+ * What to hand a member whose sync says it holds `theirs` (or none): the statements newer than theirs, oldest first, the
+ * one I hold last. Those from before only when `wasIn` says it was a member under their commit: one let in since takes
+ * the latest, as the group looked when it got in, and no line for what was changed before.
+ */
+export function groupMetaToHand(past: readonly GroupMeta[] | undefined, meta: GroupMeta, theirs: { e: number; r: number } | undefined, wasIn: (m: GroupMeta) => boolean): GroupMeta[] {
+  const before = (past ?? []).filter(m => groupMetaNewer(m, theirs) && groupMetaNewer(meta, m) && wasIn(m));
+  return groupMetaNewer(meta, theirs) ? [...before, meta] : [];
+}
+
 /** What a sync frame says of the metadata a member holds (`e.r`, "" for none): old apps send nothing, and get nothing. */
 export const groupMetaTag = (meta: { e: number; r: number } | undefined): string => meta ? `${meta.e}.${meta.r}` : "";
 export function parseGroupMetaTag(tag: unknown): { e: number; r: number } | undefined | null {

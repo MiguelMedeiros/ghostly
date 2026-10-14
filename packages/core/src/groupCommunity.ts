@@ -18,7 +18,7 @@ import { communityEditFrame, communityMessageAuthor, validEditText } from "./gro
 import { RateWindow, validEditNumber } from "./pairedEdits";
 import { CATCH_UP_PAUSE_MS, CATCH_UP_SLICE, CatchUpAnswers, type CatchUpHandled } from "./catchUp";
 import {
-  encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupMetaChange, groupMetaNewer, groupMetaPicture, nextGroupMetaRevision, groupMetaTag, groupName, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
+  encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupMetaChange, groupMetaNewer, groupMetaPicture, groupMetaToHand, keepPastGroupMeta, nextGroupMetaRevision, groupMetaTag, groupName, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
   type GroupMeta, type GroupMetaChange, type GroupMetaFrame, type GroupMetaStatement,
 } from "./groupMeta";
 
@@ -336,6 +336,8 @@ export interface CommunityState {
   left?: Record<string, { hi: Record<string, number>; sig: string }>;
   /** The group's metadata (its picture), as the admin last signed it and I accepted it. */
   meta?: GroupMeta;
+  /** A few statements I held before `meta`, oldest first, for a member back from away (`keepPastGroupMeta`). Absent in older states. */
+  metaPast?: GroupMeta[];
 }
 
 export interface CommunityIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard; file?: GroupFileMeta }
@@ -1655,9 +1657,10 @@ export class CommunitySession {
     // to the members they were written for (a hub passes them on). Anyone else's it could not read stays here.
     const unheard = new Set(this.state.unheard ?? []);
     const marked = new Set<string>();
-    // The group's picture or name, when theirs is older (after the commits and secrets above, which it may need), before
-    // the first message written after it: they place its line where it comes, as they do each message.
-    let meta = this.metaFor(from, frame.mt);
+    // The group's picture or name, when theirs is older (after the commits and secrets above, which it may need), each
+    // statement they missed before the first message written after it: they place its line where it comes, as they do
+    // each message.
+    const metas = this.metaFor(from, frame.mt);
     for (const stored of this.state.store) {
       if (stored.s === from) continue;
       // What they have first: the checks below hash commits for every stored frame, and a member up to date has them
@@ -1672,7 +1675,7 @@ export class CommunitySession {
       if (!this.mainIndex.has(found.hash)) this.handSide(from, found.hash, handed, answer);
       // A leaver's frame goes after its leave's mark, without which it is not taken.
       if (!rosterHas(this.roster, stored.s) && !marked.has(stored.s)) { marked.add(stored.s); const left = this.leftFrame(stored.s); if (left) answer.push(left); }
-      if (meta && stored.ts > this.state.meta!.ts) { answer.push(meta); meta = null; }
+      while (metas.length && metas[0].ts < stored.ts) answer.push(metas.shift()!.frame);
       answer.push(stored);
       // Handed to a member it was written for: heard.
       if (mine && reads) unheard.delete(frameKey(stored));
@@ -1682,8 +1685,8 @@ export class CommunitySession {
     if (rosterHas(this.roster, from)) { const entry = this.entryFrame(from); if (entry) answer.push(entry); }
     // Pending leaves travel too, so whoever commits next can.
     for (const request of this.state.pendingLeaves) answer.push({ t: "group-leave", v: 2, g: this.id, ...request });
-    // Or here, when none was.
-    if (meta) answer.push(meta);
+    // Or here, those after every message.
+    answer.push(...metas.map(m => m.frame));
     // And where I am, so they can hand me what I lack (asked once in a while, not in a loop).
     ask();
     this.answers.handOut(from, answer);
@@ -1763,25 +1766,30 @@ export class CommunitySession {
     const before = this.state.meta;
     const meta = signGroupMeta({ g: this.id, e: this.epoch, h: this.topHash, r: nextGroupMetaRevision(before, this.epoch), ts: now }, body, this.identity.seed, this.myKey);
     this.state.meta = meta;
+    this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, meta);
     await this.persist();
-    const frame = this.metaFrame();
+    const frame = this.metaFrame(meta);
     if (frame) this.hooks.broadcast(frame);
     const change = groupMetaChange(before, meta, this.state.name);
     if (change) this.hooks.metaChanged?.(this.myKey, change, meta.ts);
     this.hooks.changed();
   }
 
-  /** My statement sealed under my current epoch, when I hold its secret. */
-  private metaFrame(): GroupMetaFrame | null {
-    const meta = this.state.meta, secret = this.state.secrets[this.topHash];
-    return meta && secret ? wrapGroupMeta(meta, this.topHash, epochKeys(fromBase64Url(secret), this.id, this.epoch).message, true) : null;
+  /** A statement sealed under my current epoch, when I hold its secret. */
+  private metaFrame(meta: GroupMeta): GroupMetaFrame | null {
+    const secret = this.state.secrets[this.topHash];
+    return secret ? wrapGroupMeta(meta, this.topHash, epochKeys(fromBase64Url(secret), this.id, this.epoch).message, true) : null;
   }
 
-  /** My statement, for a member whose sync says it holds an older one (or none); none for an app that says nothing. */
-  private metaFor(to: string, theirTag: unknown): GroupMetaFrame | null {
+  /**
+   * The statements a member whose sync says it holds an older one (or none) missed, oldest first (`groupMetaToHand`);
+   * none for an app that says nothing.
+   */
+  private metaFor(to: string, theirTag: unknown): { ts: number; frame: GroupMetaFrame }[] {
     const meta = this.state.meta, theirs = parseGroupMetaTag(theirTag);
-    if (!meta || theirs === null || !groupMetaNewer(meta, theirs) || !this.isMember || !rosterHas(this.roster, to)) return null;
-    return this.metaFrame();
+    if (!meta || theirs === null || !this.isMember || !rosterHas(this.roster, to) || !this.state.secrets[this.topHash]) return [];
+    return groupMetaToHand(this.state.metaPast, meta, theirs, m => rosterHas(this.rosterAt(m.h) ?? [], to))
+      .map(m => ({ ts: m.ts, frame: this.metaFrame(m)! }));
   }
 
   /**
@@ -1808,6 +1816,7 @@ export class CommunitySession {
     if (!opened) return false;
     const before = this.state.meta;
     this.state.meta = opened.meta;
+    this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, opened.meta);
     await this.persist();
     // What the group looked like when I got in is no change: the first statement I take, signed under a commit before
     // mine, makes no line, nor does a new admin's signing again the name the welcome gave me.
