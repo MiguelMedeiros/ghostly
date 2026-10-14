@@ -25,9 +25,8 @@
   --color-accent: var(--theme-accent);
   --color-accent-dim: var(--theme-accent-dim);
   --color-accent-hover: var(--theme-accent-hover);
-  /* The keyboard focus's ring around a field: the accent, 3:1 or more on what is around it (WCAG 2.4.13), except where
-     the accent is too light for that (the classic light theme, below). */
-  --color-focus-ring: var(--theme-focus-ring, var(--theme-accent));
+  /* The keyboard focus's ring around a field: the accent, 3:1 or more on what is around it (WCAG 2.4.13). */
+  --color-focus-ring: var(--theme-accent);
   /* Danger's red: brighter on dark themes, darker on light ones, so its words read at 4.5:1 on either. */
   --color-danger: var(--theme-danger);
   /* Danger as a fill under white words (Delete, hang up): dark enough for 4.5:1 with white in every theme. */
@@ -86,22 +85,24 @@
   --theme-border: #222d34;
   --theme-border-bright: #334155;
   --theme-text-primary: #e9edef;
-  --theme-text-secondary: #8696a0;
-  --theme-text-muted: #667781;
+  --theme-text-secondary: #aebbc3;
+  /* At least 4.5:1 on the list, the panels and a chosen row, as the accent's words. */
+  --theme-text-muted: #94a3ad;
   --theme-received-bg: #202c33;
   --theme-input-bg: #2a3942;
   --theme-search-bg: #202c33;
   --theme-chat-pattern: #0d1418;
   --theme-scrollbar: #374151;
   --theme-scrollbar-hover: #4b5563;
-  --theme-accent: #00a884;
+  --theme-accent: #12bd96;
   --theme-accent-dim: #005c4b;
   --theme-accent-hover: #06cf9c;
   --theme-sent-bg: #005c4b;
   /* Shared by every dark theme: at least 4.5:1 (link) and 3:1 (danger) on each one's bubbles. */
   --theme-link: #8ad3f6;
   --theme-danger-ink: #ff9a8f;
-  --theme-danger: #ea4335;
+  /* Danger's words: 4.5:1 on every dark theme's lists, panels and menus. */
+  --theme-danger: #f36b5f;
   --theme-danger-fill: #d93025;
   --theme-on-accent: #111b21;
   /* Group members' names (lib/memberColors.ts), shared by every dark theme: at least 4.5:1 on each one's bubbles and header. */
@@ -131,24 +132,27 @@
   --theme-border: #e9edef;
   --theme-border-bright: #d1d5db;
   --theme-text-primary: #111b21;
-  --theme-text-secondary: #54656f;
-  --theme-text-muted: #8696a0;
+  --theme-text-secondary: #3b4a54;
+  /* At least 4.5:1 on white, the greys and the chat's beige. */
+  --theme-text-muted: #5a6a74;
   --theme-received-bg: #ffffff;
   --theme-input-bg: #f0f2f5;
   --theme-search-bg: #f0f2f5;
   --theme-chat-pattern: #d9dbd5;
   --theme-scrollbar: #c5c6c8;
   --theme-scrollbar-hover: #9a9b9d;
-  --theme-accent: #00a884;
+  /* Words in the accent (links, section titles, a chosen tab, Real money) read at 4.5:1 on white, the greys, the
+     chat's beige and the accent's own tints, and white words on it as well. */
+  --theme-accent: #006954;
   --theme-accent-dim: #dcf8c6;
-  --theme-accent-hover: #008f6f;
+  --theme-accent-hover: #005c4b;
   --theme-sent-bg: #d9fdd3;
   /* Shared by every light theme, as for dark. */
   --theme-link: #026aa0;
   --theme-danger-ink: #c5221f;
   --theme-danger: #c5221f;
   --theme-danger-fill: #c5221f;
-  --theme-on-accent: #111b21;
+  --theme-on-accent: #ffffff;
   /* Shared by every light theme, as for dark. */
   --theme-member-0: #c82020;
   --theme-member-1: #a94b1b;
@@ -179,8 +183,9 @@
   --theme-border: #2a2a2a;
   --theme-border-bright: #3a3a3a;
   --theme-text-primary: #f5f5f5;
-  --theme-text-secondary: #a0a0a0;
-  --theme-text-muted: #707070;
+  --theme-text-secondary: #b0b0b0;
+  /* At least 4.5:1 on the list, the panels and a chosen row. */
+  --theme-text-muted: #949494;
   --theme-received-bg: #1a1a1a;
   --theme-input-bg: #2a2a2a;
   --theme-search-bg: #1a1a1a;
@@ -204,8 +209,9 @@
   --theme-border: #e0e0e0;
   --theme-border-bright: #d0d0d0;
   --theme-text-primary: #0a0a0a;
-  --theme-text-secondary: #505050;
-  --theme-text-muted: #808080;
+  --theme-text-secondary: #404040;
+  /* At least 4.5:1 on white, the greys and a chosen row. */
+  --theme-text-muted: #636363;
   --theme-received-bg: #ffffff;
   --theme-input-bg: #f5f5f5;
   --theme-search-bg: #f5f5f5;
@@ -292,8 +298,9 @@
   --theme-border: #2e2640;
   --theme-border-bright: #3d3455;
   --theme-text-primary: #f3e8ff;
-  --theme-text-secondary: #b8a5d0;
-  --theme-text-muted: #8b7aa8;
+  --theme-text-secondary: #c4b3dc;
+  /* At least 4.5:1 on the list, the panels and a chosen row. */
+  --theme-text-muted: #a594c1;
   --theme-received-bg: #1a1625;
   --theme-input-bg: #2a2438;
   --theme-search-bg: #1a1625;
@@ -325,22 +332,16 @@
   --theme-chat-pattern: #f0e5f8;
   --theme-scrollbar: #e9d5ff;
   --theme-scrollbar-hover: #d8b4fe;
-  --theme-accent: #7c3aed;
+  /* 4.5:1 or more on its own tints too (a pill at 10-20 %). */
+  --theme-accent: #6d28d9;
   --theme-accent-dim: #f3e8ff;
-  --theme-accent-hover: #6d28d9;
+  --theme-accent-hover: #5b21b6;
   --theme-sent-bg: #f3e8ff;
   --theme-on-accent: #ffffff;
 }
 
 html {
   color-scheme: dark;
-}
-
-/* The classic green reads at about 2.7:1 on the light greys: a darker one, 4.3:1 or more on white, the greys and the
-   chat's beige. The other light themes' accents already do. */
-:root[data-theme="light"]:not([data-color-theme]),
-:root[data-theme="light"][data-color-theme="classic"] {
-  --theme-focus-ring: #008069;
 }
 
 html[data-theme="light"] {
