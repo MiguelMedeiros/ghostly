@@ -1,5 +1,6 @@
 import {invoke} from "@tauri-apps/api/core";
 import {androidApp} from "./touchOnly";
+import {getPrefix} from "./storage";
 /** "misplaced": the Desktop app runs from a temporary folder, where macOS gives it no notifications. */
 export type NoticePermission = NotificationPermission | "unavailable" | "misplaced";
 interface ExtensionNotifications {
@@ -89,7 +90,18 @@ function listen(){
   if(listening) return;
   if(native()){
     listening=true;
-    void import("@tauri-apps/api/event").then(({listen})=>listen<string>("notification-open",({payload})=>opened(payload))).catch(()=>{listening=false;});
+    if(!androidApp()){
+      void import("@tauri-apps/api/event").then(({listen})=>listen<string>("notification-open",({payload})=>opened(payload))).catch(()=>{listening=false;});
+      return;
+    }
+    // Android: Rust keeps the tap until the page takes it: the one that started the app came before anything listened.
+    // One heard here is taken there too, so a later page does not open it again (opened twice, it opens once).
+    const tapped=()=>invoke<string|null>("native_notification_tap").then(id=>{if(id) opened(id);}).catch(()=>{/* an older app */});
+    void sweepLeftOver();
+    void import("@tauri-apps/api/event")
+      .then(({listen})=>listen<string>("notification-open",({payload})=>{opened(payload);void tapped();}))
+      .then(tapped)
+      .catch(()=>{listening=false;});
     return;
   }
   const clicks=extension()?.notifications?.onClicked;
@@ -154,26 +166,60 @@ export async function requestNotifications():Promise<NoticePermission>{
 const oneNoticePerChat=()=>androidApp() || (native() && /Linux/i.test(platform()));
 /*
  * Android keeps them past the page, too: the app's process ends (swiped from Recents, ended in the background, an
- * update) and the next page knows none of their tags. It could not replace them, take them away or open their chat,
- * so they go as the page starts, before it posts its own.
+ * update), and a tap on one is what starts the next page. So the Android app keeps its chats' tags, and which chat each
+ * opens, in the profile's storage (with its chats, never in a notification): the next page reads them, replaces, takes
+ * away and opens those as its own. The ones it cannot map (a call's, another profile's) go as it first uses
+ * notifications, once the profile is open, before it posts its own.
  */
-const leftOver=androidApp()?invoke("native_clear_notifications").catch(()=>{/* an older app */}):Promise.resolve();
 const chatTags=new Map<string,string>();
+const tagsKey=()=>`${getPrefix()}notification_tags`;
+let restored=false;
+/** This profile's chat tags, as the earlier page left them. */
+function restore(){
+  if(restored || !androidApp()) return;
+  restored=true;
+  try{
+    const kept=JSON.parse(localStorage.getItem(tagsKey())??"[]") as unknown;
+    if(!Array.isArray(kept)) return;
+    for(const pair of kept.slice(-64)){
+      if(!Array.isArray(pair) || typeof pair[0]!=="string" || typeof pair[1]!=="string") continue;
+      chatTags.set(pair[0],pair[1]);
+      chats.set(pair[1],pair[0]);
+    }
+  }catch{/* unreadable: they go as any unknown one */}
+}
+function keepTags(){
+  if(!androidApp()) return;
+  try{
+    if(chatTags.size) localStorage.setItem(tagsKey(),JSON.stringify([...chatTags]));
+    else localStorage.removeItem(tagsKey());
+  }catch{/* not kept: the next page takes them away */}
+}
+let leftOver:Promise<void>|undefined;
+function sweepLeftOver():Promise<void>{
+  restore();
+  leftOver??=androidApp()?invoke<void>("native_clear_notifications",{keep:[...chatTags.values()]}).catch(()=>{/* an older app */}):Promise.resolve();
+  return leftOver;
+}
 function chatTag(chat:string):string{
+  restore();
   let tag=chatTags.get(chat);
   if(!tag){
     tag=crypto.randomUUID();
     chatTags.set(chat,tag);
     if(chatTags.size>64) chatTags.delete(chatTags.keys().next().value as string);
+    keepTags();
   }
   return tag;
 }
 /** The chat was read in the app: its notification goes, in the Android and Linux apps (elsewhere they close by themselves). */
 export function clearChatNotification(chat:string):void{
+  restore();
   const tag=chatTags.get(chat);
   if(!tag) return;
   chatTags.delete(chat);
   chats.delete(tag);
+  keepTags();
   void invoke("native_clear_notification",{id:tag}).catch(()=>{/* gone already, or an older app */});
 }
 /**
@@ -194,7 +240,7 @@ export async function showPrivateNotification(event:string,body:string,chat?:str
   }
   try {
     if(native()){
-      await leftOver;
+      await sweepLeftOver();
       if(await invoke<boolean>("native_private_notification",{id,body})) return;
       (await import("@tauri-apps/plugin-notification")).sendNotification({title:"Ghostly",body,silent:true});
     }else{
