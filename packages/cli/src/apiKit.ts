@@ -1,3 +1,4 @@
+import { INVITE_TAKEN } from "@ghostly/core";
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { CliError } from "./errors";
@@ -163,10 +164,13 @@ export const chatOf = (ctx: ApiContext, params: Params) => findChat(state(ctx).l
 
 /**
  * A chat whose invite nobody took yet: nobody is there to pay or to dial, and its stage says so. Before, `chat pay`
- * waited 15 s and `chat connect` 25 s for the contact, then answered `engine`.
+ * waited 15 s and `chat connect` 25 s for the contact, then answered `engine`. A chat whose invite someone else used
+ * first is refused too, with the sentence `send` gives: its contact seals everything to them (`connect` waited 120 s,
+ * then answered `timeout`, a code a bot retries).
  */
 export function inviteTaken(link: LinkView): void {
   if (link.profile && link.inviteCode && !link.peerParticipationKey) throw new CliError("unavailable", "Nobody joined this chat yet: its invite is still waiting to be taken");
+  if (link.dhtDelivery?.inviteTaken && link.textDelivery !== "stream") throw new CliError("refused", INVITE_TAKEN);
 }
 
 /** A chat or a group as `findChatOrGroup` reads it. `linkId` is what the engine calls it. */
