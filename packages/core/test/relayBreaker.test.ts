@@ -50,6 +50,19 @@ describe("relay breaker", () => {
     expect(breaker.allDownProbe(["a", "b"])).toBeNull();
   });
 
+  it("requests out before a trip that fail after it do not trip it again: a first trip is a minute, then its probe", () => {
+    const { breaker, trips, advance } = clocked();
+    // A start burst: 15 requests out at once to a relay that refuses them all.
+    for (let i = 0; i < 15; i++) breaker.failure("a", "error", "no answer");
+    expect(trips).toEqual([`a no answer ${BREAKER_BASE_MS}`]);
+    advance(BREAKER_BASE_MS);
+    expect(breaker.blockedFor("a")).toBe(0);
+    // Its probe fails: that is a trip in a row, twice as long.
+    breaker.begin("a");
+    breaker.failure("a", "error", "no answer");
+    expect(trips).toEqual([`a no answer ${BREAKER_BASE_MS}`, `a no answer ${2 * BREAKER_BASE_MS}`]);
+  });
+
   it("an answer between failures starts the count again", () => {
     const { breaker } = clocked();
     breaker.failure("a", "error", "HTTP 502");
@@ -149,6 +162,23 @@ describe("relay transport with a breaker", () => {
       expect(calls.filter((c) => c.includes("down.test"))).toEqual([]);
       expect(new Set(calls)).toEqual(new Set(["GET a.test", "GET b.test"]));
       expect(relay.discovery().path).toMatchObject({ via: "relay" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a relay that refuses a start burst trips once, for a minute: the burst's other failures do not trip it again", async () => {
+    vi.useFakeTimers();
+    try {
+      const { relay, log } = transport({
+        "refusing.test": () => { throw new TypeError("Failed to fetch"); },
+        "a.test": () => new Response(null, { status: 204 }),
+      });
+      await Promise.all(Array.from({ length: 15 }, () => relay.publish(id, []).catch(() => {})));
+      expect(log).toEqual(["refusing.test tripped (no answer); left alone for 60 s"]);
+      vi.advanceTimersByTime(70_000);
+      // Its minute is over: its probe is due, not four more minutes of waiting.
+      expect(relay.discovery().relays[0]).toEqual({ relay: "https://refusing.test", state: "ok" });
     } finally {
       vi.useRealTimers();
     }
