@@ -350,6 +350,25 @@ describe("community sessions", { timeout: 60_000 }, () => {
     expect(net.texts(carol)).not.toContain("erin after");
   });
 
+  it("the member who committed a leave cannot change its mark once taken", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob"), carol = await net.admit(alice, "carol"), dave = await net.admit(alice, "dave");
+    await net.meet(alice, bob); await net.meet(alice, carol); await net.meet(alice, dave);
+    dave.online = false;
+    await say(net, bob, "bob before");
+    await bob.session.leave(); await net.settle();
+    expect(await alice.session.commitPendingLeaves()).toBe(1);
+    await net.settle();
+    const h = communityCommitHash(alice.saved.chain[alice.saved.chain.length - 1]);
+    // Another mark for the same leave, signed by its committer: not taken, nor handed on, nor saved again.
+    const hi = {}, again = { t: "group-left", v: 2, g: alice.session.id, h, hi, sig: toBase64Url(sign(leftStatement(alice.session.id, h, hi), identityFromSeedB64(alice.seedB64).seed)) };
+    expect(await carol.session.handle(alice.session.myKey, clone(again))).toBe(false);
+    dave.online = true;
+    await net.meet(dave, carol);
+    expect(net.texts(dave)).toContain("bob before");
+  });
+
   it("what was said on the branch of a leave that lost reaches a member who was never on that branch", async () => {
     // The admin leaves; the members are in two parts for a while (the hub they shared is gone), and a member of
     // each part commits the same leave: two branches, each with its own fresh secret. Each part talks meanwhile.

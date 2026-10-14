@@ -662,14 +662,18 @@ export class CommunitySession {
     for (const old of keys.slice(0, Math.max(0, keys.length - COMMUNITY_LIMITS.leftMarks))) delete left[old];
     this.state.left = left;
   }
-  /** A leave's mark, from the member who committed it: kept when it is that member's, for a leave I hold. */
+  /**
+   * A leave's mark, from the member who committed it: kept when it is that member's, for a leave I hold. The first one
+   * taken stays: its committer signs one, and another for the same leave, each a new signature, would be handed on to
+   * every member and saved again each time, or say after the fact that the leaver's earlier lines were never heard.
+   */
   private receiveLeft(frame: Record<string, unknown>): boolean {
     const { h, hi, sig } = frame;
     if (typeof h !== "string" || !HASH.test(h) || typeof sig !== "string" || !SIG.test(sig) || !isObject(hi)) return false;
     const entries = Object.entries(hi);
     if (entries.length > COMMUNITY_LIMITS.leftMarks || entries.some(([k, n]) => !LEFT_EPOCH.test(k) || !Number.isSafeInteger(n) || (n as number) < 0)) return false;
     const commit = this.known.get(h);
-    if (!commit || commit.k !== "leave" || this.state.left?.[h]?.sig === sig) return false;
+    if (!commit || commit.k !== "leave" || this.state.left?.[h]) return false;
     const marks = hi as Record<string, number>;
     if (!verify(fromBase64Url(sig), leftStatement(this.id, h, marks), publicKeyFromZ32(commit.by))) return false;
     this.keepLeft(h, { hi: marks, sig });
