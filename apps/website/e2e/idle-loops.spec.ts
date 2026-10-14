@@ -21,6 +21,31 @@ const runningOffscreen = (page: Page) =>
     ),
   );
 
+/** Svgs inside a loop marked off screen whose SMIL clock still runs: a nested svg has its own, the loop's pause stops only the loop's. */
+const smilOffscreen = (page: Page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll("svg[data-offscreen] svg")]
+      .filter((svg) => !(svg as SVGSVGElement).animationsPaused())
+      .map((svg) => `${svg.getAttribute("class")} in ${svg.closest("svg[data-offscreen]")!.getAttribute("class")}`),
+  );
+
+test("the ghosts drawn inside the home film's stages rest with their stage", async ({ page }) => {
+  await page.goto("/");
+  const stages = page.locator("svg.stage");
+  await expect(stages.first()).toHaveAttribute("data-offscreen", "");
+  expect(await page.locator("svg.stage svg.ghost").count()).toBeGreaterThan(0);
+  await expect.poll(() => smilOffscreen(page)).toEqual([]);
+
+  // In view, the stage's ghosts move again; off screen once more, they rest again.
+  const stage = page.locator("svg.stage:has(svg.ghost)").first();
+  await stage.scrollIntoViewIfNeeded();
+  await expect(stage).not.toHaveAttribute("data-offscreen");
+  expect(await stage.locator("svg.ghost").first().evaluate((g) => (g as SVGSVGElement).animationsPaused())).toBe(false);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(stage).toHaveAttribute("data-offscreen", "");
+  await expect.poll(() => smilOffscreen(page)).toEqual([]);
+});
+
 for (const path of ["/cli", "/"]) {
   test(`off-screen loops are paused at the top of ${path}`, async ({ page }) => {
     await page.goto(path);
