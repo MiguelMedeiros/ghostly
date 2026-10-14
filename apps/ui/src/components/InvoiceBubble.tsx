@@ -73,11 +73,10 @@ function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId
         ) : (
           <>
             <span className="text-accent me-1">⚡</span>
-            {/* One run, isolated: in a right-to-left page the number and a Latin unit were one bidi run, the unit glued to it. */}
-            <bdi>
-              <span className="text-[22px] font-semibold" data-testid="money-amount">{formatAmount(amount, t.language)}</span>
-              <span className="text-text-primary/65 text-xs ms-1">{unit === "sat" ? "sats" : unit}</span>
-            </bdi>
+            {/* Only the number isolated: in a right-to-left page a Latin unit beside it was one run with it, glued to it,
+                and one isolate around both read "تجريبية sats 250,000". The unit stays in the line's direction. */}
+            <bdi className="text-[22px] font-semibold" data-testid="money-amount">{formatAmount(amount, t.language)}</bdi>
+            <span className="text-text-primary/65 text-xs ms-1">{unit === "sat" ? "sats" : unit}</span>
           </>
         )}
       </p>
