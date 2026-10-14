@@ -4,8 +4,8 @@ import { expect, test, type Page } from "@playwright/test";
  * The roadmap's page data is 310 KB (its whole inventory) and a WISP's up to 230 KB. Every page links the roadmap from
  * the nav and the footer, and several link WISPs ("read more", the roadmap's drafts and source): before, each page
  * prefetched the roadmap as it opened (over half of the 553 KB it prefetched), and /roadmap, /cli and /developers/agents
- * up to four WISP pages on top (356 KB). A link to one of them loads its page when the reader is about to open it (pointer,
- * focus, touch).
+ * up to four WISP pages on top (356 KB). /brand's is 219 KB, linked from every footer. A link to one of them loads its
+ * page when the reader is about to open it (pointer, focus, touch).
  */
 function prefetches(page: Page): Set<string> {
   const seen = new Set<string>();
@@ -19,7 +19,7 @@ function prefetches(page: Page): Set<string> {
 /** /developers keeps its hero button's page ready: the page a reader opens next (developers-prefetch.spec.ts). */
 const KEPT: Record<string, string[]> = { "/developers": ["/wisps/01-ghost-core"] };
 
-const heavy = (seen: Set<string>) => [...seen].filter((p) => p === "/roadmap" || p.startsWith("/wisps/"));
+const heavy = (seen: Set<string>) => [...seen].filter((p) => p === "/roadmap" || p === "/brand" || p.startsWith("/wisps/"));
 
 /** Brings every link of the page into view, the footer's included. */
 async function readToTheEnd(page: Page) {
@@ -36,7 +36,7 @@ async function readToTheEnd(page: Page) {
 }
 
 for (const path of ["/", "/developers", "/cli", "/developers/agents", "/roadmap", "/wisps", "/terms"]) {
-  test(`${path} loads neither the roadmap nor a WISP's page while it is read`, async ({ page }) => {
+  test(`${path} loads neither the roadmap, /brand nor a WISP's page while it is read`, async ({ page }) => {
     const seen = prefetches(page);
     await page.goto(path);
     await readToTheEnd(page);
@@ -64,4 +64,12 @@ test("the footer's roadmap link loads the roadmap when it gets the focus", async
   await page.waitForLoadState("networkidle");
   await page.locator("footer a[href='/roadmap']").focus();
   await expect.poll(() => seen.has("/roadmap")).toBe(true);
+});
+
+test("the footer's brand link loads /brand when it gets the focus", async ({ page }) => {
+  const seen = prefetches(page);
+  await page.goto("/terms");
+  await page.waitForLoadState("networkidle");
+  await page.locator("footer a[href='/brand']").focus();
+  await expect.poll(() => seen.has("/brand")).toBe(true);
 });
