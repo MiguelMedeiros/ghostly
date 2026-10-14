@@ -859,6 +859,23 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect([...transfers.keys()]).toEqual([]);
   });
 
+  it.each([
+    ["every byte of a picture is here and its sum has not come", 200_000, (frame: Record<string, unknown>) => frame.t === "pf-sum"],
+    ["the first 64 KiB of a file are here", 600_000, (frame: Record<string, unknown>) => frame.t === "pf-data" && (frame.offset as number) >= 64 * 1024],
+  ])("a member who leaves while a file is coming keeps none of its bytes: %s", async (_, size, held) => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob", "carol"]);
+    t.hold = (from, to, frame) => from === alice && to === bob && held(frame);
+    const { messageId } = await t.send(alice, id, pattern(size, 21), { name: "picture.jpg" });
+    const here = Math.min(size, 64 * 1024);
+    await t.world.until(() => (t.got(bob, id, messageId).transfer?.transferred ?? 0) >= here, 60_000);
+    const { store } = t.files.get(bob)!;
+    await bob.groups.leave(id);
+    await t.world.run(60_000);
+    expect([...store.records.keys()]).toEqual([]);
+    expect([...store.bytes.keys()]).toEqual([]);
+  });
+
   it("a file that is coming is cancelled: nobody is asked for it again, what came is deleted, and a Download brings it whole", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
