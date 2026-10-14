@@ -64,7 +64,7 @@ export class RtpWriter {
 /** What the reorder buffer gives out: a packet's payload to decode, or a frame that never came. */
 export type Playout = { payload: Buffer } | { lost: true };
 
-/** The most silence a gap in the packets becomes. */
+/** The most frames a gap in the packets becomes (concealed by the decoder, see CallAudio). */
 const MAX_LOST_FRAMES = 3;
 
 /** Sequence numbers compared across the 16-bit wrap: positive when `a` comes after `b`. */
@@ -75,7 +75,7 @@ export function sequenceDelta(a: number, b: number): number {
 
 /**
  * Puts packets back in order, holding at most `depth` of them for one that is late: a lost packet costs one frame
- * of silence (40 ms of waiting at most), a duplicate or a packet that came too late is dropped, and a new stream (its
+ * the decoder conceals (40 ms of waiting at most), a duplicate or a packet that came too late is dropped, and a new stream (its
  * SSRC changed, or its sequence jumped) starts over.
  */
 export class ReorderBuffer {
@@ -97,7 +97,7 @@ export class ReorderBuffer {
     const out: Playout[] = [];
     this.release(out);
     // Still waiting for one that is late: once too many wait behind it, the gap is given up for lost. A long gap
-    // (the network stalled) is not replayed as that much silence: a few frames of it mark the break.
+    // (the network stalled) is not replayed whole: a few frames of it mark the break.
     while (this.held.size > this.depth) {
       const next = [...this.held.keys()].reduce((a, b) => (sequenceDelta(a, b) < 0 ? a : b));
       const gap = sequenceDelta(next, this.expected);
