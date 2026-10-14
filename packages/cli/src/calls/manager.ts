@@ -44,6 +44,8 @@ export interface CallHost {
   stall?: { afterMs: number; endMs: number };
   /** EARLY_ANSWER_MS (tests shorten it). */
   earlyAnswerMs?: number;
+  /** CALL_PACE_MS (0: no pace; a test that redials at once on a clock that stands still). */
+  callPaceMs?: number;
 }
 
 /** The audio contract of one call, as commands and events report it. */
@@ -71,6 +73,14 @@ export const RACE_FAIL_MS = 2_000;
  * connection that has nothing to check (the offer's candidates wait for the answer) after about 40 s.
  */
 export const EARLY_ANSWER_MS = 30_000;
+/**
+ * A call this side placed that ended before it was answered (hung up while it rang, or rang out) is followed by the
+ * next one in the same chat no sooner than this: the contact's app keeps a call that comes this soon after a missed one
+ * as missed and does not ring it (packages/react `QUICK_REDIAL_MS`, 2 s), so it would only add a line. A bot looping
+ * `call.start` / `call.hangup` placed 1,375 calls a minute (agents#974). `call.start` refuses sooner with `busy` and the
+ * wait left (`retryAfterMs`); a person placing calls by hand never meets it.
+ */
+export const CALL_PACE_MS = 2_000;
 
 interface Call {
   id: string;
@@ -126,6 +136,8 @@ export class CallManager {
   private readonly lastSent = new Map<string, number>();
   /** Per chat: the timer that clears the hang-up signal. */
   private readonly clearing = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Per chat: when this side's last call there ended before it was answered (`CALL_PACE_MS`). */
+  private readonly unansweredAt = new Map<string, number>();
   private auto: AutoAnswer;
   private readonly configPath: string;
   private stopping = false;
@@ -363,6 +375,7 @@ export class CallManager {
   async start(chat: string, options: { rate?: unknown }): Promise<Record<string, unknown>> {
     const link = this.callable(chat);
     if (this.byChat(link.id)) throw new CliError("busy", "A call is already on in this chat");
+    this.paced(link.id);
     const rate = rateOf(options.rate, this.auto.rate);
     const stack = await this.stack();
     // The contact's call may have come in while the stack loaded.
@@ -578,6 +591,8 @@ export class CallManager {
     this.disarm(call);
     if (call.watcher) clearInterval(call.watcher);
     this.calls.delete(call.id);
+    // A call placed here that the contact never answered: the next one waits a moment (`CALL_PACE_MS`).
+    if (call.direction === "out" && call.connectedAt === null && call.state === "ringing" && (reason === "hangup" || reason === "unanswered")) this.unansweredAt.set(call.chat, this.now);
     if (report) process.stderr.write(`ghostly: call ${call.id}: ended (${reason})${call.media ? `, ice ${call.media.ice.state}` : ""}\n`);
     call.media?.close();
     // A call that ends ringing (declined, missed, stale) closes the answer it made ahead; one being made, once made.
@@ -605,6 +620,15 @@ export class CallManager {
         ...(call.connectedAt !== null ? { duration: this.now - call.connectedAt } : {}),
       });
     }
+  }
+
+  /** Refuses a call placed too soon after this side's last unanswered one in the chat (`CALL_PACE_MS`). */
+  private paced(chat: string): void {
+    const pace = this.host.callPaceMs ?? CALL_PACE_MS, last = this.unansweredAt.get(chat);
+    if (!pace || last === undefined) return;
+    const left = last + pace - this.now;
+    if (left <= 0) { this.unansweredAt.delete(chat); return; }
+    throw new CliError("busy", `Your last call in this chat ended unanswered a moment ago: call again in ${Math.ceil(left / 100) / 10} s`, { retryAfterMs: left });
   }
 
   private arm(call: Call, ms: number, reason: EndReason, tell: boolean): void {
