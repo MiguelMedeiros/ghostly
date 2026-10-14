@@ -244,8 +244,13 @@ pub fn run() {
         eprintln!("tls: Android's certificate verifier is not ready: {error}");
     }
     let context = tauri::generate_context!();
+    // Launched again on the same profile, it brings the running window forward and leaves here, before Tauri and
+    // its threads start (an exit under tao's X11 thread could crash).
+    #[cfg(target_os = "linux")]
+    if single_instance::hand_over(&context.config().identifier) {
+        return;
+    }
     let builder = tauri::Builder::default();
-    // Launched again on the same profile, it brings the running window forward and exits here, before its peer.
     #[cfg(target_os = "linux")]
     let builder = single_instance::register(builder, &context.config().identifier);
 
