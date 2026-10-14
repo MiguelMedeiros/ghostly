@@ -103,13 +103,21 @@ export const STORED_MESSAGES = 200;
 export const ROOM_MESSAGES = 20;
 const gaveRoom = new Set<string>();
 
+/**
+ * A call's lines a chat keeps: its last ones; an older one goes from this device as a deleted message does
+ * (`dropOldCallLines`). Nothing else keeps them, so its stored copy keeps every one it has (`stored`): a contact who
+ * rang and hung up over and over left two lines a call, thousands, written again with every later message, until
+ * localStorage refused the chat.
+ */
+export const CALL_LINES = STORED_MESSAGES;
+
 /** Per chat: the ids of the messages the engine keeps and the mirror would bring back (`platform/sync.ts`). */
 const inEngine = new Map<string, ReadonlySet<string>>();
 
 /**
  * The messages of this chat the engine keeps, as the mirror would write them into its session: those may leave the
  * session's stored copy, older than its last `STORED_MESSAGES`. Any other (a call's line, a file of mine the chat added
- * itself) stays there whatever its age: nothing else keeps it.
+ * itself) stays there whatever its age: nothing else keeps it. A chat keeps its last `CALL_LINES` call lines only.
  */
 export function setEngineMessages(sessionId: string, ids: ReadonlySet<string>): void {
   inEngine.set(sessionId, ids);
@@ -391,8 +399,29 @@ export function addMessages(
     }
   }
 
+  dropOldCallLines(session);
   saveSession(session);
   return session;
+}
+
+/**
+ * Takes out of a session the call lines older than its last `CALL_LINES`, and their places in the unread count as
+ * `deleteMessage` does. All of them are in its list: the stored copy never leaves one out.
+ */
+function dropOldCallLines(session: ChatSession): void {
+  let drop = -CALL_LINES;
+  for (const m of session.messages) if (m.callEvent) drop++;
+  if (drop <= 0) return;
+  const older = session.older ?? 0;
+  const lastRead = getLastReadCount(session.id);
+  let read = lastRead;
+  session.messages = session.messages.filter((m, i) => {
+    if (!m.callEvent || drop <= 0) return true;
+    drop--;
+    if (older + i < lastRead) read--;
+    return false;
+  });
+  if (read !== lastRead) setReadCount(session.id, read);
 }
 
 /**
