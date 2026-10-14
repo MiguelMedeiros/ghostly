@@ -62,4 +62,21 @@ describe("a chat's name in its header", () => {
     expect(document.activeElement).toBe(name);
     expect(loadSession("chat-1")?.label).toBe("Ana");
   });
+
+  it("spends the Escape that cancels it: a notice at the top that also answers Escape stays", async () => {
+    const { user } = openChat();
+    (await screen.findByRole("button", { name: "Ana" })).focus();
+    await user.keyboard("{Enter}");
+    const field = await screen.findByPlaceholderText("Set a name...");
+    await vi.waitFor(() => expect(document.activeElement).toBe(field));
+    // What the "No room for a new chat" notice hears (Root.tsx): an Escape on the window, closed only when not spent.
+    const heard: boolean[] = [];
+    const notice = (e: KeyboardEvent) => { if (e.key === "Escape") heard.push(e.defaultPrevented); };
+    window.addEventListener("keydown", notice);
+    try {
+      await user.type(field, "x{Escape}");
+    } finally { window.removeEventListener("keydown", notice); }
+    expect(heard).toEqual([true]);
+    expect(await screen.findByRole("button", { name: "Ana" })).toBeInTheDocument();
+  });
 });
