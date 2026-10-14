@@ -450,6 +450,12 @@ export class Groups {
    * whom, and when it was asked. Their sync goes once that answer has come.
    */
   private readonly syncHeld = new Map<string, Map<string, { via: string; at: number }>>();
+  /**
+   * Per mesh group, the members told where I am since their edge came up (`edgeReady`), forgotten when a tick sees it
+   * down. One whose edge is up but not told yet opened in the same moment as the one being told: it is asked of that
+   * one, as if its edge were still down (`askOf`), and no gossip turn or ask for gaps goes to it before it is told.
+   */
+  private readonly told = new Map<string, Set<string>>();
   /** Per mesh group and member, when a message last came over its edge (its own, or one it handed on). */
   private readonly lastHanded = new Map<string, Map<string, number>>();
   /** Admin side, per group and member let in: when its welcome was last sent again, over its chat or the link (`REWELCOME_MS`). */
@@ -1159,6 +1165,7 @@ export class Groups {
     this.lingering.delete(groupId);
     this.relayAsked.delete(groupId);
     this.syncHeld.delete(groupId);
+    this.told.delete(groupId);
     this.lastHanded.delete(groupId);
     this.rewelcomed.delete(groupId);
     this.hubs.forget(groupId);
@@ -1831,6 +1838,9 @@ export class Groups {
     const session = this.sessions.get(groupId), group = this.stored.get(groupId);
     if (session?.status === "active" && group?.farewells?.[peerKey] && !rosterHas(session.roster, peerKey)) { this.sayFarewell(groupId, session, group, peerKey, linkId); return; }
     if (!session || !group || session.status !== "active" || !rosterHas(session.roster, peerKey)) return;
+    let told = this.told.get(groupId);
+    if (!told) this.told.set(groupId, (told = new Set()));
+    told.add(peerKey);
     // Its app has the group's keys: a decline over its chat says nothing about its place any more.
     const seen = !!group.unseen?.includes(peerKey);
     if (seen) { const unseen = group.unseen!.filter(key => key !== peerKey); group.unseen = unseen.length ? unseen : undefined; }
@@ -1980,15 +1990,18 @@ export class Groups {
 
   /**
    * The unreachable members whose messages `via` should hand on to me: each is asked of one connected member at a
-   * time, so a member whose edges open one after another is not sent the same messages by each of them.
+   * time, so a member whose edges open one after another is not sent the same messages by each of them. Those whose
+   * edge opened in the same moment, not told yet, are asked of `via` too, and their syncs wait for its answer
+   * (`holdSync`): each told at once answered with its own lines alone, and a conversation two of them had while I was
+   * away came as all of one's lines, then all of the other's.
    */
   private askOf(groupId: string, session: GroupSession, via: string): string[] {
     let asked = this.relayAsked.get(groupId);
     if (!asked) this.relayAsked.set(groupId, (asked = new Map()));
-    const edges = this.host.edges(groupId), now = this.now();
+    const edges = this.host.edges(groupId), now = this.now(), told = this.told.get(groupId);
     const up = (key: string) => { const edge = edges.get(key); return !!edge && this.host.linkReady(edge); };
     const out: string[] = [];
-    for (const key of this.unreachable(groupId, session)) {
+    for (const key of session.others.filter(key => !up(key) || !told?.has(key))) {
       if (key === via) continue;
       // Asked lately of a member still connected (this one included): its answer is on the way.
       const prior = asked.get(key);
@@ -2215,9 +2228,13 @@ export class Groups {
         // A large group's edges follow its hubs, every tick (`hubsTick`).
         if (!this.hubs.large(session) && session.others.some(key => !edges.has(key))) this.reconcileEdges(groupId);
       }
-      const away = this.unreachable(groupId, session);
-      this.noteDown(groupId, session, away, now);
-      const connected = session.others.filter(key => !away.includes(key));
+      const down = this.unreachable(groupId, session);
+      this.noteDown(groupId, session, down, now);
+      const told = this.told.get(groupId);
+      for (const key of down) told?.delete(key);
+      // An edge up whose member is not told yet (its `edgeReady` comes in the same moment) is asked for, not of.
+      const connected = session.others.filter(key => !down.includes(key) && told?.has(key));
+      const away = session.others.filter(key => !connected.includes(key));
       this.gapsAgain(groupId, session, now, connected);
       if (now - (this.lastGossip.get(groupId) ?? -Infinity) < MESH_GOSSIP_MS) continue;
       const edges = this.host.edges(groupId);
