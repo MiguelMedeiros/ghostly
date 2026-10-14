@@ -5,7 +5,7 @@ import { servicesPlatform } from "../../lib/platform";
 import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
-import { audio, decoder, endPlayback, installFakeAudio, installFakeDecoder } from "./fakeMedia";
+import { audio, decoder, endPlayback, installFakeAudio, installFakeDecoder, recording } from "./fakeMedia";
 
 // covers: files.voice.play
 
@@ -38,7 +38,7 @@ async function clickPlay() {
 beforeEach(() => {
   installFakeAudio();
   installFakeDecoder();
-  vi.spyOn(servicesPlatform!, "getFile").mockImplementation(async () => new Blob(["opus"], { type: "audio/webm" }));
+  vi.spyOn(servicesPlatform!, "getFile").mockImplementation(async () => new Blob([recording("chromium.webm")], { type: "audio/webm" }));
 });
 
 afterEach(() => {

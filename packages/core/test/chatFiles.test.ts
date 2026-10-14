@@ -270,7 +270,7 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
   it("a video's description goes with its offer; a bad poster is dropped, the file still arrives", async () => {
     const w = wire({ keepBytes: true });
     w.attach();
-    const poster = b64(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]));
+    const poster = b64(new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, 0, 180, 1, 64, 3, 1, 2, 3])); // a JPEG frame header: 320 × 180
     send(w, file("video-01", 40_000, { mime: "video/mp4", video: { duration: 3000, width: 320, height: 180, poster } }));
     send(w, file("video-02", 40_000, { mime: "video/mp4", video: { duration: 3000, width: 320, height: 180, poster: "not a jpeg" } }));
     await until(() => state(w.b, "in", "video-01") === "done" && state(w.b, "in", "video-02") === "done");
