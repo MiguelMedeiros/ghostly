@@ -36,6 +36,13 @@ export function canRetryFile(file: ChatFile, transfer: FileTransferState | null,
 }
 
 /**
+ * Whether a file sent from here never left this device: its copy into the app failed (no room, the file changed), so
+ * nothing was kept to send again (`retry: false`). A file the contact declined or the sender cancelled has no `retry`.
+ */
+export const fileNeverSent = (transfer: FileTransferState | null): boolean =>
+  transfer?.state === "failed" && transfer.direction === "out" && transfer.retry === false;
+
+/**
  * Why a group's file waits, behind its ⓘ: what comes next while nobody this device is connected to has it. Null for
  * any other file or state.
  */
