@@ -1,3 +1,4 @@
+import { Profiler } from "react";
 import { act, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Chat } from "../../pages/Chat";
@@ -137,6 +138,32 @@ describe("a long chat", () => {
     expect(copies).toBe(0);
     // The name it carries is still the contact's.
     expect(screen.getByTestId("chat-name")).toHaveTextContent("Ana");
+  });
+
+  it("is not drawn again, nor its whole history read again, when a message comes in another chat", async () => {
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages: history(), createdAt: 1_700_000_000_000 });
+    const other = "other".padEnd(52, "o");
+    saveSession({ id: "chat-2", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: other, encKeyB64: "a2V5", label: "Carol", messages: [], createdAt: 1_700_000_000_000 });
+    let commits = 0;
+    const utils = renderApp(<Profiler id="open-chat" onRender={() => { commits++; }}><Chat sessionId="chat-1" visible onCallChange={() => {}} callLayer={null} /></Profiler>);
+    utils.engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("sendMessage", () => ({ error: null }));
+    utils.engine.update({ links: [link()] });
+    await screen.findByText(`Message ${COUNT - 1}`);
+    await settle();
+    // What opening the chat wrote of it (its read mark, its last sync) is read back once, as any change of it is.
+    act(() => { window.dispatchEvent(new Event("session-updated")); });
+    await settle();
+    commits = 0;
+    for (let i = 0; i < 3; i++) {
+      act(() => {
+        const session = loadSession("chat-2")!;
+        session.messages.push({ id: `peer_c${i}`, sender: "peer", timestamp: Date.now() + i, text: `Carol ${i}` });
+        saveSession(session);
+        window.dispatchEvent(new Event("session-updated"));
+      });
+    }
+    await settle();
+    expect(commits).toBe(0);
   });
 
   it("draws only the new message when one comes", async () => {
