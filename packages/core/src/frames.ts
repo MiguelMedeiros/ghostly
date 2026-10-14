@@ -426,6 +426,24 @@ export function wrapDataChannel(dc: RTCDataChannel): FrameChannel {
   return channel;
 }
 
+/**
+ * Resolves once the channel has room for a body's next chunk; undefined when it has now. A channel with a send budget
+ * (native and iroh ones throw past 120 KiB) gives a body a quarter of it, as files/3 keeps to, so a ping or a message
+ * still fits beside it; others keep under the high water mark.
+ */
+function bodyRoom(channel: FrameChannel, isCancelled: () => boolean): Promise<void> | undefined {
+  if (!channel.sendBudget) return channel.bufferedAmount > LIMITS.sendHighWaterMark ? channel.drained() : undefined;
+  const line = channel.sendBudget / 4;
+  if (channel.bufferedAmount < line) return;
+  return (async () => {
+    while (!isCancelled() && channel.bufferedAmount >= line) {
+      await channel.drained().catch(() => {});
+      // A drain that resolved above the line (a low water mark higher than it) is not waited on in a loop of promises.
+      if (!isCancelled() && channel.bufferedAmount >= line) await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  })();
+}
+
 /** Writes a body as chunks, honouring backpressure. Always ends with an END chunk. */
 export async function sendBody(
   channel: FrameChannel,
@@ -437,7 +455,11 @@ export async function sendBody(
   for await (const part of body) {
     for (let offset = 0; offset < part.length; offset += MAX_CHUNK_PAYLOAD_BYTES) {
       if (isCancelled()) return;
-      if (channel.bufferedAmount > LIMITS.sendHighWaterMark) await channel.drained();
+      const room = bodyRoom(channel, isCancelled);
+      if (room) {
+        await room;
+        if (isCancelled()) return;
+      }
       const payload = part.subarray(offset, offset + MAX_CHUNK_PAYLOAD_BYTES);
       channel.send(encodeChunk({ kind, id, end: false, payload }));
     }
