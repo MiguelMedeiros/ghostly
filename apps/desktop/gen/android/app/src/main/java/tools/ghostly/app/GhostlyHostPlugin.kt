@@ -123,7 +123,7 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
   /** Rust (src/android.rs): `kind` is "oidc", "share", "notification" or "network". */
   private external fun received(kind: String, value: String)
 
-  private var pendingSave: SaveArgs? = null
+  private val pendingSave = SaveSlot<SaveArgs>()
 
   override fun load(webView: WebView) {
     // Copies an earlier run left (a share never read, the app stopped): only shares this run takes are kept.
@@ -460,22 +460,33 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
 
   // ---- Saving a file ----
 
-  /** Android's document picker, then a copy of the stored file to where the person chose. */
+  /**
+   * Android's document picker, then a copy of the stored file to where the person chose. A save asked for while a
+   * picker is open (SaveSlot) opens none and answers as a cancelled one: the open picker's answer stays its own.
+   */
   @Command
   fun saveFile(invoke: Invoke) {
     val args = invoke.parseArgs(SaveArgs::class.java)
-    pendingSave = args
+    if (!pendingSave.take(args)) {
+      invoke.resolve(JSObject().put("saved", false))
+      return
+    }
     val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
       .addCategory(Intent.CATEGORY_OPENABLE)
       .setType("*/*")
       .putExtra(Intent.EXTRA_TITLE, args.name)
-    startActivityForResult(invoke, intent, "saveChosen")
+    try {
+      startActivityForResult(invoke, intent, "saveChosen")
+    } catch (e: Exception) {
+      // No picker opened (none on this phone): no answer will free the slot.
+      pendingSave.answered()
+      throw e
+    }
   }
 
   @ActivityCallback
   private fun saveChosen(invoke: Invoke, result: ActivityResult) {
-    val args = pendingSave
-    pendingSave = null
+    val args = pendingSave.answered()
     val target = result.data?.data
     if (result.resultCode != Activity.RESULT_OK || target == null || args == null) {
       invoke.resolve(JSObject().put("saved", false))
