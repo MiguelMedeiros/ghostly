@@ -181,6 +181,11 @@ interface Kept {
   fresh?: boolean;
   unclear?: boolean;
   /**
+   * The holder every byte stored here came from, in this run (none once two holders' bytes are mixed): its tail failing
+   * the check is its own bytes failing, so it counts as damaged, however many transfers it split them into.
+   */
+  storedBy?: string;
+  /**
    * Holders whose bytes failed the author's digest: not asked again for it, whatever the round, until its person asks
    * for it again (Download). Once every holder known is here, it is fetched no more (`DAMAGED`).
    */
@@ -225,6 +230,8 @@ interface Edge {
   /** Message ids to say in the next `group-have`, and the frames of it that went lately (`haveFrames` in `haveWindowMs`). */
   have: Set<string>;
   haveSent: RateWindow;
+  /** Its member's `group-have` frames taken lately: no more than it may send (`haveFrames` in `haveWindowMs`); past that, dropped. */
+  haveTaken: RateWindow;
   /** Message ids its member asked for while this device served all it serves at once: said in a `group-have` once a slot frees. */
   busy: Set<string>;
   /** Message ids its member said it does not hold (`gone`): not asked of it again until it says it does, or the edge's session closes or opens. */
@@ -499,7 +506,8 @@ export class GroupFileDesk {
       if (no) this.refused(groupId, peer, linkId, no.id, no.why);
     } else if (frame.t === GROUP_HAVE_FRAME) {
       const ids = readGroupHave(frame, groupId);
-      if (ids) this.heard(groupId, peer, ids);
+      // Each one makes its member worth asking again: taken at the pace it may send them, not faster.
+      if (ids && this.edge(groupId, peer, linkId).haveTaken.take()) this.heard(groupId, peer, ids);
     }
   }
 
@@ -861,7 +869,8 @@ export class GroupFileDesk {
     const known = this.edgesById.get(linkId);
     if (known) return known;
     const edge: Edge = { linkId, groupId, peer, files: undefined as unknown as ChatFiles, serving: new Map(), servedMoved: new Map(), taking: new Map(), ended: [], have: new Set(),
-      haveSent: new RateWindow(GROUP_FILE_LIMITS.haveFrames, GROUP_FILE_LIMITS.haveWindowMs, () => this.deps.now()), busy: new Set(), gone: new Set() };
+      haveSent: new RateWindow(GROUP_FILE_LIMITS.haveFrames, GROUP_FILE_LIMITS.haveWindowMs, () => this.deps.now()),
+      haveTaken: new RateWindow(GROUP_FILE_LIMITS.haveFrames, GROUP_FILE_LIMITS.haveWindowMs, () => this.deps.now()), busy: new Set(), gone: new Set() };
     edge.files = new ChatFiles({
       // An offer names the group message it serves (`gm`), which a 1:1 chat never carries.
       send: frame => {
@@ -898,6 +907,8 @@ export class GroupFileDesk {
     const writer = await this.deps.store.write(kept.id, !kept.fresh);
     kept.fresh = false;
     const resumed = writer.offset > 0;
+    if (!resumed) kept.storedBy = edge.peer;
+    else if (kept.storedBy !== edge.peer) kept.storedBy = undefined;
     let damaged = false;
     // Its group was left (`drop`): what the transfer still has to write (its checkpoint as the edge closes) is deleted,
     // not stored as a file nothing knows of.
@@ -922,7 +933,11 @@ export class GroupFileDesk {
       // came is kept for the next holder.
       discard: () => {
         // Whole from this holder and damaged: its bytes are not the author's, and it is not asked for them again.
-        if (damaged) { kept.stored = 0; if (resumed) kept.fresh = kept.unclear = true; else kept.damaged.add(edge.peer); }
+        if (damaged) {
+          kept.stored = 0;
+          if (resumed && kept.storedBy !== edge.peer) kept.fresh = kept.unclear = true; else kept.damaged.add(edge.peer);
+          kept.storedBy = undefined;
+        }
         return (kept.idle = (damaged || kept.dropped === record.id || gone() ? writer.discard() : writer.close()).catch(() => {}));
       },
     };
