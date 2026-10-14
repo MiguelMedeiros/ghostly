@@ -166,7 +166,7 @@ export function useIdentityAttention(): boolean {
 /** The chats by contact key, for a contact's name and a way back into the chat. Read once per render. */
 export const chatsByPeer = (): Map<string, ChatSession> => new Map(listSessions().map(s => [s.peerPubKeyB64, s]));
 /** A contact's name as the chat list shows it; undefined when they have none. */
-export const contactName = (chat: ChatSession | undefined): string | undefined => chat?.label || chat?.nick || undefined;
+export const contactName = (chat: Pick<ChatSession, "label" | "nick"> | undefined): string | undefined => chat?.label || chat?.nick || undefined;
 
 /** When this profile began (milliseconds): the registry's date, or the first chat's when the registry has none (the first profile). */
 export function profileSince(links: Pick<LinkView, "createdAt">[]): number {
