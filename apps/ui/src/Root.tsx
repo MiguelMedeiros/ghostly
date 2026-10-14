@@ -177,10 +177,16 @@ function ClosableTopNotice({ problem, testId, onClose }: { problem: Problem; tes
     if (lost && back && back !== document.body && back.isConnected) back.focus();
   };
   useEffect(() => {
-    // On the window: it hears the Escape after the document's listeners, a menu opened after the notice among them.
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented) close.current(); };
+    // Decided once the Escape has gone everywhere: one a menu, a field or a choice of messages spent is not its own,
+    // though their listeners came after this one (the window's run in the order they were added).
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      clearTimeout(timer);
+      timer = setTimeout(() => { if (!e.defaultPrevented) close.current(); });
+    };
     window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
+    return () => { clearTimeout(timer); window.removeEventListener("keydown", key); };
   }, []);
   return (
     <div ref={root} onClick={(e) => { if (!(e.target as Element).closest(`button, [data-testid="${testId}-details"]`)) close.current(); }}
