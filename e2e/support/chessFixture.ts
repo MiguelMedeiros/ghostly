@@ -25,7 +25,7 @@ const build = (dir: string): ChessBuild => ({
   manifest: JSON.parse(readFileSync(resolve(dir, "ghostly-app.json"), "utf8")) as ChessBuild["manifest"],
 });
 
-/** The Chess of today (2.3.0: `chat` and `name`). */
+/** The Chess of today (2.3.1: `chat` and `name`). */
 export const CHESS = build(CHESS_FIXTURE_DIR);
 
 /** Chess 1.0.2 (`chat` alone), what a person may still have installed. */
