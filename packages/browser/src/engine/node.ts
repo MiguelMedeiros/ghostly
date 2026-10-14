@@ -1562,8 +1562,9 @@ export class GhostlyNode implements EngineImplementation {
     const wallets = this.withHomes(walletInstances(networks));
     // The flat fields are Mainnet's, for a caller from before wallets had their own network; `networks` has both.
     const intents = (await intentRepository.list()).map((saved) => saved.review);
-    // A review written past the coordinator (a wallet's backup restores its own) reaches the poll from here.
+    // A review written past the coordinator (a wallet's backup restores its own) reaches the poll and the sweep from here.
     this.noteOpenReviews(intents);
+    this.paymentCoordinator.notePending(intents);
     this.walletView = { ...networks.mainnet, networks, wallets, offers: this.walletOffers(networks, wallets), intents, setup: this.walletSetup.view() };
     this.announcePaymentNetworks(wallets);
     for (const tx of everything) {
