@@ -264,8 +264,9 @@ const FILES_IN_USE_MS = 2_000;
 
 /**
  * How far an app's data may get ahead of a file's bytes while the file waits for room on the channel (WISP 1200 § In a
- * chat): a frame goes only while the app has sent less than this more than the file since. A small frame (a Chess move)
- * still goes at once; one streaming at its limit gets about half the link, and the file the other half.
+ * chat): a frame goes only while the app has sent less than this more than the file since (`FilesUse.appAhead`, below
+ * zero by what files wrote beyond the app, at most what files may hold). A small frame (a Chess move) still goes at
+ * once; one streaming at its limit gets about half the link, and the file the other half.
  */
 const APP_AHEAD_OF_FILES = 16 * 1024;
 
@@ -3326,7 +3327,9 @@ export class GhostLink {
       this.channel.send(frame);
       const use = this.filesUsing(this.channel);
       use.at = Date.now();
-      use.appAhead = Math.max(0, use.appAhead - (typeof frame === "string" ? frame.length : frame.byteLength));
+      // What files write is the app's to send too, up to what files may hold: a WebRTC channel drains to its low water
+      // mark before files write again, so they write in bursts of most of it, and the app's share is the same burst.
+      use.appAhead = Math.max(-filesCap(this.channel), use.appAhead - (typeof frame === "string" ? frame.length : frame.byteLength));
       return true;
     } catch { return false; }
   }
