@@ -1,4 +1,0 @@
----
-section: Fixed / CLI
----
-- A profile's messages and their indexes are kept on disk (`rows.db` beside the store) instead of in the daemon's memory: a daemon's memory no longer grows with its history (50,000 messages: 0.3 MB of heap instead of 62 MB, about 63 MB in all instead of 186 MB), and its store opens in 5 ms instead of 0.3 s. On disk a message takes about 1.3 KB. The first start after the upgrade moves them once (about 1.7 s at 50,000), straight from the store's file to `rows.db`, without holding them in memory on the way. Needs Node 22.13 or newer; on Node 22.12 nothing changes. Once moved, the profile no longer opens with an older ghostly; a backup (`profile backup`) restores with any release. A deleted message or chat leaves no readable copy in `rows.db`: SQLite zeroes the space it frees.
