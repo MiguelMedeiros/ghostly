@@ -512,6 +512,24 @@ describe("with the apps flag on", () => {
     expect(within(row).queryByTestId("installed-app-open")).not.toBeInTheDocument();
   });
 
+  it("Refresh shows it is working until the store is read: a turning ring, busy, no second click", async () => {
+    let finish: () => void = () => {};
+    const store = { key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+      name: "Ghostly", kind: "curated" as const, sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1, apps: [], removed: [] };
+    fakeEngine.on("appList", () => []).on("appStoreList", () => [store]).on("appCheckUpdates", () => [])
+      .on("appStoreRefresh", () => new Promise<typeof store[]>((resolve) => { finish = () => resolve([store]); }));
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    const refresh = await screen.findByTestId("app-store-refresh");
+    await user.click(refresh);
+    expect(refresh).toHaveAttribute("aria-busy", "true");
+    expect(refresh).toBeDisabled();
+    expect(within(refresh).getByTestId("button-spinner")).toBeInTheDocument();
+    expect(refresh).toHaveTextContent("Refresh");
+    await act(async () => { finish(); });
+    await waitFor(() => expect(refresh).not.toHaveAttribute("aria-busy"));
+    expect(within(refresh).queryByTestId("button-spinner")).not.toBeInTheDocument();
+  });
+
   it("reads the installed apps again after the engine's own update check, so a stopped version shows stopped", async () => {
     let run: InstalledAppView["run"] = { status: "ok" };
     fakeEngine.on("appList", () => [installed({ run })]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
