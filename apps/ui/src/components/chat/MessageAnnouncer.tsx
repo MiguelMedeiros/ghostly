@@ -61,7 +61,8 @@ export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
 }) {
   const { t } = useI18n();
   const [text, setText] = useState("");
-  const seen = useRef<{ chat: string; ids: Set<string>; last?: string } | null>(null);
+  /** `at`: where `last` was, so rows that came or went above it are noticed. */
+  const seen = useRef<{ chat: string; ids: Set<string>; last?: string; at: number } | null>(null);
   const pending = useRef<Announceable[]>([]);
   const timers = useRef<{ flush?: ReturnType<typeof setTimeout>; clear?: ReturnType<typeof setTimeout> }>({});
   const words = useRef({ t, nameOf, active });
@@ -71,17 +72,23 @@ export function MessageAnnouncer({ chat, messages, nameOf, active = true }: {
     const known = seen.current;
     // A chat just opened (or another one): what it already has is history, not news.
     if (!known || known.chat !== chat) {
-      seen.current = { chat, ids: new Set(messages.map(m => m.id)), last: messages[messages.length - 1]?.id };
+      seen.current = { chat, ids: new Set(messages.map(m => m.id)), last: messages[messages.length - 1]?.id, at: messages.length - 1 };
       pending.current = [];
       clearTimeout(timers.current.flush);
       timers.current.flush = undefined;
       return;
     }
-    // Only what comes after the last message known: older history loaded above it is not new.
-    const from = known.last === undefined ? 0 : messages.findIndex(m => m.id === known.last) + 1;
+    // Only what comes after the last message known: older history loaded above it is not new. It is looked for from the
+    // end, where a message coming in leaves it, so a long chat's history is not walked for each one.
+    let at = messages.length - 1;
+    while (at >= 0 && messages[at].id !== known.last) at--;
+    const from = known.last === undefined ? 0 : at + 1;
     const fresh = from > 0 || known.last === undefined ? messages.slice(from).filter(m => !known.ids.has(m.id)) : [];
-    for (const m of messages) known.ids.add(m.id);
+    // The rows above it are known already unless some came or went there (older history, a late one sorted in, one
+    // deleted): only then is every id read again.
+    for (const m of from > 0 && at === known.at ? messages.slice(from) : messages) known.ids.add(m.id);
     if (messages.length) known.last = messages[messages.length - 1].id;
+    known.at = messages.length - 1;
     const incoming = fresh.filter(m => m.sender === "peer" && !m.systemEvent && !m.callEvent && !m.event);
     if (!incoming.length || !active) return;
     pending.current.push(...incoming);
