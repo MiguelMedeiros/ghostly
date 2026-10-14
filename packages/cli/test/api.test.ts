@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AWAITING_PEER_MS, type PairingProgress } from "@ghostly/core";
+import { AWAITING_PEER_MS, OwnInviteError, type PairingProgress } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, findChat, findGroup, hideStateSecrets, mentionsFor, redactSettings, type ApiContext } from "../src/api";
 import { chatOrGroup, findChatOrGroup } from "../src/apiKit";
@@ -55,6 +55,16 @@ describe("chats", () => {
     expect(findChat(links, "bob").id).toBe("abc2");
     expect(() => findChat(links, "abc")).toThrow(/more than one/);
     expect(() => findChat(links, "zed")).toThrow(/No chat/);
+  });
+
+  // `invite join <your own invite>` said the engine's tag for its RPC clients: "own-invite <chat id>: This is your own…".
+  it("joining your own invite is refused in a sentence alone, with the chat that owns it as its own field", async () => {
+    const { ctx, node } = fake();
+    const said = "This is your own invite. Share it with a contact; they join with it.";
+    for (const thrown of [new OwnInviteError("chat-one"), new Error(new OwnInviteError("chat-one").message)]) {
+      Object.assign(node, { joinLink: vi.fn(async () => { throw thrown; }) });
+      await expect(callApi(ctx, "invite.join", { invite: "ghostly1abc" })).rejects.toMatchObject({ code: "refused", message: said, details: { chat: "chat-one" } });
+    }
   });
 
   it("a contact's own name never stands for someone else: a key finds only its chat, a label wins over a name", () => {
