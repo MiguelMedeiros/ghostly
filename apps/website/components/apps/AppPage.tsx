@@ -14,8 +14,8 @@ const ExternalLink = ({ href }: { href: string }) => (
 /** /apps/<slug>: one app of the store, as the build verified it, and how to install it in Ghostly. */
 export function AppPage({ app, store }: { app: StoreApp; store: string }) {
   const t = apps.app;
-  // The internet last, as the install screen puts it: the line that says who can learn about the person.
-  const permissions = [PERMISSIONS.storage, ...(["chat", "name", "internet"] as const).filter((p) => app.permissions.includes(p)).map((p) => PERMISSIONS[p])];
+  // Every permission it asks for, in the order the reader keeps them (lib/storeRead.ts: the internet last).
+  const permissions = [PERMISSIONS.storage, ...app.permissions.map((p) => PERMISSIONS[p])];
   const meta = [
     app.developer && { label: t.by, value: app.developer },
     { label: t.version, value: app.version },
@@ -88,7 +88,7 @@ export function AppPage({ app, store }: { app: StoreApp; store: string }) {
               {t.install.title}
             </h2>
             <ol className="ap-steps">
-              {t.install.steps(app.title, app.fingerprint).map((step) => (
+              {t.install.steps(app.title, app.fingerprint, app.release).map((step) => (
                 <li key={step}>{step}</li>
               ))}
             </ol>
