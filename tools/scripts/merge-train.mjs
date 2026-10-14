@@ -275,17 +275,21 @@ export function batchBody(base, baseSha, head, prs, next, extra = {}, commits = 
 
 /**
  * The comment that says where a pull request is. It also records the head the train first saw queued (`head`) and,
- * while the train lands it alone, the commit it rebased it to (`alone`: sha, baseSha, at, retried).
+ * while the train lands it alone, the commit it rebased it to (`alone`: sha, baseSha, at, retried). `held` is CI
+ * Success on the base itself ("red" or "still running") while the train holds a red batch or lone pull request for
+ * it: the one in flight is no longer waiting for its own CI, and nobody behind it moves.
  */
-export function positionText(base, pr, place, batch, head = pr.sha, alone = null) {
+export function positionText(base, pr, place, batch, head = pr.sha, alone = null, held = null) {
   const mark = `<!-- merge-train:head ${head} -->`;
+  const hold = held ? ` The train is on hold: CI Success on \`${base}\` itself is ${held}, and nobody is blamed until it is green.` : "";
   if (alone) {
     const again = alone.retried ? " (a second run, after a red one)" : "";
-    return `${POSITION}${mark}<!-- merge-train:alone ${JSON.stringify(alone)} -->\nMerge train: next into \`${base}\`, alone. Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}), waiting for CI Success on ${alone.sha.slice(0, 12)}${again}.`;
+    const where = held ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}.` : `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}), waiting for CI Success on ${alone.sha.slice(0, 12)}${again}.`;
+    return `${POSITION}${mark}<!-- merge-train:alone ${JSON.stringify(alone)} -->\nMerge train: next into \`${base}\`, alone. ${where}${hold}`;
   }
-  if (batch) return `${POSITION}${mark}\nMerge train: in batch #${batch} into \`${base}\`, waiting for its CI.`;
+  if (batch) return `${POSITION}${mark}\nMerge train: in batch #${batch} into \`${base}\`${held ? "." : ", waiting for its CI."}${hold}`;
   const why = waiting(pr);
-  return `${POSITION}${mark}\nMerge train: in line for \`${base}\`: **${ordinal(place)}**.${why ? ` Waiting: ${why}. It keeps its place.` : ""}`;
+  return `${POSITION}${mark}\nMerge train: in line for \`${base}\`: **${ordinal(place)}**.${why ? ` Waiting: ${why}. It keeps its place.` : ""}${hold}`;
 }
 
 /** The head a pull request had when the train first saw it queued (the reviewed one), from its position comment. */
@@ -558,6 +562,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   }
 
   let inFlight = null;
+  /** CI Success on the base itself while a red batch or lone pull request waits for it: every position comment says so. */
+  let held = null;
   for (const extra of batches.slice(1)) await retire(extra, "Merge train: one batch at a time per base; this one closes and its pull requests go back to the line.");
   const batch = batches[0];
   if (batch) {
@@ -709,7 +715,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       await retire(batch, `Merge train: \`${base}\` moved, so this batch is rebuilt on its new tip.`);
       inFlight = await board(members, next, { retried: state.retried });
     } else if (ci === "failure" && (baseCi === "failure" || baseCi === "pending")) {
-      say(`HOLD #${batch.number}: CI Success on \`${base}\` itself is ${baseCi === "failure" ? "red" : "still running"}; nobody is blamed until it is green.`);
+      held = baseCi === "failure" ? "red" : "still running";
+      say(`HOLD #${batch.number}: CI Success on \`${base}\` itself is ${held}; nobody is blamed until it is green.`);
       inFlight = stay;
     } else if (ci === "failure") {
       const { culprit, first, second } = bisect(members);
@@ -832,7 +839,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     if (p.ci === "failure") {
       const baseCi = ciState(await gh.ciJobs(mark.baseSha, planned(null)));
       if (baseCi === "failure" || baseCi === "pending") {
-        say(`HOLD #${p.number}: CI Success on \`${base}\` itself is ${baseCi === "failure" ? "red" : "still running"}; nobody is blamed until it is green.`);
+        held = baseCi === "failure" ? "red" : "still running";
+        say(`HOLD #${p.number}: CI Success on \`${base}\` itself is ${held}; nobody is blamed until it is green.`);
         return stay;
       }
       // One more run before blaming it: a flake should not cost its author a review round. The queue app may not rerun
@@ -875,10 +883,10 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     // Whoever is still in line passed the head checks above: its head is the one `queue` (or the train) vouches for.
     const text =
       inFlight?.alone && inFlight.number === p.number
-        ? positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone)
+        ? positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone, held)
         : aboard.has(p.number)
-          ? positionText(base, p, 0, inFlight.number, p.sha)
-          : positionText(base, p, ++place, 0, p.sha);
+          ? positionText(base, p, 0, inFlight.number, p.sha, null, held)
+          : positionText(base, p, ++place, 0, p.sha, null, held);
     if (!p.sticky && p.pushedAt === null) continue; // no CI on its head yet: its comment would record a head of unknown age
     await setSticky(p, text);
   }
