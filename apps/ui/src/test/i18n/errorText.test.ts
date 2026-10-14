@@ -269,6 +269,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This link names a private group of yours, not a community", `${BROWSER}/engine/groups.ts`],
   ["Go online to join a group", `${BROWSER}/engine/node.ts`],
   ["Only the admin can change the members of this group", `${CORE}/groupSession.ts`],
+  ["Only the admin can renew the group's secret", `${CORE}/groupSession.ts`],
   ["Only the admin can do that", `${CORE}/groupCommunity.ts`],
   ["Make someone else the admin before leaving", `${CORE}/groupSession.ts`],
   ["Only the admin can change the group's picture", `${CORE}/groupSession.ts`],

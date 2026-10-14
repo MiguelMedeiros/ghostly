@@ -717,9 +717,9 @@ export class GroupSession {
     const s = this.state.secrets[epoch];
     return s ? fromBase64Url(s) : undefined;
   }
-  private requireAdmin(): void {
+  private requireAdmin(refusal = "Only the admin can change the members of this group"): void {
     if (this.state.status !== "active") throw new Error("You are no longer in this group");
-    if (!this.isAdmin) throw new Error("Only the admin can change the members of this group");
+    if (!this.isAdmin) throw new Error(refusal);
   }
 
   /** What the admin sends a contact over their chat to invite them. */
@@ -787,7 +787,7 @@ export class GroupSession {
 
   /** A fresh secret without a membership change: whoever holds the old one and is not a member learns nothing new. */
   rotate(now = Date.now()): Promise<void> {
-    return this.serialize(async () => { this.requireAdmin(); await this.commit("rotate", undefined, now); });
+    return this.serialize(async () => { this.requireAdmin("Only the admin can renew the group's secret"); await this.commit("rotate", undefined, now); });
   }
 
   private async commit(kind: CommitKind, subject: string | undefined, now: number, left = false): Promise<{ secret: Uint8Array }> {

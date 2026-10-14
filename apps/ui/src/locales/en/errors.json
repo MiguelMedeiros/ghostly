@@ -203,6 +203,7 @@
     "adminOnly": "Only the admin can do that",
     "adminPicture": "Only the admin can change the group's picture",
     "adminRename": "Only the admin can rename the group",
+    "adminRotate": "Only the admin can renew the group's secret",
     "adminShares": "Only the admin can share a link to the group",
     "alreadyJoining": "You are already joining this group",
     "alreadyMember": "This contact is already a member",
