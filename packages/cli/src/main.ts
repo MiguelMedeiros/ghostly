@@ -10,7 +10,7 @@ import { asCliError, CliError, EXIT } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import type { RuntimeOptions } from "./runtime/engine";
-import { allowlist, checkCursor, checkWebhook, eventHandler, Feed, readCursor } from "./listen";
+import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, readCursor } from "./listen";
 import { resolve } from "node:path";
 import { format } from "node:util";
 import { secretsFromStdin } from "./secretInput";
@@ -542,6 +542,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   const types = (parsed.options.type as string[] | undefined) ?? [];
   const turns = parsed.options.turns === true;
   if (turns && types.length) throw new CliError("usage", "--turns takes the place of --type: a turn is a message received, or a group message that mentions you");
+  checkTypes(types, (line) => process.stderr.write(line + "\n"));
   const from = (parsed.options.from as string[] | undefined) ?? [], groups = (parsed.options.group as string[] | undefined) ?? [];
   const cursor = parsed.options.cursor as string | undefined;
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
