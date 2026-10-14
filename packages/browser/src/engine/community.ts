@@ -1761,7 +1761,7 @@ export class Communities {
     const live = this.live.get(groupId);
     if (!live || live.session.wasRemoved(peerKey)) return;
     if (live.hub && !this.peerIsHub(live, peerKey) && rosterHas(live.session.roster, peerKey)) live.members.set(peerKey, this.now());
-    this.sendTo(linkId, live.session.syncFrame());
+    this.sendTo(linkId, live.session.syncFrame(peerKey));
     this.host.emit();
   }
 
