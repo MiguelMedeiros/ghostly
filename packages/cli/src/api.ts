@@ -589,6 +589,7 @@ const METHODS: Record<string, Method> = {
   },
   async "group.leave"(ctx, params) {
     const group = groupOf(ctx, params);
+    if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass yes (--yes) to go on");
     await node(ctx).leaveGroup({ groupId: group.id });
     return { left: group.id };
   },
