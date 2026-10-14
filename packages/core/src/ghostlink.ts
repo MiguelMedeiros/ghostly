@@ -888,6 +888,8 @@ export class GhostLink {
   private heldSignal: { signal: string; sight?: SignalSight } | null = null;
   /** The link packet of a DHT-only contact its mailbox was last read early for (its timestamp): once per packet. */
   private leftDhtSeenFor = 0;
+  /** A first contact under way: its mailbox was read on the contact's first sight (`onPresence`), once per session. */
+  private firstSightRead = false;
   /** The first pairing of this chat, while it is one (`pairingProgress` option, no peer key yet). */
   private readonly tracker: PairingTracker | null;
   private lastDataLinkState: DataLinkState = "idle";
@@ -1077,8 +1079,15 @@ export class GhostLink {
           if (presence.online) this.tracker?.sawPeer();
           this.peerPacketArrived(presence);
           // A first contact under way, or a joined chat whose inviter never answered (read at its unused-invite wait): a
-          // fresh packet of the contact says its envelope is a read away.
-          if (presence.online && (!options.pairing?.credentials.peerKey || this.dht?.unanswered) && Date.now() - presenceSeenAt(presence) < EXPECT_PEER_MS) this.dht?.expect();
+          // fresh packet of the contact says its envelope is a read away. A first contact's first sight, however old the
+          // packet (an inviter back from a restart notices a join late), reads the mailbox now: that read pins the contact,
+          // which a mailbox read at the pace of an unused invite would leave up to minutes away.
+          const firstContact = !options.pairing?.credentials.peerKey;
+          if (presence.online && (firstContact || this.dht?.unanswered)) {
+            if (Date.now() - presenceSeenAt(presence) < EXPECT_PEER_MS) this.dht?.expect();
+            else if (firstContact && !this.firstSightRead) this.dht?.expect(0);
+            if (firstContact) this.firstSightRead = true;
+          }
           events.onPresence?.(this.mergePresence(presence));
           this.peerMayHaveLeftDht(presence);
           this.maybeAutoConnect(presence);
