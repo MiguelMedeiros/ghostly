@@ -282,7 +282,8 @@ export const FILE_METHODS: Record<string, Method> = {
     const stored = await fileStore.get(fileId);
     if (!stored?.metadata) throw new CliError("not_found", `No file ${fileId}`);
     if (stored.leftOut) throw new CliError("not_found", "Not in this backup: the light backup this profile was restored from left the file out");
-    const transfer = state(ctx).transfers[fileId] ?? stored.transfer;
+    // A sent file's bytes were staged whole at send: its transfer is the contact's download, not bytes missing here.
+    const transfer = stored.direction === "out" ? undefined : state(ctx).transfers[fileId] ?? stored.transfer;
     if (transfer && transfer.state !== "done") throw new CliError("unavailable", `The file is not all here yet (${transfer.transferred} of ${transfer.size} bytes)`);
     const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.name));
     const flags = bool(params, "force") ? "w" : "wx";
