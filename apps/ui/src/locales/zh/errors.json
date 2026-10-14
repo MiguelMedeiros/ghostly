@@ -133,6 +133,7 @@
   },
   "files": {
     "askAgain": "请联系人重新发送。",
+    "askGroupAgain": "请稍后再向群组请求。",
     "askedTooOften": "联系人请求此文件的次数过多",
     "cannotDecodeRecording": "此设备无法解码该录音",
     "cannotRetry": "此文件无法重试",
