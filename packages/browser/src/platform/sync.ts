@@ -121,10 +121,10 @@ function engineIds(messages: StoredMessage[]): ReadonlySet<string> {
 /** What each link's messages were last mirrored from: the list, and its session as stored after. */
 const mirrored = new Map<string, { messages: StoredMessage[]; sessionId: string; stored: string | null }>();
 
-/** Whether this link's last mirror went into this session, and nothing has written the session since. */
-function untouched(linkId: string, sessionId: string): boolean {
+/** Whether this link's last mirror went into this chat's session, and nothing has written the session since. */
+function untouched(linkId: string, chat: string): boolean {
   const last = mirrored.get(linkId);
-  return last?.sessionId === sessionId && storedSession(sessionId) === last.stored;
+  return last?.sessionId === chat && storedSession(chat) === last.stored;
 }
 
 /** Whether this list was mirrored into this session already, and nothing has written the session since. */
