@@ -11,6 +11,7 @@ import type { WalletNetwork } from "@ghostly/core";
 import type { WalletMode } from "../../shared/mints";
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
 import { walletKey } from "./walletNetworks";
+import { viewNews } from "./viewNews";
 /** `read`: the balances were read once since this wallet opened (until then `balance` says nothing). */
 export interface ArkWalletView { configured:boolean; locked:boolean; read?:true; automatic?:boolean; network?:ArkConfig["network"]; provider?:string; address?:string; boardingAddress?:string; incoming?:number; balance:number; recoverable?:number; sweeping?:number; small?:number;
   /** When the first coin still spendable expires (ms), unless it is renewed first; absent with no coin or no expiry known (WISP 06 § Wallets that stay home). */
@@ -46,7 +47,8 @@ export class ArkWallet {
   private gate=new ModeGate();
   adapter?:ArkadeAdapter;
   view:ArkWalletView={configured:false,locked:true,balance:0};
-  constructor(readonly network:WalletNetwork,private changed:()=>void) {this.key=walletKey("arkWallet",network);}
+  /** `changed(false)`: a balance read that found nothing new; the receipts are checked, the wallet view stays. */
+  constructor(readonly network:WalletNetwork,private changed:(viewChanged?:boolean)=>void) {this.key=walletKey("arkWallet",network);}
   /** Creating, replacing and restoring never interleave: two of them could each think the profile is empty. */
   private serial<T>(run:()=>Promise<T>):Promise<T>{const next=this.queue.then(run,run);this.queue=next.catch(()=>{});return next;}
   async start() {this.saved=await wrap<StoredArk|undefined>((await store(STORES.settings,"readonly")).get(this.key));this.view={configured:!!this.saved,locked:true,automatic:!!this.saved?.deviceKey,balance:0,network:this.saved?.config.network,provider:this.saved?.config.provider};}
@@ -191,9 +193,11 @@ export class ArkWallet {
     const expiresAt=await this.gate.within(Promise.resolve().then(()=>adapter.expiresAt?.())).catch((error)=>{if(error instanceof ModeChanged)throw error;return this.view.expiresAt;});
     if(this.adapter!==adapter)return;
     const balancesRead=this.view.read||!failed.some((what)=>what==="balance"||what==="incoming"||what==="recoverable");
+    const before=this.view;
     this.view={configured:true,locked:false,...(balancesRead?{read:true as const}:{}),automatic:!!this.saved?.deviceKey,network:adapter.config.network,provider:adapter.config.provider,address,boardingAddress,incoming,balance,recoverable,sweeping,small,...(expiresAt!==undefined?{expiresAt}:{}),
       error:failed.length?`Could not read the ${failed.join(", ")} from the Ark provider. Last values may be stale.`:undefined};
-    this.changed();
+    // Every 10 s: a read that says what the view already did is no news for the wallet view (`changed(false)`).
+    this.changed(viewNews(before,this.view));
     if(this.adapter)this.timer=setTimeout(()=>void this.refresh(),10000);
   }
   /** Swept outputs back into the balance (refused while expired ones wait for the sweep); the next refresh shows them. */

@@ -9,6 +9,7 @@ import { loadBarkSdk, type BarkNetwork, type BarkSdk } from "./barkSdk";
 import { RETIRE_READ_MS } from "./arkWallet";
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
 import { walletKey } from "./walletNetworks";
+import { viewNews } from "./viewNews";
 import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
 import type { SavedIntent } from "./coordinator";
 
@@ -83,7 +84,8 @@ export class BarkWallet {
   private gate = new ModeGate();
   adapter?: BarkAdapter;
   view: BarkWalletView = { configured: false, locked: true, balance: 0 };
-  constructor(readonly network: WalletNetwork, private changed: () => void, private sdk: () => Promise<BarkSdk> = loadBarkSdk) { this.key = walletKey("barkWallet", network); }
+  /** `changed(false)`: a balance read that found nothing new; the receipts are checked, the wallet view stays. */
+  constructor(readonly network: WalletNetwork, private changed: (viewChanged?: boolean) => void, private sdk: () => Promise<BarkSdk> = loadBarkSdk) { this.key = walletKey("barkWallet", network); }
   /** Creating, replacing and restoring never interleave: two of them could each think the profile is empty. */
   private serial<T>(run: () => Promise<T>): Promise<T> { const next = this.queue.then(run, run); this.queue = next.catch(() => {}); return next; }
   private idle(config?: BarkConfig): BarkWalletView {
@@ -230,6 +232,7 @@ export class BarkWallet {
     if (Date.now() - this.lastMaintenance > 5 * 60_000) { this.lastMaintenance = Date.now(); void adapter.maintain().catch((error) => console.warn("Bark maintenance:", error instanceof Error ? error.message : error)); }
     if (this.adapter !== adapter) return;
     const balancesRead = this.view.read || (balance !== undefined && onchain !== undefined);
+    const before = this.view;
     this.view = {
       ...this.idle(adapter.config), locked: false, ...(balancesRead ? { read: true as const } : {}), address, onchainAddress,
       balance: balance?.spendableSats ?? this.view.balance,
@@ -240,7 +243,8 @@ export class BarkWallet {
       expiry,
       error: failed.length ? `Could not read the ${failed.join(", ")} from the Bark server. Last values may be stale.` : undefined,
     };
-    this.changed();
+    // Every 10 s: a read that says what the view already did is no news for the wallet view (`changed(false)`).
+    this.changed(viewNews(before, this.view));
     if (this.adapter) this.timer = setTimeout(() => void this.refresh(), 10000);
   }
   /** On-chain coins into Ark: the board confirms on-chain, then they are spendable. */

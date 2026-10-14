@@ -6,6 +6,7 @@ import { store, STORES, transact, wrap } from "../../shared/idb";
 import type { WalletMode } from "../../shared/mints";
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
 import { walletKey } from "./walletNetworks";
+import { viewNews } from "./viewNews";
 import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
 import { forgetBreez, loadBreezSdk, type BreezSdkModule } from "./providers/breezSdk";
 import { breezDatabaseInUse, breezDatabasesFor } from "./providers/breezDatabases";
@@ -51,7 +52,8 @@ export class SparkWallet {
   private gate = new ModeGate();
   adapter?: SparkAdapter;
   view: SparkWalletView = { configured: false, locked: true, balance: 0 };
-  constructor(readonly network: WalletNetwork, private changed: () => void, private sdk: () => Promise<BreezSdkModule> = loadBreezSdk) { this.key = walletKey("sparkWallet", network); }
+  /** `changed(false)`: a balance read that found nothing new; the receipts are checked, the wallet view stays. */
+  constructor(readonly network: WalletNetwork, private changed: (viewChanged?: boolean) => void, private sdk: () => Promise<BreezSdkModule> = loadBreezSdk) { this.key = walletKey("sparkWallet", network); }
   private serial<T>(run: () => Promise<T>): Promise<T> { const next = this.queue.then(run, run); this.queue = next.catch(() => {}); return next; }
   private idle(saved?: StoredSpark): SparkWalletView {
     const needsKey = !saved && this.network === "mainnet";
@@ -168,8 +170,10 @@ export class SparkWallet {
     const history = await read("history", () => adapter.history(), this.view.history);
     if (this.adapter !== adapter) return;
     const balancesRead = this.view.read || !failed.includes("balance");
+    const before = this.view;
     this.view = { ...this.idle(this.saved), locked: false, ...(balancesRead ? { read: true as const } : {}), address, balance, history, error: failed.length ? `Could not read the ${failed.join(", ")} from Spark. Last values may be stale.` : undefined };
-    this.changed();
+    // Every poll: a read that says what the view already did is no news for the wallet view (`changed(false)`).
+    this.changed(viewNews(before, this.view));
     if (this.adapter) this.timer = setTimeout(() => void this.refresh(), sparkTiming.pollMs);
   }
 
