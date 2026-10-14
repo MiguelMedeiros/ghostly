@@ -125,7 +125,7 @@ test("the kit holds every logo in every colourway, the colours, the fonts, the c
   assert.equal(logoFiles().length, 3 * brand.logo.colorways.length + 1);
   for (const p of ["README.txt", "boilerplate.txt", "fonts/FONTS.txt", "colors/ghostly-colors.ase", "colors/ghostly-colors.json", "colors/ghostly-colors.css", "social/ghostly-og-image.png"]) assert.ok(paths.includes(p), p);
   for (const s of SCREENSHOTS) assert.ok(paths.includes(`screenshots/ghostly-${s}.webp`), s);
-  for (const e of kitEntries()) if (e.text) assert.doesNotMatch(e.text, /[–—]/, `${e.path} has a dash`);
+  for (const e of kitEntries()) if (e.text) assert.doesNotMatch(e.text, /[\u2013\u2014]/, `${e.path} has a dash`);
 });
 
 test("the logo files are one path each, eyes cut out, in the colourway's colour", () => {
