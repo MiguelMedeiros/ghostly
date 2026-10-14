@@ -45,7 +45,7 @@ import type { Payment, PaymentAsk, PaymentRequest, PaymentResult } from "./payme
 import { EXPECT_PEER_MS, OFFER_FAST_MS, WATCH_PEER_MS, LinkSession, presenceSeenAt, type LinkStatus, type PeerPresence, type PollIntervals } from "./link";
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
-import { PairedHttp } from "./pairedHttp";
+import { PairedHttp, type PairedHttpBodies } from "./pairedHttp";
 import { CALLS_CAPABILITY, FILES_CAPABILITY, FILES_BINARY_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, APPS_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
 import { APP_DATA_MAX_BYTES, APP_FRAME, APP_RESUME_GRACE_MS, AppSessions, appDataBytes, appCloseFrame, appDataFrame, appOpenFrame, type AppFrameEvent, type AppSendError } from "./pairedApps";
 import { WAKE_FRAME, parseWakeFrame, wakeFrame, type WakeTarget } from "./pairedWake";
@@ -3338,13 +3338,31 @@ export class GhostLink {
     try {
       const frame = this.supportsBinaryFiles ? encodeFileData(id, offset, data) : JSON.stringify({ t: "pf-data", id, offset, data: toBase64Url(data) });
       this.channel.send(frame);
-      const use = this.filesUsing(this.channel);
-      use.at = Date.now();
-      // What files write is the app's to send too, up to what files may hold: a WebRTC channel drains to its low water
-      // mark before files write again, so they write in bursts of most of it, and the app's share is the same burst.
-      use.appAhead = Math.max(-filesCap(this.channel), use.appAhead - (typeof frame === "string" ? frame.length : frame.byteLength));
+      this.filesWrote(this.channel, typeof frame === "string" ? frame.length : frame.byteLength);
       return true;
     } catch { return false; }
+  }
+  /** Files (or a shared service's body, `PairedHttpBodies`) wrote `bytes` on a channel. */
+  private filesWrote(channel: FrameChannel, bytes: number): void {
+    const use = this.filesUsing(channel);
+    use.at = Date.now();
+    // What files write is the app's to send too, up to what files may hold: a WebRTC channel drains to its low water
+    // mark before files write again, so they write in bursts of most of it, and the app's share is the same burst.
+    use.appAhead = Math.max(-filesCap(channel), use.appAhead - bytes);
+  }
+  /**
+   * A shared service's body on a channel counts as files there (WISP 1200 § In a chat): it keeps a WebRTC channel at the
+   * same 1 MiB line, so an app's data gets its quarter above it, and about half the link while the body waits for room.
+   */
+  private bodiesOn(channel: FrameChannel): PairedHttpBodies {
+    return {
+      wrote: bytes => this.filesWrote(channel, bytes),
+      waiting: async drained => {
+        const use = this.filesUsing(channel);
+        use.waiting++;
+        try { await drained; } finally { use.waiting--; use.at = Date.now(); }
+      },
+    };
   }
   /**
    * Files on a channel: when they last wrote on it, how many wait for room, and how many bytes an app's data has sent
@@ -3773,7 +3791,7 @@ export class GhostLink {
           this.typingSender.reset(); this.typingReceiver.clear();
           this.appsSuspended();
           this.pairedHttp?.close();
-          this.pairedHttp = new PairedHttp(channel, this.options.getHostedHttpService, this.options.localFetch);
+          this.pairedHttp = new PairedHttp(channel, this.options.getHostedHttpService, this.options.localFetch, this.bodiesOn(channel));
           this.emitPairingState();
           this.sendPairedNick();
           this.sendPairedAvatar();

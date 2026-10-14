@@ -3,6 +3,15 @@ import { CHUNK_KIND, decodeChunk, decodeControl, type FrameChannel } from "./fra
 import { HttpClient, HttpHost, type HostedHttpService, type LocalFetch } from "./http";
 
 /**
+ * What the session hears of the bodies going on its channel: each chunk written, with its frame's length, and each wait
+ * for room. An app's data in the chat keeps its own share above them, as beside a file (WISP 1200 § In a chat).
+ */
+export interface PairedHttpBodies {
+  wrote(bytes: number): void;
+  waiting(drained: Promise<void>): Promise<void>;
+}
+
+/**
  * Shared services over a paired session: the same HTTP frames as the older data link, carried as
  * `ph` application frames on the authenticated channel. Binary chunks travel base64url-encoded,
  * since paired application data is text. The frames carry no `id`, so an older app drops them.
@@ -11,11 +20,18 @@ export class PairedHttp {
   readonly client: HttpClient;
   readonly host: HttpHost;
 
-  constructor(channel: FrameChannel, getService: (id: string) => HostedHttpService | undefined, localFetch: LocalFetch) {
+  constructor(channel: FrameChannel, getService: (id: string) => HostedHttpService | undefined, localFetch: LocalFetch, bodies?: PairedHttpBodies) {
     const tunnel: FrameChannel = {
-      send: (data) => channel.send(JSON.stringify(typeof data === "string" ? { t: "ph", c: data } : { t: "ph", b: toBase64Url(data) })),
+      send: (data) => {
+        if (typeof data === "string") return channel.send(JSON.stringify({ t: "ph", c: data }));
+        // Only a body's chunks are binary.
+        const frame = JSON.stringify({ t: "ph", b: toBase64Url(data) });
+        channel.send(frame);
+        bodies?.wrote(frame.length);
+      },
       get bufferedAmount() { return channel.bufferedAmount; },
-      drained: () => channel.drained(),
+      // Only a body waits for room.
+      drained: () => bodies ? bodies.waiting(channel.drained()) : channel.drained(),
       // Its frames are counted on the session's channel, base64url and all, so a body keeps under that channel's budget.
       get sendBudget() { return channel.sendBudget; },
       // The paired channel belongs to the session; closing is the session's business.
