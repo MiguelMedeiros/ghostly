@@ -22,6 +22,7 @@
   "emoji": "表情",
   "emojiCategories": "表情类别",
   "expressions": "表情和 GIF",
+  "filePreparing": "正在准备 {{name}}…",
   "gif": "GIF",
   "gifCategories": "GIF 类别",
   "gifCategory": {

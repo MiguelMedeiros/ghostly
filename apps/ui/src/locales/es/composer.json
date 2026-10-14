@@ -22,6 +22,7 @@
   "emoji": "Emoji",
   "emojiCategories": "Categorías de emoji",
   "expressions": "Emoji y GIF",
+  "filePreparing": "Preparando {{name}}…",
   "gif": "GIF",
   "gifCategories": "Categorías de GIF",
   "gifCategory": {
