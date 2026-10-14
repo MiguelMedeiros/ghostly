@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { motion } from "motion/react";
 import { GHOST_PATH } from "@/components/ghost/Ghost";
 import { useCalm } from "@/lib/useCalm";
 
@@ -16,6 +15,8 @@ interface FloatingGhostData {
   opacity: number;
 }
 
+// The floater's drift is a CSS keyframe on its HTML box (transform and opacity only), so it plays on the compositor:
+// stepped by script, 25 of them restyled the page at every frame, forever. Its own faintness sits on the SVG, still.
 function FloatingGhost({
   delay,
   duration,
@@ -32,35 +33,24 @@ function FloatingGhost({
   opacity: number;
 }) {
   return (
-    <motion.div
-      className="absolute pointer-events-none text-cyan-400"
+    <div
+      className="nf-floater absolute pointer-events-none text-cyan-400"
       style={{
         left: `${x}%`,
         top: `${y}%`,
         width: size,
         height: size,
         filter: size > 40 ? "blur(1px)" : "none",
-      }}
-      initial={{ opacity: 0, y: 20 }}
-      animate={{
-        opacity: [0, opacity, opacity, 0],
-        y: [20, 0, -30, -60],
-        x: [0, 10, -10, 0],
-        rotate: [0, 5, -5, 0],
-      }}
-      transition={{
-        duration,
-        delay,
-        repeat: Infinity,
-        ease: "easeInOut",
+        animationDuration: `${duration}s`,
+        animationDelay: `${delay}s`,
       }}
     >
-      <svg viewBox="0 0 24 24" fill="currentColor" className="w-full h-full">
+      <svg viewBox="0 0 24 24" fill="currentColor" className="w-full h-full" opacity={opacity}>
         <path d="M12 2C7.582 2 4 5.582 4 10v8c0 .75.6 1 1 .6l2-1.6 2 1.6c.4.3.8.3 1.2 0L12 17l1.8 1.6c.4.3.8.3 1.2 0l2-1.6 2 1.6c.4.4 1 .15 1-.6v-8c0-4.418-3.582-8-8-8z" />
         <circle cx="9" cy="9" r="1.5" className="fill-[#060a10]" />
         <circle cx="15" cy="9" r="1.5" className="fill-[#060a10]" />
       </svg>
-    </motion.div>
+    </div>
   );
 }
 
@@ -92,30 +82,14 @@ function GhostParticles() {
   );
 }
 
+/**
+ * Everything that moves here is a CSS animation of `transform` or `opacity` on an HTML box (an outer `<svg>` is one),
+ * so it plays on the compositor and the page lays nothing out while it is open. A CSS transform on a shape inside an
+ * SVG is not composited: it restyles and lays out the page at every frame. Reduced motion: a still (no ghost floats
+ * by, and site.css ends every animation at once).
+ */
 export function NotFoundScene() {
   const calm = useCalm();
-  const [ghostPosition, setGhostPosition] = useState({ x: 0, y: 0 });
-  const [isSearching, setIsSearching] = useState(true);
-
-  // Reduced motion: a still. No timer moves the ghost or dims its beam, and no ghost floats by.
-  useEffect(() => {
-    if (calm) return;
-    const interval = setInterval(() => {
-      setGhostPosition({
-        x: Math.sin(Date.now() / 1000) * 20,
-        y: Math.cos(Date.now() / 800) * 15,
-      });
-    }, 50);
-
-    const searchInterval = setInterval(() => {
-      setIsSearching((prev) => !prev);
-    }, 2000);
-
-    return () => {
-      clearInterval(interval);
-      clearInterval(searchInterval);
-    };
-  }, [calm]);
 
   return (
     <main className="min-h-screen bg-[#060a10] flex flex-col items-center justify-center px-4 relative overflow-hidden">
@@ -127,102 +101,99 @@ export function NotFoundScene() {
 
       {/* Main content */}
       <div className="relative z-10 text-center max-w-2xl mx-auto">
-        {/* Ghost with flashlight */}
-        <div
-          className="relative inline-block mb-8"
-          style={
-            calm
-              ? undefined
-              : {
-                  transform: `translate(${ghostPosition.x}px, ${ghostPosition.y}px)`,
-                }
-          }
-        >
-          <svg
-            width="120"
-            height="150"
-            viewBox="0 0 80 100"
-            className="relative z-10"
-          >
-            <defs>
-              <filter id="ghost-glow-404">
-                <feGaussianBlur stdDeviation="3" result="coloredBlur" />
-                <feMerge>
-                  <feMergeNode in="coloredBlur" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
-              <radialGradient id="flashlight-beam" cx="0%" cy="50%" r="100%">
-                <stop offset="0%" stopColor="rgba(250, 204, 21, 0.4)" />
-                <stop offset="50%" stopColor="rgba(250, 204, 21, 0.1)" />
-                <stop offset="100%" stopColor="transparent" />
-              </radialGradient>
-            </defs>
+        {/* Ghost with flashlight. It wanders on two axes at two paces, one wrapper each. */}
+        <div className="nf-wander-x relative inline-block mb-8">
+          <div className="nf-wander-y relative">
+            {/* Flashlight beam: it sweeps and dims in boxes of its own, under the ghost, clipped to the ghost's box. */}
+            <div className="nf-search absolute inset-0 overflow-hidden">
+              <svg
+                width="120"
+                height="150"
+                viewBox="0 0 80 100"
+                overflow="visible"
+                className="nf-sweep absolute inset-0"
+              >
+                <defs>
+                  <radialGradient id="flashlight-beam" cx="0%" cy="50%" r="100%">
+                    <stop offset="0%" stopColor="rgba(250, 204, 21, 0.4)" />
+                    <stop offset="50%" stopColor="rgba(250, 204, 21, 0.1)" />
+                    <stop offset="100%" stopColor="transparent" />
+                  </radialGradient>
+                </defs>
+                <ellipse cx="75" cy="45" rx="60" ry="25" fill="url(#flashlight-beam)" />
+              </svg>
+            </div>
 
-            {/* Flashlight beam */}
-            <ellipse
-              cx="75"
-              cy="45"
-              rx="60"
-              ry="25"
-              fill="url(#flashlight-beam)"
-              className={`transition-opacity duration-500 ${
-                calm || isSearching ? "opacity-100" : "opacity-40"
-              }`}
-              style={{
-                transformOrigin: "40px 45px",
-                animation: "searchBeam 3s ease-in-out infinite",
-              }}
-            />
+            <svg
+              width="120"
+              height="150"
+              viewBox="0 0 80 100"
+              className="relative z-10"
+            >
+              <defs>
+                <filter id="ghost-glow-404">
+                  <feGaussianBlur stdDeviation="3" result="coloredBlur" />
+                  <feMerge>
+                    <feMergeNode in="coloredBlur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
 
-            {/* Ghost body */}
-            <path
-              d={GHOST_PATH}
-              fill="#22d3ee"
-              filter="url(#ghost-glow-404)"
-            />
+              {/* Ghost body */}
+              <path
+                d={GHOST_PATH}
+                fill="#22d3ee"
+                filter="url(#ghost-glow-404)"
+              />
 
-            {/* Worried/searching eyes */}
-            <g className="animate-blink">
+              {/* Worried mouth */}
+              <path
+                d="M32 52 Q40 48 48 52"
+                stroke="#0f172a"
+                strokeWidth="3"
+                fill="none"
+                strokeLinecap="round"
+              />
+
+              {/* Little flashlight in hand */}
+              <rect x="58" y="40" width="12" height="8" rx="2" fill="#fcd34d" />
+              <rect x="68" y="41" width="6" height="6" rx="1" fill="#fef3c7" />
+            </svg>
+
+            {/* Worried/searching eyes: a layer of their own over the ghost, so the blink is the layer's. */}
+            <svg
+              width="120"
+              height="150"
+              viewBox="0 0 80 100"
+              className="animate-blink absolute inset-0 z-10"
+            >
               <ellipse cx="29" cy="36" rx="6" ry="7" fill="#0f172a" />
               <ellipse cx="51" cy="36" rx="6" ry="7" fill="#0f172a" />
               <circle cx="31" cy="34" r="2" fill="white" />
               <circle cx="53" cy="34" r="2" fill="white" />
-            </g>
+            </svg>
 
-            {/* Worried mouth */}
-            <path
-              d="M32 52 Q40 48 48 52"
-              stroke="#0f172a"
-              strokeWidth="3"
-              fill="none"
-              strokeLinecap="round"
-            />
-
-            {/* Little flashlight in hand */}
-            <rect x="58" y="40" width="12" height="8" rx="2" fill="#fcd34d" />
-            <rect x="68" y="41" width="6" height="6" rx="1" fill="#fef3c7" />
-          </svg>
-
-          {/* Question marks floating around */}
-          <span
-            className="absolute -top-2 -right-4 text-cyan-400/60 text-2xl animate-bounce"
-            style={{ animationDelay: "0s" }}
-          >
-            ?
-          </span>
-          <span
-            className="absolute top-8 -left-6 text-cyan-400/40 text-xl animate-bounce"
-            style={{ animationDelay: "0.3s" }}
-          >
-            ?
-          </span>
-          <span
-            className="absolute -bottom-2 right-0 text-cyan-400/50 text-lg animate-bounce"
-            style={{ animationDelay: "0.6s" }}
-          >
-            ?
-          </span>
+            {/* Question marks floating around */}
+            <span
+              className="absolute -top-2 -right-4 text-cyan-400/60 text-2xl animate-bounce"
+              style={{ animationDelay: "0s" }}
+            >
+              ?
+            </span>
+            <span
+              className="absolute top-8 -left-6 text-cyan-400/40 text-xl animate-bounce"
+              style={{ animationDelay: "0.3s" }}
+            >
+              ?
+            </span>
+            <span
+              className="absolute -bottom-2 right-0 text-cyan-400/50 text-lg animate-bounce"
+              style={{ animationDelay: "0.6s" }}
+            >
+              ?
+            </span>
+          </div>
         </div>
 
         {/* 404 text */}
@@ -235,7 +206,7 @@ export function NotFoundScene() {
               0
             </span>
             <svg
-              className="absolute inset-0 w-full h-full"
+              className="animate-spin-slow absolute inset-0 w-full h-full"
               viewBox="0 0 100 100"
             >
               <circle
@@ -246,7 +217,6 @@ export function NotFoundScene() {
                 stroke="rgba(34, 211, 238, 0.3)"
                 strokeWidth="2"
                 strokeDasharray="10 5"
-                className="animate-spin-slow"
               />
             </svg>
           </span>
@@ -345,6 +315,78 @@ export function NotFoundScene() {
       </div>
 
       <style jsx global>{`
+        .nf-wander-x {
+          animation: nf-wander-x 3.14s -1.57s ease-in-out infinite alternate;
+        }
+        .nf-wander-y {
+          animation: nf-wander-y 2.51s ease-in-out infinite alternate;
+        }
+        @keyframes nf-wander-x {
+          from {
+            transform: translateX(-20px);
+          }
+          to {
+            transform: translateX(20px);
+          }
+        }
+        @keyframes nf-wander-y {
+          from {
+            transform: translateY(15px);
+          }
+          to {
+            transform: translateY(-15px);
+          }
+        }
+
+        /* The beam swings about the flashlight (40, 45 in the ghost's 80x100 box, drawn at 1.5x). */
+        .nf-sweep {
+          transform-origin: 60px 67.5px;
+          animation: searchBeam 3s ease-in-out infinite;
+        }
+        /* Bright for 2 s, dim for 2 s, half a second to change. */
+        .nf-search {
+          animation: nf-search 4s linear infinite;
+        }
+        @keyframes nf-search {
+          0%,
+          50% {
+            opacity: 1;
+          }
+          62.5%,
+          87.5% {
+            opacity: 0.4;
+          }
+          100% {
+            opacity: 1;
+          }
+        }
+
+        /* Each ghost floats by twice, then the background is still: the last is gone within a minute. */
+        .nf-floater {
+          animation-name: nf-float;
+          animation-timing-function: ease-in-out;
+          animation-iteration-count: 2;
+          animation-fill-mode: both;
+        }
+        @keyframes nf-float {
+          0% {
+            opacity: 0;
+            transform: translate(0, 20px) rotate(0deg);
+          }
+          33.333% {
+            opacity: 1;
+            transform: translate(10px, 0) rotate(5deg);
+          }
+          66.667% {
+            opacity: 1;
+            transform: translate(-10px, -30px) rotate(-5deg);
+          }
+          100% {
+            opacity: 0;
+            transform: translate(0, -60px) rotate(0deg);
+          }
+        }
+
         @keyframes searchBeam {
           0%,
           100% {
@@ -379,7 +421,9 @@ export function NotFoundScene() {
           animation: spin-slow 20s linear infinite;
         }
 
+        /* The lids close on the eyes' line (y 36 of 100). */
         .animate-blink {
+          transform-origin: 50% 36%;
           animation: blink 4s ease-in-out infinite;
         }
       `}</style>
