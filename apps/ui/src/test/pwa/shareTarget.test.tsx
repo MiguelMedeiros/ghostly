@@ -6,7 +6,7 @@ import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { SharePicker } from "../../pages/SharePicker";
 import { groupChat } from "../../lib/chatMute";
 import { incomingShare, receiveShare, resetIncomingShare, sendShareTo, shareText, takeShareFor, type IncomingShare } from "../../lib/incomingShare";
-import { saveSession } from "../../lib/storage";
+import { saveSession, setSessionDraft } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 import { engineState, fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
@@ -114,6 +114,29 @@ describe("in the composer", () => {
     const items = within(sheet).getAllByTestId("attachment-item");
     expect(items.map((item) => item.textContent)).toEqual([expect.stringContaining("Shared text.txt"), expect.stringContaining("ghost.txt")]);
     expect(screen.getByPlaceholderText<HTMLTextAreaElement>("Message…").value).toBe("");
+  });
+
+  it.each([["Japanese", "日本語".repeat(2_000)], ["emoji", "👻".repeat(5_000)]])("a %s text under the field's length but over the message's bytes goes as a text file too", async (_, text) => {
+    renderApp(<LockScreenProvider><MessageInput draftId="chat-1" onSend={onSend} onSendFile={onSendFile} maxLength={16_384} textBytes={16_384} /></LockScreenProvider>);
+    act(() => {
+      receiveShare(share({ text }));
+      sendShareTo("chat-1");
+    });
+    const sheet = await screen.findByTestId("attachment-sheet");
+    expect(within(sheet).getByTestId("attachment-item")).toHaveTextContent("Shared text.txt");
+    expect(screen.getByPlaceholderText<HTMLTextAreaElement>("Message…").value).toBe("");
+  });
+
+  it("a text that fits alone but not after the draft goes as a text file, the draft left as it was", async () => {
+    setSessionDraft("chat-joined", "a".repeat(10_000));
+    renderApp(<LockScreenProvider><MessageInput draftId="chat-joined" onSend={onSend} onSendFile={onSendFile} maxLength={16_384} textBytes={16_384} /></LockScreenProvider>);
+    act(() => {
+      receiveShare(share({ text: "b".repeat(10_000) }));
+      sendShareTo("chat-joined");
+    });
+    const sheet = await screen.findByTestId("attachment-sheet");
+    expect(within(sheet).getByTestId("attachment-item")).toHaveTextContent("Shared text.txt");
+    expect(screen.getByPlaceholderText<HTMLTextAreaElement>("Message…").value).toBe("a".repeat(10_000));
   });
 
   it("a draft over the cap, where files cannot go, takes every edit that shortens it and none that grows it", async () => {
