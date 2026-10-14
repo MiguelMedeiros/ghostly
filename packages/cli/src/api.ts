@@ -72,6 +72,16 @@ export const SETTABLE: Record<string, "strings" | "string" | "boolean" | "ice"> 
   autoDownloads: "boolean", serveFiles: "boolean",
 };
 
+/**
+ * A relay address the engine refuses (node.ts `updateSettings`, irohWeb.ts, hyperdhtRelay.ts): the person's value, so
+ * `bad_request` named by its key, in a terminal's words ("give", not the app's "Enter"). Before, `engine` (exit 1).
+ */
+function relayRefused(error: unknown, patch: Record<string, unknown>): unknown {
+  if (!(error instanceof Error) || !/^(?:Enter (?:at least one|a) relay address|Not a relay address)\b/.test(error.message)) return error;
+  const keys = ["relays", "irohRelays", "hyperdhtRelay"].filter((key) => Object.hasOwn(patch, key));
+  return new CliError("bad_request", `${keys.join(", ") || "relays"}: ${error.message.replace(/^Enter /, "give ").replace(/^Not /, "not ")}`);
+}
+
 // ---------- transports ----------
 
 const TRANSPORT_NAMES: Record<string, PairedTransport | "auto" | "dht"> = {
@@ -202,7 +212,7 @@ const METHODS: Record<string, Method> = {
       }
       patch[key] = value;
     }
-    await node(ctx).updateSettings({ settings: patch });
+    await node(ctx).updateSettings({ settings: patch }).catch((error: unknown) => { throw relayRefused(error, patch); });
     return { ...redactSettings(state(ctx).settings), ...(warning ? { warning } : {}) };
   },
 
