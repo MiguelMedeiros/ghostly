@@ -654,6 +654,7 @@ describe("a run of the train", () => {
   it("blames nobody while the base itself is red, and goes on once it is green", async () => {
     const repo = fakeRepo();
     for (const n of [11, 12]) repo.add(n);
+    repo.add(13, { ci: [] }); // no CI yet: it stays in line behind the batch
     await repo.run();
     repo.runs.set("dev0", red);
     repo.settle([11, 12]);
@@ -661,9 +662,13 @@ describe("a run of the train", () => {
     expect(held.log.join("\n")).toMatch(/HOLD .*itself is red/);
     expect(held.failed).toEqual([]);
     expect(repo.members()).toEqual([11, 12]);
+    // Everyone in line is told why nothing moves, not "waiting for its CI" under a batch that is already red.
+    for (const n of [11, 12, 13]) expect(repo.comments.get(n)!.at(-1)!.body).toMatch(/on hold: CI Success on `dev` itself is red/);
+    expect(repo.comments.get(11)!.at(-1)!.body).not.toMatch(/waiting for its CI/);
     repo.runs.set("dev0", green);
     await repo.run();
     expect(repo.members()).toEqual([11]); // now it bisects
+    for (const n of [11, 12, 13]) expect(repo.comments.get(n)!.at(-1)!.body).not.toMatch(/on hold/);
   });
 
   it("tries a single red pull request once more before failing it (a flake lands)", async () => {
@@ -1293,6 +1298,11 @@ describe("one pull request alone", () => {
     expect(held.log.join("\n")).toMatch(/HOLD #11: .*itself is red/);
     expect(repo.pulls.get(11)!.sha).toBe(head);
     expect(repo.alone(11)!.retried).toBe(false);
+    // Its own CI Success is red: the comment says the train waits for `dev`, not for its CI.
+    const said = repo.comments.get(11)!.at(-1)!.body;
+    expect(said).toMatch(/on hold: CI Success on `dev` itself is red/);
+    expect(said).not.toMatch(/waiting for CI Success/);
+    expect(repo.alone(11)).toMatchObject({ sha: head });
   });
 
   it("rebases again when the base moves under it, and never lands green on an old tip", async () => {
