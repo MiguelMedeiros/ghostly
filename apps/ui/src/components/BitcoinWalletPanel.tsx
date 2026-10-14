@@ -3,7 +3,7 @@ import type { PaymentReview as Review } from "@ghostly/core";
 import type { WalletPlatform, WalletState } from "../lib/platform";
 import { PaymentReview } from "./PaymentReview";
 import { paymentStateLabel } from "./paymentWords";
-import { Actions, Address, Amount, Button, Notice, Row, Section, input, type Action } from "./wallet/ui";
+import { Actions, Address, Amount, Button, Notice, Row, Section, Signed, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
 import { SourcePicker } from "./wallet/providers/SourcePicker";
 import { changeableFields } from "./wallet/providers/sourceStatus";
@@ -102,7 +102,8 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
               {bt.history.length === 0 ? <Notice>{t("wallet.bitcoin.nothingYet")}</Notice> : bt.history.map((tx) => (
                 <div key={tx.txid} className="text-sm py-1 flex flex-wrap justify-between gap-x-2" data-testid="bitcoin-tx">
                   <span className="min-w-0 flex-1 font-mono text-xs text-text-muted truncate">{tx.txid}</span>
-                  <span className={`tabular-nums shrink-0 ${tx.amount > 0 ? "text-accent" : "text-text-primary"}`}>{tx.confirmations ? t("wallet.bitcoin.tx.confirmed", { sign: tx.amount > 0 ? "+" : "−", amount: formatAmount(Math.abs(tx.amount), t.language), count: tx.confirmations }) : t("wallet.bitcoin.tx.unconfirmed", { sign: tx.amount > 0 ? "+" : "−", amount: formatAmount(Math.abs(tx.amount), t.language) })}</span>
+                  {/* The sign goes with the amount, in its own left-to-right run (Signed): the translation's {{sign}} stays empty. */}
+                  <span className={`tabular-nums shrink-0 ${tx.amount > 0 ? "text-accent" : "text-text-primary"}`}>{fillNodes(tx.confirmations ? t("wallet.bitcoin.tx.confirmed", { sign: "", count: tx.confirmations }) : t("wallet.bitcoin.tx.unconfirmed", { sign: "" }), { amount: <Signed sign={tx.amount > 0 ? "+" : "−"} amount={formatAmount(Math.abs(tx.amount), t.language)} /> })}</span>
                 </div>
               ))}
             </div>

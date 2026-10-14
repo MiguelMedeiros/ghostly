@@ -120,4 +120,12 @@ export function Amount({ value, onChange, unit, decimals = 0, testId, autoFocus 
   );
 }
 
+/**
+ * A movement's amount with its sign ("+250", "−1,000"), read left to right in every language: the digits are Latin
+ * everywhere (lib/amount.ts), and a bare sign in a right-to-left line would go after them ("1,000−").
+ */
+export function Signed({ sign, amount }: { sign: "+" | "−"; amount: string }) {
+  return <span dir="ltr">{sign}{amount}</span>;
+}
+
 
