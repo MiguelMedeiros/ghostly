@@ -133,7 +133,8 @@ export function DeliveryStatus({ delivery, acked = false, onPicture = false, onR
       {tip && (
         <span role="tooltip" id={tipId} data-testid="message-delivery-tip"
           className="absolute bottom-full end-0 mb-1.5 z-20 w-max max-w-[15rem] whitespace-normal rounded-md border border-border bg-surface-alt px-2 py-1 text-start text-[11.5px] leading-snug text-text-primary shadow-lg pointer-events-none animate-fade-in">
-          {full ?? words.hint(state, live, group)}
+          {/* Not sent, with nothing to send again (a file that never left this device): no "Tap to send again". */}
+          {full ?? (state === "failed" && !onRetry ? words.label(state) : words.hint(state, live, group))}
         </span>
       )}
     </span>

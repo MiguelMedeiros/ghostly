@@ -680,6 +680,26 @@ describe("MessageBubble: delivery", () => {
     expect(await screen.findByTestId("message-retry-error-title")).toHaveTextContent("This file is no longer here");
   });
 
+  it("a file of mine whose copy into this device failed has the red mark, with nothing to send again", async () => {
+    vi.spyOn(servicesPlatform!, "getFile").mockResolvedValue(null);
+    const retryFile = vi.spyOn(servicesPlatform!, "retryFile").mockResolvedValue();
+    const file = { id: "link-1-out-f", name: "film.mp4", size: 20_000_000, mime: "video/mp4" };
+    // The row Chat.tsx adds at once, before the copy: no delivery state of its own.
+    const { user, engine } = bubble({ sender: "me", text: "film.mp4", file });
+    act(() => engine.update({ transfers: { [file.id]: { state: "failed", direction: "out", transferred: 0, size: file.size, error: "Not enough space on this device to send it", retry: false } } }));
+
+    expect(mark()).toHaveAttribute("data-delivery", "failed");
+    expect(mark()).toHaveAccessibleName("Not sent");
+    expect(screen.queryByRole("button", { name: "Not sent. Send again" })).not.toBeInTheDocument();
+    await user.click(mark());
+    expect(screen.getByTestId("message-delivery-tip")).toHaveTextContent("Not sent");
+    expect(screen.getByTestId("message-delivery-tip")).not.toHaveTextContent("send again");
+    await user.click(screen.getByTestId("message-options"));
+    expect(screen.queryByTestId("message-retry")).not.toBeInTheDocument();
+    expect(retryFile).not.toHaveBeenCalled();
+    expect(engine.callsTo("retryMessage")).toEqual([]);
+  });
+
   it("marks a picture of mine on the dark chip over it, the same way", () => {
     bubble({ sender: "me", text: PNG, delivery: "waiting" });
     expect(mark().closest("[data-picture-time]")).not.toBeNull();
