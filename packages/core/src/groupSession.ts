@@ -11,7 +11,7 @@ import {
   type CommitKind, type GroupCommit, type GroupRole, type Roster,
 } from "./groupCommits";
 import {
-  encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupName, groupMetaChange, groupMetaNewer, groupMetaPicture, nextGroupMetaRevision, parseGroupMetaBody, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
+  encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupName, groupMetaChange, groupMetaNewer, groupMetaPicture, groupMetaToHand, keepPastGroupMeta, nextGroupMetaRevision, parseGroupMetaBody, groupMetaTag, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
   type GroupMeta, type GroupMetaChange, type GroupMetaFrame, type GroupMetaStatement,
 } from "./groupMeta";
 import { MENTION_LIMITS, validMentions, wireMentions, type GroupMention } from "./groupMentions";
@@ -182,6 +182,8 @@ export interface GroupState {
   nicks: Record<string, string>;
   /** The group's metadata (its picture), as the admin last signed it and I accepted it. */
   meta?: GroupMeta;
+  /** A few statements I held before `meta`, oldest first, for a member back from away (`keepPastGroupMeta`). Absent in older states. */
+  metaPast?: GroupMeta[];
   /**
    * My frames no edge took when I said them, as `e:n`, oldest first, kept until each was looked at once for saying again
    * (`resealBehind`): I may have been behind on the chain without knowing. Absent in older states.
@@ -1570,18 +1572,21 @@ export class GroupSession {
     // In the order they were written, as far as two logs can say: the receiver places each where it arrives, and my own
     // first then the others' showed it a conversation as all my lines, then all of theirs.
     const written = asWritten(this.ownLacked(from, frame), kept);
-    // The group's picture or name, when theirs is older (after the commits and secrets above, which it may need), before
-    // the first message written after it: they place its line where it comes, as they do each message.
-    const meta = this.metaFor(from, frame.mt), after = meta ? written.findIndex(f => f.ts > this.state.meta!.ts) : -1;
-    if (meta && after >= 0) answer.push(...written.slice(0, after), meta, ...written.slice(after));
-    else answer.push(...written);
+    // The group's picture or name, when theirs is older (after the commits and secrets above, which it may need), each
+    // statement they missed before the first message written after it: they place its line where it comes, as they do
+    // each message.
+    const metas = this.metaFor(from, frame.mt);
+    for (const f of written) {
+      while (metas.length && metas[0].ts < f.ts) answer.push(metas.shift()!.frame);
+      answer.push(f);
+    }
     // Their latest edits too, after the messages they change (a sync says nothing of edits: one they have changes nothing).
     for (const author of asked) {
       const edits = (this.state.relayEdits ?? []).filter(f => f.s === author && this.state.chain[f.e] && rosterHas(this.state.chain[f.e].m, from));
       answer.push(...edits.slice(-GROUP_LIMITS.handOnEdits));
     }
-    // Or last, when none was.
-    if (meta && after < 0) answer.push(meta);
+    // Or last, those after every message.
+    answer.push(...metas.map(m => m.frame));
     this.handOut(from, answer);
   }
 
@@ -1647,6 +1652,7 @@ export class GroupSession {
     const before = this.state.meta;
     const meta = signGroupMeta({ g: this.id, e: this.epoch, h: commitHash(this.top), r: nextGroupMetaRevision(before, this.epoch), ts: now }, body, this.identity.seed, this.myKey);
     this.state.meta = meta;
+    this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, meta);
     await this.persist();
     const secret = this.secret(this.epoch);
     if (secret) {
@@ -1660,14 +1666,15 @@ export class GroupSession {
 
   /** My statement, to a member whose sync says it holds an older one (or none); nothing to an app that says nothing. */
   private offerMeta(to: string, theirTag: unknown): void {
-    const frame = this.metaFor(to, theirTag);
-    if (frame) this.hooks.send(to, frame);
+    for (const { frame } of this.metaFor(to, theirTag)) this.hooks.send(to, frame);
   }
-  private metaFor(to: string, theirTag: unknown): GroupEdgeFrame | null {
-    const meta = this.state.meta, theirs = parseGroupMetaTag(theirTag);
-    if (!meta || theirs === null || !groupMetaNewer(meta, theirs) || !rosterHas(this.roster, to)) return null;
-    const secret = this.secret(this.epoch);
-    return secret ? wrapGroupMeta(meta, this.epoch, epochKeys(secret, this.id, this.epoch).message) : null;
+  /** The statements a member whose sync says it holds `theirTag` missed, oldest first, sealed under my current epoch (`groupMetaToHand`). */
+  private metaFor(to: string, theirTag: unknown): { ts: number; frame: GroupEdgeFrame }[] {
+    const meta = this.state.meta, theirs = parseGroupMetaTag(theirTag), secret = this.secret(this.epoch);
+    if (!meta || theirs === null || !secret || !rosterHas(this.roster, to)) return [];
+    const key = epochKeys(secret, this.id, this.epoch).message;
+    return groupMetaToHand(this.state.metaPast, meta, theirs, m => rosterHas(this.state.chain[m.e]?.m ?? [], to))
+      .map(m => ({ ts: m.ts, frame: wrapGroupMeta(m, this.epoch, key) }));
   }
 
   /**
@@ -1689,6 +1696,7 @@ export class GroupSession {
     if (!opened) return;
     const before = this.state.meta;
     this.state.meta = opened.meta;
+    this.state.metaPast = keepPastGroupMeta(this.state.metaPast, before, opened.meta);
     await this.persist();
     // A change of hubs alone is no line in the history, nor what the group looked like when I got in: the first
     // statement I take, signed under a commit before mine, is no change made while I was a member.

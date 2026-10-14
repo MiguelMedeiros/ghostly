@@ -6,9 +6,10 @@ const PIC = "data:image/jpeg;base64," + btoa(String.fromCharCode(0xff, 0xd8, 0xf
 
 /**
  * Four members, Dave away (network cut with the app running, or the app closed): Bob and Carol write 3 lines, Alice
- * renames the group or changes its picture, they write 3 more. Dave's history and Carol's, once Dave is back.
+ * renames the group or changes its picture, they write 3 more, and so on for each change. Dave's history and Carol's,
+ * once Dave is back.
  */
-async function backFromAway(mode: "mesh" | "community", way: "cut" | "restart", change: "rename" | "picture") {
+async function backFromAway(mode: "mesh" | "community", way: "cut" | "restart", changes: ("rename" | "picture")[]) {
   const world = mode === "mesh" ? new CommunityWorld(undefined, null) : new CommunityWorld();
   const peers = ["alice", "bob", "carol", "dave"].map(n => world.add(n));
   const [alice, bob, carol, dave] = peers;
@@ -25,10 +26,12 @@ async function backFromAway(mode: "mesh" | "community", way: "cut" | "restart", 
     for (let i = 0; i < 3; i++) { const p = [bob, carol][i % 2]; const text = `${p.name} ${tag}${i + 1}`; written.push(text); await p.groups.send(id, text); await world.run(2_000); }
   };
   await talk("b");
-  if (change === "rename") await alice.groups.rename(id, "Turns 2"); else await alice.groups.setPicture(id, PIC);
-  written.push(change === "rename" ? "[renamed]" : "[picture]");
-  await world.run(5_000);
-  await talk("a");
+  for (const [i, change] of changes.entries()) {
+    if (change === "rename") await alice.groups.rename(id, `Turns ${i + 2}`); else await alice.groups.setPicture(id, PIC);
+    written.push(change === "rename" ? "[renamed]" : "[picture]");
+    await world.run(5_000);
+    await talk(`a${i + 1}.`);
+  }
   await world.run(10_000);
   if (way === "cut") world.cut = null; else await world.restart(dave);
   await world.run(4 * 60_000);
@@ -39,9 +42,20 @@ async function backFromAway(mode: "mesh" | "community", way: "cut" | "restart", 
 describe("a member back from away reads a rename or a new picture where it was made", { timeout: 120_000 }, () => {
   for (const mode of ["mesh", "community"] as const) for (const way of ["cut", "restart"] as const) for (const change of ["rename", "picture"] as const) {
     it(`${mode === "mesh" ? "a private group" : "a community"}, ${way === "cut" ? "network cut" : "app closed"}: the ${change} line between the lines written before and after it`, async () => {
-      const { carol, dave, written } = await backFromAway(mode, way, change);
+      const { carol, dave, written } = await backFromAway(mode, way, [change]);
       expect(carol).toEqual(written);
       // Not the newest row (and the list's preview), below the lines written after it.
+      expect(dave).toEqual(written);
+    });
+  }
+});
+
+describe("a member back from away who missed two changes reads each where it was made", { timeout: 120_000 }, () => {
+  for (const mode of ["mesh", "community"] as const) for (const changes of [["rename", "rename"], ["rename", "picture"]] as const) {
+    it(`${mode === "mesh" ? "a private group" : "a community"}: a ${changes[0]} then a ${changes[1]}, each line between the lines written before and after it`, async () => {
+      const { carol, dave, written } = await backFromAway(mode, "cut", [...changes]);
+      expect(carol).toEqual(written);
+      // Not the two merged into the latest's line, nor the first one's line missing.
       expect(dave).toEqual(written);
     });
   }
