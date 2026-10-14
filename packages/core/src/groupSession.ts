@@ -1231,6 +1231,9 @@ export class GroupSession {
     if (raw.s === this.myKey) { await this.ownFrame(raw); return; }
     const relayed = raw.s !== from;
     if (relayed && (!rosterHas(this.roster, from) || !this.handsOn(raw.s, raw.e))) return;
+    // One I took whole already (markSeen) is dropped, signed or not, before its signature costs a check: in a mesh, every
+    // member a member back hears from hands it on. A copy taken stripped is not seen yet, and goes on to be checked.
+    if (this.isDuplicate(raw)) return;
     // Signed by its author before it may wait, so a frame no member wrote never takes the place of one that was.
     if (!verify(fromBase64Url(raw.sig), messageSigned(raw), publicKeyFromZ32(raw.s))) return;
     if (raw.e > this.epoch) { this.park(from, raw); return; }
@@ -1239,7 +1242,6 @@ export class GroupSession {
     const commit = this.state.chain[raw.e];
     // Not from a member of that epoch, or from before I was one: nothing to read, nothing to ask for.
     if (!commit || !rosterHas(commit.m, raw.s) || !rosterHas(commit.m, this.myKey)) return;
-    if (this.isDuplicate(raw)) return;
     // Whole: from its author's own edge, or handed on with the author's signature over every field. Anything else a
     // member handing it on may have stripped (the mentions, the reply, the hop count): its text is shown, but it is
     // neither seen nor kept nor handed on, so a sync still asks for it and a whole copy completes it.
