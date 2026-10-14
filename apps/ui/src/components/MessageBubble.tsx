@@ -22,7 +22,7 @@ import { STATUS_TONE, cardLabel, showsCard, type ShownCard } from "../lib/status
 import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
 import { downloadFile, downloadName, downloadState, Unconverted, type DownloadFormat } from "../lib/fileDownload";
-import { canRetryFile, fileHeld } from "../lib/fileStatus";
+import { canRetryFile, fileHeld, fileNeverSent } from "../lib/fileStatus";
 import { holdFull, rawError, SAVE_REFUSED } from "../lib/errorText";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
@@ -764,7 +764,10 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const { platform, transfer } = useTransfer(isMe ? message.file?.id : undefined);
   // A file of mine whose bytes did not go has the red mark, not ticks beside its "Not sent". While they move, the
   // message keeps its own mark: the bytes' progress is the file's to show (held files travel by hold/1, not files/3).
-  const fileFailed = !!message.file && canRetryFile(message.file, transfer, platform);
+  // One whose copy into this device failed never left it: the red mark too, but nothing to send again.
+  const fileRetry = !!message.file && canRetryFile(message.file, transfer, platform);
+  const fileUnsent = !!message.file && fileNeverSent(transfer);
+  const fileFailed = fileRetry || fileUnsent;
   const shown = fileFailed ? "failed" as const : message.delivery;
   // A file waiting in a DHT-only chat waits for a live connection, not for the contact to be online.
   const live = waitsForLive(isMe && !fileFailed ? message : undefined, useDhtOnly(peerPubKey));
@@ -777,7 +780,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
    */
   const retry = async () => {
     setRefused(null);
-    if (fileFailed) { await platform!.retryFile!(message.file!.id).catch(refuse(shown)); return; }
+    if (fileRetry) { await platform!.retryFile!(message.file!.id).catch(refuse(shown)); return; }
     const link = engine.linkByPeer(peerPubKey);
     if (!link) return;
     await engine.call("retryMessage", { linkId: link.id, messageId: message.id }).catch((error: unknown) => {
@@ -797,7 +800,9 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     <Notice problem={refused.problem} testId="message-retry-error" className="max-w-full px-1 pt-1 text-[11px]" />
   );
   // The ⋮ has no mark to say a full storage on: it is said under the message, as any other refusal.
-  const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && shown === "failed" ? { onRetry: () => void retry().catch(refuse(shown)) } : {};
+  const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && shown === "failed" && !fileUnsent ? { onRetry: () => void retry().catch(refuse(shown)) } : {};
+  /** What the red mark sends again: nothing for a file that never left this device. */
+  const markRetry = fileUnsent ? undefined : retry;
   // What the sender's clock said, never later than when the message came (WISP 400, requirement 10).
   const shownAt = shownTime(message);
   const time = clockTime(shownAt, language);
@@ -935,7 +940,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     // changed, in the card.
     const card = message.card!;
     const time = <CardTime sent={shownTime(message)} changed={message.edit?.at} />;
-    const marks = isMe ? <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} error={message.deliveryError} /> : undefined;
+    const marks = isMe ? <DeliveryStatus delivery={shown} acked={isAcked} onRetry={markRetry} live={live} group={inGroup} error={message.deliveryError} /> : undefined;
     const edge = card.kind === "task" ? STATUS_TONE[card.status].bar
       : card.kind !== "routine" ? undefined : card.state === "paused" ? "bg-text-muted" : card.lastRun?.result === "failed" ? "bg-danger" : undefined;
     return (
@@ -1004,7 +1009,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         <span data-testid="message-time" data-at={shownAt} className="text-[11px] leading-none text-text-primary/65">
           {time}
         </span>
-        {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} error={message.deliveryError} />}
+        {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={markRetry} live={live} group={inGroup} error={message.deliveryError} />}
       </span>
     </span>
   );
@@ -1129,7 +1134,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
               <span className="text-[11px] leading-none text-[hsla(0,0%,100%,0.9)]">
                 {time}
               </span>
-              {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} error={message.deliveryError} onPicture />}
+              {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={markRetry} live={live} group={inGroup} error={message.deliveryError} onPicture />}
             </span>
           </div>
         ) : bigEmoji ? (
