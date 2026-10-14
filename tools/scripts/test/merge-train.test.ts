@@ -17,6 +17,12 @@ const greenForDocs = [
   ...["Frontend tests (packages ${{ matrix.shard }}/4)", "CLI on Linux ARM64", "Desktop media (macOS WKWebView)", "Desktop on macOS", "Website browser checks (${{ matrix.shard }}/4)", "Affected unit tests (draft)"].map((name, i) => ({ name, status: "completed", conclusion: "skipped", id: 10 + i })),
   ...["Changed paths", "Frontend lint and types", "Frontend tests (app)", "Frontend builds", "Tauri Backend (apps/desktop)", "Website"].map((name, i) => ({ name, status: "completed", conclusion: "success", id: 20 + i })),
 ];
+/** A push to dev whose tree a green run already tested (ci-changes.mjs's testedAs): only lint, types and Tauri Backend ran. */
+const greenTested = [
+  ...green,
+  ...["Frontend tests (app)", "Frontend tests (packages ${{ matrix.shard }}/4)", "CLI on Linux ARM64", "Frontend builds", "Website", "Website browser checks (${{ matrix.shard }}/4)", "Desktop media (macOS WKWebView)", "Desktop on macOS", "Affected unit tests (draft)"].map((name, i) => ({ name, status: "completed", conclusion: "skipped", id: 10 + i })),
+  ...["Changed paths", "Frontend lint and types", "Tauri Backend (apps/desktop)"].map((name, i) => ({ name, status: "completed", conclusion: "success", id: 30 + i })),
+];
 
 /** A fake repository: pull requests, labels, label events, comments, CI per commit, and the base's tip. */
 function fakeRepo() {
@@ -1661,6 +1667,45 @@ describe("a green CI run planned for other files", () => {
     repo.files.set(11, ["docs/A.md"]);
     repo.files.set(12, ["docs/B.md"]);
     expect((await repo.run()).merged).toEqual([11, 12]);
+  });
+
+  it("counts dev's own run planned `tested` (only Tauri Backend ran) as dev's green CI", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    await repo.run();
+    repo.runs.set("dev0", greenTested);
+    // An older red run on the same commit must not speak for it.
+    repo.earlier.set("dev0", [red]);
+    repo.settle([11, 12]);
+    const r = await repo.run();
+    expect(r.log.join("\n")).not.toMatch(/does not count|HOLD/);
+    expect(repo.members()).toEqual([11]); // it bisects
+  });
+
+  it("still passes over a dev run that skipped more than a `tested` push does", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    await repo.run();
+    repo.runs.set("dev0", greenTested.map((j) => (j.name.startsWith("Tauri Backend") ? { ...j, conclusion: "skipped" } : j)));
+    repo.earlier.set("dev0", [red]);
+    repo.settle([11, 12]);
+    const r = await repo.run();
+    expect(r.log.join("\n")).toMatch(/`dev`: a green CI run skipped what a push turns on \(.*rust.*\)/);
+    expect(r.log.join("\n")).toMatch(/HOLD .*itself is red/);
+  });
+
+  it("does not count a `tested` shape on an epic: only a push to dev may plan less", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { base: "epic/x" });
+    repo.add(12, { base: "epic/x" });
+    await repo.run({ base: "epic/x" });
+    repo.runs.set("epic0", greenTested);
+    repo.earlier.set("epic0", [red]);
+    repo.settle([11, 12]);
+    const r = await repo.run({ base: "epic/x" });
+    expect(r.log.join("\n")).toMatch(/HOLD .*itself is red/);
   });
 
   it("is passed over over REST: the run before it is read, and the files are the pull request's, renames by both names", async () => {
