@@ -184,6 +184,8 @@
     "adminInvites": "Solo el admin puede invitar",
     "adminLink": "Solo el admin puede cambiar o desactivar el enlace del grupo",
     "adminMembers": "Solo el admin puede cambiar los miembros de este grupo",
+    "adminOff": "Administrar este grupo está desactivado en este dispositivo",
+    "adminOffNext": "Actívalo primero: Administrar grupos desde este dispositivo, en la página del grupo.",
     "adminOnly": "Solo el admin puede hacer eso",
     "adminPicture": "Solo el admin puede cambiar la foto del grupo",
     "adminRename": "Solo el admin puede cambiar el nombre del grupo",

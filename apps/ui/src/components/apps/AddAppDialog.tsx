@@ -86,7 +86,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
           {!store && (
             <div className="flex justify-end gap-2 pt-2">
               <Button onClick={onClose}>{t("common.cancel")}</Button>
-              <Button type="submit" variant="primary" data-testid="apps-add-check" disabled={busy || !url.trim()}>{busy ? t("apps.add.checking") : t("apps.add.check")}</Button>
+              <Button type="submit" variant="primary" data-testid="apps-add-check" disabled={!url.trim()} loading={busy}>{busy ? t("apps.add.checking") : t("apps.add.check")}</Button>
             </div>
           )}
         </form>
@@ -105,7 +105,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
             <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>
             <div className="flex justify-end gap-2">
               <Button onClick={onClose}>{t("common.cancel")}</Button>
-              <Button variant="primary" data-testid="apps-add-store-confirm" disabled={busy} onClick={() => void addStore()}>{t("apps.add.addStore")}</Button>
+              <Button variant="primary" data-testid="apps-add-store-confirm" loading={busy} onClick={() => void addStore()}>{t("apps.add.addStore")}</Button>
             </div>
           </div>
         )}

@@ -1,7 +1,7 @@
 import {
   GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, MAX_GROUP_CHAIN, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_VERSION_SIGNALS, GROUP_SIGNAL_FRAME, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, PIN_LIMITS, ReactionWindow, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
   EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, readPin, receivedTimestamp, mergeKnocks, readKnocks, rosterHas, verifyCommitSignature, decodeCommunityLink, commitHash,
-  GROUP_LIMITS, frameBytes, type GroupMessageFrame,
+  GROUP_ADMIN_OFF_ERROR, GROUP_LIMITS, frameBytes, type GroupMessageFrame,
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
@@ -708,6 +708,8 @@ export class Groups {
     if (this.isCommunity(groupId)) throw new Error("Share the group's link with them: anyone who opens it joins");
     const session = this.session(groupId);
     if (!session.isAdmin) throw new Error("Only the admin can invite");
+    // Its accept would be let in by a commit, which this device may not sign (a restore or a forced takeover).
+    if (this.host.adminWork?.(groupId) === false) throw new Error(GROUP_ADMIN_OFF_ERROR);
     const group = this.stored.get(groupId)!;
     if (Object.entries(group.contacts ?? {}).some(([key, id]) => id === linkId && rosterHas(session.roster, key))) throw new Error("This contact is already a member");
     if (session.roster.length + (this.invited.get(groupId)?.size ?? 0) >= GROUP_MEMBER_CAP.max) throw new Error(`A group holds ${GROUP_MEMBER_CAP.max} members at most`);
@@ -1382,7 +1384,17 @@ export class Groups {
   /** The member at the other end of an entry session (the joiner, on the admin's side) or of a chat an invitation went over. */
   private linkMember(groupId: string, linkId: string): string | undefined {
     for (const [peer, id] of this.host.entries(groupId)) if (id === linkId) return peer;
-    return Object.entries(this.stored.get(groupId)?.contacts ?? {}).find(([, id]) => id === linkId)?.[0];
+    return this.chatMember(groupId, linkId);
+  }
+
+  /**
+   * The member a chat an invitation went over is: one removed and invited back over the same chat has its old key on it
+   * too (`contacts` keeps it for the removal notice), so the key in the roster, else the newest.
+   */
+  private chatMember(groupId: string, linkId: string): string | undefined {
+    const keys = Object.entries(this.stored.get(groupId)?.contacts ?? {}).filter(([, id]) => id === linkId).map(([key]) => key);
+    const roster = this.sessions.get(groupId)?.roster;
+    return (roster && keys.find(key => rosterHas(roster, key))) || keys[keys.length - 1];
   }
 
   /**
@@ -1703,8 +1715,7 @@ export class Groups {
       case "group-leave": {
         // A member I invited from my contacts leaves, and says so on our chat too: its edge may be down.
         const session = this.sessions.get(g);
-        const group = this.stored.get(g);
-        const member = Object.entries(group?.contacts ?? {}).find(([, id]) => id === linkId)?.[0];
+        const member = this.chatMember(g, linkId);
         if (!session?.isAdmin || !member || member === session.myKey) return;
         // Its edge may have carried the same leave a moment ago: removed once is enough.
         if (rosterHas(session.roster, member)) await session.remove(member, Date.now(), { left: true }).catch(() => {});
@@ -2098,9 +2109,9 @@ export class Groups {
     for (const key of tried.keys()) if (!lacking.has(key)) tried.delete(key);
     const out: string[] = [];
     for (const [key, mark] of lacking) {
-      if (key === via || !up(key)) continue;
+      if (key === via || !up(key) || !session.mayHold(via, key)) continue;
       const prior = asked.get(key);
-      if (prior && prior.via !== via && up(prior.via) && now - prior.at < MESH_GOSSIP_MS) continue;
+      if (prior && prior.via !== via && up(prior.via) && now - prior.at < MESH_GOSSIP_MS && session.mayHold(prior.via, key)) continue;
       let entry = tried.get(key);
       if (!entry || entry.mark !== mark) tried.set(key, (entry = { mark, of: new Set(), noticed: entry?.noticed, last: entry?.last }));
       if (entry.of.has(via)) continue;
@@ -2146,7 +2157,8 @@ export class Groups {
     for (const [key, mark] of lacking) {
       const entry = tried.get(key);
       if (!entry || entry.mark !== mark || entry.at === undefined || now - entry.at < MESH_GAP_AGAIN_MS) continue;
-      if (!connected.includes(key) || !connected.every(member => entry.of.has(member))) continue;
+      // A member let in since those epochs is not asked (`gapsOf`): it holds none of them.
+      if (!connected.includes(key) || !connected.every(member => entry.of.has(member) || !session.mayHold(member, key))) continue;
       let gone = this.gapsGone.get(groupId);
       if (!gone) this.gapsGone.set(groupId, (gone = new Map()));
       const upTo = { ...gone.get(key) };
@@ -2184,7 +2196,9 @@ export class Groups {
       if (!up(key)) continue;
       if (!last) { if (now - (entry.noticed ?? now) >= MESH_GAP_AGAIN_MS) fresh.set(key, mark); continue; }
       if (now - last.at < MESH_GAP_AGAIN_MS || !up(last.via)) continue;
-      if (session.filledSince(key, last.asked)) again.set(last.via, [...(again.get(last.via) ?? []), key]);
+      if (!session.filledSince(key, last.asked)) continue;
+      // What is left is of epochs it was not in (it was let in since): another member is asked now.
+      if (session.mayHold(last.via, key)) again.set(last.via, [...(again.get(last.via) ?? []), key]); else fresh.set(key, mark);
     }
     const asked = this.relayAsked.get(groupId);
     for (const [via, keys] of again) {
@@ -2196,10 +2210,12 @@ export class Groups {
     }
     if (!fresh.size || !connected.length) return;
     // The gossip turn's next member that is not one of the authors asked for, when there is another: an author hands on
-    // nobody's messages of its own. Taken from the turns' own order, the next turns go on to the members not asked yet.
+    // nobody's messages of its own, and one let in since holds none of them. Taken from the turns' own order, the next
+    // turns go on to the members not asked yet.
     const at = () => connected[(gossipStart(session.myKey) + this.gossipTurn++) % connected.length]!;
+    const helps = (member: string) => !fresh.has(member) && [...fresh.keys()].some(key => session.mayHold(member, key));
     let via = at();
-    for (let i = 1; i < connected.length && fresh.has(via); i++) via = at();
+    for (let i = 1; i < connected.length && !helps(via); i++) via = at();
     const keys = this.gapsOf(groupId, session, via, fresh);
     if (!keys.length) return;
     // As `askOf`: this is the gossip turn's ask, and the next waits a whole turn. Sooner, it found this one's answer
