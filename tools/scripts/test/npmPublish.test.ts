@@ -32,7 +32,7 @@ describe("the CLI on npm", () => {
     const workflow = read(".github/workflows/npm-publish.yml");
     expect(workflow).toMatch(/^ {2}release:\n {4}types: \[published\]$/m);
     expect(workflow).toMatch(/^ {6}id-token: write$/m);
-    expect(workflow).toContain("npm publish --workspace @ghostlytools/cli --provenance --access public");
+    expect(workflow).toContain('npm publish "$RUNNER_TEMP/cli/ghostlytools-cli-$VERSION.tgz" --provenance --access public --ignore-scripts');
     // A tag that does not match the package's version never reaches npm.
     expect(workflow).toContain('"v$version" != "$TAG"');
   });
@@ -58,11 +58,36 @@ describe("npm-publish.yml's tokens", () => {
   const all = jobs();
 
   it("only the two publish jobs can ask for one, and both run in the npm environment their Trusted Publishers name", () => {
-    expect(Object.keys(all).sort()).toEqual(["check-cli", "check-sdk", "publish", "publish-sdk", "verify-sdk"]);
+    expect(Object.keys(all).sort()).toEqual(["build-cli", "check-cli", "check-sdk", "publish", "publish-sdk", "verify-sdk"]);
     const withToken = Object.keys(all).filter((id) => /id-token: write/.test(all[id]!)).sort();
     expect(withToken).toEqual(["publish", "publish-sdk"]);
     for (const id of withToken) expect(all[id], id).toMatch(/^ {4}environment: npm$/m);
     expect(read("docs/RELEASING.md")).toContain("environment `npm`");
+  });
+
+  it("never checks out, installs, builds or runs a script where a token is: a dependency's install script or build tool could ask for one", () => {
+    const withToken = Object.keys(all).filter((id) => /id-token: write/.test(all[id]!));
+    for (const id of withToken) {
+      for (const step of ["actions/checkout@", "npm ci", "npm install", "npm run", "npm pack", "npx "]) expect(all[id], `${id}: ${step}`).not.toContain(step);
+      expect(all[id], id).not.toMatch(/^ +cache:/m);
+      expect(all[id], id).not.toMatch(/npm publish (?!.*--ignore-scripts)/);
+    }
+  });
+
+  it("publishes the CLI tarball build-cli packed from the tag, with no token there", () => {
+    const build = all["build-cli"]!;
+    expect(build).not.toContain("id-token");
+    expect(build).not.toMatch(/^ {4}environment:/m);
+    expect(build).toContain("npm ci");
+    expect(build).toContain("npm run build -w @ghostlytools/cli");
+    expect(build).toContain('npm pack --workspace @ghostlytools/cli --pack-destination "$RUNNER_TEMP/cli"');
+    expect(build).toContain("actions/upload-artifact@");
+    const publish = all["publish"]!;
+    expect(publish).toMatch(/needs: build-cli/);
+    expect(publish).toContain("actions/download-artifact@");
+    expect(publish).toContain('p.name === "@ghostlytools/cli" && p.version === process.env.VERSION');
+    expect(publish).toContain('npm publish "$RUNNER_TEMP/cli/ghostlytools-cli-$VERSION.tgz" --provenance --access public --ignore-scripts');
+    expect(all["check-cli"]).toMatch(/needs: \[build-cli, publish\]/);
   });
 
   it("publishes the SDK tarball verify-sdk checked, with no install, build or script where the token is", () => {
