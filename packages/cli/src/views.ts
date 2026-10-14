@@ -98,7 +98,8 @@ export function chatDetailsJson(link: LinkView, showSecret?: boolean) {
 export interface MessageJson {
   id: string;
   chat: string;
-  from: "me" | "peer";
+  /** `system`: a line of the group's own (`event`: created, joined, renamed…), whoever's key is on it; nobody wrote it. */
+  from: "me" | "peer" | "system";
   text: string;
   /** Its place in the history, which is ordered by it: when I sent it, or when it came here (never the sender's clock). */
   timestamp: number;
@@ -142,7 +143,8 @@ export function messageJson(message: StoredMessage): MessageJson {
   return {
     id: message.id,
     chat: message.linkId,
-    from: message.sender,
+    // The engine keeps a group's own lines as the peer's, mine with my key: a bot reading others' words by `from` took them for a member's.
+    from: message.event ? "system" : message.sender,
     text: message.text,
     timestamp: message.timestamp,
     ...(message.sentAt !== undefined ? { sentAt: message.sentAt } : {}),
