@@ -36,6 +36,16 @@ const focused = (page: Page) =>
   }, SEEN);
 
 /**
+ * The chapter is a live scene, hydrated: the server's HTML is already the scene (not the article) and shows its
+ * second step, and the client puts the step the scroll is at, the first one at a chapter's start. A focus or a click
+ * before that has no handler yet and the chapter stays where it was.
+ */
+async function live(page: Page, id: string) {
+  await expect(page.locator(`#${id}:not(.scene--static)`)).toHaveCount(1);
+  await expect(page.locator(`#${id} .scene-step`).first()).toHaveAttribute("data-active", "true", { timeout: 8000 });
+}
+
+/**
  * The step is there within a few frames of the key (the page jumps, nothing glides), inside the 600 ms between two
  * Tabs of a person; then it must stay.
  */
@@ -52,7 +62,7 @@ for (const [k, id] of CHAPTERS.entries()) {
 
   test(`Tab from the last step button of #${id} shows the first step of #${next}`, async ({ page }) => {
     await page.goto("/", { waitUntil: "networkidle" });
-    await expect(page.locator(`#${id}:not(.scene--static)`)).toHaveCount(1);
+    await live(page, id);
     const last = (await page.locator(`#${id} .scene-progress button`).count()) - 1;
     await page.locator(`#${id} .scene-progress button`).nth(last).focus();
     await shows(page, id, last);
@@ -62,7 +72,7 @@ for (const [k, id] of CHAPTERS.entries()) {
 
   test(`Shift+Tab from the first step button of #${next} shows the last step of #${id}`, async ({ page }) => {
     await page.goto("/", { waitUntil: "networkidle" });
-    await expect(page.locator(`#${next}:not(.scene--static)`)).toHaveCount(1);
+    await live(page, next);
     const last = (await page.locator(`#${id} .scene-progress button`).count()) - 1;
     await page.locator(`#${next} .scene-progress button`).first().focus();
     await shows(page, next, 0);
@@ -73,7 +83,7 @@ for (const [k, id] of CHAPTERS.entries()) {
 
 test("Tab along a chapter's step buttons shows each step", async ({ page }) => {
   await page.goto("/", { waitUntil: "networkidle" });
-  await expect(page.locator("#dht:not(.scene--static)")).toHaveCount(1);
+  await live(page, "dht");
   const n = await page.locator("#dht .scene-progress button").count();
   await page.locator("#dht .scene-progress button").first().focus();
   await shows(page, "dht", 0);
@@ -85,9 +95,8 @@ test("Tab along a chapter's step buttons shows each step", async ({ page }) => {
 
 test("a click on a step button still goes to its step", async ({ page }) => {
   await page.goto("/#invite", { waitUntil: "networkidle" });
-  await expect(page.locator("#invite:not(.scene--static)")).toHaveCount(1);
+  await live(page, "invite");
   const active = () => page.locator("#invite .scene-step").evaluateAll((steps) => steps.findIndex((s) => (s as HTMLElement).dataset.active === "true"));
-  await expect.poll(active, { timeout: 8000 }).toBe(0);
   await page.locator("#invite .scene-progress button").nth(2).click();
   await expect.poll(active, { timeout: 8000 }).toBe(2);
 });
@@ -95,7 +104,7 @@ test("a click on a step button still goes to its step", async ({ page }) => {
 for (const id of CHAPTERS) {
   test(`a click on the last step button of #${id} rests on a fully opaque panel`, async ({ page }) => {
     await page.goto(`/#${id}`, { waitUntil: "networkidle" });
-    await expect(page.locator(`#${id}:not(.scene--static)`)).toHaveCount(1);
+    await live(page, id);
     const last = (await page.locator(`#${id} .scene-progress button`).count()) - 1;
     await page.locator(`#${id} .scene-progress button`).nth(last).click();
     const rests = () =>
