@@ -53,7 +53,7 @@ export class Mesh {
   /** Both sides of an edge that just opened introduce themselves; `ask`: the members each side asks the other to hand on. */
   async open(a: GroupSession, b: GroupSession, ask: { a?: string[]; b?: string[] } = {}): Promise<void> {
     this.setEdge(a.myKey, b.myKey, true);
-    this.pending.push(b.handle(a.myKey, clone(a.syncFrame(ask.a))), a.handle(b.myKey, clone(b.syncFrame(ask.b))));
+    this.pending.push(b.handle(a.myKey, clone(a.syncFrame(ask.a, b.myKey))), a.handle(b.myKey, clone(b.syncFrame(ask.b, a.myKey))));
     await this.settle();
   }
   async settle(): Promise<void> {

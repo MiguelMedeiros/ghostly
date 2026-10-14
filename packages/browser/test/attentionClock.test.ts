@@ -138,3 +138,69 @@ describe("history stays quiet", () => {
     expect(heard).toEqual([]);
   });
 });
+
+/*
+ * A group member whose clock ran over a minute behind was never heard: what it wrote read as written over a minute
+ * before the newest message of the group (a late catch-up), and its lines started a catch-up of their own, so its
+ * mentions of me rang nothing either. Its clock is told, as a contact's is, by what came straight from it.
+ */
+describe("a group member whose clock is behind", () => {
+  const GROUP = "group:g1";
+  async function startedGroup() {
+    const server = new EngineServer({ automaticWallets: false, transport: fixture });
+    servers.push(server);
+    await server.ready;
+    const heard: { id: string; mention: boolean }[] = [];
+    server.attach({ post(event: EngineEvent | RpcResponse) { if (event.kind === "attention" && event.event.type === "message") heard.push({ id: event.event.id, mention: !!event.event.mention }); } });
+    const store = (message: StoredMessage, live = true) =>
+      (server.node as unknown as { storeNewMessage(m: StoredMessage, live?: boolean): Promise<boolean> }).storeNewMessage(message, live);
+    return { store, heard };
+  }
+  /** A member's message as the group hands it: dated by the member's clock (`skew` from mine), written `ago` before it comes. */
+  const member = (who: string, text: string, skew: number, extra: Partial<StoredMessage> = {}, ago = 0): StoredMessage =>
+    ({ linkId: GROUP, id: `${who}:${text}`, text, sender: "peer", member: who, timestamp: now + skew - ago, via: "datalink", ...extra });
+  const said = (who: string, text: string, mention = false) => ({ id: `message:${GROUP}:${who}:${text}`, mention });
+
+  it.each([["90 seconds", -90_000], ["five minutes", -5 * MINUTE]])("%s: its mention of me, and its next line, are heard", async (_, skew) => {
+    const { store, heard } = await startedGroup();
+    tick(15 * MINUTE);
+    await store(member("carol", "morning", 0));
+    tick();
+    await store(member("bob", "@Dave are you there?", skew, { mentioned: true }));
+    tick();
+    await store(member("bob", "hello?", skew));
+    expect(heard).toEqual([said("carol", "morning"), said("bob", "@Dave are you there?", true), said("bob", "hello?")]);
+  });
+
+  it("alone in the group, 90 seconds behind: its line, and its mention three seconds later, are heard", async () => {
+    const { store, heard } = await startedGroup();
+    tick(15 * MINUTE);
+    await store(member("bob", "anyone?", -90_000));
+    tick(3_000);
+    await store(member("bob", "@Dave?", -90_000, { mentioned: true }));
+    expect(heard).toEqual([said("bob", "anyone?"), said("bob", "@Dave?", true)]);
+  });
+
+  it("another member's clock is not read by it: a catch-up handed on is still quiet", async () => {
+    const { store, heard } = await startedGroup();
+    tick(15 * MINUTE);
+    await store(member("bob", "live", -90_000));
+    tick();
+    // Carol's, written five minutes ago and handed on by another member: Bob's clock says nothing of it.
+    await store(member("carol", "held up", 0, {}, 5 * MINUTE), false);
+    expect(heard).toEqual([said("bob", "live")]);
+  });
+
+  it("what did not come straight from the member does not tell its clock: its catch-up stays quiet", async () => {
+    const { store, heard } = await startedGroup();
+    tick(15 * MINUTE);
+    await store(member("carol", "now", 0));
+    tick();
+    // Bob's, written while I was away and handed to me in a catch-up, oldest first.
+    for (const [i, text] of ["one", "two", "three"].entries()) {
+      await store(member("bob", text, 0, {}, (10 - i) * MINUTE), false);
+      tick(50);
+    }
+    expect(heard).toEqual([said("carol", "now")]);
+  });
+});

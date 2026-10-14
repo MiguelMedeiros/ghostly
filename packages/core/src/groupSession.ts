@@ -194,12 +194,15 @@ export interface GroupState {
 /**
  * `completes`: this message was delivered before from a copy another member handed on without its author's whole
  * signature (its text only); this is the whole one, with the mentions, reply and hop count its author put there.
+ * `live`: it came straight from its author, over the author's own edge, as it was written: not handed on by another
+ * member, not an answer to my sync (a catch-up) and not one that waited for a secret. How long it took says how far
+ * the author's clock is from mine.
  */
 /**
  * `frame`: the frame the message came in, as it is kept to hand on to a member who missed it (only its author's own
  * fields, signed by its author); only with a whole copy. An app keeps it with the message it stores.
  */
-export interface GroupIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard; file?: GroupFileMeta; completes?: true; frame?: GroupMessageFrame }
+export interface GroupIncomingMessage { id: string; sender: string; epoch: number; seq: number; timestamp: number; text: string; mentions?: GroupMention[]; reply?: WireReply; forwarded?: number; card?: StatusCard; file?: GroupFileMeta; completes?: true; frame?: GroupMessageFrame; live?: true }
 
 export interface GroupSessionHooks {
   save(state: GroupState): Promise<void>;
@@ -253,6 +256,11 @@ export interface GroupSessionHooks {
   adminTurn?(): Promise<boolean>;
 }
 
+/**
+ * After my sync to a member, how long what comes from it may be its answer (a catch-up), and after each frame of the
+ * answer: slices go one after another, each once my app handled the last (`CATCH_UP_PAUSE_MS` at most between them).
+ */
+const ANSWER_WINDOW_MS = 5_000;
 const MAX_TEXT_BOX = Math.ceil((GROUP_LIMITS.textBytes + 16) * 4 / 3) + 4;
 /** Sixteen mentions as JSON, each a key and two offsets, with room to spare, sealed. */
 const MAX_MENTIONS_BOX = Math.ceil((MENTION_LIMITS.count * 96 + 16) * 4 / 3) + 4;
@@ -430,6 +438,11 @@ export class GroupSession {
    * word, so it never counts as seen. In memory only: the syncs come again when the edges do.
    */
   private heard = new Map<string, Map<number, number>>();
+  /**
+   * Per member: until when what comes over its edge may be its answer to my sync (`syncFrame`), a catch-up and not a
+   * message written just now. Each frame of the answer keeps it open: it goes a slice at a time. In memory only.
+   */
+  private readonly answering = new Map<string, number>();
   /** Catch-up answers still going out, a slice at a time (`handOut`). */
   private readonly answers: CatchUpAnswers<GroupEdgeFrame>;
   /**
@@ -552,6 +565,7 @@ export class GroupSession {
     const secret = this.secret(this.epoch);
     return secret && meshRendezvous(secret, this.id, this.epoch);
   }
+  private now(): number { return this.hooks.clock?.() ?? Date.now(); }
   /** Epochs whose messages this member can still read. */
   get readableEpochs(): number[] { return Object.keys(this.state.secrets).map(Number).sort((a, b) => a - b); }
   /**
@@ -1067,7 +1081,8 @@ export class GroupSession {
    * What to tell a member whose edge just opened: where I am, what I have from everyone and what never arrived below
    * that. `ask`: the members whose messages I want this one to hand on, since their own edges to me are down.
    */
-  syncFrame(ask: readonly string[] = []): GroupSyncFrame {
+  syncFrame(ask: readonly string[] = [], to?: string): GroupSyncFrame {
+    if (to) this.answering.set(to, this.now() + ANSWER_WINDOW_MS);
     const have: Record<string, Record<string, number>> = {};
     const miss: Record<string, Record<string, number[]>> = {};
     for (const [sender, epochs] of Object.entries(this.state.seen)) {
@@ -1226,10 +1241,12 @@ export class GroupSession {
    * the roster (someone removed is neither heard from nor handed on, #300), or from a member in it when its author left
    * after it (`handsOn`), and its boxes only with the author's `xs`.
    */
-  private async receiveMessage(from: string, raw: unknown): Promise<void> {
+  private async receiveMessage(from: string, raw: unknown, waited = false): Promise<void> {
     if (!isMessageFrame(raw)) return;
     if (raw.s === this.myKey) { await this.ownFrame(raw); return; }
     const relayed = raw.s !== from;
+    const now = this.now(), answer = (this.answering.get(from) ?? 0) > now;
+    if (answer) this.answering.set(from, now + ANSWER_WINDOW_MS);
     if (relayed && (!rosterHas(this.roster, from) || !this.handsOn(raw.s, raw.e))) return;
     // One I took whole already (markSeen) is dropped, signed or not, before its signature costs a check: in a mesh, every
     // member a member back hears from hands it on. A copy taken stripped is not seen yet, and goes on to be checked.
@@ -1279,7 +1296,7 @@ export class GroupSession {
     const card = this.openCard(key, raw);
     const file = this.openFile(key, raw);
     const completes = whole && this.provisional.delete(id);
-    await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}), ...(file ? { file } : {}), ...(completes ? { completes: true as const } : {}), ...(whole ? { frame: clean(raw) } : {}) });
+    await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}), ...(file ? { file } : {}), ...(completes ? { completes: true as const } : {}), ...(whole ? { frame: clean(raw) } : {}), ...(!relayed && !answer && !waited ? { live: true as const } : {}) });
     if (!whole) {
       this.provisional.add(id);
       if (this.provisional.size > GROUP_LIMITS.provisional) this.provisional.delete(this.provisional.values().next().value!);
@@ -1404,7 +1421,7 @@ export class GroupSession {
     const now = Date.now();
     if (now - (this.asked.get(from) ?? 0) < 10_000) return;
     this.asked.set(from, now);
-    this.hooks.send(from, this.syncFrame());
+    this.hooks.send(from, this.syncFrame([], from));
   }
 
   private async replayWaiting(): Promise<void> {
@@ -1412,7 +1429,7 @@ export class GroupSession {
     const ready = this.waiting.filter(w => w.frame.e <= this.epoch && !!this.state.secrets[w.frame.e]);
     this.waiting = this.waiting.filter(w => !ready.includes(w));
     this.waitingBytes = this.waiting.reduce((sum, w) => sum + w.frame.c.length, 0);
-    for (const { from, frame } of ready) await this.receiveMessage(from, frame);
+    for (const { from, frame } of ready) await this.receiveMessage(from, frame, true);
     // Edits after the messages they change.
     const edits = this.waitingEdits.filter(w => w.frame.e <= this.epoch && !!this.state.secrets[w.frame.e]);
     this.waitingEdits = this.waitingEdits.filter(w => !edits.includes(w));
