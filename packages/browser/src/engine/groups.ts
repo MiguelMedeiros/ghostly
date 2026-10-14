@@ -517,7 +517,7 @@ export class Groups {
     // What it places again, the line order follows: the places are taken before anything is awaited.
     const placeAgain = host.placeAgain && (async (linkId: string, ids: readonly string[]) => {
       const done = host.placeAgain!(linkId, ids);
-      this.lineOrder.moved(linkId, ids);
+      this.lineOrder.moved(linkId, ids, this.now());
       await done;
     });
     this.authorOrder = new GroupAuthorOrder({ placeAgain }, MESSAGE_LINK, (groupId, sender) => {
@@ -1273,6 +1273,7 @@ export class Groups {
     this.ticking = true;
     try {
       this.authorOrder.tick(now);
+      this.lineOrder.tick(now);
       for (const group of [...this.stored.values()]) {
         if (group.left) {
           if (now - group.left.at > LEFT_KEPT_MS) await this.forget(group.id);

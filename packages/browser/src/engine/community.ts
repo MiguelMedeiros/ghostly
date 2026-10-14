@@ -661,6 +661,7 @@ export class Communities {
   /** Everything timed: beacon, hub election, lobbies, knocks, leaves, edges. The engine calls it every second or so. */
   async tick(now = Date.now()): Promise<void> {
     this.time = now;
+    this.lineOrder.tick(now);
     const active = [...this.live.values()].filter(l => l.session.status === "active");
     this.sharing = { groups: Math.max(1, active.length), hubs: Math.max(1, active.filter(l => l.hub).length) };
     for (const group of [...this.stored.values()]) {
