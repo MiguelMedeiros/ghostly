@@ -217,6 +217,27 @@ describe("AttentionFeedback in a muted chat", () => {
     await waitFor(() => expect(notified()).toBe(4));
   });
 
+  it("plays one sound and shows one notification for mentions that come together in a chat, a muted one too", async () => {
+    setup();
+    setChatMute(groupChat("g1"), "forever");
+    const start = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(start);
+    const notified = () => sound.notice.mock.calls.length;
+    // A member names me five times at once; a message of another chat just played.
+    expect(await send(event({ linkId: "link-a" }), ...Array.from({ length: 5 }, () => event({ linkId: "group:g1", mention: true })))).toHaveLength(2);
+    await new Promise(r => setTimeout(r, 20));
+    expect(notified()).toBe(2);
+    sound.playSound.mockClear();
+    // More of them inside the burst stay quiet; another group's mention is its own.
+    clock.mockReturnValue(start + MESSAGE_BURST_MS - 1);
+    expect(await send(event({ linkId: "group:g1", mention: true, at: start + MESSAGE_BURST_MS - 1 }), event({ linkId: "group:g2", mention: true, at: start + MESSAGE_BURST_MS - 1 }))).toHaveLength(1);
+    await waitFor(() => expect(notified()).toBe(3));
+    sound.playSound.mockClear();
+    clock.mockReturnValue(start + MESSAGE_BURST_MS);
+    expect(await send(event({ linkId: "group:g1", mention: true, at: start + MESSAGE_BURST_MS }))).toHaveLength(1);
+    await waitFor(() => expect(notified()).toBe(4));
+  });
+
   it("plays nothing, muted or not, while sounds are off", async () => {
     setup();
     saveSettings({ ...loadSettings(), notifications: { soundEnabled: false, systemEnabled: false } });
