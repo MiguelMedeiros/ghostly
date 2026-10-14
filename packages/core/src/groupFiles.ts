@@ -11,7 +11,7 @@ import { fileMessageText, formatVoiceDuration, parseVoiceMeta, type VoiceMeta } 
 export const GROUP_FILE_LIMITS = {
   /** The largest file a group takes. */
   maxBytes: 100 * 1024 * 1024,
-  /** A file this size or smaller is fetched without asking (voice messages always are, up to `VOICE_LIMITS`). */
+  /** A file this size or smaller is fetched without asking, a voice message too (one recorded is well inside it). */
   autoBytes: 8 * 1024 * 1024,
   /** What a device keeps of a group's files it fetched without asking; past it, every file is asked about. */
   autoBytesPerGroup: 256 * 1024 * 1024,
@@ -151,11 +151,11 @@ export function groupFileFallback(file: Pick<GroupFileMeta, "name" | "size" | "v
 }
 
 /**
- * Whether a device fetches a file by itself (WISP 503 § Automatic and asked downloads): a voice message always, any
- * other file up to `autoBytes` while what it took that way from the group stays within `autoBytesPerGroup`.
+ * Whether a device fetches a file by itself (WISP 503 § Automatic and asked downloads): up to `autoBytes` while what
+ * it took that way from the group stays within `autoBytesPerGroup`. A voice message too: one recorded (15 minutes at
+ * most, about 3.6 MB) always fits, and a bigger file the author called a voice message is asked about like any other.
  */
-export function fetchesByItself(file: Pick<GroupFileMeta, "size" | "voice">, keptAutomatically: number,
+export function fetchesByItself(file: Pick<GroupFileMeta, "size">, keptAutomatically: number,
   limits: { autoBytes: number; autoBytesPerGroup: number } = GROUP_FILE_LIMITS): boolean {
-  if (file.voice) return true;
   return file.size <= limits.autoBytes && keptAutomatically + file.size <= limits.autoBytesPerGroup;
 }

@@ -210,13 +210,30 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(alice.groups.fileCheck("no-such-group")).toEqual({ error: "You are not in this group yet" });
   });
 
-  it("a caption is the text under it; a voice message is fetched whatever its size", async () => {
+  it("a caption is the text under it; a voice message is fetched by itself", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
     const voice = { duration: 4_000, peaks: [0, 120, 255, 40] };
     const { messageId } = await t.send(alice, id, pattern(40_000, 3), { name: "voice.webm", mime: "audio/webm", voice }, "Listen to this");
     await t.world.until(() => t.done(bob, id, messageId), 60_000);
     expect(t.got(bob, id, messageId).message).toMatchObject({ text: "Listen to this", file: { voice } });
+  });
+
+  it("a voice message past the automatic size, or past what the group fetches by itself, waits for a Download", async () => {
+    Object.assign(limits, { autoBytes: 50_000, autoBytesPerGroup: 100_000 });
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    const voice = { duration: 1_000, peaks: [1, 2, 3] };
+    const big = await t.send(alice, id, pattern(60_000, 7), { name: "big.webm", mime: "audio/webm", voice });
+    const sent = [];
+    for (let i = 0; i < 3; i++) sent.push(await t.send(alice, id, pattern(40_000, 70 + i), { name: `v${i}.webm`, mime: "audio/webm", voice }));
+    await t.world.until(() => sent.slice(0, 2).every(({ messageId }) => t.done(bob, id, messageId)), 60_000);
+    await t.world.run(5_000);
+    for (const { messageId } of [big, sent[2]]) expect(t.got(bob, id, messageId)).toMatchObject({ transfer: { state: "transferring", stage: "asking" }, bytes: undefined });
+    expect(t.seen.filter(s => s.frame.t === "group-want").map(s => s.frame.id)).toEqual(sent.slice(0, 2).map(s => s.messageId));
+    await bob.groups.downloadFile(t.got(bob, id, big.messageId).message!.file!.id);
+    await t.world.until(() => t.done(bob, id, big.messageId), 60_000);
+    expect(sha(t.got(bob, id, big.messageId).bytes!)).toBe(big.meta.d);
   });
 
   it("a member away during the announcement gets it later from a member that is not the author, the author gone", async () => {
