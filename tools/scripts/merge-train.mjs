@@ -12,7 +12,8 @@
 //   squash commit per pull request, in order ("<title> (#n)"). One that conflicts drops out: `queue:conflict`, one
 //   comment, `queue` taken off. The batch is a pull request from `batch/<base>-<stamp>`; CI runs on it once, and that
 //   full run is the gate: a pull request boards on its fast tier alone, and its own full CI run still going is
-//   cancelled (when the token may cancel runs; else one log line), which frees runners for the batch.
+//   cancelled (when the token may cancel runs; else one log line), which frees runners for the batch. So is the run of
+//   one still waiting in line on a green fast tier whose head is behind the base: it never lands on that run.
 // - Green on `dev`: the batch's pull requests are merged one at a time, in the batch's order, each with GitHub's squash
 //   merge at the head the batch holds and with the message of the batch's commit of it. So each shows as merged, with
 //   a commit GitHub wrote and signed. Before the first merge dev's tip must be the batch's base. After each one, dev's
@@ -471,21 +472,42 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
 
   /**
    * Cancels a pull request's own full CI runs still going on its head once it is aboard: the batch's CI is its gate now,
-   * and the runners go to the batch. A token that may not cancel runs is said once, and nothing is tried after it.
+   * and the runners go to the batch. Also while it waits in line with a head behind the base (see `cancelBehind`). A
+   * token that may not cancel runs is said once, and nothing is tried after it.
    */
   let mayCancel = true;
-  const cancelOwnCi = async (p) => {
+  const cancelOwnCi = async (p, why = "the batch's CI is its gate") => {
     if (!mayCancel || p.ci === "success") return;
     try {
       const r = await w.cancelCi(p.sha);
       if (r.denied) {
         mayCancel = false;
         say(`Not cancelling the boarded pull requests' own CI: this token may not cancel workflow runs (${r.denied}); it needs "Actions: write".`);
-      } else if (r.cancelled.length) say(`CANCEL #${p.number}: its own CI run ${r.cancelled.join(" ")} (the batch's CI is its gate)`);
+      } else if (r.cancelled.length) say(`CANCEL #${p.number}: its own CI run ${r.cancelled.join(" ")} (${why})`);
     } catch (e) {
       if (e instanceof BudgetLow) throw e;
       say(`::warning::Could not cancel #${p.number}'s own CI: ${e.message}`);
     }
+  };
+  /**
+   * A pull request waiting in line lands on its own CI only alone, at a head that holds the base's tip (`goAlone`).
+   * Behind the tip, it lands on a batch's CI or on the run of the train's rebase, so the full run that leaving draft
+   * started only takes runners from the batch until it boards (2026-10-14: 58 such runs in 7 hours, none landed). It
+   * is cancelled while it waits, if its fast tier is green on that head: it boards on that alone. Without one, the
+   * full run is what lets it board, and it goes on.
+   */
+  let tipNow;
+  const cancelBehind = async (p) => {
+    if (!mayCancel || p.draft || p.ci !== "pending" || p.fast !== "success") return;
+    try {
+      tipNow ??= await gh.branchSha(base);
+      if ((await gh.behindBy(tipNow, p.sha)) === 0) return;
+    } catch (e) {
+      if (e instanceof BudgetLow) throw e;
+      say(`::warning::Could not tell whether #${p.number} is behind \`${base}\`: ${e.message}`);
+      return;
+    }
+    await cancelOwnCi(p, `its head is behind \`${base}\`: it lands on a batch's CI or on a rebase's`);
   };
 
   /** Builds a batch from `prs` on the base's tip and opens its pull request; `next` waits behind it. */
@@ -881,6 +903,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
           : positionText(base, p, ++place, 0, p.sha);
     if (!p.sticky && p.pushedAt === null) continue; // no CI on its head yet: its comment would record a head of unknown age
     await setSticky(p, text);
+    if (!aboard.has(p.number)) await cancelBehind(p);
   }
   say(inFlight ? `IN FLIGHT #${inFlight.number}${inFlight.alone ? " (alone)" : ""}` : "Nothing to board.");
   return { log, ...done, inFlight: inFlight?.number ?? null };

@@ -430,6 +430,43 @@ describe("a run of the train", () => {
     expect(repo.landed).toEqual(["#11", "#12", "#13", "#14"]);
   });
 
+  it("cancels the own full CI of a pull request waiting in line once its head is behind the base and its fast tier is green", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12]) repo.add(n);
+    await repo.run();
+    expect(repo.members()).toEqual([11, 12]);
+    // In line behind the batch in flight, each with its own full CI still going.
+    repo.add(13, { ci: running, behind: true }); // behind dev, fast tier green: that run can never be the one it lands on
+    repo.add(14, { ci: running }); // holds dev's tip: alone, it may land at this head on that run
+    repo.add(15, { ci: running, behind: true }); // no fast tier: without that run it could not board
+    repo.add(16, { ci: running, behind: true, draft: true }); // a draft's run is its fast tier
+    for (const n of [13, 14, 16]) repo.drafts.set(`h${n}`, fastGreen);
+    for (const n of [13, 14, 15, 16]) repo.going.set(`h${n}`, [100 + n]);
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11, 12]);
+    expect(repo.cancelled).toEqual([113]);
+    expect(r.log).toContain("CANCEL #13: its own CI run 113 (its head is behind `dev`: it lands on a batch's CI or on a rebase's)");
+    // Its place holds, and it boards the next batch on its fast tier.
+    repo.settle();
+    await repo.run();
+    expect(repo.landed).toEqual(["#11", "#12"]);
+    expect(repo.members()).toContain(13);
+  });
+
+  it("keeps a failed read of whether a waiting pull request is behind from stopping the train", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12]) repo.add(n);
+    await repo.run();
+    repo.add(13, { ci: running, behind: true });
+    repo.drafts.set("h13", fastGreen);
+    repo.going.set("h13", [113]);
+    repo.gh.behindBy = async () => Promise.reject(new Error("GET compare: HTTP 502"));
+    const r = await repo.run();
+    expect(repo.cancelled).toEqual([]);
+    expect(r.log).toContain("::warning::Could not tell whether #13 is behind `dev`: GET compare: HTTP 502");
+    expect(r.inFlight).toBe(repo.batch()!.number);
+  });
+
   it("does not board a pull request whose fast tier is red or missing on its head, or green only on an older commit", async () => {
     const repo = fakeRepo();
     for (const n of [11, 12, 13, 14, 15]) repo.add(n, { ci: running });
