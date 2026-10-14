@@ -2,7 +2,7 @@ import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deferred, FakePeerConnection, installWebRTCFakes, remote, type FakeMediaDevices } from "./fakes";
 import { renderCall, settle } from "./harness";
-import { MEDIA_PROBLEM_SHOWN_MS, NO_ANSWER_SHOWN_MS, RESTART_GRACE_MS, RING_MS, mediaProblem } from "../src/useWebRTC";
+import { MEDIA_PROBLEM_SHOWN_MS, NO_ANSWER_SHOWN_MS, QUICK_REDIAL_MS, RESTART_GRACE_MS, RING_MS, mediaProblem } from "../src/useWebRTC";
 
 // covers: calls.audio, calls.video, calls.cancel, calls.decline, calls.end-and-answer, calls.media-blocked, calls.screen-share, calls.upgrade
 
@@ -581,6 +581,58 @@ describe("answering a call", () => {
     // The caller's hang-up, arriving later, adds no second line.
     call.receive(remote.hangUp(Date.now()));
     expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_missed")).toHaveLength(1);
+  });
+
+  it("a contact ringing again faster than a person redials after a missed call does not ring: each call is kept as missed", () => {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    call.receive(remote.hangUp(Date.now() + 1));
+
+    // A bot looping call/hang-up: 20 offers, 50 ms apart.
+    const burst: number[] = [];
+    for (let i = 0; i < 20; i++) {
+      act(() => { vi.advanceTimersByTime(50); });
+      const ts = Date.now();
+      burst.push(ts);
+      call.receive(remote.offer(ts));
+      expect(call.result.current.callState).toBe("idle");
+      call.receive(remote.hangUp(ts + 1));
+    }
+
+    expect(call.fastPoll()).toBe(false);
+    expect(call.publishedKinds()).toEqual([null]);
+    expect(lines(call).filter((type) => type === "call_received")).toHaveLength(1);
+    const missed = call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_missed");
+    expect(missed.slice(1)).toEqual(burst.map((ts) => ["call_missed", false, undefined, ts]));
+  });
+
+  it("a call placed again once a person could have redialled rings", () => {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    call.receive(remote.hangUp(Date.now() + 1));
+
+    act(() => { vi.advanceTimersByTime(QUICK_REDIAL_MS); });
+    call.receive(remote.offer(Date.now()));
+
+    expect(call.result.current.callState).toBe("incoming");
+    expect(lines(call)).toEqual(["call_received", "call_missed", "call_received"]);
+  });
+
+  it("a call declined here does not hold the next ring back; one that rang out does", () => {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    act(() => call.result.current.rejectCall());
+
+    act(() => { vi.advanceTimersByTime(50); });
+    call.receive(remote.offer(Date.now()));
+
+    // The person said no to this call, not to every call: the next one rings.
+    expect(call.result.current.callState).toBe("incoming");
+
+    act(() => { vi.advanceTimersByTime(RING_MS); });
+    act(() => { vi.advanceTimersByTime(50); });
+    call.receive(remote.offer(Date.now()));
+    expect(call.result.current.callState).toBe("idle");
   });
 
   it("an answered call is not missed when RING_MS passes", async () => {
