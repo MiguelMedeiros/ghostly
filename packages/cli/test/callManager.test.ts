@@ -434,6 +434,25 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 
+  it("a call placed in the hang-up's millisecond rings, and a hang-up in its offer's millisecond ends the ring", async () => {
+    // A clock that stands still, as it does for a bot that redials or cancels at once: each signal is still newer.
+    const at = Date.now();
+    const { a, b } = pairOfManagers({ now: () => at });
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await a.calls.hangup(undefined);
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.filter((e) => e.type === "call.incoming").length === 2, 2000);
+    await a.calls.hangup(undefined);
+    await until(() => b.events.filter((e) => e.type === "call.ended").length === 2, 2000);
+    expect(b.calls.list()).toEqual([]);
+    const sent = a.signals.filter((s): s is string => s !== null).map((s) => (JSON.parse(s) as { ts: number }).ts);
+    expect(sent).toEqual([...sent].sort((x, y) => x - y));
+    expect(new Set(sent).size).toBe(sent.length);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
   it("a call answered seconds after it rang sends its answer at once, though the STUN server never answers: its candidates were gathered as it rang", async () => {
     // A STUN server that swallows every request, as on a network that blocks UDP to it (many offices and hotels).
     const silent = createSocket("udp4");
