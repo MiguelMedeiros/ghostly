@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, ownInviteRefusal, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
@@ -239,8 +239,11 @@ const METHODS: Record<string, Method> = {
     try {
       ({ linkId } = await node(ctx).joinLink({ inviteCode: invite }));
     } catch (error) {
+      // This profile's own invite: the sentence alone, and the chat that owns it as its own field, not the engine's tag
+      // for its RPC clients ("own-invite <chat>: …").
+      const own = ownInviteRefusal(error);
+      if (own) throw new CliError("refused", "This is your own invite. Share it with a contact; they join with it.", own.linkId ? { chat: own.linkId } : undefined);
       const message = error instanceof Error ? error.message : String(error);
-      if (/own invite/i.test(message)) throw new CliError("refused", message);
       if (/does not look like/i.test(message)) throw new CliError("bad_request", message);
       throw error;
     }
