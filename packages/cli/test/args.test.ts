@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { liftGlobals, parseArgs } from "../src/args";
 import { idSlot, positionals, COMMANDS, TEXT_COMMANDS } from "../src/commands";
@@ -227,6 +228,9 @@ describe("the argument parser", () => {
       ["group link", ["g1", "--off", "--reset"], "--off turns the link off: not with --reset"],
       ["group hub", ["g1", "m1", "--pin", "--exclude"], "--pin, --exclude or --auto: one of them"],
       ["group hub", ["g1", "m1", "--exclude", "--auto"], "--pin, --exclude or --auto: one of them"],
+      ["file save", ["f1", "--dir", "d", "--path", "d/both.txt"], "--path names the file: not with --dir"],
+      ["file save", ["f1", "--timeout", "5"], "--timeout is how long --wait waits: not without --wait"],
+      ["identity complete", ["d1", "--evidence-file", "proof.txt", "--stdin"], "--evidence-file or --stdin, not both"],
     ];
     for (const [name, argv, message] of pairs) {
       let error: unknown;
@@ -246,6 +250,12 @@ describe("the argument parser", () => {
     expect(params("group link", ["g1", "--off"])).toEqual({ group: "g1", on: false, reset: false });
     for (const role of ["pin", "exclude", "auto"]) expect(params("group hub", ["g1", "m1", `--${role}`])).toMatchObject({ role });
     expect(params("group hub", ["g1", "m1"])).toMatchObject({ role: "auto" });
+    expect(params("file save", ["f1", "--dir", "d"])).toMatchObject({ dir: resolve("d"), path: undefined });
+    expect(params("file save", ["f1", "--path", "d/one.txt"])).toMatchObject({ dir: undefined, path: resolve("d/one.txt") });
+    expect(params("file save", ["f1"])).toMatchObject({ dir: resolve("."), path: undefined });
+    expect(params("file save", ["f1", "--wait", "--timeout", "5"])).toMatchObject({ wait: true, timeout: 5 });
+    expect(params("identity complete", ["d1", "--evidence-file", "proof.txt"])).toEqual({ draft: "d1", evidenceFile: resolve("proof.txt"), stdin: false });
+    expect(params("identity complete", ["d1", "--stdin"])).toEqual({ draft: "d1", evidenceFile: undefined, stdin: true });
   });
 });
 
