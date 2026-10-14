@@ -301,6 +301,27 @@ describe("chats", () => {
   });
 });
 
+describe("group leave", () => {
+  // Leave deletes the group's history and files here, as forget does: it asked for nothing (issue: no word of it).
+  it("needs a yes, as forget does, and the engine is not asked without one", async () => {
+    const { ctx, node } = fake();
+    const leaveGroup = vi.fn(async () => undefined);
+    Object.assign(node, { leaveGroup });
+    await expect(callApi(ctx, "group.leave", { group: "g1" })).rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(/history and files on this device; pass yes \(--yes\)/) });
+    expect(leaveGroup).not.toHaveBeenCalled();
+    expect(await callApi(ctx, "group.leave", { group: "g1", yes: true })).toEqual({ left: "g1" });
+    expect(leaveGroup).toHaveBeenCalledWith({ groupId: "g1" });
+  });
+
+  it("the command takes --yes and its help says what goes", () => {
+    const command = COMMANDS["group leave"]!;
+    expect(command.usage).toBe("group leave <group> --yes");
+    expect(command.summary).toMatch(/history and files/);
+    expect(command.params!(parseArgs(["g1", "--yes"], command.options ?? {}), { group: "g1" })).toEqual({ group: "g1", yes: true });
+    expect(command.params!(parseArgs(["g1"], command.options ?? {}), { group: "g1" })).toEqual({ group: "g1", yes: false });
+  });
+});
+
 describe("chat wait", () => {
   /** A fake engine whose state a test moves, as the daemon's hub hands each new state on. */
   function moving(first: LinkView) {
