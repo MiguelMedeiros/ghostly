@@ -161,24 +161,29 @@ function JoinNotice() {
 
 /**
  * A top notice there until closed: by its ×, by Escape, or by a tap on its words (not on its ⓘ, Copy or the details
- * they open). It sits over the sidebar's header, so it closes as the app's other top notices do, and the focus goes
- * back where it was when it came (the New that could not make a chat), not to the page.
+ * they open). It sits over the sidebar's header, so it closes as the app's other top notices do. An Escape something
+ * else answered (a menu, a popover) is not its own. The focus goes back where it was when it came (the New that could
+ * not make a chat) when it was on the notice or nowhere, not to the page; one in a field or a menu stays there.
  */
 function ClosableTopNotice({ problem, testId, onClose }: { problem: Problem; testId: string; onClose: () => void }) {
   const t = useT();
   const [back] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
+  const root = useRef<HTMLDivElement>(null);
   const close = useRef(() => {});
   close.current = () => {
+    const active = document.activeElement;
+    const lost = !active || active === document.body || !!root.current?.contains(active);
     onClose();
-    if (back && back !== document.body && back.isConnected) back.focus();
+    if (lost && back && back !== document.body && back.isConnected) back.focus();
   };
   useEffect(() => {
+    // On the window: it hears the Escape after the document's listeners, a menu opened after the notice among them.
     const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented) close.current(); };
-    document.addEventListener("keydown", key);
-    return () => document.removeEventListener("keydown", key);
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
   }, []);
   return (
-    <div onClick={(e) => { if (!(e.target as Element).closest(`button, [data-testid="${testId}-details"]`)) close.current(); }}
+    <div ref={root} onClick={(e) => { if (!(e.target as Element).closest(`button, [data-testid="${testId}-details"]`)) close.current(); }}
       className="top-notice flex cursor-pointer items-start gap-2 rounded-lg border border-border bg-panel-header py-2 ps-4 pe-2 shadow-xl">
       <Notice problem={problem} testId={testId} className="min-w-0 text-sm" />
       <button type="button" data-testid={`${testId}-close`} onClick={() => close.current()} aria-label={t("common.close")}
