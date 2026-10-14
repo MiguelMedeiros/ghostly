@@ -244,7 +244,8 @@ describe("sending files", () => {
     try {
       const { file } = await services.sendFile("peer-1", big);
       await vi.waitFor(() => expect(services.getTransfer(file.id)?.state).toBe("failed"));
-      expect(services.getTransfer(file.id)).toMatchObject({ direction: "out", retry: false });
+      // In the words core uses for a copy it could not read, which the app says in its language (errorText.ts).
+      expect(services.getTransfer(file.id)).toMatchObject({ direction: "out", retry: false, error: "Could not read the file: The file changed while it was being copied" });
       await expect(services.retryFile!(file.id)).rejects.toThrow("cannot be retried");
 
       fail = false;

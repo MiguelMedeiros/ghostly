@@ -143,6 +143,8 @@
     "noRoomHere": "此设备空间不足",
     "noRoomHereNext": "请释放空间，然后再请对方发送。",
     "noRoomNext": "剩余 {{free}}。",
+    "noRoomToSend": "此设备没有足够的空间",
+    "noRoomToSendNext": "请释放一些空间，然后重新选择文件。",
     "notDelivered": "未能及时送达",
     "notVoice": "该录音无法作为语音消息发送",
     "offerExpired": "接收期限已过",

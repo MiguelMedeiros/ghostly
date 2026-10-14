@@ -143,6 +143,8 @@
     "noRoomHere": "Plus de place sur cet appareil",
     "noRoomHereNext": "Libérez de la place, puis redemandez-le.",
     "noRoomNext": "{{free}} libres.",
+    "noRoomToSend": "Pas assez d'espace sur cet appareil",
+    "noRoomToSendNext": "Libérez de l'espace, puis choisissez à nouveau le fichier.",
     "notDelivered": "Non remis à temps",
     "notVoice": "Cet enregistrement ne peut pas être envoyé comme message vocal",
     "offerExpired": "L'offre a expiré",

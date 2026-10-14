@@ -121,6 +121,9 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["That recording cannot be sent as a voice message", `${BROWSER}/platform/services.ts`],
   ["This file cannot be retried", `${BROWSER}/platform/services.ts`],
   ["This file is no longer here", `${BROWSER}/platform/services.ts`],
+  // A large file whose copy into this device failed before it was sent: nothing stored, the file is picked again.
+  ["Could not read the file: The file changed while it was being copied", `${BROWSER}/platform/services.ts`, "`Could not read the file: ${reason}`"],
+  ["Not enough space on this device to send it", `${BROWSER}/platform/services.ts`],
   ["Held messages need S3 storage (Profile → Backups) and a contact that allows them.", `${BROWSER}/engine/node.ts`],
   ["Not enough space on your contact's device for this file (2.0 MB free).", `${BROWSER}/platform/services.ts`, "Not enough space on your contact's device for this file ("],
   ["That file is too large for your contact's app (max 64 MB). Larger files need an updated Ghostly on their side.", `${BROWSER}/platform/services.ts`, ". Larger files need an updated Ghostly on their side."],
@@ -475,6 +478,11 @@ describe("errors in the app's language", () => {
     // A file sent with + whose copy could not be read is not a paste, and is sent again.
     expect(knownErrorParts("Could not read the file: The file changed while it was being copied", english)).toEqual({
       title: "The file cannot be read", next: "Send it again, or pick the file again.", detail: "Could not read the file: The file changed while it was being copied" });
+    // A large file this device had no room to copy before sending it: what to free, and that it is picked again.
+    expect(knownErrorParts("Not enough space on this device to send it", english)).toEqual({
+      title: "Not enough space on this device", next: "Free some space, then pick the file again." });
+    expect(knownErrorParts("Not enough space on this device to send it", translators.pt)).toEqual({
+      title: "Não há espaço suficiente neste dispositivo", next: "Libere espaço e escolha o arquivo de novo." });
   });
 
   it("an action refused in limited mode says why and what to do, in the language", () => {

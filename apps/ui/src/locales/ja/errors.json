@@ -143,6 +143,8 @@
     "noRoomHere": "この端末に空き容量がありません",
     "noRoomHereNext": "空き容量を作ってから、もう一度頼んでください。",
     "noRoomNext": "空き {{free}}。",
+    "noRoomToSend": "この端末に十分な空き容量がありません",
+    "noRoomToSendNext": "空き容量を作ってから、ファイルを選び直してください。",
     "notDelivered": "期限内に届けられませんでした",
     "notVoice": "その録音はボイスメッセージとして送れません",
     "offerExpired": "受け取りの期限が切れました",
