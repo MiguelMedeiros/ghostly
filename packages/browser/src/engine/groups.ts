@@ -1392,7 +1392,7 @@ export class Groups {
   private chatMember(groupId: string, linkId: string): string | undefined {
     const keys = Object.entries(this.stored.get(groupId)?.contacts ?? {}).filter(([, id]) => id === linkId).map(([key]) => key);
     const roster = this.sessions.get(groupId)?.roster;
-    return (roster && keys.find(key => rosterHas(roster, key))) || keys.at(-1);
+    return (roster && keys.find(key => rosterHas(roster, key))) || keys[keys.length - 1];
   }
 
   /**
