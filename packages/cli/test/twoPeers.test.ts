@@ -506,6 +506,10 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(error(await as(bob, "file", "request", incoming.id), "refused", 1).message).toBe("Nothing to ask for: the file is all here");
     error(await as(bob, "file", "resend", incoming.id), "bad_request", 1);
     error(await as(bob, "file", "request", "nochat-in-nothing"), "not_found", 3);
+    // Nor stopped, answered or resumed once it is all here: refused, not an echo of an action that does nothing.
+    for (const action of ["cancel", "decline", "pause"]) expect(error(await as(bob, "file", action, incoming.id), "refused", 1).message).toBe("Nothing to stop: the file is all here");
+    for (const action of ["accept", "resume"]) expect(error(await as(bob, "file", action, incoming.id), "refused", 1).message).toBe("Nothing to ask for: the file is all here");
+    expect(error(await as(alice, "file", "cancel", (sent.file as { id: string }).id), "refused", 1).message).toBe("Nothing to stop: the file is all here");
 
     const large = join(alice, "big.bin");
     writeFileSync(large, randomBytes(26 * 1024 * 1024));
@@ -528,6 +532,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const listed = ok(await as(bob, "file", "list", "alice")).files as { file: { id: string }; transfer: { state: string } | null }[];
     expect(listed.find((f) => f.file.id === incoming.id)?.transfer).toMatchObject({ state: "done", size: 200_000 });
     expect(error(await as(bob, "file", "request", incoming.id), "refused", 1).message).toBe("Nothing to ask for: the file is all here");
+    expect(error(await as(bob, "file", "cancel", incoming.id), "refused", 1).message).toBe("Nothing to stop: the file is all here");
     ok(await as(bob, "chat", "wait", "alice", "--until", "live", "--timeout", "60"));
   });
 
