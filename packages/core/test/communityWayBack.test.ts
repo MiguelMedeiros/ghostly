@@ -68,7 +68,7 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 describe("a community member back while 30 chats start", () => {
   it.each([
     ["as background looks: never", { background: true }, { background: true, door: true }],
-    ["as its way back: within the groups' allowance", { signal: true }, { signal: true }],
+    ["as its way back: within the groups' allowance", { wayBack: true }, { wayBack: true }],
   ] as [string, PkarrRequestOptions, PkarrRequestOptions][])("reads the beacon and asks a hub's lobby %s", async (how, beaconRead, lobbyAsk) => {
     const gets = new Map<string, number[]>();
     const fetch = relays(gets);
@@ -131,4 +131,61 @@ describe("a community member back while 30 chats start", () => {
       expect(asked.filter((at) => at !== null && at <= 90_000), result).toHaveLength(COMMUNITIES);
     }
   }, 300_000);
+});
+
+/**
+ * …and with its last run's group edges resumed too, their other ends online (bug hunt, 2026-10-14). An edge back after a
+ * restart reads its member, then signals, on the edges' floor (`resume`): with one floor for those and the way back, 5
+ * edges took it, and the beacons were read only when the minute freed, 60 to 65 s on. The way back has its own.
+ */
+describe("a community member back while 30 chats and its last run's group edges start", () => {
+  it.each([3, 5, 10])("reads every beacon within 20 s, and the edges' members, with %i edges", async (edgeCount) => {
+    const gets = new Map<string, number[]>();
+    const fetch = relays(gets);
+    const pair = (i: number) => { const made = invitationWhere(i % 2 ? "inviter" : "joiner"); return { app: made.inviter, contact: made.joiner }; };
+    const pairs = Array.from({ length: ONLINE }, (_, i) => pair(i));
+    const edgePairs = Array.from({ length: edgeCount }, (_, i) => pair(i));
+    const contacts = pairs.map((p, i) => chat(p.contact, p.app, new RelayTransport({ fetch, log: () => {} }), `c${i}`, false));
+    const edgeOthers = edgePairs.map((p, i) => chat(p.contact, p.app, withRequestOptions(new RelayTransport({ fetch, log: () => {} }), { group: true }), `ec${i}`, false));
+    const unlimited = new RelayTransport({ fetch, requestsPerMinute: Infinity, log: () => {} });
+    const before = [...pairs.map((p, i) => chat(p.app, p.contact, unlimited, `a${i}`, false)), ...edgePairs.map((p, i) => chat(p.app, p.contact, withRequestOptions(unlimited, { group: true }), `e${i}`, false))];
+    for (let t = 0; t < 120_000 && !before.every((l) => l.isDataLinkOpen); t += 500) await run(500);
+    for (const link of before) link.depart();
+    await run(300);
+    await Promise.all(before.map((link) => link.stop(false)));
+    await run(3 * 60_000);
+
+    const transport = new RelayTransport({ fetch, log: () => {} });
+    const group = withRequestOptions(transport, { group: true });
+    const start = Date.now();
+    const app = pairs.map((p, i) => chat(p.app, p.contact, transport, `a${i}`, true));
+    for (let i = 0; i < GONE; i++) { const made = invitationWhere(i % 2 ? "inviter" : "joiner"); chat(made.inviter, made.joiner, transport, `g${i}`, false); }
+    // The last run's group edges, resumed as the engine resumes them.
+    const edges = edgePairs.map((p, i) => chat(p.app, p.contact, group, `e${i}`, true));
+    let on = true;
+    for (const g of Array.from({ length: GROUPS }, () => createIdentity())) {
+      void group.resolve(g.pubKeyZ32).catch(() => {});
+      void (async () => { while (on) { try { await group.publish(g, []); return; } catch { await wait(4_000); } } })();
+    }
+    const beacons = Array.from({ length: COMMUNITIES }, () => createIdentity().pubKeyZ32);
+    const read: (number | null)[] = beacons.map(() => null);
+    beacons.forEach((key, i) => void (async () => {
+      while (on && read[i] === null) { try { await group.resolve(key, { wayBack: true }); read[i] = Date.now() - start; } catch { await wait(5_000); } }
+    })());
+    const liveAt: (number | null)[] = app.map(() => null), edgeAt: (number | null)[] = edges.map(() => null);
+    for (let t = 0; t < 3 * 60_000; t += 500) {
+      await run(500);
+      app.forEach((link, i) => { if (liveAt[i] === null && link.isDataLinkOpen && contacts[i].isDataLinkOpen) liveAt[i] = Date.now() - start; });
+      edges.forEach((link, i) => { if (edgeAt[i] === null && link.isDataLinkOpen && edgeOthers[i].isDataLinkOpen) edgeAt[i] = Date.now() - start; });
+    }
+    on = false;
+    const result = JSON.stringify({ read, edgeAt, liveAt, beaconGets: beacons.map((key) => gets.get(key)?.length ?? 0) });
+    // Every beacon within 20 s, as with no edges (before: 60 to 65 s with 5 edges or more).
+    expect(read.filter((at) => at !== null && at <= 20_000), result).toHaveLength(COMMUNITIES);
+    // The edges still read their members on their floor: the first up in seconds, every one when the minute frees
+    // (before the edges' resumed reads had a floor: 74 to 165 s, some never in 3 minutes).
+    expect(edgeAt.filter((at) => at !== null && at <= 5_000).length, result).toBeGreaterThanOrEqual(1);
+    expect(edgeAt.filter((at) => at !== null && at <= 90_000), result).toHaveLength(edgeCount);
+    expect(liveAt.filter((at) => at !== null && at <= 65_000), result).toHaveLength(ONLINE);
+  }, 600_000);
 });

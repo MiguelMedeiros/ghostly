@@ -1320,6 +1320,59 @@ describe("relay transport: a group edge's signaling keeps its share of the minut
     } finally { vi.useRealTimers(); }
   });
 
+  it("keeps a community member's way back its own floor while resumed edges spend theirs, and theirs while it asks", async () => {
+    // Bug hunt, 2026-10-14: a web app back with 5 resumed edges and 5 communities with no edge up. On one floor, the
+    // edges' reads back after a restart and their offers took it in the first second, and the beacons were read only
+    // when the minute freed, 60 to 65 s on.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const log: { key: string; method: string }[] = [];
+      const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        log.push({ key: new URL(String(input)).pathname.slice(1), method: init?.method ?? "GET" });
+        return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(null, { status: 404 });
+      }) as typeof fetch });
+      const group = withRequestOptions(relay, { group: true });
+      const went = async (request: () => Promise<unknown>) => { const before = log.length; await request().catch(() => {}); return log.length > before; };
+      const start = Date.now(), at = (t: number) => vi.setSystemTime(start + t);
+      for (let i = 0; i < REQUESTS_PER_MINUTE; i++) { at(i * 100); await relay.resolve(createIdentity().pubKeyZ32, { urgent: true }); }
+      const floor = Math.floor(REQUESTS_PER_MINUTE * GROUP_SIGNALING_ALLOWANCE_SHARE);
+      // The edges spend their floor: reads back after a restart, then an offer.
+      at(5_000);
+      for (let i = 0; i < floor - 1; i++) {
+        at(5_000 + i * GROUP_OVER_PACE_MS);
+        expect(await went(() => group.resolve(createIdentity().pubKeyZ32, { urgent: true, resume: true }))).toBe(true);
+      }
+      expect(await went(() => group.publish(createIdentity(), [{ label: "_ts", value: "1" }], { signal: true }))).toBe(true);
+      at(5_000 + floor * GROUP_OVER_PACE_MS);
+      expect(await went(() => group.resolve(createIdentity().pubKeyZ32, { urgent: true, resume: true }))).toBe(false);
+      expect(await went(() => group.resolve(createIdentity().pubKeyZ32, { urgent: true, signal: true }))).toBe(false);
+      // The way back still has its own: its reads one at a time, the last of it left to its request in a lobby.
+      const back = Array.from({ length: floor - 1 }, () => createIdentity().pubKeyZ32);
+      for (let i = 0; i < floor - 1; i++) {
+        at(5_000 + (floor + i) * GROUP_OVER_PACE_MS);
+        expect(await went(() => group.resolve(back[i], { wayBack: true }))).toBe(true);
+      }
+      at(5_000 + 2 * floor * GROUP_OVER_PACE_MS);
+      expect(await went(() => group.resolve(createIdentity().pubKeyZ32, { wayBack: true }))).toBe(false);
+      expect(await went(() => group.publish(createIdentity(), [{ label: "_ts", value: "1" }], { wayBack: true }))).toBe(true);
+      // …and the way back spent first leaves the edges theirs.
+      const relay2 = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        log.push({ key: new URL(String(input)).pathname.slice(1), method: init?.method ?? "GET" });
+        return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(null, { status: 404 });
+      }) as typeof fetch });
+      const group2 = withRequestOptions(relay2, { group: true });
+      at(200_000);
+      for (let i = 0; i < REQUESTS_PER_MINUTE; i++) { at(200_000 + i * 100); await relay2.resolve(createIdentity().pubKeyZ32, { urgent: true }); }
+      for (let i = 0; i < floor - 1; i++) {
+        at(205_000 + i * GROUP_OVER_PACE_MS);
+        expect(await went(() => group2.resolve(createIdentity().pubKeyZ32, { wayBack: true }))).toBe(true);
+      }
+      at(205_000 + floor * GROUP_OVER_PACE_MS);
+      expect(await went(() => group2.resolve(createIdentity().pubKeyZ32, { wayBack: true }))).toBe(false);
+      expect(await went(() => group2.resolve(createIdentity().pubKeyZ32, { urgent: true, resume: true }))).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("counts the edges' signaling under the limit toward their floor", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {

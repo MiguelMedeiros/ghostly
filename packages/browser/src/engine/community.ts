@@ -1373,8 +1373,8 @@ export class Communities {
 
   /**
    * A member with no edge up in this community: its first reading of the beacon (who the hubs are) and its request in a
-   * hub's lobby are its way back, and go as a group edge's signaling for a member that may be back (`signal`, within the
-   * groups' allowance), not as background looks. Those wait for every link that signals and every chat's look: a web
+   * hub's lobby are its way back, and go as a group edge's signaling for a member that may be back (within the groups'
+   * allowance, on a floor of its own: `PkarrRequestOptions.wayBack`), not as background looks. Those wait for every link that signals and every chat's look: a web
    * app opened with 30 chats whose contacts were online read none of its 5 communities' beacons in 3 minutes, dropped
    * the edges of its last run at 60 s, and got no community line, neither those written while it was closed nor new
    * ones (bug hunt, 2026-10-13). Bounded: the reading is asked again only when refused, and a hub that does not take
