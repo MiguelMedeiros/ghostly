@@ -83,7 +83,7 @@ describe("white words on danger's red", () => {
   it("light themes keep their red, and dark themes keep their brighter red for danger's words", () => {
     for (const { name, scheme, vars } of list) {
       if (scheme === "light") expect(vars["theme-danger-fill"], name).toBe("#c5221f");
-      expect(vars["theme-danger"], name).toBe(scheme === "light" ? "#c5221f" : "#ea4335");
+      expect(vars["theme-danger"], name).toBe(scheme === "light" ? "#c5221f" : "#f36b5f");
     }
   });
 

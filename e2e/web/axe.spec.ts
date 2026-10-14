@@ -2,13 +2,14 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import { STORE_URL, serveStore, testStore } from "../support/appStore";
 import { composerRow } from "../support/composer";
-import { chat, expect, test } from "../support/fixtures";
+import { type Peer, chat, expect, test } from "../support/fixtures";
 import { pair } from "../support/paired";
 
 /**
  * The main screens pass axe-core's WCAG 2.2 A and AA rules: no serious or critical finding (contrast, names, roles),
- * in the default colour theme, light and dark, left to right and right to left. The home screen, a 1:1 chat with its
- * ⋮ menu, + menu and payment sheet, a group, the wallets and New wallet, identities, settings, profile and services.
+ * in every colour theme, light and dark, and left to right and right to left in the default one. The home screen, a
+ * 1:1 chat with its ⋮ menu, + menu and payment sheet, a group, the wallets and New wallet, identities, settings, profile
+ * and services.
  * And the Apps screens on the suite's build (VITE_APPS_TEST), with the apps specs' test store: the Apps page, Add, the
  * install screen, the chat picker, + → Apps, the app's panel in a chat (beside it, and over it on a phone), the app card on
  * both sides, the app's details and Uninstall.
@@ -17,14 +18,15 @@ test.describe.configure({ timeout: 6 * 60_000 });
 
 const TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
-/** Language and light or dark as Settings keeps them, the app reloaded in them. */
-async function look(page: Page, language: string, scheme: "light" | "dark"): Promise<void> {
-  await page.evaluate(([language, scheme]) => {
+/** Language, light or dark and the colour theme as Settings keeps them, the app reloaded in them. */
+async function look(page: Page, language: string, scheme: "light" | "dark", colorTheme = "cyan"): Promise<void> {
+  await page.evaluate(([language, scheme, colorTheme]) => {
     const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
-    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language, colorScheme: scheme, theme: scheme }));
-  }, [language, scheme]);
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language, colorScheme: scheme, theme: scheme, colorTheme }));
+  }, [language, scheme, colorTheme]);
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("data-theme", scheme);
+  await expect(page.locator("html")).toHaveAttribute("data-color-theme", colorTheme);
   await expect(page.locator("html")).toHaveAttribute("lang", new RegExp(`^${language}`));
 }
 
@@ -54,57 +56,82 @@ async function findings(page: Page, { frames = true }: { frames?: boolean } = {}
     .flatMap((v) => v.nodes.filter((n) => frames || n.target.length === 1).map((n) => `${v.id}: ${n.target.join(" ")} ${n.failureSummary?.split("\n").slice(1).join(" ").trim() ?? ""}`));
 }
 
+/** Alice paired with Bob, a message each way, and a group of hers: the chat's and the group's addresses on her page. */
+async function chatAndGroup([alice, bob]: Peer[]): Promise<{ page: Page; chatUrl: string; groupUrl: string }> {
+  await pair(alice, bob);
+  const page = alice.page;
+  const chatUrl = new URL(page.url()).hash;
+  await page.getByPlaceholder("Message…").fill("hello there");
+  await page.getByPlaceholder("Message…").press("Enter");
+  await expect(bob.page.locator(".chat-wallpaper").getByText("hello there")).toBeVisible();
+  await page.getByTestId("sidebar-new-more").click();
+  await page.getByTestId("new-group").click();
+  await page.getByTestId("new-group-name").fill("Ghosts");
+  await page.getByTestId("new-group-create").click();
+  await page.getByTestId("group-share-done").click();
+  await expect(page.getByTestId("group-name")).toHaveText("Ghosts");
+  return { page, chatUrl, groupUrl: new URL(page.url()).hash };
+}
+
+/**
+ * The main screens, each checked as it shows: the home screen, the chat with its ⋮, + and payment sheet, the group,
+ * the wallets and New wallet, identities, settings, profile and services. What axe finds, by screen.
+ */
+async function mainScreens(page: Page, chatUrl: string, groupUrl: string): Promise<Record<string, string[]>> {
+  const found: Record<string, string[]> = {};
+  const check = async (screen: string) => { const f = await findings(page); if (f.length) found[screen] = f; };
+
+  await page.goto("/#/");
+  await expect(page.getByTestId("sidebar")).toBeVisible();
+  await check("home");
+  await page.goto(`/${chatUrl}`);
+  await expect(page.getByTestId("connection-options")).toHaveAccessibleName(/ · /);
+  await check("chat");
+  await page.getByTestId("chat-options").click();
+  await check("chat ⋮");
+  await page.keyboard.press("Escape");
+  await composerRow(page, "payment-button");
+  await check("composer +");
+  await (await composerRow(page, "payment-button")).click();
+  await expect(page.getByTestId("payment-composer")).toBeVisible();
+  await check("payment sheet");
+  await page.keyboard.press("Escape");
+  await page.goto(`/${groupUrl}`);
+  await expect(page.getByTestId("group-name")).toHaveText("Ghosts");
+  await check("group");
+  for (const [path, ready] of [["wallet", "wallet"], ["identities", "identities-page"], ["settings", "settings-reduce-motion"], ["profile", "account-nickname"], ["services", "your-apps"]] as const) {
+    await page.goto(`/#/${path}`);
+    await expect(page.getByTestId(ready).first()).toBeVisible();
+    await check(path);
+    if (path === "wallet") {
+      // Wallets → New: Mainnet and Testnet, each named in words ("Test money" in yellow, which a light page needs darker).
+      await page.getByTestId("wallet-add").click();
+      await expect(page.getByTestId("new-wallet")).toBeVisible();
+      await check("new wallet");
+      await page.keyboard.press("Escape");
+      await expect(page.getByTestId("new-wallet")).toHaveCount(0);
+    }
+  }
+  return found;
+}
+
 for (const [language, scheme] of [["en", "light"], ["ar", "dark"]] as const) {
   test(`the main screens pass axe in ${scheme}, ${language}`, { tag: ["@feature:app.accessibility", "@feature:app.theme", "@feature:app.i18n"] }, async ({ peer }) => {
-    const [alice, bob] = await Promise.all([peer(`axe-${language}-a`), peer(`axe-${language}-b`)]);
-    await pair(alice, bob);
-    const page = alice.page;
-    const chatUrl = new URL(page.url()).hash;
-    await page.getByPlaceholder("Message…").fill("hello there");
-    await page.getByPlaceholder("Message…").press("Enter");
-    await expect(bob.page.locator(".chat-wallpaper").getByText("hello there")).toBeVisible();
-    await page.getByTestId("sidebar-new-more").click();
-    await page.getByTestId("new-group").click();
-    await page.getByTestId("new-group-name").fill("Ghosts");
-    await page.getByTestId("new-group-create").click();
-    await page.getByTestId("group-share-done").click();
-    await expect(page.getByTestId("group-name")).toHaveText("Ghosts");
-    const groupUrl = new URL(page.url()).hash;
+    const { page, chatUrl, groupUrl } = await chatAndGroup(await Promise.all([peer(`axe-${language}-a`), peer(`axe-${language}-b`)]));
     await look(page, language, scheme);
+    expect(await mainScreens(page, chatUrl, groupUrl)).toEqual({});
+  });
+}
 
-    const found: Record<string, string[]> = {};
-    const check = async (screen: string) => { const f = await findings(page); if (f.length) found[screen] = f; };
-
-    await page.goto("/#/");
-    await expect(page.getByTestId("sidebar")).toBeVisible();
-    await check("home");
-    await page.goto(`/${chatUrl}`);
-    await expect(page.getByTestId("connection-options")).toHaveAccessibleName(/ · /);
-    await check("chat");
-    await page.getByTestId("chat-options").click();
-    await check("chat ⋮");
-    await page.keyboard.press("Escape");
-    await composerRow(page, "payment-button");
-    await check("composer +");
-    await (await composerRow(page, "payment-button")).click();
-    await expect(page.getByTestId("payment-composer")).toBeVisible();
-    await check("payment sheet");
-    await page.keyboard.press("Escape");
-    await page.goto(`/${groupUrl}`);
-    await expect(page.getByTestId("group-name")).toHaveText("Ghosts");
-    await check("group");
-    for (const [path, ready] of [["wallet", "wallet"], ["identities", "identities-page"], ["settings", "settings-reduce-motion"], ["profile", "account-nickname"], ["services", "your-apps"]] as const) {
-      await page.goto(`/#/${path}`);
-      await expect(page.getByTestId(ready).first()).toBeVisible();
-      await check(path);
-      if (path === "wallet") {
-        // Wallets → New: Mainnet and Testnet, each named in words ("Test money" in yellow, which a light page needs darker).
-        await page.getByTestId("wallet-add").click();
-        await expect(page.getByTestId("new-wallet")).toBeVisible();
-        await check("new wallet");
-        await page.keyboard.press("Escape");
-        await expect(page.getByTestId("new-wallet")).toHaveCount(0);
-      }
+// The other colour themes (Settings → Appearance), light and dark: their own greys, muted words and accents.
+for (const colorTheme of ["classic", "purple", "monochrome"]) {
+  test(`the main screens pass axe in the ${colorTheme} theme, light and dark`, { tag: ["@feature:app.accessibility", "@feature:app.theme"] }, async ({ peer }) => {
+    const { page, chatUrl, groupUrl } = await chatAndGroup(await Promise.all([peer(`axe-${colorTheme}-a`), peer(`axe-${colorTheme}-b`)]));
+    const found: Record<string, Record<string, string[]>> = {};
+    for (const scheme of ["light", "dark"] as const) {
+      await look(page, "en", scheme, colorTheme);
+      const screens = await mainScreens(page, chatUrl, groupUrl);
+      if (Object.keys(screens).length) found[scheme] = screens;
     }
     expect(found).toEqual({});
   });
