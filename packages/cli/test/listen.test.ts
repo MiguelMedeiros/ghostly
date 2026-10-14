@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { asCliError, CliError } from "../src/errors";
 import type { GhostlyEvent } from "../src/events";
 import { callApi, type ApiContext } from "../src/api";
-import { Allowlist, allowlist, checkCursor, eventHandler, Feed, hookEnv, MAX_BEHIND, toTurn } from "../src/listen";
+import { Allowlist, allowlist, checkCursor, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { ghostly } from "./support/cli";
 // covers: headless.hooks, headless.events
@@ -26,6 +26,30 @@ const received = (chat: string, id: string, text: string, fields: Record<string,
 const groupMessage = (group: string, id: string, text: string, fields: Record<string, unknown> = {}): GhostlyEvent =>
   ({ seq: ++seq, id: `group.message:${group}:${id}`, type: "group.message", at: 5, group, message: { id, chat: `group:${group}`, from: "peer", text, timestamp: 4, delivery: null, deliveryError: null, via: "group", nick: "Carol", member: KEY, ...fields } });
 const other = (type: string, fields: Record<string, unknown>): GhostlyEvent => ({ seq: ++seq, id: `${type}:${seq}`, type, at: 5, ...fields });
+
+describe("--type", () => {
+  it("a word with no dot is a family: message lets message.* through, never messages.x; a dotted type stays exact", () => {
+    const pass = (type: string, ...types: string[]) => matches(other(type, {}), types);
+    expect(pass("message.received", "message.received")).toBe(true);
+    expect(pass("message.received", "message")).toBe(true);
+    expect(pass("chat.created", "chat")).toBe(true);
+    expect(pass("daemon.started", "daemon")).toBe(true);
+    expect(pass("group.typing.started", "group")).toBe(true);
+    expect(pass("message.received", "message.sent", "message")).toBe(true);
+    // As before: a trailing "." or "*" is a family at any depth, and "*" is everything.
+    expect(pass("chat.created", "chat.")).toBe(true);
+    expect(pass("chat.created", "chat.*")).toBe(true);
+    expect(pass("group.typing.started", "group.typing.")).toBe(true);
+    expect(pass("call.ended", "*")).toBe(true);
+    // A family is whole words: `message` is not `messages.x`.
+    expect(pass("messages.x", "message")).toBe(false);
+    expect(pass("message.received", "group")).toBe(false);
+    // A dotted type is that type alone: a bot on group.message gets no edits it did not ask for.
+    expect(pass("group.message.edited", "group.message")).toBe(false);
+    expect(pass("group.mentioned", "group.message")).toBe(false);
+    expect(pass("message.received", "message.sent")).toBe(false);
+  });
+});
 
 describe("agent turns", () => {
   it("a contact's message is one turn: its seq, an id stable for the message, the words as untrusted data", () => {

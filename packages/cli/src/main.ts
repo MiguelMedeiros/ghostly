@@ -159,7 +159,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["daemon restart [--timeout s]", "Stop the profile's daemon and start it again in the background (after an upgrade: the new code)", { timeout: o("number", "Seconds to wait for each step") }],
   ["listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
     since: o("number", "Replay events after this seq first"), cursor: o("string", "A file that keeps the last seq handled (read at start, written after each event)"),
-    type: o("list", "Only events of this type, or starting with it (repeat for more)"),
+    type: o("list", "Only events of this type (message.received) or family (message, or group.typing.); repeat for more"),
     turns: o("boolean", "Only agent turns: each message received, and each group message that mentions you, as one agent.turn event"),
     from: o("list", "Only this chat's events (id, prefix, name or the contact's key; again for more)"),
     group: o("list", "Only this group's events (again for more); with --from or --group, nobody else's event gets through"),

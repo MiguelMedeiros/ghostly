@@ -155,9 +155,18 @@ function writeCursor(path: string, seq: number): void {
   renameSync(path + ".tmp", path);
 }
 
+/**
+ * `--type`: one type (`message.received`, exactly: `group.message` is not its `group.message.edited`), or a family, a
+ * word with no "." (`message`, `chat`) or one ending in "." or "*" (`group.typing.`). Before, a family needed its "." and
+ * `--type chat` let nothing through. A family is whole words: `message` is not `messages.x`.
+ */
 export function matches(event: GhostlyEvent, types: readonly string[]): boolean {
   if (!types.length) return true;
-  return types.some((type) => type.endsWith(".") || type.endsWith("*") ? event.type.startsWith(type.replace(/\*$/, "")) : event.type === type);
+  return types.some((type) => {
+    if (type === "*") return true;
+    const family = /[.*]$/.test(type) ? type.replace(/\.?\*$/, "").replace(/\.$/, "") : type.includes(".") ? null : type;
+    return event.type === type || (family !== null && event.type.startsWith(family + "."));
+  });
 }
 
 /** The environment a hook runs in: this one's, less the backup passphrase (a hook, and what it runs, never needs it). */
