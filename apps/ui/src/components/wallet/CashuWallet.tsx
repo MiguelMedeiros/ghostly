@@ -4,7 +4,7 @@ import type { WalletPlatform, WalletState } from "../../lib/platform";
 import { useCountUp } from "../../hooks/useCountUp";
 import { PaymentReview } from "../PaymentReview";
 import { ConfirmRealMoney } from "../ConfirmRealMoney";
-import { Actions, Address, Amount, Block, Button, Notice, Row, Section, input, type Action } from "./ui";
+import { Actions, Address, Amount, Block, Button, Notice, Row, Section, Signed, input, type Action } from "./ui";
 import { LightningAddressPay } from "./LightningAddressPay";
 import { RemoveMintConfirm } from "./RemoveMint";
 import { useRun } from "./run";
@@ -242,7 +242,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                   <div key={tx.id} className="text-sm py-2" data-testid="wallet-tx">
                     <div className="flex items-baseline justify-between gap-2">
                       <span className="text-text-primary truncate">{t(TX_LABEL[tx.kind])}</span>
-                      <span className={`font-semibold shrink-0 tabular-nums ${incoming ? "text-accent" : "text-text-primary"}`}>{incoming ? "+" : "−"}{formatAmount(tx.amount, t.language)} <span className="text-xs font-normal text-text-muted">{unit}</span></span>
+                      <span className={`font-semibold shrink-0 tabular-nums ${incoming ? "text-accent" : "text-text-primary"}`}><Signed sign={incoming ? "+" : "−"} amount={formatAmount(tx.amount, t.language)} /> <span className="text-xs font-normal text-text-muted">{unit}</span></span>
                     </div>
                     <div className="flex items-baseline justify-between gap-2 text-xs text-text-muted">
                       <span className="truncate">{formatAt(tx.timestamp, MOVED_AT, t.language)} · {mint?.name ?? new URL(tx.mint).hostname}{tx.note ? ` · ${ENGINE_NOTES[tx.note] ? t(ENGINE_NOTES[tx.note]) : tx.note}` : ""}</span>
