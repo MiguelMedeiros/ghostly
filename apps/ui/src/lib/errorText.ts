@@ -257,6 +257,7 @@ const RULES: readonly Rule[] = [
   exact("A Lightning payment for this request is still pending", "errors.pay.lightningPending"),
   exact("You already paid this request", "errors.pay.alreadyPaid"),
   exact("Already paid by another member of the group", "errors.pay.paidByOther"),
+  exact("Another member of the group is paying it", "errors.pay.payingByOther"),
   exact("The payment was refused", "errors.pay.refused"),
   // A refused send whose ecash came back (payments.ts refusedLine): why, and what came back, less the mint's fee.
   { match: /^Refused: (?<reason>[\s\S]+?)\. (?<amount>\d+) sats? came back; the mint kept (?<fee>\d+) as its fee\.$/, key: "errors.pay.refused", reason: "next", next: "errors.pay.refusedLessFee", params: ({ amount, fee }, t) => ({ amount: formatAmount(Number(amount), t.language ?? "en"), fee: formatAmount(Number(fee), t.language ?? "en") }) },
