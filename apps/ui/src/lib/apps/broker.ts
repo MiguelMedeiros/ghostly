@@ -7,8 +7,10 @@
  * - The frame loads twice: the runner, then the app the runner writes into itself after `writing`. Any other load is a
  *   navigation, and tears the app down.
  * - Requests are `{id, type, args}`, at most 64 KiB as JSON and 50 a second; answers `{id, ok, value | error}`; events
- *   `{event, data}`. An unknown type is refused. An app that sends ten times the rate is stopped. `file` answers at
- *   most 16 MiB a second, one read at a time.
+ *   `{event, data}`. An unknown type is refused. An app that sends ten times the rate is stopped. `file` and
+ *   `files.read` answer at most 16 MiB a second together, one read at a time.
+ * - `files.*` (WISP 1200 · Linked files) only for an app granted `files`, through the platform's `linkedFiles`: the client
+ *   asks the person and keeps the links; the app names only the ids it was given.
  *
  * `createBroker` is the protocol alone (tested without a browser); `startApp` frames it in a page.
  */
@@ -48,7 +50,9 @@ export type AppStopReason = "closed" | "navigated" | "protocol" | "timeout" | "s
 export type AppPhase = "loading" | "starting" | "writing" | "running" | "stopped";
 
 /** Every request type the broker answers: the whole `ghostly.*` API (WISP 1200). */
-export const BROKER_REQUESTS: readonly MiniAppRequestType[] = ["context", "file", "storage.get", "storage.set", "storage.delete", "storage.keys", "chat.send", "close"];
+export const BROKER_REQUESTS: readonly MiniAppRequestType[] = [
+  "context", "file", "storage.get", "storage.set", "storage.delete", "storage.keys", "chat.send", "files.pick", "files.list", "files.read", "files.forget", "close",
+];
 
 /** How long the runner has to say `writing` once it has the port. */
 export const START_TIMEOUT_MS = 15_000;
@@ -177,12 +181,36 @@ const refuse = (code: MiniAppErrorCode): never => { throw new Refusal(code); };
  * `full` (its storage in this scope holds 5 MiB), `no-file` (no such file in its bundle), `stopped` (a store removed
  * or its publisher revoked the version running, WISP 1200 § Takedowns), and the bounds the broker checks too. Any other failure is `failed`, without the words.
  */
-const ENGINE_REFUSALS: ReadonlySet<string> = new Set<MiniAppErrorCode>(["full", "no-file", "too-large", "bad-key", "stopped"]);
+const ENGINE_REFUSALS: ReadonlySet<string> = new Set<MiniAppErrorCode>(["full", "no-file", "too-large", "bad-key", "stopped", "cancelled", "changed", "gone"]);
 
 function refusalOf(error: unknown): MiniAppErrorCode {
   if (error instanceof Refusal) return error.message;
   const code = error instanceof Error ? /^([a-z][a-z-]*): /.exec(error.message)?.[1] : undefined;
   return code && ENGINE_REFUSALS.has(code) ? code as MiniAppErrorCode : "failed";
+}
+
+/** A linked file's id, as the client gives them: 22 base64url characters. */
+const LINK_ID = /^[A-Za-z0-9_-]{22}$/;
+const EXTENSION = /^[a-z0-9]{1,16}$/;
+
+/** `files.pick`'s options, or a refusal: `{folder?, accept?}` and nothing else that matters. */
+function pickOptions(value: unknown): { folder: boolean; accept: string[] } {
+  if (value === undefined || value === null) return { folder: false, accept: [] };
+  if (typeof value !== "object" || Array.isArray(value)) return refuse("bad-request");
+  const { folder, accept } = value as { folder?: unknown; accept?: unknown };
+  if (folder !== undefined && typeof folder !== "boolean") refuse("bad-request");
+  if (accept !== undefined && (!Array.isArray(accept) || accept.length > MINI_APP_LIMITS.filesAccept || !accept.every((e) => typeof e === "string" && EXTENSION.test(e)))) refuse("bad-request");
+  return { folder: folder === true, accept: [...new Set((accept as string[] | undefined) ?? [])] };
+}
+
+/** `files.read`'s range: whole numbers, an offset within a safe integer, a length of 1 to `filesReadBytes`. */
+function readRange(value: unknown): { offset: number; length: number } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return refuse("bad-request");
+  const { offset, length } = value as { offset?: unknown; length?: unknown };
+  if (!Number.isSafeInteger(offset) || (offset as number) < 0) refuse("bad-request");
+  if (!Number.isSafeInteger(length) || (length as number) < 1) refuse("bad-request");
+  if ((length as number) > MINI_APP_LIMITS.filesReadBytes) refuse("too-large");
+  return { offset: offset as number, length: length as number };
 }
 
 function storageKey(value: unknown): string {
@@ -201,6 +229,10 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
   let reading: Promise<unknown> = Promise.resolve();
   const scope = launch.chat?.linkId ?? "alone";
   const chatAllowed = !!launch.chat && launch.permissions.includes("chat");
+  /** Linked files: only for an app granted `files`, in a client that keeps them. Not a version's: the outer platform's. */
+  const linkedFiles = () => (launch.permissions.includes("files") ? platform.linkedFiles ?? null : null);
+  /** A pick waiting for the person: one at a time per app. */
+  let picking = false;
   let appId: string | null = null;
   let chatOpened = false;
   let peer: { version: string } | null = null;
@@ -237,6 +269,25 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
     unsubscribe = null;
     if (chatOpened && launch.chat) void host.chat.close(launch.chat.linkId, launch.ref).catch(() => {});
     stopped(reason);
+  };
+
+  /**
+   * Counted against `fileBytesPerSecond` with every other read, one at a time: `file` and `files.read` share the
+   * chain, so an app cannot double its bytes a second by mixing them.
+   */
+  const counted = (load: () => Promise<Uint8Array>): Promise<Uint8Array> => {
+    const read = reading.then(async () => {
+      if (phase === "stopped") refuse("stopped");
+      const at = now();
+      while (served.length && served[0]!.at <= at - 1000) servedBytes -= served.shift()!.bytes;
+      if (servedBytes >= MINI_APP_LIMITS.fileBytesPerSecond) refuse("too-fast");
+      const bytes = await load();
+      served.push({ at, bytes: bytes.byteLength });
+      servedBytes += bytes.byteLength;
+      return bytes;
+    });
+    reading = read.catch(() => {});
+    return read;
   };
 
   const answer = async (type: string, args: unknown[]): Promise<{ value?: MiniAppJson | ArrayBuffer; transfer?: Transferable[]; file?: AppFileAt }> => {
@@ -296,6 +347,42 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         if (args.length !== 1 || utf8Bytes(JSON.stringify(args[0])) > MINI_APP_LIMITS.chatDataBytes) refuse("too-large");
         const error = await host.chat.send(launch.chat!.linkId, launch.ref, args[0] as MiniAppJson);
         if (error) refuse(error);
+        return {};
+      }
+      case "files.pick": {
+        const files = linkedFiles();
+        if (!files) return refuse("not-allowed");
+        const options = pickOptions(args[0]);
+        if (picking) refuse("too-fast");
+        picking = true;
+        try {
+          return { value: await files.pick(launch.ref, launch.title, options) as unknown as MiniAppJson };
+        } finally {
+          picking = false;
+        }
+      }
+      case "files.list": {
+        const files = linkedFiles();
+        if (!files) return refuse("not-allowed");
+        return { value: await files.list(launch.ref) as unknown as MiniAppJson };
+      }
+      case "files.read": {
+        const files = linkedFiles();
+        if (!files) return refuse("not-allowed");
+        const id = args[0];
+        if (typeof id !== "string" || !LINK_ID.test(id)) refuse("bad-request");
+        const { offset, length } = readRange(args[1]);
+        const bytes = await counted(() => files.read(launch.ref, id as string, offset, length));
+        if (bytes.byteLength > length) refuse("failed");
+        const buffer = bytes.slice().buffer as ArrayBuffer;
+        return { value: buffer, transfer: [buffer] };
+      }
+      case "files.forget": {
+        const files = linkedFiles();
+        if (!files) return refuse("not-allowed");
+        const id = args[0];
+        if (typeof id !== "string" || (id !== "all" && !LINK_ID.test(id))) refuse("bad-request");
+        await files.forget(launch.ref, id as string);
         return {};
       }
       default:

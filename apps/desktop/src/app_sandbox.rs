@@ -109,7 +109,7 @@ const RUNNER: &str = r#"<!doctype html>
   };
   // What a failed call rejects with: one of the broker's codes (MINI_APP_ERROR_CODES, packages/core/src/miniApp.ts),
   // or "failed" for anything else, this runner's own failures included. Read without the prototypes the app may change.
-  const CODES = ["bad-key", "bad-path", "bad-request", "failed", "full", "no-file", "not-allowed", "not-open", "offline", "peer-closed", "stopped", "too-fast", "too-large", "unknown-type"];
+  const CODES = ["bad-key", "bad-path", "bad-request", "cancelled", "changed", "failed", "full", "gone", "no-file", "not-allowed", "not-open", "offline", "peer-closed", "stopped", "too-fast", "too-large", "unknown-type"];
   const known = Object.create(null);
   for (let i = 0; i < CODES.length; i++) known[CODES[i]] = true;
   const refusal = (code) => new Error(typeof code === "string" && known[code] === true ? code : "failed");
@@ -147,6 +147,12 @@ const RUNNER: &str = r#"<!doctype html>
         set.add(listener);
         return () => { set.delete(listener); };
       },
+    }),
+    files: Object.freeze({
+      pick: (options) => send("files.pick", options === undefined ? [] : [options]),
+      list: call("files.list"),
+      read: (id, range) => send("files.read", [id, range]),
+      forget: (id) => send("files.forget", [id]).then(() => undefined),
     }),
     close: () => send("close", []).then(() => undefined),
   }) });
@@ -1884,6 +1890,10 @@ mod tests {
             "keys: call(\"storage.keys\")",
             "send: (value) => send(\"chat.send\", [value]).then(() => undefined)",
             "close: () => send(\"close\", []).then(() => undefined)",
+            "pick: (options) => send(\"files.pick\", options === undefined ? [] : [options])",
+            "list: call(\"files.list\")",
+            "read: (id, range) => send(\"files.read\", [id, range])",
+            "forget: (id) => send(\"files.forget\", [id]).then(() => undefined)",
             "chat.on takes \\\"message\\\" or \\\"peer\\\" and a function",
         ] {
             assert!(RUNNER.contains(call), "desktop: {call}");

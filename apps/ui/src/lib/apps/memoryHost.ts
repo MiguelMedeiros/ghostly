@@ -3,7 +3,7 @@
  * call written down with the app reference the broker gave it, so a test sees which app the broker took a request for.
  */
 import type { AppFrameEvent, AppSendError } from "@ghostly/core";
-import type { MiniAppJson } from "@ghostly/core/miniApp";
+import type { MiniAppJson, MiniAppLinkedFile } from "@ghostly/core/miniApp";
 import type { AppsPlatform } from "../platform";
 
 export interface MemoryHostCall {
@@ -26,6 +26,10 @@ export interface MemoryHost extends AppsPlatform {
   receive(linkId: string, frame: AppFrameEvent): void;
   /** What `chat.send` answers next (null: it went). */
   sendResult: AppSendError | null;
+  /** What the person picks at the next `files.pick`: these files (path and bytes), or nothing (`cancelled`). */
+  nextPick: { path: string; bytes: Uint8Array; modified?: number }[] | "cancel";
+  /** The links each app keeps, by reference: the entry, its bytes now (a test changes them to make it `changed`). */
+  readonly linked: Map<string, Map<string, { entry: MiniAppLinkedFile; bytes: Uint8Array | null }>>;
 }
 
 /** The chat app id this host gives an app in a chat: not the real derivation, just one per chat and app. */
@@ -42,6 +46,13 @@ export function memoryHost(runnerUrl = "/app-frame.html", netRunnerUrl: string |
     const key = `${ref} ${scope}`;
     let map = stored.get(key);
     if (!map) stored.set(key, (map = new Map()));
+    return map;
+  };
+  const linked: MemoryHost["linked"] = new Map();
+  let nextId = 0;
+  const linksOf = (ref: string) => {
+    let map = linked.get(ref);
+    if (!map) linked.set(ref, (map = new Map()));
     return map;
   };
   const host: MemoryHost = {
@@ -80,6 +91,36 @@ export function memoryHost(runnerUrl = "/app-frame.html", netRunnerUrl: string |
       },
       onFrame: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
       peer: (linkId, app) => peers.get(`${linkId} ${app}`) ?? null,
+    },
+    nextPick: "cancel",
+    linked,
+    linkedFiles: {
+      pick: async (ref, _title, options) => {
+        calls.push({ op: "files.pick", ref, key: `${options.folder ? "folder" : "files"} ${options.accept.join(",")}` });
+        const picked = host.nextPick;
+        host.nextPick = "cancel";
+        if (picked === "cancel") throw new Error("cancelled: Nothing was picked");
+        const links = linksOf(ref);
+        return picked.map(({ path, bytes, modified = 1 }) => {
+          const id = `link${String(nextId++).padStart(18, "0")}`;
+          const entry: MiniAppLinkedFile = { id, path, size: bytes.length, modified, available: true };
+          links.set(id, { entry, bytes });
+          return entry;
+        });
+      },
+      list: async (ref) => { calls.push({ op: "files.list", ref }); return [...linksOf(ref).values()].map((l) => l.entry); },
+      read: async (ref, id, offset, length) => {
+        calls.push({ op: "files.read", ref, key: id });
+        const link = linksOf(ref).get(id);
+        if (!link || !link.bytes) throw new Error("gone: No such file");
+        if (link.bytes.length !== link.entry.size) throw new Error("changed: The file changed");
+        return link.bytes.slice(offset, offset + length);
+      },
+      forget: async (ref, id) => {
+        calls.push({ op: "files.forget", ref, key: id });
+        if (id === "all") linksOf(ref).clear();
+        else linksOf(ref).delete(id);
+      },
     },
     receive(linkId, frame) {
       if (!("d" in frame)) {

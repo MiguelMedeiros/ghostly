@@ -29,6 +29,29 @@ export interface MiniAppContext {
 /** `chat.peer`: the peer opened the app (again, or in another version) or closed it. */
 export type MiniAppPeerEvent = { open: true; version: string } | { open: false };
 
+/**
+ * A file the person picked for the app (WISP 1200 · Linked files): the client keeps a link to it, never a copy, and the
+ * app reads it by `id`, which the client chose. `path` is relative to what was picked, the picked folder's name first,
+ * never where it is on the device.
+ */
+export interface MiniAppLinkedFile {
+  /** 22 base64url characters. */
+  id: string;
+  path: string;
+  /** Bytes, and when it last changed (ms), as when it was picked. */
+  size: number;
+  modified: number;
+  /** Whether the client can read it now: false after a restart where the browser must be asked again, or before. */
+  available: boolean;
+}
+
+/** `ghostly.files.pick`: a folder (with everything under it) or files, of these extensions only when `accept` names some. */
+export interface MiniAppPickOptions {
+  folder?: boolean;
+  /** Extensions without the dot, lower case, at most `MINI_APP_LIMITS.filesAccept`. */
+  accept?: string[];
+}
+
 /** `window.ghostly` inside the sandbox. */
 export interface MiniAppApi {
   context(): Promise<MiniAppContext>;
@@ -49,6 +72,20 @@ export interface MiniAppApi {
     on(event: "message", listener: (data: MiniAppJson) => void): () => void;
     on(event: "peer", listener: (peer: MiniAppPeerEvent) => void): () => void;
   };
+  /**
+   * Files the person picks (the `files` permission): absent in a client that has none, so an app tests for it. The
+   * client asks the person and shows its own picker; the app reads only what was picked, by id.
+   */
+  files?: {
+    /** The entries picked now; refused with `cancelled` when the person picks nothing. */
+    pick(options?: MiniAppPickOptions): Promise<MiniAppLinkedFile[]>;
+    /** Every entry this app keeps. */
+    list(): Promise<MiniAppLinkedFile[]>;
+    /** At most `MINI_APP_LIMITS.filesReadBytes` from `offset`; fewer at the end of the file. */
+    read(id: string, range: { offset: number; length: number }): Promise<ArrayBuffer>;
+    /** Drops one link, or every link with "all". The file itself is never touched. */
+    forget(id: string): Promise<void>;
+  };
   /** Ends the app. */
   close(): Promise<void>;
 }
@@ -62,6 +99,10 @@ export type MiniAppRequestType =
   | "storage.delete"
   | "storage.keys"
   | "chat.send"
+  | "files.pick"
+  | "files.list"
+  | "files.read"
+  | "files.forget"
   | "close";
 
 /** A request from the app: `{id, type, args}`. The broker refuses an unknown `type`. */
@@ -79,12 +120,17 @@ export interface MiniAppRequest {
  *
  * - `bad-key`: a storage key that is not a string of 1 to 256 bytes.
  * - `bad-path`: a `file` path that is not a string of 1 to 1024 characters.
- * - `bad-request`: a request that is not `{id, type, args}` with JSON arguments.
+ * - `bad-request`: a request that is not `{id, type, args}` with JSON arguments, or whose arguments are not the call's.
+ * - `cancelled`: `files.pick` that the person closed without picking anything.
+ * - `changed`: `files.read` of a file whose size or date changed since it was picked: it is picked again to be read.
  * - `failed`: anything else; the client's own words never reach the app.
  * - `full`: a storage write would take the scope past 5 MiB (each key counts 128 bytes, its own bytes eight times and
  *   its value's), so the app can make room.
+ * - `gone`: `files.read` of a file that is no longer there, or that the client cannot read now (`available` false), or
+ *   of an id it does not keep.
  * - `no-file`: the bundle has no such file.
- * - `not-allowed`: `chat.send` without the `chat` permission, or with the app opened alone.
+ * - `not-allowed`: `chat.send` without the `chat` permission, or with the app opened alone; `files.*` without the
+ *   `files` permission, or in a client that cannot keep links.
  * - `not-open`: `chat.send` before this side's chat has the app open.
  * - `offline`: `chat.send` while the chat's session is not live. Nothing is kept to send later.
  * - `peer-closed`: `chat.send` while the contact has not opened the app (or its client does not offer `apps/1`).
@@ -97,8 +143,8 @@ export interface MiniAppRequest {
  * A later client may add a code: treat one you do not know as `failed`.
  */
 export const MINI_APP_ERROR_CODES = [
-  "bad-key", "bad-path", "bad-request", "failed", "full", "no-file", "not-allowed", "not-open", "offline", "peer-closed", "stopped",
-  "too-fast", "too-large", "unknown-type",
+  "bad-key", "bad-path", "bad-request", "cancelled", "changed", "failed", "full", "gone", "no-file", "not-allowed", "not-open", "offline",
+  "peer-closed", "stopped", "too-fast", "too-large", "unknown-type",
 ] as const;
 export type MiniAppErrorCode = typeof MINI_APP_ERROR_CODES[number];
 
@@ -131,10 +177,16 @@ export const MINI_APP_LIMITS = {
   /** Requests per second, per app. */
   requestsPerSecond: 50,
   /**
-   * Bytes of `file` answers per second, per app: a whole bundle's worth. A read that starts under it is answered whole;
-   * past it `file` is refused with `too-fast` until the second has gone.
+   * Bytes of `file` and `files.read` answers per second, per app, counted together: a whole bundle's worth. A read that
+   * starts under it is answered whole; past it the read is refused with `too-fast` until the second has gone.
    */
   fileBytesPerSecond: 16 * 1024 * 1024,
+  /** One `files.read`, at most. */
+  filesReadBytes: 1024 * 1024,
+  /** The links an app keeps, at most: a pick that would pass it is refused with `too-large`. */
+  filesEntries: 100_000,
+  /** Extensions a `files.pick` may name in `accept`, each 1 to 16 characters of `a-z` and `0-9`. */
+  filesAccept: 32,
   /** A storage key, UTF-8. */
   storageKeyBytes: 256,
   /** One stored JSON value, serialized. */
