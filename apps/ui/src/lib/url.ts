@@ -1,5 +1,5 @@
 import { inviteLink, inviteOwnership, readInviteCode, type InviteRefusal, type LinkParams } from "@ghostly/core";
-import { listSessions, type SessionKeys } from "./storage";
+import { knownChatKeys, listSessions, type SessionKeys } from "./storage";
 
 /**
  * Where a chat lives in the app: by the id of its stored session. The keys
@@ -85,8 +85,12 @@ export function parseInvite(input: string): SessionKeys | null {
 export type JoinOutcome = { kind: "own" | "joined"; sessionId: string } | { kind: "new" };
 
 export function classifyInvite(keys: SessionKeys): JoinOutcome {
-  const known = listSessions().map((session) => ({ id: session.id, seedB64: session.mySeedB64, peerPubKeyZ32: session.peerPubKeyB64 }));
-  const ownership = inviteOwnership({ seedB64: keys.seedB64 }, known);
+  // Read without any chat's messages (`knownChatKeys`); the list's order only when two chats could be the one.
+  const known = knownChatKeys();
+  const found = inviteOwnership({ seedB64: keys.seedB64 }, known);
+  const same = found.kind === "new" ? 0 : known.filter((c) => found.kind === "joined" ? c.seedB64 === found.link.seedB64 : c.peerPubKeyZ32 === found.link.peerPubKeyZ32).length;
+  const ownership = same < 2 ? found
+    : inviteOwnership({ seedB64: keys.seedB64 }, listSessions().map((session) => ({ id: session.id, seedB64: session.mySeedB64, peerPubKeyZ32: session.peerPubKeyB64 })));
   return ownership.kind === "new" ? ownership : { kind: ownership.kind, sessionId: ownership.link.id };
 }
 
