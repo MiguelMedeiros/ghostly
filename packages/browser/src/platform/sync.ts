@@ -21,7 +21,7 @@ import {
 } from "../../../../apps/ui/src/lib/storage";
 import type { ChatMessage, ChatSession } from "../../../../apps/ui/src/lib/types";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
-import { engine } from "./engine";
+import { engine, type ListChanges } from "./engine";
 import { replyRef } from "../shared/replies";
 
 /**
@@ -111,11 +111,32 @@ const mirrorable = (message: StoredMessage) => message.sender === "peer" || !!me
  * The ids of a history's messages the mirror would bring back: those may leave a session's stored copy
  * (`STORED_MESSAGES`), since the mirror puts them back from the engine's copy. By list: one list, one pass.
  */
-const mirrorableIds = new WeakMap<StoredMessage[], ReadonlySet<string>>();
-function engineIds(messages: StoredMessage[]): ReadonlySet<string> {
+const mirrorableIds = new WeakMap<StoredMessage[], Set<string>>();
+function engineIds(messages: StoredMessage[], since?: ListChanges): ReadonlySet<string> {
   let ids = mirrorableIds.get(messages);
-  if (!ids) mirrorableIds.set(messages, ids = new Set(messages.filter(mirrorable).map((m) => m.id)));
+  if (ids) return ids;
+  // The list it changed from had its ids: those, with what changed. Only the newest list is read again.
+  ids = since && mirrorableIds.get(since.from);
+  if (ids) {
+    for (const id of since!.deleted) ids.delete(id);
+    for (const message of since!.messages) {
+      if (mirrorable(message)) ids.add(message.id);
+      else ids.delete(message.id);
+    }
+  } else ids = new Set(messages.filter(mirrorable).map((m) => m.id));
+  mirrorableIds.set(messages, ids);
   return ids;
+}
+
+/**
+ * Where these rows are among the session's messages, by id. Searched from the end, where what changes mostly is, and
+ * without a map of the whole history: a row that arrived is not there, and the search goes through it all.
+ */
+function placesOf(messages: readonly ChatMessage[], rows: readonly StoredMessage[]): Map<string, number> {
+  const wanted = new Set(rows.map((m) => m.id));
+  const at = new Map<string, number>();
+  for (let i = messages.length - 1; i >= 0 && at.size < wanted.size; i--) if (wanted.has(messages[i].id)) at.set(messages[i].id, i);
+  return at;
 }
 
 /** What each link's messages were last mirrored from: the list, and its session as stored after. */
@@ -137,25 +158,29 @@ function mirroredAlready(linkId: string, messages: StoredMessage[]): boolean {
  * Mirrors a list not mirrored yet. The engine's state and the page's change tick (`engine.ts` `tellChanges`) both tell
  * of a message that arrived, the state often first: the list is mirrored once.
  */
-function mirrorNew(linkId: string, messages: StoredMessage[]): void {
-  if (!mirroredAlready(linkId, messages)) mirrorMessages(linkId, messages);
+function mirrorNew(linkId: string, messages: StoredMessage[], changes?: ListChanges): void {
+  if (!mirroredAlready(linkId, messages)) mirrorMessages(linkId, messages, changes);
 }
 
-function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
+function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: ListChanges): void {
   const link = engine.state?.links.find((l) => l.id === linkId);
   const session = link && sessionForPeer(link.peerPubKeyZ32);
   if (!link || !session) return;
 
-  // Every state change mirrors every chat: a long one must cost a pass over its messages, not a search per message,
-  // and the session is written once at most, whatever changed.
-  setEngineMessages(session.id, engineIds(messages));
+  // What changed since the list the last mirror of this link went through, into this session as it left it (whole):
+  // the rest is in the session already, so only those rows are looked at. A message arriving in a chat of thousands
+  // costs what it does in a short one.
+  const since = changes && !session.older && mirrored.get(linkId)?.messages === changes.from && untouched(linkId, session.id) ? changes : undefined;
+  // Otherwise every message: a long chat must cost a pass over them, not a search per message, and the session is
+  // written once at most, whatever changed.
+  setEngineMessages(session.id, engineIds(messages, since));
   // Read without its older messages (this page just loaded): the ones the engine keeps come back below, all of them.
   const partial = !!session.older;
   const before = partial ? storedSession(session.id) : null;
-  const at =new Map(session.messages.map((m, i) => [m.id, i]));
+  const at = since ? placesOf(session.messages, since.messages) : new Map(session.messages.map((m, i) => [m.id, i]));
   const added: ChatMessage[] = [];
   let dirty = false, moved = false;
-  for (const message of messages) {
+  for (const message of since ? since.messages : messages) {
     const i = at.get(message.id);
     const previous = i === undefined ? undefined : session.messages[i];
     // A row that changes is a new object, never the old one changed: the old one may be what a bubble on screen was drawn
@@ -355,7 +380,8 @@ export function startSessionSync(): void {
   engine.subscribe(() => {
     void reconcile();
     // A list mirrored already, into a session nothing wrote since, has nothing new (reconcile mirrors the link's names).
-    for (const [linkId, messages] of engine.messages) mirrorNew(linkId, messages);
+    // One whose changes the tick still holds is mirrored when it ends, from what changed only.
+    for (const [linkId, messages] of engine.messages) if (!engine.changing(linkId)) mirrorNew(linkId, messages);
   });
   // Deleting a chat only touches localStorage; notice it without waiting for the peer to speak.
   window.addEventListener("session-updated", () => void reconcile());
