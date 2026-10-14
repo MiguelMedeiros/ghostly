@@ -959,12 +959,17 @@ export class GhostLink {
         traceLink(this.myPubKeyZ32, "progress", { stage: progress.stage, attempt: progress.attempt, peerSeen: progress.peerSeen, reason: progress.reason, retryable: progress.retryable, transport: progress.transport });
         options.events?.onPairingProgress?.(progress);
       }) : null;
-    // This side's invite, nobody used yet: read less often the longer nobody does, once no longer awaited.
-    const invite = options.pairingProgress?.role === "inviter" && !!options.pairing && !options.pairing.credentials.peerKey;
+    // This side's invite, nobody used yet, or one this side joined whose inviter never came: read less often the longer
+    // nobody does, once no longer awaited (counted from the join). Joined chats whose inviter deleted its chat or is
+    // gone were read at the background pace for as long as the app ran: 15 of them, 30 reads a minute (bug hunt 1014-0136).
+    const invite = !!options.pairingProgress && !!options.pairing && !options.pairing.credentials.peerKey;
+    // A joined chat whose inviter never answered, pinned from the envelope it put out before anyone joined (`unanswered`).
+    let unanswered = options.dht?.state?.unanswered !== undefined;
+    const backsOff = invite || unanswered;
     this.dht = options.params.profile && options.pairing && options.dht ? new DhtDelivery({
       params: options.params, mode: this.deliveryMode, state: options.dht.state, credentials: options.pairing.credentials, transport: options.transport,
       save: options.dht.save, pollMs: options.dht.pollMs, firstControlAfterMs: options.dht.firstControlAfterMs,
-      ...(invite && { inviteMadeAt: options.madeAt ?? Date.now() }),
+      ...(backsOff && { inviteMadeAt: options.madeAt ?? Date.now() }),
       capsRev: options.dht.capsRev, peerCapsRev: options.dht.peerCapsRev, peerAcceptsText: options.dht.peerAcceptsText, peerAcceptsFile: options.dht.peerAcceptsFile,
       // Reactions ride on the envelopes off the live session (WISP 403 § Reactions).
       ...(options.reactionsSupport && {
@@ -999,6 +1004,10 @@ export class GhostLink {
       receipt: async id => { await options.events?.onMessageReceipt?.(id); },
       changed: view => {
         options.events?.onDhtDelivery?.(view);
+        // The inviter answered the join at last: its key is looked at now, not at the end of that wait.
+        const stillUnanswered = this.dht!.unanswered;
+        if (unanswered && !stillUnanswered) this.session.lookNow();
+        unanswered = stillUnanswered;
         // Someone else used the invite first (the contact's envelopes are sealed to them): the pairing says so, and
         // stops saying it if an envelope of the contact's reads here again.
         if (view.inviteTaken) this.tracker?.failed("taken", false, INVITE_TAKEN);
@@ -1032,7 +1041,7 @@ export class GhostLink {
       lastSeenTimestamp: options.lastSeenTimestamp,
       pollIntervals: options.pollIntervals,
       awaitingSince: options.madeAt,
-      ...(invite && { invite: () => !options.pairing!.credentials.peerKey }),
+      ...(backsOff && { invite: () => !options.pairing!.credentials.peerKey || !!this.dht?.unanswered }),
       getServices: options.getServices,
       // A joiner dials the moment it sees the inviter, and an app back after a restart (`resume`) the moment it reads its
       // contact: its offer goes in its first packet, not in a second one right behind its presence. A joiner with no WebRTC
