@@ -2627,6 +2627,16 @@ export class GhostLink {
     this.rejectWaiters(new GhostlyHttpError("unreachable", "Could not connect to the peer"));
   }
 
+  /**
+   * This side does not dial on its own: the contact's app does (the lower key), and none of what makes this side dial
+   * anyway holds (a first pairing's role, a restart, WebRTC set aside). Its own dial, chosen by hand, is not retried.
+   */
+  private awaitsContactDial(): boolean {
+    const pairing = !!this.tracker && !this.tracker.done && this.tracker.progress.stage !== "on-dht";
+    const role = pairing ? this.options.pairingProgress?.role : undefined;
+    return !role && this.myPubKeyZ32 > this.options.params.peerPubKeyZ32 && !this.resuming && !this.dialsPastRtc();
+  }
+
   /** A transport of the attempt under way did not connect. */
   private attemptFailed(transport: PairedTransport, error: string): void {
     if (this.isDataLinkOpen) return;
@@ -2640,7 +2650,7 @@ export class GhostLink {
     this.attempt = null;
     if (!attempt || this.isDataLinkOpen || this.stopped || (!attempt.failed.length && !reason)) return;
     this.lastAttempt = { at: Date.now(), side: attempt.side, failed: attempt.failed, ...(!attempt.failed.length && reason ? { reason } : {}),
-      ...(attempt.side === "dialled" ? { retryAt: Math.max(Date.now(), this.lastAutoConnectAt + this.dialWait()) } : {}) };
+      ...(attempt.side === "dialled" && !this.awaitsContactDial() ? { retryAt: Math.max(Date.now(), this.lastAutoConnectAt + this.dialWait()) } : {}) };
     traceLink(this.myPubKeyZ32, "attempt-ended", { side: attempt.side, failed: attempt.failed.map(f => f.transport), reason: this.lastAttempt.reason });
     this.options.events?.onLiveAttempt?.(this.lastAttempt);
   }
@@ -2848,7 +2858,7 @@ export class GhostLink {
     if (role === "inviter") {
       this.peerSeenAt ||= Date.now();
       if (Date.now() - this.peerSeenAt < INVITER_DIAL_GRACE_MS && !this.nothingToAwait()) { this.session.expectPeer(); return; }
-    } else if (role !== "joiner" && this.myPubKeyZ32 > this.options.params.peerPubKeyZ32 && !this.resuming && !this.dialsPastRtc()) {
+    } else if (this.awaitsContactDial()) {
       // Back after a restart (`resume`), this side dials once whatever its key: the contact may still hold the old
       // session, and would not dial. A WebRTC offer from it reaches that session as "the contact lost the connection"
       // (`DataLink.handleSignal`), and two offers crossing are settled by key there.
