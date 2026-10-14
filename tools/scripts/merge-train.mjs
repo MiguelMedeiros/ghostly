@@ -169,13 +169,13 @@ let planner;
  * ci.yml's plan for a ready pull request that changes `files` (null: every gate on), or null when the plan cannot be
  * read. Loaded on first use: `--list-bases` runs from a checkout that holds only this file.
  */
-export async function ciPlan(files) {
+export async function ciPlan(files, { tested = false } = {}) {
   planner ??= import("./ci-changes.mjs").then(
     (m) => m.plan,
     () => null,
   );
   const plan = await planner;
-  return plan ? plan(files, { draft: false }) : null;
+  return plan ? plan(files, { draft: false, tested }) : null;
 }
 
 /**
@@ -360,7 +360,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const done = { merged: [], failed: [], dropped: [], opened: [], closed: [] };
   const gone = new Set();
 
-  // Which of CI's runs on a commit count for pull request `p` (null: the base's own commit, where everything runs): a
+  // Which of CI's runs on a commit count for pull request `p` (null: the base's own commit, where everything runs but
+  // on a `tested` push to dev): a
   // green run that skipped a job this pull request's files turn on was planned for other files (see `skippedGates`),
   // so the run before it speaks. The files are read only for a green run that skipped something, once per run of the train.
   const plans = new Map();
@@ -374,6 +375,13 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     }
     const plan = plans.get(key);
     if (plan === "own") return true;
+    // dev's own push whose tree a green run already tested runs only Tauri Backend (ci-changes.mjs's testedAs), and its
+    // CI Success passes that plan for a push to dev alone: such a run is dev's green CI.
+    if (!p && base === "dev") {
+      if (!plans.has("tested")) plans.set("tested", await ciPlan(null, { tested: true }));
+      const tested = plans.get("tested");
+      if (tested && skipped.every((gate) => !tested[gate])) return true;
+    }
     // No plan to read (a checkout without ci-changes.mjs): every gate counts as on.
     const missing = skipped.filter((gate) => !plan || plan[gate]);
     if (!missing.length) return true;
