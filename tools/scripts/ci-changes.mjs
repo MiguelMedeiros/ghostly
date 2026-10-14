@@ -54,6 +54,10 @@ export const WEBSITE_INPUTS = [
   "apps/ui/src/components/walletCardTypes.ts",
   "apps/ui/src/components/wallet-deck.css",
   "apps/ui/src/components/wallet-cards.css",
+  // The brand test (brand.test.mjs) compares the app's lockup and themes, and the README's logos, with the brand page's.
+  "apps/ui/src/components/AppBrand.tsx",
+  "docs/assets/readme/",
+  "apps/ui/src/index.css",
   // The store pages' readers: sync-store-core.mjs's FILES, which `sync-store-core.mjs --check` compares.
   "packages/core/src/appStore.ts",
   "packages/core/src/appBundle.ts",
