@@ -2098,9 +2098,9 @@ export class Groups {
     for (const key of tried.keys()) if (!lacking.has(key)) tried.delete(key);
     const out: string[] = [];
     for (const [key, mark] of lacking) {
-      if (key === via || !up(key)) continue;
+      if (key === via || !up(key) || !session.mayHold(via, key)) continue;
       const prior = asked.get(key);
-      if (prior && prior.via !== via && up(prior.via) && now - prior.at < MESH_GOSSIP_MS) continue;
+      if (prior && prior.via !== via && up(prior.via) && now - prior.at < MESH_GOSSIP_MS && session.mayHold(prior.via, key)) continue;
       let entry = tried.get(key);
       if (!entry || entry.mark !== mark) tried.set(key, (entry = { mark, of: new Set(), noticed: entry?.noticed, last: entry?.last }));
       if (entry.of.has(via)) continue;
@@ -2146,7 +2146,8 @@ export class Groups {
     for (const [key, mark] of lacking) {
       const entry = tried.get(key);
       if (!entry || entry.mark !== mark || entry.at === undefined || now - entry.at < MESH_GAP_AGAIN_MS) continue;
-      if (!connected.includes(key) || !connected.every(member => entry.of.has(member))) continue;
+      // A member let in since those epochs is not asked (`gapsOf`): it holds none of them.
+      if (!connected.includes(key) || !connected.every(member => entry.of.has(member) || !session.mayHold(member, key))) continue;
       let gone = this.gapsGone.get(groupId);
       if (!gone) this.gapsGone.set(groupId, (gone = new Map()));
       const upTo = { ...gone.get(key) };
@@ -2184,7 +2185,9 @@ export class Groups {
       if (!up(key)) continue;
       if (!last) { if (now - (entry.noticed ?? now) >= MESH_GAP_AGAIN_MS) fresh.set(key, mark); continue; }
       if (now - last.at < MESH_GAP_AGAIN_MS || !up(last.via)) continue;
-      if (session.filledSince(key, last.asked)) again.set(last.via, [...(again.get(last.via) ?? []), key]);
+      if (!session.filledSince(key, last.asked)) continue;
+      // What is left is of epochs it was not in (it was let in since): another member is asked now.
+      if (session.mayHold(last.via, key)) again.set(last.via, [...(again.get(last.via) ?? []), key]); else fresh.set(key, mark);
     }
     const asked = this.relayAsked.get(groupId);
     for (const [via, keys] of again) {
@@ -2196,10 +2199,12 @@ export class Groups {
     }
     if (!fresh.size || !connected.length) return;
     // The gossip turn's next member that is not one of the authors asked for, when there is another: an author hands on
-    // nobody's messages of its own. Taken from the turns' own order, the next turns go on to the members not asked yet.
+    // nobody's messages of its own, and one let in since holds none of them. Taken from the turns' own order, the next
+    // turns go on to the members not asked yet.
     const at = () => connected[(gossipStart(session.myKey) + this.gossipTurn++) % connected.length]!;
+    const helps = (member: string) => !fresh.has(member) && [...fresh.keys()].some(key => session.mayHold(member, key));
     let via = at();
-    for (let i = 1; i < connected.length && fresh.has(via); i++) via = at();
+    for (let i = 1; i < connected.length && !helps(via); i++) via = at();
     const keys = this.gapsOf(groupId, session, via, fresh);
     if (!keys.length) return;
     // As `askOf`: this is the gossip turn's ask, and the next waits a whole turn. Sooner, it found this one's answer
