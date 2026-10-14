@@ -228,6 +228,37 @@ describe("sending files", () => {
     expect(engine.calls).toEqual([["sendFile", { linkId: "link-1", file: { id: "out-file", name: "a", size: 1, mime: "text/plain", timestamp: 3 }, timestamp: 3 }]]);
   });
 
+  // A file over 16 MiB is copied in before it goes. A copy that fails (the file changed on disk, no room) leaves no
+  // record to send again: Retry, the bubble's only button, always answered "This file cannot be retried". Said as
+  // one not to retry (`retry: false`), the bubble offers none (`canRetryFile`). One the chat refused after the copy
+  // landed keeps it.
+  it("a large file whose copy into this device failed is not offered again; one refused after its copy is", async () => {
+    withLinks(chat({ id: "big-link" }));
+    const big = new File([new Uint8Array(17 * 1024 * 1024)], "big.bin");
+    let fail = true;
+    const copies = {
+      kind: "native",
+      stage: vi.fn(async () => { if (fail) throw new Error("The file changed while it was being copied"); return "digest"; }),
+    } as unknown as FileBytes;
+    registerFileBytes("native", async () => copies, true);
+    try {
+      const { file } = await services.sendFile("peer-1", big);
+      await vi.waitFor(() => expect(services.getTransfer(file.id)?.state).toBe("failed"));
+      expect(services.getTransfer(file.id)).toMatchObject({ direction: "out", retry: false });
+      await expect(services.retryFile!(file.id)).rejects.toThrow("cannot be retried");
+
+      fail = false;
+      engine.answers = { sendFile: new Error("This chat stopped: your contact's key changed.") };
+      const refused = await services.sendFile("peer-1", big);
+      await vi.waitFor(() => expect(services.getTransfer(refused.file.id)?.state).toBe("failed"));
+      expect(services.getTransfer(refused.file.id)?.retry).not.toBe(false);
+      expect((await fileStore.get(refused.file.id))?.direction).toBe("out");
+    } finally {
+      registerFileBytes("native", async () => null);
+      resetFileBytes();
+    }
+  });
+
   it("serves a received file as opaque bytes unless it is a previewable image", async () => {
     await fileStore.put({ id: "page", linkId: "l", blob: new Blob(["<script>"], { type: "text/html" }), createdAt: 1 });
     await fileStore.put({ id: "pic", linkId: "l", blob: new Blob(["png"], { type: "image/png" }), createdAt: 1 });
