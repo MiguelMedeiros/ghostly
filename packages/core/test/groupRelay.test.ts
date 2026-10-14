@@ -140,6 +140,29 @@ describe("any member catches up the others", { timeout: 60_000 }, () => {
     expect(mesh.texts(bob)).toEqual(["before dave"]);
   });
 
+  it("asks for an epoch it holds nothing of once another member's sync says there is something, and counts none of it seen", async () => {
+    const { mesh, alice, bob, carol } = await three();
+    away(mesh, bob, [alice, carol]);
+    const before = carol.epoch;
+    for (const text of ["c0", "c1"]) await carol.sendText(text);
+    await mesh.settle();
+    // Dave let in while Bob is away: Carol's next messages are of a new epoch, and her own answer holds only those.
+    const dave = await admit(mesh, alice, "Dave");
+    expect(bob.lacking().size).toBe(0);
+    await bob.handle(alice.myKey, clone(alice.syncFrame()));
+    expect(bob.lacking().get(carol.myKey)).toBe(`${before}:1.0`);
+    expect(bob.missOf(carol.myKey)).toEqual({ [String(before)]: [1, 0] });
+    // A member's word: nothing counted as seen, nor as missing in the member list.
+    expect(bob.state.seen[carol.myKey]?.[before]).toBeUndefined();
+    expect(bob.missing(carol.myKey)).toBe(0);
+    // Dave holds none of them; Alice does.
+    expect(bob.mayHold(dave.myKey, carol.myKey)).toBe(false);
+    expect(bob.mayHold(alice.myKey, carol.myKey)).toBe(true);
+    // Dave was not in that epoch: what Alice says of it is nothing for him to ask for.
+    await dave.handle(alice.myKey, clone(alice.syncFrame()));
+    expect(dave.lacking().size).toBe(0);
+  });
+
   it("a removed member is not handed on, and a frame of theirs handed on by a third member is refused", async () => {
     const { mesh, alice, bob, carol } = await three();
     away(mesh, bob, [alice, carol]);

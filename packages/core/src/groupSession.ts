@@ -424,6 +424,12 @@ export class GroupSession {
   private leaversHanded = new Map<string, Set<string>>();
   /** Syncs answered per member, a few a minute (`GROUP_LIMITS.syncAnswers`). In memory only. */
   private syncsAnswered = new Map<string, RateWindow>();
+  /**
+   * Per author and epoch, the highest number another member's sync says it has (`have`), for the epochs I was in and
+   * of which I hold nothing at all (`hear`): what `lacking` names, so another member is asked for it. Only a member's
+   * word, so it never counts as seen. In memory only: the syncs come again when the edges do.
+   */
+  private heard = new Map<string, Map<number, number>>();
   /** Catch-up answers still going out, a slice at a time (`handOut`). */
   private readonly answers: CatchUpAnswers<GroupEdgeFrame>;
   /**
@@ -587,21 +593,55 @@ export class GroupSession {
    */
   lacking(): Map<string, string> {
     const out = new Map<string, string>();
-    for (const [sender, epochs] of Object.entries(this.state.seen)) {
+    for (const sender of new Set([...Object.keys(this.state.seen), ...this.heard.keys()])) {
       if (sender === this.myKey || !rosterHas(this.roster, sender)) continue;
       // The numbers themselves: what the author writes next arrives, and changes nothing of what is missing.
-      const marks = Object.entries(epochs).map(([e, entry]) => [e, this.gaps(entry)] as const).filter(([, gaps]) => gaps.length)
-        .map(([e, gaps]) => `${e}:${gaps.join(".")}`);
+      const marks = Object.entries(this.missOf(sender)).map(([e, gaps]) => `${e}:${gaps.join(".")}`);
       if (marks.length) out.set(sender, marks.join(","));
     }
     return out;
   }
 
-  /** What a sync names in `miss` for one sender now: per epoch, the newest `GROUP_LIMITS.miss` numbers that never arrived. */
+  /**
+   * What a sync names in `miss` for one sender now: per epoch, the newest `GROUP_LIMITS.miss` numbers that never arrived.
+   * And, for an epoch of which none arrived, the newest numbers another member said it has (`heard`): a member back
+   * after someone joined, whose author wrote 32 since (all its own answer holds), had nothing below them to ask for.
+   */
   missOf(sender: string): Record<string, number[]> {
     const out: Record<string, number[]> = {};
-    for (const [e, entry] of Object.entries(this.state.seen[sender] ?? {})) { const gaps = this.gaps(entry); if (gaps.length) out[e] = gaps; }
+    const seen = this.state.seen[sender] ?? {};
+    for (const [e, entry] of Object.entries(seen)) { const gaps = this.gaps(entry); if (gaps.length) out[e] = gaps; }
+    for (const [e, high] of this.heard.get(sender) ?? []) {
+      if (seen[e]) continue;
+      const numbers: number[] = [];
+      for (let n = high; n >= 0 && numbers.length < GROUP_LIMITS.miss; n--) numbers.push(n);
+      out[e] = numbers;
+    }
     return out;
+  }
+
+  /**
+   * Whether `member` may hold some of what never reached me from `sender` (`missOf`): it was in one of those epochs.
+   * One let in since was not, and a member asks it for them in vain.
+   */
+  mayHold(member: string, sender: string): boolean {
+    return Object.keys(this.missOf(sender)).some(e => { const commit = this.state.chain[Number(e)]; return !commit || rosterHas(commit.m, member); });
+  }
+
+  /** What another member's sync says it has of the epochs I was in, can read, and hold nothing of (`heard`). */
+  private hear(frame: GroupSyncFrame): void {
+    if (!frame.have || typeof frame.have !== "object") return;
+    for (const [sender, epochs] of Object.entries(frame.have as Record<string, unknown>)) {
+      if (sender === this.myKey || !rosterHas(this.roster, sender) || !epochs || typeof epochs !== "object") continue;
+      for (const [key, high] of Object.entries(epochs as Record<string, unknown>)) {
+        const e = Number(key), commit = this.state.chain[e];
+        if (!Number.isSafeInteger(high) || (high as number) < 0 || (high as number) >= OWN_FRAME_LIMIT || !commit || this.state.seen[sender]?.[e]) continue;
+        if (!rosterHas(commit.m, this.myKey) || !rosterHas(commit.m, sender) || !this.secret(e)) continue;
+        let byEpoch = this.heard.get(sender);
+        if (!byEpoch) this.heard.set(sender, byEpoch = new Map());
+        byEpoch.set(e, Math.max(byEpoch.get(e) ?? -1, high as number));
+      }
+    }
   }
 
   /** Whether any of `asked` (per epoch, as `missOf` gave them) arrived since: the member asked holds what is missing. */
@@ -1481,6 +1521,7 @@ export class GroupSession {
     let answered = this.syncsAnswered.get(from);
     if (!answered) this.syncsAnswered.set(from, answered = new RateWindow(GROUP_LIMITS.syncAnswers, GROUP_LIMITS.syncWindowMs, () => this.hooks.clock?.() ?? Date.now()));
     if (!answered.take()) return;
+    this.hear(frame);
     if (frame.e > this.epoch) {
       this.ask(from);
       this.offerMeta(from, frame.mt);
