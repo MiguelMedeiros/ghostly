@@ -122,6 +122,8 @@ export class CallManager {
   private readonly calls = new Map<string, Call>();
   /** Per chat: the timestamp of the last signal handled. */
   private readonly lastSignal = new Map<string, number>();
+  /** Per chat: the timestamp of the last signal sent (`stamp`). */
+  private readonly lastSent = new Map<string, number>();
   /** Per chat: the timer that clears the hang-up signal. */
   private readonly clearing = new Map<string, ReturnType<typeof setTimeout>>();
   private auto: AutoAnswer;
@@ -136,6 +138,16 @@ export class CallManager {
   }
 
   private get now(): number { return (this.host.now ?? Date.now)(); }
+
+  /**
+   * A new signal's timestamp in a chat: now, or 1 ms after the last one sent there. The contact drops a signal no
+   * newer than the last it heard, so a redial or a hang-up in the same millisecond as the signal before it would be lost.
+   */
+  private stamp(chat: string): number {
+    const ts = Math.max(this.now, (this.lastSent.get(chat) ?? 0) + 1);
+    this.lastSent.set(chat, ts);
+    return ts;
+  }
 
   // ---------- signals from the contact ----------
 
@@ -269,7 +281,7 @@ export class CallManager {
     try {
       const stack = await this.stack();
       if (!(await this.connect(call, (media) => CallMedia.offer(stack, media)))) return;
-      call.offerTs = this.now;
+      call.offerTs = this.stamp(call.chat);
       call.offering = true;
       await this.send(call.chat, { t: "o", ts: call.offerTs, ...call.media!.local, v: 0 });
     } catch (error) {
@@ -287,7 +299,7 @@ export class CallManager {
     try {
       const stack = await this.stack();
       if (!(await this.connect(call, (media) => CallMedia.answer(stack, offer, media)))) return;
-      await this.send(call.chat, { t: "a", ts: this.now, o: offer.ts, ...call.media!.local, v: 0 });
+      await this.send(call.chat, { t: "a", ts: this.stamp(call.chat), o: offer.ts, ...call.media!.local, v: 0 });
     } catch (error) {
       process.stderr.write(`ghostly: call ${call.id}: answering again failed (${error instanceof Error ? error.message : String(error)})\n`);
       void this.end(call, "failed", true);
@@ -360,7 +372,7 @@ export class CallManager {
       await this.attach(call, (media) => CallMedia.offer(stack, media));
       if (call.reason === "crossed") throw new CliError("busy", "The contact called at the same time: their call rings here");
       if (call.ended) throw new CliError("unavailable", "The call ended before it was placed");
-      call.offerTs = this.now;
+      call.offerTs = this.stamp(link.id);
       call.offering = true;
       await this.send(link.id, { t: "o", ts: call.offerTs, ...call.media!.local, v: 0 });
     } catch (error) {
@@ -390,7 +402,7 @@ export class CallManager {
       early = await this.takeEarly(call);
       await this.attach(call, (media) => CallMedia.answer(stack, call.offer!, media, early));
       if (call.ended) throw new CliError("unavailable", "The call ended before it was answered");
-      await this.send(call.chat, { t: "a", ts: this.now, o: call.offer!.ts, ...call.media!.local, v: 0 });
+      await this.send(call.chat, { t: "a", ts: this.stamp(call.chat), o: call.offer!.ts, ...call.media!.local, v: 0 });
     } catch (error) {
       await this.end(call, "failed", true, false);
       throw error;
@@ -574,7 +586,7 @@ export class CallManager {
     call.early = null;
     await call.socket?.close();
     if (tell) {
-      await this.send(call.chat, { t: "h", ts: this.now }).catch(() => {});
+      await this.send(call.chat, { t: "h", ts: this.stamp(call.chat) }).catch(() => {});
       if (!this.stopping) {
         const timer = setTimeout(() => {
           this.clearing.delete(call.chat);
