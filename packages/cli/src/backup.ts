@@ -64,7 +64,8 @@ export const BACKUP_METHODS: Record<string, Method> = {
    */
   async "profile.backup"(ctx, params) {
     const path = resolve(str(params, "path", true));
-    if (existsSync(path)) throw new CliError("confirm", `${path} exists: choose another name`);
+    // `refused`, not `confirm` (exit 5, "pass --force"): backup takes no flag that writes over a file.
+    if (existsSync(path)) throw new CliError("refused", `${path} exists: choose another name`);
     const passphrase = str(params, "passphrase"), unsealed = bool(params, "noPassphrase");
     if (!passphrase && !unsealed) throw new CliError("bad_request", "passphrase is required (or noPassphrase: true for a backup anyone can read)");
     if (passphrase && unsealed) throw new CliError("bad_request", "Give a passphrase or noPassphrase, not both");
@@ -106,7 +107,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
       await handle.close();
       out = null;
       // Its name only now, and never over a file that appeared meanwhile.
-      try { await link(partial, path); } catch (error) { throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new CliError("confirm", `${path} exists: choose another name`) : error; }
+      try { await link(partial, path); } catch (error) { throw (error as NodeJS.ErrnoException).code === "EEXIST" ? new CliError("refused", `${path} exists: choose another name`) : error; }
       return { path, bytes: written, files: files.length, protection: unsealed ? "none" : "passphrase", ...(light && { light: true, leftOut: leftOut.length, leftOutBytes }) };
     } finally {
       await out?.close().catch(() => {});
