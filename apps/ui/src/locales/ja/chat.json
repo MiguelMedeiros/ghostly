@@ -293,7 +293,6 @@
     "bitcoinAddress": "₿ Bitcoin アドレス",
     "ecash": "⚡ Ecash",
     "invoice": "⚡ Lightning 請求書",
-    "invoiceSats": "⚡ Lightning 請求書 · {{amount}} sats",
     "lightningAddress": "Lightning アドレス",
     "lightningOffer": "⚡ Lightning オファー",
     "payment": "⚡ {{what}}：{{amount}}",

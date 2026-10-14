@@ -293,7 +293,6 @@
     "bitcoinAddress": "₿ عنوان Bitcoin",
     "ecash": "⚡ Ecash",
     "invoice": "⚡ فاتورة Lightning",
-    "invoiceSats": "⚡ فاتورة Lightning · {{amount}} ساتس",
     "lightningAddress": "عنوان Lightning",
     "lightningOffer": "⚡ عرض Lightning",
     "payment": "⚡ {{what}} {{amount}}",

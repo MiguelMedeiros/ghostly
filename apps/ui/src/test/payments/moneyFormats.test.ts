@@ -290,4 +290,13 @@ describe("the chat list's line", () => {
     expect(previewText(BARK_TESTNET)).toBe("Ark address · Test money");
     expect(previewText(`USDT: ${EVM}`)).toBe("USDT address");
   });
+
+  // Before, a Lightning invoice said only "⚡ Lightning invoice · 250,000 sats", whatever its chain.
+  it("says whether a Lightning invoice is test or real money, as the other formats do", () => {
+    const words = bech32.decode(REGTEST_INVOICE as `${string}1${string}`, false).words;
+    expect(previewText(REGTEST_INVOICE)).toBe("⚡ Lightning invoice · Test money · 250,000 test sats");
+    expect(previewText(bech32.encode("lntbs2500u", words, false))).toBe("⚡ Lightning invoice · Test money · 250,000 test sats");
+    expect(previewText(bech32.encode("lnbcrt", words, false))).toBe("⚡ Lightning invoice · Test money");
+    expect(previewText(INVOICE)).toBe("⚡ Lightning invoice · Real money · 2,100 sats");
+  });
 });
