@@ -1,5 +1,5 @@
-import { BunkerSigner, type BunkerPointer } from 'nostr-tools/nip46';
-import { SimplePool } from 'nostr-tools/pool';
+import type { BunkerPointer, BunkerSigner } from 'nostr-tools/nip46';
+import type { SimplePool } from 'nostr-tools/pool';
 import { generateSecretKey } from 'nostr-tools/pure';
 import type { NostrProofEvent } from '@ghostly/core';
 
@@ -53,6 +53,9 @@ export async function withNostrSigner<T>(options: { bunker?: string; signal: Abo
     const action = async () => {
       if (options.bunker) {
         const bp = parseProofBunker(options.bunker);
+        // Loaded here, not with the app: the NIP-46 signer and its relay pool are only for a bunker.
+        const [{ BunkerSigner }, { SimplePool }] = await Promise.all([import('nostr-tools/nip46'), import('nostr-tools/pool')]);
+        if (closed) throw new Error('Signer request cancelled');
         pool = new SimplePool(); clientKey = generateSecretKey();
         signer = BunkerSigner.fromBunker(clientKey, bp, { pool, skipSwitchRelays: true, onauth: url => {
           try { const u = new URL(url); if (!closed && u.protocol === 'https:' && !u.username && !u.password) options.onAuth(u.href); } catch { /* Invalid signer URL: never navigate. */ }
