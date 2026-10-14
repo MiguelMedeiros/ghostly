@@ -22,9 +22,9 @@ export const answerable = (invitation: Invitation | undefined) => !!invitation &
 
 /** Who took the invitation back, and what to do: the words of a taken-back invitation's page. */
 function takenBackWords(group: GroupView, t: Translate): { title: string; next: string } {
-  const contact = group.invitation!.contact, name = group.name || t("group.chat.unnamed");
-  return contact ? { title: t("group.chat.takenBack", { contact, name }), next: t("group.chat.takenBackNext", { contact }) }
-    : { title: t("group.chat.takenBackUnknown", { name }), next: t("group.chat.takenBackNextUnknown") };
+  const contact = group.invitation!.contact, name = group.name;
+  return contact ? { title: name ? t("group.chat.takenBack", { contact, name }) : t("group.chat.takenBackNoName", { contact }), next: t("group.chat.takenBackNext", { contact }) }
+    : { title: name ? t("group.chat.takenBackUnknown", { name }) : t("group.chat.takenBackUnknownNoName"), next: t("group.chat.takenBackNextUnknown") };
 }
 
 /** The open button of the chat list's row after this group's, if there is one. */
