@@ -23,7 +23,9 @@
     "takenBack": "{{contact}} 收回了加入 {{name}} 的邀请",
     "takenBackNext": "请向 {{contact}} 要一个新邀请或群组链接。",
     "takenBackNextUnknown": "请向群组管理员要一个新邀请或群组链接。",
+    "takenBackNoName": "{{contact}} 收回了加入群组的邀请",
     "takenBackUnknown": "加入 {{name}} 的邀请已被收回",
+    "takenBackUnknownNoName": "加入群组的邀请已被收回",
     "unnamed": "一个群组"
   },
   "connection": {

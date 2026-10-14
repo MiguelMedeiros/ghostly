@@ -23,7 +23,9 @@
     "takenBack": "سحب {{contact}} الدعوة إلى {{name}}",
     "takenBackNext": "اطلب من {{contact}} دعوة جديدة أو رابط المجموعة.",
     "takenBackNextUnknown": "اطلب من مشرف المجموعة دعوة جديدة أو رابط المجموعة.",
+    "takenBackNoName": "سحب {{contact}} الدعوة إلى المجموعة",
     "takenBackUnknown": "سُحبت الدعوة إلى {{name}}",
+    "takenBackUnknownNoName": "سُحبت الدعوة إلى المجموعة",
     "unnamed": "مجموعة"
   },
   "connection": {

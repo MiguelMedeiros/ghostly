@@ -129,6 +129,22 @@ describe("GroupChat: what the header says", () => {
     expect(screen.getByTestId("group-taken-back")).toHaveTextContent("Alice retirou o convite para Book club" + "Peça a Alice um novo convite ou o link do grupo.");
   });
 
+  it("says an invitation to a group with no name was taken back in a sentence of its own, not with \"A group\" mid-sentence", () => {
+    const noName = (contact: string) => groupView({ name: "", canSend: false, invitation: { linkId: "link-1", contact, admin: ALICE, members: 3, accepted: false, takenBack: true } });
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
+    for (const [contact, language, words] of [
+      ["Ana", "en", "Ana took back the invitation to the group"], ["Ana", "pt", "Ana retirou o convite para o grupo"],
+      ["", "en", "The invitation to the group was taken back"], ["", "pt", "O convite para o grupo foi retirado"],
+    ] as const) {
+      fakeEngine.update({ groups: [noName(contact)] });
+      const { unmount } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language });
+      const card = screen.getByTestId("group-taken-back");
+      expect(card).toHaveTextContent(words);
+      expect(card).not.toHaveTextContent(/A group|Um grupo/);
+      unmount();
+    }
+  });
+
   it("says an invitation came from a contact when it does not know their name", () => {
     openGroup(groupView({ canSend: false, invitation: { linkId: "link-1", contact: "", admin: ALICE, members: 3, accepted: true } }));
     expect(screen.getByTestId("group-members")).toHaveTextContent("Invitation from a contact");
