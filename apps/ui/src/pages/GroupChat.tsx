@@ -32,7 +32,7 @@ import { clearChatNotification } from "../lib/notifications";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { authorsOf, type MessageAuthor } from "../lib/senderRuns";
 import { MemberColorsProvider } from "../contexts/MemberColorsContext";
-import { chatsByPeer } from "../lib/identities";
+import { chatNamesForPeer } from "../lib/storage";
 import { useContactFaces, withContactFaces } from "../components/identities/contactFace";
 import type { ChatMessage } from "../lib/types";
 import { useSettings } from "../contexts/SettingsContext";
@@ -281,10 +281,11 @@ export function GroupChat() {
   // Members who are contacts go by the identity they are shown as, if one was chosen (identities/contactFace.ts).
   const faceOf = useContactFaces();
   const rosterGroup = state?.groups.find(g => g.id === groupId);
+  // A member's nickname from that contact's chat, read only for members who are contacts and parsed again only when the
+  // chat changed: every engine state comes through here, and a read of every chat each time grew with the chat list.
   const group = useMemo(() => {
     if (!rosterGroup) return undefined;
-    const chats = chatsByPeer();
-    return withContactFaces(rosterGroup, state?.links, faceOf, peerKey => chats.get(peerKey)?.label);
+    return withContactFaces(rosterGroup, state?.links, faceOf, peerKey => chatNamesForPeer(peerKey)?.label);
   }, [rosterGroup, state?.links, faceOf]);
   // The history of this group only: the page stays mounted from one group to the next, and for the render that changes
   // groups the last one's messages would still be here (the timeline would open on them, and never find where this
