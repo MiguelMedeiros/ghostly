@@ -244,7 +244,7 @@ function RingingCard({ call, cardRef, profile }: { call: LockedCall; cardRef: Re
       <div ref={cardRef} tabIndex={-1} role="alert" aria-labelledby={nameId} aria-describedby={kindId}
         data-testid="lock-call" data-video={call.hasVideo || undefined}
         className="flex flex-col items-center gap-3 rounded-2xl focus:outline-none">
-        <div aria-hidden="true" className="relative w-20 h-20 rounded-full bg-surface-hover flex items-center justify-center text-2xl overflow-hidden animate-pulse-dot">
+        <div aria-hidden="true" className="relative w-20 h-20 rounded-full bg-surface-hover flex items-center justify-center text-2xl overflow-hidden animate-ring-pulse">
           <PeerAvatar peerPubKey={call.peerPubKey} label={call.name} named={call.named} photo={call.photo} testId="lock-call-avatar" />
         </div>
         <div className="min-w-0 max-w-full">

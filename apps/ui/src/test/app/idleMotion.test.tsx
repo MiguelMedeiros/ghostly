@@ -3,8 +3,10 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { IncomingCallNotification } from "../../components/IncomingCallNotification";
 import { PairingGlyph } from "../../components/pairing/PairingGlyph";
 import { MOTION_REST_MS, refreshWindowAway, useMotionRest, useWindowAway, watchWindowAway } from "../../lib/windowAway";
+import { renderApp } from "../render";
 
 // covers: app.idle, chat.paired.pairing-progress
 
@@ -65,6 +67,20 @@ describe("the stylesheets", () => {
     const css = readFileSync(join(SRC, "components/pairing/pairing-scene.css"), "utf8");
     expect(css).toMatch(/\.ps\[data-still\] \* \{ animation: none !important; \}/);
     expect(css).toMatch(/\.pg\[data-still\] \.pi-packet \{ animation: none !important;/);
+  });
+
+  // A call ringing in: its avatar pulsed forever under a full-window backdrop blur, which redrew the whole window every
+  // frame for the whole ring (a core of the GPU process in Chromium). The ring sound says it goes on.
+  it("a ringing card pulses a few times, then rests, and blurs nothing behind it", () => {
+    const ring = rules(index).find(rule => rule.selector === ".animate-ring-pulse")!;
+    expect(ring.body).toMatch(/animation: ring-pulse 1\.5s ease-in-out 3;/);
+    // It rests fully shown, where the motion starts and ends: nothing jumps when it stops.
+    expect(index).toMatch(/@keyframes ring-pulse \{\s*0%, 100% \{ opacity: 1; \}/);
+    const { baseElement } = renderApp(<IncomingCallNotification peerName="Bob" hasVideo onAcceptAudio={vi.fn()} onAcceptVideo={vi.fn()} onReject={vi.fn()} />);
+    expect(baseElement.querySelector(".animate-ring-pulse")).not.toBeNull();
+    expect(baseElement.querySelector(".animate-pulse-dot, [class*='backdrop-blur']")).toBeNull();
+    // The lock screen's ringing card too.
+    expect(readFileSync(join(SRC, "components/LockScreen.tsx"), "utf8")).not.toMatch(/animate-pulse-dot/);
   });
 
   it("the new wallet's light runs with a transform, not with left", () => {
