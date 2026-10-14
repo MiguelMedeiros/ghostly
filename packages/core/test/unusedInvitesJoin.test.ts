@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RELAY_POLL_INTERVALS, UNUSED_INVITE_WAIT_MAX_MS } from "../src/link";
 import { closeWorld, DESKTOP_NETWORK, invitation, MemoryPkarr, open, untilLive, useFakeWorld } from "./support/pairingWorld";
 
-// covers: invite.create, invite.join, core.relay-client
+// covers: invite.create, invite.code, core.relay-client
 
 /**
  * A daemon with 15 invites nobody used (bug hunt 1013-1642): their keys and mailboxes were read at the background pace
