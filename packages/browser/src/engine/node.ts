@@ -7186,6 +7186,9 @@ export class GhostlyNode implements EngineImplementation {
       },
     });
     const link = live.link;
+    // The chat may be on screen already: a new chat's page opens it while the engine is still saving it, before this
+    // link exists, so `setActiveLink` found none to tell (the inviter read its contact every 30 s in the background).
+    if (linkId === this.activeLinkId) link.setChatActive(true);
     link.start(); this.emitState();
     if (resumed.resume) {
       const last = this.transportLogOf(live)?.liveAtLastRun;
