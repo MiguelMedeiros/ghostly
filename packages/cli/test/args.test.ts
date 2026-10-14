@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { liftGlobals, parseArgs } from "../src/args";
 import { idSlot, positionals, COMMANDS, TEXT_COMMANDS } from "../src/commands";
-import { GhostlyHttpError } from "@ghostly/core";
+import { GhostlyHttpError, engineError } from "@ghostly/core";
 import { asCliError, CliError, EXIT } from "../src/errors";
 // covers: headless.cli
 
@@ -257,6 +257,20 @@ describe("errors", () => {
     expect(asCliError({ code: "not_found", message: "x" }).code).toBe("not_found");
     // A code is one of the table's own: every object has `constructor`, which is none (and has no exit status).
     expect(asCliError({ code: "constructor", message: "x" }).code).toBe("engine");
+  });
+
+  // A host that does not answer was `engine` (exit 1), which a bot reads as the engine failing, and a Lightning
+  // address the CLI could not reach said the browser's words ("not allow web apps to read it (CORS)").
+  it("say the engine's known errors by what they are: a host not there, one too slow, a wrong value, a refusal", () => {
+    const host = { host: "nowhere.example" };
+    for (const code of ["mintUnreachable", "hostUnreachable", "networkUnreachable", "usdtRpcUnavailable"] as const)
+      expect(asCliError(engineError(code, host)).code, code).toBe("unavailable");
+    for (const code of ["hostTimedOut", "networkTimedOut"] as const) expect(asCliError(engineError(code, host)).code, code).toBe("timeout");
+    for (const code of ["invalidMintUrl", "mintNotHttps", "invalidMaxFee"] as const) expect(asCliError(engineError(code)).code, code).toBe("bad_request");
+    for (const code of ["notEnoughSats", "ecashAlreadySpent"] as const) expect(asCliError(engineError(code)).code, code).toBe("refused");
+    expect(asCliError(engineError("lnurlUnreachable", host)).toJSON()).toEqual({ code: "unavailable", message: "Could not reach nowhere.example" });
+    // One the table does not name stays the engine's, in its words.
+    expect(asCliError(engineError("outcomeUnknown")).toJSON()).toEqual({ code: "engine", message: "Outcome unknown. Check the existing payment; do not send another." });
   });
 
   it("say a local path could not be opened as the person's path, not as the engine refusing", async () => {
