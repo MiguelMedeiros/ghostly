@@ -848,6 +848,41 @@ describe("LinkSession poll pacing", () => {
     await b.s.stop(false);
   });
 
+  it("says its reads are a resume's back after a restart, until one is answered (a group edge's go on the relays' floor)", async () => {
+    const { a, b } = pair({ resumed: true, firstPublish: "after-first-poll" }, { getServices: () => [] });
+    b.s.start();
+    await settle();
+    const last = () => (a.transport.resolve.mock.calls.at(-1) as unknown[] | undefined)?.[1] as { resume?: boolean } | undefined;
+    // The relays' budget holds the first read back: the next one still waits on it.
+    a.transport.failResolve = new DiscoveryBudgetError(1_000);
+    a.s.start();
+    await settle();
+    expect(last()?.resume).toBe(true);
+    a.transport.failResolve = null;
+    a.s.pollNow();
+    await settle();
+    expect(last()?.resume).toBe(true);
+    expect(a.s.peerPresence.online).toBe(true);
+    // Answered: from then on a read is the contact's like any other.
+    a.s.pollNow();
+    await settle();
+    expect(last()?.resume).toBeUndefined();
+    await a.s.stop(false);
+    await b.s.stop(false);
+  });
+
+  it("never says so when it was not live when the app last ran", async () => {
+    const { a, b } = pair({}, { getServices: () => [] });
+    b.s.start();
+    a.s.start();
+    await settle();
+    a.s.pollNow();
+    await settle();
+    expect(a.transport.resolve.mock.calls.every((call) => !((call as unknown[])[1] as { resume?: boolean } | undefined)?.resume)).toBe(true);
+    await a.s.stop(false);
+    await b.s.stop(false);
+  });
+
   it("watches a contact that went away fast, then at the active pace: the step-down never slows that", async () => {
     const { a, b } = pair();
     await b.s.refreshAdvertisement();
