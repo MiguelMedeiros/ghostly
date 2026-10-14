@@ -237,6 +237,11 @@ export function parsePayParams(body: unknown, destination: LightningDestination)
   if (body.tag !== "payRequest") throw new Error(`${destination.domain} answered with something other than a pay request${typeof body.tag === "string" ? ` (${reason(body.tag)})` : ""}`);
   if (typeof body.callback !== "string") throw new Error("The pay request has no callback");
   const callback = acceptUrl(body.callback);
+  // The same rule as a redirect: another host only over HTTPS and at a public address.
+  if (callback.host !== new URL(destination.url).host) {
+    if (callback.protocol !== "https:") throw new Error("Lightning addresses and LNURLs must use HTTPS");
+    if (isLocalHost(callback.hostname)) throw new Error(`${destination.domain} asks for the invoice at a local address`);
+  }
   const { minSendable, maxSendable, metadata, commentAllowed } = body;
   if (!Number.isSafeInteger(minSendable) || !Number.isSafeInteger(maxSendable) || (minSendable as number) <= 0 || (maxSendable as number) < (minSendable as number)) throw new Error("The pay request has invalid amount limits");
   const minSat = Math.ceil((minSendable as number) / 1000), maxSat = Math.floor((maxSendable as number) / 1000);
