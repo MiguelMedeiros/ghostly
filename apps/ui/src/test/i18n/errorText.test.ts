@@ -69,6 +69,15 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   // (libudx's own words, measured on a local HyperDHT testnet).
   ["connection reset by peer", "native/transports/hyperdht/endpoint.mjs", "if (stopped || channels.size >= 2) { socket.destroy();"],
   ["PEER_NOT_FOUND: Peer not found", "node_modules/hyperdht/lib/errors.js", "static PEER_NOT_FOUND(msg = 'Peer not found')"],
+  // A contact's app that is seen but does not answer (frozen, asleep): its record is fresh, the dial fails after ~4 s.
+  ["PEER_CONNECTION_FAILED: Could not connect to peer", "node_modules/hyperdht/lib/errors.js", "static PEER_CONNECTION_FAILED(msg = 'Could not connect to peer')"],
+  ["HOLEPUNCH_ABORTED: Holepunch aborted", "node_modules/hyperdht/lib/errors.js", "static HOLEPUNCH_ABORTED(msg = 'Holepunch aborted')"],
+  // The Desktop's own HyperDHT runtime (apps/desktop/src/hyperdht.rs): a dial while one runs, the runtime gone.
+  ["A native connection attempt is already running", "apps/desktop/src/hyperdht.rs"],
+  ["HyperDHT endpoint closed", "apps/desktop/src/hyperdht.rs"],
+  ["HyperDHT runtime stopped", "apps/desktop/src/hyperdht.rs"],
+  ["Native runtime stopped", "apps/desktop/src/hyperdht.rs"],
+  ["HyperDHT failed", "apps/desktop/src/hyperdht.rs"],
   ["It did not connect", `${BROWSER}/engine/node.ts`],
   ["The peer closed this connection. Check that both transport preferences allow a common transport, then reconnect.", `${CORE}/ghostlink.ts`],
   ["Your contact needs an updated app to negotiate a transport change.", `${CORE}/ghostlink.ts`],
