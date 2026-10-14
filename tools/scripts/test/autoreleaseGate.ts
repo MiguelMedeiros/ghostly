@@ -3,11 +3,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-/** What a security branch changes: the compare's files, and file contents on main and on the branch. */
+/** What a security branch changes: the compare's files, file contents on main and on the branch, and what it holds of dev. */
 export type Fixture = {
   files: { filename: string; additions: number; deletions: number; previous_filename?: string }[];
   main: Record<string, unknown>;
   branch: Record<string, unknown>;
+  /** Commits of `dev` that `main` does not have under the branch's head (none: the branch was cut from main). */
+  unreleased?: number;
 };
 
 const SHA = "a".repeat(40);

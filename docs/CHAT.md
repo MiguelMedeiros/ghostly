@@ -42,12 +42,13 @@ In order, some rows only when they apply:
 
 1. Pin chat / Unpin chat
 2. Mute notifications… / Unmute notifications
-3. Copy invite code (until the contact arrives)
-4. Hold messages… (paired chats)
-5. Continue in a new chat (compatibility chats)
-6. Refresh
-7. Tech Info
-8. Delete chat
+3. Move to folder…
+4. Copy invite code (until the contact arrives)
+5. Hold messages… (paired chats)
+6. Continue in a new chat (compatibility chats)
+7. Refresh
+8. Tech Info
+9. Delete chat
 
 Connection, Payments, Services and Identities are no longer in the ⋮ (#264, #267, #268): they live in the header icon, the header marks and the composer's +.
 
@@ -56,6 +57,18 @@ Connection, Payments, Services and Identities are no longer in the ⋮ (#264, #2
 - From the chat list: the row's bell in the hover actions (#262), or the ⋮ on a phone.
 - 15 minutes, 1 hour, 1 day, or until unmuted. Groups add "Still notify me when I'm mentioned".
 - Messages still arrive, and **calls still ring**. Only the message sound, the system notification and the connected sound are silenced (`apps/ui/src/lib/chatMute.ts`). Local to this device.
+
+### Folders
+
+- Your own sections of the chat list ("Agents", "Personal"), for 1:1 chats, groups and communities. A chat is in one folder or in none.
+- Make one from **New ▾ → Folder**, or from a chat's ⋮ → **Move to folder… → New folder…**, which puts the chat in it. The same menu moves a chat to another folder or back to **No folder**.
+- Folders come first in the list, in your order, then **Other chats**: the chats in no folder, as the list always was. Inside a folder the order is the list's: groups, pinned chats, then the latest first. A search shows what it finds as one list, without folders.
+- A folder's header is a button that folds and unfolds it. Folded, only the header shows. What is folded is remembered.
+- The header counts what is unread in the folder, as the app icon's badge counts: each unmuted chat's unread messages, and 1 for each unmuted group with something new (a mention gets through a group's mute). When only muted chats have something unread, the count is their sum, in grey.
+- An invitation to a group stays in sight under Other chats until it is answered, whatever folder the group is in.
+- A folder's ⋮: Rename folder, Move up, Move down, Delete folder. Deleting a folder deletes no chat: its chats go back to Other chats.
+- Pinned chats are put in order among the pinned chats shown with them: those in no folder by dragging or from the chat's ⋮ (Move up, Move down), those of a folder from the chat's ⋮.
+- Local to this profile on this device, like pins and mutes (`apps/ui/src/lib/chatFolders.ts`): not synced to your other devices. A profile backup and a move to another device carry them.
 
 ## Composer
 
@@ -142,6 +155,7 @@ Double click, or the message's ⋮ → **Details** (#240, `apps/ui/src/component
 `files/3` ([WISP 501 Chat Files](wisps/501-paired-files.md), #228, #233, `packages/core/src/chatFiles.ts`):
 
 - Any size. Offered first, then sent in 16 KiB chunks with 1 MiB in flight, resumed from the last confirmed byte, checked against the sender's SHA-256.
+- The bytes as they are (`files/4`, `encodeFileData`): with a contact whose app has it, on a session that carries binary messages (WebRTC; HyperDHT from the Desktop, the CLI and a browser), each chunk is one binary message, not base64 text in a JSON frame. A 200 MiB file is 200.4 MiB on the wire instead of 267.6 MiB. In a group's file sessions too. Older apps and Iroh keep `files/3` frames.
 - Taken without asking up to 25 MiB per file and 500 MiB per contact; past that, the receiver is asked. Offers expire after 7 days.
 - Bytes stream to storage, never whole in memory: OPFS on web and extension, files on Desktop, IndexedDB as fallback.
 - A transfer that has not moved for 60 s offers **Send again** (sender) or **Ask again** (receiver); both go on from what the receiver already holds. A receiver with no data for 30 s asks again by itself (#348, #352).
@@ -188,7 +202,7 @@ Double click, or the message's ⋮ → **Details** (#240, `apps/ui/src/component
 
 - New group offers Community (default) or Private (`apps/ui/src/components/NewGroupDialog.tsx`). Negotiation: [WISP 900](wisps/900-group-sessions.md).
 - The admin renames the group in Members… (Rename) or with `ghostly group rename` (#438); every member sees the new name, and apps from before keep the old one. The group link can be replaced or turned off by the admin. Leaving deletes the group and its history from the device; an admin hands the role on first.
-- Group ⋮: Members…, Mute, Rotate keys (admin), Leave group, Delete from this device.
+- Group ⋮: Members…, Mute, Move to folder… ([Folders](#folders)), Rotate keys (admin), Leave group, Delete from this device.
 - Hubs (private groups past 16 members, #402): the Desktop app and the CLI, which stay online, pass messages on. The admin makes a member a hub, or keeps one from being one, in Members…. A Mac holds at most 40 group connections, and past that stops being a hub (#439). As a community's hub, a Mac takes only the members its 40 leave free beside its other groups and 1:1 chats, then says it is full (#503).
 - Typing, recording and thinking show in private groups (#442, [Header](#header)). A message that mentions you wakes your closed web app, if you turned on Wake me while closed (#448, [WEB.md](WEB.md#install-it)).
 - A member's name stays while their connection is down; only the member changes or removes it (#533).

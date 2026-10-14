@@ -4,7 +4,6 @@ import { SiteFooter } from "./Footer";
 import { GhostPet } from "./GhostPet";
 import { BooTransition } from "./Boo";
 import { IdleLoops } from "./IdleLoops";
-import { JoinLanding } from "./JoinLanding";
 import { appsReleased } from "@/lib/appsGate";
 
 /** `apps`: the Apps link shows only once the released Ghostly has Apps (lib/appsGate.ts). */
@@ -22,7 +21,6 @@ export async function Shell({ children }: { children: React.ReactNode }) {
       <GhostPet label={t.pet} />
       <BooTransition />
       <IdleLoops />
-      <JoinLanding />
     </div>
   );
 }

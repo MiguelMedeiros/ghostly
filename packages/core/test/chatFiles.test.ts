@@ -100,6 +100,8 @@ function wire(options: {
   writable?: boolean;
   /** Storage that takes this long (ms) for each write. */
   writeMs?: number;
+  /** Storage that takes this long (ms) to open a received file, as a database lookup does. */
+  openMs?: number;
 } = {}) {
   let open = true;
   const queued = { a: 0, b: 0 };
@@ -153,6 +155,7 @@ function wire(options: {
       },
       decide: (file, again) => side.decide(file, again),
       openTarget: async (record) => {
+        if (options.openMs) await new Promise((resolve) => setTimeout(resolve, options.openMs));
         let disk = side.disks.get(record.id);
         if (!disk) { disk = new Disk(!!options.keepBytes, options.writeMs); side.disks.set(record.id, disk); }
         return disk.target();
@@ -800,6 +803,48 @@ describe("files/3 between two chats", { timeout: 30_000 }, () => {
     expect([...w.b.records.values()].filter((r) => r.state === "active").length).toBe(3);
     expect([...w.a.records.values()].filter((r) => r.waitingFor === "busy").length).toBe(2);
     await until(() => [...w.a.records.values()].every((r) => r.state === "done"), 30_000);
+  });
+
+  it("files sent all at once still arrive three at a time when opening where each is written takes a while", async () => {
+    // Opening a received file reads the database first: the offers behind it, and the files queued behind one that
+    // ended, came in meanwhile and each went, until ten sent 1 MiB windows at once and the session's receive queue
+    // overflowed.
+    const w = wire({ openMs: 5 });
+    w.attach();
+    let sending = 0, receiving = 0;
+    const sample = setInterval(() => {
+      sending = Math.max(sending, [...w.a.records.values()].filter((r) => r.state === "active").length);
+      receiving = Math.max(receiving, [...w.b.records.values()].filter((r) => r.state === "active" || r.state === "verifying").length);
+    }, 0);
+    try {
+      for (let i = 0; i < 10; i++) send(w, file(`burst-0${i}`, 256 * 1024));
+      await until(() => [...w.a.records.values()].length === 10 && [...w.a.records.values()].every((r) => r.state === "done"), 30_000);
+    } finally { clearInterval(sample); }
+    expect(receiving).toBeLessThanOrEqual(FILE_LIMITS.maxActiveIncoming);
+    expect(sending).toBeLessThanOrEqual(FILE_LIMITS.maxActiveIncoming);
+  });
+
+  it("what a chat's files have sent and not seen confirmed stays within one window for them all", async () => {
+    // Three files at once with a 1 MiB window each were 3 MiB in flight, and as base64 text more than a session's
+    // receive queue takes (`SESSION_RECEIVE_PENDING`): a receiver that stalled a moment ended the session.
+    const w = wire({ writeMs: 1 });
+    w.attach();
+    const sizes = new Map<string, number>();
+    for (let i = 0; i < 3; i++) { sizes.set(`shared-0${i}`, 3 * 1024 * 1024); send(w, file(`shared-0${i}`, 3 * 1024 * 1024)); }
+    let most = 0;
+    const sample = setInterval(() => {
+      let total = 0;
+      for (const id of sizes.keys()) {
+        const sent = w.a.sent.filter((f) => f.t === "pf-data" && f.id === id).reduce((end, f) => Math.max(end, (f.offset as number) + FILE_LIMITS.chunkBytes), 0);
+        total += Math.max(0, Math.min(sent, sizes.get(id)!) - (w.a.records.get(`out:${id}`)?.confirmed ?? 0));
+      }
+      most = Math.max(most, total);
+    }, 0);
+    try {
+      await until(() => [...sizes.keys()].every((id) => state(w.a, "out", id) === "done"), 60_000);
+    } finally { clearInterval(sample); }
+    expect(most).toBeGreaterThan(FILE_LIMITS.windowBytes);
+    expect(most).toBeLessThanOrEqual(FILE_LIMITS.chatWindowBytes);
   });
 
   it("no more than 16 offers wait for an answer; the 17th is refused", async () => {

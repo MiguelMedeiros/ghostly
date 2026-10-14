@@ -62,6 +62,7 @@ mod turn_network;
 #[cfg(test)]
 mod turn_record;
 mod types;
+mod unread_count;
 #[cfg(desktop)]
 mod viewer;
 
@@ -195,6 +196,7 @@ macro_rules! commands {
             native_call::native_microphone_meter_close,
             native_call::native_speaker_test,
             notifications::native_clear_notification,
+            notifications::native_clear_notifications,
             notifications::native_notification_permission,
             notifications::native_private_notification,
             notifications::open_notification_settings,
@@ -208,6 +210,7 @@ macro_rules! commands {
             paired_transport::paired_native_close,
             paired_transport::paired_native_send,
             share::share_text,
+            unread_count::native_unread_count,
         ]
     };
 }
@@ -286,7 +289,8 @@ pub fn run() {
         })
         .on_menu_event(|app, event| {
             app_window::on_menu_event(app, event.id().as_ref());
-        });
+        })
+        .on_page_load(on_page_load);
 
     // Android's own host, before the app's setup: what started the app (a share, a sign-in's link) comes with it.
     #[cfg(target_os = "android")]
@@ -387,6 +391,33 @@ fn android_tls() -> Result<(), String> {
         rustls_platform_verifier::android::init_with_env(env, context)
     })
     .map_err(|e: jni::errors::Error| e.to_string())
+}
+
+/// A document takes the Ghostly window's place (`Started`: it is committed, and no script of it has run): the app
+/// opening, the page loaded again, the WebView back after its process died. A route change inside the page is no
+/// load. What the page before it held in Rust by ids only it knew goes with it. Desktop only: when Android's WebView
+/// says a page started was not tried.
+#[cfg(desktop)]
+fn on_page_load<R: tauri::Runtime>(
+    webview: &tauri::Webview<R>,
+    payload: &tauri::webview::PageLoadPayload<'_>,
+) {
+    if webview.label() == "main"
+        && matches!(payload.event(), tauri::webview::PageLoadEvent::Started)
+    {
+        page_started(webview.app_handle());
+    }
+}
+
+/// The native listeners of the page before this one: stopped, their eight places free (`TransportState::page_started`).
+#[cfg(desktop)]
+fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(transports) = app.try_state::<paired_transport::TransportState>() {
+        transports.page_started();
+    }
+    if let Some(hyperdht) = app.try_state::<hyperdht::HyperState>() {
+        hyperdht.page_started();
+    }
 }
 
 /// How long the page gets to say goodbye to its contacts before an exit it can be told about goes on.
@@ -571,6 +602,7 @@ mod tests {
         arguments["origin"] = serde_json::json!("http://127.0.0.1:9");
         arguments["profile"] = serde_json::json!("x");
         arguments["record"] = serde_json::json!(null);
+        arguments["count"] = serde_json::json!(0);
         arguments
     }
 

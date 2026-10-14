@@ -26,6 +26,7 @@ export function engineApps(runnerUrl: string, netRunnerUrl?: string, runnerServe
     entry: (ref, runAnyway) => engine.call("appEntry", { ref, ...(runAnyway ? { runAnyway } : {}) }),
     running: (of) => engineApps(runnerUrl, netRunnerUrl, runnerServed, of),
     file: (ref, path) => engine.call("appFile", { ref, path, ...runs }),
+    fileAt: (ref, path) => engine.call("appFileAt", { ref, path, ...runs }),
     storage: {
       get: async (ref, scope, key) => {
         const found = await engine.call("appStorageGet", { ref, scope, key, ...runs });

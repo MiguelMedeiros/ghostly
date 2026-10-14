@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, isBatch, LABEL, localBases, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, isBatch, LABEL, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting } from "../merge-train.mjs";
 
-type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string; merged?: boolean };
+type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string; merged?: boolean; author?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
 const red = [{ name: "CI Success", status: "completed", conclusion: "failure", started_at: "2026-10-08T00:00:00Z", id: 1 }];
 const running = [{ name: "CI Success", status: "in_progress", conclusion: null, started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -16,6 +16,12 @@ const greenForDocs = [
   ...green,
   ...["Frontend tests (packages ${{ matrix.shard }}/4)", "CLI on Linux ARM64", "Desktop media (macOS WKWebView)", "Desktop on macOS", "Website browser checks (${{ matrix.shard }}/4)", "Affected unit tests (draft)"].map((name, i) => ({ name, status: "completed", conclusion: "skipped", id: 10 + i })),
   ...["Changed paths", "Frontend lint and types", "Frontend tests (app)", "Frontend builds", "Tauri Backend (apps/desktop)", "Website"].map((name, i) => ({ name, status: "completed", conclusion: "success", id: 20 + i })),
+];
+/** A push to dev whose tree a green run already tested (ci-changes.mjs's testedAs): only lint, types and Tauri Backend ran. */
+const greenTested = [
+  ...green,
+  ...["Frontend tests (app)", "Frontend tests (packages ${{ matrix.shard }}/4)", "CLI on Linux ARM64", "Frontend builds", "Website", "Website browser checks (${{ matrix.shard }}/4)", "Desktop media (macOS WKWebView)", "Desktop on macOS", "Affected unit tests (draft)"].map((name, i) => ({ name, status: "completed", conclusion: "skipped", id: 10 + i })),
+  ...["Changed paths", "Frontend lint and types", "Tauri Backend (apps/desktop)"].map((name, i) => ({ name, status: "completed", conclusion: "success", id: 30 + i })),
 ];
 
 /** A fake repository: pull requests, labels, label events, comments, CI per commit, and the base's tip. */
@@ -106,7 +112,7 @@ function fakeRepo() {
     deleteBranch: async () => {},
     createPull: async ({ base, head, title, body }: { base: string; head: string; title: string; body: string }) => {
       const number = next++;
-      pulls.set(number, { number, title, body, draft: false, sha: built.get(head)!, branch: head, fork: false, labels: [], createdAt: "", open: true, base });
+      pulls.set(number, { number, title, body, draft: false, sha: built.get(head)!, branch: head, fork: false, labels: [], createdAt: "", open: true, base, author: "train" });
       return { number };
     },
     /** A pull request's commits: a batch's are the ones the train built (one per member), with their trees. */
@@ -291,12 +297,17 @@ describe("the line", () => {
     expect(readState(body)).toMatchObject({ baseSha: "abc", prs: [{ number: 1, sha: "s1" }] });
   });
 
-  it("counts as a batch only a pull request from this repository on a batch/<base>- branch", () => {
-    const body = batchBody("dev", "abc", "b1", [], []);
-    expect(isBatch({ fork: false, branch: "batch/dev-1", body }, "dev")).toBe(true);
-    expect(isBatch({ fork: true, branch: "batch/dev-1", body }, "dev")).toBe(false);
-    expect(isBatch({ fork: false, branch: "dev", body }, "dev")).toBe(false);
-    expect(isBatch({ fork: false, branch: "batch/epic/x-1", body }, "dev")).toBe(false);
+  it("counts as a batch only a pull request the train opened from this repository on a batch/<base>- branch", () => {
+    const body = batchBody("dev", "abc", "b1", [{ number: 1, sha: "s1", title: "one" }], []);
+    const own = { fork: false, branch: "batch/dev-1", body, author: "train" };
+    expect(isBatch(own, "dev", "train")).toBe(true);
+    expect(isBatch({ ...own, fork: true }, "dev", "train")).toBe(false);
+    expect(isBatch({ ...own, branch: "dev" }, "dev", "train")).toBe(false);
+    expect(isBatch({ ...own, branch: "batch/epic/x-1" }, "dev", "train")).toBe(false);
+    expect(isBatch({ ...own, author: "stranger" }, "dev", "train")).toBe(false);
+    expect(isBatch(own, "dev", undefined)).toBe(false);
+    // The train never opens a batch of nobody.
+    expect(isBatch({ ...own, body: batchBody("dev", "abc", "b1", [], []) }, "dev", "train")).toBe(false);
   });
 });
 
@@ -544,6 +555,50 @@ describe("a run of the train", () => {
     expect(repo.landed).toEqual([]);
     expect(r.closed).toEqual([]);
     expect(deleted).toEqual([]);
+  });
+
+  it("never merges a batch branch of this repository that another login opened, nor lets it retire the train's", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    const real = (await repo.run()).inFlight;
+    const mark = (prs: object[]) => `<!-- merge-train:batch ${JSON.stringify({ base: "dev", baseSha: "dev0", head: "evil", prs, next: [] })} -->`;
+    const forged = { title: "x", draft: false, sha: "evil", fork: false, labels: [], createdAt: "", open: true, base: "dev" };
+    repo.pulls.set(1, { ...forged, number: 1, body: mark([]), branch: "batch/dev-20261008", author: "stranger" });
+    repo.pulls.set(2, { ...forged, number: 2, body: mark([{ number: 11, sha: "h11" }]), branch: "batch/dev-20261009", author: "stranger" });
+    repo.runs.set("evil", green);
+    const r = await repo.run();
+    expect(repo.landed).toEqual([]);
+    expect(r.closed).toEqual([]);
+    expect(r.inFlight).toBe(real);
+    expect(repo.pulls.get(1)!.open && repo.pulls.get(2)!.open).toBe(true);
+  });
+
+  it("takes out a pull request that changes a workflow when GitHub refuses the batch's push for it, and boards the rest", async () => {
+    // The queue app's token has no `workflows` permission: GitHub refuses any push whose commits change a workflow, so
+    // every run failed and the whole line waited behind that one pull request.
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    repo.add(13);
+    repo.files.set(12, [".github/workflows/ci.yml", "tools/scripts/ci-changes.mjs"]);
+    const push = repo.git.push;
+    repo.git.push = async (branch: string, sha: string) => {
+      if (sha.split(":")[1]?.split(",").includes("12")) {
+        throw new Error(`Command failed: git push -q --force origin ${sha}:refs/heads/${branch}\n ! [remote rejected]   ${sha} -> ${branch} (refusing to allow a GitHub App to create or update workflow \`.github/workflows/ci.yml\` without \`workflows\` permission)\nerror: failed to push some refs`);
+      }
+      return push(branch, sha);
+    };
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11, 13]);
+    expect(r.dropped).toEqual([12]);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.failed]);
+    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
+    // Any other refusal is still the run's error.
+    repo.git.push = async () => { throw new Error("Command failed: git push\nfatal: unable to access"); };
+    repo.add(14);
+    repo.batch()!.open = false;
+    await expect(repo.run()).rejects.toThrow(/unable to access/);
   });
 
   it("closes a batch whose branch got a commit the train did not build", async () => {
@@ -1427,6 +1482,45 @@ describe("one pull request alone", () => {
     expect(repo.members()).toEqual([11]);
   });
 
+  it("never pushes its rebase to a branch whose pushes a workflow acts on", async () => {
+    // Every branch a workflow names under `on.push` (or under a `workflow_run` that follows such a push): CI on a push
+    // to `claude/security-auto-*` ends in security-autorelease.yml, which releases that commit.
+    const dir = resolve(import.meta.dirname, "../../../.github/workflows");
+    const named = new Set<string>();
+    for (const file of readdirSync(dir)) {
+      const text = readFileSync(resolve(dir, file), "utf8");
+      for (const m of text.matchAll(/^ {2}(?:push|workflow_run):\n(?: {4}.*\n)*? {4}branches: \[(.*)\]/gm)) for (const b of m[1].split(",")) named.add(b.trim().replace(/^"|"$/g, ""));
+    }
+    expect([...named]).toEqual(expect.arrayContaining(["main", "dev", "claude/security-auto-**", "epic/**"]));
+    for (const pattern of named) expect([pattern, canGoAlone({ fork: false, branch: pattern.replace(/\*+/, "20261008") })]).toEqual([pattern, false]);
+
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    repo.pulls.get(11)!.branch = "claude/security-auto-20261008";
+    const r = await repo.run();
+    expect(repo.pushes).toEqual([]);
+    expect(repo.pulls.get(11)!.sha).toBe("h11"); // the routine's own commit stays the branch's head
+    expect(repo.alone(11)).toBeNull();
+    expect(repo.members()).toEqual([11]);
+    expect(r.inFlight).toBe(repo.batch()!.number);
+  });
+
+  it("stops flying alone a head it may no longer push to: the next rebase is a batch", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    const head = repo.pulls.get(11)!.sha;
+    expect(repo.pushes).toEqual([`fix-11=${head}`]);
+    repo.pulls.get(11)!.branch = "claude/security-auto-20261008"; // a mark left by a train that still pushed there
+    repo.tips.dev = "dev1";
+    expect((await repo.run()).inFlight).toBeNull(); // in line like any other, until CI is green on its head
+    repo.settle();
+    await repo.run();
+    expect(repo.pushes).toHaveLength(1);
+    expect(repo.pulls.get(11)!.sha).toBe(head);
+    expect(repo.members()).toEqual([11]);
+  });
+
   it("changes nothing in a dry run, and says what it would do", async () => {
     const repo = fakeRepo();
     repo.add(11);
@@ -1575,6 +1669,45 @@ describe("a green CI run planned for other files", () => {
     expect((await repo.run()).merged).toEqual([11, 12]);
   });
 
+  it("counts dev's own run planned `tested` (only Tauri Backend ran) as dev's green CI", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    await repo.run();
+    repo.runs.set("dev0", greenTested);
+    // An older red run on the same commit must not speak for it.
+    repo.earlier.set("dev0", [red]);
+    repo.settle([11, 12]);
+    const r = await repo.run();
+    expect(r.log.join("\n")).not.toMatch(/does not count|HOLD/);
+    expect(repo.members()).toEqual([11]); // it bisects
+  });
+
+  it("still passes over a dev run that skipped more than a `tested` push does", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    await repo.run();
+    repo.runs.set("dev0", greenTested.map((j) => (j.name.startsWith("Tauri Backend") ? { ...j, conclusion: "skipped" } : j)));
+    repo.earlier.set("dev0", [red]);
+    repo.settle([11, 12]);
+    const r = await repo.run();
+    expect(r.log.join("\n")).toMatch(/`dev`: a green CI run skipped what a push turns on \(.*rust.*\)/);
+    expect(r.log.join("\n")).toMatch(/HOLD .*itself is red/);
+  });
+
+  it("does not count a `tested` shape on an epic: only a push to dev may plan less", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { base: "epic/x" });
+    repo.add(12, { base: "epic/x" });
+    await repo.run({ base: "epic/x" });
+    repo.runs.set("epic0", greenTested);
+    repo.earlier.set("epic0", [red]);
+    repo.settle([11, 12]);
+    const r = await repo.run({ base: "epic/x" });
+    expect(r.log.join("\n")).toMatch(/HOLD .*itself is red/);
+  });
+
   it("is passed over over REST: the run before it is read, and the files are the pull request's, renames by both names", async () => {
     const sent: string[] = [];
     const wf = (id: number) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" } });
@@ -1628,6 +1761,92 @@ describe("the bases with a train", () => {
     expect(trainBases([pr("dev", [LABEL.priority])])).toEqual(["dev"]);
     // Only bases tick accepts, so a strange epic name never turns the workflow red; a forged batch names no base.
     expect(trainBases([pr("epic/a/b", [LABEL.queue]), pr("epic/z", [], batchBody("epic/z", "a", "b", [], []), "batch/epic/z-1", true)])).toEqual([]);
+  });
+
+  it("woken by a CI run are only those where its commit is the head of a queued pull request or of a batch", () => {
+    const a = "a".repeat(40), b = "b".repeat(40), c = "c".repeat(40), d = "d".repeat(40);
+    const pr = (base: string, sha: string, labels: string[] = [], body = "", branch = "fix") => ({ base, sha, labels, body, branch, fork: false });
+    const pulls = [pr("dev", a, [LABEL.queue]), pr("dev", b), pr("epic/x", c, [], batchBody("epic/x", "abc", c, [], []), "batch/epic/x-1"), pr("epic/y", d, [LABEL.priority])];
+    // No CI run woke it (the schedule, a label, a push, by hand): every base with a train, as before.
+    expect(trainBases(pulls)).toEqual(["dev", "epic/x", "epic/y"]);
+    // The head of a queued pull request, and of a batch: its base's train alone.
+    expect(trainBases(pulls, a)).toEqual(["dev"]);
+    expect(trainBases(pulls, c)).toEqual(["epic/x"]);
+    expect(trainBases(pulls, d)).toEqual(["epic/y"]);
+    // A pull request not in line (a draft still worked on, a ready one before `queue`), and a commit that heads none
+    // (the head a queued one had before a push): no train can do anything with that run.
+    expect(trainBases(pulls, b)).toEqual([]);
+    expect(trainBases(pulls, "e".repeat(40))).toEqual([]);
+    // The same commit at the head of two pull requests (a fork of a queued branch): the base of the queued one.
+    expect(trainBases([...pulls, pr("epic/y", a)], a)).toEqual(["dev"]);
+    // Not a commit (the workflow gave nothing, or something else): every base, never none by mistake.
+    expect(trainBases(pulls, "")).toEqual(["dev", "epic/x", "epic/y"]);
+    expect(trainBases(pulls, "abc")).toEqual(["dev", "epic/x", "epic/y"]);
+  });
+
+  it("woken by a CI run are read from the open pull requests' heads as GitHub lists them", async () => {
+    const queued = "1".repeat(40), draft = "2".repeat(40);
+    const open = (number: number, sha: string, labels: string[]) => ({ number, title: "t", body: "", draft: false, head: { sha, ref: `fix-${number}`, repo: { full_name: "o/r" } }, labels: labels.map((name) => ({ name })), created_at: "2026-10-12T00:00:00Z", base: { ref: "dev" } });
+    const gh = restLayer("t", "o/r", { fetchImpl: async () => ({ status: 200, ok: true, headers: new Headers({ "x-ratelimit-remaining": "4000" }), text: async () => JSON.stringify([open(1, queued, [LABEL.queue]), open(2, draft, [])]) }), wait: async () => {} });
+    const pulls = await gh.pulls();
+    expect(trainBases(pulls, queued)).toEqual(["dev"]);
+    expect(trainBases(pulls, draft)).toEqual([]);
+  });
+
+  // A run that waits in the `bases` job's group is replaced by the next one that joins it (merge-queue.yml): that one
+  // serves it too, so a queued pull request's CI ending is never lost to a draft's CI ending just after it.
+  it("woken by a CI run are also those of the runs it replaced while they waited", async () => {
+    const a = "a".repeat(40), b = "b".repeat(40), c = "c".repeat(40), d = "d".repeat(40);
+    const pr = (base: string, sha: string, labels: string[] = []) => ({ base, sha, labels, body: "", branch: "fix", fork: false });
+    const pulls = [pr("dev", a, [LABEL.queue]), pr("dev", b), pr("epic/x", c, [LABEL.queue]), pr("epic/y", d, [LABEL.queue])];
+    const ci = (id: number, head: string, conclusion: string | null) => ({ id, conclusion, display_title: `Merge queue: CI ended on ${head}` });
+    const run = (id: number, display_title: string, conclusion: string | null) => ({ id, conclusion, display_title });
+    // Each cancelled one waited: its bases job was cancelled before it started.
+    const waited = async () => [{ name: "Bases with a train", status: "completed", conclusion: "cancelled", steps: [] }];
+    // Newest first, as GitHub lists them: 9 runs now; 8 (a draft's CI, after 7) and 6 (the queued pull request's CI)
+    // waited and were replaced; 7 was the train's own label (all skipped); 5 ran; 4 waited before 5 ran and is served.
+    const runs = [run(10, "Merge queue", null), ci(9, b, null), ci(8, b, "cancelled"), run(7, "fix: x", "skipped"), ci(6, a, "cancelled"), ci(5, d, "success"), ci(4, c, "cancelled")];
+    expect(await missedWakes(runs, 9, waited)).toEqual([b, a]);
+    expect(trainBases(pulls, [b, ...(await missedWakes(runs, 9, waited))!])).toEqual(["dev"]);
+    // Before: the draft's CI alone, so no train ran until the schedule.
+    expect(trainBases(pulls, b)).toEqual([]);
+    // Nothing replaced (the one before ran, or is running), and a run not on the page: its own head alone.
+    expect(await missedWakes(runs, 6, waited)).toEqual([]);
+    expect(await missedWakes([ci(2, a, null), ci(1, b, null)], 2, waited)).toEqual([]);
+    expect(await missedWakes(runs, 11, waited)).toEqual([]);
+    expect(trainBases(pulls, [b])).toEqual([]);
+    // A replaced run that was not woken by CI (a `queue` label, a person's push, the schedule): every base.
+    const label = [ci(3, b, null), run(2, "perf(chat): rows", "cancelled"), ci(1, a, "success")];
+    expect(await missedWakes(label, 3, waited)).toBeNull();
+    expect(trainBases(pulls, null)).toEqual(["dev", "epic/x", "epic/y"]);
+    // A name that only looks like a head is no head.
+    expect(await missedWakes([ci(2, b, null), run(1, "Merge queue: CI ended on abc", "cancelled")], 2, waited)).toBeNull();
+  });
+
+  // A run whose bases job ran but whose train job was replaced in its base's own group ends `cancelled` too: it was
+  // served, so the walk stops there, and the `queue` label run before it never makes this one wake every base.
+  it("woken by a CI run stop at a cancelled run whose bases job ran", async () => {
+    const a = "a".repeat(40), b = "b".repeat(40), e = "e".repeat(40);
+    const pr = (base: string, sha: string, labels: string[] = []) => ({ base, sha, labels, body: "", branch: "fix", fork: false });
+    const pulls = [pr("dev", a, [LABEL.queue]), pr("dev", b), pr("epic/x", "c".repeat(40), [LABEL.queue]), pr("epic/y", e, [LABEL.queue])];
+    const ci = (id: number, head: string, conclusion: string | null) => ({ id, conclusion, display_title: `Merge queue: CI ended on ${head}` });
+    const job = (name: string, conclusion: string, steps: { name: string; conclusion: string }[] = []) => ({ name, status: "completed", conclusion, steps });
+    const waited = [job("Bases with a train", "cancelled"), job("Train into ${{ matrix.base }}", "cancelled")];
+    const listed = [job("Bases with a train", "success", [{ name: "List the bases", conclusion: "success" }]), job("Train into epic/y", "cancelled")];
+    const jobs: Record<number, ReturnType<typeof job>[]> = { 8: waited, 7: listed, 6: listed };
+    const asked: number[] = [];
+    const jobsOf = async (id: number) => (asked.push(id), jobs[id] ?? []);
+    // Newest first: 9 lists now; 8 waited and was replaced; 7 listed epic/y and its train job was replaced in
+    // `merge-train-epic/y`; 6 (a `queue` label) the same; 5 ran.
+    const runs = [ci(9, b, null), ci(8, a, "cancelled"), ci(7, e, "cancelled"), { id: 6, conclusion: "cancelled", display_title: "fix: x" }, ci(5, e, "success")];
+    expect(await missedWakes(runs, 9, jobsOf)).toEqual([a]);
+    expect(trainBases(pulls, [b, a])).toEqual(["dev"]);
+    expect(asked).toEqual([8, 7]);
+    // A run whose jobs could not be told (none listed) counts as one that waited: no wake is lost.
+    expect(await missedWakes([ci(3, b, null), ci(2, a, "cancelled"), ci(1, e, "success")], 3, async () => [])).toEqual([a]);
+    // A bases job cancelled after it started (by hand, or its time ran out) listed nothing: that wake is served here.
+    const cut = [job("Bases with a train", "cancelled", [{ name: "List the bases", conclusion: "cancelled" }])];
+    expect(await missedWakes([ci(3, b, null), ci(2, a, "cancelled"), ci(1, e, "success")], 3, async () => cut)).toEqual([a]);
   });
 
   it("on a Mac are dev and every epic branch, queued or not, with no queue app", async () => {

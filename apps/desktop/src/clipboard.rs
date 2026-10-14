@@ -462,13 +462,13 @@ fn read_held(held: Held, offset: u64, length: u64) -> Result<Vec<u8>, String> {
         }
         Held::Path(path) => {
             let mut file =
-                File::open(&path).map_err(|e| format!("Could not read the file: {e}"))?;
+                File::open(&path).map_err(|e| format!("Could not read the pasted file: {e}"))?;
             file.seek(SeekFrom::Start(offset))
                 .map_err(|e| e.to_string())?;
             let mut out = Vec::new();
             file.take(length)
                 .read_to_end(&mut out)
-                .map_err(|e| format!("Could not read the file: {e}"))?;
+                .map_err(|e| format!("Could not read the pasted file: {e}"))?;
             Ok(out)
         }
     }

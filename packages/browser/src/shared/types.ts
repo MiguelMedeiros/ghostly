@@ -142,6 +142,11 @@ export interface StoredGroup {
      * group (anyone may sign a genesis under it): only a welcome whose chain starts there joins the history I kept.
      */
     genesis?: string;
+    /**
+     * Taken back by who sent it (`group-decline` over its chat), and when: kept a week so the list says so where the
+     * invitation was, instead of it going with no word. Nothing is accepted or owed for it; another invitation replaces it.
+     */
+    takenBack?: number;
   };
   /**
    * On the admin's side: contact chats invited and not answered yet, and when. Kept so that an accept after my app
@@ -158,6 +163,13 @@ export interface StoredGroup {
    * rosters past eight: an admin grows the group past eight only when every other member is here (WISP 902 § Bounds).
    */
   large?: string[];
+  /**
+   * On the admin's side: members I let in over a contact chat or the group's link whose edge has not come up with me
+   * yet, so whose app may never have had the group's keys (its welcome lost on the way). A `group-decline` from that
+   * chat takes such a member out again, and one that knocks on the link again gets its welcome again; one seen on an
+   * edge once is a member, whatever its chat says after.
+   */
+  unseen?: string[];
   /**
    * Removed, then invited again over a contact chat: the names my app knew members by (member key → name). The history
    * stays while the invitation waits, and still names who wrote it; once in again, the names of members who are gone
@@ -286,11 +298,14 @@ export interface GroupView {
   /** On the invitee's side, until the welcome arrives. */
   /**
    * `waiting`: joining a community through its link, how many others were knocking with me when I last knocked.
+   * `since`: joining a community through its link, when the knock started (a group kept here, knocking to get back in,
+   * was created long before).
    * `full`: with stage `full` or `blocked`, the members the group has and the most it holds, as the answer said.
    * `unanswered`: accepted over a contact chat, said again as often as it is, and the inviter's app answered nothing
    * while that chat was up: the answer is offered again.
+   * `takenBack`: who sent it took it back (the group is gone from its app, or the admin role from it): nothing to answer.
    */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; full?: { n: number; max: number } };
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; since?: number; full?: { n: number; max: number } };
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
   /** Contacts (by chat id) invited by me and not yet in. */
@@ -1695,6 +1710,11 @@ export interface EngineState {
    * yet may still be moving, not finished.
    */
   transfersRestored?: boolean;
+  /**
+   * The kept groups are in `groups`. Unset while the peer starts: until then a group missing from the list may only not
+   * be loaded yet, not gone (the app forgets a gone group's draft and read mark only between two states that have it).
+   */
+  groupsLoaded?: true;
   wallet: WalletView;
   payments: Record<string, PaymentView>;
   /** This profile's identity proofs. */

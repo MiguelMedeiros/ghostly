@@ -1,3 +1,4 @@
+import type { AppFileAt } from "@ghostly/browser/engine/apps";
 import type { PaymentMethodName } from "@ghostly/core";
 import type { UsdtWalletView, UsdtCreate } from "@ghostly/browser/engine/paymentAdapters/usdtWallet";
 import type { PaymentReview, PaymentTarget } from "@ghostly/core";
@@ -437,6 +438,11 @@ export interface AppsPlatform {
   running?(digest: string): AppsPlatform;
   /** One file of an installed app's bundle: a copy the caller owns, which the broker hands to the app (transferred). */
   file(ref: string, path: string): Promise<Uint8Array>;
+  /**
+   * Where that file lies in this device's file storage, for an opener that hands its bytes to the app itself (Desktop):
+   * null where it cannot say (the icon, a bundle kept in the browser), and absent where nothing reads it.
+   */
+  fileAt?(ref: string, path: string): Promise<AppFileAt | null>;
   storage: {
     /** Null when the key is not set. */
     get(ref: string, scope: string, key: string): Promise<{ value: MiniAppJson } | null>;
@@ -550,6 +556,11 @@ export interface ServicesPlatform {
    * file with no transfer may still be moving. Where left out, `getTransfer` always knows.
    */
   transfersRestored?(): boolean;
+  /**
+   * A transfer the engine shows none of, read from the file's record: a group's file waiting for its person's Download
+   * (the engine keeps no transfer for it). Null for any other file.
+   */
+  storedTransfer?(fileId: string): Promise<FileTransferState | null>;
   /** files/3: answers an offer, or pauses, resumes, cancels, sends again or asks again for a transfer. */
   fileAction?(fileId: string, action: FileAction): Promise<void>;
   /** Why a file of this size cannot go to this contact now, or null when it can (checked before sending). */
@@ -564,6 +575,8 @@ export interface ServicesPlatform {
   /**
    * A URL a `<video>` plays a stored file from without the page holding it (Desktop: served in ranges by Rust), for
    * a file `getFile` cannot hand out. Null where the platform cannot, or the file is gone. Call `release` when done.
+   * Rejects with `NO_ROOM_TO_PLAY` (@ghostly/browser/shared/fileBytes) when the disk has no room for the copy the
+   * player makes of it (Desktop on Linux): the file is offered to save instead.
    */
   streamFile?(fileId: string): Promise<{ url: string; release(): void } | null>;
   /**

@@ -1,10 +1,11 @@
-import { groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
+import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
 import { CliError } from "./errors";
 import {
-  bool, chatOf, chatOrGroup, findChat, findGroup, groupOf, list, messageOf, node, num, oneOf, state, str, waitForState,
+  bool, chatOf, chatOrGroup, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
@@ -19,6 +20,8 @@ import { IDENTITY_METHODS } from "./identities";
 import { SERVICE_METHODS } from "./services";
 import { BACKUP_METHODS } from "./backup";
 import { CALL_METHODS } from "./calls/api";
+import { APP_SERVE_METHODS } from "./appServe";
+import { APP_CHAT_METHODS } from "./appChat";
 import { WALLET_METHODS } from "./wallets";
 import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, isLive, messageJson, type MessageJson } from "./views";
 
@@ -111,7 +114,8 @@ const inviteShown = new WeakMap<ApiContext, () => void>();
 /**
  * Marks a new invite as the chat on screen (native listeners, the quick pace) only until it is paired: a paired chat
  * keeps its listeners anyway, and a daemon nobody looks at reads an away contact at the background pace, as its
- * other chats and the same chat after a restart do.
+ * other chats and the same chat after a restart do. Nor past its wait for a peer (`AWAITING_PEER_MS`): an invite
+ * nobody joined is then read at the background pace like the daemon's other ones, which it no longer holds back.
  */
 function showUntilPaired(ctx: ApiContext, linkId: string): void {
   inviteShown.get(ctx)?.();
@@ -123,12 +127,11 @@ function showUntilPaired(ctx: ApiContext, linkId: string): void {
     if (link) seen = true;
     return link ? !!link.peerParticipationKey : seen;
   };
-  const stop = () => { off(); if (inviteShown.get(ctx) === stop) inviteShown.delete(ctx); };
-  const off = ctx.hub.onState((s) => {
-    if (!done(s)) return;
-    stop();
-    node(ctx).setActiveLink({ linkId: null });
-  });
+  const stop = () => { off(); clearTimeout(timer); if (inviteShown.get(ctx) === stop) inviteShown.delete(ctx); };
+  const hide = () => { stop(); node(ctx).setActiveLink({ linkId: null }); };
+  const timer = setTimeout(hide, AWAITING_PEER_MS);
+  timer.unref?.();
+  const off = ctx.hub.onState((s) => { if (done(s)) hide(); });
   inviteShown.set(ctx, stop);
 }
 
@@ -144,6 +147,8 @@ const METHODS: Record<string, Method> = {
   ...SERVICE_METHODS,
   ...BACKUP_METHODS,
   ...CALL_METHODS,
+  ...APP_SERVE_METHODS,
+  ...APP_CHAT_METHODS,
 
   async status(ctx) {
     const s = state(ctx);
@@ -177,6 +182,7 @@ const METHODS: Record<string, Method> = {
   },
   async "settings.set"(ctx, params) {
     const patch: Record<string, unknown> = {};
+    let warning: string | undefined;
     for (const [key, value] of Object.entries(params)) {
       // The table's own keys only: every object has `constructor` and `toString`, which are no settings.
       const kind = Object.hasOwn(SETTABLE, key) ? SETTABLE[key] : undefined;
@@ -184,11 +190,21 @@ const METHODS: Record<string, Method> = {
       if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("bad_request", `${key} must be a list of strings`);
       if (kind === "string" && typeof value !== "string") throw new CliError("bad_request", `${key} must be a string`);
       if (kind === "boolean" && typeof value !== "boolean") throw new CliError("bad_request", `${key} must be true or false`);
-      if (kind === "ice" && !(Array.isArray(value) && value.every((v) => v && typeof v === "object"))) throw new CliError("bad_request", `${key} must be a list of ICE servers`);
+      if (kind === "ice") {
+        if (!(Array.isArray(value) && value.every((v) => v && typeof v === "object"))) throw new CliError("bad_request", `${key} must be a list of ICE servers`);
+        // WebRTC's own form (`urls` a list) is taken; a server without urls is said here, not as the engine's TypeError.
+        const servers = value.map(iceServerSetting);
+        for (const server of servers) { const problem = iceServerProblem(server); if (problem) throw new CliError("bad_request", `${key}: ${problem}`); }
+        patch[key] = servers;
+        // libdatachannel (libjuice) skips TURN over TCP and TLS without a word; the apps' browsers use them, so they stay.
+        const unused = servers.flatMap((server) => server.urls.split(/[\s,]+/)).filter((url) => /^turns:|\?transport=tcp$/i.test(url));
+        if (unused.length) warning = `The CLI reaches TURN over UDP only: it does not use ${unused.join(", ")} (the apps do). Add a turn: server over UDP for the CLI`;
+        continue;
+      }
       patch[key] = value;
     }
     await node(ctx).updateSettings({ settings: patch });
-    return redactSettings(state(ctx).settings);
+    return { ...redactSettings(state(ctx).settings), ...(warning ? { warning } : {}) };
   },
 
   async "invite.create"(ctx, params) {
@@ -252,7 +268,8 @@ const METHODS: Record<string, Method> = {
     // A kept `typing --for` ends with the message (the engine says stop with it).
     endTyping(ctx, { linkId: link.id }, false);
     const result = await node(ctx).sendMessage({ linkId: link.id, text, ...(replyTo ? { replyTo } : {}), ...(card ? { card } : {}) });
-    if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
+    // A `--reply` to a message this chat does not have is not_found (exit 3), as `file send --reply` and `group send` say.
+    if (result.error) throw /not in this chat|cannot be replied to/.test(result.error) ? new CliError("not_found", result.error) : new CliError(result.refused ? "refused" : "unavailable", result.error);
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
     let message = await node(ctx).getMessage(link.id, result.messageId);
     if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
@@ -399,6 +416,7 @@ const METHODS: Record<string, Method> = {
   async "chat.connect"(ctx, params) {
     const link = chatOf(ctx, params);
     await releaseHold(ctx, link.id, "connect");
+    inviteTaken(link);
     await node(ctx).connect({ linkId: link.id });
     return chatJson(findChat(state(ctx).links, link.id));
   },

@@ -1,5 +1,5 @@
 import type { Identity } from "./identity";
-import { createRelayPayload, newerPacket, openRelayPayload, parseRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
+import { createRelayPayload, newerPacket, openRelayPayload, parseRelayPayload, readOwnRelayPayload, RELAY_PAYLOAD_MAX_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
 import { RelayBreaker, type DiscoveryStatus, type RelayBreakerOptions, type RelayFailure } from "./relayBreaker";
 import { DiscoveryBudgetError, isDiscoveryBudgetError, type DiscoveryChange, type PkarrRequestOptions, type PkarrTransport, type ServerTime } from "./transport";
 import { traceLink } from "./linkTrace";
@@ -79,8 +79,8 @@ export const BACKGROUND_REQUESTS_PER_MINUTE = 20;
 export const WRITE_FIRST_MS = 5_000;
 /**
  * Once a 1:1 chat needs the relays (the budget refused one of its requests there, or it read urgently anywhere: it polls
- * fast for a signal due any moment), group requests leave it the last this many of each minute, for a minute. Groups
- * that spend the whole budget spend it over the minute, so the chat then takes the next request that frees, within
+ * fast for a signal due any moment), group requests and background ones leave it the last this many of each minute (more
+ * for several chats, `CHAT_RESERVE_PER_CHAT`), for a minute. Groups that spend the whole budget spend it over the minute, so the chat then takes the next request that frees, within
  * seconds, and has room for what follows (the receipt). Waiting for a refusal was too late when a contact went away
  * from a chat and from groups at once: the chat and the groups' edges all watched fast for it, the edges spent both
  * relays' minute in 40 s, and the chat read the contact's offer half a minute late (2026-09-27). A chat with nothing
@@ -90,6 +90,18 @@ export const WRITE_FIRST_MS = 5_000;
  * live in 18 s held a group's edge that had just missed its read for 48 s more (bug hunt r6a, 2026-09-29).
  */
 export const CHAT_RESERVE = 10;
+/**
+ * …and more while several chats need the relays at once: this many requests each (a read, an offer or answer, the read
+ * for the answer to it), up to `CHAT_RESERVE_MOST_SHARE` of the minute. Background requests leave it too, not the
+ * groups' alone: the looks of chats whose contacts are not there, and their presence (upkeep, `LinkSession`). An app
+ * opened while 30 of its 50 chats' contacts were online spent both relays' minute in its first second, on the presence
+ * of the chats whose contacts were long gone, its groups' records and every chat's first read: 12 of the 30 offers and
+ * answers went out, no read for an answer could, and 0 of the 30 chats were live 60 s after the start (bug hunt,
+ * 2026-10-13).
+ */
+export const CHAT_RESERVE_PER_CHAT = 3;
+/** The most of a relay's minute the chats' reserve takes, however many chats need it: the rest stays for everything else. */
+export const CHAT_RESERVE_MOST_SHARE = 5 / 6;
 /**
  * A 1:1 chat's signaling (a new offer or answer, and its reads for the answer to its offer, `signal`) may go over a
  * relay's minute by this fraction of it: 6 on a relay of 30, 12 on one of 60, 1 on relay.pkarr.org's 5 (it allows 10),
@@ -466,6 +478,9 @@ export class RelayTransport implements PkarrTransport {
 
   /**
    * Signs the records, dated by `nextTimestamp`, and hands the payload to `put` (the relays; the CLI adds the DHT).
+   * When every relay's budget (or rate limit) holds this asker back, it throws that wait before signing anything
+   * (`publishWait`): a daemon at its budget signed about 500 packets a minute that never went out. `elsewhere`: `put`
+   * also takes the packet where no budget holds it back (the CLI's DHT), so it is signed whatever the relays say.
    * `put` calls `conflict` for a relay that answered 409: it holds a packet under this key dated at or after this one,
    * which this client has not read (an inviter's warm packet under the key it gave its contact, from a clock ahead of
    * this one). That packet is read from that relay, and the records go again dated just past it, once. Without this
@@ -474,8 +489,14 @@ export class RelayTransport implements PkarrTransport {
    */
   async publishDated(identity: Identity, records: GhostRecord[],
     put: (pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, conflict: (relay: string) => void) => Promise<void>,
-    options: PkarrRequestOptions = {}, again = false): Promise<void> {
-    const key = identity.pubKeyZ32, timestamp = this.nextTimestamp(key);
+    options: PkarrRequestOptions = {}, again = false, elsewhere = false): Promise<void> {
+    const key = identity.pubKeyZ32;
+    // Before the packet is signed and dated: a publish no relay takes now costs no signature, and moves no date on.
+    if (!again && !elsewhere) {
+      const held = this.publishWait(key, asker(options, true));
+      if (held) throw new DiscoveryBudgetError(held.wait, `Publish held back on every relay: ${held.reasons.join("; ")}`);
+    }
+    const timestamp = this.nextTimestamp(key);
     let redated: Promise<boolean> | undefined;
     const conflict = (relay: string) => {
       if (again || redated) return;
@@ -486,7 +507,7 @@ export class RelayTransport implements PkarrTransport {
         traceLink(key, "publish-redated", { aheadMs: Number((held - timestamp) / 1000n), relay });
         // A later publication of this key took over meanwhile: it is dated past what was just read.
         if (this.lastTimestamp.get(key) !== timestamp) return true;
-        await this.publishDated(identity, records, put, options, true);
+        await this.publishDated(identity, records, put, options, true, elsewhere);
         return true;
       })();
       redated.catch(() => {});
@@ -497,6 +518,40 @@ export class RelayTransport implements PkarrTransport {
       const pending = redated as Promise<boolean> | undefined;
       if (!pending || !(await pending)) throw error;
     }
+  }
+
+  /**
+   * How long until some relay takes a publish of this asker, and why each holds it back; null when one would now. Walks the relays as `put` does,
+   * without asking any: a relay the budget holds back gets its refused `take` (the asker's write then waits first in
+   * line, as when `put` is refused), one rate limiting or throttling this address is a wait, one left alone for failing
+   * is none. Null too when a relay fails another way (its network cooling down): the publish then goes, and fails, as
+   * before, and when no relay is held back at all.
+   */
+  private publishWait(pubKeyZ32: string, who: Asker): { wait: number; reasons: string[] } | null {
+    const probe = this.breaker.allDownProbe(this.relays);
+    let wait = Infinity;
+    const held: string[] = [], reasons: string[] = [];
+    for (const relay of this.relays) {
+      if (relay !== probe && this.networkCoolingDown(relay, "PUT")) return null;
+      const limited = this.rateLimitedFor(relay);
+      if (limited > 0) { wait = Math.min(wait, limited); reasons.push(`${relay}: Discovery relay is cooling down after a 429; retry shortly`); continue; }
+      const blocked = relay === probe ? 0 : this.breaker.blockedFor(relay);
+      if (blocked > 0) {
+        if (this.breaker.blockedKind(relay) === "throttled") { wait = Math.min(wait, blocked); reasons.push(`${relay}: Discovery relay is throttling this address; retry shortly`); }
+        else reasons.push(`${relay} is left alone after failing`);
+        continue;
+      }
+      if (this.heldFor(relay, who, Date.now(), pubKeyZ32) <= 0) return null;
+      held.push(relay);
+      const left = this.heldFor(relay, who);
+      wait = Math.min(wait, left);
+      reasons.push(`${relay}: discovery budget reached; retry in ${Math.ceil(left / 1000)} s`);
+    }
+    if (wait === Infinity) return null;
+    // Held back everywhere: refused as `put` would be, so what a refusal notes holds (this write goes first once a
+    // request frees, a chat's need of its reserve). Only now: a publish another relay takes leaves no write waiting.
+    for (const relay of held) this.take(relay, who, pubKeyZ32);
+    return { wait, reasons };
   }
 
   /** One relay's packet for a key, read now: its time, kept for `nextTimestamp`. Null when it has none or does not answer. */
@@ -519,10 +574,23 @@ export class RelayTransport implements PkarrTransport {
     if (timestamp > (this.seenTimestamp.get(pubKeyZ32) ?? 0n)) this.seenTimestamp.set(pubKeyZ32, timestamp);
   }
 
-  /** Puts a payload signed elsewhere (a did:dht document), byte for byte, on every relay. `conflict`: as `publishDated` gives it. */
+  /**
+   * Puts a payload `publishDated` just signed, dated `timestamp`, on every relay. Its signature is not checked: it was
+   * made here (`publishPayload` checks one signed elsewhere, to read its sequence number). `conflict`: as `publishDated`
+   * gives it.
+   */
+  async putSigned(pubKeyZ32: string, payload: Uint8Array, timestamp: bigint, options: PkarrRequestOptions = {}, conflict?: (relay: string) => void): Promise<void> {
+    if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
+    await this.putEverywhere(pubKeyZ32, payload, timestamp, options, conflict);
+  }
+
+  /**
+   * Puts a payload signed elsewhere (a did:dht document), byte for byte, on every relay; one signed here says its date
+   * (`signedAt`) and is not checked again. `conflict`: as `publishDated` gives it.
+   */
   async publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}, conflict?: (relay: string) => void): Promise<void> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
-    const { seq } = openRelayPayload(pubKeyZ32, payload);
+    const seq = options.signedAt ?? openRelayPayload(pubKeyZ32, payload).seq;
     await this.putEverywhere(pubKeyZ32, payload, seq, options, conflict);
   }
 
@@ -576,7 +644,8 @@ export class RelayTransport implements PkarrTransport {
           if (accepted) return;
           accepted = true;
           noWriteWaits();
-          try { this.written.set(pubKeyZ32, parseRelayPayload(pubKeyZ32, payload)); } catch { /* not a packet a read would take either */ }
+          // Signed here (`publishDated`) or checked on the way in (`publishPayload`): not checked a third time.
+          try { this.written.set(pubKeyZ32, readOwnRelayPayload(pubKeyZ32, payload)); } catch { /* not a packet a read would take either */ }
           resolve();
         }, () => { /* read from `settled` */ });
       }
@@ -1015,9 +1084,9 @@ export class RelayTransport implements PkarrTransport {
       if (rationed.length >= most) wait = Math.max(wait, rationed[rationed.length - most] + GROUP_RATION_WINDOW_MS - now);
       if (this.readsAhead(key, now) > 0) wait = Math.max(wait, TURN_WAIT_MS);
     }
-    if (who.group) {
+    if (who.group || who.background) {
       const reserved = this.chatReservedFor(relay, now);
-      if (reserved > 0) wait = Math.max(wait, Math.min(reserved, over(recent, limit - this.reserveOf(relay))));
+      if (reserved > 0) wait = Math.max(wait, Math.min(reserved, over(recent, limit - this.chatReserveOf(relay, now))));
     }
     const writer = firstWriter(who);
     const waiting = (lane: "chat" | "group") => {
@@ -1123,6 +1192,13 @@ export class RelayTransport implements PkarrTransport {
     const share = RELAY_REQUESTS_PER_MINUTE[relay];
     if (share === undefined) return this.perMinute;
     return this.perMinuteGiven ? Math.min(this.perMinute, share) : share;
+  }
+
+  /** What the chats that need the relays keep on this relay (`CHAT_RESERVE_PER_CHAT`), never less than `reserveOf`. */
+  private chatReserveOf(relay: string, now: number): number {
+    let needing = 0;
+    for (const need of this.chatNeeds.values()) if (now - Math.max(need.urgentAt, need.refused.get(relay) ?? -Infinity) < 60_000) needing++;
+    return Math.max(this.reserveOf(relay), Math.min(needing * CHAT_RESERVE_PER_CHAT, Math.floor(this.limitOf(relay) * CHAT_RESERVE_MOST_SHARE)));
   }
 
   /** What groups leave a chat on this relay: `CHAT_RESERVE`, or a third of a smaller budget. */

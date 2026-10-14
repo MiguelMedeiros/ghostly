@@ -1,7 +1,7 @@
 import { pasteInvite } from "../support/clipboard";
 import type { Locator, Page } from "@playwright/test";
 import { linkTrace, watchLink, type EngineHost } from "../support/callTrace";
-import { chat, expect, test } from "../support/fixtures";
+import { chat, expect, headerControl, test } from "../support/fixtures";
 import { HeadlessBot } from "../support/headless";
 
 /**
@@ -124,7 +124,8 @@ test("a bot's task card moves to done, and the Tasks button follows it", { tag: 
     expect(box!.width).toBeLessThanOrEqual(375);
     await running.scrollIntoViewIfNeeded();
     await page.screenshot({ path: test.info().outputPath("phone-card.png") });
-    await page.getByTestId("chat-tasks").click();
+    // On a phone Tasks is a row of ⋮.
+    await (await headerControl(page, "chat-tasks")).click();
     await expect(page.getByTestId("chat-tasks-panel")).toBeVisible();
     await page.waitForTimeout(400); // the sheet fades in: the picture after it
     await page.screenshot({ path: test.info().outputPath("phone-panel.png") });

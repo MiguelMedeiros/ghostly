@@ -23,6 +23,16 @@
     "updateWaits": "La versione {{version}} è pronta.",
     "version": "Versione {{version}}"
   },
+  "builtIn": {
+    "allow": "Consenti",
+    "allowOpen": "Consenti e apri",
+    "carried": "Inclusa in Ghostly. Non viene scaricato nulla.",
+    "carriedInfo": "Questa copia fa parte del Ghostly che stai usando. Gli aggiornamenti arrivano dal suo editore o dai tuoi store, che allora vedono il tuo indirizzo IP.",
+    "hint": "Inclusa in Ghostly",
+    "openNamed": "Apri {{title}}",
+    "remove": "Rimuovi",
+    "removeNamed": "Rimuovi {{title}}"
+  },
   "card": {
     "ask": "Chiedi a {{name}} un link",
     "contactCannot": "L'app di {{name}} non esegue ancora app",
@@ -60,7 +70,7 @@
     "rollback": "Il link contiene una versione più vecchia.",
     "status": "Niente a quel link.",
     "storage": "Questo browser non può tenere app qui (navigazione privata?). Prova una finestra normale.",
-    "storageInfo": "Ghostly tiene i file di ogni app su questo dispositivo. Le finestre private, come la Navigazione privata di Safari, non lo permettono, e anche un disco pieno lo impedisce. Apri Ghostly in una finestra normale e installa lì l'app.",
+    "storageInfo": "Ghostly tiene i file di ogni app su questo dispositivo. Le finestre private, come la Navigazione privata di Safari, non lo permettono, e anche un disco pieno lo impedisce.",
     "storeKey": "Quello store è firmato con un'altra chiave.",
     "tooLarge": "Troppo grande.",
     "unlistedVersion": "Il link contiene una versione che questo store non elenca ancora."
@@ -96,7 +106,7 @@
     "unknownPublisherInfo": "Chiunque può firmare un'app con una chiave nuova. Solo uno store che hai aggiunto può garantire chi l'ha fatta. Confronta la chiave con quella pubblicata dall'autore.",
     "update": "Aggiorna",
     "webkit": "In questo browser, un'app può comunque contattare altri server.",
-    "webkitInfo": "Safari, e ogni browser su iPhone e iPad, lascia che un'app apra connessioni che Ghostly non può bloccare, anche senza il permesso internet. Quei server vedono il tuo indirizzo IP. L'app desktop le blocca."
+    "webkitInfo": "Safari e ogni browser su iPhone o iPad lasciano che un'app apra connessioni che Ghostly non può bloccare. Quei server vedono il tuo indirizzo IP. L'app desktop le blocca."
   },
   "page": {
     "add": "Aggiungi",

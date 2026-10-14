@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { act, configure, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
@@ -10,6 +10,14 @@ import { useToast } from "../../hooks/useToast";
 import { hashPassword } from "../../lib/settings";
 import { renderApp } from "../render";
 // covers: settings.lock.password, devices.enroll
+
+/*
+ * What these tests wait for sits behind the lock password's hash (600,000 rounds, twice for a change of password):
+ * about 200 ms each on an idle machine, over a second on a busy runner. The default wait of 1 s is too short for that;
+ * and a test gets longer than its longest wait, so one that fails still says what it waited for.
+ */
+configure({ asyncUtilTimeout: 10_000 });
+vi.setConfig({ testTimeout: 30_000 });
 
 /** happy-dom has no <dialog> modal; the dialog only needs to open. */
 HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true; };

@@ -26,6 +26,8 @@ export interface FileDeskDeps {
   /** Sends a files/3 frame on the chat's open session; false when there is none. */
   send(linkId: string, frame: Record<string, unknown>): boolean;
   /** Resolves once the chat's open session can take another data frame (its send budget has room). */
+  /** A file's bytes on the chat's session, in the form it agreed (`GhostLink.sendFileData`). Absent: `pf-data` frames through `send`. */
+  sendData?(linkId: string, id: string, offset: number, data: Uint8Array): boolean;
   writable?(linkId: string): Promise<void> | undefined;
   /** Bytes the contact sent that are stored here without asking (files/2 included): the budget files/3 fills. */
   receivedBytes(linkId: string): number;
@@ -111,6 +113,7 @@ export class FileDesk {
       openSource: (record) => this.openSource(linkId, record),
       changed: (record, transferred, progress) => this.changed(linkId, record, transferred, progress),
       room: async () => (await fileBytes()).room(),
+      ...(this.deps.sendData && { sendData: (id: string, offset: number, data: Uint8Array) => this.deps.sendData!(linkId, id, offset, data) }),
       writable: () => this.deps.writable?.(linkId),
     });
     this.chats.set(linkId, made);
@@ -132,6 +135,9 @@ export class FileDesk {
       records.push(file.wire3);
       if (file.wire3.direction === "in") chat.local.set(file.wire3.id, file.id);
       if (!transferEnded(file.wire3)) this.restored.add(file.id);
+      // Finished: no transfer (a file with none reads as finished; its record says done). A view for each would go into
+      // every state the engine builds, so each state would cost more with every file the chat ever had.
+      if (file.wire3.state === "done") continue;
       this.deps.transfers.set(file.id, this.view(chat, file.wire3, file.wire3.confirmed, transferStalled(file.wire3, Date.now(), this.restored.has(file.id), Date.now())));
     }
     chat.files.restore(records);
@@ -467,7 +473,8 @@ export class FileDesk {
       if (rate) view.rate = rate;
     } else this.speeds.delete(id);
     if (view.stage === "asking" && record.direction === "in") { view.room = this.deps.transfers.get(id)?.room; void this.room(id); }
-    this.deps.transfers.set(id, view);
+    // One that finished before this run (a session opening walks them all) gets no view back (`restore`).
+    if (record.state !== "done" || this.underway.has(id) || this.deps.transfers.has(id)) this.deps.transfers.set(id, view);
     // Ended, then going again (sent again, taken again): its next end is reported too.
     if (!transferEnded(record)) { this.underway.add(id); this.ended.delete(id); }
     else if (!this.ended.has(id)) { this.ended.add(id); this.deps.settled?.(linkId, id, record, this.underway.delete(id)); }

@@ -6,7 +6,7 @@ import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { groupLinkUrl, groupPath, groupStatusText } from "../../lib/groups";
 import { useEngineState } from "../../lib/identities";
 import { showJoinNotice } from "../../lib/joinNotice";
-import { ensureSession } from "../../lib/storage";
+import { NO_ROOM_FOR_CHAT, ensureSession } from "../../lib/storage";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteShareText, readInvite, type JoinOutcome } from "../../lib/url";
 import { CardIcon, EntityCardFrame, cardButton, cardQuiet } from "./EntityCardFrame";
 import { LinkActions } from "./LinkQrDialog";
@@ -53,7 +53,11 @@ export function InviteEntityCard({ code, mine, from }: { code: string; mine: boo
     if (now.kind === "own") return;
     if (now.kind === "joined") { showJoinNotice("join.alreadyIn"); nav.conversation(chatPath(now.sessionId)); return; }
     let sessionId: string;
-    try { sessionId = ensureSession(reading.keys); } catch { setError({ tone: "error", title: t("join.invalid") }); return; }
+    try { sessionId = ensureSession(reading.keys); } catch (cause) {
+      // No room left to store the chat is said as that: the invite is good.
+      setError(cause instanceof Error && cause.message === NO_ROOM_FOR_CHAT ? problemText(cause, t) : { tone: "error", title: t("join.invalid") });
+      return;
+    }
     window.dispatchEvent(new Event("session-updated"));
     nav.conversation(chatPath(sessionId));
   };

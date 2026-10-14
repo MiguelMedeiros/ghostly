@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { COMMUNITY_LIMITS, GROUP_LIMITS, MAX_GROUP_MEMBERS, MAX_GROUP_NAME_LENGTH, MAX_GROUP_PICTURE_LENGTH, MESH_HUBS } from "@ghostly/core";
+import { COMMUNITY_LIMITS, GROUP_LIMITS, MAX_GROUP_MEMBERS, MAX_GROUP_NAME_LENGTH, MAX_GROUP_PICTURE_LENGTH, MESH_HUBS, groupName } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss } from "../hooks/useDismiss";
@@ -69,6 +69,8 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   const rename = async () => {
     const name = naming ?? "";
     if (name.trim() === live.name) { setNaming(null); return; }
+    // Nothing visible in it: Save is off, and Enter does nothing either.
+    if (!groupName(name)) return;
     await run("rename", async () => { await engine.call("renameGroup", { groupId: live.id, name }); setNaming(null); });
   };
   // Contacts: paired chats, minus members and pending invitations. Those without groups are shown, and say why.
@@ -109,7 +111,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
               <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} value={naming} maxLength={MAX_GROUP_NAME_LENGTH} disabled={busy !== null}
                 onChange={e => setNaming(e.target.value)} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setNaming(null); } }}
                 className="min-w-0 flex-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-sm focus:border-accent focus:outline-none" />
-              <button type="submit" data-testid="group-rename-save" disabled={busy !== null || !naming.trim()}
+              <button type="submit" data-testid="group-rename-save" disabled={busy !== null || !groupName(naming)}
                 className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{t("group.rename.save")}</button>
               <button type="button" data-testid="group-rename-cancel" onClick={() => setNaming(null)} className="text-xs text-text-muted hover:text-text-primary">{t("group.rename.cancel")}</button>
             </form>}
@@ -133,7 +135,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
       </button>
     </div>
     {live.status === "active" && (live.isAdmin || (live.profile === "community" && live.entryLink)) && <GroupLinkPanel group={live} />}
-    <ul ref={list} className="mt-3 max-h-56 space-y-1 overflow-y-auto" data-testid="group-member-list">
+    <ul ref={list} tabIndex={-1} className="mt-3 max-h-56 space-y-1 overflow-y-auto rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-accent" data-testid="group-member-list">
       {live.members.map(m => <MemberRow key={m.key} member={m} focused={m.key === focusKey} viaHub={viaHubs(m)} photo={photoOf(m)} myNick={m.me ? state?.settings.nick : undefined}
         peerKey={m.me ? undefined : contactKey(m.key)} status={m.me ? "" : viaHubs(m) ? t("group.member.viaHub") : edgeLabel(m, now, t, since)}
         tools={!live.isAdmin || m.me ? "" : hubChoice ? "hubs" : "admin"} busy={busy !== null} onHub={setHub} onPromote={setPromoting} onRemove={setRemoving} />)}
@@ -158,9 +160,9 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
       </ul>
     </div>}
     {error && <Notice problem={error} className="mt-3 text-sm" />}
-    {removing && <RemoveMemberDialog name={memberName(removing, t)} linkOn={!!live.entryLink} onClose={() => setRemoving(null)}
+    {removing && <RemoveMemberDialog name={memberName(removing, t)} linkOn={!!live.entryLink} returnFocus={list} onClose={() => setRemoving(null)}
       onConfirm={() => { const key = removing.key; setRemoving(null); void run(key, () => engine.call("removeGroupMember", { groupId: live.id, key })); }} />}
-    {promoting && <MakeAdminDialog name={memberName(promoting, t)} onClose={() => setPromoting(null)}
+    {promoting && <MakeAdminDialog name={memberName(promoting, t)} linkEnds={!!live.entryLink && live.profile !== "community"} returnFocus={list} onClose={() => setPromoting(null)}
       onConfirm={() => { const key = promoting.key; setPromoting(null); void run(key, () => engine.call("makeGroupAdmin", { groupId: live.id, key })); }} />}
     <p data-testid="group-read-note" className="mt-4 rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed text-text-secondary">{live.profile === "community" ? t("group.readNoteCommunity", { count: COMMUNITY_LIMITS.store }) : t("group.readNote", { count: GROUP_LIMITS.relay })}</p>
   </dialog>, document.body);

@@ -1,0 +1,1 @@
+Screens: the ⓘ under "Ghostly makes a new profile here for it" is quoted with its shorter wording ("This device's profile has chats, groups or money, so it can't become a copy of the other. Switch between them in the profile menu."). Words only; no behaviour, frame or record changed.

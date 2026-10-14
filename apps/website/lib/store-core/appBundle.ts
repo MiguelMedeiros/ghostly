@@ -310,8 +310,72 @@ export type AppBundleReading = { ok: true; bundle: AppBundle } | { ok: false; re
 
 const u32 = (b: Uint8Array, at: number) => ((b[at]! << 24) >>> 0) + (b[at + 1]! << 16) + (b[at + 2]! << 8) + b[at + 3]!;
 
-/** Reads and checks a bundle (the order of the checks is part of the format: see above). */
-export function readAppBundle(bytes: Uint8Array): AppBundleReading {
+/**
+ * Lets the thread go for one turn: what waits (input, drawing, timers, port messages, IndexedDB answers) runs, then the
+ * caller goes on. A message to itself, queued behind the page's other tasks. Never `scheduler.yield()`: in Chromium its
+ * continuation outranks every normal task, so a paced read of 4096 revocations held the page's timers, its apps' broker
+ * ports and IndexedDB for the whole 1.8 s. Never `setTimeout(0)` but as the last resort: from the fifth nested timer on
+ * the browser waits at least 4 ms (HTML's clamp), which made that read take 60% longer than the work, and a hidden tab
+ * runs timers once a second.
+ */
+export function yieldThread(): Promise<void> {
+  if (typeof MessageChannel === "function") {
+    return new Promise((resolve) => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => {
+        channel.port1.close();
+        resolve();
+      };
+      channel.port2.postMessage(null);
+    });
+  }
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * A pause for a loop of short steps: `await pause()` after each step lets the thread go once `sliceMs` of work has
+ * run since the last time, and answers at once otherwise.
+ */
+export function pacer(sliceMs: number): () => Promise<void> | undefined {
+  let since = performance.now();
+  return () => {
+    if (performance.now() - since < sliceMs) return undefined;
+    return yieldThread().then(() => {
+      since = performance.now();
+    });
+  };
+}
+
+/** `sha256Paced` hashes up to this much at once: under a millisecond of the thread. */
+const HASH_AT_ONCE = 64 * 1024;
+/** Without `crypto.subtle`, `sha256Paced` hashes this much (a few ms), then lets the thread go. */
+const HASH_SLICE = 256 * 1024;
+/** `readAppBundleAsync` hashes files for this long at most before it lets the thread go, however small each file. */
+const HASH_SLICE_MS = 5;
+
+/**
+ * SHA-256 of bytes that may be a whole bundle, for a client whose engine shares its page's thread: `sha256` in
+ * JavaScript takes about 12 ms per MiB on a desktop CPU, so 16 MiB in one run is a page that draws nothing and takes no
+ * input for 200 ms. With `crypto.subtle` the bytes are hashed off the thread; without it (a page not served over
+ * HTTPS), a slice at a time with a pause between slices. The bytes must not change until it answers.
+ */
+export async function sha256Paced(bytes: Uint8Array): Promise<Uint8Array> {
+  if (bytes.length <= HASH_AT_ONCE) return sha256(bytes);
+  const subtle = globalThis.crypto?.subtle as SubtleCrypto | undefined;
+  const away = subtle ? await subtle.digest("SHA-256", bytes as BufferSource).catch(() => null) : null;
+  if (away) return new Uint8Array(away);
+  const hash = sha256.create();
+  for (let at = 0; at < bytes.length; at += HASH_SLICE) {
+    if (at) await yieldThread();
+    hash.update(bytes.subarray(at, at + HASH_SLICE));
+  }
+  return hash.digest();
+}
+
+/** A bundle read up to its files: everything `readAppBundle` checks before a file's hash, and where the files start. */
+interface AppBundleHead { manifest: AppManifest; manifestBytes: Uint8Array; signature: AppSignature; filesAt: number }
+
+function readAppBundleHead(bytes: Uint8Array): { ok: true; head: AppBundleHead } | { ok: false; reason: AppBundleRefusal; detail?: string } {
   if (bytes.length > APP_BUNDLE_LIMITS.bundleBytes) return { ok: false, reason: "too-large" };
   const head = bytes.subarray(0, MAGIC.length);
   if (!head.every((b, i) => b === MAGIC[i])) return { ok: false, reason: "magic" };
@@ -342,20 +406,53 @@ export function readAppBundle(bytes: Uint8Array): AppBundleReading {
 
   const signed = verifyAppSignature(APP_PREFIXES.app, manifestBytes, statement.signature, manifest.publisher);
   if (!signed.ok) return signed;
+  return { ok: true, head: { manifest, manifestBytes, signature: statement.signature, filesAt: at } };
+}
 
-  const files = new Map<string, Uint8Array>();
-  for (const f of manifest.files) {
-    const content = bytes.subarray(at, at + f.size); at += f.size;
-    if (toBase64Url(sha256(content)) !== f.sha256) return { ok: false, reason: "file-hash", detail: f.path };
-    files.set(f.path, content);
-  }
+/** The last check, once every file's hash held: the icon. */
+function closeAppBundle({ manifest, manifestBytes, signature }: AppBundleHead, files: Map<string, Uint8Array>): AppBundleReading {
   const icon = files.get(APP_ICON_PATH);
   if (icon) {
     const size = imageSize(icon);
     if (!size || icon[0] !== 0x89 || size.width !== size.height) return { ok: false, reason: "bad-icon", detail: "icon.png is not a square PNG" };
     if (size.width > APP_BUNDLE_LIMITS.iconEdge) return { ok: false, reason: "bad-icon", detail: "icon.png is larger than 1024 × 1024 pixels" };
   }
-  return { ok: true, bundle: { manifest, manifestBytes, digest: appDigest(manifestBytes), signature: statement.signature, files } };
+  return { ok: true, bundle: { manifest, manifestBytes, digest: appDigest(manifestBytes), signature, files } };
+}
+
+/** Reads and checks a bundle (the order of the checks is part of the format: see above). */
+export function readAppBundle(bytes: Uint8Array): AppBundleReading {
+  const read = readAppBundleHead(bytes);
+  if (!read.ok) return read;
+  const files = new Map<string, Uint8Array>();
+  let at = read.head.filesAt;
+  for (const f of read.head.manifest.files) {
+    const content = bytes.subarray(at, at + f.size); at += f.size;
+    if (toBase64Url(sha256(content)) !== f.sha256) return { ok: false, reason: "file-hash", detail: f.path };
+    files.set(f.path, content);
+  }
+  return closeAppBundle(read.head, files);
+}
+
+/**
+ * `readAppBundle` for a client whose engine shares its page's thread: the same checks in the same order, with the same
+ * refusals, and each file hashed by `sha256Paced`, one after the other, with the thread let go between files every
+ * `HASH_SLICE_MS` (64 files of 64 KiB, each hashed at once, held it for 50 ms). The bytes must not change until it
+ * answers.
+ */
+export async function readAppBundleAsync(bytes: Uint8Array): Promise<AppBundleReading> {
+  const read = readAppBundleHead(bytes);
+  if (!read.ok) return read;
+  const files = new Map<string, Uint8Array>();
+  const pause = pacer(HASH_SLICE_MS);
+  let at = read.head.filesAt;
+  for (const f of read.head.manifest.files) {
+    const content = bytes.subarray(at, at + f.size); at += f.size;
+    if (toBase64Url(await sha256Paced(content)) !== f.sha256) return { ok: false, reason: "file-hash", detail: f.path };
+    files.set(f.path, content);
+    await pause();
+  }
+  return closeAppBundle(read.head, files);
 }
 
 /** Puts a bundle's parts together, checking nothing: for builders, and for tests that need a broken bundle. */

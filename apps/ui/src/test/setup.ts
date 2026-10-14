@@ -3,6 +3,7 @@ import { cleanup } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, expect, vi } from "vitest";
 import { resetGifSearch } from "../lib/gifSearch";
 import { resetUnseenSats } from "../hooks/useUnseenSats";
+import { forgetPictures } from "../lib/pictureReads";
 import { fakeEngine, installFakeEngine } from "./fakeEngine";
 import type { Language } from "../lib/settings";
 import { loadLocale } from "../locales";
@@ -44,6 +45,8 @@ beforeEach(() => {
   resetGifSearch();
   // What the wallet icon marks as new is kept for the app session, like the GIF answers.
   resetUnseenSats();
+  // So are the pictures a chat read.
+  forgetPictures();
   delete document.documentElement.dataset.reduceMotion;
   document.documentElement.removeAttribute("lang");
   document.documentElement.removeAttribute("dir");

@@ -4,16 +4,15 @@ import { expect, test, type Page } from "@playwright/test";
  * A step button that takes the keyboard's focus is one the reader can see. A pinned chapter fades its picture and
  * copy in over its first pixels and out before the hand-off (SceneFrame FADE), and the browser brings a focused
  * button on screen at the chapter's nearest edge: Tab from a chapter's last step button to the next chapter's first
- * landed on a panel at opacity 0, on the bare backdrop. Focusing a step button brings its chapter to that step.
+ * landed on a panel at opacity 0, on the bare backdrop. Focusing a step button brings its chapter to that step, at
+ * once: a smooth scroll and the playhead's glide after it left a black screen for 1 to 2.1 s, so a reader tabbing every
+ * 600 ms was on step 2 before step 1 showed.
  */
 
 const CHAPTERS = ["invite", "dht", "agree", "alive"];
 
-/**
- * How opaque a focused step button is at least, itself and its ancestors together. Not 1: a chapter of four steps
- * ends its last step's beat 0.9% of the chapter into its fade-out, so that step rests at about 0.77.
- */
-const SEEN = 0.7;
+/** A focused step button is fully opaque, itself and its ancestors together: a step at rest is outside its chapter's fades. */
+const SEEN = 1;
 
 /** The step button that has the focus: its chapter, its place, whether it can be seen, and what its chapter shows. */
 const focused = (page: Page) =>
@@ -36,10 +35,13 @@ const focused = (page: Page) =>
     };
   }, SEEN);
 
-/** The page scrolls there smoothly and the playhead plays the beats on the way, so the step is given a few seconds to arrive; then it must stay. */
+/**
+ * The step is there within a few frames of the key (the page jumps, nothing glides), inside the 600 ms between two
+ * Tabs of a person; then it must stay.
+ */
 async function shows(page: Page, chapter: string, button: number) {
   const there = { chapter, button, ring: true, seen: true, onScreen: true, pinned: true, step: button };
-  await expect.poll(() => focused(page), { timeout: 8000 }).toEqual(there);
+  await expect.poll(() => focused(page), { timeout: 600, intervals: [50] }).toEqual(there);
   await page.waitForTimeout(1000);
   expect(await focused(page)).toEqual(there);
 }
@@ -89,3 +91,26 @@ test("a click on a step button still goes to its step", async ({ page }) => {
   await page.locator("#invite .scene-progress button").nth(2).click();
   await expect.poll(active, { timeout: 8000 }).toBe(2);
 });
+
+for (const id of CHAPTERS) {
+  test(`a click on the last step button of #${id} rests on a fully opaque panel`, async ({ page }) => {
+    await page.goto(`/#${id}`, { waitUntil: "networkidle" });
+    await expect(page.locator(`#${id}:not(.scene--static)`)).toHaveCount(1);
+    const last = (await page.locator(`#${id} .scene-progress button`).count()) - 1;
+    await page.locator(`#${id} .scene-progress button`).nth(last).click();
+    const rests = () =>
+      page.evaluate((id) => {
+        const scene = document.getElementById(id)!;
+        const opacity = (sel: string) => Number(getComputedStyle(scene.querySelector(sel)!).opacity);
+        return {
+          step: [...scene.querySelectorAll(".scene-step")].findIndex((s) => (s as HTMLElement).dataset.active === "true"),
+          copy: opacity(".scene-copy"),
+          picture: opacity(".scene-visual"),
+        };
+      }, id);
+    const there = { step: last, copy: 1, picture: 1 };
+    await expect.poll(rests, { timeout: 8000 }).toEqual(there);
+    await page.waitForTimeout(1000);
+    expect(await rests()).toEqual(there);
+  });
+}

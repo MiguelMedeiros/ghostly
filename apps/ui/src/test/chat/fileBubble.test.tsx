@@ -1,10 +1,11 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileBubble } from "../../components/FileBubble";
 import { fileStatus, timeLeft } from "../../lib/fileStatus";
 import { servicesPlatform, type FileTransferState } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
+import { everythingOnScreen } from "../onScreen";
 import { renderApp } from "../render";
 
 // covers: files.large.offer, files.large.resume, files.size-label, files.large.resend, files.large.request, backup.light
@@ -19,9 +20,11 @@ const show = (transfer: FileTransferState | null, patch: Partial<ChatFile> = {})
 };
 
 beforeEach(() => {
+  everythingOnScreen();
   vi.spyOn(servicesPlatform!, "getFile").mockResolvedValue(null);
   fakeEngine.on("fileAction", () => undefined);
 });
+afterEach(() => vi.unstubAllGlobals());
 
 describe("what a file's status line says", () => {
   const f = file();
@@ -251,8 +254,9 @@ describe("FileBubble: files/3", () => {
       expect(screen.getByRole("img", { name: "Pasted image.png" })).toHaveAttribute("src", src);
       expect(created).toEqual([src]);
       expect(revoked).toEqual([]);
+      // Kept for the run once the bubble goes: the chat opened again shows it without reading it (lib/pictureReads.ts).
       view.unmount();
-      expect(revoked).toEqual([src]);
+      expect(revoked).toEqual([]);
     } finally {
       Object.assign(URL, { createObjectURL, revokeObjectURL });
     }
@@ -349,6 +353,19 @@ describe("FileBubble: files/3", () => {
       expect(saveFile).toHaveBeenCalledWith("chat1-in-abc", "movie.mkv");
       expect(screen.getByTestId("file-status")).toHaveTextContent("4.2 GB");
     } finally { delete (servicesPlatform as { saveFile?: unknown }).saveFile; }
+  });
+
+  it("a group's picture all here, too large to show here, is saved through the system though it shows no transfer (Desktop)", async () => {
+    const saveFile = vi.fn(async () => true);
+    Object.assign(servicesPlatform!, { saveFile, fileHeld: vi.fn(async () => "here" as const) });
+    try {
+      // The engine keeps no transfer for a group's file all here: its record says it is done.
+      const picture = { id: "group-g1-in-abc", name: "huge.png", mime: "image/png", size: 900 * 1024 ** 2 };
+      fakeEngine.update({ links: [], transfers: {}, transfersRestored: true });
+      renderApp(<FileBubble file={file(picture)} peerName="Ana" />);
+      fireEvent.click(await screen.findByTestId("file-save"));
+      expect(saveFile).toHaveBeenCalledWith("group-g1-in-abc", "huge.png");
+    } finally { delete (servicesPlatform as { saveFile?: unknown; fileHeld?: unknown }).saveFile; delete (servicesPlatform as { fileHeld?: unknown }).fileHeld; }
   });
 
   // The save command (apps/desktop file_store.rs) rejects with the system's English: a folder that cannot be written

@@ -95,6 +95,17 @@ export const DEPARTED_READ_MS = EXPECT_PEER_MS;
 /** A chat whose contact was never seen (an invite just sent) keeps looking at the active pace this long. */
 export const AWAITING_PEER_MS = 10 * 60_000;
 /**
+ * An invite this side made that nobody used, once no longer awaited (`AWAITING_PEER_MS`), is read less often the older
+ * it is: a fifth of its age between reads, up to this. Read at the background pace instead, 15 unused invites (their
+ * keys and their mailboxes) asked the relays for 60 reads a minute for as long as the app ran: the relays' minute went
+ * to invites nobody may ever open, and a join on one was noticed 90 s later (bug hunt 1013-1642, 2026-10-13).
+ */
+export const UNUSED_INVITE_WAIT_MAX_MS = 3 * 60_000;
+/** The wait between reads of an unused invite of age `age` (`UNUSED_INVITE_WAIT_MAX_MS`), never shorter than the pace's `interval`. */
+export function unusedInviteWait(age: number, interval: number): number {
+  return Math.max(interval, Math.min(UNUSED_INVITE_WAIT_MAX_MS, Math.round(age / 5)));
+}
+/**
  * A group link's peer whose packet advertises and carries no `_tr` on every read for this long publishes none: what it
  * said before is forgotten (WISP 902 § Transports). Not at the first such packet: an app with no WebRTC (a Linux
  * Desktop) publishes its `_tr` only once a native endpoint is up, seconds after its first packet of a run, and what it
@@ -199,6 +210,8 @@ export interface LinkSessionOptions {
    * sent at once) went out for a minute (2026-10-08).
    */
   awaitingSince?: number;
+  /** Whether this is an invite this side made that nobody used yet: once no longer awaited, read less often (`unusedInviteWait`). */
+  invite?: () => boolean;
 }
 
 /** With `firstPublish: "after-first-poll"`, the first packet goes out by then whatever happened. */
@@ -247,6 +260,8 @@ export class LinkSession {
   private readonly startedAt = Date.now();
   /** From when a peer never seen is awaited (`AWAITING_PEER_MS`): never later than this start, whatever the clock said when the chat was made. */
   private readonly awaitingSince: number;
+  /** This side's invite, nobody used yet (`LinkSessionOptions.invite`). */
+  private readonly invite: () => boolean;
   private readonly intervals: PollIntervals;
   private fastPollUntil = 0;
   /** An offer to a saved contact is out: from then on its fast window looks less often (`OFFER_FAST_MS`); 0 for none. */
@@ -299,6 +314,7 @@ export class LinkSession {
     this.events = options.events ?? {};
     this.firstPublish = options.firstPublish ?? "at-start";
     this.awaitingSince = Math.min(options.awaitingSince ?? this.startedAt, this.startedAt);
+    this.invite = options.invite ?? (() => false);
   }
 
   get peerPresence(): PeerPresence {
@@ -479,8 +495,9 @@ export class LinkSession {
   async setRtcSignal(signal: string | null, reportFailure = false): Promise<void> {
     if (this.rtcSignal === signal) return;
     this.rtcSignal = signal;
-    if (reportFailure) await this.publish();
-    else await this.publish().catch(() => {});
+    // A signal taken back (the session opened, or the attempt ended) is nothing the contact waits for: upkeep.
+    if (reportFailure) await this.publish(signal === null);
+    else await this.publish(signal === null).catch(() => {});
     if (signal) this.pollNow();
   }
 
@@ -560,6 +577,8 @@ export class LinkSession {
     const stepping = this.fastStepsAfter ? Date.now() - this.fastStepsAfter : -1;
     if (pace === "fast" && stepping >= 0) return Math.min(OFFER_STEP_MAX * interval, Math.max(2 * interval, stepping));
     if (pace === "fast" || pace === "connected" || since < 0) return interval;
+    // An invite nobody used, no longer awaited: the older it is, the less often it is read.
+    if (pace === "background" && this.presence.lastPacketAt === 0 && this.invite()) return unusedInviteWait(Date.now() - this.awaitingSince, interval);
     return Math.min(interval, Math.max(2 * this.intervals.fast, since));
   }
 
@@ -573,6 +592,11 @@ export class LinkSession {
     return Date.now() < this.watchUntil && this.rtcSignal === null && !(this.presence.online && this.presence.lastPacketAt > this.watchFrom);
   }
 
+  /** A contact never seen, whose invite was sent lately (`AWAITING_PEER_MS`): its join is due. */
+  private awaitingPeer(): boolean {
+    return this.presence.lastPacketAt === 0 && Date.now() - this.awaitingSince < AWAITING_PEER_MS;
+  }
+
   /** How urgently this link looks right now. */
   private pace(): keyof PollIntervals {
     // Connected peers signal over the data link; no reason to hurry Pkarr, unless it stopped answering.
@@ -581,7 +605,7 @@ export class LinkSession {
     if (Date.now() < this.fastPollUntil) return "fast";
     if (Date.now() < this.watchUntil) return "active";
     // Someone who just sent an invite may look elsewhere while waiting: the join still comes in quickly.
-    if (!this.active && this.presence.lastPacketAt === 0 && Date.now() - this.awaitingSince < AWAITING_PEER_MS) return "active";
+    if (!this.active && this.awaitingPeer()) return "active";
     if (!this.active) return "background";
     return Date.now() - this.lastActivity > IDLE_THRESHOLD ? "idle" : "active";
   }
@@ -653,7 +677,17 @@ export class LinkSession {
       // relays' budget keeps for those, so it never takes a request a group's door or edges need. As a chat's write,
       // the budget refusing it held the groups back for its reserve: a daemon with 30 live chats sat at the budget
       // while idle, and people joining its group by link waited 80 s to 9 min (bug hunt, 2026-10-08).
-      const options = rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : this.watching() ? { watch: true } : upkeep && this.connected ? { background: true } : undefined;
+      // So is a packet with nothing in it a contact waits for (no signal, no text) while the contact is not there: its
+      // last read found it away, or none was made yet in this run (an invite just sent awaits its peer: not that). As a
+      // chat's write, the presence of the chats whose contacts were long gone took the relays' minute as the app started,
+      // ahead of the chats whose contacts were online and offering (`CHAT_RESERVE_PER_CHAT` in relay.ts). And so is a
+      // packet that only takes a signal back (`setRtcSignal`): as a chat's write, the 30 chats that went live as the app
+      // started took their offers and answers back in a minute the start had spent, and each, first in line once refused,
+      // held back every read of the chats still waiting for an answer until the minute freed.
+      const awaited = this.connected || this.presence.online || this.sentBuffer.length > 0 || this.callSignal !== null || this.awaitingPeer();
+      const takesBack = !rtcSignal && this.rtcSignalOut !== null;
+      const options = rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : this.watching() ? { watch: true }
+        : (upkeep && (this.connected || takesBack)) || (!rtcSignal && !awaited) ? { background: true } : undefined;
       await this.transport.publish(this.identity, built.records, options);
     } catch (error) {
       const ms = Date.now() - started, waiting = isDiscoveryBudgetError(error);

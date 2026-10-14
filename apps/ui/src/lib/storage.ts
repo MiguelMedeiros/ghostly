@@ -192,6 +192,32 @@ function forgetKey(key: string): void {
 }
 
 /**
+ * Writes again what this page holds (`unsaved`), once room may have been made: a chat or profile deleted here, or in
+ * another page of this origin (its `storage` event), or the person back on the page. What still does not fit stays held.
+ */
+export function retryUnsaved(): void {
+  if (!unsaved.size) return;
+  for (const [key, value] of [...unsaved]) {
+    try {
+      localStorage.setItem(key, value);
+      unsaved.delete(key);
+    } catch {
+      // still no room for it
+    }
+  }
+  if (!unsaved.size) tellUnsaved();
+}
+
+/** While this page holds something, room made elsewhere is tried at once (`retryUnsaved`). */
+function watchForRoom(on: boolean): void {
+  if (typeof window === "undefined") return;
+  for (const event of ["storage", "focus"]) {
+    if (on) window.addEventListener(event, retryUnsaved);
+    else window.removeEventListener(event, retryUnsaved);
+  }
+}
+
+/**
  * Whether this page holds something localStorage refused: storage is full, and what came since is shown but gone at a
  * reload until the engine brings it back (the storage-full notice, `StorageFullBanner`).
  */
@@ -206,11 +232,16 @@ export function onUnsavedChange(listener: () => void): () => void {
   return () => void unsavedListeners.delete(listener);
 }
 function tellUnsaved(): void {
+  watchForRoom(unsaved.size > 0);
   // A write may come while a component draws: the notice draws again after it.
   queueMicrotask(() => { for (const listener of unsavedListeners) listener(); });
 }
 
-export function saveSession(session: ChatSession): void {
+/**
+ * False when localStorage did not take the session, even after making room (full, or unavailable): this page holds it
+ * (`unsaved`) until a later write fits.
+ */
+export function saveSession(session: ChatSession): boolean {
   // Whether the session was stored (or needs no write).
   const write = (): boolean => {
     const kept = stored(session);
@@ -231,7 +262,9 @@ export function saveSession(session: ChatSession): void {
     }
     return writeKey(getKey(session.id), raw);
   };
-  if (!write()) makeRoom(session.id, write);
+  if (write()) return true;
+  makeRoom(session.id, write);
+  return !unsaved.has(getKey(session.id));
 }
 
 let makingRoom = false;
@@ -418,6 +451,8 @@ export function deleteSession(sessionId: string): void {
   }
   const order = storedPinOrder();
   if (order.includes(sessionId)) writePinOrder(order.filter(id => id !== sessionId));
+  // The room it made may fit what this page held.
+  retryUnsaved();
 }
 
 /**
@@ -546,16 +581,19 @@ export function movePinned(sessionId: string, direction: "up" | "down"): PinnedP
  */
 export type SessionCache = Map<string, { raw: string; session: ChatSession; whole?: { list: ChatMessage[]; session: ChatSession } }>;
 
+/** The keys chats are stored under, with those only this page holds (a chat made while localStorage was full). */
+function sessionKeys(): string[] {
+  const keys = new Set<string | null>([...unsaved.keys()]);
+  for (let i = 0; i < localStorage.length; i++) keys.add(localStorage.key(i));
+  return [...keys].filter(isSessionKey);
+}
+
 /** Every chat, pinned first, then the latest first. With a cache, only a session whose stored text changed is parsed. */
 export function listSessions(cache?: SessionCache): ChatSession[] {
   const sessions: ChatSession[] = [];
   const seen = new Set<string>();
-  // A chat made while localStorage was full is only in this page.
-  const keys = new Set<string | null>([...unsaved.keys()]);
-  for (let i = 0; i < localStorage.length; i++) keys.add(localStorage.key(i));
-  for (const key of keys) {
+  for (const key of sessionKeys()) {
     try {
-      if (!isSessionKey(key)) continue;
       const raw = readKey(key);
       if (!raw) continue;
       const hit = cache?.get(key);
@@ -587,6 +625,37 @@ export function listSessions(cache?: SessionCache): ChatSession[] {
     return bTime - aTime;
   });
   return sessions;
+}
+
+/** Per chat's key: its id and its contact's key, read once. Neither changes while the chat is stored under that key. */
+const contacts = new Map<string, { id: string; peer: string }>();
+
+/**
+ * The chat with this contact, as `listSessions()` would find it first, without reading any chat's messages: each chat's
+ * stored copy is parsed once, the first time it is looked through, and a long chat's whole history is never merged in.
+ * An attention event, a call offer, finds its chat this way.
+ */
+export function sessionIdForPeer(peerPubKeyB64: string): string | undefined {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const key of sessionKeys()) {
+    seen.add(key);
+    let contact = contacts.get(key);
+    if (!contact) {
+      try {
+        const session = JSON.parse(readKey(key) ?? "null") as ChatSession | null;
+        // As `listSessions` counts a chat.
+        if (!session?.id || !session.mySeedB64 || !session.peerPubKeyB64 || !session.encKeyB64) continue;
+        contacts.set(key, contact = { id: session.id, peer: session.peerPubKeyB64 });
+      } catch {
+        continue;
+      }
+    }
+    if (contact.peer === peerPubKeyB64) ids.push(contact.id);
+  }
+  for (const key of contacts.keys()) if (!seen.has(key)) contacts.delete(key);
+  // Two chats with this contact: the one the list shows first.
+  return ids.length > 1 ? listSessions().find((s) => s.peerPubKeyB64 === peerPubKeyB64)?.id : ids[0];
 }
 
 /**
@@ -709,11 +778,14 @@ export function markJoinAnnounced(sessionId: string): void {
   }
 }
 
-export function saveInviteCode(sessionId: string, code: string): void {
+/** False when the code could not be stored (storage full or unavailable). */
+export function saveInviteCode(sessionId: string, code: string): boolean {
   try {
     localStorage.setItem(`${getPrefix()}invite_${sessionId}`, code);
+    return true;
   } catch {
     // storage full or unavailable
+    return false;
   }
 }
 
@@ -785,9 +857,14 @@ export function sessionLinkParams(session: ChatSession): LinkParams {
   };
 }
 
+/** What `ensureSession` throws when a new chat could not be stored: the storage is full (errorText.ts says it). */
+export const NO_ROOM_FOR_CHAT = "There is no room left on this device for a new chat";
+
 /**
  * The id of the session for these keys, stored first if it is new. Chats are
  * routed by this id so the keys never reach the address bar or the history.
+ * A new one that could not be stored (or its invite, which the chat shows) throws
+ * `NO_ROOM_FOR_CHAT`: its id would open no chat.
  */
 export function ensureSession(
   keys: SessionKeys,
@@ -797,7 +874,7 @@ export function ensureSession(
   if (existing && existing.profile !== keys.profile) throw new Error("Invitation profile does not match this stored conversation");
   const id = existing?.id ?? newSessionId();
   if (!existing) {
-    saveSession({
+    const saved = saveSession({
       id,
       profile: keys.profile,
       deliveryMode: keys.deliveryMode,
@@ -810,8 +887,13 @@ export function ensureSession(
       createdAt: options.createdAt ?? Date.now(),
       ...(options.viaLink ? { viaLink: true as const } : {}),
     });
+    // Held only in this page, it would be gone at a reload, its link with it: not made at all.
+    if (!saved) { forgetKey(getKey(id)); throw new Error(NO_ROOM_FOR_CHAT); }
   }
-  if (options.inviteCode) saveInviteCode(id, options.inviteCode);
+  if (options.inviteCode && !saveInviteCode(id, options.inviteCode) && !existing) {
+    forgetKey(getKey(id));
+    throw new Error(NO_ROOM_FOR_CHAT);
+  }
   return id;
 }
 

@@ -1,0 +1,1 @@
+The headless store keeps the engine's messages and their index entries in `rows.db` (SQLite, keyed by bytes in IndexedDB's key order) instead of memory, writing a transaction there once the journal has it, with a snapshot format older releases refuse; a profile of either earlier format moves at its first open, and a backup's store still holds every value inline for any release.

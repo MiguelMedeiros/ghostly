@@ -139,6 +139,8 @@ describe("a community member removed while its app was closed", { timeout: 120_0
     // Still the group he was removed from, with who was in it and what was said, and knocking beside that.
     expect(world.view(dave, id)).toMatchObject({ status: "removed", statusReason: "You were removed from this group", canSend: false, name: "Open door",
       invitation: { viaLink: true, accepted: true, stage: "knocked" } });
+    // When the knock started, not when the kept group was made: what the page times "the link may be old" from.
+    expect(world.view(dave, id)!.invitation!.since).toBeGreaterThanOrEqual(before.createdAt + 5_000);
     expect(world.view(dave, id)!.members.map(m => m.key)).toEqual(before.members.map(m => m.key));
     expect(world.texts(dave, id)).toEqual(["dave, while a member"]);
 

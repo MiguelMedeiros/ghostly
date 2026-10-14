@@ -228,6 +228,7 @@
   "media": {
     "downloadSize": "下载 {{size}}",
     "noRoom": "空间不足：剩余 {{size}}",
+    "noRoomToPlay": "磁盘可用空间不足，无法在此播放。请下载。",
     "notYet": "发送完成后即可播放。",
     "wantsToSend": "{{name}} 想发送 · 剩余 {{size}}"
   },

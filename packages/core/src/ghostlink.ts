@@ -46,14 +46,14 @@ import { EXPECT_PEER_MS, OFFER_FAST_MS, WATCH_PEER_MS, LinkSession, presenceSeen
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp } from "./pairedHttp";
-import { CALLS_CAPABILITY, FILES_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, APPS_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
+import { CALLS_CAPABILITY, FILES_CAPABILITY, FILES_BINARY_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, APPS_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
 import { APP_DATA_MAX_BYTES, APP_FRAME, APP_RESUME_GRACE_MS, AppSessions, appDataBytes, appCloseFrame, appDataFrame, appOpenFrame, type AppFrameEvent, type AppSendError } from "./pairedApps";
 import { WAKE_FRAME, parseWakeFrame, wakeFrame, type WakeTarget } from "./pairedWake";
 import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseReactedFrame, parseReactionFrame, reactedFrame, reactionFrame, type WireReaction } from "./reactions";
 import { PINNED_FRAME, PIN_FRAME, PIN_LIMITS, parsePinFrame, parsePinnedFrame, pinFrame, pinnedFrame, type WirePin } from "./pins";
 import { TYPING_FRAME, TypingReceiver, TypingSender, type TypingActivity } from "./pairedTyping";
 import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditMessage, validEditNumber, type WireEdit } from "./pairedEdits";
-import { FILE_FRAMES } from "./chatFiles";
+import { FILE_FRAMES, decodeFileData, encodeFileData } from "./chatFiles";
 import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
 import { heardCallSignal } from "./callSignal";
 import { traceLink } from "./linkTrace";
@@ -96,6 +96,14 @@ export const CROSSED_WAIT_MS = 500;
  * takes over.
  */
 export const CROSSED_FRESH_MS = 10_000;
+/**
+ * A dial of the contact's that meets such a session waits this long for that session to answer a ping. It answers when
+ * the dials crossed (the contact holds this side's dial too); it does not when the contact's app ended since and is
+ * back: its dial then takes over. Refused outright, that dial left the contact waiting for the dead session's end, 16.6
+ * to 18.9 s (CLI daemons over HyperDHT, the contact killed 1 to 3 s after this side's knock, 5 of 5). A round trip is
+ * 7 ms on loopback and under 0.5 s over a relayed Iroh.
+ */
+export const CROSSED_PROBE_MS = 1_500;
 /** A WebRTC attempt under way, not yet open: what a member's packet saying it has no WebRTC ends (`peerPacketTransports`). */
 const WEBRTC_ATTEMPT: ReadonlySet<DataLinkState> = new Set(["offering", "answering", "connecting"]);
 /** A joiner gathers its offer while it first looks for the inviter (`dialEarly`) only this soon after the join. */
@@ -236,6 +244,20 @@ export interface IncomingMessage {
   /** A status card (`sc`, WISP 405 · Status Cards), already checked; the text is its fallback. Live session only. */
   card?: StatusCard;
 }
+
+/**
+ * What files/3 may hold on a session's channel (WISP 501, Backpressure): a quarter of its send budget (native and iroh
+ * channels throw past 120 KiB), or the high water mark of a WebRTC channel, which has none.
+ */
+function filesCap(channel: FrameChannel): number {
+  return channel.sendBudget ? channel.sendBudget / 4 : LIMITS.sendHighWaterMark;
+}
+
+/**
+ * How long after files last wrote on a channel, or last waited for room on it, an app's data keeps its own quarter above
+ * their line (WISP 1200 § In a chat): a file waiting for `pf-got` holds its share meanwhile.
+ */
+const FILES_IN_USE_MS = 2_000;
 
 /** Largest `paired-message` frame sent with a preview: a session fails on a frame over 60 KiB (`PairedSession`). */
 export const MAX_PAIRED_MESSAGE_FRAME = 56 * 1024;
@@ -455,7 +477,10 @@ export interface GhostLinkEvents {
   onFileProgress?(fileId: string, transferred: number, direction: "in" | "out"): void;
   onFileComplete?(fileId: string, direction: "in" | "out"): void;
   onFileFailed?(fileId: string, reason: string, direction: "in" | "out"): void;
-  /** A files/3 frame (`FILE_FRAMES`), only while both sides agreed `files/3` on the open session. */
+  /**
+   * A files/3 frame (`FILE_FRAMES`), only while both sides agreed `files/3` on the open session. A file's data that came
+   * as a binary message (`files/4`) is the `pf-data` frame it stands for, its `data` the bytes themselves.
+   */
   onFilesFrame?(frame: Record<string, unknown>): void | Promise<void>;
   /**
    * files/3 can flow (a session agreed it and is open), or no longer can. Said again, open, after a live
@@ -531,6 +556,11 @@ export interface GhostLinkOptions {
   servicesSupport?: boolean;
   /** Offer `files/3` on paired sessions: files of any size, offered, resumed and checked (`chatFiles.ts`). */
   largeFilesSupport?: boolean;
+  /**
+   * With `largeFilesSupport`, offer `files/4` on a session whose channel carries binary messages: a file's bytes as
+   * they are, not as text (WISP 501 § files/4). The owner's `onFilesFrame` then takes a `pf-data` whose `data` is bytes.
+   */
+  binaryFilesSupport?: boolean;
   /** Offer `typing/1` on paired sessions: say and show when either side is writing (1:1 chats, not group edges). */
   typingSupport?: boolean;
   /** Offer `react/1` on paired sessions: reactions to messages (1:1 chats, not group edges). */
@@ -929,9 +959,12 @@ export class GhostLink {
         traceLink(this.myPubKeyZ32, "progress", { stage: progress.stage, attempt: progress.attempt, peerSeen: progress.peerSeen, reason: progress.reason, retryable: progress.retryable, transport: progress.transport });
         options.events?.onPairingProgress?.(progress);
       }) : null;
+    // This side's invite, nobody used yet: read less often the longer nobody does, once no longer awaited.
+    const invite = options.pairingProgress?.role === "inviter" && !!options.pairing && !options.pairing.credentials.peerKey;
     this.dht = options.params.profile && options.pairing && options.dht ? new DhtDelivery({
       params: options.params, mode: this.deliveryMode, state: options.dht.state, credentials: options.pairing.credentials, transport: options.transport,
       save: options.dht.save, pollMs: options.dht.pollMs, firstControlAfterMs: options.dht.firstControlAfterMs,
+      ...(invite && { inviteMadeAt: options.madeAt ?? Date.now() }),
       capsRev: options.dht.capsRev, peerCapsRev: options.dht.peerCapsRev, peerAcceptsText: options.dht.peerAcceptsText, peerAcceptsFile: options.dht.peerAcceptsFile,
       // Reactions ride on the envelopes off the live session (WISP 403 § Reactions).
       ...(options.reactionsSupport && {
@@ -942,6 +975,8 @@ export class GhostLink {
       // A first contact verified on the DHT pins the contact: the pairing is on the DHT until a stream is up.
       pin: async key => {
         await options.pairing!.pinPeer(key, true);
+        // An invite read slowly while nobody used it: its contact's key is looked at now, not at the end of that wait.
+        if (invite) this.session.lookNow();
         if (this.isDataLinkOpen || !this.tracker || this.tracker.done) return;
         if (this.deliveryMode === "dht") { this.tracker.onDht("chosen"); return; }
         // A stream is usually a moment away: the pairing shows its steps, and ends on the DHT only if no stream
@@ -997,6 +1032,7 @@ export class GhostLink {
       lastSeenTimestamp: options.lastSeenTimestamp,
       pollIntervals: options.pollIntervals,
       awaitingSince: options.madeAt,
+      ...(invite && { invite: () => !options.pairing!.credentials.peerKey }),
       getServices: options.getServices,
       // A joiner dials the moment it sees the inviter, and an app back after a restart (`resume`) the moment it reads its
       // contact: its offer goes in its first packet, not in a second one right behind its presence. A joiner with no WebRTC
@@ -1476,13 +1512,13 @@ export class GhostLink {
   start(): void {
     // What this side runs on a group link now goes in its first packet (`packetTransportsSaid`).
     if (this.saidTransports) this.publishPacketTransports();
-    if (this.deliveryMode !== "dht") this.session.start();
     // Back after a restart: the contact, if it still holds the old session, dials or offers as soon as it notices;
-    // its offer is looked for fast rather than at the background pace.
+    // its offer is looked for fast rather than at the background pace, from the first read on.
     if (this.resuming && this.deliveryMode !== "dht") {
       this.session.expectPeer();
       this.resumeWaitUntil = Date.now() + RESUME_WAIT_MS;
     }
+    if (this.deliveryMode !== "dht") this.session.start();
     // A joiner has just opened the invite: the inviter is there, and its first-contact envelope is worth reading
     // at the signaling pace now (an inviter speeds up when the joiner's fresh packet shows).
     if (this.tracker && !this.tracker.done && this.options.pairingProgress?.role === "joiner") { this.dht?.expect(); this.dialEarly(); }
@@ -1584,6 +1620,7 @@ export class GhostLink {
   disconnect(): void {
     this.closeRetired();
     this.dropCrossed();
+    this.dropCrossedProbe();
     this.dropBlockedDial();
     this.switcher.stop(); this.cancelCandidate();
     this.transitionTarget = this.transitionError = undefined;
@@ -2510,6 +2547,19 @@ export class GhostLink {
     return this.transportOffer().some(t => t === "webrtc/1" ? !this.peerTransports || this.peerTransports.includes(t)
       : this.canDial(t) && !!this.peerTransports?.includes(t));
   }
+  /**
+   * Neither side can dial the other until something changes, past a first pairing: what the contact runs is known, and
+   * no transport both run has WebRTC on both sides or an endpoint up on both (this side's, and the one its record
+   * describes). A chat that gave its listener up to another (`yieldEndpoint`), or whose contact did, is so. It dials
+   * again when that changes (a listener taken back, `registerEndpoint`; the record describing one, `learnPeerTransports`),
+   * and reads at its own pace meanwhile: looks every 20 s for a dial with nothing to try, and the contact's fast looks
+   * for an offer that could not come, read its key 2.5x to 4x as often as the background pace, for good (bug hunt,
+   * 2026-10-12). A first pairing keeps both: the records are what it is reading for.
+   */
+  private nothingToDialEitherWay(): boolean {
+    const pairing = !!this.tracker && !this.tracker.done && this.tracker.progress.stage !== "on-dht";
+    return !pairing && !!this.peerTransports && !this.anythingToDial();
+  }
   private clearRace(): void {
     if (this.raceTimer) clearTimeout(this.raceTimer);
     this.raceTimer = null;
@@ -2783,8 +2833,11 @@ export class GhostLink {
       // The other side dials as soon as it sees me. A packet of its that is new to me and fresh says it just
       // (re)appeared, so its offer is a poll away; an old one (a contact online for a while, as when this app
       // starts) says nothing is coming now, and looking fast for it would only spend the relays' budget.
+      // A contact that has nothing to dial here (`nothingToDialEitherWay`) sends no offer either.
       const fresh = Date.now() - presenceSeenAt(presence) < EXPECT_PEER_MS;
-      if (fresh && presence.lastPacketAt !== this.offerAwaitedFor) { this.offerAwaitedFor = presence.lastPacketAt; this.session.expectPeer(); }
+      if (fresh && presence.lastPacketAt !== this.offerAwaitedFor && !this.nothingToDialEitherWay()) {
+        this.offerAwaitedFor = presence.lastPacketAt; this.session.expectPeer();
+      }
       return;
     }
     const wait = this.dialWait();
@@ -2848,6 +2901,8 @@ export class GhostLink {
     this.retryLook = null;
     const from = this.lastAutoConnectAt;
     if (!from || this.stopped || this.leaving || this.streamBlocked || this.keyStopped || !this.options.autoConnect) return;
+    // Nothing to dial: the look would only read the contact's key again (`nothingToDialEitherWay`).
+    if (this.nothingToDialEitherWay()) return;
     this.retryLook = setTimeout(() => {
       this.retryLook = null;
       if (this.lastAutoConnectAt !== from || this.stopped || this.leaving || this.yielding || this.streamBlocked || this.keyStopped || this.channel || this.dialing || this.dataLink.state !== "idle") return;
@@ -3040,6 +3095,7 @@ export class GhostLink {
     if (this.options.callsSupport) offered.push(CALLS_CAPABILITY);
     if (this.options.servicesSupport) offered.push(SERVICES_CAPABILITY);
     if (this.options.largeFilesSupport) offered.push(FILES_CAPABILITY);
+    if (this.options.largeFilesSupport && this.options.binaryFilesSupport && this.channel?.binary) offered.push(FILES_BINARY_CAPABILITY);
     if (this.options.typingSupport) offered.push(TYPING_CAPABILITY);
     if (this.options.reactionsSupport) offered.push(REACTIONS_CAPABILITY);
     if (this.options.editSupport) offered.push(EDIT_CAPABILITY);
@@ -3070,6 +3126,8 @@ export class GhostLink {
   get supportsServices(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(SERVICES_CAPABILITY); }
   /** Both sides offer `files/3` on the open session: files of any size, offered and resumed. */
   get supportsLargeFiles(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(FILES_CAPABILITY); }
+  /** Both sides offer `files/4` beside `files/3` on the open session: a file's bytes go as binary messages. */
+  get supportsBinaryFiles(): boolean { return this.supportsLargeFiles && this.sessionCapabilities.agreed(FILES_BINARY_CAPABILITY); }
   /** Both sides offer `typing/1` on the open session: typing can be said and shown. */
   get supportsTyping(): boolean { return this.isDataLinkOpen && this.sessionCapabilities.agreed(TYPING_CAPABILITY); }
   /** Both sides offer `react/1` on the open session: reactions can be said and confirmed here. */
@@ -3181,13 +3239,19 @@ export class GhostLink {
   }
   /**
    * One data frame of an app open on both sides, on the live session only. An error when it did not go: nothing is
-   * kept to send later.
+   * kept to send later. While the channel already holds a quarter of what it may queue (its send budget, or the high
+   * water mark of a WebRTC channel), the frame is refused with `too-fast`, so the chat's messages and pings never wait
+   * behind an app's data on a link slower than it sends (WISP 1200 § In a chat). While a file goes, that quarter sits
+   * above what files may hold (`filesWritable`): files keep the channel at their own line for the whole transfer.
    */
   sendAppData(app: string, data: unknown): AppSendError | null {
     if (!this.apps.open.has(app)) return "not-open";
     if (appDataBytes(data) > APP_DATA_MAX_BYTES) return "too-large";
     if (!this.channel || !this.isDataLinkOpen) return "offline";
     if (!this.supportsApps) return "peer-closed";
+    const files = this.filesUse?.channel === this.channel && (this.filesUse.waiting > 0 || Date.now() - this.filesUse.at < FILES_IN_USE_MS)
+      ? filesCap(this.channel) : 0;
+    if (this.channel.bufferedAmount >= files + (this.channel.sendBudget ?? LIMITS.sendHighWaterMark) / 4) return "too-fast";
     const refused = this.apps.canSend(app, data);
     if (refused) return refused;
     try { this.channel.send(JSON.stringify(appDataFrame(app, data))); return null; } catch { return "offline"; }
@@ -3225,21 +3289,48 @@ export class GhostLink {
     try { this.channel.send(JSON.stringify(frame)); return true; } catch { return false; }
   }
   /**
+   * A file's bytes to the contact, on the open session: one binary message while both sides agreed `files/4` on it,
+   * the `pf-data` frame with them as base64url text otherwise (WISP 501 § files/4). The form is chosen for each chunk,
+   * so a transfer follows the session it is on. False when files/3 cannot flow now, or the channel has no room.
+   */
+  sendFileData(id: string, offset: number, data: Uint8Array): boolean {
+    if (!this.supportsLargeFiles || !this.channel) return false;
+    try {
+      this.channel.send(this.supportsBinaryFiles ? encodeFileData(id, offset, data) : JSON.stringify({ t: "pf-data", id, offset, data: toBase64Url(data) }));
+      this.filesUsing(this.channel).at = Date.now();
+      return true;
+    } catch { return false; }
+  }
+  /** Files on a channel: when they last wrote on it, and how many wait for room. An app's data gets room above theirs. */
+  private filesUse: { channel: FrameChannel; at: number; waiting: number } | null = null;
+  private filesUsing(channel: FrameChannel): { channel: FrameChannel; at: number; waiting: number } {
+    if (this.filesUse?.channel !== channel) this.filesUse = { channel, at: 0, waiting: 0 };
+    return this.filesUse;
+  }
+  /**
    * Resolves once the open session can take another files/3 data frame; undefined when it can now. A channel with a send budget (native and
    * iroh ones throw past 120 KiB) gives files a quarter of it, so a ping, a message or any other frame still fits
-   * while a file goes; others keep under the high water mark, as files/2 does.
+   * while a file goes; others keep under the high water mark, as files/2 does. An app's data gets a quarter above that
+   * line meanwhile (`sendAppData`).
    */
   filesWritable(): Promise<void> | undefined {
     const channel = this.channel;
     if (!channel) return;
-    const cap = channel.sendBudget ? channel.sendBudget / 4 : LIMITS.sendHighWaterMark;
+    const cap = filesCap(channel);
     // Room now: nothing to wait for, and nothing made for each frame of a large file.
     if (channel.bufferedAmount < cap) return;
+    const use = this.filesUsing(channel);
+    use.waiting++;
     return (async () => {
-      while (this.channel === channel && channel.bufferedAmount >= cap) {
-        await channel.drained().catch(() => {});
-        // A drain that resolved above the cap (a low water mark higher than it) is not waited on in a loop of promises.
-        if (this.channel === channel && channel.bufferedAmount >= cap) await new Promise((resolve) => setTimeout(resolve, 20));
+      try {
+        while (this.channel === channel && channel.bufferedAmount >= cap) {
+          await channel.drained().catch(() => {});
+          // A drain that resolved above the cap (a low water mark higher than it) is not waited on in a loop of promises.
+          if (this.channel === channel && channel.bufferedAmount >= cap) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      } finally {
+        use.waiting--;
+        use.at = Date.now();
       }
     })();
   }
@@ -3465,10 +3556,47 @@ export class GhostLink {
     const held = this.channel;
     if (held && this.activeBinding && !this.dialedIn.has(held) && Date.now() - this.channelSince < CROSSED_FRESH_MS
       && this.myPubKeyZ32 < this.options.params.peerPubKeyZ32) {
-      traceLink(this.myPubKeyZ32, "dial-crossed", { transport: binding.transport, held: true }); channel.close(); return;
+      // Still authenticating: the dials crossed, or the held one fails its authentication by itself.
+      if (this.paired?.state.status !== "ready") { traceLink(this.myPubKeyZ32, "dial-crossed", { transport: binding.transport, held: true }); channel.close(); return; }
+      this.probeCrossed(held, channel, binding); return;
     }
+    this.replaceWith(channel, binding);
+  }
+  private replaceWith(channel: FrameChannel, binding: NativeBinding): void {
     traceLink(this.myPubKeyZ32, "replacing", { transport: binding.transport, held: this.paired?.state.transport });
     this.attach(channel, binding, { resolve: () => {}, reject: () => {} });
+  }
+
+  /**
+   * The contact dialled in while this side's own fresh dial holds the chat (`CROSSED_FRESH_MS`): the dials crossed, or
+   * the contact's app ended since that dial and is back. The held session is pinged; heard from within
+   * `CROSSED_PROBE_MS`, the contact holds this side's dial too and its own closes. Not heard from, the contact's dial
+   * takes over.
+   */
+  private crossedProbe: { channel: FrameChannel; timer: ReturnType<typeof setTimeout> } | null = null;
+  /** Frames heard on the open session, counted from its start: whether the contact answered `probeCrossed`. */
+  private framesHeard = 0;
+  private probeCrossed(held: FrameChannel, channel: FrameChannel, binding: NativeBinding): void {
+    this.dropCrossedProbe();
+    traceLink(this.myPubKeyZ32, "dial-crossed", { transport: binding.transport, held: true, probe: true });
+    const heard = this.framesHeard;
+    try { this.sendPing(held, false); } catch { /* closing: the dial in is taken below */ }
+    const timer = setTimeout(() => {
+      if (this.crossedProbe?.channel !== channel) return;
+      this.crossedProbe = null;
+      if (this.stopped || this.leaving || this.candidate) { channel.close(); return; }
+      if (!this.channel) { this.attach(channel, binding); return; }
+      if (this.channel === held && this.framesHeard !== heard) { channel.close(); return; }
+      traceLink(this.myPubKeyZ32, "crossed-held-silent", { transport: binding.transport });
+      this.replaceWith(channel, binding);
+    }, CROSSED_PROBE_MS);
+    channel.onClose = () => { if (this.crossedProbe?.channel === channel) { clearTimeout(timer); this.crossedProbe = null; } };
+    this.crossedProbe = { channel, timer };
+  }
+  private dropCrossedProbe(): void {
+    const probe = this.crossedProbe;
+    if (!probe) return;
+    this.crossedProbe = null; clearTimeout(probe.timer); probe.channel.close();
   }
 
   /**
@@ -3633,8 +3761,16 @@ export class GhostLink {
         onApplication: async data => {
           if (this.channel !== channel) return;
           // Anything from the peer shows the session is alive.
-          this.unansweredPings = 0; this.heardFromPeer();
-          if (typeof data !== "string" || data.length > 60 * 1024) return;
+          this.unansweredPings = 0; this.heardFromPeer(); this.framesHeard++;
+          if (typeof data !== "string") {
+            // files/4: a file's bytes. Any other binary message, or one nobody agreed to, is dropped (WISP 100).
+            const chunk = this.supportsBinaryFiles ? decodeFileData(data) : null;
+            if (!chunk) return;
+            this.activityAt = Date.now();
+            await this.options.events?.onFilesFrame?.({ t: "pf-data", ...chunk });
+            return;
+          }
+          if (data.length > 60 * 1024) return;
           let frame: Record<string, unknown>;
           try { frame = JSON.parse(data); } catch { return; }
           // What the two people do (texts, receipts, typing, files, calls, payments...), not the session's upkeep.

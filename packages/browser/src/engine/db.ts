@@ -45,8 +45,9 @@ export const db = {
       tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Link storage failed"));
     });
   },
-  async patchLink(linkId: string, patch: Partial<StoredLink>): Promise<void> {
-    const tx = (await openDb()).transaction(STORES.links, "readwrite");
+  /** `relaxed`: for what a power cut may cost (a round trip, a note made again later), no disk sync of its own. */
+  async patchLink(linkId: string, patch: Partial<StoredLink>, relaxed = false): Promise<void> {
+    const tx = (await openDb()).transaction(STORES.links, "readwrite", relaxed ? RELAXED : undefined);
     const links = tx.objectStore(STORES.links);
     const request = links.get(linkId);
     request.onsuccess = () => { if (!request.result) { tx.abort(); return; } links.put({ ...request.result, ...patch, id: linkId }); };
@@ -259,6 +260,29 @@ export const db = {
       tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Message storage failed"));
     });
     return result;
+  },
+  /**
+   * `patchMessage` on these rows of one history, all in one transaction: one disk sync for all of them. Resolves to
+   * the rows changed, in the order of `ids`.
+   */
+  async patchMessages(linkId: string, ids: readonly string[], change: (message: StoredMessage) => Partial<StoredMessage> | null): Promise<StoredMessage[]> {
+    const tx = (await openDb()).transaction(STORES.messages, "readwrite");
+    const messages = tx.objectStore(STORES.messages);
+    const results: (StoredMessage | undefined)[] = [];
+    ids.forEach((id, i) => {
+      const request = messages.get([linkId, id]);
+      request.onsuccess = () => {
+        const message = request.result as StoredMessage | undefined;
+        const patch = message && change(message);
+        if (!patch) return;
+        messages.put((results[i] = { ...message, ...patch }));
+      };
+    });
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = tx.onabort = () => reject(tx.error ?? new Error("Message storage failed"));
+    });
+    return results.filter((row): row is StoredMessage => !!row);
   },
   async deleteMessage(linkId: string, messageId: string): Promise<void> {
     await wrap((await store(STORES.messages, "readwrite")).delete([linkId, messageId]));

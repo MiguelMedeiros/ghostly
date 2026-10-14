@@ -108,19 +108,28 @@ export class RelaysAndDht implements PkarrTransport {
   async publish(identity: Identity, records: GhostRecord[], options: PkarrRequestOptions = {}): Promise<void> {
     // BEP44 sequence numbers must strictly increase, on the relays and on the DHT alike: one payload for both, dated
     // past every packet put or read under the key (`RelayTransport.publishDated`), whichever clock dated those.
-    await this.relays.publishDated(identity, records, (key, payload, _timestamp, conflict) => this.putBoth(key, payload, options, conflict), options);
+    // With the DHT, the packet goes there whatever the relays' budgets say: signed every time. Without it (a private
+    // network's relays only), a publish none of them takes now is not signed at all.
+    await this.relays.publishDated(identity, records, (key, payload, timestamp, conflict) => this.putBoth(key, payload, options, conflict, timestamp), options, false, this.dht !== null);
   }
 
   publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}): Promise<void> {
     return this.putBoth(pubKeyZ32, payload, options);
   }
 
-  private async putBoth(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions, conflict?: (relay: string) => void): Promise<void> {
-    if (!this.dht) return this.relays.publishPayload(pubKeyZ32, payload, options, conflict);
+  /**
+   * `timestamp`: the payload was just signed here (`publish`), dated so; its signature is not checked again on the way
+   * to the relays. Without it (`publishPayload`, signed elsewhere) the relays' side checks it to read its date.
+   */
+  private async putBoth(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions, conflict?: (relay: string) => void, timestamp?: bigint): Promise<void> {
+    const toRelays = () => timestamp === undefined
+      ? this.relays.publishPayload(pubKeyZ32, payload, options, conflict)
+      : this.relays.putSigned(pubKeyZ32, payload, timestamp, options, conflict);
+    if (!this.dht) return toRelays();
     const onDht = this.dht.put(pubKeyZ32, payload);
     onDht.catch(() => {});
     try {
-      await this.relays.publishPayload(pubKeyZ32, payload, options, conflict);
+      await toRelays();
     } catch (error) {
       // Held back by this app's budget: the relays take it when it frees (browser contacts read only them).
       if (isDiscoveryBudgetError(error)) throw error;

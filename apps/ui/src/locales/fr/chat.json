@@ -228,6 +228,7 @@
   "media": {
     "downloadSize": "Télécharger {{size}}",
     "noRoom": "Espace insuffisant : {{size}} libres",
+    "noRoomToPlay": "Pas assez d'espace disque libre pour le lire ici. Téléchargez-le.",
     "notYet": "La lecture est possible une fois l'envoi terminé.",
     "wantsToSend": "{{name}} veut l'envoyer · {{size}} libres"
   },

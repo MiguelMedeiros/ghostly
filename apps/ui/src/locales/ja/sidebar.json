@@ -4,6 +4,24 @@
   "copyInvite": "招待コードをコピー",
   "deleteAllChats": "すべてのチャットを削除",
   "deleteChat": "チャットを削除",
+  "folder": {
+    "byLatest": "最新のメッセージ順に並べる",
+    "create": "作成",
+    "delete": "フォルダを削除",
+    "deleteBody": "中のチャットは削除されません。フォルダなしで一覧に戻ります。",
+    "deleteTitle": "フォルダ「{{name}}」を削除しますか？",
+    "empty": "このフォルダにはまだチャットがありません",
+    "move": "フォルダに移動…",
+    "nameLabel": "フォルダ名",
+    "new": "新しいフォルダ…",
+    "newTitle": "新しいフォルダ",
+    "none": "フォルダなし",
+    "options": "フォルダ「{{name}}」のオプション",
+    "others": "その他のチャット",
+    "rename": "フォルダ名を変更",
+    "unreadCount": "{{name}} に未読 {{count}} 件",
+    "unreadOne": "{{name}} に未読 1 件"
+  },
   "group": {
     "adminAnswered": "管理者のアプリが応答しました…",
     "answerFailed": "うまくいきませんでした。もう一度お試しください。",
@@ -12,6 +30,7 @@
     "inviterAway": "{{contact}} はまだ接続されていません。少し待ってからもう一度お試しください。",
     "inviterAwayUnknown": "招待した連絡先はまだ接続されていません。少し待ってからもう一度お試しください。",
     "letting": "メンバーが参加を受け入れています…",
+    "takenBack": "招待は取り消されました",
     "unanswered": "招待した相手のアプリから応答がありません。もう一度承諾するか、辞退してください。",
     "waitingAdmin": "管理者のアプリを待っています…",
     "waitingIn": "参加の許可を待っています…"
@@ -23,6 +42,8 @@
   "newMenu": {
     "chat": "チャット",
     "chatHint": "1人と、招待で",
+    "folder": "フォルダ",
+    "folderHint": "チャット一覧のセクション",
     "group": "グループ",
     "groupHint": "誰でも開けるリンク",
     "label": "グループまたはチャットを作成"

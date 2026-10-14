@@ -1,0 +1,1 @@
+The event stream's record of what it reported keeps a message's note for 30 days after the message's last activity (longer for one of the profile's own not delivered yet), so a daemon's memory no longer grows with its history; a message older than that with no note is no news, and an edit or reaction to it since is still reported, while its deletion is not.

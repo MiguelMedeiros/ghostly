@@ -1,6 +1,10 @@
 {
   "copied": "Copié",
   "copy": "Copier les détails",
+  "lockdown": "Le mode Isolement semble activé, et il coupe ce dont Ghostly a besoin. Désactivez-le pour ce site, puis rechargez.",
+  "lockdownHow": "Comment le désactiver pour ce site",
+  "lockdownOtherBrowser": "Autres navigateurs sur iPhone ou iPad : Réglages › Confidentialité et sécurité › Mode Isolement › Configurer la navigation web, et désactivez-le pour ce navigateur.",
+  "lockdownSafari": "Safari : touchez aA dans la barre d’adresse, puis Réglages du site web, et désactivez le mode Isolement (sur un Mac : Safari › Réglages pour ce site web).",
   "missingCrypto": "Web Crypto est désactivé. Il ne fonctionne que sur une adresse sécurisée (https).",
   "missingIndexedDB": "IndexedDB est désactivé ou bloqué : les discussions et les clés ne peuvent pas être enregistrées.",
   "missingLocks": "Web Locks est absent : Ghostly ne peut pas s'assurer de ne tourner qu'une fois.",

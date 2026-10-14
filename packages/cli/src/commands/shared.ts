@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { ITEM_STATES, PR_CHECKS, PR_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, cardUrl } from "@ghostly/core";
+// From its own module, not the package: the command table is read by every command, and the package is all of the
+// protocol (~100 ms to load), which a command a daemon answers never needs.
+import { ITEM_STATES, PR_CHECKS, PR_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, cardUrl } from "@ghostly/core/statusCards";
 import type { OptionSpec, Parsed } from "../args";
 import { CliError } from "../errors";
 
@@ -89,11 +91,24 @@ export function typingFor(options: Parsed["options"]): number | undefined {
   return seconds;
 }
 
-/** A history cursor: a timestamp when it is all digits, else a message id. */
-export function cursor(value: unknown): string | number | undefined {
+/**
+ * A time given as digits: milliseconds. Unix seconds (from 1e9, 2001, up to 1e11, which as milliseconds would be 1970
+ * to 1973) are refused with the milliseconds they mean: before, they were read as January 1970 without a word.
+ */
+function milliseconds(text: string, flag: string): number {
+  const ms = Number(text);
+  if (ms >= 1e9 && ms < 1e11) throw new CliError("usage", `--${flag} takes milliseconds, not seconds: ${text}000`);
+  return ms;
+}
+
+/**
+ * A history cursor: a time when it is all digits (`0` is from the start), else a message id. Message ids are never all
+ * digits (`me_…`, `peer_…`): before, fewer than 10 digits were read as an id ("No message 0").
+ */
+export function cursor(value: unknown, flag: string): string | number | undefined {
   if (value === undefined) return undefined;
-  const text = String(value);
-  return /^\d{10,}$/.test(text) ? Number(text) : text;
+  const text = String(value).trim();
+  return /^\d+$/.test(text) ? milliseconds(text, flag) : text;
 }
 
 /**
@@ -228,7 +243,7 @@ export function quota(card: Record<string, unknown>, usage: string): Record<stri
 export function cardTime(value: unknown, flag: string): number | undefined {
   if (value === undefined) return undefined;
   const text = String(value).trim();
-  const ms = /^\d+$/.test(text) ? Number(text) : Date.parse(text);
+  const ms = /^\d+$/.test(text) ? milliseconds(text, flag) : Date.parse(text);
   if (!Number.isSafeInteger(ms) || ms <= 0) throw new CliError("usage", `--${flag} takes a time in milliseconds or a date like 2026-09-30T01:00:00Z, not ${JSON.stringify(value)}`);
   return ms;
 }

@@ -117,7 +117,7 @@ describe("the mini-app runner (WISP 1200, \"The runner's CSP\")", () => {
     const desktop = /pub const RUNNER_CSP: &str = "([^"]*)";/.exec(read("apps/desktop/src/app_sandbox.rs"))![1]!.replace(/\\\n/g, "");
     expect(desktop).toBe(RUNNER_CSP);
     const d = directives(RUNNER_CSP);
-    expect(d.get("sandbox")).toEqual(["allow-scripts"]);
+    expect(d.get("sandbox")).toEqual(["allow-scripts", "allow-pointer-lock"]);
     expect(d.get("frame-ancestors")).toEqual(["'self'"]);
     for (const name of ["default-src", "connect-src", "frame-src", "worker-src", "form-action", "base-uri"]) expect(d.get(name), name).toEqual(["'none'"]);
     expect(d.get("script-src")).toEqual(["'unsafe-inline'", "'wasm-unsafe-eval'"]);

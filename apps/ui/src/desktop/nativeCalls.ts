@@ -1,6 +1,7 @@
 import { Channel, invoke, transformCallback } from "@tauri-apps/api/core";
 import { RTC_CONFIG, type CallMedia } from "@ghostly/core";
 import { EMPTY_DEVICES, loadDeviceChoices, type DeviceKind, type DeviceList, type DeviceSource } from "../lib/mediaDevices";
+import { setCallLevels, type LevelSource } from "../lib/voiceLevels";
 
 /**
  * Calls on Ghostly Desktop for Linux. WebKitGTK is built without WebRTC by Ubuntu, Debian and Fedora alike, so
@@ -269,6 +270,9 @@ function microphone(device: string | null = null): MediaStreamTrack {
   const context = new AudioContext();
   const track = context.createMediaStreamDestination().stream.getAudioTracks()[0];
   reporting(track, device);
+  // Who is speaking: the page hears neither side, so the call this track is sent on says both levels.
+  const side = (of: "mic" | "peer"): LevelSource => (heard) => callOf.get(track)?.listen(of, heard) ?? (() => {});
+  setCallLevels(track, { own: side("mic"), peer: side("peer") });
   const enabled = Object.getOwnPropertyDescriptor(MediaStreamTrack.prototype, "enabled")!;
   Object.defineProperty(track, "enabled", {
     configurable: true,
@@ -287,6 +291,20 @@ function microphone(device: string | null = null): MediaStreamTrack {
 }
 
 type Handler<E extends Event = Event> = ((event: E) => void) | null;
+
+/**
+ * Our half of the video lane, from the peer's description: Rust always offers and answers it both ways, so ours is
+ * the peer's turned round. A peer that takes no picture (`vr: 0`, a bot) has its section rebuilt `a=inactive`,
+ * and the call hook then turns no camera or screen on. No video section: open, as before.
+ */
+function videoDirection(sdp: string): RTCRtpTransceiverDirection {
+  const video = sdp.split(/\r?\n(?=m=)/).find((section) => section.startsWith("m=video"));
+  const said = video?.match(/^a=(sendrecv|sendonly|recvonly|inactive)\s*$/m)?.[1];
+  if (said === "inactive") return "inactive";
+  if (said === "sendonly") return "recvonly";
+  if (said === "recvonly") return "sendonly";
+  return "sendrecv";
+}
 
 interface Lane {
   mid: string | null;
@@ -328,6 +346,9 @@ export class NativePeerConnection extends EventTarget {
   private heldState: string | null = null;
   private readonly audio: Lane;
   private readonly video: Lane;
+  /** How loud each side is, as Rust last said: our microphone (silence while muted) and the peer's sound. */
+  private readonly levels = { mic: 0, peer: 0 };
+  private readonly listeners = { mic: new Set<(level: number) => void>(), peer: new Set<(level: number) => void>() };
 
   constructor(private readonly config: RTCConfiguration) {
     super();
@@ -445,7 +466,7 @@ export class NativePeerConnection extends EventTarget {
     const { sdp, microphone } = await this.hold(() => invoke<Described>("native_call_answer", { id: this.id, offer, ...this.devices() }));
     this.using(microphone);
     if (this.muted) await this.mute(true);
-    this.negotiated();
+    this.negotiated(offer);
     return { type: "answer", sdp };
   }
 
@@ -463,7 +484,7 @@ export class NativePeerConnection extends EventTarget {
       return;
     }
     await this.hold(() => invoke("native_call_accept", { id: this.id, answer: description.sdp ?? "" }));
-    this.negotiated();
+    this.negotiated(description.sdp ?? "");
   }
 
   /**
@@ -486,10 +507,11 @@ export class NativePeerConnection extends EventTarget {
     else this.remote.onFirstFrame = hand;
   }
 
-  private negotiated(): void {
+  /** Both sides have described the lanes; `remote` is the peer's description, offer or answer. */
+  private negotiated(remote: string): void {
     this.lanes();
     this.audio.currentDirection = "sendrecv";
-    this.video.currentDirection = "sendrecv";
+    this.video.currentDirection = videoDirection(remote);
   }
 
   /** Sends this camera's picture, or none. */
@@ -519,18 +541,35 @@ export class NativePeerConnection extends EventTarget {
     if (this.started && !this.closed) await invoke("native_call_mute", { id: this.id, muted }).catch(() => {});
   }
 
+  /** Hears how loud a side of the call is, 0 to 1: now, and each time Rust says it changed. Returns what stops it. */
+  listen(side: "mic" | "peer", heard: (level: number) => void): () => void {
+    this.listeners[side].add(heard);
+    heard(this.levels[side]);
+    return () => { this.listeners[side].delete(heard); };
+  }
+
   private heard(bytes: Uint8Array): void {
     if (this.closed) return;
     if (isJpeg(bytes)) {
       this.remote.show(bytes);
       return;
     }
-    let ice: unknown;
+    let said: { ice?: unknown; levels?: unknown };
     try {
-      ice = (JSON.parse(new TextDecoder().decode(bytes)) as { ice?: unknown }).ice;
+      said = JSON.parse(new TextDecoder().decode(bytes)) as typeof said;
     } catch {
       return;
     }
+    if (said.levels && typeof said.levels === "object") {
+      for (const side of ["mic", "peer"] as const) {
+        const level = (said.levels as Record<string, unknown>)[side];
+        if (typeof level !== "number") continue;
+        this.levels[side] = Math.min(1, Math.max(0, level));
+        for (const heard of this.listeners[side]) heard(this.levels[side]);
+      }
+      return;
+    }
+    const ice = said.ice;
     if (typeof ice !== "string") return;
     if (this.describing) this.heldState = ice;
     else this.relay(ice);

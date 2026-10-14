@@ -36,6 +36,7 @@ export function SiteFooter({ apps = false }: { apps?: boolean }) {
         { label: t.links.releases, href: RELEASES_URL },
         { label: t.links.security, href: SECURITY_URL },
         { label: t.links.contributing, href: CONTRIBUTING_URL },
+        { label: t.links.brand, href: "/brand" },
       ],
     },
   ];

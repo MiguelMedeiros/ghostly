@@ -7,6 +7,7 @@ import { GROUP_FILE_LIMITS } from "@ghostly/core";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import type { FileTransferView, GroupMemberView, GroupView, MessageFile, StoredMessage } from "@ghostly/browser/shared/types";
 import { GroupChat } from "../../pages/GroupChat";
+import { servicesPlatform } from "../../lib/platform";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { installFakeAudio, installFakeMedia, removeFakeMedia } from "../voice/fakeMedia";
@@ -39,8 +40,8 @@ const history = [
 
 const offered = (file: MessageFile): FileTransferView => ({ state: "transferring", stage: "asking", transferred: 0, size: file.size, direction: "in" });
 
-function openGroup(transfers: Record<string, FileTransferView> = {}, patch: Partial<GroupView> = {}) {
-  fakeEngine.on("groupMessages", () => history).on("updateSettings", () => undefined).on("sendGroupMessage", () => ({ error: null }))
+function openGroup(transfers: Record<string, FileTransferView> = {}, patch: Partial<GroupView> = {}, messages = history) {
+  fakeEngine.on("groupMessages", () => messages).on("updateSettings", () => undefined).on("sendGroupMessage", () => ({ error: null }))
     .on("groupFileCheck", () => ({ error: null })).on("sendGroupFile", () => ({ error: null, messageId: `${ME}:1:9` })).on("fileAction", () => undefined);
   fakeEngine.update({ groups: [group(patch)], transfers });
   return renderApp(<Routes>
@@ -167,6 +168,40 @@ describe("a group's file bubbles", () => {
     await user.click(within(bubble).getByTestId("file-accept"));
     await user.click(await within(bubble).findByTestId("file-why"));
     expect(within(bubble).getByTestId("file-why-text")).toHaveTextContent("Not enough space on this device for this file. Free some space, then download it again.");
+  });
+
+  it("a file the engine shows no transfer for reads from its record: one not here has its Download, one all here none", async () => {
+    // Files of their own: what a bubble read of a record is kept for the run.
+    const waiting: MessageFile = { ...REPORT, id: "group-group-1-in-waiting", name: "minutes.pdf" };
+    const held: MessageFile = { ...REPORT, id: "group-group-1-in-held", name: "agenda.pdf" };
+    const record = (file: MessageFile, state: "transferring" | "done") => fileStore.put({ id: file.id, linkId: "group:group-1", direction: "in", createdAt: 1,
+      metadata: { name: file.name, size: file.size, mime: file.mime, timestamp: 1 }, transfer: { state, transferred: state === "done" ? file.size : 0, size: file.size },
+      group: { message: file.id, author: ALICE } });
+    await record(waiting, "transferring");
+    await record(held, "done");
+    const { user, engine } = openGroup({}, {}, [...history, stored({ id: `${ALICE}:1:7`, text: "📎 minutes.pdf", member: ALICE, file: waiting, timestamp: 1_700_000_006_000 }),
+      stored({ id: `${ALICE}:1:8`, text: "📎 agenda.pdf", member: ALICE, file: held, timestamp: 1_700_000_007_000 })]);
+    const bubble = await vi.waitFor(() => within(row(`${ALICE}:1:7`)).getByTestId("file-bubble"));
+    await vi.waitFor(() => expect(within(bubble).getByTestId("file-status")).toHaveTextContent("2.3 MB · not downloaded"));
+    await user.click(within(bubble).getByTestId("file-accept"));
+    expect(engine.callsTo("fileAction")).toEqual([{ linkId: "group:group-1", fileId: waiting.id, action: "accept" }]);
+    const done = within(row(`${ALICE}:1:8`)).getByTestId("file-bubble");
+    await vi.waitFor(() => expect(done).toHaveAttribute("data-stage", "done"));
+    expect(within(done).queryByTestId("file-accept")).toBeNull();
+  });
+
+  it("a file that came in this run stays done once the engine shows its transfer no more, with nothing read again", async () => {
+    const fresh: MessageFile = { ...REPORT, id: "group-group-1-in-fresh", name: "fresh.pdf" };
+    const storedTransfer = vi.spyOn(servicesPlatform!, "storedTransfer");
+    openGroup({ [fresh.id]: { state: "done", transferred: fresh.size, size: fresh.size, direction: "in" } }, {},
+      [...history, stored({ id: `${ALICE}:1:9`, text: "📎 fresh.pdf", member: ALICE, file: fresh, timestamp: 1_700_000_006_000 })]);
+    const bubble = await vi.waitFor(() => within(row(`${ALICE}:1:9`)).getByTestId("file-bubble"));
+    expect(bubble).toHaveAttribute("data-stage", "done");
+    // The engine said it once: the next state carries no transfer for it.
+    act(() => fakeEngine.update({ transfers: {} }));
+    expect(bubble).toHaveAttribute("data-stage", "done");
+    expect(within(bubble).queryByTestId("file-accept")).toBeNull();
+    expect(storedTransfer.mock.calls.filter(([id]) => id === fresh.id)).toEqual([]);
   });
 
   it("done: nothing to answer", async () => {

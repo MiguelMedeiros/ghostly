@@ -17,7 +17,7 @@ import type { ServicesPlatform, WalletPlatform } from "../../../../apps/ui/src/l
 import type { WalletNetwork } from "@ghostly/core";
 import { fileStore } from "../shared/idb";
 import { SMALL_FILE_BYTES, blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
-import { removeStored, storedBlob } from "../shared/storedFiles";
+import { removeStored, storedBlob, waitingGroupFile } from "../shared/storedFiles";
 import type { FileTransferState } from "../../../../apps/ui/src/lib/platform";
 import { DEFAULT_HYPERDHT_RELAY } from "../shared/hyperdhtRelay";
 import { TEST_MINT, TEST_MINTS } from "../shared/mints";
@@ -444,6 +444,7 @@ export const servicesPlatform: ServicesPlatform | null = {
   },
   getTransfer: (fileId) => preparing.get(fileId) ?? engine.state?.transfers[fileId] ?? null,
   transfersRestored: () => engine.state?.transfersRestored ?? false,
+  storedTransfer: async (fileId) => waitingGroupFile(await fileStore.get(fileId).catch(() => undefined)),
   async fileAction(fileId, action) {
     // A file's local id starts with its chat's.
     const linkId = engine.state?.links.find((link) => fileId.startsWith(`${link.id}-in-`) || fileId.startsWith(`${link.id}-out-`))?.id

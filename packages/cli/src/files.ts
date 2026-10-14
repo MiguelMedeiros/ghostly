@@ -4,7 +4,7 @@ import { basename, extname, join, resolve } from "node:path";
 import { GROUP_FILE_LIMITS, LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, type VoiceMeta } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
-import { removeStored } from "@ghostly/browser/shared/storedFiles";
+import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import type { GroupView, MessageFile } from "@ghostly/browser/shared/types";
 import { groupFileId, groupOfFile } from "@ghostly/browser/engine/groupFiles";
@@ -34,12 +34,12 @@ export function mimeOf(path: string, given?: string): string {
   return sanitizeMime(given ?? TYPES[extname(path).toLowerCase()] ?? "application/octet-stream");
 }
 
-/** A chat's files as the timeline shows them, with where each transfer stands. */
-export function filesOf(messages: { id: string; file?: MessageFile; sender: string; timestamp: number }[], transfers: Record<string, unknown>) {
+/** A chat's files as the timeline shows them, with where each transfer stands (`transferOf`, by file id). */
+export function filesOf(messages: { id: string; file?: MessageFile; sender: string; timestamp: number }[], transferOf: (fileId: string) => unknown) {
   return messages.filter((m) => m.file).map((m) => ({
     messageId: m.id, from: m.sender, timestamp: m.timestamp,
     file: { id: m.file!.id, name: m.file!.name, size: m.file!.size, mime: m.file!.mime, ...(m.file!.voice ? { voice: m.file!.voice } : {}), ...(m.file!.image ? { image: m.file!.image } : {}) },
-    transfer: transfers[m.file!.id] ?? null,
+    transfer: transferOf(m.file!.id) ?? null,
   }));
 }
 
@@ -206,8 +206,19 @@ export const FILE_METHODS: Record<string, Method> = {
 
   async "file.list"(ctx, params) {
     const target = chatOrGroupOf(ctx, params);
-    if ("group" in target) return { group: target.group.id, files: filesOf(await node(ctx).groupMessages({ groupId: target.group.id }), state(ctx).transfers) };
-    return { chat: target.link.id, files: filesOf(await node(ctx).getMessages(target.link.id), state(ctx).transfers) };
+    const views = state(ctx).transfers;
+    // A file that finished before this run has no transfer in the engine's state: its record says it is done. Nor has a
+    // group's file waiting for a Download: its record says it is not here.
+    const keptOf = async (linkId: string) => new Map((await fileStore.listForLink(linkId).catch(() => [])).flatMap((f) => {
+      const kept = f.transfer?.state === "done" ? { ...f.transfer, direction: f.direction } : waitingGroupFile(f);
+      return kept ? [[f.id, kept] as const] : [];
+    }));
+    if ("group" in target) {
+      const kept = await keptOf(`group:${target.group.id}`);
+      return { group: target.group.id, files: filesOf(await node(ctx).groupMessages({ groupId: target.group.id }), (id) => views[id] ?? kept.get(id)) };
+    }
+    const kept = await keptOf(target.link.id);
+    return { chat: target.link.id, files: filesOf(await node(ctx).getMessages(target.link.id), (id) => views[id] ?? kept.get(id)) };
   },
 
   /**
@@ -222,7 +233,8 @@ export const FILE_METHODS: Record<string, Method> = {
     const action = oneOf(params, "action", ACTIONS, "accept");
     if ("group" in where) {
       if (action === "resend") throw new CliError("bad_request", "A group's file is downloaded (file accept) or asked for again (file request)");
-      if (state(ctx).transfers[fileId]?.state === "done") throw new CliError("refused", action === "accept" || action === "request" || action === "resume" ? "Nothing to ask for: the file is all here" : "Nothing to stop: the file is all here");
+      // One all here has no transfer in the engine's state, only its record.
+      if ((state(ctx).transfers[fileId] ?? (await fileStore.get(fileId).catch(() => undefined))?.transfer)?.state === "done") throw new CliError("refused", action === "accept" || action === "request" || action === "resume" ? "Nothing to ask for: the file is all here" : "Nothing to stop: the file is all here");
       try { await node(ctx).fileAction({ linkId, fileId, action }); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
       return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
     }

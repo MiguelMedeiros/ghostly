@@ -12,6 +12,7 @@
  *
  * `createBroker` is the protocol alone (tested without a browser); `startApp` frames it in a page.
  */
+import type { AppFileAt } from "@ghostly/browser/engine/apps";
 import { MINI_APP_LIMITS, type MiniAppContext, type MiniAppErrorCode, type MiniAppJson, type MiniAppPeerEvent, type MiniAppRequestType } from "@ghostly/core/miniApp";
 import type { AppsPlatform } from "../platform";
 
@@ -69,6 +70,11 @@ interface BrokerOptions {
   post(message: unknown, transfer?: Transferable[]): void;
   /** Tears the frame down: called once, with why. */
   stopped(reason: AppStopReason): void;
+  /**
+   * The opener hands a file's bytes to the app itself (Desktop: Rust, from its own file storage): a `file` answer says
+   * where they lie (`{id, ok, file: AppFileAt}`) when the host can, instead of carrying them. Every check is the same.
+   */
+  byReference?: boolean;
   now?: () => number;
 }
 
@@ -184,7 +190,7 @@ function storageKey(value: unknown): string {
   return value as string;
 }
 
-export function createBroker({ host: platform, launch, view, post, stopped, now = Date.now }: BrokerOptions): Broker {
+export function createBroker({ host: platform, launch, view, post, stopped, byReference = false, now = Date.now }: BrokerOptions): Broker {
   const host = platform.running?.(launch.digest) ?? platform;
   let phase: AppPhase = "loading";
   const recent: number[] = [];
@@ -233,7 +239,7 @@ export function createBroker({ host: platform, launch, view, post, stopped, now 
     stopped(reason);
   };
 
-  const answer = async (type: string, args: unknown[]): Promise<{ value?: MiniAppJson | ArrayBuffer; transfer?: Transferable[] }> => {
+  const answer = async (type: string, args: unknown[]): Promise<{ value?: MiniAppJson | ArrayBuffer; transfer?: Transferable[]; file?: AppFileAt }> => {
     switch (type as MiniAppRequestType) {
       case "context": {
         // After the chat open answered: before it, a contact whose app is already open would read as not open, and the
@@ -252,13 +258,17 @@ export function createBroker({ host: platform, launch, view, post, stopped, now 
           const at = now();
           while (served.length && served[0]!.at <= at - 1000) servedBytes -= served.shift()!.bytes;
           if (servedBytes >= MINI_APP_LIMITS.fileBytesPerSecond) refuse("too-fast");
-          const file = await host.file(launch.ref, path as string);
-          served.push({ at, bytes: file.byteLength });
-          servedBytes += file.byteLength;
+          const where = byReference && host.fileAt ? await host.fileAt(launch.ref, path as string) : null;
+          const file = where ?? await host.file(launch.ref, path as string);
+          const size = where ? where.length : (file as Uint8Array).byteLength;
+          served.push({ at, bytes: size });
+          servedBytes += size;
           return file;
         });
         reading = read.catch(() => {});
-        const bytes = await read;
+        const got = await read;
+        if (!(got instanceof Uint8Array)) return { file: got };
+        const bytes = got;
         // The host's copy is the caller's (AppsPlatform.file): handed over as it is when it is the whole buffer, where
         // copying it again doubled what a read cost the page.
         const whole = bytes.byteOffset === 0 && bytes.buffer instanceof ArrayBuffer && bytes.byteLength === bytes.buffer.byteLength;
@@ -333,8 +343,9 @@ export function createBroker({ host: platform, launch, view, post, stopped, now 
       return stop("closed");
     }
 
-    answer(type, args).then(({ value, transfer }) => {
+    answer(type, args).then(({ value, transfer, file }) => {
       if (phase === "stopped") return;
+      if (file) return post({ id, ok: true, file });
       post(value === undefined ? { id, ok: true } : { id, ok: true, value }, transfer);
     }, (error: unknown) => {
       if (phase === "stopped") return;
@@ -384,7 +395,8 @@ export function startApp({ container, host, launch, view, onStop, startTimeoutMs
 }): RunningApp {
   const runner = runnerFor(host, launch);
   const frame = document.createElement("iframe");
-  frame.setAttribute("sandbox", "allow-scripts");
+  // Scripts, and the pointer for mouse look (Esc always gives it back): nothing else of what a page may do.
+  frame.setAttribute("sandbox", "allow-scripts allow-pointer-lock");
   frame.setAttribute("referrerpolicy", "no-referrer");
   frame.setAttribute("allow", "");
   frame.title = launch.title;

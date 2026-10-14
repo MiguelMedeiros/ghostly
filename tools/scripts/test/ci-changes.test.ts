@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PACKAGES_READ_FROM_SITE, WEBSITE_INPUTS, covers, plan } from "../ci-changes.mjs";
+import { BUILT_BATCHES, PACKAGES_READ_FROM_SITE, TESTED_PAGES,WEBSITE_INPUTS, covers, plan, testedAs } from "../ci-changes.mjs";
 import { FILES as DECK } from "../../../apps/website/scripts/sync-app-deck.mjs";
 import { FILES as STORE_CORE } from "../../../apps/website/scripts/sync-store-core.mjs";
 
@@ -127,5 +127,205 @@ describe("plan", () => {
 
   it("the Desktop workflow is not the site", () => {
     expect(plan([".github/workflows/desktop-macos.yml"], ready)).toMatchObject({ website: false, app: true });
+  });
+});
+
+describe("a push to dev whose tree a pull request already tested", () => {
+  it("runs only Tauri Backend, which saves the Cargo cache, and CI Success accepts that plan", () => {
+    expect(plan(null, { draft: false, tested: true })).toMatchObject({ rust: true, website: false, website_e2e: false, app: false, packages: false, full: false, affected: false, tested: true });
+    expect(plan(null, { draft: false }).tested).toBe(false);
+    const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
+    expect(ci).toContain('if [[ "$DRAFT" != "true" && "$TESTED" != "true" && ( "$FULL" != "true"');
+    expect(ci).toContain('if [[ "$TESTED" == "true" && "$PUSH_TO_DEV" != "true" ]]; then');
+  });
+
+  // dev's new commit, its tree, and the batch's head that holds that tree (tested at 20:54, landed at 21:01).
+  const sha = "c".repeat(40);
+  const tree = "t".repeat(40);
+  const head = "h".repeat(40);
+  const repo = "o/r";
+  const run = (over: object = {}) => ({
+    id: 7,
+    html_url: "https://github.com/o/r/actions/runs/7",
+    path: ".github/workflows/ci.yml",
+    head_sha: head,
+    head_branch: "batch/dev-20261012205400",
+    head_repository: { full_name: repo },
+    head_commit: { tree_id: tree },
+    created_at: "2026-10-12T20:54:22Z",
+    ...over,
+  });
+  const landed = (date: string) => ({ commit: { committer: { date } } });
+  // The batch, closed by the time dev's last push runs.
+  const into = (ref: string, state = "closed", number = 41) => ({ number, state, base: { ref, repo: { full_name: repo } } });
+  const fake = ({ runs = [[run()]], pulls = [into("dev")], events = {}, jobs = [{ name: "CI Success", conclusion: "success" }], compare = { ahead_by: 2, commits: [landed("2026-10-12T21:00:50Z"), landed("2026-10-12T21:01:05Z")] } }: { runs?: object[][]; pulls?: object[]; events?: Record<number, object[]>; jobs?: object[]; compare?: object } = {}) => {
+    const asked: string[] = [];
+    const api = async (path: string) => {
+      asked.push(path);
+      const page = /[?&]page=(\d+)/.exec(path);
+      if (page) return { workflow_runs: runs[Number(page[1]) - 1] ?? [] };
+      if (path.startsWith("pulls?")) return pulls;
+      const issue = /^issues\/(\d+)\/events\?per_page=100$/.exec(path);
+      if (issue) return events[Number(issue[1])] ?? [{ event: "closed" }];
+      if (path.startsWith("actions/runs/")) return { jobs };
+      if (path.startsWith("compare/")) return compare;
+      throw new Error(path);
+    };
+    return { api, asked };
+  };
+
+  it("finds the green run whose head holds the same tree", async () => {
+    const { api, asked } = fake();
+    expect(await testedAs({ sha, tree, repo, api })).toBe("https://github.com/o/r/actions/runs/7");
+    expect(asked).toContain(`compare/${head}...${sha}`);
+    expect(asked[0]).toContain("event=pull_request&status=success");
+    expect(asked).toContain(`pulls?state=all&per_page=100&head=${encodeURIComponent("o:batch/dev-20261012205400")}`);
+  });
+
+  it("does not take a run into an epic: it ran the epic's ci.yml, which may be a stub", async () => {
+    const { api, asked } = fake({ pulls: [into("epic/x", "open")] });
+    expect(await testedAs({ sha, tree, repo, api })).toBe(null);
+    expect(asked.some((p) => p.startsWith("actions/runs/"))).toBe(false);
+  });
+
+  it("does not take a run whose branch also has a pull request into another base, even a closed one", async () => {
+    const { api } = fake({ pulls: [into("dev"), into("epic/x")] });
+    expect(await testedAs({ sha, tree, repo, api })).toBe(null);
+  });
+
+  it("does not take a run of a pull request moved to dev: its run may have run the old base's ci.yml", async () => {
+    const moved = [{ event: "base_ref_changed" }, { event: "closed" }];
+    const { api, asked } = fake({ pulls: [into("dev", "open", 77)], events: { 77: moved } });
+    expect(await testedAs({ sha, tree, repo, api })).toBe(null);
+    expect(asked).toContain("issues/77/events?per_page=100");
+    expect(asked.some((p) => p.startsWith("actions/runs/"))).toBe(false);
+    // Any one of the branch's pull requests, and a page too full to read whole, count the same.
+    expect(await testedAs({ sha, tree, repo, api: fake({ pulls: [into("dev"), into("dev", "closed", 77)], events: { 77: moved } }).api })).toBe(null);
+    const full = Array.from({ length: 100 }, () => ({ event: "labeled" }));
+    expect(await testedAs({ sha, tree, repo, api: fake({ events: { 41: full } }).api })).toBe(null);
+  });
+
+  it("does not take a run of a pull request GitHub moved to dev when its old base was deleted", async () => {
+    for (const event of ["automatic_base_change_succeeded", "automatic_base_change_failed"]) {
+      const moved = [{ event: "head_ref_deleted" }, { event }, { event: "head_ref_restored" }];
+      const { api, asked } = fake({ pulls: [into("dev", "open", 77)], events: { 77: moved } });
+      expect(await testedAs({ sha, tree, repo, api })).toBe(null);
+      expect(asked.some((p) => p.startsWith("actions/runs/"))).toBe(false);
+    }
+  });
+
+  it("does not take a run whose branch has no pull request it can name", async () => {
+    const { api } = fake({ pulls: [] });
+    expect(await testedAs({ sha, tree, repo, api })).toBe(null);
+  });
+
+  it("does not take a fork's run, whatever its branch is named", async () => {
+    const { api, asked } = fake({ runs: [[run({ head_repository: { full_name: "someone/r" } })]] });
+    expect(await testedAs({ sha, tree, repo, api })).toBe(null);
+    expect(asked).toHaveLength(1);
+  });
+
+  it("does not take a run of another workflow file", async () => {
+    const { api } = fake({ runs: [[run({ path: ".github/workflows/other.yml" })]] });
+    expect(await testedAs({ sha, tree, repo, api })).toBe(null);
+  });
+
+  it("does not take a run of another tree", async () => {
+    const { api } = fake({ runs: [[run({ head_commit: { tree_id: "x".repeat(40) } })]] });
+    expect(await testedAs({ sha, tree, repo, api })).toBe(null);
+  });
+
+  it("does not take a draft's green run: only CI Success counts", async () => {
+    const { api } = fake({ jobs: [{ name: "CI Success (draft)", conclusion: "success" }] });
+    expect(await testedAs({ sha, tree, repo, api })).toBe(null);
+  });
+
+  it("does not take a run that started when dev already held a commit its head lacks (it tested their merge)", async () => {
+    const { api } = fake({ compare: { ahead_by: 2, commits: [landed("2026-10-12T20:50:00Z"), landed("2026-10-12T21:01:05Z")] } });
+    expect(await testedAs({ sha, tree, repo, api })).toBe(null);
+  });
+
+  it("does not take a run when the commits its head lacks are too many to list", async () => {
+    const { api } = fake({ compare: { ahead_by: 300, commits: [landed("2026-10-12T21:01:05Z")] } });
+    expect(await testedAs({ sha, tree, repo, api })).toBe(null);
+  });
+
+  it("takes the next match when the newest one does not count", async () => {
+    const other = run({ id: 8, html_url: "https://github.com/o/r/actions/runs/8", head_sha: "g".repeat(40) });
+    const calls: string[] = [];
+    const api = async (path: string) => {
+      calls.push(path);
+      if (path.startsWith("actions/workflows/")) return { workflow_runs: [run(), other] };
+      if (path.startsWith("pulls?")) return [into("dev")];
+      if (path.startsWith("issues/")) return [];
+      if (path === "actions/runs/7/jobs?per_page=100") return { jobs: [{ name: "CI Success", conclusion: "failure" }] };
+      if (path.startsWith("actions/runs/")) return { jobs: [{ name: "CI Success", conclusion: "success" }] };
+      return { ahead_by: 1, commits: [landed("2026-10-12T21:01:05Z")] };
+    };
+    expect(await testedAs({ sha, tree, repo, api })).toBe("https://github.com/o/r/actions/runs/8");
+  });
+
+  // A batch of two lands as two pushes: the first holds the tree of the batch's first commit, which no run has as its head.
+  describe("a push that holds a commit of a green batch, not its head", () => {
+    const first = "f".repeat(40);
+    const built = [
+      { sha: "1".repeat(40), commit: { tree: { sha: first } } },
+      { sha: head, commit: { tree: { sha: tree } } },
+    ];
+    const batchFake = ({ runs = [run()], commits = built, landedAt = "2026-10-12T21:00:50Z" } = {}) => {
+      const asked: string[] = [];
+      const api = async (path: string) => {
+        asked.push(path);
+        if (path.startsWith("actions/workflows/")) return { workflow_runs: runs };
+        if (path.startsWith("pulls?")) return [into("dev")];
+        if (path.startsWith("issues/")) return [];
+        if (path.startsWith("actions/runs/")) return { jobs: [{ name: "CI Success", conclusion: "success" }] };
+        if (path === `compare/${sha}...${head}`) return { ahead_by: commits.length, behind_by: 1, commits };
+        if (path === `compare/${head}...${sha}`) return { ahead_by: 1, commits: [landed(landedAt)] };
+        throw new Error(path);
+      };
+      return { api, asked };
+    };
+
+    it("counts as tested by the batch's run: the push after it holds the batch's head", async () => {
+      const { api, asked } = batchFake();
+      expect(await testedAs({ sha, tree: first, repo, api })).toBe("https://github.com/o/r/actions/runs/7");
+      expect(asked).toContain(`compare/${sha}...${head}`);
+    });
+
+    it("does not count when no commit of the batch holds its tree", async () => {
+      const { api } = batchFake({ commits: [{ sha: head, commit: { tree: { sha: tree } } }] });
+      expect(await testedAs({ sha, tree: first, repo, api })).toBe(null);
+    });
+
+    it("does not count when dev held a commit the batch lacks before its run started", async () => {
+      const { api } = batchFake({ landedAt: "2026-10-12T20:50:00Z" });
+      expect(await testedAs({ sha, tree: first, repo, api })).toBe(null);
+    });
+
+    it("keeps the other checks: a fork's batch-named run is not read", async () => {
+      const { api, asked } = batchFake({ runs: [run({ head_repository: { full_name: "someone/r" } })] });
+      expect(await testedAs({ sha, tree: first, repo, api })).toBe(null);
+      expect(asked).toHaveLength(1);
+    });
+
+    it("only reads the commits of batches, and of the newest BUILT_BATCHES of them", async () => {
+      const lone = run({ id: 9, head_branch: "issue-1-x", head_commit: { tree_id: "x".repeat(40) } });
+      const others = Array.from({ length: BUILT_BATCHES + 2 }, (_, i) => run({ id: 10 + i, head_sha: String(i).repeat(40), head_commit: { tree_id: "x".repeat(40) } }));
+      const { api, asked } = batchFake({ runs: [lone, ...others], commits: [] });
+      expect(await testedAs({ sha, tree: first, repo, api })).toBe(null);
+      expect(asked.filter((p) => p.startsWith("compare/"))).toHaveLength(BUILT_BATCHES);
+      expect(asked).not.toContain(`compare/${sha}...${lone.head_sha}`);
+    });
+  });
+
+  it("reads at most TESTED_PAGES pages, and stops at a short one", async () => {
+    const full = Array.from({ length: 100 }, (_, i) => run({ id: i, head_branch: "issue-1-x", head_commit: { tree_id: "x".repeat(40) } }));
+    const many = fake({ runs: Array.from({ length: TESTED_PAGES + 2 }, () => full) });
+    expect(await testedAs({ sha, tree, repo, api: many.api })).toBe(null);
+    expect(many.asked).toHaveLength(TESTED_PAGES);
+    const short = fake({ runs: [[run({ head_branch: "issue-1-x", head_commit: { tree_id: "x".repeat(40) } })], full] });
+    expect(await testedAs({ sha, tree, repo, api: short.api })).toBe(null);
+    expect(short.asked).toHaveLength(1);
   });
 });

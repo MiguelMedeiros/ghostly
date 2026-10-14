@@ -182,7 +182,8 @@ export interface EngineApi {
   /**
    * One data frame to the same app on the contact's side, live only: `offline` while the session is not live (nothing is
    * kept), `too-large` past 32 KiB as JSON, `not-open`, `peer-closed` (the contact's app is not open, or cannot run
-   * apps), `too-fast` (over 48 a second for this app).
+   * apps), `too-fast` (over 48 a second for this app, or the session's channel still holds a quarter of what it may
+   * queue).
    */
   appSend(params: { linkId: string; ref: string; data: unknown; digest?: string }): { error: import("@ghostly/core").AppSendError | null };
   /** One message's details view (WISP 400 § Message details): how it travelled, as stored, plus what the engine knows around it now. */
@@ -497,6 +498,11 @@ export interface EngineApi {
    */
   /** The installed apps, each with whether it may run now. No request. */
   appList(): import("../engine/apps").InstalledAppView[];
+  /**
+   * The built-in apps this profile is offered (WISP 1200 § Built-in apps): the ones it has neither installed nor removed.
+   * Nothing of them is stored or granted; `appPreview({ builtIn: ref })` reads one from the build, with no request.
+   */
+  appBuiltIns(): import("../engine/apps").BuiltInAppOffer[];
   /** The stores the person has, with the last index read of each. No request. */
   appStoreList(): import("../engine/apps").AppStoreSummary[];
   /** Reads a store at a URL (a GitHub repository, or a URL of `ghostly-store.json`) for the person to see. Nothing is kept. */
@@ -528,6 +534,8 @@ export interface EngineApi {
   appEntry(params: { ref: string; runAnyway?: boolean }): import("../engine/apps").AppRunEntry;
   /** One file of an installed app (`ghostly.file(path)`). */
   appFile(params: { ref: string; path: string; digest?: string }): Uint8Array;
+  /** Where that file lies in this device's file storage, for a client that hands its bytes over itself; null where it cannot. */
+  appFileAt(params: { ref: string; path: string; digest?: string }): import("../engine/apps").AppFileAt | null;
   /** An app's storage in one scope: keys of up to 256 bytes, JSON values of up to 64 KiB, 5 MiB in all. `null`: no such key. */
   appStorageGet(params: { ref: string; scope: string; key: string; digest?: string }): { value: import("@ghostly/core").JsonValue } | null;
   appStorageSet(params: { ref: string; scope: string; key: string; value: unknown; digest?: string }): void;
@@ -535,6 +543,8 @@ export interface EngineApi {
   appStorageKeys(params: { ref: string; scope: string; digest?: string }): string[];
   /** An app's storage in every scope, as export files, offered before an uninstall. */
   appDataExport(params: { ref: string }): import("../engine/apps").AppDataExport[];
+  /** `appDataExport` with each value as its stored JSON text, for a file written as is. */
+  appDataExportText(params: { ref: string }): import("../engine/apps").AppDataExportText[];
 }
 
 /** What the engine implements: any call may be answered asynchronously. */

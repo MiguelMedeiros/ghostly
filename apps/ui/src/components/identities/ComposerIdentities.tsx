@@ -178,7 +178,7 @@ export function IdentityPicker({ peerKey, contact, initial, onManage, onAdding, 
   /** Why this identity cannot be shared here now. Stopping is always possible; the Ghostly identity is always seen. */
   const why = (e: Entry) => {
     if (e.add || e.ghostly || e.on) return undefined;
-    if (expired(e)) return t("identities.card.expiredOn", { date: date(e.proof.expiresAt) });
+    if (expired(e)) return t("identities.card.expiredOn", { date: date(e.proof.expiresAt, t.language) });
     if (ids?.contactProviders && !ids.contactProviders.includes(e.proof.provider)) return t("identities.picker.cannotVerify", { contact, provider: providerLabel(e.proof.provider) });
     if (unsupported) return t("identities.picker.cannotReceive", { contact });
     if (!ids) return t("identities.picker.connectFirst");

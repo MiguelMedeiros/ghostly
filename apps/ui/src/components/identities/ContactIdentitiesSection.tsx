@@ -31,7 +31,7 @@ export function ContactIdentitiesSection() {
           label={<span className="flex flex-wrap items-center gap-2"><span>{name}</span><StatusPill ok={status === "verified"} warn={status === "revoked" || status === "unconfirmed"} testId="identity-received-status">{receivedStatus(status, t)}</StatusPill></span>}
           hint={<>
             <span>{providerLabel(r.provider)} · <span className="font-mono break-all" title={r.subject}>{shortSubject(r.provider, r.subject)}</span></span>
-            <span className="block">{t("identities.received.checked", { category: categoryLabel(r.provider, r.verified.attester, t), time: dateTime(r.checkedAt) })}</span>
+            <span className="block">{t("identities.received.checked", { category: categoryLabel(r.provider, r.verified.attester, t), time: dateTime(r.checkedAt, t.language) })}</span>
           </>}>
           {chat && <Button data-testid="identity-received-open" onClick={() => nav.conversation(chatPath(chat.id))}>{t("identities.openChat")}</Button>}
         </Row>

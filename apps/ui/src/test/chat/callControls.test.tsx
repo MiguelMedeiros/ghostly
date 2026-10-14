@@ -58,7 +58,7 @@ describe("the chat header's call buttons", () => {
 
 type OverlayProps = ComponentProps<typeof CallOverlay>;
 
-function overlay(props: Partial<OverlayProps> = {}) {
+function overlay(props: Partial<OverlayProps> = {}, options?: Parameters<typeof renderApp>[1]) {
   const onToggleScreenShare = vi.fn();
   const view = renderApp(
     <CallOverlay
@@ -78,6 +78,7 @@ function overlay(props: Partial<OverlayProps> = {}) {
       onToggleScreenShare={onToggleScreenShare}
       {...props}
     />,
+    options,
   );
   return { ...view, onToggleScreenShare, window: () => screen.getByTestId("call-window") };
 }
@@ -157,6 +158,17 @@ describe("sharing the screen from inside a call", () => {
   it("explains why a share failed", () => {
     overlay({ screenShareError: "Screen sharing is blocked. Allow screen recording for this app in your system's privacy settings." });
     expect(screen.getByRole("alert")).toHaveTextContent("Allow screen recording");
+  });
+
+  // The call hook and the Desktop media layer say these in English; the alert and the button's title were English in
+  // every language.
+  it("says why a share failed, and why it is off, in the app's language", () => {
+    const { rerender } = overlay({ screenShareError: "Screen sharing is blocked. Allow screen recording for this app in your system's privacy settings." }, { language: "pt" });
+    expect(screen.getByRole("alert")).toHaveTextContent("O compartilhamento de tela está bloqueado. Permita a gravação de tela para este app nos ajustes de privacidade do sistema.");
+    rerender(<CallOverlay callState="connected" localStream={null} remoteStream={null} isMuted={false} isVideoOff canSendVideo canShareScreen={false} remoteHasVideo={false}
+      callStartedAt={Date.now()} peerName="Ana" onHangUp={vi.fn()} onToggleMute={vi.fn()} onToggleVideo={vi.fn()} onToggleScreenShare={vi.fn()}
+      screenShareUnavailable="Screen sharing is not available on Linux yet" />);
+    expect(screen.getByTestId("share-screen")).toHaveAttribute("title", "Compartilhar a tela ainda não está disponível no Linux");
   });
 
   it("is in the small window too, with the notice, when the call follows you out of its chat", async () => {

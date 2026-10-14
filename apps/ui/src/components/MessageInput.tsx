@@ -23,7 +23,7 @@ import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
 import { dragHasFiles, droppedFiles, pastedFiles, pasteNamesFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
-import { onShareChange, peekShareFor, shareText, takeShareFor } from "../lib/incomingShare";
+import { onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
 import { fitFieldHeight } from "./composer/fieldHeight";
 import { useComposition } from "../hooks/useComposition";
 import "./composer/composer.css";
@@ -453,6 +453,11 @@ export function MessageInput({
     return true;
   };
   const offerRef = useRef(offerFiles); offerRef.current = offerFiles;
+  /** A share's files to the sheet: the Android app's are read into the page only now; a read that fails says so, as a paste's. */
+  const offerShared = (share: IncomingShare) => {
+    shareFiles(share).then((files) => offerRef.current(files), (error: unknown) => showToast(problemLine(error, t)));
+  };
+  const offerSharedRef = useRef(offerShared); offerSharedRef.current = offerShared;
 
   /**
    * A paste's files to the sheet. True when the paste was taken; false leaves it to the field: no files, or a rich
@@ -519,7 +524,7 @@ export function MessageInput({
       const share = takeShareFor(draftId)!;
       const shared = shareText(share);
       if (shared) setText((was) => (was.trim() ? `${was}\n${shared}` : shared));
-      if (share.files.length) offerRef.current(share.files);
+      if (share.files.length) offerSharedRef.current(share);
       else if (!touchOnly()) textareaRef.current?.focus();
     };
     take();
@@ -801,7 +806,7 @@ export function MessageInput({
           }} />
       )}
       {sheetOpen && (
-        <AttachmentSheet files={attached} alert={toastBox} status={readingLine} onPaste={takePaste}
+        <AttachmentSheet files={attached} alert={toastBox} status={readingLine} returnFocus={textareaRef} onPaste={takePaste}
           onRemove={(index) => setAttached((was) => was && was.length > 1 ? was.filter((_, i) => i !== index) : null)}
           onCancel={() => setAttached(null)}
           onSend={(caption) => void sendAttached(caption)} />

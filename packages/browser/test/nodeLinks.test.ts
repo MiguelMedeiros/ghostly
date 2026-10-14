@@ -167,6 +167,33 @@ describe("a chat as the contact drives it", () => {
     expect(node.getState().links[0].peerNick).toBe("Old timer");
   });
 
+  it("a read that finds the contact as before, and a round trip about the same as the one shown, post no state", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const { events } = linkOf(chat.id).options;
+    const emits = vi.spyOn(node as never as { emitState(): void }, "emitState");
+    const read = (lastPacketAt: number) => events.onPresence({ online: true, lastPacketAt, seenAt: 5, nick: "Bob", services: [{ id: "web", type: "http" }] });
+    read(10);
+    expect(emits).toHaveBeenCalledTimes(1);
+    // Every read parses the packet again: equal services in a new array are the same.
+    read(10); read(10);
+    expect(emits).toHaveBeenCalledTimes(1);
+    read(11);
+    expect(emits).toHaveBeenCalledTimes(2);
+    expect(node.getState().links[0]).toMatchObject({ peerOnline: true, peerLastSeenAt: 5, peerServices: [{ id: "web", type: "http" }] });
+
+    // The round trip a state carries is the link's (`rttMs`): a pong within 10 ms of it shows nothing new.
+    emits.mockClear();
+    (linkOf(chat.id) as never as { rttMs: number }).rttMs = 40;
+    events.onRtt(40);
+    expect(emits).toHaveBeenCalledTimes(1);
+    expect(node.getState().links[0].transportRttMs).toBe(40);
+    events.onRtt(43); events.onRtt(37);
+    expect(emits).toHaveBeenCalledTimes(1);
+    events.onRtt(55);
+    expect(emits).toHaveBeenCalledTimes(2);
+  });
+
   it("an acknowledgement moves a legacy chat's read mark, never a paired one's", async () => {
     const legacy = row({ profile: undefined, participationSeed: undefined }), paired = row();
     const { node, linkOf } = await started(legacy, paired);
@@ -345,6 +372,43 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
     }
     // Stored first (the links store reads back in id order), each idle since long ago.
     const older = () => Array.from({ length: 10 }, (_, i) => row({ ...paired(), id: `chat-a${i}` }));
+
+    it("a paired chat whose listener failed to start (Iroh's relay out of reach) starts it again on a later tick, and at once when the network is back", async () => {
+      // A CLI daemon started while its Iroh relay was down (2026-10-13): two minutes after the relay was back, its chat
+      // still had no Iroh listener, and a contact with no WebRTC could not dial it. Only opening the chat on screen
+      // started one again, and a daemon's chats are never on screen.
+      const chat = row({ ...paired() });
+      await db.putLink(chat);
+      const iroh = vi.fn(async () => endpoint());
+      iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, nativeTransports: { "iroh/1": iroh } });
+      nodes.push(node);
+      await node.start();
+      const linkOf = () => links.filter((l) => l.options.params.id === chat.id).at(-1)! as unknown as Recorded & { registerEndpoint: ReturnType<typeof vi.fn> };
+      await vi.waitFor(() => expect(node["links"].get(chat.id)?.transportErrors?.["iroh/1"]).toBe("Iroh relay unreachable"));
+      expect(linkOf().registerEndpoint).not.toHaveBeenCalled();
+      // The next tick before the wait is over: nothing yet.
+      node["retryNative"]();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(iroh).toHaveBeenCalledOnce();
+      // One retry period later, the tick starts it again, and the chat has it.
+      const now = Date.now();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now + 16_000);
+      onTestFinished(() => { clock.mockRestore(); });
+      node["retryNative"]();
+      await vi.waitFor(() => expect(linkOf().registerEndpoint).toHaveBeenCalledOnce());
+      expect(iroh).toHaveBeenCalledTimes(2);
+      expect(node["links"].get(chat.id)?.transportErrors?.["iroh/1"]).toBeUndefined();
+      // Failed again: the network coming back starts it at the next tick, its wait anew.
+      linkOf().availableTransports = ["webrtc/1"];
+      iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
+      void node["ensureNativeEndpoints"](chat.id);
+      await vi.waitFor(() => expect(node["nativeFailed"].has(chat.id)).toBe(true));
+      node.wake({ network: true });
+      node["retryNative"]();
+      await vi.waitFor(() => expect(linkOf().registerEndpoint).toHaveBeenCalledTimes(2));
+    });
 
     it("the chat live most recently takes one first, among chats live when the app quit", async () => {
       // Omarchy (2026-09-30): both apps restarted, and the chat they had just been live in got no listener on one side:
@@ -757,6 +821,23 @@ describe("files a contact sends", () => {
     expect(linkOf(chat.id).options.events.onFileIncoming({ id: "a", name: "x", size: 1, mime: "", timestamp: 3 })).toBe("duplicate file id");
   });
 
+  it("files finished before a restart carry no transfer in the state, after the session opens too; failed ones keep theirs", async () => {
+    // A view for each finished file went into every state the engine built: its cost grew with the chat's file history.
+    const chat = row();
+    await db.putLink(chat);
+    const blob = new Blob([new Uint8Array(8)]);
+    const record = (id: string, state: "done" | "failed") => ({ id, direction: "in" as const, file: { id, name: `${id}.bin`, size: 8, mime: "" }, state, confirmed: state === "done" ? 8 : 0, since: 1, agreed: true, ...(state === "failed" && { error: "Damaged" }) });
+    await fileStore.put({ id: `${chat.id}-in-old`, linkId: chat.id, blob, createdAt: 1, direction: "in", wireId: "old", transfer: { state: "done", transferred: 8, size: 8 } });
+    await fileStore.put({ id: `${chat.id}-in-w3`, linkId: chat.id, blob, createdAt: 1, direction: "in", wireId: "w3", transfer: { state: "done", transferred: 8, size: 8 }, wire3: record("w3", "done") });
+    await fileStore.put({ id: `${chat.id}-in-bad`, linkId: chat.id, blob, createdAt: 1, direction: "in", wireId: "bad", transfer: { state: "failed", transferred: 0, size: 8 }, wire3: record("bad", "failed") });
+    const { node, linkOf } = await started();
+    linkOf(chat.id).options.events.onFilesSession!(true);
+    const { transfers } = node.getState();
+    expect(transfers[`${chat.id}-in-old`]).toBeUndefined();
+    expect(transfers[`${chat.id}-in-w3`]).toBeUndefined();
+    expect(transfers[`${chat.id}-in-bad`]).toMatchObject({ state: "failed", error: "Damaged" });
+  });
+
   it("asked whether it holds a file, a chat that never took it reads none of its stored files", async () => {
     const chat = row();
     await db.putLink(chat);
@@ -1090,6 +1171,36 @@ describe("an away contact", () => {
     expect(linkOf(chat.id).connect).toHaveBeenCalledOnce();
     await expect(node.connect({ linkId: "missing" })).rejects.toThrow("Go online before reconnecting");
   });
+
+  it("reconnecting dials at once where WebRTC can carry the chat, beside a native listener still starting; a native-only chat waits for it", async () => {
+    // Iroh's relay out of reach: its listener takes 10 s to give up. Reconnect waited for it before it dialed.
+    vi.stubGlobal("RTCPeerConnection", class {});
+    const starting: (() => void)[] = [];
+    const made = () => ({ transport: "iroh/1" as const, descriptor: { id: "ab".repeat(32), relay: "https://relay.test./", addresses: [] },
+      connect: vi.fn(), close: vi.fn(async () => {}), onConnection: null, onDescriptor: null });
+    const iroh = vi.fn(() => new Promise((resolve) => { starting.push(() => resolve(made())); }));
+    const both = row({ pairedPeerKey: createIdentity().pubKeyZ32, peerTransports: ["webrtc/1", "iroh/1"] });
+    const native = row({ pairedPeerKey: createIdentity().pubKeyZ32, peerTransports: ["iroh/1"] });
+    const pinned = row({ pairedPeerKey: createIdentity().pubKeyZ32, peerTransports: ["webrtc/1", "iroh/1"], preferredTransport: "iroh/1", transportFallback: false });
+    try {
+      const { node, linkOf } = await startedWith({ nativeTransports: { "iroh/1": iroh } } as unknown as Partial<NodeOptions>, both, native, pinned);
+      for (const chat of [both, native, pinned]) linkOf(chat.id).availableTransports = ["webrtc/1"];
+      const began = Date.now();
+      await node.connect({ linkId: both.id });
+      expect(Date.now() - began).toBeLessThan(500);
+      expect(linkOf(both.id).connect).toHaveBeenCalledOnce();
+      // Nothing to dial without the listener: these wait for it, as before.
+      const waiting = [node.connect({ linkId: native.id }), node.connect({ linkId: pinned.id })];
+      await new Promise((r) => setTimeout(r, 50));
+      expect(linkOf(native.id).connect).not.toHaveBeenCalled();
+      expect(linkOf(pinned.id).connect).not.toHaveBeenCalled();
+      // The listeners come up, one after another in Iroh's queue: then they dial.
+      await vi.waitFor(() => { for (const start of starting.splice(0)) start(); expect(linkOf(pinned.id).connect).toHaveBeenCalled(); }, { timeout: 3_000 });
+      await Promise.all(waiting);
+      // (The engine also dials a native contact itself once its listener is up, as the lower key.)
+      expect(linkOf(native.id).connect).toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); }
+  });
 });
 
 describe("what arrives from held storage", () => {
@@ -1241,25 +1352,25 @@ describe("private groups through the engine", () => {
       const edgeId = await openEdge(node, state,createIdentity().pubKeyZ32);
       await vi.waitFor(() => expect(node["links"].get(edgeId)?.transportErrors?.["iroh/1"]).toBe("Iroh relay unreachable"));
       // The next tick before the wait is over: nothing yet.
-      node["retryGroupNative"]();
+      node["retryNative"]();
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(iroh).toHaveBeenCalledOnce();
       // One retry period later, the tick starts it again, and the edge has it.
       const now = Date.now();
       const clock = vi.spyOn(Date, "now").mockReturnValue(now + 16_000);
       onTestFinished(() => { clock.mockRestore(); });
-      node["retryGroupNative"]();
+      node["retryNative"]();
       await vi.waitFor(() => expect(edgeOf(edgeId).registerEndpoint).toHaveBeenCalledOnce());
       expect(iroh).toHaveBeenCalledTimes(2);
       expect(node["links"].get(edgeId)?.transportErrors?.["iroh/1"]).toBeUndefined();
       // Failed again (the network went down once more): the network coming back starts it at the next tick.
       edgeOf(edgeId).availableTransports = ["webrtc/1"];
       iroh.mockRejectedValueOnce(new Error("Iroh relay unreachable"));
-      node["groupNativeFailed"].clear();
+      node["nativeFailed"].clear();
       void node["ensureNativeEndpoints"](edgeId);
-      await vi.waitFor(() => expect(node["groupNativeFailed"].has(edgeId)).toBe(true));
+      await vi.waitFor(() => expect(node["nativeFailed"].has(edgeId)).toBe(true));
       node.wake({ network: true });
-      node["retryGroupNative"]();
+      node["retryNative"]();
       await vi.waitFor(() => expect(edgeOf(edgeId).registerEndpoint).toHaveBeenCalledTimes(2));
     });
 

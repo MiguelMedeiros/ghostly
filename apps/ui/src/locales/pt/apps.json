@@ -23,6 +23,16 @@
     "updateWaits": "A versão {{version}} está pronta.",
     "version": "Versão {{version}}"
   },
+  "builtIn": {
+    "allow": "Permitir",
+    "allowOpen": "Permitir e abrir",
+    "carried": "Já vem com o Ghostly. Nada é baixado.",
+    "carriedInfo": "Esta cópia faz parte do Ghostly que você está usando. As atualizações vêm do publicador ou das suas lojas, que então veem seu endereço IP.",
+    "hint": "Vem com o Ghostly",
+    "openNamed": "Abrir {{title}}",
+    "remove": "Remover",
+    "removeNamed": "Remover {{title}}"
+  },
   "card": {
     "ask": "Peça a {{name}} um link para ele",
     "contactCannot": "O app de {{name}} ainda não roda apps",
@@ -60,7 +70,7 @@
     "rollback": "O link tem uma versão mais antiga.",
     "status": "Nada encontrado nesse link.",
     "storage": "Este navegador não consegue guardar apps aqui (navegação privada?). Tente uma janela normal.",
-    "storageInfo": "O Ghostly guarda os arquivos de cada app neste dispositivo. Janelas privadas, como a Navegação Privada do Safari, não deixam, e um disco cheio também impede. Abra o Ghostly numa janela normal e instale o app lá.",
+    "storageInfo": "O Ghostly guarda os arquivos de cada app neste dispositivo. Janelas privadas, como a Navegação Privada do Safari, não deixam, e um disco cheio também impede.",
     "storeKey": "Essa loja é assinada por outra chave.",
     "tooLarge": "Grande demais.",
     "unlistedVersion": "O link tem uma versão que esta loja ainda não lista."
@@ -96,7 +106,7 @@
     "unknownPublisherInfo": "Qualquer pessoa pode assinar um app com uma chave nova. Só uma loja que você adicionou pode garantir quem o fez. Compare a chave com a que o autor publica.",
     "update": "Atualizar",
     "webkit": "Neste navegador, um app ainda pode contatar outros servidores.",
-    "webkitInfo": "O Safari, e qualquer navegador no iPhone e no iPad, deixa um app abrir conexões que o Ghostly não consegue bloquear, mesmo sem a permissão de internet. Esses servidores ficam sabendo do seu endereço IP. O app para desktop as bloqueia."
+    "webkitInfo": "O Safari e qualquer navegador no iPhone ou iPad deixam um app abrir conexões que o Ghostly não consegue bloquear. Esses servidores ficam sabendo do seu endereço IP. O app para desktop as bloqueia."
   },
   "page": {
     "add": "Adicionar",

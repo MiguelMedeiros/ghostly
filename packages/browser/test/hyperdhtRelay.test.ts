@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
-import { GhostLink, createIdentity, createLink, fromBase64Url, type BoundChannel, type NativeEndpoint, type PairingState } from "@ghostly/core";
+import { GhostLink, createIdentity, createLink, encodeFileData, fromBase64Url, type BoundChannel, type NativeEndpoint, type PairingState } from "@ghostly/core";
 import { createRelayedHyperEndpoint, hyperKeyPair, relayUrlProblem } from "../src/platform/hyperdhtRelay";
 // covers: transport.hyperdht-relay, transport.hyperdht, transport.relayed
 
@@ -105,6 +105,60 @@ it("talks to a Desktop both ways, with the same binding at both ends, and the re
     expect(contains(sent, key)).toBe(true); // Public keys do go to the relay.
   }
   dialled.channel.close(); outgoing.channel.close();
+}, 60_000);
+
+it("carries binary messages both ways with a Desktop, in order with text, and refuses one too large", async () => {
+  const [browser, native] = [await web(), await desktop()];
+  const accepted = incoming(native);
+  const dialled = await browser.connect(native.descriptor);
+  const other = await accepted;
+  expect(dialled.channel.binary && other.channel.binary).toBe(true);
+  const heard = (bound: BoundChannel, count: number) => new Promise<(string | Uint8Array)[]>(resolve => {
+    const got: (string | Uint8Array)[] = [];
+    bound.channel.onMessage = data => { got.push(data); if (got.length === count) resolve(got); };
+  });
+  const big = Uint8Array.from({ length: 60 * 1024 }, (_, i) => (i * 7) & 0xff);
+  // A message that reads as UTF-8 text stays bytes, and one that does not is not refused for it.
+  const looksLikeText = new TextEncoder().encode('{"t":"paired-ping"}'), notText = Uint8Array.of(0xff, 0xfe, 0x00);
+  const there = heard(other, 4);
+  dialled.channel.send(looksLikeText); dialled.channel.send("between"); dialled.channel.send(notText); dialled.channel.send(big);
+  expect(await there).toEqual([looksLikeText, "between", notText, big]);
+  const back = heard(dialled, 2);
+  other.channel.send(Uint8Array.of(4, 2)); other.channel.send("after");
+  expect(await back).toEqual([Uint8Array.of(4, 2), "after"]);
+  expect(() => dialled.channel.send(new Uint8Array(60 * 1024 + 1))).toThrow(/frame budget/);
+  expect(() => other.channel.send(new Uint8Array(60 * 1024 + 1))).toThrow(/frame budget/);
+  dialled.channel.close();
+}, 60_000);
+
+it("agrees files/4 on a chat over HyperDHT with a Desktop, and a file's bytes arrive as bytes", async () => {
+  const invitation = createLink();
+  const params = [invitation.mine, invitation.invite];
+  const frames: Record<string, unknown>[][] = [[], []];
+  const endpoints = [await web(), await desktop()];
+  // The browser dials: its end of the session, to put a file's data on it as the sender's app would.
+  let session: BoundChannel | undefined;
+  const connect = endpoints[0].connect.bind(endpoints[0]);
+  endpoints[0].connect = async (address) => (session = await connect(address));
+  const links = params.map((p, i) => new GhostLink({
+    params: { ...p, profile: "paired-chat/1" }, rtcAvailable: false,
+    pairing: { credentials: { seedB64: createIdentity().seedB64 }, pinPeer: async () => {} },
+    native: { preferred: "hyperdht/1", fallback: true, peerDescriptors: { "hyperdht/1": endpoints[1 - i].descriptor }, peerTransports: ["hyperdht/1"], peerFallback: true },
+    transport: { publish: vi.fn(), resolve: async () => null, describe: () => ({ protocol: "relay test", relays: [] }) },
+    createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
+    largeFilesSupport: true, binaryFilesSupport: true,
+    events: { onFilesFrame: frame => { frames[i].push(frame); } },
+  }));
+  links.forEach((link, i) => link.registerEndpoint(endpoints[i]));
+  try {
+    await links[0].connect(15_000);
+    await vi.waitFor(() => expect(links.every(link => link.supportsBinaryFiles)).toBe(true), { timeout: 15_000 });
+    const chunk = Uint8Array.from({ length: 16 * 1024 }, (_, i) => (i * 13) & 0xff);
+    session!.channel.send(encodeFileData("AbCdEfGh_-0123456789xy", 2 ** 33, chunk));
+    await vi.waitFor(() => expect(frames[1]).toEqual([{ t: "pf-data", id: "AbCdEfGh_-0123456789xy", offset: 2 ** 33, data: chunk }]));
+  } finally {
+    await Promise.allSettled(links.map(link => link.stop()));
+  }
 }, 60_000);
 
 it("connects two browsers through relays, on one relay connection each or shared", async () => {

@@ -20,6 +20,10 @@
     "sendFailed": "送信できませんでした",
     "shareHint": "グループのリンクを共有",
     "shareLink": "リンクを共有",
+    "takenBack": "{{contact}}さんが{{name}}への招待を取り消しました",
+    "takenBackNext": "{{contact}}さんに新しい招待かグループのリンクを頼んでください。",
+    "takenBackNextUnknown": "グループの管理者に新しい招待かグループのリンクを頼んでください。",
+    "takenBackUnknown": "{{name}}への招待は取り消されました",
     "unnamed": "グループ"
   },
   "connection": {
@@ -63,6 +67,7 @@
     "forked": "メンバー履歴が分岐しました",
     "gone": "{{name}} はメンバーではなくなりました",
     "joined": "{{name}} が参加しました",
+    "left": "{{name}} が退出しました",
     "pictureChanged": "{{name}} がグループの写真を変更しました",
     "pictureChangedNoName": "グループの写真が変更されました",
     "pictureChangedYou": "グループの写真を変更しました",
@@ -76,6 +81,15 @@
     "rotated": "鍵を更新しました: 新しいエポック",
     "youJoined": "参加しました。",
     "youJoinedAgain": "再び参加しました。"
+  },
+  "forget": {
+    "invitation": "招待はこのデバイスから削除されます。{{contact}}さんには辞退したことが伝わります。",
+    "invitationKept": "招待とグループの履歴はこのデバイスから削除されます。{{contact}}さんには辞退したことが伝わります。",
+    "invitationKeptUnknown": "招待とグループの履歴はこのデバイスから削除されます。送った連絡先には辞退したことが伝わります。",
+    "invitationUnknown": "招待はこのデバイスから削除されます。送った連絡先には辞退したことが伝わります。",
+    "joining": "参加のリクエストをやめ、グループはこのデバイスから削除されます。",
+    "kept": "グループとその履歴はこのデバイスから削除されます。",
+    "takenBack": "招待はこのデバイスから削除されます。取り消された招待なので、誰にも伝わりません。"
   },
   "hubs": {
     "auto": "常時オンならハブ",
@@ -116,6 +130,8 @@
   "leave": {
     "blocked": "管理者を引き継げる人がオンラインにいません",
     "blockedCommunity": "退出を受け付けるメンバーがオンラインにいません",
+    "blockedCommunityAdminForgetNext": "メンバーがオンラインになるのを待つか、先にメンバーを削除するか、誰かを管理者にしてください。",
+    "blockedCommunityAdminNext": "メンバーがオンラインになるのを待つか、先にメンバーを削除してください。",
     "blockedCommunityNext": "しばらくしてから再試行してください。",
     "blockedNext": "誰かを管理者にするか、メンバーを待ってください。",
     "body": "グループとその履歴はこの端末から削除されます。その後のやり取りは読めなくなり、戻るには誰かに再び参加を許可してもらう必要があります。",
@@ -125,7 +141,8 @@
     "forgetTitleUnnamed": "このグループを削除しますか?",
     "successor": "あなたは管理者です。退出すると {{name}} が管理者になります。",
     "title": "{{name}} から退出しますか?",
-    "titleUnnamed": "このグループから退出しますか?"
+    "titleUnnamed": "このグループから退出しますか?",
+    "unsaidNext": "それでもこのデバイスから削除されます。ほかの人には引き続きメンバーとして表示されます。"
   },
   "link": {
     "broken": "このグループへのリンクは使えません",
@@ -137,6 +154,7 @@
     "disableTitle": "リンクをオフにしますか?",
     "enable": "リンクをオンにする",
     "enableFailed": "リンクをオンにできませんでした",
+    "endsOnHandover": "これまで共有したリンクは使えなくなります。{{name}} が新しいリンクを共有できます。",
     "full": "グループは満員です（{{count}} / {{count}}）。誰かが抜けるまで参加できません。",
     "fullShort": "グループは満員です",
     "hideQr": "QR を隠す",

@@ -1,8 +1,8 @@
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { engine } from "@ghostly/browser/platform/engine";
+import { memo, useCallback, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
+import { answerable, InvitationButtons, TakenBackDelete, invitationLine, useInvitationAnswer } from "./GroupInvitation";
 import { ContactMarks, FaceCorner } from "./identities/ContactMarks";
 import { useChosenProfile, type ContactFace } from "./identities/contactFace";
 import { PinIcon } from "./PinIcon";
@@ -15,7 +15,7 @@ import { filePreview, formatListTime, previewText } from "../lib/chatList";
 import { cardLine, showsCard } from "../lib/statusCards";
 import { deliveryShape, useDeliveryWords, useDhtOnly, waitsForLive, type DhtOnlyBy } from "../lib/delivery";
 import { groupChat, mentionsNotify, muteEndText, useChatMute } from "../lib/chatMute";
-import { authorName, groupReadAt, groupStatusText, groupUnreadAt } from "../lib/groups";
+import { authorName, groupReadAt, groupStatusText, groupUnreadAt, invitationRow } from "../lib/groups";
 import { reactionNoteText } from "../lib/reactions";
 import { problemText } from "../lib/problemText";
 import { sameValue } from "../lib/sameValue";
@@ -44,7 +44,7 @@ import { WorkingDot, WorkingGap } from "./chat/WorkingMark";
 
 const AVATAR = { compact: 46, comfortable: 52 } as const;
 /** How long a group invitation's row says why its answer did not go. */
-export const REFUSAL_SHOWN_MS = 8000;
+export { REFUSAL_SHOWN_MS } from "./GroupInvitation";
 const ROW = { compact: "min-h-[66px] py-2.5", comfortable: "min-h-[80px] py-3" } as const;
 /**
  * Compact has no key line, so a bot's meter stays on the last line, where nothing but the row's end is fixed: it starts
@@ -378,46 +378,43 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
  * A group (private or community), or an invitation to one, in the chat list. Drawn again only when what it shows
  * changes, as a chat's row (`ChatRow`): its time and when it was read are taken here, at each draw of the list.
  */
-export function GroupRow({ group, active, density, onOpen }: { group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void }) {
+export function GroupRow({ group, active, density, onOpen, drag }: {
+  group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void;
+  /** The row can be dragged onto a folder (hooks/useRowReorder.ts). */
+  drag?: { props: Record<string, unknown>; dragging: boolean; drop?: "before" | "after" };
+}) {
   const { t, language } = useI18n();
   const latest = useRef(onOpen);
   latest.current = onOpen;
   const open = useCallback(() => latest.current(), []);
   const time = group.lastMessageAt > 0 ? formatListTime(group.lastMessageAt, undefined, language, t) : undefined;
-  return <SameGroupRow group={group} active={active} density={density} onOpen={open} time={time} readAt={groupReadAt(group.id)} />;
+  const row = <SameGroupRow group={group} active={active} density={density} onOpen={open} time={time} readAt={groupReadAt(group.id)} />;
+  if (!drag) return row;
+  // The drag is on a box around the row, so the row itself is drawn again only when the group changes.
+  return (
+    <div {...drag.props} data-testid="group-row-drag" data-dragging={drag.dragging || undefined}
+      className={`relative select-none [-webkit-touch-callout:none] ${drag.dragging ? "z-20 cursor-grabbing bg-surface-hover opacity-70 shadow-lg" : ""}`}>
+      {drag.drop && <span aria-hidden="true" data-testid="chat-row-drop" data-edge={drag.drop}
+        className={`pointer-events-none absolute inset-x-0 z-30 h-0.5 rounded-full bg-accent ${drag.drop === "before" ? "top-0" : "bottom-0"}`} />}
+      {row}
+    </div>
+  );
 }
 
 const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen, time, readAt }: {
   group: GroupView; active: boolean; density: ChatListDensity; onOpen(): void; time?: string; readAt: number;
 }) {
   const { t } = useI18n();
-  const [busy, setBusy] = useState(false);
   const muted = useChatMute(groupChat(group.id)) !== undefined;
   const invitation = group.invitation;
   const unread = !active && !invitation && groupUnreadAt(group) > readAt;
   // An unread message that names me: "@" beside the dot, in the accent unless the mute keeps mentions quiet too.
   const mention = unread && (group.lastMentionAt ?? 0) > readAt;
   const mentionQuiet = muted && !mentionsNotify(groupChat(group.id));
-  // Why the last answer did not go, for a few seconds: Accept needs the inviter's chat live, which takes a moment after
-  // the app opens, and a click that did nothing and said nothing looked broken.
-  const [refused, setRefused] = useState<string | null>(null);
-  useEffect(() => {
-    if (!refused) return;
-    const timer = setTimeout(() => setRefused(null), REFUSAL_SHOWN_MS);
-    return () => clearTimeout(timer);
-  }, [refused]);
-  const answer = async (method: "acceptGroupInvitation" | "declineGroupInvitation") => {
-    setBusy(true);
-    setRefused(null);
-    try { await engine.call(method, { groupId: group.id }); } catch (error) {
-      const away = /not connected/i.test(error instanceof Error ? error.message : String(error));
-      setRefused(!away ? t("sidebar.group.answerFailed")
-        : invitation?.contact ? t("sidebar.group.inviterAway", { contact: invitation.contact }) : t("sidebar.group.inviterAwayUnknown"));
-    } finally { setBusy(false); }
-  };
+  const { busy, refused, answer } = useInvitationAnswer(group);
   const members = (count: number) => count === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count });
   const status = invitation ? (invitation.viaLink ? (invitation.admin ? t("group.chat.joining") : group.profile === "community" ? (invitation.stage === "answered" ? t("sidebar.group.letting") : t("sidebar.group.waitingIn")) : invitation.stage === "answered" ? t("sidebar.group.adminAnswered") : t("sidebar.group.waitingAdmin"))
-      : invitation.unanswered ? t("sidebar.group.unanswered") : invitation.accepted ? t("group.chat.joining") : invitation.contact ? t("sidebar.group.invitedBy", { contact: invitation.contact, members: members(invitation.members) }) : t("sidebar.group.invitedByUnknown", { members: members(invitation.members) }))
+      : invitationLine(invitation, t))
     : group.status !== "active" ? (group.statusReason ? problemText(group.statusReason, t).title : group.status && groupStatusText(group.status, t)) : members(group.members.length);
   // The latest reaction, while nothing was said after it (WISP 400 § Reactions).
   const reacted = !invitation && group.status === "active" && group.lastReaction && group.lastReaction.at > group.lastMessageAt ? group.lastReaction : undefined;
@@ -438,7 +435,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
           time={time}
           timeClass={unread && !muted ? "text-accent font-medium" : "text-text-muted"}
           status={muted && <MutedMark label={t("mute.bell")} />}
-          timeCover={!invitation && <RowActions active={active}><RowMute chat={groupChat(group.id)} mentions /></RowActions>}
+          timeCover={!invitationRow(group) && <RowActions active={active}><RowMute chat={groupChat(group.id)} mentions /></RowActions>}
           preview={note ? <span data-testid="group-row-note" className="text-text-muted">{note}</span> : <span className="text-text-muted">{status}</span>}
           trailing={unread && <span className="flex items-center gap-1.5">
             {mention && <span data-testid="group-row-mention" data-muted={mentionQuiet || undefined} aria-label={t("mentions.unread")} title={t("mentions.unread")} role="img"
@@ -446,10 +443,9 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
             <span data-testid="group-row-unread" data-muted={muted || undefined} aria-label={t("sidebar.unread")} role="img" className={`w-2.5 h-2.5 rounded-full ${muted ? "bg-text-secondary" : "bg-accent"}`} />
           </span>}
         />
-        {invitation && (!invitation.accepted || invitation.unanswered) && <div className="mt-1.5 flex gap-2">
-          <button disabled={busy} data-testid="group-accept" onClick={e => { e.stopPropagation(); void answer("acceptGroupInvitation"); }} className="rounded-lg bg-accent px-3 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{t("chat.file.accept")}</button>
-          <button disabled={busy} data-testid="group-decline" onClick={e => { e.stopPropagation(); void answer("declineGroupInvitation"); }} className="rounded-lg px-3 py-1 text-xs text-text-secondary hover:bg-surface-hover disabled:opacity-40">{t("chat.file.decline")}</button>
-        </div>}
+        {/* Taken back: nothing to answer, only to clear away (it says nothing to whoever took it back). */}
+        {invitation?.takenBack && <div className="mt-1.5 flex gap-2"><TakenBackDelete busy={busy} answer={answer} /></div>}
+        {invitation && answerable(invitation) && <div className="mt-1.5 flex gap-2"><InvitationButtons busy={busy} answer={answer} /></div>}
         {invitation && refused && <p role="status" data-testid="group-answer-refused" className="mt-1 text-xs text-danger">{refused}</p>}
       </div>
     </div>

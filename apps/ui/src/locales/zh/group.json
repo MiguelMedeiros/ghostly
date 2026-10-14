@@ -20,6 +20,10 @@
     "sendFailed": "无法发送",
     "shareHint": "分享群组链接",
     "shareLink": "分享链接",
+    "takenBack": "{{contact}} 收回了加入 {{name}} 的邀请",
+    "takenBackNext": "请向 {{contact}} 要一个新邀请或群组链接。",
+    "takenBackNextUnknown": "请向群组管理员要一个新邀请或群组链接。",
+    "takenBackUnknown": "加入 {{name}} 的邀请已被收回",
     "unnamed": "一个群组"
   },
   "connection": {
@@ -63,6 +67,7 @@
     "forked": "成员历史出现了分叉",
     "gone": "{{name}} 已不再是成员",
     "joined": "{{name}} 已加入",
+    "left": "{{name}} 已退出",
     "pictureChanged": "{{name}} 更换了群组头像",
     "pictureChangedNoName": "群组头像已更换",
     "pictureChangedYou": "你更换了群组头像",
@@ -76,6 +81,15 @@
     "rotated": "密钥已轮换：新的纪元",
     "youJoined": "你已加入。",
     "youJoinedAgain": "你已重新加入。"
+  },
+  "forget": {
+    "invitation": "邀请将从此设备删除。{{contact}} 会知道你已拒绝。",
+    "invitationKept": "邀请和群组的历史记录将从此设备删除。{{contact}} 会知道你已拒绝。",
+    "invitationKeptUnknown": "邀请和群组的历史记录将从此设备删除。发送邀请的联系人会知道你已拒绝。",
+    "invitationUnknown": "邀请将从此设备删除。发送邀请的联系人会知道你已拒绝。",
+    "joining": "你将不再请求加入，群组也会从此设备删除。",
+    "kept": "群组及其历史记录将从此设备删除。",
+    "takenBack": "邀请将从此设备删除。它已被收回，因此不会通知任何人。"
   },
   "hubs": {
     "auto": "常在线时作为中继",
@@ -116,6 +130,8 @@
   "leave": {
     "blocked": "没有人在线可以接任管理员",
     "blockedCommunity": "没有人在线接收你的退出",
+    "blockedCommunityAdminForgetNext": "请等待有成员上线，或先移除成员，或将其中一人设为管理员。",
+    "blockedCommunityAdminNext": "请等待有成员上线，或先移除成员。",
     "blockedCommunityNext": "请稍后再试。",
     "blockedNext": "先指定一位管理员，或等待成员上线。",
     "body": "群组及其历史记录将从此设备移除。你将无法阅读之后的内容，想回来需要有人再次让你进入。",
@@ -125,7 +141,8 @@
     "forgetTitleUnnamed": "删除此群组？",
     "successor": "你是管理员：你退出后 {{name}} 将成为管理员。",
     "title": "退出 {{name}}？",
-    "titleUnnamed": "退出此群组？"
+    "titleUnnamed": "退出此群组？",
+    "unsaidNext": "它仍会从此设备删除。其他人仍会看到你是成员。"
   },
   "link": {
     "broken": "此群组链接无效",
@@ -137,6 +154,7 @@
     "disableTitle": "关闭链接？",
     "enable": "开启链接",
     "enableFailed": "无法开启链接",
+    "endsOnHandover": "此前分享的链接将失效。{{name}} 可以分享新的链接。",
     "full": "群组已满（{{count}}/{{count}}）。有人离开前无法加入。",
     "fullShort": "群组已满",
     "hideQr": "隐藏二维码",

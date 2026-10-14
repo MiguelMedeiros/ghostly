@@ -104,9 +104,11 @@ class FakePeerConnection extends EventTarget {
     if (!answerer || answerer.closed || fingerprintOf(answerer.remoteDescription!.sdp!) !== fingerprintOf(this.localDescription!.sdp!)) return;
     if (failConnections > 0) {
       failConnections--;
-      realSetTimeout(() => {
-        for (const pc of [this, answerer]) { pc.connectionState = "failed"; pc.dispatchEvent(new Event("connectionstatechange")); }
-      }, 0);
+      // ICE gives up half a minute on (this clock is the test's): one that failed as the answer went in would be an
+      // answer refused, offered again at once.
+      setTimeout(() => {
+        for (const pc of [this, answerer]) { if (pc.closed) continue; pc.connectionState = "failed"; pc.dispatchEvent(new Event("connectionstatechange")); }
+      }, 30_000);
       return;
     }
     this.channel.peer = answerer.channel; answerer.channel.peer = this.channel;

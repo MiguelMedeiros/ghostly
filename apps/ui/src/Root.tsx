@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AttentionFeedback } from "./components/AttentionFeedback";
 import { NameStep } from "./components/NameStep";
@@ -15,9 +15,10 @@ import { UpdateProvider } from "./contexts/UpdateContext";
 import { LockScreen } from "./components/LockScreen";
 import { ProfileSwitchSplash } from "./components/ProfileSwitchSplash";
 import { PreUnlockRing } from "./components/PreUnlockRing";
-import { LINK_CHATS_WAITING, ensureSession, linkChatsWaiting, loadSession, type SessionKeys } from "./lib/storage";
+import { LINK_CHATS_WAITING, NO_ROOM_FOR_CHAT, ensureSession, linkChatsWaiting, loadSession, type SessionKeys } from "./lib/storage";
 import { useI18n, useT } from "./contexts/I18nContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { menuPage } from "./components/MenuPage";
 import { ProfileGate } from "./components/ProfileUnavailable";
 import { DeviceStandby } from "./components/DeviceStandby";
 import { LimitedStartGate } from "./components/devices/LimitedStart";
@@ -26,6 +27,7 @@ import { JoinHost } from "./components/devices/JoinHost";
 import { isDeviceCode, offerDeviceLink, readDeviceLink, takeDeviceLinkFromAddress } from "./lib/devices";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
 import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
+import { onChatNotStored, reportChatNotStored } from "./lib/chatNotStored";
 import { groupPath } from "./lib/groups";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
@@ -34,16 +36,7 @@ import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
 import "./index.css";
 
-/**
- * A page of the menu, loaded the first time it is opened: the first screen (the chat list) does not wait for them.
- * Nothing is drawn in its place for the moment it takes.
- */
-function menuPage<P extends object>(load: () => Promise<ComponentType<P>>) {
-  const Page = lazy(async () => ({ default: await load() }));
-  return function MenuPage(props: P) {
-    return <Suspense fallback={null}><Page {...props} /></Suspense>;
-  };
-}
+// The pages of the menu, each loaded the first time it is opened (components/MenuPage.tsx).
 const Settings = menuPage(() => import("./pages/Settings").then((m) => m.Settings));
 const Services = menuPage(() => import("./pages/Services").then((m) => m.Services));
 const Profile = menuPage(() => import("./pages/Profile").then((m) => m.Profile));
@@ -90,7 +83,11 @@ function ChatLinkIntake() {
       navigate("/", { replace: true });
       return;
     } else {
-      try { sessionId = ensureSession(keys, { viaLink: true }); } catch { sessionId = null; }
+      try { sessionId = ensureSession(keys, { viaLink: true }); } catch (cause) {
+        // A good invite the storage has no room for: said as that, never as a bad invite.
+        if (cause instanceof Error && cause.message === NO_ROOM_FOR_CHAT) { reportChatNotStored(cause); navigate("/", { replace: true }); return; }
+        sessionId = null;
+      }
       if (sessionId && outcome.kind === "joined") showJoinNotice("join.alreadyIn");
     }
     if (!sessionId) {
@@ -163,6 +160,45 @@ function JoinNotice() {
 }
 
 /**
+ * A top notice there until closed: by its ×, by Escape, or by a tap on its words (not on its ⓘ, Copy or the details
+ * they open). It sits over the sidebar's header, so it closes as the app's other top notices do, and the focus goes
+ * back where it was when it came (the New that could not make a chat), not to the page.
+ */
+function ClosableTopNotice({ problem, testId, onClose }: { problem: Problem; testId: string; onClose: () => void }) {
+  const t = useT();
+  const [back] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
+  const close = useRef(() => {});
+  close.current = () => {
+    onClose();
+    if (back && back !== document.body && back.isConnected) back.focus();
+  };
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented) close.current(); };
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
+  }, []);
+  return (
+    <div onClick={(e) => { if (!(e.target as Element).closest(`button, [data-testid="${testId}-details"]`)) close.current(); }}
+      className="top-notice flex cursor-pointer items-start gap-2 rounded-lg border border-border bg-panel-header py-2 ps-4 pe-2 shadow-xl">
+      <Notice problem={problem} testId={testId} className="min-w-0 text-sm" />
+      <button type="button" data-testid={`${testId}-close`} onClick={() => close.current()} aria-label={t("common.close")}
+        className="-my-1 h-8 w-8 shrink-0 cursor-pointer rounded-md text-lg leading-none text-text-secondary hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">×</button>
+    </div>
+  );
+}
+
+/**
+ * A new chat the storage had no room for, made where no dialog says it (lib/chatNotStored.ts): what happened and what to
+ * do, there until closed.
+ */
+function ChatNotStoredNotice() {
+  const t = useT();
+  const [problem, setProblem] = useState<Problem | null>(null);
+  useEffect(() => onChatNotStored((cause) => setProblem(problemText(cause, t))), [t]);
+  return problem ? <ClosableTopNotice problem={problem} testId="chat-not-stored" onClose={() => setProblem(null)} /> : null;
+}
+
+/**
  * A group's link opened in the app (`#/join/group1/…` or `#/join/group2/…`): it leaves the address at once, like an
  * invite; once the app is unlocked the engine joins and the group opens, saying it waits for the admin's app. A refusal
  * is a notice as JoinDialog shows one (a title, what to do, the engine's English behind the ⓘ), there until closed.
@@ -189,13 +225,7 @@ function GroupLinkIntake() {
       .catch((cause: unknown) => setProblem(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
   }, [code, hasUnlocked]);
-  return problem ? (
-    <div className="top-notice flex items-start gap-2 rounded-lg border border-border bg-panel-header py-2 ps-4 pe-2 shadow-xl">
-      <Notice problem={problem} testId="group-link-invalid" className="min-w-0 text-sm" />
-      <button type="button" data-testid="group-link-invalid-close" onClick={() => setProblem(null)} aria-label={t("common.close")}
-        className="-my-1 h-8 w-8 shrink-0 cursor-pointer rounded-md text-lg leading-none text-text-secondary hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">×</button>
-    </div>
-  ) : null;
+  return problem ? <ClosableTopNotice problem={problem} testId="group-link-invalid" onClose={() => setProblem(null)} /> : null;
 }
 
 /**
@@ -270,6 +300,7 @@ export function Root() {
               <ErrorBoundary>
               <ChatLinkIntake />
               <JoinNotice />
+              <ChatNotStoredNotice />
               <OpenFailureNotice />
               <GroupLinkIntake />
               <HomeAnchor />

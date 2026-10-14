@@ -20,6 +20,10 @@
     "sendFailed": "Envoi impossible",
     "shareHint": "Partager le lien du groupe",
     "shareLink": "Partager le lien",
+    "takenBack": "{{contact}} a retiré l'invitation à {{name}}",
+    "takenBackNext": "Demandez à {{contact}} une nouvelle invitation ou le lien du groupe.",
+    "takenBackNextUnknown": "Demandez à l'admin du groupe une nouvelle invitation ou le lien du groupe.",
+    "takenBackUnknown": "L'invitation à {{name}} a été retirée",
     "unnamed": "Un groupe"
   },
   "connection": {
@@ -63,6 +67,7 @@
     "forked": "L'historique des membres a divergé",
     "gone": "{{name}} n'est plus membre",
     "joined": "{{name}} a rejoint le groupe",
+    "left": "{{name}} a quitté le groupe",
     "pictureChanged": "{{name}} a changé la photo du groupe",
     "pictureChangedNoName": "La photo du groupe a été changée",
     "pictureChangedYou": "Vous avez changé la photo du groupe",
@@ -76,6 +81,15 @@
     "rotated": "Clés renouvelées : une nouvelle époque",
     "youJoined": "Vous avez rejoint le groupe.",
     "youJoinedAgain": "Vous avez rejoint le groupe à nouveau."
+  },
+  "forget": {
+    "invitation": "L'invitation est supprimée de cet appareil. {{contact}} saura que vous l'avez refusée.",
+    "invitationKept": "L'invitation et l'historique du groupe sont supprimés de cet appareil. {{contact}} saura que vous l'avez refusée.",
+    "invitationKeptUnknown": "L'invitation et l'historique du groupe sont supprimés de cet appareil. Le contact qui l'a envoyée saura que vous l'avez refusée.",
+    "invitationUnknown": "L'invitation est supprimée de cet appareil. Le contact qui l'a envoyée saura que vous l'avez refusée.",
+    "joining": "Vous ne demandez plus à rejoindre, et le groupe est supprimé de cet appareil.",
+    "kept": "Le groupe et son historique sont supprimés de cet appareil.",
+    "takenBack": "L'invitation est supprimée de cet appareil. Elle a été retirée, personne n'est donc prévenu."
   },
   "hubs": {
     "auto": "Hub s'il reste allumé",
@@ -116,6 +130,8 @@
   "leave": {
     "blocked": "Personne n'est en ligne pour devenir admin",
     "blockedCommunity": "Personne n'est en ligne pour prendre acte de votre départ",
+    "blockedCommunityAdminForgetNext": "Attendez qu'un membre soit en ligne, ou retirez d'abord les membres, ou nommez l'un d'eux admin.",
+    "blockedCommunityAdminNext": "Attendez qu'un membre soit en ligne, ou retirez d'abord les membres.",
     "blockedCommunityNext": "Réessayez dans un instant.",
     "blockedNext": "Nommez un admin ou attendez un membre.",
     "body": "Le groupe et son historique quittent cet appareil. Vous ne lirez pas ce qui sera dit ensuite, et pour revenir quelqu'un devra vous faire entrer à nouveau.",
@@ -125,7 +141,8 @@
     "forgetTitleUnnamed": "Supprimer ce groupe ?",
     "successor": "Vous êtes l'admin : {{name}} devient l'admin quand vous partez.",
     "title": "Quitter {{name}} ?",
-    "titleUnnamed": "Quitter ce groupe ?"
+    "titleUnnamed": "Quitter ce groupe ?",
+    "unsaidNext": "Il est quand même supprimé de cet appareil. Les autres vous verront encore comme membre."
   },
   "link": {
     "broken": "Ce lien vers un groupe ne fonctionne pas",
@@ -137,6 +154,7 @@
     "disableTitle": "Désactiver le lien ?",
     "enable": "Activer le lien",
     "enableFailed": "Impossible d'activer le lien",
+    "endsOnHandover": "Le lien partagé jusqu'ici cesse de fonctionner. {{name}} peut en partager un nouveau.",
     "full": "Le groupe est plein ({{count}} sur {{count}}). Personne n'entre avant qu'un membre parte.",
     "fullShort": "Le groupe est complet",
     "hideQr": "Masquer le QR",

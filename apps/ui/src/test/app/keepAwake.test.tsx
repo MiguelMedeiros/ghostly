@@ -1,9 +1,10 @@
-import { renderHook, screen, waitFor, within } from "@testing-library/react";
+import { act, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { HandoffView } from "@ghostly/browser/devices/handoff";
 import { DevicesSection } from "../../components/devices/DevicesSection";
 import { handoffRunning, hasStandby, keepAwakeWanted, useComputerAwake } from "../../lib/keepAwake";
+import { useDeviceSet } from "../../lib/devices";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 // covers: devices.keep-awake
@@ -31,6 +32,38 @@ describe("when the computer is kept awake", () => {
     expect(keepAwakeWanted(false, null, handoff("copying"))).toBe(true);
     expect(keepAwakeWanted(false, null, { ...handoff("settling"), role: "taker" })).toBe(true);
     for (const step of ["failed", "done", "offer"] as const) expect(handoffRunning(handoff(step))).toBe(false);
+  });
+});
+
+describe("how often the device set is asked for", () => {
+  const single: DeviceSetView = { state: "single", devices: [] };
+  const minute = async () => { await act(async () => { await vi.advanceTimersByTimeAsync(60_000); }); };
+
+  it("once for a profile on one device, and again every 5 s from the moment the page reads a device set", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      const keepAwake = vi.fn(async (on: boolean) => on);
+      fakeEngine.keepAwake = keepAwake;
+      localStorage.setItem("ghostly_keep_awake", "1");
+      let set = single;
+      fakeEngine.on("deviceSet", () => set);
+      fakeEngine.on("deviceHandoffView", () => null);
+      renderHook(() => useComputerAwake());
+      await minute();
+      // No standby and no handoff can be there: nothing to look at again.
+      expect(fakeEngine.callsTo("deviceSet")).toHaveLength(1);
+      expect(fakeEngine.callsTo("deviceHandoffView")).toHaveLength(1);
+      expect(keepAwake).not.toHaveBeenCalledWith(true);
+      // A device was added here: Profile, Devices reads the set, and the checks start again.
+      set = active;
+      const page = renderHook(() => useDeviceSet(0));
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+      expect(page.result.current?.state).toBe("active");
+      expect(keepAwake).toHaveBeenLastCalledWith(true);
+      const before = fakeEngine.callsTo("deviceHandoffView").length;
+      await minute();
+      expect(fakeEngine.callsTo("deviceHandoffView").length - before).toBe(12);
+    } finally { vi.useRealTimers(); }
   });
 });
 

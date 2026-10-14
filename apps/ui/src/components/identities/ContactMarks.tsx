@@ -2,6 +2,7 @@ import { useId } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { BADGE_LIMITS, contactBadges, isGood, takeBadges, useReceived } from "./contactBadges";
 import { BadgeMark } from "./BadgeMark";
+import { MenuItem } from "../Menu";
 import { GHOSTLY } from "./idCard";
 import { IdentityTip } from "./IdentityTip";
 import { ALL_MARKS, loadShownProfiles, useMarkTip } from "./markTip";
@@ -95,6 +96,21 @@ export function IdentityStack({ peerKey, name, onOpen, open, footer }: { peerKey
       </button>
       {tip && (ghostly || inTip.length > 0) && <IdentityTip id={tipId} testId="chat-identity-tip" at={tip} badges={inTip} text={ghostly} footer={ghostly ? undefined : footer} />}
     </>
+  );
+}
+
+/**
+ * The same on a phone, where the header keeps the name, a call and ⋮: a row of the ⋮ menu that opens the contact's
+ * identities, with the contact's key and each mark in words under it ("GitHub: ana · verified 2 h ago").
+ */
+export function IdentityMenuItem({ peerKey, name, keyLabel, onOpen }: { peerKey: string; name: string; keyLabel: string; onOpen: () => void }) {
+  const { t, language } = useI18n();
+  const badges = contactBadges(useReceived(peerKey), { t, language });
+  return (
+    <MenuItem testId="chat-identity-badges" data={{ "data-count": badges.length }} onClick={onOpen} hint={[keyLabel, ...badges.map(b => b.label)].join(" · ")}
+      icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="9" cy="11" r="2" /><path d="M6 16c.6-1.4 1.7-2 3-2s2.4.6 3 2M15 10h3M15 14h3" /></svg>}>
+      {t("identities.contact.title", { name })}
+    </MenuItem>
   );
 }
 

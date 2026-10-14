@@ -14,7 +14,7 @@ describe("app errors", () => {
   it("says a storage failure in words, with an ⓘ, and never the browser's", () => {
     const view = appErrorView(new Error(RAW), translateWith(locales.en));
     expect(view.text).toBe("This browser can't keep apps here (private browsing?). Try a normal window.");
-    expect(view.info).toContain("Open Ghostly in a normal window");
+    expect(view.info).toContain("Private windows, like Safari's Private Browsing, don't let it");
     expect(`${view.text} ${view.info}`).not.toMatch(/Blob|IndexedDB|object store/);
     expect(appErrorCode(new Error(RAW))).toBe("storage");
     expect(appErrorView(new Error(RAW), translateWith(locales.pt)).text).toBe("Este navegador não consegue guardar apps aqui (navegação privada?). Tente uma janela normal.");

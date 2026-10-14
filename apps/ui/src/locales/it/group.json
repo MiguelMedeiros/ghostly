@@ -20,6 +20,10 @@
     "sendFailed": "Impossibile inviare",
     "shareHint": "Condividi il link del gruppo",
     "shareLink": "Condividi link",
+    "takenBack": "{{contact}} ha ritirato l'invito a {{name}}",
+    "takenBackNext": "Chiedi a {{contact}} un nuovo invito o il link del gruppo.",
+    "takenBackNextUnknown": "Chiedi all'admin del gruppo un nuovo invito o il link del gruppo.",
+    "takenBackUnknown": "L'invito a {{name}} è stato ritirato",
     "unnamed": "Un gruppo"
   },
   "connection": {
@@ -63,6 +67,7 @@
     "forked": "La cronologia dei membri si è biforcata",
     "gone": "{{name}} non è più un membro",
     "joined": "{{name}} è entrato",
+    "left": "{{name}} è uscito",
     "pictureChanged": "{{name}} ha cambiato la foto del gruppo",
     "pictureChangedNoName": "La foto del gruppo è stata cambiata",
     "pictureChangedYou": "Hai cambiato la foto del gruppo",
@@ -76,6 +81,15 @@
     "rotated": "Chiavi rinnovate: una nuova epoca",
     "youJoined": "Sei entrato.",
     "youJoinedAgain": "Sei entrato di nuovo."
+  },
+  "forget": {
+    "invitation": "L'invito viene eliminato da questo dispositivo. {{contact}} saprà che hai rifiutato.",
+    "invitationKept": "L'invito e la cronologia del gruppo vengono eliminati da questo dispositivo. {{contact}} saprà che hai rifiutato.",
+    "invitationKeptUnknown": "L'invito e la cronologia del gruppo vengono eliminati da questo dispositivo. Il contatto che l'ha inviato saprà che hai rifiutato.",
+    "invitationUnknown": "L'invito viene eliminato da questo dispositivo. Il contatto che l'ha inviato saprà che hai rifiutato.",
+    "joining": "Smetti di chiedere di entrare, e il gruppo viene eliminato da questo dispositivo.",
+    "kept": "Il gruppo e la sua cronologia vengono eliminati da questo dispositivo.",
+    "takenBack": "L'invito viene eliminato da questo dispositivo. È stato ritirato, quindi nessuno viene avvisato."
   },
   "hubs": {
     "auto": "Hub se sempre acceso",
@@ -116,6 +130,8 @@
   "leave": {
     "blocked": "Nessuno è online per diventare admin",
     "blockedCommunity": "Nessuno è online per registrare la tua uscita",
+    "blockedCommunityAdminForgetNext": "Aspetta che un membro sia online, oppure rimuovi prima i membri, oppure rendi admin uno di loro.",
+    "blockedCommunityAdminNext": "Aspetta che un membro sia online, oppure rimuovi prima i membri.",
     "blockedCommunityNext": "Riprova tra un momento.",
     "blockedNext": "Nomina un admin o aspetta un membro.",
     "body": "Il gruppo e la sua cronologia spariscono da questo dispositivo. Non leggerai ciò che verrà detto dopo, e per tornare qualcuno dovrà farti entrare di nuovo.",
@@ -125,7 +141,8 @@
     "forgetTitleUnnamed": "Eliminare questo gruppo?",
     "successor": "Sei l'admin: {{name}} diventa admin quando esci.",
     "title": "Uscire da {{name}}?",
-    "titleUnnamed": "Uscire da questo gruppo?"
+    "titleUnnamed": "Uscire da questo gruppo?",
+    "unsaidNext": "Viene comunque eliminato da questo dispositivo. Gli altri ti vedranno ancora come membro."
   },
   "link": {
     "broken": "Questo link a un gruppo non funziona",
@@ -137,6 +154,7 @@
     "disableTitle": "Disattivare il link?",
     "enable": "Attiva il link",
     "enableFailed": "Impossibile attivare il link",
+    "endsOnHandover": "Il link condiviso finora smette di funzionare. {{name}} può condividerne uno nuovo.",
     "full": "Il gruppo è pieno ({{count}} su {{count}}). Nessuno entra finché qualcuno non esce.",
     "fullShort": "Il gruppo è pieno",
     "hideQr": "Nascondi QR",

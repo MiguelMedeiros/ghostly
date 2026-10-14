@@ -315,7 +315,7 @@ for (const vp of VIEWPORTS) {
           s.querySelectorAll("text").forEach((el) => {
             if (!seen(el)) return;
             const px = parseFloat(getComputedStyle(el).fontSize) * scale;
-            if (px < 12 && el.textContent !== "₿")
+            if (px < 12)
               problems.push(`text "${el.textContent}" at ${px.toFixed(1)}px`);
           });
           return { problems, count: items.length };

@@ -86,7 +86,7 @@ export function DevelopersPage() {
           </Reveal>
           <ol className="dvx-path">
             {t.path.steps.map((s, i) => (
-              <Reveal as="article" key={s.title} className="dvx-step">
+              <Reveal as="li" key={s.title} className="dvx-step">
                 <span className="dvx-step-num mono" aria-hidden="true">
                   {String(i + 1).padStart(2, "0")}
                 </span>

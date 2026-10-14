@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { HandoffFailure, HandoffView } from "@ghostly/browser/devices/handoff";
 import type { TranslationKey } from "../contexts/I18nContext";
 import { WALLET_NAME } from "../components/wallet/names";
 import { englishT, type Translate } from "../locales/translate";
 import { sizeIn } from "./sizeText";
+import { useShownPoll } from "../hooks/useShownPoll";
+import { said } from "./notices";
+import type { Problem } from "./problemText";
 
 /* The handoff (WISP 06 § The handoff) as the pages need it: what a failure says, sizes, and the view of the engine's. */
 
@@ -24,6 +26,34 @@ export const FAILURES: Record<HandoffFailure, TranslationKey> = {
   version: "devices.handoff.fail.version", failed: "devices.handoff.fail.failed", woken: "devices.handoff.fail.woken",
   stalled: "devices.handoff.fail.stalled", settle: "devices.handoff.fail.settle",
 };
+
+/**
+ * Refusals this device's own engine makes before asking the other one (devices/handoff.ts, engine/node.ts): they say
+ * what is true here, not that the other device refused. By the engine's own line, which the ⓘ keeps.
+ */
+export const LOCAL_REFUSALS: Record<string, { key: TranslationKey; next?: TranslationKey }> = {
+  "handoff-refused: Only the active device moves the profile.": { key: "devices.handoff.fail.notActive" },
+  "handoff-refused: That device is not one of this profile's.": { key: "devices.handoff.fail.notOurs" },
+  "handoff-refused: This device cannot move the profile.": { key: "devices.handoff.fail.cannotMove" },
+  "handoff-refused: This device is not on standby.": { key: "devices.handoff.fail.notStandby" },
+  "handoff-refused: No other device is active.": { key: "devices.handoff.fail.noneActive" },
+  "handoff-refused: There is no offer to accept.": { key: "devices.handoff.fail.offerEnded", next: "devices.handoff.fail.offerEndedNext" },
+  "handoff-refused: This device is the active one.": { key: "devices.handoff.fail.isActive" },
+  "handoff-refused: This device is not taking the profile.": { key: "devices.handoff.fail.notTaking" },
+  "handoff-busy: Another move is in progress.": { key: "devices.handoff.fail.busyHere", next: "devices.handoff.fail.busyHereNext" },
+};
+
+/**
+ * What an engine call's refusal says: one of this device's own in its words, with the engine's line behind the ⓘ;
+ * else the failure it names (`handoff-<reason>:`), said as from the other device; null for another error.
+ */
+export function handoffProblem(error: unknown, t: Translate, params: Record<string, string>): Problem | null {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const local = LOCAL_REFUSALS[message];
+  if (local) return { tone: "error", title: t(local.key, params), ...(local.next && { next: t(local.next, params) }), detail: message.replace(/^handoff-[a-z-]+: /, "") };
+  const key = handoffErrorKey(error);
+  return key ? said(key, t, { ...params, wallet: handoffErrorWallet(error) ?? "" }) : null;
+}
 
 /** The failure an engine call ended with (`handoff-<reason>:`), or null for another error. */
 export function handoffErrorKey(error: unknown): TranslationKey | null {
@@ -51,17 +81,11 @@ export function dayText(at: number, language: string): string {
 /** A wallet type the engine names, as the cards say it. */
 export const walletNameOf = (type: string | undefined): string => (type && type in WALLET_NAME ? WALLET_NAME[type as keyof typeof WALLET_NAME] : type ?? "");
 
-/** The handoff on this device, read twice a second while `on`. */
-export function useHandoffView(on = true): HandoffView | null {
-  const [view, setView] = useState<HandoffView | null>(null);
-  useEffect(() => {
-    if (!on) return;
-    let live = true;
-    const read = () => void engine.call("deviceHandoffView").then((next) => { if (live) setView(next); }, () => {});
-    read();
-    const timer = setInterval(read, 500);
-    return () => { live = false; clearInterval(timer); };
-  }, [on]);
-  return view;
-}
+/** How often a handoff's progress is read while its screen is in front. */
+const HANDOFF_EVERY_MS = 500;
+const readHandoff = () => engine.call("deviceHandoffView");
 
+/** The handoff on this device, read twice a second while `on` and the page shows (`useShownPoll`). */
+export function useHandoffView(on = true): HandoffView | null {
+  return useShownPoll(readHandoff, HANDOFF_EVERY_MS, on);
+}

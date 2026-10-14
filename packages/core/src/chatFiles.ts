@@ -36,6 +36,11 @@ export const FILE_LIMITS = {
   chunkBytes: 16 * 1024,
   /** Bytes a sender has sent and not seen confirmed: throughput is this per round trip. */
   windowBytes: 1024 * 1024,
+  /**
+   * Bytes all of a chat's files have sent and not seen confirmed, together. Three files' windows at once were 3 MiB, and
+   * as base64 text past what a session's receive queue holds (`SESSION_RECEIVE_PENDING`, 3.75 MiB).
+   */
+  chatWindowBytes: 2 * 1024 * 1024,
   /** A receiver asks its person before taking a file larger than this. */
   askAboveBytes: 25 * 1024 * 1024,
   /** Files taken without asking, per contact, while stored. Past it, every file is asked about. */
@@ -164,6 +169,11 @@ export interface ChatFilesHost {
   /** Sends a frame on the open session; false when there is none. */
   send(frame: Record<string, unknown>): boolean;
   /**
+   * Sends a file's bytes at `offset` in the form the open session agreed (WISP 501 § files/4): a binary message, or
+   * the `pf-data` frame; false when there is no session or it has no room. A host without it gets `pf-data` through `send`.
+   */
+  sendData?(id: string, offset: number, data: Uint8Array): boolean;
+  /**
    * A new offer from the contact: take it, ask the person, or refuse it. `again`: a file taken here without asking
    * that ended (failed, or stopped by the sender) and is offered again; it counts against the same limits as a new one.
    */
@@ -224,6 +234,8 @@ interface Incoming {
   gapAt?: number;
   writing: Promise<void>;
   verifying?: boolean;
+  /** Where it is written is being opened, before it is accepted: it holds one of the turns already. */
+  starting?: boolean;
   /** What was stored is being removed: nothing more is written. */
   dropped?: boolean;
 }
@@ -236,6 +248,44 @@ interface Entry {
 
 const key = (direction: "in" | "out", id: string) => `${direction}:${id}`;
 const isInt = (value: unknown, max = Number.MAX_SAFE_INTEGER): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= max;
+
+/**
+ * files/4 (WISP 501 § files/4): a chunk as one binary message of the session, in place of the base64url text of a
+ * `pf-data` frame, which is a third more than the bytes it carries:
+ *
+ *   kind 0x04 (1) | id length (1) | id (ASCII) | offset (8, big endian) | data (1 to `FILE_LIMITS.chunkBytes`)
+ */
+export const FILE_DATA_KIND = 0x04;
+const FILE_DATA_OFFSET_BYTES = 8;
+
+/** The binary message for the bytes of file `id` at `offset`. Throws on what no receiver would take. */
+export function encodeFileData(id: string, offset: number, data: Uint8Array): Uint8Array {
+  if (!ID.test(id) || !isInt(offset) || !data.length || data.length > FILE_LIMITS.chunkBytes) throw new Error("Invalid file data");
+  const head = 2 + id.length;
+  const out = new Uint8Array(head + FILE_DATA_OFFSET_BYTES + data.length);
+  out[0] = FILE_DATA_KIND;
+  out[1] = id.length;
+  for (let i = 0; i < id.length; i++) out[2 + i] = id.charCodeAt(i);
+  const view = new DataView(out.buffer);
+  view.setUint32(head, Math.floor(offset / 2 ** 32));
+  view.setUint32(head + 4, offset % 2 ** 32);
+  out.set(data, head + FILE_DATA_OFFSET_BYTES);
+  return out;
+}
+
+/** What a binary message from the contact says, or null when it is not a well-formed file data message. `data` is a view of `message`. */
+export function decodeFileData(message: Uint8Array): { id: string; offset: number; data: Uint8Array } | null {
+  if (message.length < 2 || message[0] !== FILE_DATA_KIND) return null;
+  const head = 2 + message[1], body = head + FILE_DATA_OFFSET_BYTES;
+  if (message.length <= body || message.length - body > FILE_LIMITS.chunkBytes) return null;
+  const id = String.fromCharCode(...message.subarray(2, head));
+  if (!ID.test(id)) return null;
+  const view = new DataView(message.buffer, message.byteOffset, message.byteLength);
+  const high = view.getUint32(head);
+  // Past 2^53 - 1 an offset is no longer a whole number here.
+  if (high > 0x1fffff) return null;
+  return { id, offset: high * 2 ** 32 + view.getUint32(head + 4), data: message.subarray(body) };
+}
 
 /** What a refusal means to the sender's person. */
 export function refusalText(why: string, room?: number): { state: TransferState; error: string } {
@@ -252,6 +302,10 @@ export function refusalText(why: string, room?: number): { state: TransferState;
 
 export class ChatFiles {
   private readonly entries = new Map<string, Entry>();
+  /** Files sending that may have bytes not confirmed yet: what `inFlight` adds up (the rest are left out as it goes). */
+  private readonly moving = new Set<Entry>();
+  /** Files that stopped sending for the chat's window alone: they go on once another's bytes are confirmed. */
+  private readonly held = new Set<Entry>();
   private attached = false;
   private peerRoomValue: number | null = null;
 
@@ -299,6 +353,11 @@ export class ChatFiles {
     return this.attached && this.host.send(frame);
   }
 
+  private sendData(id: string, offset: number, data: Uint8Array): boolean {
+    if (!this.host.sendData) return this.send({ t: "pf-data", id, offset, data: toBase64Url(data) });
+    return this.attached && this.host.sendData(id, offset, data);
+  }
+
   /** A session that agreed files/3 is open: say what fits here, then offer again what is not finished. */
   attach(): void {
     this.attached = true;
@@ -319,6 +378,7 @@ export class ChatFiles {
     if (!this.attached) return;
     this.attached = false;
     this.peerRoomValue = null;
+    this.moving.clear(); this.held.clear();
     for (const entry of this.entries.values()) {
       if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.next = entry.record.confirmed; }
       if (entry.in) clearTimeout(entry.in.timer);
@@ -404,9 +464,30 @@ export class ChatFiles {
     return out.block!.bytes.subarray(at, at + length);
   }
 
-  private shouldPump(entry: Entry): boolean {
+  /** Whether this file's own window lets it send more. */
+  private fileMayPump(entry: Entry): boolean {
     const { record } = entry, out = entry.out!;
     return this.attached && record.state === "active" && out.next < record.file.size && out.next - record.confirmed < FILE_LIMITS.windowBytes;
+  }
+
+  private shouldPump(entry: Entry): boolean {
+    return this.fileMayPump(entry) && this.inFlight() < FILE_LIMITS.chatWindowBytes;
+  }
+
+  /** Bytes this chat's files sent and have not seen confirmed. */
+  private inFlight(): number {
+    let bytes = 0;
+    for (const entry of this.moving) {
+      const out = entry.out, { record } = entry;
+      if (!out || record.state !== "active" || out.next <= record.confirmed) { this.moving.delete(entry); continue; }
+      bytes += out.next - record.confirmed;
+    }
+    return bytes;
+  }
+
+  /** Bytes were confirmed, or a file stopped sending: the files the chat's window held go on, before the one that freed it. */
+  private wakeHeld(): void {
+    for (const entry of [...this.held]) { this.held.delete(entry); void this.pump(entry); }
   }
 
   /**
@@ -437,9 +518,10 @@ export class ChatFiles {
           this.end(entry, "failed", "Your contact asked for the same part of this file too many times");
           break;
         }
-        if (!this.send({ t: "pf-data", id: entry.record.id, offset, data: toBase64Url(chunk) })) { refused = true; break; }
+        if (!this.sendData(entry.record.id, offset, chunk)) { refused = true; break; }
         out.next = offset + chunk.length;
         out.sent += chunk.length;
+        this.moving.add(entry);
       }
     } catch (error) {
       if (generation === out.generation) {
@@ -452,7 +534,7 @@ export class ChatFiles {
         // A refused frame is tried again later, never at once: at once, nothing else would run until it went.
         if (refused) out.wake = setTimeout(() => void this.pump(entry), FILE_LIMITS.sendRetryMs);
         else void this.pump(entry);
-      }
+      } else if (generation === out.generation && this.fileMayPump(entry)) this.held.add(entry);
     }
   }
 
@@ -478,7 +560,7 @@ export class ChatFiles {
   }
 
   private activeIncoming(except: Entry): number {
-    return [...this.entries.values()].filter((e) => e !== except && e.record.direction === "in" && (e.record.state === "active" || e.record.state === "verifying")).length;
+    return [...this.entries.values()].filter((e) => e !== except && e.record.direction === "in" && (e.record.state === "active" || e.record.state === "verifying" || e.in?.starting)).length;
   }
 
   /**
@@ -506,17 +588,25 @@ export class ChatFiles {
     return incoming.target;
   }
 
-  /** An accepted file goes when a session is open and fewer than three others arrive at once. */
+  /**
+   * An accepted file goes when a session is open and fewer than three others arrive at once. One whose target is still
+   * being opened counts among the three: counted only once active, every file offered or queued meanwhile went too, and
+   * the windows of ten files and more at once overflowed the session's receive queue.
+   */
   private startIncoming(entry: Entry): void {
     if (!this.attached || transferEnded(entry.record) || entry.record.state === "asking" || (entry.record.state === "paused" && entry.record.pausedBy === "me")) return;
+    const incoming = entry.in!;
+    if (incoming.starting) return;
     if (this.activeIncoming(entry) >= FILE_LIMITS.maxActiveIncoming) {
       if (entry.record.state !== "queued") { entry.record.state = "queued"; this.changed(entry); }
       this.send({ t: "pf-wait", id: entry.record.id, why: "busy" });
       return;
     }
+    incoming.starting = true;
     void this.target(entry).then(() => {
-      if (transferEnded(entry.record) || !this.attached) return;
-      if (entry.record.state === "paused" && entry.record.pausedBy === "me") return;
+      incoming.starting = false;
+      // Ended, paused or cut off while it opened: its turn goes to the next one.
+      if (transferEnded(entry.record) || !this.attached || (entry.record.state === "paused" && entry.record.pausedBy === "me")) { this.startNext(); return; }
       entry.record.state = "active";
       entry.record.pausedBy = undefined;
       entry.in!.gapAt = undefined;
@@ -525,8 +615,10 @@ export class ChatFiles {
       entry.in!.heardAt = this.now();
       this.armNudge(entry);
     }, (error) => {
+      incoming.starting = false;
       this.end(entry, "failed", `Could not store the file: ${error instanceof Error ? error.message : String(error)}`);
       this.send({ t: "pf-refuse", id: entry.record.id, why: "no-room" });
+      this.startNext();
     });
   }
 
@@ -634,7 +726,10 @@ export class ChatFiles {
     if (record.state !== "active" || !incoming.target) return;
     incoming.heardAt = this.now();
     const { offset, data } = frame;
-    if (!isInt(offset) || typeof data !== "string" || !data.length || data.length > Math.ceil(FILE_LIMITS.chunkBytes * 4 / 3) || !DATA.test(data)) return;
+    // The bytes themselves when they came as a binary message (files/4), base64url text in a `pf-data` frame.
+    const binary = data instanceof Uint8Array;
+    if (!isInt(offset) || !(binary || typeof data === "string") || !data.length) return;
+    if (!binary && (data.length > Math.ceil(FILE_LIMITS.chunkBytes * 4 / 3) || !DATA.test(data))) return;
     if (offset < incoming.written) {
       // Sent again (a resync): already taken. Said again only once everything is stored.
       if (incoming.stored === incoming.written) this.send({ t: "pf-got", id: record.id, offset: incoming.stored });
@@ -645,7 +740,7 @@ export class ChatFiles {
       if (incoming.gapAt !== incoming.written) { incoming.gapAt = incoming.written; this.send({ t: "pf-accept", id: record.id, offset: incoming.written }); }
       return;
     }
-    const bytes = fromBase64Url(data);
+    const bytes = binary ? data : fromBase64Url(data);
     if (!bytes.length || bytes.length > FILE_LIMITS.chunkBytes || offset + bytes.length > record.file.size) return;
     incoming.written += bytes.length;
     const target = incoming.target;
@@ -780,6 +875,7 @@ export class ChatFiles {
         record.state = "active";
         record.pausedBy = record.waitingFor = undefined;
         this.changed(outgoing);
+        this.wakeHeld();
         if (record.confirmed === record.file.size) void this.sendSum(outgoing);
         else { this.armStall(outgoing); void this.pump(outgoing); }
         return;
@@ -793,12 +889,14 @@ export class ChatFiles {
         if (frame.why === "paused") { record.state = "paused"; record.pausedBy = "peer"; }
         else { record.state = "asking"; record.waitingFor = frame.why === "busy" ? "busy" : "consent"; }
         this.changed(outgoing);
+        this.wakeHeld();
         return;
       }
       case "pf-got": {
         if (!isInt(frame.offset) || frame.offset <= record.confirmed || frame.offset > out.next) return;
         record.confirmed = frame.offset;
         this.changed(outgoing, true);
+        this.wakeHeld();
         if (record.confirmed === record.file.size) void this.sendSum(outgoing);
         else { this.armStall(outgoing); void this.pump(outgoing); }
         return;
@@ -823,7 +921,10 @@ export class ChatFiles {
     record.state = state;
     record.error = error;
     record.pausedBy = record.waitingFor = undefined;
-    if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.block = undefined; entry.out.source = undefined; }
+    if (entry.out) {
+      entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.block = undefined; entry.out.source = undefined;
+      this.moving.delete(entry); this.held.delete(entry);
+    }
     if (entry.in) {
       const incoming = entry.in;
       clearTimeout(incoming.timer);
@@ -832,6 +933,7 @@ export class ChatFiles {
       void incoming.writing.finally(() => { if (transferEnded(record)) incoming.target = undefined; });
     }
     this.changed(entry);
+    if (entry.out) this.wakeHeld();
   }
 
   // ─── What the person does ───────────────────────────────────────────────
@@ -870,6 +972,7 @@ export class ChatFiles {
     if (entry.out) { entry.out.generation++; entry.out.next = record.confirmed; clearTimeout(entry.out.timer); this.send(this.offerFrame(record, true)); }
     else { this.send({ t: "pf-wait", id, why: "paused" }); void this.checkpoint(entry); this.startNext(); }
     this.changed(entry);
+    if (entry.out) this.wakeHeld();
   }
 
   resume(direction: "in" | "out", id: string): void {

@@ -2,6 +2,7 @@ import { createInPageHost } from "@ghostly/browser/inPageHost";
 import { checkVersionFeed } from "@ghostly/browser/updateFeed";
 import { applyUpdate, prepareUpdate } from "./pwa/serviceWorker";
 import { RELEASES_URL } from "../../ui/src/lib/settings";
+import { builtInAppOption } from "../../ui/src/lib/apps/builtIns";
 import { popupWindow } from "@ghostly/browser/proofs/oidc/popup";
 import { atprotoPopupWindow } from "@ghostly/browser/proofs/atproto/popup";
 import { DHT_POLL_INTERVALS, RelayTransport } from "@ghostly/core";
@@ -56,7 +57,8 @@ export const webHost = createInPageHost({
   // A new profile gets its default Mainnet wallets, never under test (see defaultWalletsAllowed).
   // Mini-apps by the build's flag (APPS_ENABLED); on whatever it says in the e2e suite's build (VITE_APPS_TEST, fixed at build time),
   // and held items read from its local S3 server there.
-  node: { ...testPace(), ...testReactions(), irohWeb: testIroh(), defaultWallets: defaultWalletsAllowed(), ...(import.meta.env.VITE_APPS_TEST === "1" ? { apps: true, holdLoopback: true } : {}) },
+  // The apps that come with Ghostly are read from this build's own files (`builtInAppOption`), never from a server of theirs.
+  node: { ...testPace(), ...testReactions(), irohWeb: testIroh(), defaultWallets: defaultWalletsAllowed(), ...builtInAppOption(), ...(import.meta.env.VITE_APPS_TEST === "1" ? { apps: true, holdLoopback: true } : {}) },
 
   /**
    * The deployed build says what it is in `/version.json`, on this origin and

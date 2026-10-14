@@ -546,6 +546,11 @@ body {
 .nav-sheet a:hover {
   background: var(--surface-2);
 }
+/* The page that is open, marked as in the desktop nav. */
+.nav-sheet a[aria-current="page"] {
+  color: var(--cyan);
+  background: rgba(255, 255, 255, 0.04);
+}
 .nav-sheet .nav-sheet-way {
   color: var(--cyan);
 }

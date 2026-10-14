@@ -58,7 +58,7 @@ async function copyIn(writer: BackupWriter, path: string, size: number): Promise
 export const BACKUP_METHODS: Record<string, Method> = {
   /**
    * Writes the backup to `path` (resolved by the command), sealed with `passphrase`, or not encrypted when
-   * `noPassphrase` is true: one of the two, never a guess. The store is folded first, so the copy is whole. It is
+   * `noPassphrase` is true: one of the two, never a guess. The store is written whole for it, every value inline. It is
    * written beside `path` and only takes its name once it is complete: a backup that fails leaves no file. `light`:
    * the files over the cut (`keptInLight`) are left out, their records kept.
    */
@@ -68,9 +68,14 @@ export const BACKUP_METHODS: Record<string, Method> = {
     const passphrase = str(params, "passphrase"), unsealed = bool(params, "noPassphrase");
     if (!passphrase && !unsealed) throw new CliError("bad_request", "passphrase is required (or noPassphrase: true for a backup anyone can read)");
     if (passphrase && unsealed) throw new CliError("bad_request", "Give a passphrase or noPassphrase, not both");
-    await ctx.runtime.store.compact();
+    // The folder it goes in, checked first: a missing one is named, not the file written beside `path`.
+    const folder = dirname(path);
+    if (!(await stat(folder)).isDirectory()) throw new CliError("not_found", `No such file or folder: ${folder}`);
     const paths = ctx.runtime.paths;
-    const store = join(paths.db, "snapshot.bin");
+    // The store as one snapshot with every value in it (the messages too, which the profile keeps in rows.db): a backup
+    // any ghostly restores, this one or an older one.
+    const store = join(paths.db, `backup-store-${process.pid}.bin`);
+    await ctx.runtime.store.exportSnapshot(store);
     const light = bool(params, "light");
     const all = await Promise.all((await walk(paths.files)).map(async (name) => ({ name, size: (await stat(join(paths.files, name))).size })));
     // A file's name is its id: only one that could be a voice message under its larger cut is looked up.
@@ -106,6 +111,7 @@ export const BACKUP_METHODS: Record<string, Method> = {
     } finally {
       await out?.close().catch(() => {});
       await rm(partial, { force: true });
+      await rm(store, { force: true });
     }
   },
 };
@@ -117,10 +123,12 @@ async function openFile(path: string): Promise<FileHandle> {
   }
 }
 
-/** A file on disk as a backup's source: read in ranges, never whole. */
+/** A file on disk as a backup's source: read in ranges, never whole. A folder opens, and is refused as one here. */
 async function fileSource(path: string): Promise<BackupSource & { close(): Promise<void> }> {
   const handle = await open(path, "r");
-  const { size } = await handle.stat();
+  const found = await handle.stat();
+  if (found.isDirectory()) { await handle.close(); throw new CliError("bad_request", `${path} is a folder: name a file`); }
+  const { size } = found;
   return {
     size,
     read: async (offset, length) => {

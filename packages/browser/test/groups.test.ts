@@ -161,7 +161,8 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     await world.settle();
     expect(world.peers.get("alice")!.edges.size).toBe(0);
     expect(world.peers.get("bob")!.edges.size).toBe(0);
-    expect(world.events("alice")).toEqual(["created", "joined", "gone"]);
+    // He left on his own: the line says so, not that he is no longer a member.
+    expect(world.events("alice")).toEqual(["created", "joined", "left"]);
     // Nothing of it is left on Bob's device once the admin confirmed.
     expect(await world.peers.get("bob")!.store.getGroups()).toEqual([]);
   });

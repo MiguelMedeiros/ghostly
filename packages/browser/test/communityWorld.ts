@@ -128,6 +128,8 @@ export class CommunityWorld {
    * rest wait their turn while the other links go on, as a long answer does on a slow connection.
    */
   slow: ((from: Peer, to: Peer) => number) | null = null;
+  /** With `slow`: the frames that wait go once per step of the clock (`run`), not all within one: an answer that takes time. */
+  slowByClock = false;
   private readonly slowed = new Map<string, { per: number; frames: (() => void)[] }>();
   private pending: Promise<unknown>[] = [];
 
@@ -231,6 +233,14 @@ export class CommunityWorld {
       },
       storeMessage: async message => { if (messages.some(m => m.id === message.id)) return false; messages.push(message); return true; },
       forgetFrame: async (linkId, id) => { const row = messages.find(m => m.linkId === linkId && m.id === id); if (row) delete row.frame; },
+      keepFrame: async (linkId, id, frame) => { const row = messages.find(m => m.linkId === linkId && m.id === id); if (row) row.frame = frame; },
+      // The history is the order rows came in: these go to its end, in this order.
+      placeAgain: async (linkId, ids) => {
+        for (const id of ids) {
+          const i = messages.findIndex(m => m.linkId === linkId && m.id === id);
+          if (i >= 0) messages.push(...messages.splice(i, 1));
+        }
+      },
       emit: () => {},
       myNick: () => peer.nick,
       staysOnline: () => !!peer.staysOnline,
@@ -279,6 +289,17 @@ export class CommunityWorld {
     const copy = JSON.parse(data) as Record<string, unknown>;
     if (this.drop?.(peer, there.peer, copy)) return true;
     this.pending.push(there.peer.groups.filesFrame(edge.g, edge.me, there.linkId, copy));
+    return true;
+  }
+
+  /** A file's bytes on an edge as a binary message (files/4): the receiver's app hears the `pf-data` frame with them as bytes. */
+  sendData(peer: Peer, linkId: string, id: string, offset: number, bytes: Uint8Array): boolean {
+    const edge = peer.links.get(linkId), there = edge && this.counterpart(edge);
+    if (!edge || edge.kind !== "edge" || !there || !this.up(peer, edge, there.peer)) return false;
+    peer.sent.frames++; peer.sent.bytes += 2 + id.length + 8 + bytes.length;
+    const frame = { t: "pf-data", id, offset, data: bytes.slice() };
+    if (this.drop?.(peer, there.peer, frame)) return true;
+    this.pending.push(there.peer.groups.filesFrame(edge.g, edge.me, there.linkId, frame));
     return true;
   }
 
@@ -358,11 +379,13 @@ export class CommunityWorld {
     }
   }
 
+  /** A slow way's next frames, in the order they were sent. */
+  private slowNext(): void { for (const queue of this.slowed.values()) for (const deliver of queue.frames.splice(0, queue.per)) deliver(); }
+
   async settle(): Promise<void> {
     for (let i = 0; i < 500; i++) {
       this.announce();
-      // A slow way's next frames, in the order they were sent.
-      for (const queue of this.slowed.values()) for (const deliver of queue.frames.splice(0, queue.per)) deliver();
+      if (!this.slowByClock) this.slowNext();
       const batch = this.pending.splice(0);
       if (!batch.length) {
         // What the engines handed on (payments) may send more.
@@ -398,6 +421,7 @@ export class CommunityWorld {
       if (this.readsFromStepStart) this.stepStart = new Map(this.pkarr);
       for (const peer of this.peers.values()) if (peer.online) await peer.groups.tick(this.now + (peer.clock ?? 0));
       this.signal();
+      if (this.slowByClock) this.slowNext();
       await this.settle();
     }
   }

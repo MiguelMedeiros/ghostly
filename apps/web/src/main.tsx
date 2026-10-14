@@ -12,7 +12,7 @@ import { handoffProfileHost, recoverHandoffPointer } from "../../ui/src/lib/hand
 import { openProfile } from "../../ui/src/lib/profileStart";
 import { restartWhenRestored } from "../../ui/src/lib/restoredPage";
 import { loadSettings } from "../../ui/src/lib/settings";
-import { bootDetails, missingEssentials, type Essential } from "../../ui/src/lib/bootCheck";
+import { bootDetails, browserTraits, lockdownLikely, missingEssentials, type Essential } from "../../ui/src/lib/bootCheck";
 import { UnsupportedBrowser } from "../../ui/src/components/UnsupportedBrowser";
 import { OtherTab } from "../../ui/src/components/OtherTab";
 import { loadLocale, translatorFor } from "../../ui/src/locales";
@@ -56,11 +56,11 @@ function profileTranslator() {
 
 /**
  * "Ghostly can't run in this browser", in the profile's language, instead of the app: said rather than a blank page
- * or an app that never connects. Nothing else starts; the returned promise never settles, so the module stops here.
+ * or an app that never connects, and that Lockdown Mode is the likely reason when what is missing matches it. Nothing else starts; the returned promise never settles, so the module stops here.
  */
 function cannotRun(missing: Essential[], error?: unknown): Promise<never> {
   const t = profileTranslator();
-  root.render(<UnsupportedBrowser missing={missing} details={bootDetails(missing, error)} t={t} />);
+  root.render(<UnsupportedBrowser missing={missing} details={bootDetails(missing, error)} lockdown={lockdownLikely(missing, browserTraits())} t={t} />);
   return new Promise<never>(() => {});
 }
 

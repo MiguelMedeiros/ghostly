@@ -91,7 +91,7 @@ describe("on Desktop, the Dock icon", () => {
 
   it("takes the number the web app's icon would, through Tauri's window badge, and no count at 0", async () => {
     const call = vi.fn((_command: string, _args: Record<string, unknown>) => Promise.resolve(null));
-    setAppBadgeTarget(dockBadge(call));
+    setAppBadgeTarget(dockBadge(call, false));
     expect(canBadge()).toBe(true);
     setChatMute("muted", "forever");
     showAppBadge(badgeCount([session("a", 2), session("muted", 4)], [{ id: "desk", lastMessageAt: NOW - 100 }], NOW));
@@ -103,9 +103,21 @@ describe("on Desktop, the Dock icon", () => {
     ]);
   });
 
+  // Tauri's badge resolved on Linux and showed nothing: it reaches only Unity itself, which no current desktop runs.
+  it("on Linux, the launcher's count goes to the app's own launcher entry, 0 when there is none", async () => {
+    const call = vi.fn((_command: string, _args: Record<string, unknown>) => Promise.resolve(null));
+    setAppBadgeTarget(dockBadge(call, true));
+    showAppBadge(4);
+    showAppBadge(0);
+    expect(call.mock.calls).toEqual([
+      ["native_unread_count", { count: 4 }],
+      ["native_unread_count", { count: 0 }],
+    ]);
+  });
+
   it("a platform without a badge (Windows) refuses quietly", async () => {
     const call = vi.fn(() => Promise.reject(new Error("unsupported")));
-    setAppBadgeTarget(dockBadge(call));
+    setAppBadgeTarget(dockBadge(call, false));
     expect(() => showAppBadge(2)).not.toThrow();
     await Promise.resolve();
     expect(call).toHaveBeenCalledTimes(1);

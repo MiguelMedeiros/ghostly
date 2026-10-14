@@ -1,18 +1,19 @@
 import type { DiscoveryStatus, RelayHealth } from "@ghostly/core";
 import { useI18n, type Translate } from "../contexts/I18nContext";
+import { clockTime } from "../lib/time";
 
 /** A relay by its host, as people know it: `pkarr.pubky.org`, not `https://pkarr.pubky.org`. */
 function hostOf(relay: string): string {
   try { return new URL(relay).host; } catch { return relay; }
 }
 
-const at = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const at = (ms: number, t: Translate) => clockTime(ms, t.language);
 
 function stateText(health: RelayHealth, t: Translate): string {
   if (health.state === "ok") return t("connection.discovery.ok");
   const throttled = health.state === "throttled";
   if (!health.until) return throttled ? t("connection.discovery.throttled") : t("connection.discovery.failing");
-  return t(throttled ? "connection.discovery.throttledUntil" : "connection.discovery.failingUntil", { time: at(health.until) });
+  return t(throttled ? "connection.discovery.throttledUntil" : "connection.discovery.failingUntil", { time: at(health.until, t) });
 }
 
 /**

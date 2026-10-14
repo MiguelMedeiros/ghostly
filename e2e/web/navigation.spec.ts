@@ -115,3 +115,57 @@ test("a deep link gets home under it: Back from it goes home, not out of the app
   await page.goBack();
   await home(page);
 });
+
+test("a page of the menu whose file did not load says so in its place, and Try again or Reload shows it", { tag: ["@feature:app.navigation"] }, async ({ peer, browserName }) => {
+  // A page of the menu is a file of its own, asked for when it is first opened: the connection drops just then.
+  let offline = true;
+  const { page } = await peer("blip", {
+    beforeOpen: async (context) => {
+      await context.route(/\/assets\/Settings-[^/]+\.js$/, (route) => (offline ? route.abort("internetdisconnected") : route.fallback()));
+      // And the question Reload asks first: is the app's page there to reload into?
+      await context.route((url) => url.pathname === "/", (route) => (offline && route.request().method() === "HEAD" ? route.abort("internetdisconnected") : route.fallback()));
+    },
+  });
+  await page.getByTestId("account-settings").click();
+  const notice = page.getByTestId("page-not-loaded");
+  await expect(notice).toContainText("This page did not load.");
+  // Not the app-wide error screen, whose only way out is a reload: the chat list is still there.
+  await expect(page.getByTestId("app-error")).toHaveCount(0);
+  await expect(page.getByTestId("sidebar")).toBeVisible();
+  await expect(page.getByTitle("New Chat")).toBeVisible();
+
+  // Still no connection: the notice stays, with the keyboard focus on its button.
+  const again = page.getByTestId("page-not-loaded-retry");
+  await again.click();
+  await expect(again).not.toHaveAttribute("aria-busy", "true");
+  await expect(notice).toBeVisible();
+  await expect(again).toBeFocused();
+
+  // The other pages are files of their own, and open meanwhile.
+  await page.getByTestId("wallet-chip").click();
+  await expect(page.getByTestId("wallet")).toBeVisible();
+  await page.getByTestId("account-settings").click();
+  await expect(notice).toBeVisible();
+
+  // Reload is offered once Try again has failed. With no connection it would leave the browser's own error page: the app stays.
+  const reload = page.getByTestId("page-not-loaded-reload");
+  await page.evaluate(() => { (window as unknown as { sameDocument?: boolean }).sameDocument = true; });
+  await reload.click();
+  await expect(reload).not.toHaveAttribute("aria-disabled", "true");
+  await expect(notice).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { sameDocument?: boolean }).sameDocument)).toBe(true);
+
+  // The connection is back. Chromium keeps a failed import for as long as the page lives, so Try again still fails
+  // there (Firefox and Safari ask the server again, and show the page); Reload opens Settings.
+  offline = false;
+  await again.click();
+  if (browserName === "chromium") {
+    await expect(again).not.toHaveAttribute("aria-busy", "true");
+    await reload.click();
+  }
+  await expect(page.getByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { sameDocument?: boolean }).sameDocument)).toBe(browserName === "chromium" ? undefined : true);
+  await expect(notice).toHaveCount(0);
+  await expect(page.getByTestId("app-error")).toHaveCount(0);
+  await expect(page.getByTestId("sidebar")).toBeVisible();
+});
