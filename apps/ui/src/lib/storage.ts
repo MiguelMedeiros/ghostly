@@ -345,8 +345,13 @@ export function addMessages(
   messages: readonly ChatMessage[],
   /** These bring back every message its stored copy left out (the engine's whole history): the list is whole again. */
   complete = false,
+  /**
+   * The session as it is stored now, read already (the mirror's, `platform/sync.ts`): not read again, which in a chat of
+   * thousands is a parse and a merge of all of them. Its list is not changed in place.
+   */
+  held?: ChatSession,
 ): ChatSession | null {
-  const session = loadSession(sessionId);
+  const session = held ? { ...held, messages: held.messages.slice() } : loadSession(sessionId);
   if (!session) return null;
   if (complete) delete session.older;
 
