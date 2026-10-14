@@ -200,6 +200,14 @@
   line-height: 1.1;
   color: var(--cyan);
 }
+.br-tagline-short-label {
+  margin-top: 10px !important;
+}
+.br-tagline-short {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
 .br-traits strong {
   font-size: 17px;
 }

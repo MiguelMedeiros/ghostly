@@ -56,6 +56,13 @@ test("the copy buttons copy the boilerplate", async ({ page, context }) => {
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(brand.foundation.boilerplate.short);
 });
 
+test("the press contact is a mail link, and the social card carries the short tagline", async ({ page }) => {
+  await page.goto("/brand");
+  await expect(page.locator("#use a.br-contact-mail")).toHaveAttribute("href", `mailto:${brand.press.contact}`);
+  await expect(page.locator(".br-app-social-title")).toHaveText(brand.foundation.taglineShort);
+  await expect(page.locator("#foundation .br-tagline")).toHaveText(brand.foundation.tagline);
+});
+
 test("the contrast table shows every pair, the don't pair failing", async ({ page }) => {
   await page.goto("/brand");
   const rows = page.locator(".br-contrast tbody tr");

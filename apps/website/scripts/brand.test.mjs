@@ -9,7 +9,7 @@ import { inflateRawSync } from "node:zlib";
 import brand from "../lib/brand/brand.json" with { type: "json" };
 import { NEEDS, contrast, notations } from "../lib/brand/color.mjs";
 import { KIT_DIR, SCREENSHOTS, kitEntries, logoFiles } from "../lib/brand/kit.mjs";
-import { lockup, toSvg } from "../lib/brand/logo.mjs";
+import { README_LOGOS, lockup, readmeSvg, toSvg } from "../lib/brand/logo.mjs";
 import { kitFiles, zip } from "./brand-kit.mjs";
 
 const SITE = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -112,10 +112,20 @@ test("the core palette's shares add up to the whole", () => {
   assert.equal(brand.colors.core.reduce((n, c) => n + c.share, 0), 100);
 });
 
-test("the kit gives the press contact, or where to write until there is one", () => {
+test("the kit gives the press contact and both taglines", () => {
   const text = kitEntries().find((e) => e.path === "boilerplate.txt").text;
-  if (brand.press.contact) assert.ok(text.includes(`Press: ${brand.press.contact}`));
-  else assert.ok(text.includes(`Press: no address yet. Until there is one, write through ${brand.press.contactFallback}`));
+  assert.match(brand.press.contact, /^[^@\s]+@[^@\s]+\.[a-z]+$/);
+  assert.ok(text.includes(`Press: ${brand.press.contact}`));
+  assert.ok(text.includes(`Tagline: ${brand.foundation.tagline}`));
+  assert.ok(text.includes(`Short tagline (small spaces, bios): ${brand.foundation.taglineShort}`));
+  assert.ok(brand.foundation.tagline.endsWith(brand.foundation.taglineShort), "the short tagline is the end of the long one");
+});
+
+test("the README's logos (docs/assets/readme) are the brand's icon, cyan on dark and Ghost deep on light", () => {
+  for (const [file, way] of Object.entries(README_LOGOS)) {
+    const fill = brand.logo.colorways.find((w) => w.id === way).fill;
+    assert.equal(readRepo(`docs/assets/readme/${file}`), readmeSvg(fill), `${file}: run node scripts/brand-kit.mjs --readme`);
+  }
 });
 
 test("the kit holds every logo in every colourway, the colours, the fonts, the copy, the screenshots", () => {

@@ -99,12 +99,12 @@ export function ApplicationsSection() {
           </figure>
         </Sub>
         <Sub title={t.social} note={t.socialText}>
-          <div className="br-app-social" role="img" aria-label={`A square post: "${t.socialTitle}" ${t.socialLine}`}>
+          <div className="br-app-social" role="img" aria-label={`A square post: "${brand.foundation.taglineShort}" ${t.socialLine}`}>
             <div className="br-app-social-ghosts" aria-hidden="true">
               <Ghost who="boo" mood="happy" size={92} float={false} />
               <Ghost who="casper" mood="talk" size={92} float={false} />
             </div>
-            <p className="br-app-social-title">{t.socialTitle}</p>
+            <p className="br-app-social-title">{brand.foundation.taglineShort}</p>
             <p className="br-app-social-line">{t.socialLine}</p>
             <Logo variant="lockup" fill="#22d3ee" className="br-app-social-logo" />
           </div>
@@ -160,21 +160,13 @@ export function UseSection() {
       </div>
       <p className="note br-after">{t.fork}</p>
       <Sub title={t.contact}>
-        <div className="br-panel br-contact" data-contact={press.contact ? "set" : "pending"}>
-          {press.contact ? (
-            <p>
-              <a className="link-arrow" href={`mailto:${press.contact}`}>
-                {press.contact}
-              </a>
-            </p>
-          ) : (
-            <p>
-              {t.contactPending}{" "}
-              <a className="link-arrow" href={press.contactFallback}>
-                GitHub issues ↗
-              </a>
-            </p>
-          )}
+        <div className="br-panel br-contact" >
+          <p>
+            <a className="link-arrow br-contact-mail" href={`mailto:${press.contact}`}>
+              {press.contact}
+            </a>
+          </p>
+          <p className="muted">{t.contactText}</p>
           <p className="note">
             {t.maker} <a href={press.maker.url}>{press.maker.name}</a> · {press.license} License ·{" "}
             <a href={press.repo}>Source code</a>

@@ -97,7 +97,7 @@ const wrap = (text, width = 100) => {
 };
 
 export function contactLine() {
-  return brand.press.contact ? `Press: ${brand.press.contact}` : `Press: no address yet. Until there is one, write through ${brand.press.contactFallback}`;
+  return `Press: ${brand.press.contact}`;
 }
 
 export function boilerplateTxt() {
@@ -107,6 +107,7 @@ export function boilerplateTxt() {
     "=======",
     "",
     `Tagline: ${f.tagline}`,
+    `Short tagline (small spaces, bios): ${f.taglineShort}`,
     "",
     "In one line",
     wrap(f.oneLine),
@@ -160,7 +161,7 @@ export function readmeTxt() {
     "  boilerplate.txt  the name, the tagline and the descriptions to quote",
     "",
     "The rules in short",
-    "  - Ghost cyan on dark backgrounds, Night (navy) on light ones and on cyan. White or black only where those cannot work.",
+    "  - Ghost cyan on dark backgrounds, Ghost deep on light ones, Night on cyan. White or black only where those cannot work.",
     `  - Keep clear space of ${brand.logo.clearSpaceE} eye-widths around the logo. Smallest logo: ${brand.logo.minimum[0].px} px wide; below that, the icon.`,
     "  - Don't stretch, rotate, recolour, outline or add effects to the logo.",
     "  - Ghostly is open source (MIT), but the name and the logo say \"this is the Ghostly project\". Use them to talk about Ghostly, not to name your own product.",

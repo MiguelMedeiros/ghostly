@@ -98,5 +98,14 @@ export function toSvg(drawing, title) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x} ${y} ${w} ${h}" width="${r2(w)}" height="${r2(h)}" role="img" aria-label="${title}">\n  <title>${title}</title>\n${shapes}\n</svg>\n`;
 }
 
+/** The README's logos (docs/assets/readme), by colourway: the icon in its 64 box, framed as the README shows it. */
+export const README_LOGOS = { "logo-dark.svg": "cyan", "logo-light.svg": "deep" };
+
+/** One README logo. `node scripts/brand-kit.mjs --readme` writes both. @param {string} fill */
+export function readmeSvg(fill) {
+  const [tx, ty] = logo.appBox.translate;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 9 44 44" width="160" height="160" role="img" aria-label="Ghostly">\n  <path fill="${fill}" fill-rule="evenodd" transform="translate(${tx} ${ty})" d="${GHOST_D}"/>\n</svg>\n`;
+}
+
 /** The unit everything is measured in: one eye's diameter, in the icon's units. */
 export const EYE = E;

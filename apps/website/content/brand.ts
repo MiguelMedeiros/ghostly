@@ -34,6 +34,7 @@ export const brandPage = {
     oneLine: "In one line",
     promise: "The promise",
     tagline: "Tagline",
+    taglineShort: "Short form, for small spaces and bios",
     traits: "Personality",
     isNot: "What Ghostly is not",
     boilerplate: "Boilerplate for the press",
@@ -57,7 +58,7 @@ export const brandPage = {
       `Measure in E, the width of one of the ghost's eyes. Keep ${n}E free around the logo on every side: no text, edge or picture inside it. The gap between the ghost and the word is part of the logo; never close it.`,
     minimum: "Minimum size",
     backgrounds: "On backgrounds",
-    backgroundsText: "Ghost cyan on dark. Night on light and on cyan. White only on dark pictures or colours that are not ours.",
+    backgroundsText: "Ghost cyan on dark, Ghost deep on light, Night on cyan. White only on dark pictures or colours that are not ours.",
     donts: "Don't",
     wordmarkNote:
       "On screen the wordmark is set live in the device's own font, as in the app. In files it is outlined from Inter Bold, so it looks the same everywhere.",
@@ -198,7 +199,6 @@ export const brandPage = {
     ogText: "1200 × 630, the size every network reads without cropping. Words and ghosts keep 40 px from every edge. The site's own is made by npm run og-image from the same sources.",
     social: "Social post",
     socialText: "1080 × 1080. One headline in Inter Bold, one line in Haze, the lockup bottom left.",
-    socialTitle: "Talk peer to peer.",
     socialLine: "No account. No server keeping your messages.",
     slide: "Slide title",
     slideText: "16:9. Eyebrow in mono, title in Inter Bold, the icon in the corner. One idea per slide.",
@@ -229,7 +229,7 @@ export const brandPage = {
     ],
     fork: "A fork of the code is welcome under the MIT License. Give it its own name and icon, so people know which one they run.",
     contact: "Press and permissions",
-    contactPending: "A press address is coming. Until then, open an issue on GitHub and say it is for the press.",
+    contactText: "For interviews, logos you can't find here, or permission for something the list above does not cover.",
     maker: "Made by",
   },
   kit: {

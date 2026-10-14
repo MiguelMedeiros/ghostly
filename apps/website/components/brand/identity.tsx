@@ -28,6 +28,8 @@ export function FoundationSection() {
         <div className="br-panel">
           <p className="caption">{t.tagline}</p>
           <p className="br-tagline">{f.tagline}</p>
+          <p className="caption br-tagline-short-label">{t.taglineShort}</p>
+          <p className="br-tagline-short">{f.taglineShort}</p>
         </div>
       </div>
       <Sub title={t.traits}>
@@ -118,7 +120,7 @@ export function LogoSection() {
   const cyan = (variant: string) => files.find((f) => f.variant === variant && (f.colorway === "cyan" || variant === "tile"))!;
   const bgs = [
     { id: "night", bg: NIGHT, way: "cyan", label: "Ghost cyan on Night" },
-    { id: "white", bg: "#ffffff", way: "navy", label: "Night on white" },
+    { id: "white", bg: "#ffffff", way: "deep", label: "Ghost deep on white" },
     { id: "cyan", bg: CYAN, way: "navy", label: "Night on Ghost cyan" },
     { id: "photo", bg: NIGHT, way: "white", label: "White on a dark picture" },
   ];

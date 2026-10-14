@@ -8,13 +8,16 @@
  * The zip is written here (deflate from node:zlib, fixed dates), so the same sources give the same bytes.
  *
  *   node scripts/brand-kit.mjs          write the kit
+ *   node scripts/brand-kit.mjs --readme write the README's logos (docs/assets/readme), which are committed
  */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
 import sharp from "sharp";
+import brand from "../lib/brand/brand.json" with { type: "json" };
 import { KIT_DIR, KIT_ZIP, kitEntries } from "../lib/brand/kit.mjs";
+import { README_LOGOS, readmeSvg } from "../lib/brand/logo.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "public/brand");
@@ -104,7 +107,12 @@ export function zip(files) {
   return Buffer.concat([...locals, dir, end]);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv.includes("--readme")) {
+  for (const [file, way] of Object.entries(README_LOGOS)) {
+    writeFileSync(join(ROOT, "../../docs/assets/readme", file), readmeSvg(brand.logo.colorways.find((w) => w.id === way).fill));
+  }
+  console.log(`brand kit: wrote ${Object.keys(README_LOGOS).join(", ")} in docs/assets/readme/`);
+} else if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const files = await kitFiles();
   rmSync(OUT, { recursive: true, force: true });
   for (const { path, data } of files) {

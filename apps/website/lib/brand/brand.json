@@ -6,6 +6,7 @@
     "oneLine": "Ghostly is a free, open source messenger that connects you straight to the people you invite, with no account and no server holding your messages.",
     "promise": "Your conversations go from your device to theirs. Nobody in between keeps them, reads them or sells them.",
     "tagline": "Find each other. Talk peer to peer.",
+    "taglineShort": "Talk peer to peer.",
     "traits": [
       { "name": "Private by build", "text": "Privacy comes from how Ghostly works, not from a promise. We say what the network sees, plainly." },
       { "name": "Friendly", "text": "A ghost that waves, not one that haunts. Warm, a little playful, never spooky or edgy." },
@@ -53,7 +54,8 @@
     ],
     "colorways": [
       { "id": "cyan", "name": "Ghost cyan", "fill": "#22d3ee", "on": "#060a10", "use": "The default. On Night and every dark surface." },
-      { "id": "navy", "name": "Night", "fill": "#060a10", "on": "#ffffff", "use": "On white, light greys and on Ghost cyan." },
+      { "id": "deep", "name": "Ghost deep", "fill": "#0b6680", "on": "#ffffff", "use": "On white and light greys: the README on a light page, documents, light themes." },
+      { "id": "navy", "name": "Night", "fill": "#060a10", "on": "#22d3ee", "use": "On Ghost cyan, and in one-colour dark print." },
       { "id": "white", "name": "White", "fill": "#ffffff", "on": "#0d1117", "use": "On dark photos and colours that are not ours, where cyan would clash." },
       { "id": "black", "name": "Black", "fill": "#000000", "on": "#ffffff", "use": "One-colour print, stamps, engraving." }
     ],
@@ -84,6 +86,7 @@
       { "id": "line-2", "name": "Line 2", "hex": "#2b3b52", "role": "Borders of buttons and chips.", "site": "--line-2" },
       { "id": "dim", "name": "Dim", "hex": "#7a8aa6", "role": "Notes and the quietest text, on Night and the Shades only.", "site": "--dim" },
       { "id": "tile", "name": "Tile", "hex": "#0f172a", "role": "The rounded square behind the icon (favicon, app icons)." },
+      { "id": "deep", "name": "Ghost deep", "hex": "#0b6680", "role": "The logo and the accent on light pages (the app's Cyan light accent, the README's light logo)." },
       { "id": "cyan-dim", "name": "Cyan deep", "hex": "#0e7490", "role": "Cyan on light pages, and pressed states.", "theme": "--color-cyan-dim" },
       { "id": "green-dim", "name": "Green deep", "hex": "#005c4b", "role": "The app's sent bubble (Classic, dark).", "theme": "--color-green-dim" },
       { "id": "mint", "name": "Casper mint", "hex": "#4ade80", "role": "Casper, the second ghost, and Available badges.", "site": "--mint", "ghost": "casper" },
@@ -119,7 +122,8 @@
       { "fg": "#031018", "bg": "#22d3ee", "label": "Button ink on Ghost cyan", "use": "text" },
       { "fg": "#031018", "bg": "#00a884", "label": "Button ink on Signal green", "use": "text" },
       { "fg": "#060a10", "bg": "#22d3ee", "label": "Night logo on Ghost cyan", "use": "graphic" },
-      { "fg": "#060a10", "bg": "#ffffff", "label": "Night logo on white", "use": "graphic" },
+      { "fg": "#0b6680", "bg": "#ffffff", "label": "Ghost deep logo on white", "use": "graphic" },
+      { "fg": "#060a10", "bg": "#ffffff", "label": "Night on white", "use": "text" },
       { "fg": "#0e7490", "bg": "#ffffff", "label": "Cyan deep on white", "use": "text" },
       { "fg": "#22d3ee", "bg": "#ffffff", "label": "Ghost cyan on white", "use": "avoid" },
       { "fg": "#e9edef", "bg": "#005c4b", "label": "App: text on a sent bubble (Classic dark)", "use": "text" },
@@ -180,8 +184,7 @@
     ]
   },
   "press": {
-    "contact": null,
-    "contactFallback": "https://github.com/MiguelMedeiros/ghostly/issues",
+    "contact": "ghostly@miguelmedeiros.com.br",
     "maker": { "name": "Miguel Medeiros", "url": "https://miguelmedeiros.dev" },
     "repo": "https://github.com/MiguelMedeiros/ghostly",
     "license": "MIT"
