@@ -64,7 +64,7 @@ test("a picture's bubble is as tall from the start as the picture it shows", { t
   expect(await mine.evaluate((el) => (el as HTMLElement).offsetHeight)).toBe(330);
 });
 
-test("a tap on a picture in a chat on a phone opens it large, in its own shape; a long press still opens the reactions", { tag: ["@feature:files.image.view", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+test("a tap on a picture in a chat on a phone opens it large, in its own shape, and a pinch zooms it and not the page; a long press still opens the reactions", { tag: ["@feature:files.image.view", "@feature:app.mobile-layout"] }, async ({ peer }) => {
   // Only profile pictures opened large: a tap on a picture someone sent did nothing, and a phone showed it at 330px.
   const [alice, bob] = await Promise.all([peer("view-alice"), peer("view-bob", { mobile: true, viewport: { width: 402, height: 874 } })]);
   await link(alice, bob);
@@ -96,7 +96,36 @@ test("a tap on a picture in a chat on a phone opens it large, in its own shape; 
   const large = (await viewer.getByTestId("avatar-viewer-image").boundingBox())!;
   expect(large.width).toBeGreaterThan(360);
   expect(large.width / large.height).toBeCloseTo(2, 1);
+
+  // A pinch on it zooms the picture, not the page: the browser's own zoom of the app stays at 1.
+  const image = viewer.getByTestId("avatar-viewer-image");
+  const cdp = await bob.page.context().newCDPSession(bob.page);
+  // Two fingers, spreading 240px apart from (x, y), as raw touches: Chromium's synthetic pinch never zooms the page.
+  const pinchAt = async (x: number, y: number) => {
+    const touch = (type: "touchStart" | "touchMove" | "touchEnd", spread: number) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x: x - 20 - spread, y, id: 0 }, { x: x + 20 + spread, y, id: 1 }] });
+    await touch("touchStart", 0);
+    for (let step = 1; step <= 20; step++) { await touch("touchMove", step * 6); await bob.page.waitForTimeout(16); }
+    await touch("touchEnd", 0);
+    await bob.page.waitForTimeout(300);
+  };
+  await pinchAt(large.x + large.width / 2, large.y + large.height / 2);
+  await expect.poll(() => image.getAttribute("data-zoom").then(Number)).toBeGreaterThan(1.5);
+  expect(await bob.page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
+  await expect(viewer).toBeVisible();
+  // A double tap puts it back whole.
+  const tapAt = async (x: number, y: number) => {
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  };
+  await tapAt(large.x + large.width / 2, large.y + large.height / 2);
+  await tapAt(large.x + large.width / 2, large.y + large.height / 2);
+  await expect(image).toHaveAttribute("data-zoom", "1.00");
+
   await viewer.getByTestId("avatar-viewer-close").click();
   await expect(viewer).toHaveCount(0);
   await expect(open).toBeFocused();
+
+  // The chat under it does not zoom either (the pinch's hold may open a message's details: only the scale counts).
+  await pinchAt(200, 400);
+  expect(await bob.page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(1);
 });

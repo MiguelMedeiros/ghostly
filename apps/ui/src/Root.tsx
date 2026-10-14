@@ -1,17 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { HashRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { AttentionFeedback } from "./components/AttentionFeedback";
 import { NameStep } from "./components/NameStep";
 import { OpenFailureNotice } from "./components/OpenFailureNotice";
 import { App } from "./App";
 import { Home } from "./pages/Home";
-import { Settings } from "./pages/Settings";
-import { Services } from "./pages/Services";
-import { Profile } from "./pages/Profile";
-import { Identities } from "./pages/Identities";
-import { Apps } from "./pages/Apps";
-import { Tasks } from "./pages/Tasks";
-import { Wallet } from "./pages/Wallet";
 import { GroupChat } from "./pages/GroupChat";
 import { SharePicker } from "./pages/SharePicker";
 import { SettingsProvider } from "./contexts/SettingsContext";
@@ -22,9 +15,10 @@ import { UpdateProvider } from "./contexts/UpdateContext";
 import { LockScreen } from "./components/LockScreen";
 import { ProfileSwitchSplash } from "./components/ProfileSwitchSplash";
 import { PreUnlockRing } from "./components/PreUnlockRing";
-import { ensureSession, loadSession } from "./lib/storage";
+import { LINK_CHATS_WAITING, NO_ROOM_FOR_CHAT, ensureSession, linkChatsWaiting, loadSession, type SessionKeys } from "./lib/storage";
 import { useI18n, useT } from "./contexts/I18nContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { menuPage } from "./components/MenuPage";
 import { ProfileGate } from "./components/ProfileUnavailable";
 import { DeviceStandby } from "./components/DeviceStandby";
 import { LimitedStartGate } from "./components/devices/LimitedStart";
@@ -33,19 +27,24 @@ import { JoinHost } from "./components/devices/JoinHost";
 import { isDeviceCode, offerDeviceLink, readDeviceLink, takeDeviceLinkFromAddress } from "./lib/devices";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteRouteCode, protocolLinkCode, readInvite } from "./lib/url";
 import { onJoinNotice, showJoinNotice, type JoinNoticeKey } from "./lib/joinNotice";
+import { onChatNotStored, reportChatNotStored } from "./lib/chatNotStored";
 import { groupPath } from "./lib/groups";
 import { engine } from "@ghostly/browser/platform/engine";
 import { useAnchorHome, useAppNavigation } from "./hooks/useAppNavigation";
-import { errorText } from "./lib/errorText";
+import { problemText, type Problem } from "./lib/problemText";
+import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
 import "./index.css";
 
-/**
- * An invite link, or a chat address from before chats were routed by session
- * id, carries the chat's keys. Store them and replace the address at once, so
- * the keys stay out of the history. Runs while locked too: the address must
- * not wait for the password.
- */
+// The pages of the menu, each loaded the first time it is opened (components/MenuPage.tsx).
+const Settings = menuPage(() => import("./pages/Settings").then((m) => m.Settings));
+const Services = menuPage(() => import("./pages/Services").then((m) => m.Services));
+const Profile = menuPage(() => import("./pages/Profile").then((m) => m.Profile));
+const Identities = menuPage(() => import("./pages/Identities").then((m) => m.Identities));
+const Apps = menuPage(() => import("./pages/Apps").then((m) => m.Apps));
+const Tasks = menuPage(() => import("./pages/Tasks").then((m) => m.Tasks));
+const Wallet = menuPage(() => import("./pages/Wallet").then((m) => m.Wallet));
+
 /**
  * A device code's link that names the profile, `#<profile>#ghostly1z…` (WISP 06 § Adding a device), as the router reads
  * it when the address changes while the app is open: the name as the path, the code as its hash. Null for anything else.
@@ -56,11 +55,49 @@ function namedDeviceLink(pathname: string, hash: string): string | null {
   return link.profile && /^ghostly1/i.test(link.code) && isDeviceCode(link.code) ? named : null;
 }
 
+/**
+ * An invite link, or a chat address from before chats were routed by session
+ * id, carries the chat's keys. They leave the address at once, so they stay
+ * out of the history: the address must not wait for the password. The chat
+ * itself is made once the lock is passed, as a group's link is joined, and
+ * only while few link-made chats still wait for an answer (`LINK_CHATS_WAITING`).
+ */
 function ChatLinkIntake() {
   const { pathname, hash } = useLocation();
   const navigate = useNavigate();
   const { t } = useI18n();
-  const [invalid, setInvalid] = useState<(typeof INVITE_REFUSAL_MESSAGE)[keyof typeof INVITE_REFUSAL_MESSAGE] | "join.invalid" | null>(null);
+  const { isLocked } = useLockScreen();
+  const locked = useRef(isLocked);
+  locked.current = isLocked;
+  /** The invite a link brought while locked: the last one, kept in memory only. */
+  const [held, setHeld] = useState<SessionKeys | null>(null);
+  const [invalid, setInvalid] = useState<(typeof INVITE_REFUSAL_MESSAGE)[keyof typeof INVITE_REFUSAL_MESSAGE] | "join.invalid" | "join.tooManyLinks" | null>(null);
+
+  const open = useCallback((keys: SessionKeys) => {
+    // This profile's own invite opens the chat that owns it, never a second one; one already joined by opens its chat.
+    const outcome = classifyInvite(keys);
+    let sessionId: string | null;
+    if (outcome.kind === "own") { sessionId = outcome.sessionId; showJoinNotice("join.own"); }
+    else if (outcome.kind === "new" && linkChatsWaiting() >= LINK_CHATS_WAITING) {
+      setInvalid("join.tooManyLinks");
+      navigate("/", { replace: true });
+      return;
+    } else {
+      try { sessionId = ensureSession(keys, { viaLink: true }); } catch (cause) {
+        // A good invite the storage has no room for: said as that, never as a bad invite.
+        if (cause instanceof Error && cause.message === NO_ROOM_FOR_CHAT) { reportChatNotStored(cause); navigate("/", { replace: true }); return; }
+        sessionId = null;
+      }
+      if (sessionId && outcome.kind === "joined") showJoinNotice("join.alreadyIn");
+    }
+    if (!sessionId) {
+      setInvalid("join.invalid");
+      navigate("/", { replace: true });
+      return;
+    }
+    window.dispatchEvent(new Event("session-updated"));
+    navigate(chatPath(sessionId), { replace: true });
+  }, [navigate]);
 
   // An effect, not a layout effect: the router starts listening in its own layout effect, after this
   // one's, and would miss a navigation made before it (an invite link opened in a new tab).
@@ -73,25 +110,22 @@ function ChatLinkIntake() {
     // A device code opened while the app was open already (the address changed, no new page): the join host takes it.
     if (isDeviceCode(rest)) { offerDeviceLink(rest); navigate("/", { replace: true }); return; }
     const reading = readInvite(rest);
-    let sessionId: string | null = null;
     if (reading.ok) {
-      // This profile's own invite opens the chat that owns it, never a second one; one already joined by opens its chat.
-      const outcome = classifyInvite(reading.keys);
-      if (outcome.kind === "own") { sessionId = outcome.sessionId; showJoinNotice("join.own"); }
-      else {
-        try { sessionId = ensureSession(reading.keys); } catch { sessionId = null; }
-        if (sessionId && outcome.kind === "joined") showJoinNotice("join.alreadyIn");
-      }
-    } else if (protocolLinkCode(pathname) === null && !rest.includes("/") && !/^ghostly1/i.test(rest) && loadSession(decodeURIComponent(rest))) return; // an ordinary chat address
-    if (!sessionId) {
-      // Whatever it was, it leaves the address bar and the history: it may hold a key.
-      setInvalid(reading.ok ? "join.invalid" : INVITE_REFUSAL_MESSAGE[reading.reason]);
-      navigate("/", { replace: true });
+      if (locked.current) { setHeld(reading.keys); navigate("/", { replace: true }); }
+      else open(reading.keys);
       return;
     }
-    window.dispatchEvent(new Event("session-updated"));
-    navigate(chatPath(sessionId), { replace: true });
-  }, [pathname, hash, navigate]);
+    if (protocolLinkCode(pathname) === null && !rest.includes("/") && !/^ghostly1/i.test(rest) && loadSession(decodeURIComponent(rest))) return; // an ordinary chat address
+    // Whatever it was, it leaves the address bar and the history: it may hold a key.
+    setInvalid(INVITE_REFUSAL_MESSAGE[reading.reason]);
+    navigate("/", { replace: true });
+  }, [pathname, hash, navigate, open]);
+
+  useEffect(() => {
+    if (!held || isLocked) return;
+    setHeld(null);
+    open(held);
+  }, [held, isLocked, open]);
 
   useEffect(() => {
     if (!invalid) return;
@@ -101,7 +135,7 @@ function ChatLinkIntake() {
 
   return invalid ? (
     <div role="alert" data-testid="invite-link-invalid" onClick={() => setInvalid(null)}
-      className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-danger shadow-xl cursor-pointer">
+      className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-danger shadow-xl cursor-pointer">
       {t(invalid)}
     </div>
   ) : null;
@@ -119,15 +153,55 @@ function JoinNotice() {
   }, [notice]);
   return notice ? (
     <div role="status" data-testid="join-notice" onClick={() => setNotice(null)}
-      className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl cursor-pointer">
+      className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-text-primary shadow-xl cursor-pointer">
       {t(notice)}
     </div>
   ) : null;
 }
 
 /**
+ * A top notice there until closed: by its ×, by Escape, or by a tap on its words (not on its ⓘ, Copy or the details
+ * they open). It sits over the sidebar's header, so it closes as the app's other top notices do, and the focus goes
+ * back where it was when it came (the New that could not make a chat), not to the page.
+ */
+function ClosableTopNotice({ problem, testId, onClose }: { problem: Problem; testId: string; onClose: () => void }) {
+  const t = useT();
+  const [back] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
+  const close = useRef(() => {});
+  close.current = () => {
+    onClose();
+    if (back && back !== document.body && back.isConnected) back.focus();
+  };
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.defaultPrevented) close.current(); };
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
+  }, []);
+  return (
+    <div onClick={(e) => { if (!(e.target as Element).closest(`button, [data-testid="${testId}-details"]`)) close.current(); }}
+      className="top-notice flex cursor-pointer items-start gap-2 rounded-lg border border-border bg-panel-header py-2 ps-4 pe-2 shadow-xl">
+      <Notice problem={problem} testId={testId} className="min-w-0 text-sm" />
+      <button type="button" data-testid={`${testId}-close`} onClick={() => close.current()} aria-label={t("common.close")}
+        className="-my-1 h-8 w-8 shrink-0 cursor-pointer rounded-md text-lg leading-none text-text-secondary hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">×</button>
+    </div>
+  );
+}
+
+/**
+ * A new chat the storage had no room for, made where no dialog says it (lib/chatNotStored.ts): what happened and what to
+ * do, there until closed.
+ */
+function ChatNotStoredNotice() {
+  const t = useT();
+  const [problem, setProblem] = useState<Problem | null>(null);
+  useEffect(() => onChatNotStored((cause) => setProblem(problemText(cause, t))), [t]);
+  return problem ? <ClosableTopNotice problem={problem} testId="chat-not-stored" onClose={() => setProblem(null)} /> : null;
+}
+
+/**
  * A group's link opened in the app (`#/join/group1/…` or `#/join/group2/…`): it leaves the address at once, like an
- * invite; once the app is unlocked the engine joins and the group opens, saying it waits for the admin's app.
+ * invite; once the app is unlocked the engine joins and the group opens, saying it waits for the admin's app. A refusal
+ * is a notice as JoinDialog shows one (a title, what to do, the engine's English behind the ⓘ), there until closed.
  */
 function GroupLinkIntake() {
   const { pathname } = useLocation();
@@ -135,7 +209,7 @@ function GroupLinkIntake() {
   const nav = useAppNavigation();
   const { hasUnlocked } = useLockScreen();
   const [code, setCode] = useState("");
-  const [problem, setProblem] = useState("");
+  const [problem, setProblem] = useState<Problem | null>(null);
   const t = useT();
   useEffect(() => {
     const found = pathname.match(/^\/join\/(.+)$/)?.[1];
@@ -148,20 +222,10 @@ function GroupLinkIntake() {
     setCode("");
     engine.call("joinGroupByLink", { link: code })
       .then(({ groupId }) => nav.conversation(groupPath(groupId)))
-      .catch((cause: unknown) => setProblem(cause instanceof Error ? errorText(cause, t) : t("group.link.broken")));
+      .catch((cause: unknown) => setProblem(cause instanceof Error ? problemText(cause, t) : { tone: "error", title: t("group.link.broken") }));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `nav` changes with every location
   }, [code, hasUnlocked]);
-  useEffect(() => {
-    if (!problem) return;
-    const timer = setTimeout(() => setProblem(""), 6000);
-    return () => clearTimeout(timer);
-  }, [problem]);
-  return problem ? (
-    <div role="alert" data-testid="group-link-invalid" onClick={() => setProblem("")}
-      className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] rounded-lg border border-border bg-panel-header px-4 py-2 text-sm text-danger shadow-xl cursor-pointer">
-      {problem}
-    </div>
-  ) : null;
+  return problem ? <ClosableTopNotice problem={problem} testId="group-link-invalid" onClose={() => setProblem(null)} /> : null;
 }
 
 /**
@@ -236,6 +300,7 @@ export function Root() {
               <ErrorBoundary>
               <ChatLinkIntake />
               <JoinNotice />
+              <ChatNotStoredNotice />
               <OpenFailureNotice />
               <GroupLinkIntake />
               <HomeAnchor />

@@ -15,6 +15,7 @@ import { SWITCHER_SHORTCUT, useProfileGlances, useProfileSwitcher } from "../hoo
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useAppsState } from "../lib/apps/flag";
 import { AppGlyph } from "./apps/AppIcon";
+import { initial } from "../lib/initial";
 
 
 /**
@@ -120,7 +121,7 @@ export function AccountBar() {
             {/* The active profile's initial in its own color: which profile this is, at a glance. */}
             {myAvatar
               ? <img src={myAvatar} alt="" aria-hidden="true" draggable={false} className="w-[23px] h-[23px] rounded-full object-cover" />
-              : <span aria-hidden="true" className="grid place-items-center w-[23px] h-[23px] rounded-full text-[12px] font-bold text-[#111b21]" style={{ background: THEME_COLOR[themeOf(profile.id)] }}>{profile.name.charAt(0).toUpperCase()}</span>}
+              : <span aria-hidden="true" className="grid place-items-center w-[23px] h-[23px] rounded-full text-[12px] font-bold text-[#111b21]" style={{ background: THEME_COLOR[themeOf(profile.id)] }}>{initial(profile.name)}</span>}
             {platform && (
               <span
                 className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-sidebar-bg ${

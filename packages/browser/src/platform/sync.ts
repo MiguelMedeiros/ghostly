@@ -44,6 +44,18 @@ export function notifySessionsChanged(): void {
 }
 
 /**
+ * Histories made whole again after a reload (the engine posts every chat's at attach) store nothing new: the chat list
+ * has nothing to show, but an open chat has older messages to read. One `session-updated` for all of them, not one each.
+ */
+let wholeAgain: ReturnType<typeof setTimeout> | undefined;
+function notifyWholeAgain(): void {
+  wholeAgain ??= setTimeout(() => {
+    wholeAgain = undefined;
+    notifySessionsChanged();
+  }, 50);
+}
+
+/**
  * The sessions as this module last read them. Each engine update, `session-updated` and the 5 s tick reads them all:
  * a long chat's session is parsed again only when what is stored for it changed. One changed in place here is saved,
  * then forgotten (read again), so a write that failed does not linger as if it had been made.
@@ -109,10 +121,24 @@ function engineIds(messages: StoredMessage[]): ReadonlySet<string> {
 /** What each link's messages were last mirrored from: the list, and its session as stored after. */
 const mirrored = new Map<string, { messages: StoredMessage[]; sessionId: string; stored: string | null }>();
 
+/** Whether this link's last mirror went into this chat's session, and nothing has written the session since. */
+function untouched(linkId: string, chat: string): boolean {
+  const last = mirrored.get(linkId);
+  return last?.sessionId === chat && storedSession(chat) === last.stored;
+}
+
 /** Whether this list was mirrored into this session already, and nothing has written the session since. */
 function mirroredAlready(linkId: string, messages: StoredMessage[]): boolean {
   const last = mirrored.get(linkId);
-  return last?.messages === messages && storedSession(last.sessionId) === last.stored;
+  return last?.messages === messages && untouched(linkId, last.sessionId);
+}
+
+/**
+ * Mirrors a list not mirrored yet. The engine's state and the page's change tick (`engine.ts` `tellChanges`) both tell
+ * of a message that arrived, the state often first: the list is mirrored once.
+ */
+function mirrorNew(linkId: string, messages: StoredMessage[]): void {
+  if (!mirroredAlready(linkId, messages)) mirrorMessages(linkId, messages);
 }
 
 function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
@@ -125,7 +151,8 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
   setEngineMessages(session.id, engineIds(messages));
   // Read without its older messages (this page just loaded): the ones the engine keeps come back below, all of them.
   const partial = !!session.older;
-  const at = new Map(session.messages.map((m, i) => [m.id, i]));
+  const before = partial ? storedSession(session.id) : null;
+  const at =new Map(session.messages.map((m, i) => [m.id, i]));
   const added: ChatMessage[] = [];
   let dirty = false, moved = false;
   for (const message of messages) {
@@ -176,8 +203,9 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
   if (moved) session.messages.sort((a, b) => a.timestamp - b.timestamp);
   let changed = dirty;
   // A long history stored whole (before its stored copy kept only its last messages) is stored anew: saving writes only
-  // what changed, so this writes once.
-  if (dirty || (!partial && !added.length && session.messages.length > STORED_MESSAGES)) saveSession(session);
+  // what changed, so this writes once. Not again after a mirror that left it stored, nothing written since: that one
+  // stored it as it is kept.
+  if (dirty || (!partial && !added.length && session.messages.length > STORED_MESSAGES && !untouched(linkId, session.id))) saveSession(session);
   if (added.length) {
     const before = session.messages.length;
     const updated = addMessages(session.id, added, partial);
@@ -188,8 +216,10 @@ function mirrorMessages(linkId: string, messages: StoredMessage[]): void {
   if (mirrorIdentityShare(session, link)) changed = true;
   if (mirrorReaction(session, link)) changed = true;
   if (dirty || added.length || changed) forget(session.id);
-  mirrored.set(linkId, { messages, sessionId: session.id, stored: storedSession(session.id) });
-  if (changed) notifySessionsChanged();
+  const after = storedSession(session.id);
+  mirrored.set(linkId, { messages, sessionId: session.id, stored: after });
+  if (changed && partial && after === before) notifyWholeAgain();
+  else if (changed) notifySessionsChanged();
 }
 
 /**
@@ -250,19 +280,28 @@ async function reconcile(): Promise<void> {
   const state = engine.state;
   if (!state) return;
 
-  if (!localStorage.getItem(MIGRATED_KEY) && localStorage.getItem(OLD_MIGRATED_KEY)) localStorage.setItem(MIGRATED_KEY, "1");
-  if (!localStorage.getItem(MIGRATED_KEY)) {
-    // Links made before the UI kept sessions (or by another Ghostly page).
-    for (const link of await engine.call("exportLinks")) {
-      if (findSession(link.seedB64, link.peerPubKeyZ32)) continue;
-      const id = ensureSession(
-        { profile: link.profile, deliveryMode: link.deliveryMode, seedB64: link.seedB64, peerPubKeyB64: link.peerPubKeyZ32, encKeyB64: link.encKeyB64 },
-        { inviteCode: link.inviteCode, createdAt: link.createdAt },
-      );
-      if (link.label) updateSessionLabel(id, link.label);
+  if (!localStorage.getItem(MIGRATED_KEY) && localStorage.getItem(OLD_MIGRATED_KEY)) {
+    try { localStorage.setItem(MIGRATED_KEY, "1"); } catch { /* no room: the old mark still counts */ }
+  }
+  let imported = !!localStorage.getItem(MIGRATED_KEY) || !!localStorage.getItem(OLD_MIGRATED_KEY);
+  if (!imported) {
+    try {
+      // Links made before the UI kept sessions (or by another Ghostly page).
+      for (const link of await engine.call("exportLinks")) {
+        if (findSession(link.seedB64, link.peerPubKeyZ32)) continue;
+        const id = ensureSession(
+          { profile: link.profile, deliveryMode: link.deliveryMode, seedB64: link.seedB64, peerPubKeyB64: link.peerPubKeyZ32, encKeyB64: link.encKeyB64 },
+          { inviteCode: link.inviteCode, createdAt: link.createdAt },
+        );
+        if (link.label) updateSessionLabel(id, link.label);
+      }
+      localStorage.setItem(MIGRATED_KEY, "1");
+      imported = true;
+      notifySessionsChanged();
+    } catch {
+      // No room to store them (or the mark): imported again at the next reconcile. Until then no link goes for want of
+      // its chat below.
     }
-    localStorage.setItem(MIGRATED_KEY, "1");
-    notifySessionsChanged();
   }
 
   const sessions = listSessions(cache);
@@ -298,6 +337,7 @@ async function reconcile(): Promise<void> {
   for (const link of state.links) {
     if (peers.has(link.peerPubKeyZ32)) continue;
     later = true;
+    if (!imported) continue;
     // A link only just made may not have its chat yet; one whose chat was deleted here goes at once.
     if (Date.now() - link.createdAt < FORGET_AFTER_MS && !wasDeleted(link.peerPubKeyZ32)) continue;
     void engine.call("removeLink", { linkId: link.id }).catch(() => {});
@@ -311,11 +351,11 @@ export function startSessionSync(): void {
   if (started) return;
   started = true;
   void engine.connect().catch(() => {});
-  engine.onMessages(mirrorMessages);
+  engine.onMessages(mirrorNew);
   engine.subscribe(() => {
     void reconcile();
     // A list mirrored already, into a session nothing wrote since, has nothing new (reconcile mirrors the link's names).
-    for (const [linkId, messages] of engine.messages) if (!mirroredAlready(linkId, messages)) mirrorMessages(linkId, messages);
+    for (const [linkId, messages] of engine.messages) mirrorNew(linkId, messages);
   });
   // Deleting a chat only touches localStorage; notice it without waiting for the peer to speak.
   window.addEventListener("session-updated", () => void reconcile());

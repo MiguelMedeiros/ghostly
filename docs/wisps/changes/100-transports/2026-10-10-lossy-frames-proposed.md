@@ -1,0 +1,1 @@
+The adapter contract now says what is true today, that every adapter carries the session as one ordered, reliable stream and nothing uses a datagram, and points to the proposal for real-time apps (1200, not accepted), which lists what each adapter could carry beside the stream. No rule changes.

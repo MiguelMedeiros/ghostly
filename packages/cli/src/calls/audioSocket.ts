@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { privateFolder } from "../privateFolder";
 import { bytesToMs, type CallRate } from "./pcm";
 
@@ -15,6 +15,24 @@ export function audioSocketPath(profileDir: string, callId: string): string {
   if (process.platform === "win32") return `\\\\.\\pipe\\ghostly-call-${createHash("sha256").update(inside).digest("hex").slice(0, 24)}`;
   if (Buffer.byteLength(inside) <= 100) return inside;
   return join("/tmp", `ghostly-calls-${createHash("sha256").update(profileDir).digest("hex").slice(0, 24)}`, `${callId}.sock`);
+}
+
+/**
+ * Removes the call sockets a daemon that died during a call left in this profile's folder (`audioSocketPath`; call
+ * ids are 12 hex digits): no call outlives its daemon. A folder that is a link or someone else's is left alone.
+ */
+export function clearAudioSockets(profileDir: string): void {
+  if (process.platform === "win32") return;
+  const folder = dirname(audioSocketPath(profileDir, "0".repeat(12)));
+  try {
+    const info = lstatSync(folder);
+    if (!info.isDirectory() || (process.getuid && info.uid !== process.getuid())) return;
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      if (entry.name.endsWith(".sock") && !entry.isDirectory()) rmSync(join(folder, entry.name), { force: true });
+    }
+  } catch {
+    // No folder yet, or one it cannot read: nothing to clear.
+  }
 }
 
 /** How far a program may fall behind reading the call's audio before frames are dropped for it. */

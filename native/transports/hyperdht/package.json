@@ -3,5 +3,5 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "dependencies": { "hyperdht": "6.34.0" }
+  "dependencies": { "hyperdht": "6.34.1" }
 }

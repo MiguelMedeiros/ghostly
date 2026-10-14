@@ -196,6 +196,23 @@ export class MacDriver implements DesktopApp {
     }
   }
 
+  /**
+   * Reloads the page and waits for the document that comes after it. `location.reload()` returns at once and the old
+   * document goes on answering, `complete`, until the new one takes its place: the old window is marked, and the page
+   * has reloaded once a document without the mark has loaded. A script started before that is lost with the old document.
+   */
+  async reload(timeout = 30_000): Promise<void> {
+    await this.execute(`window.__e2eReloading = true; location.reload();`);
+    const deadline = Date.now() + timeout;
+    for (;;) {
+      // No answer while the page is between two documents.
+      const loaded = await this.execute<boolean>(`return !window.__e2eReloading && document.readyState === "complete";`).catch(() => false);
+      if (loaded) return;
+      if (Date.now() > deadline) throw new Error("The page did not reload");
+      await new Promise((done) => setTimeout(done, 100));
+    }
+  }
+
   text(selector: string): Promise<string | null> {
     return this.execute(`const e = document.querySelector(arguments[0]); return e ? e.innerText : null;`, selector);
   }

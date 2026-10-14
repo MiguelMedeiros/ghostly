@@ -209,7 +209,7 @@ describe("every route lands on the one screen", () => {
     const glances = { current: listProfiles()[0], others: [], othersUnread: 0, othersFresh: 0 };
     const { user } = renderApp(<><ProfileSwitcherMenu variant="popover" glances={glances} onClose={() => {}} /><JoinHost /></>);
     await user.click(screen.getByTestId("profile-switcher-join"));
-    await user.click(await screen.findByRole("button", { name: "Close join" }));
+    await user.click(await screen.findByRole("button", { name: "Close" }));
     expect(screen.queryByTestId("device-join")).toBeNull();
     expect(screen.queryByRole("button", { name: "Paste from clipboard" })).toBeNull();
     expect(listProfiles()).toHaveLength(before);
@@ -272,6 +272,31 @@ describe("every route lands on the one screen", () => {
     renderApp(<DevicesSection />);
     await waitFor(() => expect(fakeEngine.callsTo("deviceSet").length).toBeGreaterThan(0));
     expect(screen.queryByTestId("device-join-another-row")).toBeNull();
+  });
+});
+
+describe("the scanner's own words in device mode", () => {
+  it("with the camera refused it asks for the code from the other device, not for an invite", async () => {
+    const getUserMedia = vi.fn(async () => { throw new DOMException("Permission denied", "NotAllowedError"); });
+    Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { getUserMedia } });
+    try {
+      const { user } = renderApp(<JoinDialog onDevice={async () => {}} onClose={() => {}} />);
+      await user.click(screen.getByRole("button", { name: "Scan QR" }));
+      const notice = await screen.findByText("Camera unavailable. Paste the code from your other device, or open an image.");
+      expect(getUserMedia).toHaveBeenCalled();
+      expect(notice.textContent).not.toMatch(/invite/i);
+      expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+    } finally {
+      Reflect.deleteProperty(navigator, "mediaDevices");
+    }
+  });
+
+  it("a code that fails with no reason says nothing was added, not that an invite is invalid", async () => {
+    const { user } = renderApp(<JoinDialog onDevice={() => Promise.reject("no")} onClose={() => {}} />);
+    fakeEngine.readClipboardText = vi.fn(async () => code());
+    await user.click(screen.getByRole("button", { name: "Paste from clipboard" }));
+    expect(await screen.findByText("Something went wrong. Nothing was added.")).toBeInTheDocument();
+    expect(screen.queryByText(/invite/i)).toBeNull();
   });
 });
 
@@ -372,6 +397,8 @@ describe("a device code opened as a link (the QR code, by a phone's camera)", ()
     // A crafted link: control and invisible reordering marks are dropped from the name it shows.
     expect(readDeviceLink(`${origin}/#A%0AB%E2%80%AEC%E2%80%8B#${device}`)).toEqual({ code: device, profile: "ABC" });
     expect(readDeviceLink(`${origin}/#%E2%80%AE#${device}`)).toEqual({ code: device });
+    // Every invisible or direction-changing mark, as a contact's name loses them: ALM, line and paragraph separators, BOM, word joiner.
+    expect(readDeviceLink(`${origin}/#${encodeURIComponent("A\u061CB\u2028C\u2029D\uFEFFE\u2060F\u2064")}#${device}`)).toEqual({ code: device, profile: "ABCDEF" });
     expect(readDeviceLink(device)).toEqual({ code: device });
     expect(readDeviceLink(`${origin}/#${device}`)).toEqual({ code: device });
     // From the desktop app, which has no address another device opens: the public web app.

@@ -96,6 +96,30 @@ describe("the set-update frame", () => {
     }
   });
 
+  it("shows its names cleaned, and still verifies the names as its remover signed them", async () => {
+    const tomb = await tombstone();
+    const good = await frame(tomb);
+    // What a build that does not clean names signs: the set as it holds it.
+    const set = [[toBase64Url(remover.publicKey), "MacBook"], null, [toBase64Url(staying.publicKey), "\u202EenohP\n\x07"]];
+    const message = utf8Encode(JSON.stringify(["ghostly-set-update", toBase64Url(oldKeys.address), toBase64Url(newD), set, 123_456_789, 0, toBase64Url(sha256(tomb))]));
+    const update = readSetUpdate({ ...good, set, s: toBase64Url(await remover.sign(message)) })!;
+    expect(update.set.map((slot) => slot?.name)).toEqual(["MacBook", undefined, "enohP"]);
+    expect(verifySetUpdate(update, oldKeys.address)).toBe(true);
+    // A name with nothing to see in it reads as no name, under the signature of the name as written.
+    const unseenSet = [[toBase64Url(remover.publicKey), "MacBook"], null, [toBase64Url(staying.publicKey), "\u3164\u200D"]];
+    const unseenMessage = utf8Encode(JSON.stringify(["ghostly-set-update", toBase64Url(oldKeys.address), toBase64Url(newD), unseenSet, 123_456_789, 0, toBase64Url(sha256(tomb))]));
+    const unseen = readSetUpdate({ ...good, set: unseenSet, s: toBase64Url(await remover.sign(unseenMessage)) })!;
+    expect(unseen.set.map((slot) => slot?.name)).toEqual(["MacBook", undefined, ""]);
+    expect(verifySetUpdate(unseen, oldKeys.address)).toBe(true);
+    // The names are still signed: the same frame under the signature of the clean names is refused.
+    const other = readSetUpdate({ ...good, set })!;
+    expect(verifySetUpdate(other, oldKeys.address)).toBe(false);
+    // A remover of this build signs the clean names, whatever its own record held.
+    const made = await setUpdateFrame(oldKeys.address, { d: newD, set: [{ key: remover.publicKey, name: "MacBook" }, null, { key: staying.publicKey, name: "\u202EenohP\n\x07" }], turn: 1, rev: 0, tomb }, remover);
+    expect(made.set).toEqual([[toBase64Url(remover.publicKey), "MacBook"], null, [toBase64Url(staying.publicKey), "enohP"]]);
+    expect(verifySetUpdate(readSetUpdate(made)!, oldKeys.address)).toBe(true);
+  });
+
   it("is refused when it is not well formed", async () => {
     const good = await frame(await tombstone());
     const bad: DeviceFrame[] = [
@@ -105,6 +129,7 @@ describe("the set-update frame", () => {
       { ...good, set: [[toBase64Url(remover.publicKey), "A"], [toBase64Url(remover.publicKey), "B"]] },
       { ...good, set: [null, null, null, null, null] },
       { ...good, set: [[toBase64Url(remover.publicKey), "a name much longer than sixteen bytes"]] },
+      { ...good, set: [[toBase64Url(remover.publicKey), "a\0b"]] },
       { ...good, turn: 2 ** 32 - 1 },
       { ...good, rev: 2 ** 18 },
       { ...good, tomb: "" },

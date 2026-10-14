@@ -173,6 +173,20 @@ class Driver {
     await this.call("POST", "/window", { handle });
   }
 
+  /**
+   * Sizes the window commands go to, as a drag of its edge does, and answers the page's width after it. On a display
+   * with no window manager (Xvfb) that is `width`; a compositor may leave the window as it was.
+   */
+  async resize(width: number, height: number): Promise<number> {
+    await this.call("POST", "/window/rect", { width, height });
+    let inner = 0;
+    for (const deadline = Date.now() + 5_000; Date.now() < deadline; await sleep(100)) {
+      inner = await this.execute<number>("return innerWidth");
+      if (inner === width) break;
+    }
+    return inner;
+  }
+
   async close(): Promise<void> {
     await this.call("DELETE", "").catch(() => {});
   }
@@ -180,8 +194,11 @@ class Driver {
 
 export type DesktopApp = Pick<Driver, "text" | "click" | "title" | "attribute" | "type" | "execute" | "executeAsync">;
 
-/** Going from window to window (an app's own window, WISP 1200): WebDriver's, which the macOS driver has no part of. */
-export type DesktopWindows = Pick<Driver, "windows" | "window" | "switchTo">;
+/**
+ * Going from window to window (an app's own window, WISP 1200) and sizing one: WebDriver's, which the macOS driver has
+ * no part of.
+ */
+export type DesktopWindows = Pick<Driver, "windows" | "window" | "switchTo" | "resize">;
 
 /** `app`'s windows, where its driver is WebDriver's (Linux and Windows). */
 export function desktopWindows(app: DesktopApp): DesktopWindows {
@@ -193,9 +210,14 @@ export function desktopWindows(app: DesktopApp): DesktopWindows {
  * Chooses in a `Select` (apps/ui/src/components/ui/Select.tsx) by its test id, as a person does: opens it and clicks the
  * option. It is a combobox with a listbox, not a native `<select>` — its options exist only while it is open, and
  * its value is in `data-value`. e2e/support/select.ts does the same for the browser projects.
+ *
+ * It waits for the select first, as Playwright's locators do there: a menu page (Settings) loads the first time it is
+ * opened and nothing is drawn in its place meanwhile (apps/ui/src/Root.tsx `menuPage`), so right after the click that
+ * opens the page there is no select yet.
  */
 export async function choose(app: DesktopApp, testId: string, value: string): Promise<void> {
   const select = `[data-testid="${testId}"]`;
+  await expect.poll(() => app.attribute(select, "aria-expanded"), { message: `the page shows ${select}` }).not.toBeNull();
   if ((await app.attribute(select, "aria-expanded")) !== "true") await app.click(select);
   const option = `[data-testid="${testId}-list"] [role="option"][data-value="${value}"]`;
   await expect.poll(() => app.text(option)).not.toBeNull();
@@ -204,6 +226,8 @@ export async function choose(app: DesktopApp, testId: string, value: string): Pr
 }
 
 export interface DesktopOptions {
+  /** The binary to open instead of `desktopBinary()`: an older release's, for the compatibility tests. */
+  binary?: string;
   /** `GHOSTLY_PROFILE`: the app's own space in its storage. */
   profile?: string;
   /**
@@ -244,7 +268,7 @@ export const homeEnv = (dir: string): Record<string, string> => {
 /** `tauri-driver`, and the app it opens, until `stop`. */
 export async function openDesktop(options: DesktopOptions = {}): Promise<{ app: DesktopApp; stop: () => Promise<void> }> {
   // Before anything is spawned: a missing binary is not something to retry for 30 seconds.
-  const application = desktopBinary();
+  const application = options.binary ?? desktopBinary();
   const port = await freePort();
   const nativePort = await freePort();
   // A session bus of its own unless the test brings one: see `privateBus`.

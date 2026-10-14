@@ -15,6 +15,7 @@ import { NetworkSettings } from "../components/NetworkSettings";
 import { ForkRows } from "../components/devices/Forks";
 import { DomainProofSettings } from "../components/DomainProofSettings";
 import { MediaSettings } from "../components/MediaSettings";
+import { GroupDownloadsRow } from "../components/settings/GroupDownloads";
 import { Block, ButtonGroup, Field, FieldGrid, InputGroup, LinkRow, Page, Row, Section } from "../components/layout";
 import { ColorSwatches } from "../components/ColorSwatches";
 import { ProfileBadge } from "../components/ProfileBadge";
@@ -60,6 +61,7 @@ import { problemLine } from "../lib/problemText";
 import { listText } from "../lib/listText";
 import { hasMediaDevices } from "../lib/mediaDevices";
 import { navOnly, readNav } from "../lib/navigation";
+import { formatAt } from "../lib/time";
 import { SECTION_TITLE, SETTINGS_SECTIONS, isOldSection, sectionInView, settingsPath, settingsSection, type SettingEntry, type SettingNeeds, type SettingsSection } from "../lib/settingsSections";
 import { SettingsIndex, SettingsMenu, SettingsSearch } from "../components/settings/SettingsMenu";
 
@@ -101,7 +103,7 @@ export function Settings() {
   const { settings, updateColorScheme, updateLanguage, updateLockScreen, updateNotifications, updateDefaultNickname,
     updateReduceMotion, updateChatListDensity, updateCheckForUpdates, updateLinkPreviews, updateProfilePeek, randomizeNickname } =
     useSettings();
-  const { t } = useI18n();
+  const { t, languageNotLoaded, retryLanguage } = useI18n();
   const { lock } = useLockScreen();
   const update = useUpdate();
   const install = useInstallState();
@@ -546,7 +548,13 @@ export function Settings() {
             ))}
           </div>
         </Row>
-        <Row label={t("settings.language")}>
+        <Row label={t("settings.language")}
+          hint={languageNotLoaded ? (
+            <span role="status" data-testid="settings-language-not-loaded">
+              {t("settings.languageNotLoaded", { language: LANGUAGE_OPTIONS.find((option) => option.value === settings.language)?.native ?? settings.language })}{" "}
+              <button type="button" onClick={retryLanguage} className="underline text-accent cursor-pointer">{t("settings.languageRetry")}</button>
+            </span>
+          ) : undefined}>
           <Select fit aria-label={t("settings.language")} data-testid="settings-language" value={settings.language} onChange={handleLanguageChange}
             options={LANGUAGE_OPTIONS.map((option) => ({ value: option.value, label: option.native, description: option.label === option.native ? undefined : option.label }))} />
         </Row>
@@ -682,6 +690,7 @@ export function Settings() {
           </Row>
         )}
         <ForkRows forks={devices?.forks} />
+        <GroupDownloadsRow />
         <Row label={t("sidebar.deleteAllChats")} hint={confirmDeleteChats ? t("settings.deleteAllChatsConfirm", { count: chatCount }) : t("settings.deleteAllChatsHint")}>
           {confirmDeleteChats ? <>
             <Button variant="danger" data-testid="delete-all-chats-confirm" onClick={deleteChats}>{t("common.confirm")}</Button>
@@ -748,7 +757,7 @@ export function Settings() {
               <span className="block mt-1.5 text-text-muted">{t("updates.errorDetails")}</span>
               <code className="block font-mono text-[11px] break-all" data-testid="update-error">{update.error}</code>
             </> : undefined}
-            hint={update.lastCheckedAt ? t("updates.lastChecked", { when: new Date(update.lastCheckedAt).toLocaleTimeString() }) : undefined}>
+            hint={update.lastCheckedAt ? t("updates.lastChecked", { when: formatAt(update.lastCheckedAt, { timeStyle: "medium" }, t.language) }) : undefined}>
             {update.update && update.update.apply === "manual" ? (
               <a {...externalLinkProps(update.downloadUrl)} className="px-4 py-2 min-h-10 inline-flex items-center rounded-lg text-sm transition-colors bg-accent hover:bg-accent-hover text-on-accent font-semibold">
                 {t("updates.download")}

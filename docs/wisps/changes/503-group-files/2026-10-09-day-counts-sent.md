@@ -1,0 +1,1 @@
+Serving limits: the day's bytes count every byte of data a holder sent, parts sent again included, whatever the asker confirmed; a transfer past its file's size goes on only while the day has room, and is ended with `pf-abort` past it.

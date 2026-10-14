@@ -81,14 +81,16 @@ export interface MiniAppRequest {
  * - `bad-path`: a `file` path that is not a string of 1 to 1024 characters.
  * - `bad-request`: a request that is not `{id, type, args}` with JSON arguments.
  * - `failed`: anything else; the client's own words never reach the app.
- * - `full`: a storage write would take the scope past 5 MiB, so the app can make room.
+ * - `full`: a storage write would take the scope past 5 MiB (each key counts 128 bytes, its own bytes eight times and
+ *   its value's), so the app can make room.
  * - `no-file`: the bundle has no such file.
  * - `not-allowed`: `chat.send` without the `chat` permission, or with the app opened alone.
  * - `not-open`: `chat.send` before this side's chat has the app open.
  * - `offline`: `chat.send` while the chat's session is not live. Nothing is kept to send later.
  * - `peer-closed`: `chat.send` while the contact has not opened the app (or its client does not offer `apps/1`).
  * - `stopped`: a store removed or the publisher revoked the version running.
- * - `too-fast`: past 50 requests a second, or past 48 `chat.send` frames a second.
+ * - `too-fast`: past 50 requests a second, past 48 `chat.send` frames a second, or a `chat.send` while the chat's
+ *   connection is still sending earlier ones (back off and send again).
  * - `too-large`: a request, a stored value or a `chat.send` value past its bound (`MINI_APP_LIMITS`).
  * - `unknown-type`: a request `type` the broker does not answer.
  *
@@ -128,11 +130,23 @@ export const MINI_APP_LIMITS = {
   requestBytes: 64 * 1024,
   /** Requests per second, per app. */
   requestsPerSecond: 50,
+  /**
+   * Bytes of `file` answers per second, per app: a whole bundle's worth. A read that starts under it is answered whole;
+   * past it `file` is refused with `too-fast` until the second has gone.
+   */
+  fileBytesPerSecond: 16 * 1024 * 1024,
   /** A storage key, UTF-8. */
   storageKeyBytes: 256,
   /** One stored JSON value, serialized. */
   storageValueBytes: 64 * 1024,
-  /** Everything an app keeps in one scope (per app and per chat, or alone). */
+  /** Counted for each stored key beside its own bytes and its value's: what keeping the key costs the device. */
+  storageRowBytes: 128,
+  /** How many times a stored key's bytes count: the device keeps each key several times, mostly as UTF-16. */
+  storageKeyTimes: 8,
+  /**
+   * Everything an app keeps in one scope (per app and per chat, or alone): for each key `storageRowBytes`, the key's
+   * bytes `storageKeyTimes` over and its value's.
+   */
   storageScopeBytes: 5 * 1024 * 1024,
   /** One `chat.send` value, serialized: the `paired-app` data cap (decision D5 of the plan). */
   chatDataBytes: 32 * 1024,

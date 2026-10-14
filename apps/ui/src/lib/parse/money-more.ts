@@ -1,6 +1,6 @@
 import { decodeBolt11, type Bolt11Invoice } from "@ghostly/core";
 import { findArkAddress, type ArkRequest } from "./money-ark";
-import { findBip21, findBitcoinAddress, onchainFromBip21, type OnchainRequest } from "./money-bitcoin";
+import { btcToSats, findBip21, findBitcoinAddress, onchainFromBip21, unknownRequired, type OnchainRequest } from "./money-bitcoin";
 import { decodeBolt12Offer, findBolt12Offer, type Bolt12Offer } from "./money-bolt12";
 import { cut } from "./money-text";
 import { findUsdtAddress, type UsdtRequest } from "./money-usdt";
@@ -15,13 +15,17 @@ export type MoreMoney =
 /**
  * A `bitcoin:` link, read before anything inside it: its address wins over the Lightning invoice it may carry
  * (which the card offers as the other way to pay). A link with no address is what its `lightning=`, `lno=` or
- * `ark=` says. Null when there is no `bitcoin:` link this can read.
+ * `ark=` says. Null when there is no `bitcoin:` link this can read; `"refused"` when a link with no address must
+ * not be paid (BIP 21: a `req-` parameter this app does not understand, or an amount it cannot read), so nothing
+ * inside it is offered as money either.
  */
-export function findLinkMoney(text: string): MoreMoney | { type: "lightning"; invoice: Bolt11Invoice; rest: string } | null {
+export function findLinkMoney(text: string): MoreMoney | { type: "lightning"; invoice: Bolt11Invoice; rest: string } | "refused" | null {
   for (const link of findBip21(text)) {
     const onchain = onchainFromBip21(link);
     if (onchain) return { type: "onchain", request: onchain, rest: cut(text, link.index, link.uri.length) };
     if (link.address) continue;
+    const amount = link.params.get("amount");
+    if (unknownRequired(link).length || (amount !== undefined && btcToSats(amount) === null)) return "refused";
     const offer = link.params.get("lno");
     const decodedOffer = offer ? decodeBolt12Offer(offer) : null;
     if (decodedOffer) return { type: "bolt12", offer: decodedOffer, rest: cut(text, link.index, link.uri.length) };

@@ -1,0 +1,1 @@
+Open decisions gain apps opened in a group, with a pointer to the proposal in 1200 (not accepted): a table whose players each keep a session with its host, which in a group on hubs or a community waits for the decision on sessions between two members who share no edge. No rule changes.

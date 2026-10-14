@@ -4,6 +4,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { EngineState } from "@ghostly/browser/shared/types";
 import { Block, Button, Notice, Row, Switch } from "../wallet/ui";
 import { useI18n } from "../../contexts/I18nContext";
+import { formatAt } from "../../lib/time";
 import { useCopyKey } from "../../hooks/useCopyKey";
 import { idCard } from "./idCard";
 import { ProviderMark, StatusPill } from "./ProviderMark";
@@ -27,7 +28,7 @@ export function PublicDid({ state }: { state: EngineState }) {
   const now = Date.now() / 1000;
   const listable = state.identityProofs.filter(p => p.publicUri);
   const status = did.error ? t("identities.did.failed", { error: problemText(did.error, t).title.replace(/\.$/, "") })
-    : did.published && did.upToDate ? t("identities.did.published", { time: new Date(did.published.at).toLocaleString() })
+    : did.published && did.upToDate ? t("identities.did.published", { time: formatAt(did.published.at, { dateStyle: "medium", timeStyle: "short" }, t.language) })
     : !state.settings.online ? t("identities.did.offline")
     : did.published ? t("identities.did.updating") : t("identities.did.publishing");
   const list = (id: string, listed: boolean) => {
@@ -53,7 +54,7 @@ export function PublicDid({ state }: { state: EngineState }) {
       </Block>
       <Block testId="did-links">
         <p className="text-xs font-medium text-text-secondary">{t("identities.did.listTitle")}</p>
-        <InfoLine testId="did-warning" className="text-xs text-yellow-500" info={t("identities.did.warningInfo")}>{t("identities.did.warning")}<span className="block text-text-secondary">{t("identities.did.warningNext")}</span></InfoLine>
+        <InfoLine testId="did-warning" className="text-xs text-warn-ink" info={t("identities.did.warningInfo")}>{t("identities.did.warning")}<span className="block text-text-secondary">{t("identities.did.warningNext")}</span></InfoLine>
         {listable.length === 0 ? <p className="text-xs text-text-muted" data-testid="did-none">{t("identities.did.none")}</p>
           : listable.map(p => {
             const card = idCard(p, { now });

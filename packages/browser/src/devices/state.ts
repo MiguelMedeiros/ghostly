@@ -6,6 +6,8 @@
  * A profile that never enrolled a device has no record: it is `single` and runs exactly as before this WISP.
  */
 
+import { turnName } from "@ghostly/core";
+
 /** WISP 06 § States of a device. */
 export const DEVICE_STATES = ["single", "active", "standby", "releasing", "taking", "superseded", "moving", "removed"] as const;
 export type DeviceState = (typeof DEVICE_STATES)[number];
@@ -596,7 +598,20 @@ export function parseDeviceRecord(value: unknown): DeviceRecord {
     if (!o || typeof o !== "object" || !bytes(o.d) || !bytes(o.tombstone) || !bytes(o.packet) || !(o.at === null || count(o.at, Number.MAX_SAFE_INTEGER))) return bad("ownSet");
     if (!Array.isArray(o.sources) || o.sources.length > 16 || !o.sources.every(text)) return bad("ownSet");
   }
-  return value as DeviceRecord;
+  return cleanNames(value as DeviceRecord);
+}
+
+/**
+ * The record with every device name as `turnName` makes one: a name is another device's own word, and a build that did
+ * not clean names may have stored it. The same record when there is nothing to clean.
+ */
+function cleanNames(record: DeviceRecord): DeviceRecord {
+  const dirty = (entry: { name: string } | null) => !!entry && turnName(entry.name) !== entry.name;
+  if (!record.deviceSet.some(dirty) && !record.unfinishedGrants?.some(dirty)) return record;
+  return {
+    ...record, deviceSet: record.deviceSet.map((slot) => slot && { ...slot, name: turnName(slot.name) }),
+    ...(record.unfinishedGrants ? { unfinishedGrants: record.unfinishedGrants.map((grant) => ({ ...grant, name: turnName(grant.name) })) } : {}),
+  };
 }
 
 function checked(record: DeviceRecord): DeviceRecord {

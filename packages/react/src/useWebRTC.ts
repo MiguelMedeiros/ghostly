@@ -120,6 +120,13 @@ export function mediaProblem(error: unknown): MediaProblem | null {
  */
 export const GATHER_STALL_MS = 4000;
 export const GATHER_ATTEMPTS = 3;
+/**
+ * An offer or an answer with its host candidates waits this long at most for a server reflexive one, not the 10 s
+ * cap: a STUN server that answers does in tens of milliseconds, and one that never does (UDP to it blocked, as on many
+ * office, school and hotel networks) made every call ring about 10 s late and connect about 10 s after Answer. The
+ * chats' data link bounds its offers the same way (`OFFER_HOST_GATHER_MS`).
+ */
+export const HOST_GATHER_MS = 2000;
 
 /**
  * A call answered (or whose answer came) that has not connected by then ends, and says so: ICE normally connects in
@@ -306,7 +313,7 @@ export function useWebRTC({
   /** The wait for a second offer after the answered call's connection failed (`RESTART_GRACE_MS`). */
   const restartGraceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /** The connected call lost its path and is getting it back (see ICE_DISCONNECT_GRACE_MS): "Reconnecting...". */
+  /** The connected call lost its path and waits for it, or is getting it back (see ICE_DISCONNECT_GRACE_MS): "Reconnecting...". */
   const [reconnecting, setReconnecting] = useState(false);
   const reconnectingRef = useRef(false);
   /** The contact's offer or answer said it restarts ICE (`x`), and its DTLS fingerprint: a restart keeps it. */
@@ -395,14 +402,15 @@ export function useWebRTC({
     }
   }, []);
 
+  /** Whether the call is up: connected, and its media flowed. */
+  const callUp = useCallback(() => mediaUpRef.current && callConnectedEventFiredRef.current && callStateRef.current === "connected", []);
+
   /**
-   * Whether this call restarts ICE when its path is lost: both sides said they can, and the call is up (its media
-   * flowed). With an older contact, or before the call connected, a lost path ends the call as before.
+   * Whether this call restarts ICE when its path is lost: both sides said they can, and the call is up. With a contact
+   * that does not (an older app, the headless CLI), or before the call connected, a failed connection ends the call
+   * as before.
    */
-  const reconnects = useCallback(
-    () => !!mediaRef.current.restartsIce && peerRestartsRef.current && mediaUpRef.current && callConnectedEventFiredRef.current && callStateRef.current === "connected",
-    [],
-  );
+  const reconnects = useCallback(() => !!mediaRef.current.restartsIce && peerRestartsRef.current && callUp(), [callUp]);
 
   const cleanupConnection = useCallback(() => {
     attemptRef.current++;
@@ -486,20 +494,23 @@ export function useWebRTC({
     /**
      * The connected call lost its path. It says "Reconnecting..." and has RECONNECT_TIMEOUT_MS to get it back; the
      * side whose offer was answered restarts ICE: at once when ICE failed, after a short wait when it only says
-     * "disconnected". False when this call does not reconnect (an older contact, a call not up yet).
+     * "disconnected". A call that does not restart ICE (a contact that never said it can, as the headless CLI) says
+     * so all the same while ICE says "disconnected", which often comes back by itself, and tries nothing. False when
+     * the call ends here: one that is not up yet, or one that does not restart and whose ICE failed.
      */
     const pathLost = (now: boolean): boolean => {
-      if (!reconnects()) return false;
+      const restarts = reconnects();
+      if (!restarts && (now || !callUp())) return false;
       if (!reconnectingRef.current) {
         reconnectingRef.current = true;
         setReconnecting(true);
         // A compatibility chat reads the contact's restart offer or answer on its next poll.
-        setFastPoll(true);
-        traceLink("call", "call-reconnecting", { ice: pc.iceConnectionState, connection: pc.connectionState, restarts: !answeredRef.current });
+        if (restarts) setFastPoll(true);
+        traceLink("call", "call-reconnecting", { ice: pc.iceConnectionState, connection: pc.connectionState, restarts: restarts && !answeredRef.current });
         reconnectTimerRef.current = setTimeout(() => { reconnectTimerRef.current = null; giveUpRef.current(); }, RECONNECT_TIMEOUT_MS);
       }
-      // The contact's side placed the call: its restart offer is what this side waits for.
-      if (answeredRef.current) return true;
+      // Nothing to try, or the contact's side placed the call: its restart offer is what this side waits for.
+      if (!restarts || answeredRef.current) return true;
       if (now) {
         if (disconnectGraceRef.current) clearTimeout(disconnectGraceRef.current);
         disconnectGraceRef.current = null;
@@ -589,17 +600,18 @@ export function useWebRTC({
     pcRef.current = pc;
     giveUpRef.current = giveUp;
     return pc;
-  }, [updateCallState, setFastPoll, cleanupConnection, publishCallSignal, addCallEventMessage, refreshVideoLane, clearRestartGrace, restartable, clearReconnect, reconnects]);
+  }, [updateCallState, setFastPoll, cleanupConnection, publishCallSignal, addCallEventMessage, refreshVideoLane, clearRestartGrace, restartable, clearReconnect, reconnects, callUp]);
 
   /**
-   * Makes the call's connection with `make` (its description set) and waits for its candidates. One that finds none
+   * Makes the call's connection with `make` (its description set) and waits for its candidates (for a reflexive one
+   * at most `HOST_GATHER_MS` once the host ones are in). One that finds none
    * (`GATHER_STALL_MS`) is closed and made again, up to `GATHER_ATTEMPTS` times; then the call cannot reach anyone
    * (`CallUnreachableError`). Null when the attempt was cancelled meanwhile.
    */
   const gathered = useCallback(async (make: () => Promise<RTCPeerConnection>, cancelled: () => boolean): Promise<RTCPeerConnection | null> => {
     for (let attempt = 1; ; attempt++) {
       const pc = await make();
-      await waitForIceGathering(pc, undefined, { stallMs: GATHER_STALL_MS });
+      await waitForIceGathering(pc, undefined, { stallMs: GATHER_STALL_MS, hostBoundMs: HOST_GATHER_MS });
       if (cancelled()) return null;
       if (sdpHasCandidates(pc.localDescription?.sdp)) return pc;
       // Its events are not ours any more: the next connection takes its place in pcRef.
@@ -1424,8 +1436,12 @@ export function useWebRTC({
     remoteHasVideo: remotePicture !== null,
     /** The picture the peer is sending is its screen. */
     remoteIsScreenSharing: remotePicture === "screen",
-    /** A camera or a screen can be turned on right now, even if the call started as audio. */
-    canSendVideo: connected && videoLaneOpen,
+    /**
+     * The camera button: a camera or a screen can be turned on right now, even if the call started as audio; or the
+     * camera that is on can be turned off, when the answer closed the lane (a contact that takes no picture) and only
+     * the self-view shows it. Turned off there, it is not turned back on: nobody would see it.
+     */
+    canSendVideo: connected && (videoLaneOpen || picture === "camera"),
     /** The screen can be shared right now: a connected call with a video lane, voice or video, and a screen to capture. */
     canShareScreen: connected && videoLaneOpen && screenCapture,
     /**
@@ -1448,8 +1464,9 @@ export function useWebRTC({
     micPaused,
     callStartedAt,
     /**
-     * The connected call lost its path (a network change) and is getting it back: the call window says
-     * "Reconnecting...". `callState` stays "connected"; the call ends as usual if the path does not come back in time.
+     * The connected call lost its path (a network change, a contact that went away) and waits for it or is getting it
+     * back: the call window says "Reconnecting...". `callState` stays "connected"; the call ends as usual if the path
+     * does not come back in time.
      */
     reconnecting,
     /**

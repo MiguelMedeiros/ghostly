@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { MessageBubble } from "../../components/MessageBubble";
 import { ForwardDialog } from "../../components/chat/ForwardDialog";
@@ -76,10 +76,10 @@ describe("the Forward to… picker", () => {
   function Where() {
     return <p data-testid="where">{useLocation().pathname}</p>;
   }
-  const open = (messages: ChatMessage[], from = "link-bo") => renderApp(<Routes>
+  const open = (messages: ChatMessage[], from = "link-bo", language?: "pt") => renderApp(<Routes>
     <Route path="/here" element={<ForwardDialog from={from} messages={messages} onClose={() => {}} />} />
     <Route path="*" element={<Where />} />
-  </Routes>, { route: "/here" });
+  </Routes>, { route: "/here", language });
   const names = () => screen.getAllByTestId("forward-target").map(row => row.querySelector("bdi")?.textContent);
 
   it("lists chats and the groups this device can write in, most recent first, and finds them by name", async () => {
@@ -91,10 +91,15 @@ describe("the Forward to… picker", () => {
     expect(screen.getByTestId("forward-none")).toHaveTextContent("No chat by that name");
   });
 
-  it("offers no group for a file: groups take text only", () => {
-    open([message({ text: "", file: PICTURE })]);
-    expect(names()).toEqual(["Ana", "Bo"]);
-    expect(screen.getByTestId("forward-files-hint")).toHaveTextContent("Groups take text only");
+  it("offers the groups for a file too (WISP 503), and forwards it there", async () => {
+    fakeEngine.on("forwardMessages", ({ to }: { to: string[] }) => ({ results: to.map(t => ({ to: t, messageIds: ["x"], error: null })) }));
+    const { user } = open([message({ text: "", file: PICTURE })]);
+    expect(names()).toEqual(["Ana", "Friends", "Bo"]);
+    expect(screen.queryByTestId("forward-files-hint")).toBeNull();
+    await user.click(screen.getAllByTestId("forward-target")[1]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(fakeEngine.callsTo("forwardMessages")).toEqual([{ linkId: "link-bo", messageIds: ["m1"], to: ["group:g1"] }]);
+    expect(await screen.findByTestId("where")).toHaveTextContent("/group/g1");
   });
 
   it("sends to the chosen ones and, for one, opens it", async () => {
@@ -123,6 +128,15 @@ describe("the Forward to… picker", () => {
     expect(fakeEngine.callsTo("forwardMessages")[0]).toMatchObject({ to: ["link-ana", "group:g1", "link-bo", "link-1", "link-2"] });
     expect(screen.getByTestId("forward-error")).toHaveTextContent("Friends: You are not in this group");
     expect(screen.queryByTestId("where")).toBeNull();
+  });
+
+  it("says what a chat refused in the app's language, not the engine's English", async () => {
+    fakeEngine.on("forwardMessages", ({ to }: { to: string[] }) => ({ results: to.map(t => ({ to: t, messageIds: [], error: "You are offline" })) }));
+    const { user } = open([message({ text: "", file: PICTURE })], "link-bo", "pt");
+    await user.click(screen.getAllByTestId("forward-target")[0]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(screen.getByTestId("forward-error")).toHaveTextContent(/^Ana: Você está offline/);
+    expect(screen.getByTestId("forward-error")).not.toHaveTextContent("You are offline");
   });
 
   it("asks before forwarding text that looks like a seed, as typing it would", async () => {
@@ -190,5 +204,94 @@ describe("choosing several", () => {
     await user.click(screen.getByTestId("message-select-start"));
     fireEvent.click(screen.getByText("first"));
     expect(screen.queryByTestId("select-bar")).toBeNull();
+  });
+
+  /** The chat's column as the pages lay it out: the list, the bar, and the composer, kept but hidden while messages are chosen. */
+  function Column({ disabled = false }: { disabled?: boolean }) {
+    const forwarding = useForwarding("link-bo", messages);
+    return <div>
+      <button type="button" data-testid="elsewhere">Search</button>
+      <div data-message-list>{messages.map(m => <MessageBubble key={m.id} message={m} peerPubKey="peer" onDelete={() => {}} {...forwarding.rowProps(m)} />)}</div>
+      {forwarding.bar}
+      {forwarding.dialog}
+      <div className={forwarding.selecting ? "hidden" : "contents"}><textarea data-testid="field" aria-label="Message" disabled={disabled} /></div>
+    </div>;
+  }
+  /** A touch screen with no mouse (`any-pointer` coarse, never fine), or a mouse. */
+  function pointer(touch: boolean) {
+    const matchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) =>
+      query === "(any-pointer: coarse)" || query === "(any-pointer: fine)"
+        ? ({ ...matchMedia(query), matches: query === "(any-pointer: coarse)" ? touch : !touch } as MediaQueryList)
+        : matchMedia(query));
+  }
+  const select = async (user: ReturnType<typeof renderApp>["user"]) => {
+    await user.click(screen.getAllByTestId("message-options")[0]!);
+    await user.click(screen.getByTestId("message-select-start"));
+  };
+
+  it("ended from the keyboard, the focus goes to the message field that comes back, not to the page", async () => {
+    pointer(false);
+    const { user } = renderApp(<Column />);
+    await select(user);
+    screen.getByTestId("select-cancel").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("select-bar")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId("field"));
+
+  });
+
+  it("after a forward of the chosen messages went, the focus is on the message field too", async () => {
+    pointer(false);
+    const { user } = renderApp(<Column />);
+    await select(user);
+    screen.getByTestId("select-forward").focus();
+    await user.keyboard("{Enter}");
+    const dialog = screen.getByTestId("forward-dialog");
+    fakeEngine.on("forwardMessages", ({ to }: { to: string[] }) => ({ results: to.map(t => ({ to: t, messageIds: [], error: null })) }));
+    await user.click(within(dialog).getAllByTestId("forward-target")[0]!);
+    await user.click(within(dialog).getAllByTestId("forward-target")[1]!);
+    await user.click(within(dialog).getByTestId("forward-send"));
+    expect(screen.queryByTestId("select-bar")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId("field"));
+  });
+
+  it("on a touch screen the focus goes to the messages: the field would bring the keyboard up", async () => {
+    pointer(true);
+    const { user } = renderApp(<Column />);
+    await select(user);
+    screen.getByTestId("select-cancel").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("select-bar")).toBeNull();
+    expect(document.activeElement).toBe(document.querySelector("[data-message-list]"));
+  });
+
+  it("where the field takes no text the focus goes to the messages, a stop only while they hold it", async () => {
+    pointer(false);
+    const { user } = renderApp(<Column disabled />);
+    await select(user);
+    screen.getByTestId("select-cancel").focus();
+    await user.keyboard("{Enter}");
+    const list = document.querySelector("[data-message-list]");
+    expect(document.activeElement).toBe(list);
+    screen.getByTestId("elsewhere").focus();
+    expect(list).not.toHaveAttribute("tabindex");
+  });
+
+  it("a focus the person moved elsewhere, or that a message's row kept, is left alone", async () => {
+    pointer(false);
+    const { user } = renderApp(<Column />);
+    await select(user);
+    screen.getByTestId("elsewhere").focus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("select-bar")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId("elsewhere"));
+
+    // The last one taken off from its checkbox: the row keeps the focus its checkbox had.
+    await select(user);
+    screen.getAllByTestId("message-select")[0]!.focus();
+    await user.keyboard(" ");
+    expect(screen.queryByTestId("select-bar")).toBeNull();
+    expect(document.activeElement).toBe(document.querySelector("[data-message-id=a]"));
   });
 });

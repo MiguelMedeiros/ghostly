@@ -3,10 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostLink, REACTION_LIMITS, createIdentity, createLink, identityFromSeedB64, type PairingState, type WireReaction } from "@ghostly/core";
 import { GhostlyNode, type NodeEvents } from "../src/engine/node";
 import { db } from "../src/engine/db";
-import { Reactions, latestReaction } from "../src/engine/reactions";
+import { Reactions, latestReaction, noteIfStanding } from "../src/engine/reactions";
 import type { AttentionEvent } from "../src/shared/rpc";
 import type { StoredMessage } from "../src/shared/types";
-import { FakeNativeNet } from "./helpers/fakeNative";
+import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
 // covers: chat.reactions.wire, groups.protocol.reactions
 
 /**
@@ -29,7 +29,7 @@ async function setup(contactOptions: { reactionsSupport?: boolean; take?: boolea
   await db.putLink({ ...invitation.mine, id, profile: "paired-chat/1", participationSeed: mine, createdAt: 1,
     pairedPeerKey: identityFromSeedB64(theirs).pubKeyZ32, peerTrust: { version: 1 },
     peerTransports: ["iroh/1"], peerFallback: true, preferredTransport: "iroh/1", transportFallback: true,
-    peerDescriptors: { "iroh/1": { id: "contact:iroh/1" } } });
+    peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "contact") } });
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
   const attention: AttentionEvent[] = [];
   const node = new GhostlyNode({ onState: vi.fn(), onMessages: contactOptions.onMessages ?? vi.fn(), onCallSignal: vi.fn(), onAttention: event => { attention.push(event); },
@@ -41,7 +41,7 @@ async function setup(contactOptions: { reactionsSupport?: boolean; take?: boolea
   const contact = new GhostLink({
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
-    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": { id: "app:iroh/1" } } },
+    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "app") } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
     reactionsSupport: contactOptions.reactionsSupport ?? true,
     events: {
@@ -160,6 +160,52 @@ describe("reacting over the live link", () => {
     expect(t.attention.filter(e => e.type === "message")).toEqual([]);
   });
 
+  it("a reaction taken back leaves the chat list's line: the one before it is shown again, or none", async () => {
+    const t = await setup();
+    await t.agreed();
+    await t.node.sendMessage({ linkId: t.id, text: "lunch?" });
+    await t.node.sendMessage({ linkId: t.id, text: "dinner?" });
+    const [lunch, dinner] = [await t.row("lunch?"), await t.row("dinner?")];
+    t.contact.sendReaction({ id: lunch.wireId!, e: "😂", n: 10 });
+    await vi.waitFor(() => expect(t.receipts).toContain(10));
+    t.contact.sendReaction({ id: dinner.wireId!, e: "👍", n: 20 });
+    await vi.waitFor(() => expect(t.receipts).toContain(20));
+    expect(t.view().lastReaction).toMatchObject({ by: "peer", emoji: "👍", snippet: "dinner?" });
+    t.contact.sendReaction({ id: dinner.wireId!, e: "", n: 30 });
+    await vi.waitFor(() => expect(t.receipts).toContain(30));
+    await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ by: "peer", emoji: "😂", snippet: "lunch?" }));
+    t.contact.sendReaction({ id: lunch.wireId!, e: "", n: 40 });
+    await vi.waitFor(() => expect(t.receipts).toContain(40));
+    await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
+  });
+
+  it("the reaction shown again after one is taken back is found by its row, the chat read whole only past those this run showed", async () => {
+    const t = await setup({ onMessageChanges: () => {} });
+    await t.agreed();
+    for (const text of ["breakfast?", "lunch?", "dinner?"]) await t.node.sendMessage({ linkId: t.id, text });
+    const [breakfast, lunch, dinner] = [await t.row("breakfast?"), await t.row("lunch?"), await t.row("dinner?")];
+    const says = async (to: StoredMessage, e: string, n: number) => {
+      t.contact.sendReaction({ id: to.wireId!, e, n });
+      await vi.waitFor(() => expect(t.receipts).toContain(n));
+    };
+    await says(breakfast, "😂", 10);
+    await says(lunch, "👍", 20);
+    await says(dinner, "🙏", 30);
+    await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ emoji: "🙏", snippet: "dinner?" }));
+    const whole = vi.spyOn(db, "getMessages");
+    const reads = () => whole.mock.calls.filter(([chat]) => chat === t.id).length;
+    // One that is not the one shown is taken back, then the one shown: the one before both is shown again.
+    await says(lunch, "", 40);
+    await says(dinner, "", 50);
+    await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ by: "peer", emoji: "😂", snippet: "breakfast?" }));
+    expect(reads()).toBe(0);
+    // Past what this run showed, the history says whether an older one is left.
+    await says(breakfast, "", 60);
+    await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
+    expect(reads()).toBe(1);
+    whole.mockRestore();
+  });
+
   it("a reaction to a message not here yet waits for it", async () => {
     const t = await setup();
     await t.agreed();
@@ -239,17 +285,83 @@ describe("the reactions store", () => {
   });
 
   it("takes at most REACTION_LIMITS.receive a window from one group member", async () => {
-    const [ana, bo] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
-    const rows = [row({ id: `${ana}:0:1`, member: ana, text: "hello group" })];
-    const { reactions, tick } = memory(rows);
-    const outcomes: string[] = [];
-    for (let n = 1; n <= REACTION_LIMITS.receive + 5; n++) outcomes.push(await reactions.receive("group:g", bo, { id: `${ana}:0:1`, e: "👍", n }));
-    expect(outcomes.filter(o => o === "applied")).toHaveLength(REACTION_LIMITS.receive);
-    expect(outcomes.slice(-5)).toEqual(Array(5).fill("dropped"));
-    // Another member has a window of its own, and the window passes.
-    expect(await reactions.receive("group:g", ana, { id: `${ana}:0:1`, e: "😂", n: 1 })).toBe("applied");
-    tick(REACTION_LIMITS.windowMs);
-    expect(await reactions.receive("group:g", bo, { id: `${ana}:0:1`, e: "🙏", n: 100 })).toBe("applied");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const [ana, bo] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
+      const rows = [row({ id: `${ana}:0:1`, member: ana, text: "hello group" })];
+      const { reactions, tick } = memory(rows);
+      const outcomes: string[] = [];
+      for (let n = 1; n <= REACTION_LIMITS.receive + 5; n++) outcomes.push(await reactions.receive("group:g", bo, { id: `${ana}:0:1`, e: "👍", n }));
+      expect(outcomes.filter(o => o === "applied")).toHaveLength(REACTION_LIMITS.receive);
+      // Past the window they wait for the next one, and nothing more is written in this one.
+      expect(outcomes.slice(-5)).toEqual(Array(5).fill("waiting"));
+      expect(rows[0].reactions?.[bo]).toMatchObject({ n: REACTION_LIMITS.receive });
+      // Another member has a window of its own, and the window passes.
+      expect(await reactions.receive("group:g", ana, { id: `${ana}:0:1`, e: "😂", n: 1 })).toBe("applied");
+      tick(REACTION_LIMITS.windowMs);
+      await vi.advanceTimersByTimeAsync(REACTION_LIMITS.windowMs);
+      expect(rows[0].reactions?.[bo]).toMatchObject({ e: "👍", n: REACTION_LIMITS.receive + 5 });
+      expect(await reactions.receive("group:g", bo, { id: `${ana}:0:1`, e: "🙏", n: 100 })).toBe("applied");
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("a group member's reactions past the window are kept for the next one, the newest per message: a catch-up's burst loses none", async () => {
+    // A community's catch-up hands back every reaction a member made while this one was away, at once, and a frame it
+    // handed is never handed again: the ten past the thirty a window takes were dropped for good.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const [ana, bo] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
+      const rows = Array.from({ length: 40 }, (_, i) => row({ id: `${ana}:0:${i}`, member: ana, text: `message ${i}` }));
+      const { reactions, tick } = memory(rows);
+      const outcomes: string[] = [];
+      for (let i = 0; i < 40; i++) outcomes.push(await reactions.receive("group:g", bo, { id: `${ana}:0:${i}`, e: "👍", n: i + 1 }));
+      expect(outcomes.slice(0, REACTION_LIMITS.receive)).toEqual(Array(REACTION_LIMITS.receive).fill("applied"));
+      expect(outcomes.slice(REACTION_LIMITS.receive)).toEqual(Array(10).fill("waiting"));
+      expect(rows.filter(r => r.reactions?.[bo])).toHaveLength(REACTION_LIMITS.receive);
+      // A newer one for a message that waits takes its place; an older one changes nothing.
+      expect(await reactions.receive("group:g", bo, { id: `${ana}:0:39`, e: "😂", n: 100 })).toBe("waiting");
+      expect(await reactions.receive("group:g", bo, { id: `${ana}:0:39`, e: "🙏", n: 50 })).toBe("stale");
+      tick(REACTION_LIMITS.windowMs);
+      await vi.advanceTimersByTimeAsync(REACTION_LIMITS.windowMs);
+      expect(rows.filter(r => r.reactions?.[bo])).toHaveLength(40);
+      expect(rows[39].reactions?.[bo]).toMatchObject({ e: "😂", n: 100 });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("keeps REACTION_LIMITS.held reactions past the window per group, drops a member's once it is out of the group, and nothing after a stop", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const [ana, bo, cy] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
+      const count = REACTION_LIMITS.receive + REACTION_LIMITS.held + 5;
+      const rows = Array.from({ length: count }, (_, i) => row({ id: `${ana}:0:${i}`, member: ana, text: `message ${i}` }));
+      const { reactions, host, tick } = memory(rows);
+      const members = new Set([ana, bo, cy]);
+      Object.assign(host, { believed: (_chat: string, by: string) => members.has(by) });
+      const outcomes: string[] = [];
+      for (let i = 0; i < count; i++) outcomes.push(await reactions.receive("group:g", bo, { id: `${ana}:0:${i}`, e: "👍", n: i + 1 }));
+      expect(outcomes.filter(o => o === "waiting")).toHaveLength(REACTION_LIMITS.held + 5);
+      // The oldest that waited made room for the newest: a window later, 30 more are shown and the rest still wait.
+      tick(REACTION_LIMITS.windowMs);
+      await vi.advanceTimersByTimeAsync(REACTION_LIMITS.windowMs);
+      expect(rows.filter(r => r.reactions?.[bo])).toHaveLength(2 * REACTION_LIMITS.receive);
+      expect(rows[REACTION_LIMITS.receive].reactions, "the oldest five past the room are gone").toBeUndefined();
+      expect(rows[REACTION_LIMITS.receive + 5].reactions?.[bo]).toMatchObject({ n: REACTION_LIMITS.receive + 6 });
+      // Removed meanwhile: what waited from that member is not shown.
+      members.delete(bo);
+      tick(REACTION_LIMITS.windowMs);
+      await vi.advanceTimersByTimeAsync(REACTION_LIMITS.windowMs);
+      expect(rows.filter(r => r.reactions?.[bo])).toHaveLength(2 * REACTION_LIMITS.receive);
+      expect(vi.getTimerCount()).toBe(0);
+      // Stopped with some waiting: no timer is left and nothing more is written.
+      for (let i = 0; i < REACTION_LIMITS.receive + 3; i++) await reactions.receive("group:g", cy, { id: `${ana}:0:${i}`, e: "😮", n: i + 1 });
+      expect(vi.getTimerCount()).toBe(1);
+      reactions.stop();
+      expect(vi.getTimerCount()).toBe(0);
+      tick(REACTION_LIMITS.windowMs);
+      await vi.advanceTimersByTimeAsync(REACTION_LIMITS.windowMs);
+      expect(rows.filter(r => r.reactions?.[cy])).toHaveLength(REACTION_LIMITS.receive);
+    } finally { vi.useRealTimers(); }
   });
 
   it("keeps one reaction per member per message in a group, by member key", async () => {
@@ -272,7 +384,7 @@ describe("the reactions store", () => {
     expect(rows[0].reactions?.me?.e).toBe("🙏");
   });
 
-  it("a reaction waits a minute for its message, the newest per person, and then is dropped", async () => {
+  it("a reaction waits five minutes for its message, the newest per person, and then is dropped", async () => {
     const rows: StoredMessage[] = [];
     const { reactions, tick } = memory(rows);
     expect(await reactions.receive("group:g", "p", { id: "k:0:1", e: "👍", n: 2 })).toBe("waiting");
@@ -282,16 +394,70 @@ describe("the reactions store", () => {
     await reactions.stored(rows[0]);
     expect(rows[0].reactions?.p).toMatchObject({ e: "😮", n: 3 });
     expect(await reactions.receive("group:g", "p", { id: "k:0:2", e: "👍", n: 4 })).toBe("waiting");
-    tick(61_000);
+    tick(REACTION_LIMITS.bufferMs + 1_000);
     rows.push(row({ id: "k:0:2", member: "k" }));
     await reactions.stored(rows[1]);
     expect(rows[1].reactions).toBeUndefined();
   });
 
-  it("has room for so many waiting per chat", async () => {
-    const { reactions } = memory([]);
-    for (let i = 0; i < 64; i++) expect(await reactions.receive("group:g", `m${i}`, { id: "k:0:1", e: "👍", n: 1 })).toBe("waiting");
-    expect(await reactions.receive("group:g", "one-more", { id: "k:0:1", e: "👍", n: 1 })).toBe("dropped");
+  it("in a group, a reaction to a message not here yet waits after a lookup by id, and its message landing never reads the whole chat", async () => {
+    // A member back in a group hears the others' latest reactions as each edge opens, before the catch-up brings the
+    // messages they name: each one read the whole history to wait, and again when its message came.
+    const rows = [row({ id: "k:0:1", member: "k", text: "here already" })];
+    const { reactions, host } = memory(rows);
+    Object.assign(host, { message: async (chat: string, id: string) => rows.find(r => r.linkId === chat && r.id === id) });
+    const whole = vi.spyOn(host, "messages");
+    expect(await reactions.receive("group:g", "a", { id: "k:0:2", e: "👍", n: 1 })).toBe("waiting");
+    expect(await reactions.receive("group:g", "b", { id: "k:0:2", e: "😂", n: 1 })).toBe("waiting");
+    expect(await reactions.receive("group:g", "a", { id: "k:0:1", e: "🙏", n: 2 })).toBe("applied");
+    rows.push(row({ id: "k:0:2", member: "k", text: "came late" }));
+    await reactions.stored(rows[1]);
+    expect(rows[1].reactions).toMatchObject({ a: { e: "👍", n: 1 }, b: { e: "😂", n: 1 } });
+    expect(whole).not.toHaveBeenCalled();
+  });
+
+  it("has room for so many waiting per sender in a chat", async () => {
+    const { reactions, tick } = memory([]);
+    for (let i = 0; i < REACTION_LIMITS.buffer; i++) {
+      if (i && i % REACTION_LIMITS.receive === 0) tick(REACTION_LIMITS.windowMs);
+      expect(await reactions.receive("group:g", "m", { id: `k:0:${i}`, e: "👍", n: 1 })).toBe("waiting");
+    }
+    expect(await reactions.receive("group:g", "m", { id: "k:0:one-more", e: "👍", n: 1 })).toBe("dropped");
+    // Another member's room is its own.
+    expect(await reactions.receive("group:g", "other", { id: "k:0:1", e: "👍", n: 1 })).toBe("waiting");
+  });
+
+  it("keeps what every member says again to a member back in a busy group until the catch-up brings the messages", async () => {
+    // Seven members each say their latest 32 again as their edges open (20 a window, as a sender says them), naming
+    // messages the catch-up brings over a minute later: before, 64 waited for the whole chat, a minute, and 64 of 224 showed.
+    const rows: StoredMessage[] = [];
+    const { reactions, tick } = memory(rows);
+    const members = Array.from({ length: 7 }, (_, i) => `member${i}`);
+    const outcomes: string[] = [];
+    for (const [first, last] of [[0, REACTION_LIMITS.send], [REACTION_LIMITS.send, 32]]) {
+      for (const [m, by] of members.entries()) {
+        for (let i = first; i < last; i++) outcomes.push(await reactions.receive("group:g", by, { id: `k:0:${m * 32 + i}`, e: "👍", n: i + 1 }));
+      }
+      tick(REACTION_LIMITS.windowMs);
+    }
+    expect(outcomes.filter(o => o !== "waiting")).toEqual([]);
+    tick(70_000);
+    for (let i = 0; i < 7 * 32; i++) {
+      rows.push(row({ id: `k:0:${i}`, member: "k" }));
+      await reactions.stored(rows[i]);
+    }
+    expect(rows.filter(r => r.reactions).length).toBe(7 * 32);
+  });
+
+  it("tells whether a reaction shown before still stands on its row, with the row's text as it is now", () => {
+    const message = row({ id: "k:0:1", member: "k", text: "edited since", reactions: { a: { e: "👍", n: 2, at: 50 }, b: { e: "", n: 3, at: 60 } } });
+    const shown = { by: "a", emoji: "👍", at: 50, snippet: "as written", mine: false, message: "k:0:1" };
+    expect(noteIfStanding(shown, message)).toEqual({ ...shown, snippet: "edited since" });
+    // Replaced by another emoji, said again later, taken back, or never there.
+    expect(noteIfStanding({ ...shown, emoji: "😂" }, message)).toBeUndefined();
+    expect(noteIfStanding({ ...shown, at: 40 }, message)).toBeUndefined();
+    expect(noteIfStanding({ ...shown, by: "b", emoji: "", at: 60 }, message)).toBeUndefined();
+    expect(noteIfStanding({ ...shown, by: "c" }, message)).toBeUndefined();
   });
 
   it("numbers mine past what waits to be confirmed, even when the clock goes back", async () => {
@@ -299,6 +465,53 @@ describe("the reactions store", () => {
     const { reactions } = memory(rows);
     const out = await reactions.mine("l", rows[0].id, "👍", [{ id: "B".repeat(22), e: "😂", n: 5_000 }]);
     expect(out).toMatchObject({ reaction: { id: "A".repeat(22), n: 5_001 } });
+  });
+
+  it("a reaction of mine reads the row it names; my highest number in a chat is read from its history once", async () => {
+    // Each reaction of mine (and each one taken back) read and sorted the whole chat or group: for the row, which the
+    // page names by its id, and for my highest number in it.
+    const rows = [
+      row({ linkId: "chat", id: "peer_AAAAAAAAAAAAAAAA", text: "theirs", reactions: { me: { e: "👍", n: 9_000, at: 1 } } }),
+      row({ linkId: "chat", id: "me_BBBBBBBBBBBBBBBB", sender: "me", text: "mine" }),
+      row({ id: "k:0:1", member: "k", text: "in the group", reactions: { me: { e: "👍", n: 7_000, at: 1 } } }),
+      row({ id: "k:0:2", member: "k", text: "the next one" }),
+      row({ id: "k:0:3", event: "joined", text: "" }),
+    ];
+    const { reactions, host } = memory(rows);
+    Object.assign(host, { message: async (chat: string, id: string) => rows.find(r => r.linkId === chat && r.id === id) });
+    const whole = vi.spyOn(host, "messages");
+    const numbers: number[] = [];
+    const mine = async (chat: string, id: string, emoji: string, pending: WireReaction[] = []) => {
+      const out = await reactions.mine(chat, id, emoji, pending);
+      if ("error" in out) return out.error;
+      numbers.push(out.reaction.n);
+      return out.reaction.id;
+    };
+    // The clock (1,000) is behind my numbers in both: each goes past the highest of its own chat.
+    expect(await mine("group:g", "k:0:2", "😂")).toBe("k:0:2");
+    expect(await mine("chat", "me_BBBBBBBBBBBBBBBB", "🙏")).toBe("BBBBBBBBBBBBBBBB");
+    expect(numbers).toEqual([7_001, 9_001]);
+    expect(whole.mock.calls).toEqual([["group:g"], ["chat"]]);
+
+    whole.mockClear();
+    expect(await mine("group:g", "k:0:1", "🙏")).toBe("k:0:1");
+    expect(await mine("group:g", "k:0:1", "")).toBe("k:0:1");
+    expect(await mine("chat", "peer_AAAAAAAAAAAAAAAA", "😂")).toBe("AAAAAAAAAAAAAAAA");
+    // By the id both sides know it by, as the CLI may name it; and past what still waits to be confirmed.
+    expect(await mine("chat", "BBBBBBBBBBBBBBBB", "👍", [{ id: "C".repeat(16), e: "👍", n: 9_500 }])).toBe("BBBBBBBBBBBBBBBB");
+    expect(await mine("chat", "peer_AAAAAAAAAAAAAAAA", "")).toBe("AAAAAAAAAAAAAAAA");
+    expect(numbers.slice(2)).toEqual([7_002, 7_003, 9_002, 9_501, 9_502]);
+    // What takes no reaction, or is not here, is refused without the whole group either.
+    expect(await mine("group:g", "k:0:3", "👍")).toMatch(/takes no reaction/);
+    expect(await mine("group:g", "k:0:9", "👍")).toMatch(/not in this chat/);
+    expect(whole).not.toHaveBeenCalled();
+    expect(rows.map(r => r.reactions?.me?.e)).toEqual(["", "👍", "", "😂", undefined]);
+
+    // A chat that is gone is read again if it ever comes back.
+    reactions.forget("chat");
+    expect(await mine("chat", "me_BBBBBBBBBBBBBBBB", "🙏")).toBe("BBBBBBBBBBBBBBBB");
+    expect(whole.mock.calls).toEqual([["chat"]]);
+    expect(numbers.at(-1)).toBe(9_503);
   });
 });
 
@@ -325,5 +538,90 @@ describe("a private group's edge that opens", () => {
     vi.spyOn(inner.groups, "signReaction").mockReturnValue({});
     await inner.resendGroupReactions(g, "edge");
     expect(sent.map(frame => [frame.id, frame.e])).toEqual([["admin:5:0", "🎉"]]);
+  });
+
+  it("gets my newest reaction through to a member who missed it, after 32 reactions", async () => {
+    // Said again: my 32 latest, oldest first; the member takes 30 a window, so the newest two never landed.
+    const g = `many-${crypto.randomUUID()}`, chat = `group:${g}`;
+    const row = (fields: Partial<StoredMessage>): StoredMessage => ({ linkId: chat, id: "x", text: "", sender: "peer", timestamp: 1, via: "datalink", ...fields });
+    const mine = Array.from({ length: 32 }, (_, i) => row({ id: `alice:0:${i + 1}`, member: "alice", text: `m${i + 1}`, timestamp: 2_000 + i, reactions: { me: { e: "👍", n: i + 1, at: 3_000 + i } } }));
+    for (const message of [row({ id: "event:1:joined:1000", event: "joined", text: "You joined.", timestamp: 1_000 }), ...mine]) await db.addMessage(message);
+    cleanup.push(async () => { for (const m of await db.getMessages(chat)) await db.deleteMessage(chat, m.id); });
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
+    const inner = node as unknown as { links: Map<string, unknown>; groups: { signReaction(): object }; resendGroupReactions(groupId: string, linkId: string): Promise<void> };
+    const sent: Record<string, unknown>[] = [];
+    inner.links.set("edge", { link: { sendGroupFrame: (frame: Record<string, unknown>) => { sent.push(frame); } } });
+    vi.spyOn(inner.groups, "signReaction").mockReturnValue({});
+    // The rest go a window later: not in this test's time.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    cleanup.push(async () => { vi.useRealTimers(); });
+    await inner.resendGroupReactions(g, "edge");
+    // The member's side: every reaction of mine but the newest, which came while it was away.
+    const theirs = mine.map(m => ({ ...m, reactions: m.reactions!.me.n < 32 ? { bob: m.reactions!.me } : undefined }));
+    const reactions = new Reactions({
+      messages: async () => theirs,
+      patch: async (_chat, id, change) => {
+        const i = theirs.findIndex(r => r.id === id), patch = change(theirs[i]);
+        if (patch) theirs[i] = { ...theirs[i], ...patch };
+        return theirs[i];
+      },
+      changed: () => {},
+    });
+    for (const frame of sent) await reactions.receive(chat, "bob", { id: frame.id as string, e: frame.e as string, n: frame.n as number });
+    expect(theirs.at(-1)!.reactions?.bob).toMatchObject({ e: "👍", n: 32 });
+    expect(sent[0]).toMatchObject({ id: "alice:0:32", n: 32 });
+    expect(sent.length).toBeLessThan(REACTION_LIMITS.receive);
+  });
+
+  it("edges that open together read the group's history once for my reactions and edits said again", async () => {
+    // A member back in a group of 8 opens 7 edges at once: each read the whole history twice, 14 reads (4 s at 10k rows).
+    const g = `burst-${crypto.randomUUID()}`, chat = `group:${g}`;
+    await db.addMessage({ linkId: chat, id: "admin:1:0", member: "admin", text: "hello group", sender: "peer", timestamp: 1_500, via: "datalink", reactions: { me: { e: "👍", n: 2_000, at: 2_000 } } });
+    cleanup.push(async () => { for (const m of await db.getMessages(chat)) await db.deleteMessage(chat, m.id); });
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
+    const inner = node as unknown as { links: Map<string, unknown>; groups: { signReaction(): object }; resendGroupReactions(groupId: string, linkId: string): Promise<void>; groupEdits: { resend(groupId: string, to: string): Promise<void> } };
+    const sent = new Map<string, unknown[]>();
+    for (let e = 0; e < 7; e++) inner.links.set(`edge-${e}`, { stored: {}, link: { sendGroupFrame: (frame: Record<string, unknown>) => { sent.set(`edge-${e}`, [...sent.get(`edge-${e}`) ?? [], frame.id]); } } });
+    vi.spyOn(inner.groups, "signReaction").mockReturnValue({});
+    const reads = vi.spyOn(db, "getMessages");
+    cleanup.push(() => { reads.mockRestore(); });
+    await Promise.all(Array.from({ length: 7 }, (_, e) => [inner.resendGroupReactions(g, `edge-${e}`), inner.groupEdits.resend(g, `member-${e}`)]).flat());
+    expect(reads.mock.calls.filter(([id]) => id === chat)).toHaveLength(1);
+    // Each edge still hears my reaction.
+    expect([...sent.values()]).toEqual(Array(7).fill(["admin:1:0"]));
+    // The next burst reads again: what changed meanwhile is said.
+    await inner.resendGroupReactions(g, "edge-0");
+    expect(reads.mock.calls.filter(([id]) => id === chat)).toHaveLength(2);
+  });
+
+  it("hears my latest 32 again within what a member takes a window: the newest 20 now, the rest a window later", async () => {
+    // 32 at once went past the 30 a member takes from me in 10 s, and the last two were dropped (Bug hunter, 2026-10-09).
+    const g = `paced-${crypto.randomUUID()}`, chat = `group:${g}`;
+    const row = (fields: Partial<StoredMessage>): StoredMessage => ({ linkId: chat, id: "x", text: "", sender: "peer", timestamp: 1, via: "datalink", ...fields });
+    await db.addMessage(row({ id: "event:1:joined:1000", event: "joined", text: "You joined.", timestamp: 1_000 }));
+    for (let i = 0; i < 40; i++) await db.addMessage(row({ id: `admin:1:${i}`, member: "admin", text: `line ${i}`, timestamp: 2_000 + i, reactions: { me: { e: "👍", n: 3_000 + i, at: 3_000 + i } } }));
+    cleanup.push(async () => { for (const m of await db.getMessages(chat)) await db.deleteMessage(chat, m.id); });
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
+    const inner = node as unknown as { links: Map<string, unknown>; groups: { signReaction(): object }; resendGroupReactions(groupId: string, linkId: string): Promise<void> };
+    const sent: Record<string, unknown>[] = [], again: Record<string, unknown>[] = [];
+    inner.links.set("edge", { link: { sendGroupFrame: (frame: Record<string, unknown>) => { sent.push(frame); } } });
+    inner.links.set("closes", { link: { sendGroupFrame: (frame: Record<string, unknown>) => { again.push(frame); } } });
+    vi.spyOn(inner.groups, "signReaction").mockReturnValue({});
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    cleanup.push(async () => { vi.useRealTimers(); });
+    await inner.resendGroupReactions(g, "edge");
+    await inner.resendGroupReactions(g, "closes");
+    // Newest first.
+    expect(sent.map(frame => frame.id)).toEqual(Array.from({ length: REACTION_LIMITS.send }, (_, i) => `admin:1:${39 - i}`));
+    // That edge closed and opened again: the next one says them all from the start.
+    inner.links.set("closes", { link: { sendGroupFrame: vi.fn() } });
+    await vi.advanceTimersByTimeAsync(REACTION_LIMITS.windowMs);
+    expect(sent).toHaveLength(REACTION_LIMITS.send);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(new Set(sent.map(frame => frame.id))).toEqual(new Set(Array.from({ length: 32 }, (_, i) => `admin:1:${8 + i}`)));
+    expect(again).toHaveLength(REACTION_LIMITS.send);
   });
 });

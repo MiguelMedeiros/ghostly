@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PageLink } from "@/components/site/IntentLink";
 import { Ghost, GhostMark } from "@/components/ghost/Ghost";
 import { Brand } from "./Brand";
 import { RELEASES_URL } from "@/lib/release";
@@ -35,6 +36,7 @@ export function SiteFooter({ apps = false }: { apps?: boolean }) {
         { label: t.links.releases, href: RELEASES_URL },
         { label: t.links.security, href: SECURITY_URL },
         { label: t.links.contributing, href: CONTRIBUTING_URL },
+        { label: t.links.brand, href: "/brand" },
       ],
     },
   ];
@@ -57,7 +59,7 @@ export function SiteFooter({ apps = false }: { apps?: boolean }) {
               <ul>
                 {col.links.map((l) => (
                   <li key={l.label}>
-                    {l.href.startsWith("http") ? <a href={l.href}>{l.label}</a> : <Link href={l.href}>{l.label}</Link>}
+                    {l.href.startsWith("http") ? <a href={l.href}>{l.label}</a> : <PageLink href={l.href}>{l.label}</PageLink>}
                   </li>
                 ))}
               </ul>

@@ -60,9 +60,16 @@ function CheckGlyph({ on }: { on: boolean }) {
  * until when, and the way back. `portal`: for an opener in the chat list (Menu's `portal`). `mentions`: a group,
  * which also offers "Still notify me when I'm mentioned" (on by default; apps/ui/src/lib/chatMute.ts).
  */
-export function MuteMenu({ chat, open, onClose, anchorRef, align, portal, mentions }: {
+export function MuteMenu(props: MuteMenuProps) {
+  // Closed, it is nothing: every row of the chat list has one, and its choices' end times are formatted only once open.
+  return props.open ? <OpenMuteMenu {...props} /> : null;
+}
+
+type MuteMenuProps = {
   chat: string; open: boolean; onClose(): void; anchorRef: RefObject<HTMLElement | null>; align?: "start" | "end"; portal?: boolean; mentions?: boolean;
-}) {
+};
+
+function OpenMuteMenu({ chat, open, onClose, anchorRef, align, portal, mentions }: MuteMenuProps) {
   const { t, language } = useI18n();
   const until = useChatMute(chat);
   const mutedText = useMutedText();

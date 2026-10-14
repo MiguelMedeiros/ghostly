@@ -39,7 +39,8 @@ describe("PairingTracker", () => {
     t.published(); t.sawPeer(); t.offerSent(); t.failed("timeout", true); t.offerSent(); t.answerReceived(); t.failed("transport", true, "ICE failed"); t.offerSent(); t.answerReceived(); t.live();
     expect(stages()).toEqual(["waiting", "waiting", "knocking", "waiting", "knocking", "connecting", "waiting", "knocking", "connecting", "live"]);
     expect(reported.map(p => p.attempt)).toEqual([1, 1, 1, 1, 2, 2, 2, 3, 3, 3]);
-    expect(reported[3]).toMatchObject({ peerSeen: true, detail: expect.stringContaining("not answered") });
+    // Why, as a code (the UI's words say the stage; no English sentence of the engine's reaches the scene).
+    expect(reported[3]).toMatchObject({ peerSeen: true, detail: "timeout" });
     expect(reported[3].reason).toBeUndefined();
     expect(reported[6]).toMatchObject({ detail: "ICE failed" });
     // A detail belongs to the attempt it came with, not to the stages after it.

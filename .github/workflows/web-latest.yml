@@ -1,0 +1,77 @@
+name: Web image latest
+
+# Moves the web image's `latest` tag (ghcr.io/miguelmedeiros/ghostly-web:latest,
+# what infra/docker-compose.yml pulls by default) to a release's image once the
+# release is published. release.yml's build-web pushes only `:<tag>`, so a
+# draft that is never published, or an old tag built again, leaves `latest`
+# alone. It moves only to GitHub's Latest release, and never back: a release
+# with a published one above it is refused (tools/scripts/web-latest.mjs).
+#
+# A person publishing the draft (docs/RELEASING.md, step 4) starts it. A
+# security autorelease publishes with the workflow token, which starts nothing,
+# so security-autorelease.yml dispatches this workflow itself. By hand:
+#   gh workflow run web-latest.yml -f tag=v1.0.0
+# The image `:<tag>` has to exist: when the release is published before the
+# Release workflow's build-web is done, run it again once it is.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag whose image becomes latest, e.g. v1.0.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-latest
+  cancel-in-progress: false
+
+jobs:
+  latest:
+    name: Move latest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Is it the newest published release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name || true)
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+            | node tools/scripts/web-latest.mjs "$TAG" "$latest"
+
+      - name: Log in to the GitHub container registry
+        if: steps.check.outputs.move == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Point latest at the release's image
+        if: steps.check.outputs.move == 'true'
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ghostly-web"
+          docker buildx imagetools create --tag "$image:latest" "$image:$TAG"
+          echo "\`$image:latest\` is now \`$image:$TAG\`." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Say why not
+        if: steps.check.outputs.move != 'true'
+        run: echo "\`latest\` was not moved to $TAG (the check's log says why)." >> "$GITHUB_STEP_SUMMARY"

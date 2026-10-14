@@ -1,5 +1,7 @@
 import { decodeCommunityLink, decodeGroupEntryLink, groupEntryUrl, type PairedTransport } from "@ghostly/core";
-import { getPrefix } from "./storage";
+import { getPrefix, setSessionDraft } from "./storage";
+import { setChatFolder } from "./chatFolders";
+import { forgetChatMute, groupChat } from "./chatMute";
 import type { GroupEdgeView, GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { publicKeyLabel } from "./publicKeyLabel";
 import { transportName } from "./connection";
@@ -16,7 +18,7 @@ export const memberName = (m: { key: string; me: boolean; nick?: string }, t: Tr
  * Who wrote (or reacted to) a group's message: a member by the roster's name; an author no longer in the roster
  * (removed, or back with a new member key) by the name the group knew them by, else by their key.
  */
-export const authorName = (group: Pick<GroupView, "members" | "formerNames">, key: string, t: Translate = english) => {
+export const authorName = (group: { members: readonly Pick<GroupMemberView, "key" | "me" | "nick">[]; formerNames?: GroupView["formerNames"] }, key: string, t: Translate = english) => {
   const member = group.members.find(m => m.key === key);
   return member ? memberName(member, t) : group.formerNames?.[key] || t("group.member.unnamed", { key: key.slice(0, 8) });
 };
@@ -26,7 +28,7 @@ export const authorName = (group: Pick<GroupView, "members" | "formerNames">, ke
  * identity they are shown as wins, as in the chat). Community members are not contacts: they have none here.
  */
 export function memberPhoto(
-  group: Pick<GroupView, "memberLinks">, member: { key: string; me: boolean }, links: readonly LinkView[] | undefined,
+  group: Pick<GroupView, "memberLinks">, member: { key: string; me: boolean }, links: readonly Pick<LinkView, "id" | "peerPubKeyZ32" | "peerAvatar">[] | undefined,
   faceOf: (peerKey: string | undefined) => { photo?: string } | undefined, myAvatar?: string,
 ): string | undefined {
   if (member.me) return myAvatar || undefined;
@@ -89,6 +91,12 @@ export const edgeDot = (member: GroupMemberView) => member.me || member.edge?.st
   : edgeWaits(member.edge) ? "bg-text-muted motion-safe:animate-pulse"
   : member.edge?.state === "error" ? "bg-danger" : member.edge?.state === "connecting" ? "bg-text-muted motion-safe:animate-pulse" : "bg-text-muted/50";
 
+/**
+ * An invitation, or a first join through a link, answered from its row: lifted out of folders to stay in sight. A group
+ * kept here and knocking to get back in (removed from a community, its link opened again) is the group, not that.
+ */
+export const invitationRow = (group: Pick<GroupView, "invitation" | "status">): boolean => !!group.invitation && !(group.invitation.viaLink && group.status);
+
 /** Where a private group lives in the app: by its id. */
 export function groupPath(groupId: string): string {
   return `/group/${encodeURIComponent(groupId)}`;
@@ -111,6 +119,18 @@ export function groupReadAt(groupId: string): number {
 }
 export function markGroupRead(groupId: string, at = Date.now()): void {
   try { localStorage.setItem(`${getPrefix()}group_read_${groupId}`, String(at)); } catch { /* private mode: nothing is remembered */ }
+}
+
+/**
+ * What this device keeps of a group beside the engine goes with it (left, deleted here, a join called off): what was
+ * typed and not sent, the read mark, the mute and the folder, as a chat's go with the chat (storage.ts deleteSession).
+ * A community keeps its id, so a draft left behind was in the field again after joining it again.
+ */
+export function forgetGroupLocal(groupId: string): void {
+  setSessionDraft(`group:${groupId}`, "");
+  try { localStorage.removeItem(`${getPrefix()}group_read_${groupId}`); } catch { /* storage unavailable */ }
+  forgetChatMute(groupChat(groupId));
+  setChatFolder(groupChat(groupId), undefined);
 }
 
 /** The web app opens a group's link; the extension and desktop hand out the public app's address, which they also accept pasted. */

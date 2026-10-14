@@ -164,7 +164,7 @@ export function Wallet() {
       <PageAction label={t("sidebar.new")} title={t("wallet.page.create")} testId="wallet-add" onClick={() => setCreating(cards.length && !firstRun ? network : "testnet")} />
     )}>
       <div ref={page} className="space-y-6">
-        {platform?.notice && <p className="px-3 py-2 rounded-lg bg-yellow-500/10 text-yellow-500 text-xs" data-testid="platform-notice">{platform.notice}</p>}
+        {platform?.notice && <p className="px-3 py-2 rounded-lg bg-yellow-500/10 text-warn-ink text-xs" data-testid="platform-notice">{platform.notice}</p>}
         {wallet && state?.setup && <WalletSetupStatus wallet={wallet} setup={state.setup} showProgress={!cards.length} />}
         {!wallet || !state ? <p className="text-text-muted text-sm">{t("wallet.page.unavailable")}</p> : (!cards.length && state.setup?.running && !firstRun) ? null : !cards.length || firstRun ? (
           <FirstWallet wallet={wallet} offers={state.offers} onNew={() => setCreating("testnet")} onStart={() => setFirstRun(true)} onMade={(id) => { setFirstRun(false); select(id); setDealt(id); }} />

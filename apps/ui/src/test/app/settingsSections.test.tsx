@@ -10,7 +10,7 @@ import { Settings } from "../../pages/Settings";
 import { renderApp } from "../render";
 import { windowIs } from "../viewport";
 import en from "../../locales/en";
-import { locales } from "../../locales";
+import { LOCALES as locales } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
 import type { Language } from "../../lib/settings";
 

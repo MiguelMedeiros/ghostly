@@ -143,9 +143,39 @@ describe("enroll/1 over a one-time paired session", () => {
     await settled(intruder.start(waiting.code));
     expect(await until(() => intruder.ended, 90_000)).toBe(true);
     expect(intruder.current()).toMatchObject({ step: "failed" });
-    // The person's device is still the one on the inviter's screen.
+    // The person's device is still the one on the inviter's screen, which says another device tried the code.
     expect(a.current()).toMatchObject({ step: "confirm", device: "Phone" });
+    expect((a.current() as { refused?: number }).refused ?? 0).toBeGreaterThan(0);
     await settled(a.cancel());
     expect(await settled(readDeviceRecord("ghostly_intruder"))).toBeNull();
+  });
+
+  // One session per invite, and the inviter says so (WISP 06 § Adding a device): both devices write the code's one
+  // packet, so whichever authenticates first, the inviter's screen with the digits also says a second device is there.
+  it.each([0, 50, 300, 1_000, 2_000, 3_000, 4_000, 8_000])("two devices that open the code %i ms apart, before either authenticated: the inviter says a second one tried", async (apart) => {
+    const network = new FakeTurnNetwork();
+    const open = (owner: string) => ghostLinkEnrollChannel({ transport: pkarr.transport(), createPeerConnection: () => fakePeerConnection(owner), pollIntervals: RELAY_POLL_INTERVALS });
+    const timing = { proofMs: 60_000 };
+    const a = new EnrollInviter({ profile: A, network, open: open("desktop"), didSeed: async () => randomBytes(32), name: "Desktop", forceSeed: true });
+    const b = new EnrollJoiner({ profile: B, network, open: open("phone"), about: { name: "Phone", kind: "web", app: "1.1.0" }, forceSeed: true, install: null, timing });
+    const c = new EnrollJoiner({ profile: "ghostly_other", network, open: open("other"), about: { name: "Other", kind: "web", app: "1.1.0" }, forceSeed: true, install: null, timing });
+    const waiting = await settled(a.start());
+    if (waiting.step !== "waiting") throw new Error("no code");
+    await settled(b.start(waiting.code));
+    if (apart) await run(apart);
+    await settled(c.start(waiting.code));
+    const refused = () => { const view = a.current(); return view.step === "confirm" ? view.refused ?? 0 : 0; };
+    // Soon after the digits: the device that has no session puts its packet out again, and the inviter reads it.
+    expect(await until(() => refused() > 0, 30_000)).toBe(true);
+    // One of the two has the session and the inviter's digits; the other never shows any.
+    const av = a.current(), views = [b.current(), c.current()];
+    if (av.step !== "confirm") throw new Error("no digits");
+    const shown = views.filter((view) => view.step === "confirm");
+    expect(shown.length).toBeLessThanOrEqual(1);
+    for (const view of shown) expect(view).toMatchObject({ digits: av.digits });
+    await settled(a.cancel());
+    expect(await until(() => b.ended && c.ended, 90_000)).toBe(true);
+    expect(await settled(readDeviceRecord(B))).toBeNull();
+    expect(await settled(readDeviceRecord("ghostly_other"))).toBeNull();
   });
 });

@@ -119,6 +119,34 @@ describe("notification sounds that come together", () => {
     expect(context().started).toEqual([587, 784, 784, ...MESSAGE]);
   });
 
+  it("let a chat's connected sound through after its contact's knock, however quick the pairing was", async () => {
+    // The contact came with my invite (knock), and the chat went live less than the gap later.
+    sounds.playSound("knock");
+    await flush();
+    await vi.advanceTimersByTimeAsync(gate.NOTICE_GAP_MS - 100);
+    sounds.playSound("connected");
+    await flush();
+    expect(context().started).toEqual([392, 415, 587, 784, 784]);
+    // Only after a knock: behind any other notice it is still dropped.
+    await vi.advanceTimersByTimeAsync(gate.NOTICE_GAP_MS);
+    sounds.playSound("message");
+    await flush();
+    await vi.advanceTimersByTimeAsync(gate.NOTICE_GAP_MS - 100);
+    sounds.playSound("connected");
+    await flush();
+    expect(context().started).toEqual([392, 415, 587, 784, 784, ...MESSAGE]);
+  });
+
+  it("fade the knock out for a connected sound that comes while it still sounds, so they never overlap", async () => {
+    sounds.playSound("knock");
+    await flush();
+    await vi.advanceTimersByTimeAsync(100);
+    sounds.playSound("connected");
+    await flush();
+    expect(context().stopped).toEqual([392, 415]);
+    expect(context().started).toEqual([392, 415, 587, 784, 784]);
+  });
+
   it("let the next one play once the gap is over", async () => {
     sounds.playSound("message");
     await flush();

@@ -274,14 +274,18 @@
       "testnet": "Denaro di prova: non hai un portafoglio Lightning Testnet con cui pagarla"
     },
     "onchainBitcoin": "Bitcoin on-chain",
+    "onlySat": "Qui si può riscattare solo ecash in sat.",
     "openTitle": "Apri in un portafoglio Lightning su questo dispositivo",
     "openWallet": "Apri portafoglio",
+    "otherUnitRequest": "Chiede ecash in {{unit}}",
+    "otherUnitToken": "Un token in {{unit}}",
     "paid": "Pagata ✓",
     "pay": "Paga",
     "payWithFee": "Paga {{amount}} + commissione fino a {{fee}}",
     "paying": "Pagamento…",
     "paysThrough": "Si paga tramite {{domain}}",
     "pendingAtMint": "Pagamento in sospeso presso il mint…",
+    "qrTooLong": "Troppo lungo per un codice QR: copialo invece.",
     "redeem": "Riscatta",
     "redeemed": "Riscattato ✓",
     "redeeming": "Riscatto…"

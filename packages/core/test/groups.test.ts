@@ -3,7 +3,7 @@ import { createIdentity, identityFromSeedB64, sign } from "../src/identity";
 import { fromBase64Url, toBase64Url, utf8Encode } from "../src/bytes";
 import { confirmationMatches, confirmationTag, decryptText, edgeParams, encryptText, epochKeys, newEpochSecret, openSecret, sealSecret } from "../src/groupCrypto";
 import { MAX_GROUP_MEMBERS, commitHash, commitUntaggedHash, signCommit, verifyChain, verifyCommit, type GroupCommit, type Roster } from "../src/groupCommits";
-import { GROUP_LIMITS, GroupSession, groupMessageId, type GroupMessageFrame } from "../src/groupSession";
+import { GROUP_LIMITS, GroupSession, groupMessageId, type GroupEdgeFrame, type GroupMessageFrame } from "../src/groupSession";
 import { Mesh, admit, clone } from "./support/groupMesh";
 // covers: groups.protocol.crypto, groups.protocol.commits, groups.create, groups.invite, groups.send, groups.catch-up, groups.remove-member, groups.admin-change, groups.rotate, groups.leave
 
@@ -288,6 +288,32 @@ describe("group session", () => {
     expect(dave.status).toBe("forked");
   });
 
+  it("names everyone only while its author is still the admin: a former admin's old epoch gives no `*`, in a message or an edit", async () => {
+    const mesh = new Mesh();
+    const alice = mesh.add(GroupSession.create("Ghosts"));
+    const bob = await admit(mesh, alice, "Bob"), carol = await admit(mesh, alice, "Carol");
+    const everyone = [{ k: "*", o: 0, l: 4 }];
+    const sent = await alice.sendText("@all one", 1, everyone); await mesh.settle();
+    expect(mesh.inbox.get(carol.myKey)![0].mentions).toEqual(everyone); // the admin's, while it is the admin
+    const before = clone(mesh.saved.get(alice.myKey)!);
+    await alice.transferAdmin(bob.myKey); await mesh.settle();
+    expect(carol.admin).toBe(bob.myKey);
+    // Alice's app as it was before she handed the role on: it still seals under the epoch she was the admin of.
+    const frames: GroupEdgeFrame[] = [];
+    const stale = new GroupSession(before, { save: async () => {}, send: (_to, frame) => { frames.push(clone(frame)); return true; }, message: () => {}, changed: () => {} });
+    expect(stale.isAdmin).toBe(true);
+    await stale.sendText("@all @Carol", 2, [...everyone, { k: carol.myKey, o: 5, l: 6 }]);
+    await stale.sendEdit((sent as { id: string }).id, { v: 1, ts: 3, text: "@all three", mentions: everyone });
+    for (const frame of frames) await carol.handle(alice.myKey, clone(frame));
+    const two = mesh.inbox.get(carol.myKey)!.find(m => m.text === "@all @Carol")!;
+    expect(two.epoch).toBe(stale.epoch);
+    expect(two.mentions).toEqual([{ k: carol.myKey, o: 5, l: 6 }]);
+    expect(mesh.edits.get(carol.myKey)!.find(e => e.m === "@all three")).not.toHaveProperty("k");
+    // The admin now names everyone, as before.
+    await bob.sendText("@all four", 4, everyone); await mesh.settle();
+    expect(mesh.inbox.get(carol.myKey)!.find(m => m.text === "@all four")!.mentions).toEqual(everyone);
+  });
+
   it("lets a member leave: its secrets go at once, the admin removes it, and the admin cannot leave first", async () => {
     const mesh = new Mesh();
     const alice = mesh.add(GroupSession.create("Ghosts"));
@@ -315,6 +341,10 @@ describe("group session", () => {
     await mesh.open(alice, bob);
     expect(mesh.texts(bob)).toHaveLength(GROUP_LIMITS.outlog);
     expect(bob.missing(alice.myKey)).toBe(5);
+    // A caller that knows nobody holds the numbers up to one counts only those above it.
+    expect(bob.missing(alice.myKey, 2)).toBe(2);
+    expect(bob.missing(alice.myKey, 4)).toBe(0);
+    expect(bob.missing(alice.myKey, 1_000)).toBe(0);
     // Frames far ahead of the chain are refused; frames one epoch ahead wait, up to a bound.
     const far = { ...alice.state.sent[0], e: alice.epoch + GROUP_LIMITS.secrets + 1 };
     await bob.handle(alice.myKey, far);
@@ -356,11 +386,30 @@ describe("group session", () => {
     expect(GroupSession.join({ name: "x", admin: alice.myKey }, [], welcome[0], seed)).toHaveProperty("state");
   });
 
+  it("welcomes a member again whose welcome was lost, with the epochs since its admission and nothing committed", async () => {
+    const mesh = new Mesh();
+    const alice = mesh.add(GroupSession.create("Ghosts"));
+    const seed = createIdentity().seedB64, key = identityFromSeedB64(seed).pubKeyZ32;
+    await alice.admit(key); // lost on the way
+    await alice.admit(createIdentity().pubKeyZ32); // and someone else let in since
+    const chain = alice.state.chain.length;
+    const again = await alice.rewelcome(key);
+    expect(alice.state.chain).toHaveLength(chain);
+    const joined = GroupSession.join({ name: "Ghosts", admin: alice.myKey }, again.slice(0, -1), again.at(-1), seed);
+    expect(joined).toHaveProperty("state");
+    const state = (joined as { state: { chain: unknown[]; secrets: Record<string, string> } }).state;
+    expect(state.chain).toHaveLength(chain);
+    expect(Object.keys(state.secrets).map(Number)).toEqual([1, 2]);
+    await expect(alice.rewelcome(createIdentity().pubKeyZ32)).rejects.toThrow("Not a member");
+    await expect(alice.rewelcome(alice.myKey)).rejects.toThrow("Not a member");
+  });
+
   it("survives a restart from saved state", async () => {
     const mesh = new Mesh();
     const alice = mesh.add(GroupSession.create("Ghosts"));
     const bob = await admit(mesh, alice, "Bob");
     await alice.sendText("first"); await mesh.settle();
+    await bob.flush();
     const restored = new Mesh();
     const alice2 = restored.add(clone(mesh.saved.get(alice.myKey)!)), bob2 = restored.add(clone(mesh.saved.get(bob.myKey)!));
     expect(bob2.epoch).toBe(1); expect(bob2.readableEpochs).toEqual([1]);

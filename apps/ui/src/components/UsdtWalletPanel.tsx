@@ -46,7 +46,7 @@ export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPla
    <div>
     <p className="text-text-primary break-words" data-testid="usdt-balance"><span className="text-4xl font-semibold tabular-nums">{formatTokenAmount(usdt.balance,usdt.decimals,t.language)}</span> <span className="text-text-muted text-sm">{label}</span></p>
     <p className="mt-1 text-xs text-text-muted" data-testid="usdt-gas">{t('wallet.usdt.gas',{amount:formatTokenAmount(usdt.gasBalance,18,t.language)})}</p>
-    {usdt.chainId!==1&&<p className="mt-1 text-xs text-yellow-500">{network==='sepolia'?t('wallet.usdt.sepoliaTest'):t('wallet.usdt.localTest')}</p>}
+    {usdt.chainId!==1&&<p className="mt-1 text-xs text-warn-ink">{network==='sepolia'?t('wallet.usdt.sepoliaTest'):t('wallet.usdt.localTest')}</p>}
    </div>
    <Actions value={action} onChange={setAction}/>
    {action==='receive'&&<div className="bg-surface rounded-xl p-4 animate-fade-in"><Address value={usdt.address} qr={usdt.address ? `ethereum:${usdt.address}@${usdt.chainId}` : undefined} testId="usdt-address" note={network==='evm-local'?t('wallet.usdt.receiveNoteLocal',{token:label}):t('wallet.usdt.receiveNote',{token:label,place:PLACE[network]})}/></div>}

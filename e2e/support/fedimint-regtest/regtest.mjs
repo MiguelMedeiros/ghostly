@@ -4,6 +4,7 @@
 //   node e2e/support/fedimint-regtest/regtest.mjs ready            set the federation up (DKG), connect the gateway,
 //                                                                   open peer → gateway (half pushed), print the invite
 //   node e2e/support/fedimint-regtest/regtest.mjs invite           the federation's invite code
+//   node e2e/support/fedimint-regtest/regtest.mjs status           whether Lightning routes in and out now (reads only)
 //   node e2e/support/fedimint-regtest/regtest.mjs pay <invoice>    the peer pays an invoice (a federation's, through the gateway)
 //   node e2e/support/fedimint-regtest/regtest.mjs invoice <sats>   an invoice of the peer (for the federation to pay)
 //   node e2e/support/fedimint-regtest/regtest.mjs lookup <hash>    whether the peer's invoice of that hash is settled
@@ -89,6 +90,25 @@ export async function ready() {
   return { invite: code, federation: federationId, gatewayEcashMsats: ecash(), api: endpoints.fedimint.api };
 }
 
+/**
+ * Whether Lightning goes in and out of the federation right now: the gateway serves it, the peer's channel to the
+ * gateway's node is active on both sides, and the gateway holds ecash to pay in with. It only reads (`ready` is what
+ * sets up): the guardian answers and has its invite code minutes before all of this is true, while the stack starts.
+ */
+export function status(gateway = gatewayCli, node = lncli) {
+  const state = { federation: null, channel: false, gatewayEcashMsats: 0, routes: false };
+  try {
+    state.federation = gateway("info").federations?.[0]?.federation_id ?? null;
+    if (!state.federation) return state;
+    const id = node("fedimint-lnd", "getinfo").identity_pubkey;
+    state.channel = node("fedimint-lnd-peer", "listchannels").channels.some((c) => c.remote_pubkey === id && c.active)
+      && node("fedimint-lnd", "listchannels").channels.some((c) => c.active);
+    state.gatewayEcashMsats = Number(gateway("get-balances").ecash_balances?.find((b) => b.federation_id === state.federation)?.ecash_balance_msats ?? 0);
+  } catch { /* a container that is not up or not answering yet: nothing routes */ }
+  state.routes = state.channel && state.gatewayEcashMsats > 0;
+  return state;
+}
+
 export const pay = (request) => peer("payinvoice", "--force", "--json", request);
 export const invoice = (sats, memo = "fedimint regtest") => peer("addinvoice", "--amt", String(sats), "--memo", memo);
 export const lookup = (hash) => peer("lookupinvoice", hash);
@@ -97,9 +117,10 @@ const [command, ...args] = process.argv.slice(2);
 if (import.meta.url === `file://${process.argv[1]}`) {
   if (command === "ready") console.log(JSON.stringify(await ready()));
   else if (command === "invite") console.log(invite());
+  else if (command === "status") console.log(JSON.stringify(status()));
   else if (command === "pay") { const p = pay(args[0]); console.log(JSON.stringify({ status: p.status, hash: p.payment_hash, fee: p.fee_sat })); }
   else if (command === "invoice") console.log(JSON.stringify(invoice(Number(args[0]))));
   else if (command === "lookup") console.log(JSON.stringify(lookup(args[0])));
   else if (command === "mine") mine(Number(args[0] ?? 1));
-  else { console.error("usage: regtest.mjs ready | invite | pay <invoice> | invoice <sats> | lookup <hash> | mine [n]"); process.exit(2); }
+  else { console.error("usage: regtest.mjs ready | invite | status | pay <invoice> | invoice <sats> | lookup <hash> | mine [n]"); process.exit(2); }
 }

@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LinkView } from "@ghostly/browser/shared/types";
@@ -247,6 +250,31 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     expect(within(app).queryByTestId("app-connection-options")).not.toBeInTheDocument();
   });
 
+  it("opened alone keeps its bar below a phone's status bar, so Close can be pressed", async () => {
+    await open(REF, null);
+    const app = await waitFor(() => screen.getByTestId("mini-app"));
+    const bar = within(app).getByTestId("mini-app-title").parentElement!;
+    expect(bar.className).toContain("alone-bar");
+    expect(readFileSync(join(fileURLToPath(import.meta.url), "../../../index.css"), "utf8")).toMatch(/\.alone-bar\s*\{[^}]*safe-area-inset-top/);
+    expect(within(app).getByRole("button", { name: "Close" }).className).toContain("min-h-11");
+  });
+
+  it("opened alone twice before it shows (a double click) starts once, and opens again after Close", async () => {
+    view = "full";
+    await Promise.all([open(REF, null), open(REF, null)]);
+    expect(document.querySelectorAll("[data-place=alone]")).toHaveLength(1);
+    expect(started).toHaveLength(1);
+    // Already shown: one more Open changes nothing.
+    await open(REF, null);
+    expect(document.querySelectorAll("[data-place=alone]")).toHaveLength(1);
+    expect(started).toHaveLength(1);
+    within(screen.getByTestId("mini-app")).getByRole("button", { name: "Close" }).click();
+    expect(screen.queryByTestId("mini-app")).not.toBeInTheDocument();
+    await open(REF, null);
+    expect(document.querySelectorAll("[data-place=alone]")).toHaveLength(1);
+    expect(started).toHaveLength(2);
+  });
+
   it("names a Desktop app window after the app and the contact, and the app alone outside a chat", async () => {
     windowIs(false);
     panel();
@@ -426,7 +454,6 @@ describe("focus on the Apps page", () => {
       .on("appInstall", () => { list = [app]; return app as never; });
     const { user } = renderApp(<Apps />, { route: "/apps" });
     const store = await screen.findByTestId("app-store");
-    await user.click(within(store).getByRole("button", { name: /Ghostly/ }));
     await user.click(within(store).getByTestId("app-listing-install"));
     await user.click(await screen.findByTestId("app-install-confirm"));
     await waitFor(() => expect(within(screen.getByTestId("installed-app")).getByTestId("installed-app-open")).toHaveFocus());

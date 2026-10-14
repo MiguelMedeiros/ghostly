@@ -12,9 +12,14 @@ mod app_window;
 mod bitcoind_rpc;
 mod clipboard;
 mod commands;
+// The e2e build pastes from a stand-in, never from the clipboard.
+#[cfg(target_os = "linux")]
+#[cfg_attr(feature = "e2e-driver", allow(dead_code))]
+mod copied_files;
 mod crypto;
 mod device_state;
 mod diagnostics;
+mod downloads;
 // The macOS end-to-end tests' way into the page (debug builds with `--features e2e-driver` only).
 #[cfg(any(test, feature = "e2e-driver"))]
 #[cfg_attr(not(feature = "e2e-driver"), allow(dead_code))]
@@ -36,11 +41,14 @@ mod microphone;
 #[cfg(mobile)]
 mod mobile;
 mod native_call;
+mod navigation;
 mod notifications;
 mod oidc;
 mod paired_transport;
 mod pkarr_client;
 mod pkarr_network;
+#[cfg(any(target_os = "linux", test))]
+mod proxy_env;
 mod pubky_session;
 mod push_send;
 mod records;
@@ -54,6 +62,7 @@ mod turn_network;
 #[cfg(test)]
 mod turn_record;
 mod types;
+mod unread_count;
 #[cfg(desktop)]
 mod viewer;
 
@@ -102,6 +111,7 @@ macro_rules! commands {
             app_sandbox::app_close,
             app_sandbox::app_open,
             app_sandbox::app_post,
+            clipboard::incoming_share_done,
             clipboard::incoming_share_take,
             clipboard::read_clipboard_files,
             clipboard::read_clipboard_text,
@@ -185,6 +195,7 @@ macro_rules! commands {
             native_call::native_microphone_meter,
             native_call::native_microphone_meter_close,
             native_call::native_speaker_test,
+            notifications::native_clear_notification,
             notifications::native_notification_permission,
             notifications::native_private_notification,
             notifications::open_notification_settings,
@@ -198,6 +209,7 @@ macro_rules! commands {
             paired_transport::paired_native_close,
             paired_transport::paired_native_send,
             share::share_text,
+            unread_count::native_unread_count,
         ]
     };
 }
@@ -221,6 +233,10 @@ fn paste_source() -> clipboard::PasteSource {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before the WebView and any other thread: a proxy in the environment is never handed this machine's own
+    // requests (the stored files the page plays from 127.0.0.1).
+    #[cfg(target_os = "linux")]
+    proxy_env::exempt_loopback();
     // First of all, before anything here can make an HTTPS request (logcat shows it: RustStdoutStderr).
     #[cfg(target_os = "android")]
     if let Err(error) = android_tls() {
@@ -272,7 +288,8 @@ pub fn run() {
         })
         .on_menu_event(|app, event| {
             app_window::on_menu_event(app, event.id().as_ref());
-        });
+        })
+        .on_page_load(on_page_load);
 
     // Android's own host, before the app's setup: what started the app (a share, a sign-in's link) comes with it.
     #[cfg(target_os = "android")]
@@ -281,6 +298,8 @@ pub fn run() {
         .manage(android::Incoming::default());
 
     builder
+        // The Ghostly window stays on the app's own pages, whatever is dropped on it.
+        .plugin(navigation::guard())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -312,6 +331,8 @@ pub fn run() {
                 fullscreen::install(&main);
                 // A voice message's microphone: WebKitGTK denies it unless the app answers.
                 microphone::install(&main);
+                // A file is saved through the app's own Save only, never by the WebView's own menu.
+                downloads::install(&main);
             }
             #[cfg(feature = "e2e-driver")]
             {
@@ -361,10 +382,41 @@ fn android_tls() -> Result<(), String> {
     let android = ndk_context::android_context();
     // SAFETY: the pointers are the process's JavaVM and the application context, which tao keeps as a global
     // reference for the life of the process.
-    let vm = unsafe { jni::JavaVM::from_raw(android.vm().cast()) }.map_err(|e| e.to_string())?;
-    let mut env = vm.attach_current_thread().map_err(|e| e.to_string())?;
-    let context = unsafe { jni::objects::JObject::from_raw(android.context().cast()) };
-    rustls_platform_verifier::android::init_with_env(&mut env, context).map_err(|e| e.to_string())
+    let vm = unsafe { jni::JavaVM::from_raw(android.vm().cast()) };
+    // For the scope: a thread this attaches is detached again, and one the JVM attached (Android's main thread) is
+    // left as it was.
+    vm.attach_current_thread_for_scope(|env| {
+        let context = unsafe { jni::objects::JObject::from_raw(env, android.context().cast()) };
+        rustls_platform_verifier::android::init_with_env(env, context)
+    })
+    .map_err(|e: jni::errors::Error| e.to_string())
+}
+
+/// A document takes the Ghostly window's place (`Started`: it is committed, and no script of it has run): the app
+/// opening, the page loaded again, the WebView back after its process died. A route change inside the page is no
+/// load. What the page before it held in Rust by ids only it knew goes with it. Desktop only: when Android's WebView
+/// says a page started was not tried.
+#[cfg(desktop)]
+fn on_page_load<R: tauri::Runtime>(
+    webview: &tauri::Webview<R>,
+    payload: &tauri::webview::PageLoadPayload<'_>,
+) {
+    if webview.label() == "main"
+        && matches!(payload.event(), tauri::webview::PageLoadEvent::Started)
+    {
+        page_started(webview.app_handle());
+    }
+}
+
+/// The native listeners of the page before this one: stopped, their eight places free (`TransportState::page_started`).
+#[cfg(desktop)]
+fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(transports) = app.try_state::<paired_transport::TransportState>() {
+        transports.page_started();
+    }
+    if let Some(hyperdht) = app.try_state::<hyperdht::HyperState>() {
+        hyperdht.page_started();
+    }
 }
 
 /// How long the page gets to say goodbye to its contacts before an exit it can be told about goes on.
@@ -549,6 +601,7 @@ mod tests {
         arguments["origin"] = serde_json::json!("http://127.0.0.1:9");
         arguments["profile"] = serde_json::json!("x");
         arguments["record"] = serde_json::json!(null);
+        arguments["count"] = serde_json::json!(0);
         arguments
     }
 

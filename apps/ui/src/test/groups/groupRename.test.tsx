@@ -48,14 +48,26 @@ describe("renaming a group in the app", () => {
     expect(engine.callsTo("renameGroup")).toEqual([]);
   });
 
-  it("says what the engine refused, and keeps what was typed", async () => {
+  it("says what the engine refused, in the app's words, and keeps what was typed", async () => {
     fakeEngine.update({ groups: [admin()] });
     const { user, engine } = renderApp(<GroupMembersDialog group={admin()} onClose={() => {}} />);
     engine.on("renameGroup", () => { throw new Error("A group's name is 1 to 64 characters"); });
     await user.click(screen.getByTestId("group-rename"));
-    await user.type(screen.getByTestId("group-rename-input"), "‮{Enter}");
-    expect(await screen.findByRole("alert")).toHaveTextContent("1 to 64 characters");
+    await user.clear(screen.getByTestId("group-rename-input"));
+    await user.type(screen.getByTestId("group-rename-input"), "Book club{Enter}");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Type a name with letters or emoji" + "Up to 64 characters, on one line.");
     expect(screen.getByTestId("group-rename-input")).toBeInTheDocument();
+  });
+
+  it.each([["a zero-width space", "\u200B"], ["a direction mark", "\u202E"]])("keeps Save off for a name with nothing visible in it (%s)", async (_, name) => {
+    fakeEngine.update({ groups: [admin()] });
+    const { user, engine } = renderApp(<GroupMembersDialog group={admin()} onClose={() => {}} />);
+    engine.on("renameGroup", () => undefined);
+    await user.click(screen.getByTestId("group-rename"));
+    await user.clear(screen.getByTestId("group-rename-input"));
+    await user.type(screen.getByTestId("group-rename-input"), `${name}{Enter}`);
+    expect(screen.getByTestId("group-rename-save")).toBeDisabled();
+    expect(engine.callsTo("renameGroup")).toEqual([]);
   });
 
   it("a member cannot rename it", () => {
@@ -78,5 +90,17 @@ describe("renaming a group in the app", () => {
     expect(screen.getByTestId("group-name")).toHaveTextContent("Book club");
     const lines = await screen.findAllByTestId("group-event");
     expect(lines.map(l => l.textContent)).toEqual(["Alice renamed the group to “Book club”"]);
+  });
+
+  it("a change the engine credits nobody with (a new admin signed again what the last one set) names nobody, in the app's language", async () => {
+    const history: StoredMessage[] = [
+      { linkId: "group:group-1", id: "e1", text: "The group is now called “Book club”", sender: "peer", event: "renamed", timestamp: 1, via: "datalink" },
+      { linkId: "group:group-1", id: "e2", text: "The group's picture was changed", sender: "peer", event: "picture", timestamp: 2, via: "datalink" },
+    ];
+    fakeEngine.update({ groups: [notAdmin({ name: "Book club" })] });
+    fakeEngine.on("groupMessages", () => history).on("updateSettings", () => undefined);
+    renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1", language: "pt" });
+    const lines = await screen.findAllByTestId("group-event");
+    expect(lines.map(l => l.textContent)).toEqual(["O grupo agora se chama “Book club”", "A foto do grupo foi alterada"]);
   });
 });

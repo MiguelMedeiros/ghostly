@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { formatPaymentAmount, parsePaymentAmount, type Bolt11Invoice, type PaymentReview as Review, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
@@ -14,10 +14,13 @@ import { useI18n } from "../contexts/I18nContext";
 import { moneyLabel, satsIn } from "./NetworkTag";
 import { PaymentReview } from "./PaymentReview";
 import { OpenInWallet } from "./OpenInWallet";
+import { MoneyCopyRefused } from "./MoneyCopy";
+import { useMoneyCopy } from "../hooks/useMoneyCopy";
 import { ONCHAIN_FEE_CAP } from "./walletCardData";
 import { formatAmount, formatTokenAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
 import { problemText, type Problem } from "../lib/problemText";
+import { qrFits } from "../lib/qrFits";
 import { Notice } from "./ui/Notice";
 
 const button =
@@ -56,18 +59,6 @@ export function MoneyNetworkTag({ network, chain }: { network?: WalletNetwork; c
   );
 }
 
-function useCopy(value: string) {
-  const [copied, setCopied] = useState(false);
-  return {
-    copied,
-    copy: async () => {
-      await navigator.clipboard.writeText(value).catch(() => {});
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    },
-  };
-}
-
 function Shell({ label, network, chain, amount, testId, lines, detail, qr, children }: {
   label: string;
   network?: WalletNetwork;
@@ -82,6 +73,8 @@ function Shell({ label, network, chain, amount, testId, lines, detail, qr, child
 }) {
   const { t } = useI18n();
   const [showQr, setShowQr] = useState(false);
+  // More than one QR code holds: no QR button, said in words.
+  const fits = useMemo(() => qrFits(qr), [qr]);
   return (
     <div className="min-w-[230px] max-md:min-w-[min(230px,68vw)] max-w-[min(300px,72vw)] px-1 py-0.5" data-testid={testId} data-network={network ?? "unknown"}>
       <div className="flex flex-wrap items-center justify-between gap-1.5">
@@ -93,14 +86,15 @@ function Shell({ label, network, chain, amount, testId, lines, detail, qr, child
         <p key={line} className="text-[12.5px] leading-snug m-0 mt-1 wrap-break-word text-text-primary/80">{line}</p>
       ))}
       <p className="font-mono text-[11.5px] leading-snug m-0 mt-1.5 break-all text-text-primary/80" data-testid="money-detail">{detail}</p>
-      {showQr && (
+      {!fits && <p className="text-[12.5px] leading-snug m-0 mt-1 text-text-primary/65" data-testid="qr-too-long">{t("payments.invoice.qrTooLong")}</p>}
+      {fits && showQr && (
         <button onClick={() => setShowQr(false)} className="block mt-2 bg-white p-2.5 rounded-lg cursor-pointer border-none" title={t("payments.invoice.hideQr")}>
           <QRCodeSVG value={qr} size={184} bgColor="#ffffff" fgColor="#0b0f1a" level="L" className="block max-w-full h-auto" />
         </button>
       )}
       <div className="flex flex-wrap gap-1.5 mt-2">
         {children}
-        <button className={quiet} onClick={() => setShowQr(!showQr)}>{showQr ? t("payments.formats.hideQr") : "QR"}</button>
+        {fits && <button className={quiet} onClick={() => setShowQr(!showQr)}>{showQr ? t("payments.formats.hideQr") : "QR"}</button>}
       </div>
     </div>
   );
@@ -223,7 +217,7 @@ function OnchainCard({ request, mine, off, lightning }: { request: OnchainReques
   const state = wallet?.getState() ?? null;
   const view = networkView(state, request.network), other = networkView(state, request.network === "mainnet" ? "testnet" : "mainnet");
   const bitcoin = view?.bitcoin;
-  const { copied, copy } = useCopy(request.address);
+  const { copied, failed, copy } = useMoneyCopy(request.address);
   const chainName = request.chain === "regtest" ? "regtest" : request.chain === "testnet" ? "testnet / signet" : undefined;
   const payable = !!wallet && !mine && !off && !request.unsupported;
   let status: React.ReactNode = null;
@@ -256,6 +250,7 @@ function OnchainCard({ request, mine, off, lightning }: { request: OnchainReques
         {status}
         <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("payments.formats.copyAddress")}</button>
         <OpenInWallet className={`${quiet} no-underline text-inherit`} uri={request.uri ?? `bitcoin:${request.address}`} title={t("payments.formats.openBitcoinTitle")} testId="onchain-open-wallet">{t("payments.invoice.openWallet")}</OpenInWallet>
+        {failed && <MoneyCopyRefused value={request.address} />}
       </Shell>
       {lightning && (
         <div className="mt-2" data-testid="onchain-lightning">
@@ -269,7 +264,7 @@ function OnchainCard({ request, mine, off, lightning }: { request: OnchainReques
 
 function Bolt12Card({ offer }: { offer: Bolt12Offer }) {
   const { t } = useI18n();
-  const { copied, copy } = useCopy(offer.offer);
+  const { copied, failed, copy } = useMoneyCopy(offer.offer);
   const chain = offer.network === "testnet" && offer.chain !== "other" ? offer.chain : undefined;
   const amount = offer.amountSat !== undefined
     ? <Amount sats={offer.amountSat} network={offer.network} />
@@ -285,6 +280,7 @@ function Bolt12Card({ offer }: { offer: Bolt12Offer }) {
     >
       <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("payments.formats.copyOffer")}</button>
       <OpenInWallet className={`${quiet} no-underline text-inherit`} uri={`lightning:${offer.offer}`} title={t("payments.invoice.openTitle")} testId="bolt12-open-wallet">{t("payments.invoice.openWallet")}</OpenInWallet>
+      {failed && <MoneyCopyRefused value={offer.offer} />}
     </Shell>
   );
 }
@@ -296,7 +292,7 @@ function ArkCard({ request, mine, off }: { request: ArkRequest; mine: boolean; o
   const rail = request.kind;
   const view = networkView(state, request.network), other = networkView(state, request.network === "mainnet" ? "testnet" : "mainnet");
   const ark = rail === "arkade" ? view?.ark : view?.bark;
-  const { copied, copy } = useCopy(request.address);
+  const { copied, failed, copy } = useMoneyCopy(request.address);
   const uri = request.uri ?? `bitcoin:?ark=${request.address}`;
   let status: React.ReactNode = null;
   if (wallet && !mine && !off) {
@@ -325,6 +321,7 @@ function ArkCard({ request, mine, off }: { request: ArkRequest; mine: boolean; o
     >
       {status}
       <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("payments.formats.copyAddress")}</button>
+      {failed && <MoneyCopyRefused value={request.address} />}
     </Shell>
   );
 }
@@ -334,7 +331,7 @@ function UsdtCard({ request, mine, off }: { request: UsdtRequest; mine: boolean;
   const wallet = useServicesPlatform()?.wallet;
   const state = wallet?.getState() ?? null;
   const chain = request.chainId !== undefined ? USDT_CHAINS[request.chainId]?.name ?? t("payments.formats.chainId", { id: request.chainId }) : undefined;
-  const { copied, copy } = useCopy(request.recipient);
+  const { copied, failed, copy } = useMoneyCopy(request.recipient);
   const network = request.network;
   const view = network ? networkView(state, network) : undefined, other = network ? networkView(state, network === "mainnet" ? "testnet" : "mainnet") : undefined;
   const usdt = view?.usdt;
@@ -376,6 +373,7 @@ function UsdtCard({ request, mine, off }: { request: UsdtRequest; mine: boolean;
     >
       {status}
       <button className={quiet} onClick={copy}>{copied ? t("payments.invoice.copied") : t("payments.formats.copyAddress")}</button>
+      {failed && <MoneyCopyRefused value={request.recipient} />}
     </Shell>
   );
 }

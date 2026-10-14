@@ -1,7 +1,7 @@
 import { useEffect, useReducer } from "react";
 import type { AttentionEvent } from "@ghostly/browser/shared/rpc";
 import type { NotificationSettings } from "./settings";
-import { getPrefix, listSessions } from "./storage";
+import { getPrefix, sessionIdForPeer } from "./storage";
 
 /*
  * Muting one chat's notifications, for a while or until turned back on. The choice is this profile's, on this
@@ -105,7 +105,7 @@ export function chatOfLink(linkId: string | undefined, links: readonly { id: str
   if (!linkId) return undefined;
   if (linkId.startsWith("group:")) return linkId;
   const peer = links.find((l) => l.id === linkId)?.peerPubKeyZ32;
-  return peer ? listSessions().find((s) => s.peerPubKeyB64 === peer)?.id : undefined;
+  return peer ? sessionIdForPeer(peer) : undefined;
 }
 
 /**

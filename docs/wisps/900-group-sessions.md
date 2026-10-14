@@ -6,10 +6,10 @@
 | Status | Draft |
 | Editors | Ghostly contributors; maintainer review pending |
 | Dependencies | [02](02-peer-keys.md), [03](03-capabilities.md), [100](100-transports.md), [800](800-invite-join.md) |
-| Implementation | Two profiles: [`group-mesh/1`](902-group-mesh.md) (private, up to 32, hubs past 16) and [`group-community/1`](903-group-community.md) (a link anyone can open, hundreds of members, admission by any member); core, engine, UI, e2e and a headless load test; text with @mentions, a group name and picture and payments between members |
+| Implementation | Two profiles: [`group-mesh/1`](902-group-mesh.md) (private, up to 32, hubs past 16) and [`group-community/1`](903-group-community.md) (a link anyone can open, hundreds of members, admission by any member); core, engine, UI, e2e and a headless load test; text with @mentions, a group name and picture, payments between members, and files and voice messages ([503](503-group-files.md), from release 1.2) |
 | Summary | How a group agrees on who is in it, locks out whoever left, and moves messages between members, never through the DHT. |
 | Availability | Available |
-| Notes | Two profiles implemented: group-mesh/1 (private, up to 32 members, one admin; past 16, members whose apps stay online carry it; a member who was away is caught up by whoever is there) and group-community/1 (a link anyone can open, up to 256). Text, a picture and payments between members; web, desktop, extension and the CLI. |
+| Notes | Two profiles implemented: group-mesh/1 (private, up to 32 members, one admin; past 16, members whose apps stay online carry it; a member who was away is caught up by whoever is there) and group-community/1 (a link anyone can open, up to 256). Text, a picture, files, voice messages and payments between members; web, desktop, extension and the CLI. |
 
 > This is a review draft. Candidate numbers and new wire formats are not registered standards. Normative language describes a candidate requirement, not a shipped guarantee. See the [catalogue](README.md), [implementation evidence](IMPLEMENTATION.md), and [interoperability plan](INTEROP.md).
 
@@ -73,7 +73,7 @@ The admin invites, removes and transfers its role; any member leaves. Local bloc
 
 ## Compatibility and open decisions
 
-Legacy and current 1:1 clients keep working unchanged; an app without groups is shown as needing an update to be invited. Mesh groups, their links and frames are unchanged by the community profile; an app that knows only the mesh never receives a community frame and says a `group2/` link is not one it can open. Open before Proposed: multiple admins; member key updates; approval, expiry and use counts on links; group media as a capability of its own (group files are proposed in [503](503-group-files.md); payments between members are in both profiles: [mesh](902-group-mesh.md#payments), [community](903-group-community.md#payments)); native transports on edges; a profile beyond a few hundred members; interoperability with a second implementation.
+Legacy and current 1:1 clients keep working unchanged; an app without groups is shown as needing an update to be invited. Mesh groups, their links and frames are unchanged by the community profile; an app that knows only the mesh never receives a community frame and says a `group2/` link is not one it can open. Open before Proposed: multiple admins; member key updates; approval, expiry and use counts on links; group calls as a capability of their own (group files are [503](503-group-files.md); payments between members are in both profiles: [mesh](902-group-mesh.md#payments), [community](903-group-community.md#payments)); native transports on edges; apps opened in a group (a proposal, not accepted: [1200](1200-marketplace.md#apps-in-groups), a table whose players each keep a session with its host, which in a group on hubs or a community waits for the decision on sessions between two members who share no edge, [503](503-group-files.md#the-file-session)); a profile beyond a few hundred members; interoperability with a second implementation.
 
 ## Conformance
 

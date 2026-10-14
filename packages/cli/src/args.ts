@@ -5,6 +5,8 @@ export interface OptionSpec {
   type: OptionType; short?: string; description: string;
   /** A number option that may stand alone (then `true`): it takes the next word only when that is a number. */
   optionalValue?: boolean;
+  /** A boolean the command takes only as `--no-<name>`: help shows it so. */
+  negatedOnly?: boolean;
 }
 export interface Parsed { positionals: string[]; options: Record<string, string | number | boolean | string[] | undefined> }
 
@@ -85,9 +87,28 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
   return { positionals, options };
 }
 
+/** The global option a word names (`--profile`, `--profile=bot`, `-p`), else undefined. */
+export function globalOption(arg: string): OptionSpec | undefined {
+  const name = globalName(arg);
+  return name ? GLOBAL_OPTIONS[name] : undefined;
+}
+
+/** The name of the global option a word names (`profile` for `-p`, `pretty` for `--no-pretty`), else undefined. */
+function globalName(arg: string): string | undefined {
+  const eq = arg.indexOf("=");
+  const name = arg.startsWith("--") ? arg.slice(2, eq === -1 ? undefined : eq) : arg.length === 2 && arg.startsWith("-") ? Object.entries(GLOBAL_OPTIONS).find(([, o]) => o.short === arg.slice(1))?.[0] : undefined;
+  if (name && Object.hasOwn(GLOBAL_OPTIONS, name)) return name;
+  // A boolean's `--no-` form, as the parser reads it (with no value): before, `ghostly --no-pretty status` was no command.
+  const negated = name?.startsWith("no-") && eq === -1 ? name.slice(3) : undefined;
+  return negated && GLOBAL_OPTIONS[negated]?.type === "boolean" ? negated : undefined;
+}
+
 /**
  * Global options given before the command (`ghostly --profile bot send …`) move after it, where every command's
- * parser reads them. Stops at `--` and at the first word that is not a global option.
+ * parser reads them. Stops at `--` and at the first word that is not a global option. They go before the first word
+ * after the command's that starts with a dash (its first option, or the `--` that ends them), else at the end: never
+ * between an option and its value, which may itself be `--` (`--pretty profile set --name --`). One that takes a value
+ * and is the last word has none: a usage error.
  */
 export function liftGlobals(argv: readonly string[]): string[] {
   const lifted: string[] = [];
@@ -95,14 +116,16 @@ export function liftGlobals(argv: readonly string[]): string[] {
   while (i < argv.length) {
     const arg = argv[i];
     const eq = arg.indexOf("=");
-    const name = arg.startsWith("--") ? arg.slice(2, eq === -1 ? undefined : eq) : arg.length === 2 && arg.startsWith("-") ? Object.entries(GLOBAL_OPTIONS).find(([, o]) => o.short === arg.slice(1))?.[0] : undefined;
-    const option = name ? GLOBAL_OPTIONS[name] : undefined;
+    const option = globalOption(arg);
     if (!option || arg === "--") break;
     const takesValue = option.type !== "boolean" && eq === -1;
+    // `ghostly -p` alone: a usage error, as `ghostly send -p` is, not the help a line of global options alone shows.
+    if (takesValue && i + 1 >= argv.length) throw new CliError("usage", `--${globalName(arg)} needs a value`);
     lifted.push(...argv.slice(i, i + (takesValue ? 2 : 1)));
     i += takesValue ? 2 : 1;
   }
   const rest = argv.slice(i);
-  const end = rest.indexOf("--");
-  return end === -1 ? [...rest, ...lifted] : [...rest.slice(0, end), ...lifted, ...rest.slice(end)];
+  // The first word is the command, also when it is `--version` or `--help`; a `--` there ends the options at once.
+  const dash = rest[0] === "--" ? 0 : rest.findIndex((word, i) => i > 0 && word.startsWith("-"));
+  return dash === -1 ? [...rest, ...lifted] : [...rest.slice(0, dash), ...lifted, ...rest.slice(dash)];
 }

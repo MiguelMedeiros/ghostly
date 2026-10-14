@@ -12,10 +12,13 @@ const MISSING: Record<Essential, TranslationKey> = {
 /**
  * "Ghostly can't run in this browser": what it lacks of what the app cannot do without (lib/bootCheck), and what
  * to try. Drawn by the web entry instead of the app, before any provider exists: it is handed its translator, and
- * its styles are its own (the app's stylesheet may be what the browser cannot read).
+ * its styles are its own (the app's stylesheet may be what the browser cannot read). With `lockdown` (what is missing
+ * looks like Apple's Lockdown Mode, lib/bootCheck lockdownLikely) it says so and how to exclude the site, the steps
+ * behind an ⓘ, in place of "try another browser" (on an iPhone every browser is the same WebKit).
  */
-export function UnsupportedBrowser({ missing, details, t }: { missing: readonly Essential[]; details: string; t: Translate }) {
+export function UnsupportedBrowser({ missing, details, lockdown = false, t }: { missing: readonly Essential[]; details: string; lockdown?: boolean; t: Translate }) {
   const [copied, setCopied] = useState(false);
+  const [steps, setSteps] = useState(false);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(details);
@@ -37,7 +40,24 @@ export function UnsupportedBrowser({ missing, details, t }: { missing: readonly 
         <ul style={{ listStyle: "none", margin: "0 0 8px", padding: 0, color: "#aebac1" }}>
           {missing.map((what) => <li key={what} data-testid={`unsupported-${what}`} style={{ margin: "0 0 6px" }}>{t(MISSING[what])}</li>)}
         </ul>
-        <p style={{ margin: "0 0 8px" }}>{t(missing.every((what) => what === "crypto") ? "boot.trySecure" : "boot.tryOther")}</p>
+        {lockdown ? (
+          <>
+            <p data-testid="unsupported-lockdown" style={{ margin: "0 0 8px" }}>
+              {t("boot.lockdown")}{" "}
+              <button type="button" data-testid="unsupported-lockdown-info" aria-expanded={steps} aria-controls="unsupported-lockdown-steps" aria-label={t("boot.lockdownHow")} title={t("boot.lockdownHow")}
+                onClick={() => setSteps((open) => !open)}
+                style={{ padding: "0 4px", border: 0, background: "none", color: "#53bdeb", font: "inherit", cursor: "pointer" }}>ⓘ</button>
+            </p>
+            {steps && (
+              <ul id="unsupported-lockdown-steps" style={{ margin: "0 0 8px", padding: "0 0 0 18px", color: "#aebac1", textAlign: "start" }}>
+                <li style={{ margin: "0 0 6px" }}>{t("boot.lockdownSafari")}</li>
+                <li style={{ margin: "0 0 6px" }}>{t("boot.lockdownOtherBrowser")}</li>
+              </ul>
+            )}
+          </>
+        ) : (
+          <p style={{ margin: "0 0 8px" }}>{t(missing.every((what) => what === "crypto") ? "boot.trySecure" : "boot.tryOther")}</p>
+        )}
         <button type="button" style={button} onClick={() => location.reload()}>{t("boot.reload")}</button>
         <button type="button" style={button} data-testid="unsupported-copy" onClick={() => void copy()}>{t(copied ? "boot.copied" : "boot.copy")}</button>
         <textarea readOnly rows={6} data-testid="unsupported-details" aria-label={t("boot.copy")} value={details}

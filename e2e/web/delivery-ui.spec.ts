@@ -129,12 +129,13 @@ test("mobile keeps its footer and compact header, with multiline text and QR ins
   await expect(a.page.getByPlaceholder("Message…")).toBeEnabled();
   await expect(a.page.getByTestId("account-bar")).toHaveCount(0);
   await a.page.getByPlaceholder("Message…").fill("Line one\nLine two");
-  // Only the icon in the header, with the call buttons, and nothing past the edge.
-  const icon=a.page.getByTestId("connection-options"); await expect(icon).toHaveText("");
-  const iconBox=(await icon.boundingBox())!, call=(await a.page.getByTestId("call-video").boundingBox())!;
-  expect(Math.abs(iconBox.width-call.width)).toBeLessThanOrEqual(1); expect(iconBox.x+iconBox.width).toBeLessThanOrEqual(390);
-  expect(await icon.evaluate(el=>{const h=el.closest(".header-safe")!;return h.scrollWidth<=h.clientWidth;})).toBe(true);
-  await a.page.getByTestId("connection-options").click();await expect(a.page.getByRole("dialog",{name:"Connection options"})).toBeVisible();
+  // Only the connection, a voice call and ⋮ beside the name (chat-header-phone.spec.ts), and nothing past the edge; a video call is a row of ⋮.
+  const more=a.page.getByTestId("chat-options").filter({visible:true}); await expect(more).toBeVisible();
+  await expect(a.page.getByTestId("call-video")).toHaveCount(0);
+  const connection=a.page.getByTestId("connection-options"); await expect(connection).toBeVisible();
+  for (const control of [connection,a.page.getByTestId("call-audio"),more]) { const box=(await control.boundingBox())!; expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x+box.width).toBeLessThanOrEqual(390); }
+  expect(await more.evaluate(el=>{const h=el.closest(".header-safe")!;return h.scrollWidth<=h.clientWidth;})).toBe(true);
+  await connection.click();await expect(a.page.getByRole("dialog",{name:"Connection options"})).toBeVisible();
   const menu=await a.page.getByRole("dialog",{name:"Connection options"}).boundingBox(); expect(menu!.x).toBeGreaterThanOrEqual(0); expect(menu!.x+menu!.width).toBeLessThanOrEqual(390);
   await a.page.screenshot({path:testInfo.outputPath("mobile-menu.png")});
   await a.page.keyboard.press("Escape"); await expect(a.page.getByPlaceholder("Message…")).toHaveValue("Line one\nLine two");

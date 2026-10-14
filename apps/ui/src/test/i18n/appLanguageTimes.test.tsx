@@ -1,5 +1,6 @@
-import { screen, within } from "@testing-library/react";
+import { act, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { ContactIdentitiesPanel } from "../../components/identities/ContactIdentitiesPanel";
 import { MessageBubble } from "../../components/MessageBubble";
 import { MessageInput } from "../../components/MessageInput";
 import { ConnectionHistory, TransportLine } from "../../components/TransportTimeline";
@@ -7,7 +8,9 @@ import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { formatListTime } from "../../lib/chatList";
 import { clockTime, formatAt } from "../../lib/time";
 import type { ChatMessage } from "../../lib/types";
+import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { identitiesView } from "../identities/views";
 
 // covers: app.i18n
 
@@ -57,6 +60,14 @@ describe("in Arabic", () => {
       new Intl.DateTimeFormat("ar", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(now),
       new Intl.DateTimeFormat("ar", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(older),
     ]);
+  });
+
+  it("a contact's ID card says since when they chat the Arabic way", () => {
+    const { engine } = renderApp(<ContactIdentitiesPanel peerKey="peer" name="Ana" onClose={() => {}} />, { language: "ar" });
+    act(() => engine.update({ links: [linkView({ createdAt: AT, identities: identitiesView() })] }));
+    const since = new Intl.DateTimeFormat("ar", { year: "numeric", month: "short", day: "numeric" }).format(AT);
+    expect(since).not.toBe(new Intl.DateTimeFormat("en-US", { year: "numeric", month: "short", day: "numeric" }).format(AT));
+    expect(screen.getByTestId("chat-identity-ghostly")).toHaveTextContent(since);
   });
 
   it("formatAt follows the language given, the device's without one", () => {

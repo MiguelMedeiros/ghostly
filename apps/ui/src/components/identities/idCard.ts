@@ -7,6 +7,7 @@ import { providerIcon } from "./ProviderIcons";
 import { categoryLabel, date, daysLeft, expiringSoon, providerLabel, providerOf, receivedStatus, shortSubject } from "../../lib/identities";
 import { english } from "../../lib/english";
 import { ago, badgeState } from "./contactBadges";
+import { initial } from "../../lib/initial";
 
 /**
  * What an identity's ID card says (IdCardFace.tsx), worked out once so the card, its panel and the tests agree.
@@ -75,7 +76,7 @@ const expiresIn = (t: Translate, expiresAt: number, now: number) => {
 };
 /** "Valid until 3 Oct 2026", or "Expired 3 Oct 2026". */
 const validity = (t: Translate, expiresAt: number, now: number) =>
-  expiresAt <= now ? t("identities.card.expiredOn", { date: date(expiresAt) }) : t("identities.card.validUntil", { date: date(expiresAt) });
+  expiresAt <= now ? t("identities.card.expiredOn", { date: date(expiresAt, t.language) }) : t("identities.card.validUntil", { date: date(expiresAt, t.language) });
 
 /** `t`: the interface's words (English by default, as in tests). */
 export function idCard(p: IdentityProofView, { now = Date.now() / 1000, refusedBy = [], revoking = false, t = english }: { now?: number; refusedBy?: string[]; revoking?: boolean; t?: Translate } = {}): IdCardContent {
@@ -103,7 +104,7 @@ export function idCard(p: IdentityProofView, { now = Date.now() / 1000, refusedB
     status,
     statusLabel,
     validity: validity(t, p.expiresAt, now),
-    issued: date(p.issuedAt),
+    issued: date(p.issuedAt, t.language),
     shared: p.sharedWith === 0 ? t("identities.card.notShared") : p.sharedWith === 1 ? t("identities.card.sharedInOne") : t("identities.card.sharedIn", { count: p.sharedWith }),
     refusedBy,
     ...pp,
@@ -143,7 +144,7 @@ export function receivedIdCard(r: ReceivedIdentityView, now = Date.now() / 1000,
     status,
     statusLabel,
     validity: validity(t, r.expiresAt, now),
-    issued: date(r.verifiedAt),
+    issued: date(r.verifiedAt, t.language),
     shared: t("identities.card.checked", { time: ago(r.checkedAt, now, language) }),
     refusedBy: [],
     ...pp,
@@ -225,7 +226,7 @@ export function ghostlyCard(t: Translate, profile: GhostlyProfile, place: { chat
   const name = shown ? nick || t("identities.ghostly.noName") : t("identities.ghostly.hidden");
   const photo = shown && profile.avatar?.startsWith("data:image/") ? profile.avatar : undefined;
   const subject = place.chat ? place.chat.key : t("identities.ghostly.keyPerChat");
-  const since = place.since ? date(Math.floor(place.since / 1000)) : "";
+  const since = place.since ? date(Math.floor(place.since / 1000), t.language) : "";
   const chats = place.chats ?? 0;
   return {
     id: GHOSTLY,
@@ -236,7 +237,7 @@ export function ghostlyCard(t: Translate, profile: GhostlyProfile, place: { chat
     bound: GHOSTLY,
     name,
     photo,
-    monogram: !photo && nick ? nick.charAt(0).toUpperCase() : undefined,
+    monogram: !photo && nick ? initial(nick) : undefined,
     category: place.chat ? t("identities.ghostly.keyInChat") : t("identities.ghostly.yourOwnKeys"),
     attested: false,
     status: "default",
@@ -258,7 +259,7 @@ export function ghostlyCard(t: Translate, profile: GhostlyProfile, place: { chat
 export function contactGhostlyCard(t: Translate, link: Pick<LinkView, "peerNick" | "peerAvatar" | "peerPubKeyZ32" | "peerVerified" | "createdAt">, fallback: string): IdCardContent {
   const nick = link.peerNick?.trim() ?? "";
   const photo = link.peerAvatar?.startsWith("data:image/") ? link.peerAvatar : undefined;
-  const since = link.createdAt ? date(Math.floor(link.createdAt / 1000)) : "";
+  const since = link.createdAt ? date(Math.floor(link.createdAt / 1000), t.language) : "";
   return {
     id: GHOSTLY,
     provider: GHOSTLY,
@@ -268,7 +269,7 @@ export function contactGhostlyCard(t: Translate, link: Pick<LinkView, "peerNick"
     bound: GHOSTLY,
     name: nick || fallback,
     photo,
-    monogram: !photo && nick ? nick.charAt(0).toUpperCase() : undefined,
+    monogram: !photo && nick ? initial(nick) : undefined,
     category: t("identities.ghostly.theirKeyInChat"),
     attested: false,
     status: "default",

@@ -7,6 +7,8 @@
   "cameraOff": "Caméra désactivée",
   "connected": "Connecté",
   "connecting": "Connexion...",
+  "contactCannot": "L'app de votre contact ne peut pas recevoir d'appels",
+  "contactOutdated": "Votre contact doit mettre Ghostly à jour pour les appels",
   "decline": "Refuser",
   "devices": {
     "back": "{{name}} est de retour",
@@ -37,6 +39,16 @@
   "reconnecting": "Reconnexion...",
   "rejected": "Appel rejeté",
   "selfView": "Glissez pour déplacer, tirez un coin pour redimensionner, double-cliquez pour réinitialiser",
+  "share": {
+    "blocked": "Le partage d'écran est bloqué",
+    "blockedNext": "Autorisez l'enregistrement de l'écran pour cette app dans les réglages de confidentialité du système.",
+    "contactCannot": "L'app de votre contact ne peut pas afficher d'écran dans cet appel",
+    "failed": "Impossible de partager l'écran",
+    "failedNext": "Réessayez.",
+    "noScreen": "Aucun écran à partager",
+    "notHere": "Le partage d'écran n'est pas disponible ici",
+    "notOnLinux": "Le partage d'écran n'est pas encore disponible sur Linux"
+  },
   "shareScreen": "Partager l'écran",
   "sharing": {
     "both": "Vous et {{name}} partagez vos écrans",
@@ -66,6 +78,7 @@
   },
   "turnCameraOff": "Couper la caméra",
   "turnCameraOn": "Activer la caméra",
+  "unavailableHere": "Les appels ne sont pas disponibles dans cette app",
   "unmute": "Activer le son",
   "video": "Appel vidéo",
   "wakeGaveUp": "{{name}} n'a pas ouvert Ghostly.",
@@ -74,5 +87,6 @@
     "chat": "Revenir à la discussion",
     "full": "Revenir en plein écran",
     "small": "Garder l'appel dans une petite fenêtre"
-  }
+  },
+  "you": "Vous"
 }

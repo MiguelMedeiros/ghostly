@@ -24,8 +24,12 @@ const heights = new Map<string, number>();
 const entering = new Map<string, number>();
 const positions = new WeakMap<Element, number>();
 const isList = (el: Element) => el instanceof HTMLElement && el.dataset.testid === "list";
-const rowsIn = (el: Element) => [...el.querySelectorAll<HTMLElement>("[data-message-id]")];
-const heightOf = (row: HTMLElement) => heights.get(row.dataset.messageId!) ?? ROW;
+/**
+ * What takes room in the list: the rows, and a folded run's own row (`data-fold`, a bot's routine cards) in place of
+ * the rows folded in it: those are in `hidden`, display: none, with no box at all.
+ */
+const rowsIn = (el: Element) => [...el.querySelectorAll<HTMLElement>("[data-message-id], [data-fold]")].filter(row => !row.closest("[hidden]"));
+const heightOf = (row: HTMLElement) => row.dataset.fold !== undefined ? ROW : heights.get(row.dataset.messageId!) ?? ROW;
 const contentHeight = (el: Element) => rowsIn(el).reduce((sum, row) => sum + heightOf(row), above);
 const maxTop = (el: Element) => Math.max(0, contentHeight(el) - view);
 
@@ -64,7 +68,8 @@ beforeAll(() => {
       value(this: HTMLElement) {
         if (isList(this)) return new DOMRect(0, 0, 400, view);
         const list = this.closest<HTMLElement>("[data-testid='list']");
-        if (!list || !this.dataset.messageId) return rect.call(this);
+        if (!list || (!this.dataset.messageId && this.dataset.fold === undefined)) return rect.call(this);
+        if (this.closest("[hidden]")) return new DOMRect(0, 0, 0, 0);
         let y = above - list.scrollTop;
         for (const row of rowsIn(list)) {
           if (row === this) return new DOMRect(0, y + (entering.get(row.dataset.messageId!) ?? 0), 400, heightOf(row));
@@ -96,12 +101,16 @@ afterAll(() => {
 
 beforeEach(() => { heights.clear(); entering.clear(); observed = []; view = VIEW; above = 0; forgetChatScroll(); });
 
-function Timeline({ rows, chat = "chat-1" }: { rows: ScrollRow[]; chat?: string }) {
+/** `fold`: rows drawn folded into one row (a bot's routine run), in `hidden` as RoutineStack draws them. */
+function Timeline({ rows, chat = "chat-1", fold = [] }: { rows: ScrollRow[]; chat?: string; fold?: string[] }) {
   const jump = useChatScroll({ rows, chat });
+  const row = (r: ScrollRow) => <div key={r.id} data-message-id={r.id}>{r.id}</div>;
+  const folded = rows.filter(r => fold.includes(r.id));
   return (
     <div>
-      <div ref={jump.listRef} data-testid="list">
-        <div ref={jump.columnRef}>{rows.map(row => <div key={row.id} data-message-id={row.id}>{row.id}</div>)}</div>
+      <div ref={jump.listRef} data-testid="list" data-message-list>
+        <div ref={jump.columnRef}>{rows.map(r => !fold.includes(r.id) ? row(r)
+          : r === folded[0] ? <div key="fold" data-fold data-testid="fold"><div hidden>{folded.map(row)}</div></div> : null)}</div>
       </div>
       <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />
       <textarea data-testid="composer" />
@@ -187,6 +196,61 @@ describe("the chat timeline's scrolling", () => {
     expect(pill()).toBeNull();
   });
 
+  it("pressed from the keyboard, the pill leaves the focus on the list, and Tab goes on to the composer", async () => {
+    const rows = theirs(0, 10);
+    const { rerender, user } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    rerender(<Timeline rows={[...rows, ...theirs(10, 3)]} />);
+    pill()!.focus();
+    await user.keyboard("{Enter}");
+    expect(pill()).toBeNull();
+    expect(list()).toHaveFocus();
+    await user.tab();
+    expect(screen.getByTestId("composer")).toHaveFocus();
+    // The list was a stop only while it held that focus.
+    expect(list()).not.toHaveAttribute("tabindex");
+  });
+
+  it("pressed from the keyboard twice (the first new one, then the bottom), the focus stays on the pill and then goes to the list", async () => {
+    const rows = theirs(0, 10);
+    const { rerender, user } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    rerender(<Timeline rows={[...rows, ...theirs(10, 20)]} />);
+    pill()!.focus();
+    await user.keyboard("{Enter}");
+    expect(pill()).toHaveFocus();
+    await user.keyboard(" ");
+    expect(pill()).toBeNull();
+    expect(list()).toHaveFocus();
+  });
+
+  it("pressed with a mouse, the pill moves no focus to the list", async () => {
+    const rows = theirs(0, 10);
+    const { rerender, user } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    rerender(<Timeline rows={[...rows, ...theirs(10, 3)]} />);
+    await user.click(pill()!);
+    expect(pill()).toBeNull();
+    expect(list()).not.toHaveFocus();
+    expect(list()).not.toHaveAttribute("tabindex");
+  });
+
+  it("pressed from the keyboard and then left, the pill going away later moves no focus", async () => {
+    const rows = theirs(0, 10);
+    const { rerender, user } = renderApp(<Timeline rows={rows} />);
+    scrollTo(0);
+    rerender(<Timeline rows={[...rows, ...theirs(10, 20)]} />);
+    pill()!.focus();
+    await user.keyboard("{Enter}");
+    expect(pill()).toHaveFocus();
+    // The person's own move: out of the pill, to nothing.
+    act(() => pill()!.blur());
+    await act(() => new Promise(resolve => setTimeout(resolve)));
+    scrollTo(1_200);
+    expect(pill()).toBeNull();
+    expect(list()).not.toHaveFocus();
+  });
+
   it("with more new than a screen, the pill stops at the first new one", async () => {
     const rows = theirs(0, 10);
     const { rerender, user } = renderApp(<Timeline rows={rows} />);
@@ -200,6 +264,31 @@ describe("the chat timeline's scrolling", () => {
     // Nothing counted any more; still far from the bottom, so the plain ↓ stays.
     expect(pill()).toHaveAttribute("data-count", "0");
     expect(pill()).toHaveAccessibleName("Scroll to bottom");
+  });
+
+  it("the pill goes to a bot's routine cards folded into one row, not up: their rows have no box", async () => {
+    const rows = theirs(0, 10), cards = theirs(10, 3).map(r => ({ ...r, id: `card_${r.id}` }));
+    const fold = cards.map(r => r.id);
+    const { rerender, user } = renderApp(<Timeline rows={rows} fold={fold} />);
+    scrollTo(0);
+    rerender(<Timeline rows={[...rows, ...cards, ...theirs(13, 20)]} fold={fold} />);
+    expect(pill()).toHaveAttribute("data-count", "23");
+    await user.click(pill()!);
+    // The folded row starts at 500: it went up to the list's top, and the count was cleared.
+    expect(list().scrollTop).toBe(492);
+    expect(screen.getByTestId("fold").getBoundingClientRect().top).toBe(8);
+    expect(pill()).toHaveAttribute("data-count", "0");
+  });
+
+  it("scrolled up with a folded run below the view's top, the view is held on its first row in view", () => {
+    const rows = [...theirs(0, 10), ...theirs(10, 3).map(r => ({ ...r, id: `card_${r.id}` })), ...theirs(13, 10)];
+    renderApp(<Timeline rows={rows} fold={["card_peer_10", "card_peer_11", "card_peer_12"]} />);
+    scrollTo(100);
+    const before = topOf("peer_2");
+    // A picture loads in a row in view, under the first one: that first row stays where it is.
+    heights.set("peer_3", 150);
+    resized();
+    expect(topOf("peer_2")).toBe(before);
   });
 
   it("reaching the bottom by hand clears the count", () => {
@@ -477,6 +566,54 @@ describe("the chat timeline's scrolling", () => {
     expect(pill()).toHaveAttribute("data-count", "1");
   });
 
+  it("a jump gliding to a message glides all the way while rows on its way lay out, with no leap in one frame", () => {
+    // Rows never drawn take a typical height (90 px, index.css's content-visibility), their real one once near the view.
+    for (let i = 0; i < 40; i++) heights.set(`peer_${i}`, 90);
+    renderApp(<Timeline rows={theirs(0, 40)} />);
+    const drawNear = () => {
+      for (const row of rowsIn(list())) {
+        const box = row.getBoundingClientRect();
+        if (box.bottom > -VIEW && box.top < 2 * VIEW) heights.delete(row.dataset.messageId!);
+      }
+    };
+    drawNear();
+    // The match itself was drawn before (the rows between it and the view were not).
+    heights.delete("peer_25");
+    resized();
+    // The browser's smooth scroll: up to 100 px a frame toward where it was sent. Setting the scroll stops it; a smooth
+    // scrollTo starts it again from where it is.
+    let goal: number | null = null;
+    let sent = 0;
+    const into = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(function (this: HTMLElement) {
+      goal = list().scrollTop + this.getBoundingClientRect().top - (VIEW - this.getBoundingClientRect().height) / 2;
+    });
+    const to = vi.spyOn(HTMLElement.prototype, "scrollTo").mockImplementation(function (this: HTMLElement, options?: ScrollToOptions | number) {
+      const top = typeof options === "object" ? options.top ?? 0 : 0;
+      if (typeof options === "object" && options.behavior === "smooth") { goal = top; sent++; }
+      else { goal = null; this.scrollTop = top; }
+    });
+    act(() => { jumpToMessage("peer_25", list()); });
+    /** The most the match moved on screen in a frame. */
+    let largest = 0;
+    for (let frame = 0; frame < 100 && goal !== null; frame++) {
+      const before = list().scrollTop, was = topOf("peer_25"), sentBefore = sent;
+      const step = Math.max(-100, Math.min(100, goal - before));
+      scrollTo(before + step);
+      if (list().scrollTop === goal) goal = null;
+      drawNear();
+      resized();
+      largest = Math.max(largest, Math.abs(topOf("peer_25") - was));
+      // Set by someone else, and not sent on again: the glide stops where it was put.
+      if (list().scrollTop !== before + step && sent === sentBefore) goal = null;
+    }
+    into.mockRestore();
+    to.mockRestore();
+    // A frame's glide, and a row above it taking its real height in that frame (90 - 50).
+    expect(largest).toBeLessThanOrEqual(140);
+    // In the middle of the view: (300 - 50) / 2.
+    expect(topOf("peer_25")).toBe(125);
+  });
+
   it("the pill is a button reached with Tab", async () => {
     const rows = theirs(0, 10);
     const { rerender, user } = renderApp(<Timeline rows={rows} />);
@@ -562,6 +699,68 @@ describe("the chat timeline's scrolling", () => {
     resized();
     expect(topOf("peer_2")).toBe(-30);
     expect(list().scrollTop).toBe(130);
+  });
+});
+
+/**
+ * A chat kept loaded while another one is on screen (it is on a call, or a mini-app runs in it), then shown again.
+ * Chromium brings its list back where it was, with no event. WebKit (Safari, the macOS and Linux apps) brings it back
+ * at the top and says so with a scroll event, at the list's full size, before anything says the size changed.
+ */
+describe("a list off screen and back, as WebKit brings it", () => {
+  const awayAndBack = () => {
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(0);
+    resized();
+    height.mockRestore();
+    scrollTo(0);
+    resized();
+  };
+
+  it("left at its bottom, it is back at its bottom, and is still remembered there", () => {
+    const rows = theirs(0, 20);
+    const { rerender } = renderApp(<Timeline rows={rows} />);
+    expect(list().scrollTop).toBe(700);
+    awayAndBack();
+    expect(list().scrollTop).toBe(700);
+    expect(pill()).toBeNull();
+    // What came while it was back keeps it at the bottom, and so does opening it again later.
+    rerender(<Timeline rows={[...rows, ...theirs(20, 1)]} />);
+    expect(list().scrollTop).toBe(750);
+    rerender(<Timeline chat="chat-2" rows={theirs(100, 12)} />);
+    rerender(<Timeline rows={[...rows, ...theirs(20, 1)]} />);
+    expect(list().scrollTop).toBe(750);
+  });
+
+  it("left scrolled up, it is back on the same message", () => {
+    renderApp(<Timeline rows={theirs(0, 20)} />);
+    scrollTo(130);
+    awayAndBack();
+    expect(topOf("peer_2")).toBe(-30);
+    expect(list().scrollTop).toBe(130);
+  });
+
+  it("a long chat is back on its last rows: none older come into the page", () => {
+    renderApp(<WindowTimeline rows={theirs(0, 1_000)} />);
+    awayAndBack();
+    expect(rowsIn(list()).length).toBe(OPEN_ROWS);
+    expect(list().scrollTop).toBe(OPEN_ROWS * ROW - VIEW);
+    expect(pill()).toBeNull();
+  });
+
+  it("back on screen, a hand's scroll is still the hand's", () => {
+    renderApp(<Timeline rows={theirs(0, 20)} />);
+    awayAndBack();
+    scrollTo(200);
+    expect(list().scrollTop).toBe(200);
+    // Off screen again and back where it was (Chromium): the same.
+    const height = vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(0);
+    resized();
+    height.mockRestore();
+    resized();
+    expect(list().scrollTop).toBe(200);
+    scrollTo(700);
+    scrollTo(450);
+    expect(list().scrollTop).toBe(450);
   });
 });
 
@@ -683,7 +882,7 @@ function WindowTimeline({ rows, chat = "chat-1" }: { rows: ScrollRow[]; chat?: s
   const jump = useChatScroll({ rows: all, chat, window: win });
   return (
     <div>
-      <div ref={jump.listRef} data-testid="list">
+      <div ref={jump.listRef} data-testid="list" data-message-list>
         <div ref={jump.columnRef}>{rows.slice(win.from, win.to).map(row => <Row key={row.id} id={row.id} />)}</div>
       </div>
       <JumpToLatest count={jump.count} far={jump.far} onJump={jump.toNew} />
@@ -699,6 +898,8 @@ describe("a long timeline's window of rows", () => {
   const atTop = () => rowsIn(list()).find(row => row.getBoundingClientRect().bottom > 0)!.dataset.messageId!;
   /** The user scrolls up near the top of the rows in the page, again and again. */
   const upTimes = (n: number) => { for (let i = 0; i < n; i++) scrollTo(ROW); };
+  /** Pages up from the open rows that fill the window to its most. */
+  const FILL = Math.ceil((MAX_ROWS - OPEN_ROWS) / PAGE_ROWS);
 
   it("opens on its last rows at the bottom, and scrolled near the top takes older ones in above without moving the view", () => {
     renderApp(<WindowTimeline rows={long} />);
@@ -716,7 +917,7 @@ describe("a long timeline's window of rows", () => {
 
   it("never holds more than its most rows: far up, the last ones leave the page and new messages are counted, not drawn", () => {
     const { rerender } = renderApp(<WindowTimeline rows={long} />);
-    upTimes(4);
+    upTimes(FILL + 2);
     expect(inPage()).toBe(MAX_ROWS);
     const row = atTop();
     const was = topOf(row);
@@ -732,7 +933,7 @@ describe("a long timeline's window of rows", () => {
 
   it("going down from up the history takes newer rows in below and lets the top ones go, the view on its row", () => {
     renderApp(<WindowTimeline rows={long} />);
-    upTimes(4);
+    upTimes(FILL + 2);
     const firstBefore = rowsIn(list())[0].dataset.messageId;
     // Near the bottom of the rows in the page.
     scrollTo(MAX_ROWS * ROW - VIEW - ROW);
@@ -745,7 +946,7 @@ describe("a long timeline's window of rows", () => {
 
   it("↓ from up the history brings the last rows back and lands at the bottom", () => {
     renderApp(<WindowTimeline rows={long} />);
-    upTimes(4);
+    upTimes(FILL + 2);
     expect(pill()).not.toBeNull();
     fireEvent.click(pill()!);
     expect(lastInPage()).toBe("peer_999");
@@ -755,7 +956,7 @@ describe("a long timeline's window of rows", () => {
 
   it("what I send from up the history brings the last rows back, at the bottom", () => {
     const { rerender } = renderApp(<WindowTimeline rows={long} />);
-    upTimes(4);
+    upTimes(FILL + 2);
     rerender(<WindowTimeline rows={[...long, { id: "me_1", mine: true }]} />);
     expect(lastInPage()).toBe("me_1");
     expect(list().scrollTop).toBe(list().scrollHeight - VIEW);
@@ -784,7 +985,7 @@ describe("a long timeline's window of rows", () => {
     expect(list().scrollTop).toBe(list().scrollHeight - VIEW);
     expect(pill()).toBeNull();
     // The rows that went are still there to scroll up to.
-    upTimes(3);
+    upTimes(Math.ceil((rows.length - OPEN_ROWS) / PAGE_ROWS));
     expect(rowsIn(list())[0].dataset.messageId).toBe("peer_0");
   });
 
@@ -846,7 +1047,7 @@ describe("a long timeline's window of rows", () => {
 
   it("left scrolled up far in the history, it opens on that message again", () => {
     const { unmount } = renderApp(<WindowTimeline rows={long} />);
-    upTimes(4);
+    upTimes(FILL + 2);
     const row = atTop();
     const was = topOf(row);
     unmount();

@@ -280,6 +280,21 @@ export class BitcoindOnchain implements OnchainProvider {
     return [...byTxid.values()].reverse().slice(0, Math.max(0, limit));
   }
 
+  /** The wallet's receives on this address, newest first: only `receive` entries paying exactly it count. */
+  async received(address: string): Promise<OnchainTx[]> {
+    const entries = await this.call("listtransactions", "*", 200, 0, true);
+    if (!Array.isArray(entries)) throw new Error("The node returned no transaction list");
+    const byTxid = new Map<string, OnchainTx>();
+    for (const raw of entries as Record<string, unknown>[]) {
+      if (!raw || raw.category !== "receive" || raw.address !== address || typeof raw.txid !== "string" || !TXID.test(raw.txid)) continue;
+      const tx = byTxid.get(raw.txid) ?? { txid: raw.txid, amount: 0, confirmations: typeof raw.confirmations === "number" ? Math.max(0, raw.confirmations) : 0 };
+      tx.amount += btcToSats(raw.amount);
+      byTxid.delete(raw.txid);
+      byTxid.set(raw.txid, tx);
+    }
+    return [...byTxid.values()].reverse();
+  }
+
   async close(): Promise<void> { this.closed = true; }
 }
 

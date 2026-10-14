@@ -11,6 +11,7 @@ import {
   type Identity,
   type DiscoveryChange,
   type DiscoveryStatus,
+  type CallMedia,
   type GhostRecord,
   type LocalFetch,
   type PkarrRequestOptions,
@@ -27,15 +28,22 @@ import { createInPageHost } from "@ghostly/browser/inPageHost";
 import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
 import { getIdentifier } from "@tauri-apps/api/app";
 import type { PubkyCookieSession } from "@ghostly/browser/host";
+import type { NodeOptions } from "@ghostly/browser/engine/node";
 import { createIrohEndpoint, createHyperEndpoint } from "./nativeTransports";
 import { desktopUpdates } from "./updates";
+import { desktopLnurlFetch } from "./lnurlFetch";
 import { desktopOidc } from "./oidc";
-import { desktopAtproto } from "./atproto";
+import { desktopAtprotoHost } from "./atproto";
 import { appCommandForKey, isAppCommand, sendAppCommand } from "../lib/appCommands";
 import { nativeCallOptions, nativeDevices, type NativeCallSupport } from "./nativeCalls";
 import { setDeviceSource } from "../lib/mediaDevices";
 import { setAppBadgeTarget } from "../lib/appBadge";
 import { setSoundsRelease, type SoundsRelease } from "../lib/sounds";
+import { knownErrorText } from "../lib/errorText";
+import { english } from "../lib/english";
+import { loadSettings } from "../lib/settings";
+import { translatorFor } from "../locales";
+import type { Translate } from "../locales/translate";
 import { webkitGtkSoundsRelease } from "../lib/webkitGtk";
 import { dockBadge } from "./dockBadge";
 import { engine } from "@ghostly/browser/platform/engine";
@@ -45,6 +53,7 @@ import { setWindowThemeSink } from "../lib/windowTheme";
 import { setNameStepUnderTest } from "../lib/nameStep";
 import { appsTestFetch } from "./appsTestFetch";
 import { appsPlatform } from "../lib/apps/flag";
+import { builtInAppOption } from "../lib/apps/builtIns";
 
 /**
  * Ghostly Desktop runs the same peer as the browser clients, in its WebView,
@@ -138,6 +147,12 @@ export function createTauriTransport(): PkarrTransport {
 }
 
 /**
+ * The language the page is shown in now (`<html lang>`, lib/documentLanguage.ts), for a native dialog Rust words
+ * itself (`local_access.rs`): the page names the language, never the words.
+ */
+const dialogLanguage = () => document.documentElement.lang;
+
+/**
  * The WebView may not talk to localhost (CSP, CORS); Rust may, and only to
  * loopback addresses this profile's person allowed (`local_service_allow`),
  * without following redirects. The Rust request cannot be aborted, so this
@@ -152,6 +167,7 @@ const tauriLocalFetch: LocalFetch = async (request) => {
     method: request.method,
     headers: request.headers,
     bodyB64: request.body ? toBase64(request.body) : null,
+    lang: dialogLanguage(),
   });
   const body = fromBase64(response.body_b64);
   return {
@@ -203,9 +219,10 @@ export interface ServiceWindowResponse {
 
 /**
  * The answer a service window gets for one request: the contact's, over the data link, with only the headers a
- * viewer serves (`viewerResponseHeaders`), or a short page saying why there is none.
+ * viewer serves (`viewerResponseHeaders`), or a short page saying why there is none, in `t`'s language. An error the
+ * app does not know is said as a failed request only: the engine's own English goes to the console, not to the page.
  */
-export async function answerServiceWindow(server: Pick<EngineServer, "ready" | "node">, payload: ServiceRequest): Promise<ServiceWindowResponse> {
+export async function answerServiceWindow(server: Pick<EngineServer, "ready" | "node">, payload: ServiceRequest, t: Translate = english): Promise<ServiceWindowResponse> {
   try {
     await server.ready;
     const answer = await server.node.request(payload.peer, payload.service, {
@@ -218,9 +235,8 @@ export async function answerServiceWindow(server: Pick<EngineServer, "ready" | "
     return { status: answer.status, headers: viewerResponseHeaders(answer.headers), body_b64: toBase64(await answer.bytes()) };
   } catch (error) {
     const gone = error instanceof GhostlyHttpError && ["unreachable", "timeout", "closed", "offline"].includes(error.code);
-    const text = gone
-      ? "This service is not reachable. Services exist while their ghost is online."
-      : `The request failed: ${error instanceof Error ? error.message : String(error)}`;
+    if (!gone) console.warn("Service window request failed:", error);
+    const text = gone ? t("services.window.unreachable") : knownErrorText(error, t) ?? t("services.window.failed");
     return {
       status: gone ? 503 : 502,
       headers: [["content-type", "text/plain; charset=utf-8"]],
@@ -229,10 +245,13 @@ export async function answerServiceWindow(server: Pick<EngineServer, "ready" | "
   }
 }
 
+/** `t()` in the profile's language, as it is now. */
+const profileT = (): Translate => translatorFor(loadSettings().language);
+
 /** Requests from a service window arrive here and leave over the contact's data link. */
 function serveServiceWindows(server: EngineServer): void {
   void listen<ServiceRequest>("ghostly-svc-request", async ({ payload }) => {
-    const response = await answerServiceWindow(server, payload);
+    const response = await answerServiceWindow(server, payload, profileT());
     await invoke("service_respond", { id: payload.id, response });
   });
 }
@@ -290,23 +309,25 @@ export async function desktopUnderTest(): Promise<boolean> {
 /**
  * Mini-apps (WISP 1200) on this app: on Desktop they run in windows of their own on Rust's `ghostly-app` scheme, which
  * serves the runner with its policy (apps/desktop/src/app_sandbox.rs): one address, the policy chosen by what the
- * person granted. The engine has them in the e2e suite's build only (VITE_APPS_TEST, fixed when the build is made),
- * reading its test store. Desktop on Windows and the Android app have none yet (`appsPlatform` false), whatever the
+ * person granted. The engine has them by the build's flag (`APPS_ENABLED`); the e2e suite's build (VITE_APPS_TEST,
+ * fixed when the build is made) has them whatever the flag, and reads its test store. Desktop on Windows and the Android app have none yet (`appsPlatform` false), whatever the
  * build: no runner, and the engine told so, so no `apps/1` is offered to contacts.
  */
 export function desktopApps(runsApps: boolean) {
   if (!runsApps) return { host: {}, node: { apps: false } };
   return {
     host: { appRunner: "ghostly-app://localhost/", appNetRunner: "ghostly-app://localhost/", appRunnerServed: true },
-    node: import.meta.env.VITE_APPS_TEST === "1" ? { apps: true, appFetch: appsTestFetch() } : {},
+    // The apps that come with Ghostly are files of the application (`builtInAppOption`).
+    node: { ...builtInAppOption(), ...(import.meta.env.VITE_APPS_TEST === "1" ? { apps: true, appFetch: appsTestFetch() } : {}) },
   };
 }
 
-/** `calls`: what Rust said about calls on this machine (`nativeCallSupport`), for `nativeCallOptions`. */
-export function createDesktopHost(version: string, calls: NativeCallSupport | null = null) {
-  const { node: callOptions, callMedia } = nativeCallOptions(calls);
-  // Native calls capture and play in Rust: the microphones, cameras and speakers to choose from are GStreamer's.
-  if (callMedia) setDeviceSource(nativeDevices);
+/**
+ * `calls`: what Rust says about calls on this machine (`nativeCallSupport`), for `nativeCallOptions`. It may still be
+ * coming: on Linux it starts GStreamer, 0.6 s on a first launch, and the page is drawn meanwhile. The engine starts
+ * once it is there, since it tells contacts whether this app takes calls.
+ */
+export function createDesktopHost(version: string, calls: NativeCallSupport | null | Promise<NativeCallSupport | null> = null) {
   // The title bar follows the app's Light / Dark choice (null: the system's). On a Mac this is the app's appearance, so
   // the page's `prefers-color-scheme` follows it too, and comes back to the system's with System.
   setWindowThemeSink((value) => void invoke("plugin:window|set_theme", { label: "main", value }).catch(() => {}));
@@ -324,21 +345,33 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   // The unread count, as the web app's icon has it (muted chats left out), on the Dock icon.
   setAppBadgeTarget(dockBadge());
   const apps = desktopApps(appsPlatform());
-  return createInPageHost({
+  const node: NodeOptions = { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, nativeIrohRelays: true, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
+    // Wake-ups go from Rust: push services answer without CORS, which a WebView would enforce (WISP 401 § Wake-up push).
+    pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
+    // A Lightning address whose service redirects is asked from Rust, which checks every hop before following it.
+    lnurlFetch: desktopLnurlFetch(invoke),
+    // A new profile gets its default Mainnet wallets; never under an e2e suite (desktopUnderTest).
+    defaultWallets: defaultWalletsAllowed(desktopUnderTest),
+    ...apps.node, ...macPeerBudget() };
+  let callMedia: CallMedia | undefined;
+  const heard = (said: NativeCallSupport | null) => {
+    const options = nativeCallOptions(said);
+    Object.assign(node, options.node);
+    callMedia = options.callMedia;
+    // Native calls capture and play in Rust: the microphones, cameras and speakers to choose from are GStreamer's.
+    if (callMedia) setDeviceSource(nativeDevices);
+  };
+  const callsKnown = calls instanceof Promise ? calls.then(heard) : heard(calls);
+  const host = createInPageHost({
     version,
     features: { shareLocalServices: true, openServices: true, profiles: true },
     updates: desktopUpdates,
     ...apps.host,
-    node: { nativeTransports: { "iroh/1": createIrohEndpoint, "hyperdht/1": createHyperEndpoint }, nativeIrohRelays: true, transport: createTauriTransport(), pollIntervals: DHT_POLL_INTERVALS, localFetch: tauriLocalFetch, platform: "desktop", invoke,
-      // Wake-ups go from Rust: push services answer without CORS, which a WebView would enforce (WISP 401 § Wake-up push).
-      pushSend: (request) => invoke<number>("push_send", { url: request.url, headers: Object.entries(request.headers), body: toBase64Url(request.body) }),
-      // A new profile gets its default Mainnet wallets; never under an e2e suite (desktopUnderTest).
-      defaultWallets: defaultWalletsAllowed(desktopUnderTest),
-      ...apps.node, ...macPeerBudget(), ...callOptions },
-    callMedia,
+    node,
     onServer: serveServiceWindows,
     oidc: desktopOidc,
-    atproto: desktopAtproto,
+    // Not in the Android app yet (no redirect the phone receives): Bluesky is not offered there.
+    atproto: desktopAtprotoHost(),
     // A WebView cannot hand a lightning: or bitcoin: link to the system; Rust does, for those two schemes only.
     openPaymentLink: (uri) => invoke("open_payment_link", { url: uri }),
     fullscreenWindow: (on) => invoke("plugin:window|set_fullscreen", { label: "main", value: on }),
@@ -353,19 +386,30 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     // WKWebView's readText() shows a "Paste" callout that needs a second click; Rust reads the text (main window only, bounded).
     readClipboardText: () => invoke<string>("read_clipboard_text"),
     // A paste the webview showed the page nothing of (no files, no text): Rust looks for copied files or a picture.
-    // Their bytes stay in Rust, read by token; the page never names a path.
+    // Their bytes stay in Rust, read by token; the page never names a path. Once the page has them, Rust lets them
+    // go (`incoming_share_done`, named after a share, takes a paste's tokens too): a pasted picture's PNG is not kept.
     readClipboardFiles: async () => (await invoke<{ token: string; name: string | null; size: number; mime: string | null }[]>("read_clipboard_files"))
-      .map(({ token, ...item }) => ({ ...item, read: async (offset: number, length: number) => {
-        const bytes = await invoke<ArrayBuffer | number[]>("read_pasted_bytes", { token, offset, length });
-        return bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes);
-      } })),
+      .map(({ token, ...item }) => ({
+        ...item,
+        read: async (offset: number, length: number) => {
+          const bytes = await invoke<ArrayBuffer | number[]>("read_pasted_bytes", { token, offset, length });
+          return bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes);
+        },
+        done: () => void invoke("incoming_share_done", { tokens: [token] }).catch(() => {}),
+      })),
     // Rust asks in a native dialog naming the exact address (the page can neither draw nor answer it), and keeps the
-    // answer per profile: `local_fetch` reaches only an address allowed there.
-    requestLocalAccess: (_pattern, origin) => invoke<boolean>("local_service_allow", { space: fileSpace(), origin }),
+    // answer per profile: `local_fetch` reaches only an address allowed there. The dialog is in the page's language.
+    requestLocalAccess: (_pattern, origin) => invoke<boolean>("local_service_allow", { space: fileSpace(), origin, lang: dialogLanguage() }),
     forgetLocalAccess: (origin) => invoke<void>("local_service_forget", { space: fileSpace(), origin }),
     async openService(peerPubKeyZ32, serviceId) {
       const service = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId);
-      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, title: service?.name ?? serviceId });
+      // Rust says `unreachable` itself for a request this page never answered: the sentence goes with the window.
+      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, title: service?.name ?? serviceId, unreachable: profileT()("services.window.unreachable") });
     },
+  });
+  const connect = host.connect;
+  return Object.defineProperties(host, {
+    connect: { value: async (...args: Parameters<typeof connect>) => { await callsKnown; return connect(...args); } },
+    callMedia: { get: () => callMedia },
   });
 }

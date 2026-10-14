@@ -33,6 +33,8 @@ export type DiscoveryChange = "tripped" | "recovered";
  * fast for a while, on the hub left and on its members alike: on CLI daemons the hub left got 2 of 24 beacon writes
  * through in 90 s (its entry went stale, and members it should have carried became hubs), and the members' requests
  * in its lobby went out 40 s after they asked (2026-10-03).
+ * A hub's reads say `door` only while someone is coming in (`Communities.doorBusy`): otherwise they give way like any
+ * background read, and an app that was a hub of several communities left its edges' signaling the share (2026-10-13).
  *
  * `signal`: a link's WebRTC signaling, what its contact waits for: the write of a new offer or answer, or a read for
  * the answer while this side's offer is out, or the reads of a DHT-only contact's mailbox once it shows it is leaving,
@@ -46,6 +48,16 @@ export interface PkarrRequestOptions {
    * a write while a link watches for one: what that contact, back, reads first.
    */
   watch?: boolean;
+  /**
+   * A 1:1 chat's read of a contact that went away from a live session within `DEPARTED_READ_MS` (link.ts): an app that
+   * restarts publishes its offer then. A few may go over the relay's minute (`DEPARTED_READS` in relay.ts).
+   */
+  departed?: boolean;
+  /**
+   * `publishPayload` only: the payload was signed in this process, dated so (a group edge's, `CarriedTransport`). Its
+   * signature is not checked again on the way to the relays, as `RelayTransport.putSigned`'s is not.
+   */
+  signedAt?: bigint;
 }
 
 /**
@@ -63,6 +75,7 @@ export function withRequestOptions(transport: PkarrTransport, extra: PkarrReques
   if (transport.subscribe) wrapped.subscribe = (listener) => transport.subscribe!(listener);
   if (transport.networkChanged) wrapped.networkChanged = () => transport.networkChanged!();
   if (transport.readAnsweredAt) wrapped.readAnsweredAt = (pubKeyZ32) => transport.readAnsweredAt!(pubKeyZ32);
+  if (transport.readHeldBackFor) wrapped.readHeldBackFor = (pubKeyZ32) => transport.readHeldBackFor!(pubKeyZ32);
   if (transport.onServerTime) wrapped.onServerTime = (listener) => transport.onServerTime!(listener);
   if (transport.configure) wrapped.configure = (options) => transport.configure!(options);
   if (transport.turnRead) wrapped.turnRead = (pubKeyZ32, options) => transport.turnRead!(pubKeyZ32, options);
@@ -139,6 +152,11 @@ export interface PkarrTransport {
    * where the transport cannot say; such a caller then takes no read for one.
    */
   readAnsweredAt?(pubKeyZ32: string): number | undefined;
+  /**
+   * How long the budget still holds back a read of this key, when its last read was held back and answered from a kept
+   * copy (`readAnsweredAt` did not move): when to read again. Undefined once a read went out, or where it cannot say.
+   */
+  readHeldBackFor?(pubKeyZ32: string): number | undefined;
   /**
    * Called with each time a server gave (`ServerTime`), where the transport can read one: what `ClockWatch` holds this
    * device's clock against. Returns the unsubscribe.

@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FILE_BYTES_STEP, blobDigest, checkFileId, digestText, dropFileSpace, fileBytes, fileBytesOf, registerFileBytes, removeFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
+import { FILE_BYTES_STEP, NO_ROOM_TO_PLAY, blobDigest, checkFileId, digestText, dropFileSpace, fileBytes, fileBytesOf, registerFileBytes, removeFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
 import { IdbFileBytes } from "../src/shared/fileBytesIdb";
 import { NATIVE_BLOB_MAX, NativeFileBytes, type NativeInvoke } from "../src/shared/fileBytesNative";
 import { fileStore } from "../src/shared/idb";
@@ -202,6 +202,14 @@ describe("files on Desktop (Rust commands)", () => {
     await expect(bytes.stream("../x", "video/mp4")).rejects.toThrow("Invalid file id");
     // An app from before the scheme answers nothing it knows: nothing streams.
     expect(await fakeRust().bytes.stream("c-in-big", "video/mp4")).toBeNull();
+  });
+
+  // covers: files.video.stream
+  it("a file the disk has no room to play says so, apart from one that is gone", async () => {
+    const { invoke } = fakeRust();
+    invoke.mockImplementation(async (command: string) => (command === "file_bytes_stream_open" ? Promise.reject(NO_ROOM_TO_PLAY) : null));
+    const bytes = new NativeFileBytes(invoke as unknown as NativeInvoke);
+    await expect(bytes.stream("c-in-big", "video/mp4")).rejects.toThrow(NO_ROOM_TO_PLAY);
   });
 
   it("a failed copy leaves nothing behind", async () => {

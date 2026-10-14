@@ -2,10 +2,11 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { formatFileSize, formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
+import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
 import { downloadFile } from "../../lib/fileDownload";
-import { canRetryFile, fileHeld, fileStatus, stalledAction } from "../../lib/fileStatus";
+import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, stalledAction } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { openStoredMedia, type StoredMedia } from "../../lib/storedMedia";
@@ -15,10 +16,10 @@ import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMedi
 import { Highlight } from "../chat/ChatSearch";
 import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { SpeedPill } from "../voice/VoiceBubble";
-import { problemLine } from "../../lib/problemText";
+import { problemLine, saveProblemLine } from "../../lib/problemText";
 
 type PlayState = "idle" | "loading" | "playing" | "paused";
-type Problem = "unsupported" | "too-large" | "missing" | "left-out" | "not-yet";
+type Problem = "unsupported" | "too-large" | "no-room" | "missing" | "left-out" | "not-yet";
 
 const pill = "text-xs px-2.5 py-0.5 rounded-full bg-black/20 hover:bg-black/30 border-none text-inherit cursor-pointer transition-colors";
 
@@ -51,12 +52,16 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const audioRef = useRef<HTMLAudioElement>(null);
   useChosenSpeaker(audioRef, src);
   const playRef = useRef<HTMLButtonElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useFocusKept(rootRef);
   const srcRef = useRef<string | null>(null);
   /** The source playing: a blob URL, or a file the platform streams (released when it stops). */
   const sourceRef = useRef<StoredMedia | null>(null);
   /** A stream the player refused was tried again from the file's bytes, once. */
   const fellBack = useRef(false);
   const resumeAt = useRef(0);
+  /** On screen: a stream that opens after the bubble went is let go at once. */
+  const mounted = useRef(false);
   /** What the system's media controls call (lock screen, media keys): set on every render, below. */
   const mediaRef = useRef<MediaSessionPlayer | null>(null);
 
@@ -94,6 +99,9 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
     setPlayState("loading");
     // Desktop streams its files from Rust, in ranges (a large one plays too); elsewhere the bytes come as a Blob.
     const source = await openStoredMedia(platform, file.id, file.mime, { bytes: !ready || fellBack.current });
+    if (!mounted.current) { if (source !== "no-room") source?.release(); return; }
+    // No room on the disk for the copy the player makes of it (Linux): it is offered to save instead.
+    if (source === "no-room") { releasePlayback(file.id); setPlayState("idle"); setProblem("no-room"); return; }
     if (!source) {
       releasePlayback(file.id);
       setPlayState("idle");
@@ -140,12 +148,16 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   // Another audio file, video or voice message starts: this one stops and lets go of its bytes.
   useEffect(() => registerVoicePlayer(file.id, { play: () => void play(), pause: () => { if (srcRef.current) unload(); } }), [file.id, play, unload]);
 
-  useEffect(() => () => {
-    releasePlayback(file.id);
-    releaseMediaSession(file.id);
-    sourceRef.current?.release();
-    sourceRef.current = null;
-    srcRef.current = null;
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      releasePlayback(file.id);
+      releaseMediaSession(file.id);
+      sourceRef.current?.release();
+      sourceRef.current = null;
+      srcRef.current = null;
+    };
   }, [file.id]);
 
   const pause = () => audioRef.current?.pause();
@@ -155,7 +167,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
     resumeAt.current = clamped;
     if (audioRef.current && srcRef.current) audioRef.current.currentTime = clamped;
   };
-  mediaRef.current = { title: file.name, artist: sender === "me" ? "You" : peerName, play: () => void play(), pause, seekTo: seek };
+  mediaRef.current = { title: file.name, artist: sender === "me" ? t("chat.reply.you") : peerName, play: () => void play(), pause, seekTo: seek };
 
   const act = (action: FileAction) => {
     setActionError("");
@@ -165,7 +177,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
     if (!platform) return;
     setActionError("");
     void downloadFile(platform, file, sanitizeFileName(file.name)).then(async (result) => { if (result === "missing") setProblem((await fileHeld(platform, file.id, false)) === "left-out" ? "left-out" : "missing"); })
-      .catch((error: Error) => setActionError(problemLine(error, t)));
+      .catch((error: Error) => setActionError(saveProblemLine(error, t)));
   };
   const again = (action: () => Promise<unknown>) => {
     setActionError("");
@@ -174,6 +186,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   };
 
   const moving = transfer?.state === "transferring";
+  // A group's file (WISP 503) is downloaded or not: no Decline, no pause or cancel.
+  const group = isGroupFile(file);
   const controls = moving && !!transfer.direction && !!platform?.fileAction;
   const offered = controls && transfer.direction === "in" && transfer.stage === "asking";
   const noRoom = offered && typeof transfer.room === "number" && transfer.room < file.size;
@@ -183,7 +197,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const stuck = platform?.fileAction ? stalledAction(transfer, t) : null;
   const failed = transfer?.state === "failed";
   const status = (moving && !offered) || failed ? fileStatus(file, transfer, named, false, t) : null;
-  const reason = actionError || (failed ? transfer.error : undefined);
+  const reason = actionError ? { text: actionError } : failedReason(transfer, t);
+  const hint = reason ? null : groupFileHint(file, transfer, t);
   // One sent from here can be listened to while it goes, once it has been copied.
   const canPlay = playable && (ready || (sender === "me" && transfer?.stage !== "preparing" && !failed));
   const arriving = moving && !offered && !(sender === "me" && canPlay);
@@ -192,13 +207,14 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
 
   const problemText = problem === "unsupported" || (!playable && ready) ? t("chat.audio.cantPlay", { format: audioFormat(file.mime) })
     : problem === "too-large" ? t("chat.audio.tooLarge")
+    : problem === "no-room" ? t("chat.media.noRoomToPlay")
     : problem === "missing" ? t("chat.file.gone")
     : problem === "left-out" ? t("chat.file.notInBackup")
     : problem === "not-yet" ? t("chat.media.notYet")
     : null;
 
   return (
-    <div className="w-[300px] max-w-full pt-1" data-testid="audio-bubble" data-state={state} data-playable={playable ? "true" : "false"} data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")}>
+    <div ref={rootRef} className="w-[300px] max-w-full pt-1 rounded-[4px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" data-testid="audio-bubble" data-state={state} data-playable={playable ? "true" : "false"} data-stage={transfer?.stage ?? transfer?.state ?? (restoring ? "restoring" : "done")}>
       <div className="flex items-center gap-2">
         {canRetry ? (
           <RoundRetry danger busy={busy} testId="audio-retry" label={t("chat.message.retry")} hint={t("chat.file.notSentHint")} onClick={() => again(() => platform!.retryFile!(file.id))} />
@@ -245,7 +261,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
               {known ? `${formatVideoDuration(position * 1000)} / ${formatVideoDuration(duration * 1000)}` : formatFileSize(file.size)}
             </span>
             {status && <span data-testid="audio-status" className={`min-w-0 truncate ${failed ? "text-danger-ink" : ""}`}>· <bdi>{status}</bdi></span>}
-            {reason && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="audio-why" danger />}
+            {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="audio-why" danger={!!reason} />}
           </div>
         </div>
         {ready && (
@@ -264,7 +280,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
               className="text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none cursor-pointer disabled:opacity-50 disabled:cursor-default">
               {t("chat.media.downloadSize", { size: formatFileSize(file.size) })}
             </button>
-            <button type="button" data-testid="audio-decline" onClick={() => act("decline")} className={pill}>{t("chat.file.decline")}</button>
+            {!group && <button type="button" data-testid="audio-decline" onClick={() => act("decline")} className={pill}>{t("chat.file.decline")}</button>}
           </div>
           {typeof transfer.room === "number" && (
             <p className={`text-[11px] m-0 mt-1 ${noRoom ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="audio-room">
@@ -273,18 +289,18 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
           )}
         </div>
       )}
-      {controls && !offered && (
+      {controls && !offered && !group && (
         <div className="flex gap-1.5 mt-1 px-1">
           {canPause && <button type="button" className={pill} data-testid="audio-pause-transfer" onClick={() => act("pause")}>{t("chat.file.pause")}</button>}
           {pausedHere && <button type="button" className={pill} data-testid="audio-resume-transfer" onClick={() => act("resume")}>{t("chat.file.resume")}</button>}
           <button type="button" className={pill} data-testid="audio-cancel" onClick={() => act("cancel")}>{t("common.cancel")}</button>
         </div>
       )}
-      {reason && why && <WhyText id={whyId} testId="audio-why-text">{reason}</WhyText>}
+      {(reason || hint) && why && <WhyText id={whyId} testId="audio-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
       {problemText && (
         <p className={`text-[12px] m-0 mt-1 px-1 ${problem === "not-yet" ? "text-text-primary/65" : "text-danger-ink"}`} role={problem === "not-yet" ? undefined : "alert"} data-testid="audio-problem">
           {problemText}{" "}
-          {(problem === "unsupported" || problem === "too-large" || (!playable && ready)) && (
+          {(problem === "unsupported" || problem === "too-large" || problem === "no-room" || (!playable && ready)) && (
             <button type="button" data-testid="audio-download" onClick={save} className="underline text-inherit bg-transparent border-none p-0 cursor-pointer text-[12px]">{t("chat.message.download")}</button>
           )}
         </p>

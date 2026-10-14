@@ -57,7 +57,7 @@ export function memoryHost(runnerUrl = "/app-frame.html", netRunnerUrl: string |
       calls.push({ op: "file", ref, key: path });
       const bytes = files.get(ref)?.get(path);
       if (!bytes) throw new Error("not-found");
-      return bytes;
+      return bytes.slice();
     },
     storage: {
       get: async (ref, scope, key) => {

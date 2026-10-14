@@ -2,6 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Amount, HttpResponseError, MintOperationError, OutputData, getEncodedToken, getTokenMetadata, type Proof, type SerializedSwapPreview, type SwapPreview } from "@cashu/cashu-ts";
 import { CashuWallet, SwapUnsettledError } from "../src/engine/wallet";
+import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import { removalRisksFunds, walletRemoval } from "../src/shared/walletRemoval";
 import type { PendingMelt, PendingSwap, StoredPayment, StoredProof, StoredQuote, WalletTx } from "../src/shared/types";
@@ -14,7 +15,7 @@ import type { PendingMelt, PendingSwap, StoredPayment, StoredProof, StoredQuote,
  */
 const mintApi = vi.hoisted(() => ({
   sendOffline: vi.fn(), prepareSend: vi.fn(), prepareReceive: vi.fn(), completeSwap: vi.fn(), restore: vi.fn(), getKeys: vi.fn(), checkProofsStates: vi.fn(),
-  checkMeltQuoteBolt11: vi.fn(), prepareMelt: vi.fn(), completeMelt: vi.fn(),
+  createMeltQuoteBolt11: vi.fn(), checkMeltQuoteBolt11: vi.fn(), prepareMelt: vi.fn(), completeMelt: vi.fn(),
   checkMintQuoteBolt11: vi.fn(), prepareMint: vi.fn(), completeMint: vi.fn(),
   /** Whether the mint's info says it restores (NUT-09). */
   restores: vi.fn(),
@@ -34,6 +35,7 @@ vi.mock("@cashu/cashu-ts", async (importOriginal) => {
       completeSwap = (preview: unknown) => mintApi.completeSwap(preview);
       mint = { restore: (request: unknown) => mintApi.restore(request), getKeys: () => mintApi.getKeys() };
       checkProofsStates = (proofs: unknown) => mintApi.checkProofsStates(proofs);
+      createMeltQuoteBolt11 = (invoice: unknown) => mintApi.createMeltQuoteBolt11(invoice);
       checkMeltQuoteBolt11 = (quote: unknown) => mintApi.checkMeltQuoteBolt11(quote);
       prepareMelt = (...args: unknown[]) => mintApi.prepareMelt(...args);
       completeMelt = (preview: unknown) => mintApi.completeMelt(preview);
@@ -264,9 +266,54 @@ describe("redeeming a token", () => {
     expect(events.onSwapSettled).not.toHaveBeenCalled();
     const [kept] = await swaps();
     mintApi.restore.mockResolvedValue(signed(kept));
-    await pass(30_000);
+    await pass(600_000);
     expect(await swaps()).toEqual([]);
     expect(await balance()).toBe(72 + 62);
+  });
+
+  it("a token the mint refuses because its ecash is pending is refused at once, and the mint is not asked about it again", async () => {
+    mintApi.completeSwap.mockRejectedValue(new MintOperationError(11002, "Token is pending"));
+    mintApi.checkProofsStates.mockResolvedValue([{ state: "PENDING" }]);
+    const { wallet, events } = setup();
+    const thrown = await wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming }).catch((e: Error) => e);
+    expect(thrown).not.toBeInstanceOf(SwapUnsettledError);
+    expect((thrown as Error).message).toBe("Token is pending");
+    expect(await swaps(), "nothing of it is ours to wait for").toEqual([]);
+    const asked = mintApi.checkProofsStates.mock.calls.length;
+    await pass(3_600_000);
+    expect(mintApi.checkProofsStates.mock.calls.length).toBe(asked);
+    expect(mintApi.completeSwap).toHaveBeenCalledOnce();
+    expect(events.onSwapSettled).not.toHaveBeenCalled();
+    expect(await balance()).toBe(72);
+  });
+
+  it("a redeem whose ecash stays pending is asked about less and less often, and let go after its hour", async () => {
+    mintApi.completeSwap.mockRejectedValue(lost());
+    mintApi.checkProofsStates.mockResolvedValue([{ state: "PENDING" }]);
+    const { wallet, events } = setup();
+    await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming })).rejects.toBeInstanceOf(SwapUnsettledError);
+    await pass(WATCH_MS);
+    expect(await swaps()).toEqual([]);
+    expect(events.onSwapSettled).toHaveBeenCalledWith(expect.objectContaining({ payment: expect.objectContaining({ id: "p1" }) }), false);
+    expect(mintApi.checkProofsStates.mock.calls.length, "not every 30 s for an hour").toBeLessThan(25);
+    const asked = mintApi.checkProofsStates.mock.calls.length;
+    await pass(3_600_000);
+    expect(mintApi.checkProofsStates.mock.calls.length).toBe(asked);
+    expect(await balance()).toBe(72);
+  });
+
+  it("the same coins sent again in another token (another memo) are one redeem, never a second swap counted again", async () => {
+    mintApi.completeSwap.mockRejectedValue(lost());
+    mintApi.checkProofsStates.mockResolvedValue([{ state: "PENDING" }]);
+    const { wallet } = setup();
+    await expect(wallet.receiveToken(TOKEN, "ecash-in", undefined, { payment: incoming })).rejects.toBeInstanceOf(SwapUnsettledError);
+    for (let i = 0; i < 5; i++) {
+      const again = getEncodedToken({ mint: MINT, unit: "sat", proofs: [proof(64, "t1")], memo: `m${i}` });
+      await expect(wallet.receiveToken(again, "ecash-in", undefined, { payment: incoming })).rejects.toThrow("This ecash is already being received");
+    }
+    expect(await swaps()).toHaveLength(1);
+    expect(mintApi.completeSwap).toHaveBeenCalledOnce();
+    expect(await wallet.view()).toMatchObject({ openSwaps: 1, swapsAmount: 62 });
   });
 
   it("only an answer counts: a restore that fails says nothing, and the redeem is finished when it works again", async () => {
@@ -383,6 +430,38 @@ describe("redeeming a token", () => {
     expect(await balance(), "nothing of it stored here").toBe(72);
     expect(await all(STORES.walletTx)).toEqual([]);
     expect(events.onSwapSettled).not.toHaveBeenCalled();
+  });
+
+  it("a round over the open swaps at a mint lets the user's own redeem there go between two of them", async () => {
+    const token = (secret: string) => getEncodedToken({ mint: MINT, unit: "sat", proofs: [proof(64, secret)] });
+    // Each token its own coin: the same coin twice is one redeem (the second is refused as being received).
+    const coin = new Map(["o1", "o2", "u1"].map((secret) => [token(secret), secret]));
+    mintApi.prepareReceive.mockImplementation(async (sent: string) => ({ ...receivePreview(), inputs: [proof(64, coin.get(sent) ?? "t1")] }));
+    mintApi.completeSwap.mockRejectedValue(lost());
+    mintApi.restore.mockRejectedValue(lost());
+    const { wallet } = setup();
+    for (const secret of ["o1", "o2"]) await expect(wallet.receiveToken(token(secret))).rejects.toBeInstanceOf(SwapUnsettledError);
+    expect(await swaps()).toHaveLength(2);
+
+    // A slow mint: asked about the first open swap, it answers when let; about the second, never.
+    let answer!: () => void;
+    const answered = new Promise<void>((resolve) => { answer = resolve; });
+    let asked!: () => void;
+    const reached = new Promise<void>((resolve) => { asked = resolve; });
+    mintApi.restore.mockImplementationOnce(async () => { asked(); await answered; throw lost(); }).mockImplementation(() => new Promise(() => {}));
+    void wallet.settleSwaps([MINT]);
+    await reached;
+
+    // The user redeems a token at that mint while the round asks about the first one.
+    mintApi.completeSwap.mockReset();
+    mintApi.completeSwap.mockResolvedValue(receiveAnswer());
+    let redeemed = false;
+    const redeem = wallet.receiveToken(token("u1")).then((result) => { redeemed = true; return result; });
+    answer();
+    await pass(0);
+    expect(redeemed, "not behind the second open swap").toBe(true);
+    await expect(redeem).resolves.toEqual({ amount: 62, mint: MINT, fee: 2 });
+    expect(await balance()).toBe(72 + 62);
   });
 
   it("from a restored copy of the profile, what it brings is checked like the copy's ecash", async () => {
@@ -568,8 +647,16 @@ describe("splitting ecash for a token", () => {
 });
 
 describe("splitting ecash for a Lightning payment", () => {
+  const INVOICE = fakeInvoice(38, new Uint8Array(32).fill(7));
+  // Only a quote shown to the person is paid: each payment is quoted first, as the app does.
+  const pay = async (wallet: CashuWallet) => {
+    const { quote, mint } = await wallet.quoteInvoice(INVOICE);
+    return wallet.payQuote(quote, mint);
+  };
   beforeEach(() => {
-    mintApi.checkMeltQuoteBolt11.mockResolvedValue({ quote: "q1", request: "lnbc1", amount: Amount.from(38), fee_reserve: Amount.from(2), state: "UNPAID" });
+    const quote = { quote: "q1", request: INVOICE, amount: Amount.from(38), fee_reserve: Amount.from(2), state: "UNPAID" };
+    mintApi.createMeltQuoteBolt11.mockResolvedValue(quote);
+    mintApi.checkMeltQuoteBolt11.mockResolvedValue(quote);
     mintApi.prepareMelt.mockImplementation(async (method: string, quote: unknown, inputs: unknown[]) => ({ method, inputs, outputData: [], keysetId: KEYSET, quote }));
   });
 
@@ -581,7 +668,7 @@ describe("splitting ecash for a Lightning payment", () => {
       return { quote: { state: "PAID" }, change: [] };
     });
     const { wallet } = setup();
-    await expect(wallet.payQuote("q1", MINT)).resolves.toBe(true);
+    await expect(pay(wallet)).resolves.toBe(true);
     expect((await proofs()).map((p) => p.secret).sort()).toEqual(["b", "k"]);
     expect(await all<WalletTx>(STORES.walletTx)).toMatchObject([{ kind: "lightning-out", amount: 38, fee: 10 }]);
   });
@@ -590,7 +677,7 @@ describe("splitting ecash for a Lightning payment", () => {
     mintApi.completeSwap.mockRejectedValue(lost());
     mintApi.restore.mockRejectedValue(lost());
     const first = setup();
-    await expect(first.wallet.payQuote("q1", MINT)).rejects.toBeInstanceOf(SwapUnsettledError);
+    await expect(pay(first.wallet)).rejects.toBeInstanceOf(SwapUnsettledError);
     expect(mintApi.completeMelt).not.toHaveBeenCalled();
     expect(await all(STORES.melts)).toEqual([]);
     expect(await balance()).toBe(8);
@@ -609,7 +696,7 @@ describe("splitting ecash for a Lightning payment", () => {
     mintApi.restore.mockImplementation(async () => signed((await swaps())[0]));
     mintApi.completeMelt.mockResolvedValue({ quote: { state: "PAID" }, change: [] });
     const { wallet } = setup();
-    await expect(wallet.payQuote("q1", MINT)).resolves.toBe(true);
+    await expect(pay(wallet)).resolves.toBe(true);
     expect(await balance()).toBe(8 + 16);
     expect(await swaps()).toEqual([]);
     expect(await all(STORES.melts)).toEqual([]);

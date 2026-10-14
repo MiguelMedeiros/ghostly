@@ -57,6 +57,8 @@ class MainActivity : TauriActivity() {
         .toMap()
       for ((name, value) in E2eEnvironment.of(strings)) Os.setenv(name, value, true)
     }
+    // The camera's photos a previous page held (CameraCapture.kt): this start's page holds none of them.
+    CameraFiles.sweep(cacheDir)
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     // Edge to edge is enforced from Android 15 (target SDK 35 and up), so the page would draw under the status bar,
@@ -86,6 +88,11 @@ class MainActivity : TauriActivity() {
   /** The page's WebView is made: hidden, with the update screen over it, when the WebView is too old to run it. */
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
+    // wry sets its WebChromeClient after this callback: the camera's capture goes in over it on the next turn.
+    window.decorView.post {
+      val wry = webView.webChromeClient
+      if (wry != null && wry !is CameraChromeClient) webView.webChromeClient = CameraChromeClient(this, wry)
+    }
     val version = webViewTooOld ?: return
     webView.visibility = View.GONE
     val screen = layoutInflater.inflate(R.layout.webview_update, null)

@@ -21,10 +21,13 @@ import { CardTime, StatusCardView } from "./chat/StatusCard";
 import { STATUS_TONE, cardLabel, showsCard, type ShownCard } from "../lib/statusCards";
 import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
-import { downloadFile, downloadName, downloadState, type DownloadFormat } from "../lib/fileDownload";
+import { downloadFile, downloadName, downloadState, Unconverted, type DownloadFormat } from "../lib/fileDownload";
 import { canRetryFile, fileHeld } from "../lib/fileStatus";
-import { rawError, SAVE_REFUSED } from "../lib/errorText";
+import { holdFull, rawError, SAVE_REFUSED } from "../lib/errorText";
+import { problemText, type Problem } from "../lib/problemText";
+import { Notice } from "./ui/Notice";
 import { useDhtOnly, waitsForLive } from "../lib/delivery";
+import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import type { ChatFile, ChatMessage } from "../lib/types";
 import { callEventText } from "../lib/callLines";
@@ -40,10 +43,12 @@ import { DeliveryStatus } from "./chat/DeliveryStatus";
 import { forwardedLabel } from "../lib/forward";
 import { PinIcon } from "./PinIcon";
 import { copyText } from "../lib/shareLink";
+import { pictureLinkUrl } from "../lib/pictureLink";
 import { SenderAvatar, type MessageAuthor } from "./chat/SenderAvatar";
 import { useMemberText } from "../contexts/MemberColorsContext";
 import { AppCardView } from "./apps/AppCardView";
 import { useAppsAvailable } from "../lib/apps/flag";
+import { useInstalledApp } from "../lib/apps/installed";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -444,6 +449,8 @@ function DownloadItem({ file, name, sender, format = "original", onDone }: { fil
   const { t } = useI18n();
   const { platform, transfer, restoring } = useTransfer(file.id);
   const [problem, setProblem] = useState<"missing" | "left-out" | "unconverted" | "unsaved" | null>(null);
+  // The system's own words for a refused save, in the row's hover text.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -469,12 +476,19 @@ function DownloadItem({ file, name, sender, format = "original", onDone }: { fil
         const held = await fileHeld(platform, file.id, false);
         if (mounted.current) setProblem(held === "left-out" ? "left-out" : "missing");
       })
-      // Refused where it was to be saved (Android's picker): it can be saved again, somewhere else.
-      .catch((error: unknown) => { if (mounted.current) setProblem(SAVE_REFUSED.test(rawError(error)) ? "unsaved" : format === "mp3" ? "unconverted" : "missing"); })
+      // Bytes gone resolve `missing`; a rejection is the save refused where it was to be (Android's picker, a folder the
+      // desktop cannot write to, a full disk): it can be saved again, somewhere else.
+      .catch((error: unknown) => {
+        if (!mounted.current) return;
+        const unconverted = error instanceof Unconverted;
+        setProblem(unconverted ? "unconverted" : "unsaved");
+        setRefusal(unconverted || SAVE_REFUSED.test(rawError(error)) ? null : rawError(error));
+      })
       .finally(() => { if (mounted.current) setBusy(false); });
   };
   return (
-    <MenuItem testId={format === "mp3" ? "message-download-mp3" : "message-download"} onClick={run} disabled={!platform || (!!reason && problem !== "unsaved")} hint={reason} title={reason ?? name}
+    <MenuItem testId={format === "mp3" ? "message-download-mp3" : "message-download"} onClick={run} disabled={!platform || (!!reason && problem !== "unsaved")} hint={reason}
+      title={reason && refusal ? `${reason}\n${refusal}` : reason ?? name}
       data={{ "data-download-state": problem ?? (busy ? "busy" : state) }} icon={downloadIcon}>
       {t(format === "mp3" ? "chat.message.downloadMp3" : "chat.message.download")}
     </MenuItem>
@@ -537,6 +551,11 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onPin, pin
   const [confirm, setConfirm] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const side = align === "left" ? "end" : "start";
+  // A file still on its way stops on both sides when its message is deleted (the engine's deleteMessage): the contact
+  // keeps no copy of it, so the hint says what happens instead.
+  const { transfer } = useTransfer(download?.file.id);
+  const deleteHint = transfer?.state !== "transferring" ? t("chat.deleteMessageHint")
+    : t(download?.sender === "me" ? "chat.deleteSendingFileHint" : "chat.deleteArrivingFileHint");
 
   return (
     <div ref={ref} className="relative self-center shrink-0">
@@ -594,7 +613,7 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onPin, pin
       {onDelete && (
         <Menu open={confirm} onClose={() => setConfirm(false)} anchorRef={ref} testId="message-delete-menu" align={side} prefer="up" portal within={MESSAGE_LIST} label={t("chat.deleteMessage")}>
           <div className="px-3 py-2 md:w-[210px]">
-            <p className="m-0 mb-2 whitespace-normal text-[11px] leading-snug text-text-muted">{t("chat.deleteMessageHint")}</p>
+            <p className="m-0 mb-2 whitespace-normal text-[11px] leading-snug text-text-muted">{deleteHint}</p>
             <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
@@ -611,7 +630,7 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onPin, pin
                   playCue("deleted", { chat });
                   onDelete();
                 }}
-                className="px-2 py-0.5 rounded border border-danger/30 bg-danger/20 text-danger text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
+                className="px-2 py-0.5 rounded border border-danger/30 bg-danger/20 text-danger-ink text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
               >
                 {t("common.delete")}
               </button>
@@ -710,8 +729,19 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // An app card (WISP 405 § An app) in a 1:1 chat, where Apps shows; elsewhere its text, as an older app shows it.
   const appsOn = useAppsAvailable();
   const appCard = appsOn && message.card?.kind === "app" && linkId && !linkId.startsWith("group:") ? message.card : undefined;
+  // Installed here: the card names the installed app, so its name for a screen reader does too (never the sender's).
+  const cardApp = useInstalledApp(appCard?.ref);
   const rowRef = useRef<HTMLDivElement>(null);
+  // A control of the message taken out by its own press (my reaction's chip taken back, the red mark sent again): the
+  // focus stays on the message, so Tab goes on from it.
+  useFocusKept(rowRef);
   const openDetails = () => setDetails(true);
+  // A double click on a control in the message (a file's Accept, Pause or Save, a player's Play, a link) is that
+  // control's: two quick clicks on a button do not open the details too.
+  const detailsOnDoubleClick = (e: React.MouseEvent) => {
+    const control = (e.target as Element).closest("button, a, input, [role=button]");
+    if (!control || !e.currentTarget.contains(control)) openDetails();
+  };
   // What Copy under a long press copies: a message's own words, not a file's name, a payment's or a card's.
   const copyable = message.file || message.paymentId || pressed || showsCard(message.card) ? "" : message.text.trim();
   // The reactions' quick bar: from the React button or the ⋮ (`button`), or a long press (`press`, with Details under it).
@@ -738,24 +768,57 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const shown = fileFailed ? "failed" as const : message.delivery;
   // A file waiting in a DHT-only chat waits for a live connection, not for the contact to be online.
   const live = waitsForLive(isMe && !fileFailed ? message : undefined, useDhtOnly(peerPubKey));
-  /** A message that was not sent, sent again: its red mark, or its ⋮. */
-  const retry = () => {
-    if (fileFailed) { void platform!.retryFile!(message.file!.id).catch(() => {}); return; }
+  /** Why a Send again or a Cancel sending was refused (no storage to hold it, a file gone): shown while the mark it came from stays. */
+  const [refused, setRefused] = useState<{ problem: Problem; on: typeof shown } | null>(null);
+  const refuse = (on: typeof shown) => (error: unknown) => setRefused({ problem: problemText(error, t), on });
+  /**
+   * A message that was not sent, sent again: its red mark, or its ⋮. It rejects with a full storage of the contact's,
+   * which the red mark says itself (again, on a refused tap); any other refusal is said under the message.
+   */
+  const retry = async () => {
+    setRefused(null);
+    if (fileFailed) { await platform!.retryFile!(message.file!.id).catch(refuse(shown)); return; }
     const link = engine.linkByPeer(peerPubKey);
-    if (link) void engine.call("retryMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
+    if (!link) return;
+    await engine.call("retryMessage", { linkId: link.id, messageId: message.id }).catch((error: unknown) => {
+      if (holdFull(error)) throw error;
+      refuse(shown)(error);
+    });
   };
   /** What waits to be sent, dropped: it never left, so the chat's own delete (the list forgets it too), with no confirmation. */
   const cancelSending = () => {
     playCue("deleted", { chat });
+    setRefused(null);
     if (onDelete) { onDelete(); return; }
     const link = engine.linkByPeer(peerPubKey);
-    if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(() => {});
+    if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(refuse(shown));
   };
-  const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && shown === "failed" ? { onRetry: retry } : {};
+  const refusal = isMe && refused && refused.on === shown && (
+    <Notice problem={refused.problem} testId="message-retry-error" className="max-w-full px-1 pt-1 text-[11px]" />
+  );
+  // The ⋮ has no mark to say a full storage on: it is said under the message, as any other refusal.
+  const sending = isMe && message.delivery === "waiting" ? { onCancelSend: cancelSending } : isMe && shown === "failed" ? { onRetry: () => void retry().catch(refuse(shown)) } : {};
   // What the sender's clock said, never later than when the message came (WISP 400, requirement 10).
   const shownAt = shownTime(message);
   const time = clockTime(shownAt, language);
   const contentType = imgError || message.file || message.paymentId || pressed ? "text" : detectContentType(message.text);
+  // The picture this bubble shows, if it shows one (a card or a system line never does).
+  const picture = contentType === "image" && !isSystem && !showsCard(message.card) && !appCard ? message.text.trim() : null;
+  // No shell's policy lets the page load a picture from any address but the GIF sources': the app reads the others
+  // itself, once asked (my own at once), and the bubble shows what came (lib/pictureLink.ts).
+  const readHere = picture !== null && !autoLoads(picture) && (isMe || revealed) ? picture : null;
+  const [pictureRead, setPictureRead] = useState<{ link: string; url: string } | null>(null);
+  useEffect(() => {
+    if (!readHere) return;
+    let shown = true;
+    void pictureLinkUrl(readHere).then((url) => {
+      if (!shown) return;
+      if (url) setPictureRead({ link: readHere, url });
+      else setImgError(true);
+    });
+    return () => { shown = false; };
+  }, [readHere]);
+  const pictureSrc = picture === null ? null : autoLoads(picture) ? picture : pictureRead?.link === picture ? pictureRead.url : null;
   const download = message.file && !isSystem
     ? {
       file: message.file, name: downloadName(message.file, message.timestamp), sender: isMe ? "me" as const : "peer" as const,
@@ -771,7 +834,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     // A click anywhere on the row (a player's button included) chooses it or not; nothing inside it runs.
     onClickCapture: (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); selection.onToggle?.(); },
   } : {
-    ref: rowRef, onDoubleClick: openDetails, ...mergeHandlers(press, swipe.handlers), "data-details-open": details || undefined, "data-message-id": message.id,
+    ref: rowRef, onDoubleClick: detailsOnDoubleClick, ...mergeHandlers(press, swipe.handlers), "data-details-open": details || undefined, "data-message-id": message.id,
     // The second click of a double click would select a word of the message under the details.
     onMouseDown: (e: React.MouseEvent) => { if (e.detail > 1) e.preventDefault(); },
   };
@@ -832,7 +895,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         <div
           className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
             isMissed
-              ? "bg-danger/10 text-danger"
+              ? "bg-danger/10 text-danger-ink"
               : "bg-surface-alt/80 text-text-secondary"
           } ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}
         >
@@ -872,7 +935,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     // changed, in the card.
     const card = message.card!;
     const time = <CardTime sent={shownTime(message)} changed={message.edit?.at} />;
-    const marks = isMe ? <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} /> : undefined;
+    const marks = isMe ? <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} error={message.deliveryError} /> : undefined;
     const edge = card.kind === "task" ? STATUS_TONE[card.status].bar
       : card.kind !== "routine" ? undefined : card.state === "paused" ? "bg-text-muted" : card.lastRun?.result === "failed" ? "bg-danger" : undefined;
     return (
@@ -902,7 +965,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             ref={bubbleRef}
             data-message-card
             role="group"
-            aria-label={appCard ? t("apps.card.label", { title: appCard.title }) : cardLabel(t, card as ShownCard)}
+            aria-label={appCard ? t("apps.card.label", { title: cardApp ? cardApp.title : appCard.title }) : cardLabel(t, card as ShownCard)}
             className={`status-card-surface w-full text-text-primary ${details ? "outline-2 outline-accent outline-offset-2" : ""}`}
             style={swipe.dx > 0 ? { transform: `translateX(${swipe.offset}px)` } : undefined}
           >
@@ -914,6 +977,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
               ? <AppCardView card={appCard} mine={isMe} contact={contactName || peerNick || t("common.anonymous")} linkId={linkId!} peerKey={peerPubKey} time={time} marks={marks} />
               : <StatusCardView card={card as ShownCard} time={time} marks={marks} end={message.edit?.at ?? message.timestamp} />}
           </div>
+          {refusal}
           <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
         </div>
         {!isMe && menu}
@@ -940,7 +1004,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         <span data-testid="message-time" data-at={shownAt} className="text-[11px] leading-none text-text-primary/65">
           {time}
         </span>
-        {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} />}
+        {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} error={message.deliveryError} />}
       </span>
     </span>
   );
@@ -1046,21 +1110,26 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           <div className="relative">
             {/* A link says nothing of its picture's size: a placeholder 120 px high (as high as most GIFs and photos are
                 at least, shown here) until it loads, so it grows less when it does. */}
-            <img
-              src={message.text.trim()}
-              alt=""
-              data-testid="picture-link"
-              className={`rounded-[4px] max-w-[min(330px,72vw)] min-w-[120px] max-h-[330px] object-contain block ${pictureLoaded === message.text.trim() ? "" : "min-h-[120px] bg-black/10"}`}
-              style={isWaybackGif(message.text.trim()) ? { imageRendering: "pixelated" } : undefined}
-              loading="lazy"
-              onLoad={() => setPictureLoaded(message.text.trim())}
-              onError={() => setImgError(true)}
-            />
+            {pictureSrc ? (
+              <img
+                src={pictureSrc}
+                alt=""
+                data-testid="picture-link"
+                className={`rounded-[4px] max-w-[min(330px,72vw)] min-w-[120px] max-h-[330px] object-contain block ${pictureLoaded === message.text.trim() ? "" : "min-h-[120px] bg-black/10"}`}
+                style={isWaybackGif(message.text.trim()) ? { imageRendering: "pixelated" } : undefined}
+                loading="lazy"
+                onLoad={() => setPictureLoaded(message.text.trim())}
+                onError={() => setImgError(true)}
+              />
+            ) : (
+              // Being read: the placeholder a picture has until it loads.
+              <div data-testid="picture-link-reading" aria-busy="true" className="rounded-[4px] w-[120px] h-[120px] bg-black/10" />
+            )}
             <span data-picture-time className="absolute bottom-[4px] end-[6px] inline-flex items-center gap-[3px] bg-[rgba(11,20,26,0.55)] rounded-full px-[6px] py-[3px]">
               <span className="text-[11px] leading-none text-[hsla(0,0%,100%,0.9)]">
                 {time}
               </span>
-              {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} onPicture />}
+              {isMe && <DeliveryStatus delivery={shown} acked={isAcked} onRetry={retry} live={live} group={inGroup} error={message.deliveryError} onPicture />}
             </span>
           </div>
         ) : bigEmoji ? (
@@ -1085,6 +1154,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
         )}
       </div>
       {buttonsView && <MessageButtons view={buttonsView} messageId={message.id} linkId={linkId ?? (peerPubKey ? engine.linkByPeer(peerPubKey)?.id : undefined)} />}
+      {refusal}
       <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
       </div>
       {!isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onForward={onForward} onSelect={onSelect} align="right" download={download} sender="peer" />}

@@ -1,5 +1,5 @@
 import {
-  ENROLL_CAPABILITY, ENROLL_DONE, ENROLL_GRANT, ENROLL_HELLO, ENROLL_PROOF, GhostLink, classifyTurnRead, createDeviceInvite, deviceInviteJoinerParams, deviceKeyZ32,
+  turnInstance, DHT_POLL_INTERVALS, ENROLL_CAPABILITY, ENROLL_DONE, ENROLL_GRANT, ENROLL_HELLO, ENROLL_PROOF, GhostLink, classifyTurnRead, createDeviceInvite, deviceInviteJoinerParams, deviceKeyZ32,
   enrollCancelFrame, enrollCancelReason, enrollDigits, enrollDoneFrame, enrollGrantFrame, enrollHelloFrame, enrollProofFrame, firstDeviceSetSecret, fromBase64Url,
   nextTurnPosition, publicKeyFromZ32, randomBytes, readDeviceInvite, readEnrollGrant, readEnrollHello, signTurnPacket, toBase64Url, turnKeys, turnName, verifyEnrollProof,
   type DeviceFrame, type DeviceInviteRefusal, type DeviceKind, type EnrollCancelReason, type EnrollNetwork, type EnrollSlot, type LinkParams, type NativeEndpoint, type NativeTransport,
@@ -40,6 +40,8 @@ import { deviceSetOf, type TurnKeeper } from "./turn";
 export const ENROLL_DONE_TIMEOUT_MS = 60_000;
 /** The joiner waits this long for the inviter's proof, from its first try to connect. */
 export const ENROLL_PROOF_TIMEOUT_MS = 120_000;
+/** A joiner with no session yet puts its packet out again this often: another device on the same code may have replaced it. */
+export const ENROLL_REPUT_MS = 5_000;
 /** How long, and how often, the joiner reads the turn record for the record that lists it. */
 export const ENROLL_FINISH = { rounds: 20, everyMs: 3_000 };
 
@@ -280,6 +282,8 @@ export class EnrollInviter extends Enrollment {
   private stopDoneWait: (() => void) | null = null;
   /** A joiner was seen on the link: from then it has as long as a joiner waits for the proof to open a session. */
   private seen = false;
+  /** The person answered the digits: one answer is taken, before the record is read or written for it. */
+  private answered = false;
 
   constructor(private readonly options: InviterOptions) {
     super(options, { role: "inviter", step: "waiting", code: "", expires: 0 });
@@ -352,7 +356,8 @@ export class EnrollInviter extends Enrollment {
    * and nothing was written.
    */
   async confirm(match: boolean): Promise<EnrollView> {
-    if (this.over || this.view.step !== "confirm" || !this.joiner) throw new Error("There are no digits to confirm");
+    if (this.over || this.answered || this.view.step !== "confirm" || !this.joiner) throw new Error("There are no digits to confirm");
+    this.answered = true;
     if (!match) { await this.fail("digits", "digits", this.joiner.name); return this.view; }
     const joiner = this.joiner;
     let slots: EnrollSlot[], ownSlot: number, turn: number, rev: number;
@@ -415,7 +420,8 @@ export class EnrollInviter extends Enrollment {
       if (read.result !== "none") { await this.fail("elsewhere", "failed", joiner.name, true); return; }
       const keys = turnKeys(this.d);
       const packet = await signTurnPacket(keys, {
-        turn: granted.turn, rev: 0, author: 0, active: 0, instance: randomBytes(8),
+        // States no verifier: the device state may not hold the profile's yet; the engine states it right after (`stateVerifier`).
+        turn: granted.turn, rev: 0, author: 0, active: 0, instance: turnInstance(),
         slots: granted.slots.map((slot) => slot && { key: slot.key, name: slot.name }),
       }, (bytes) => this.key.sign(bytes));
       this.crash("inviter:before-write");
@@ -664,6 +670,16 @@ export function ghostLinkEnrollChannel(options: EnrollLinkOptions): OpenEnrollCh
       : { seedB64: "", signer };
     let link: GhostLink | null = null;
     const rtc = !!options.createPeerConnection;
+    // One session per invite, and the inviter says so (WISP 06 § Adding a device). Every device that reads the code
+    // writes the joiner's one packet, and the inviter reads only the last one written: a device whose packet another
+    // one replaced never reaches it. So a joiner with WebRTC always makes an offer, whichever key sorts first, signed
+    // with its device signing key, and while it has no session it puts its packet out again; and the inviter goes on
+    // reading that packet once a session is up, at the pace of a link being looked at (an enrollment lasts minutes).
+    // A signal there of a second key is what tells the person (`onPeerKeyRefused`); to a key the inviter pinned, a
+    // signal of another key is nothing else.
+    const intervals = options.pollIntervals ?? DHT_POLL_INTERVALS;
+    let offered = false;
+    const reput = pinned && rtc ? setInterval(() => { if (!opened) link?.republish(); }, ENROLL_REPUT_MS) : null;
     const tryOpen = () => {
       if (opened || !link?.supportsDevice(ENROLL_CAPABILITY)) return;
       const hash = link.sessionTranscriptHash, key = credentials.peerKey;
@@ -686,7 +702,7 @@ export function ghostLinkEnrollChannel(options: EnrollLinkOptions): OpenEnrollCh
       native: { automatic: true },
       packetTransports: true,
       transport: options.transport,
-      pollIntervals: options.pollIntervals,
+      pollIntervals: { ...intervals, connected: intervals.active },
       autoConnect: true,
       createPeerConnection: () => {
         if (!options.createPeerConnection) throw new ReferenceError("RTCPeerConnection is not defined");
@@ -704,7 +720,13 @@ export function ghostLinkEnrollChannel(options: EnrollLinkOptions): OpenEnrollCh
         },
         onDeviceFrame: (frame) => { if (opened) events.onFrame(frame); },
         onPeerKeyRefused: () => events.onPeerRefused(),
-        onPresence: (presence) => { if (presence.online) events.onPeerSeen?.(); },
+        onPresence: (presence) => {
+          if (!presence.online) return;
+          events.onPeerSeen?.();
+          if (!pinned || !rtc || offered || opened) return;
+          offered = true;
+          void link?.connect().catch(() => {});
+        },
         // The other device has no WebRTC (a Linux Desktop): this one starts its native endpoints for it, as a device
         // link does. Without them a page with WebRTC had no transport in common with it, and nothing said so.
         onPacketTransports: (transports) => { if (!transports.includes("webrtc/1")) startNative(); },
@@ -731,7 +753,7 @@ export function ghostLinkEnrollChannel(options: EnrollLinkOptions): OpenEnrollCh
     if (!rtc) startNative();
     return {
       send: (frame) => link!.sendDeviceFrame(frame),
-      stop: async () => { const running = link; link = null; await running?.stop().catch(() => {}); },
+      stop: async () => { const running = link; link = null; if (reput) clearInterval(reput); await running?.stop().catch(() => {}); },
     };
   };
 }

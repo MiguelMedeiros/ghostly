@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import {
-  enrollCancelFrame, fromBase64Url, randomBytes, readTurnPacket, signTurnPacket, toBase64Url, turnKeys,
+  ENROLL_GRANT, enrollCancelFrame, fromBase64Url, randomBytes, readTurnPacket, signTurnPacket, toBase64Url, turnKeys,
   type DeviceFrame, type LinkParams, type Signer, type TurnRecord,
 } from "@ghostly/core";
 import {
@@ -227,10 +227,29 @@ describe("adding a device", () => {
     expect((await readDeviceRecord(B))!.turnPacket).toBe(before.turnPacket);
   });
 
+  it("They match answered twice at once (a double click): one grant goes out, and the second answer is refused", async () => {
+    const twice = async (a: EnrollInviter, b: EnrollJoiner, device: string) => {
+      await toDigits(a, b);
+      const [first, second] = await Promise.allSettled([a.confirm(true), a.confirm(true)]);
+      expect(first).toMatchObject({ status: "fulfilled", value: { step: "adding", device } });
+      expect(second.status).toBe("rejected");
+      expect((second as PromiseRejectedResult).reason).toMatchObject({ message: "There are no digits to confirm" });
+      await until(() => a.ended && b.ended);
+      expect(pipe.frames.filter(({ frame }) => frame.t === ENROLL_GRANT)).toHaveLength(1);
+      expect(a.current()).toMatchObject({ step: "done", device });
+      expect((await readDeviceRecord(A))!.unfinishedGrants ?? []).toHaveLength(0);
+    };
+    // A profile's first device set, then an active device that adds a third.
+    await twice(inviter(), joiner(), "Phone");
+    pipe = new Pipe();
+    await twice(inviter(), joiner({ profile: C, name: "Firefox" }), "Firefox");
+    expect((await readDeviceRecord(A))!.deviceSet.map((slot) => slot?.name ?? null)).toEqual(["MacBook", "Phone", "Firefox", null]);
+  });
+
   it("the joiner calls itself as the person named it, cut to 16 bytes at a whole character", async () => {
     const a = inviter(), b = joiner({ name: "Miguel's phone 📱📱" });
     await toDigits(a, b);
-    expect(a.current()).toMatchObject({ device: "Miguel's phone " });
+    expect(a.current()).toMatchObject({ device: "Miguel's phone" });
   });
 });
 

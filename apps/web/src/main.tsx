@@ -10,12 +10,12 @@ import { openDeviceGate } from "@ghostly/browser/devices/gate";
 import { setHandoffProfileHost } from "@ghostly/browser/devices/handoffHost";
 import { handoffProfileHost, recoverHandoffPointer } from "../../ui/src/lib/handoffProfile";
 import { openProfile } from "../../ui/src/lib/profileStart";
+import { restartWhenRestored } from "../../ui/src/lib/restoredPage";
 import { loadSettings } from "../../ui/src/lib/settings";
-import { bootDetails, missingEssentials, type Essential } from "../../ui/src/lib/bootCheck";
+import { bootDetails, browserTraits, lockdownLikely, missingEssentials, type Essential } from "../../ui/src/lib/bootCheck";
 import { UnsupportedBrowser } from "../../ui/src/components/UnsupportedBrowser";
 import { OtherTab } from "../../ui/src/components/OtherTab";
-import { locales } from "../../ui/src/locales";
-import { translateWith } from "../../ui/src/locales/translate";
+import { loadLocale, translatorFor } from "../../ui/src/locales";
 import { watchInstallPrompt } from "../../ui/src/lib/installPrompt";
 import { setPushPlatform } from "../../ui/src/lib/wakePush";
 import { APPS_ENABLED } from "@ghostly/browser/shared/features";
@@ -46,20 +46,21 @@ gateSounds();
 // is pointed at its state again before anything opens storage. Its language is on <html> before the first paint (the
 // I18nProvider keeps it in step from then on).
 const profile = await openProfile(recoverHandoffPointer);
+// Its words too: only English is in the entry, every other language is loaded when a profile reads in it.
+await loadLocale(loadSettings().language);
 
 /** The profile's language, for what the entry draws before the app (and its providers) can. */
 function profileTranslator() {
-  const language = loadSettings().language;
-  return translateWith(locales[language] || locales.en, locales[language] ? language : "en");
+  return translatorFor(loadSettings().language);
 }
 
 /**
  * "Ghostly can't run in this browser", in the profile's language, instead of the app: said rather than a blank page
- * or an app that never connects. Nothing else starts; the returned promise never settles, so the module stops here.
+ * or an app that never connects, and that Lockdown Mode is the likely reason when what is missing matches it. Nothing else starts; the returned promise never settles, so the module stops here.
  */
 function cannotRun(missing: Essential[], error?: unknown): Promise<never> {
   const t = profileTranslator();
-  root.render(<UnsupportedBrowser missing={missing} details={bootDetails(missing, error)} t={t} />);
+  root.render(<UnsupportedBrowser missing={missing} details={bootDetails(missing, error)} lockdown={lockdownLikely(missing, browserTraits())} t={t} />);
   return new Promise<never>(() => {});
 }
 
@@ -93,6 +94,8 @@ if (gate.full) {
   askForShare();
 }
 addEventListener("pagehide", () => webHost.announceDeparture());
+// Shown again after that (Back, out of the back/forward cache), the page has no peer: it starts over.
+restartWhenRestored();
 // Mini-apps (WISP 1200) open in this server's runner, once the feature is on (or in the e2e suite's build).
 if (gate.full && (APPS_ENABLED || import.meta.env.VITE_APPS_TEST === "1")) {
   setAppOpener(webOpener({

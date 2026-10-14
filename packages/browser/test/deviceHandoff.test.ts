@@ -150,7 +150,7 @@ class Storage implements HandoffStagingHost {
       },
       finish: async (file) => { space.held.set(file.id, file); },
       discard: async (id) => { space.files.delete(id); space.held.delete(id); },
-      copyHeld: async (fromId, file) => { space.files.set(file.id, this.frozen.get(fromId)!.slice()); space.held.set(file.id, file); },
+      copyHeld: async (copies) => { for (const { fromId, file } of copies) { space.files.set(file.id, this.frozen.get(fromId)!.slice()); space.held.set(file.id, file); } },
       copyStaged: async (fromId, file) => { space.files.set(file.id, space.files.get(fromId)!.slice()); space.held.set(file.id, file); },
       restore: async (bundle, files) => { space.restored = { bundle: bundle.slice(), files }; },
       dropRest: async () => { space.restored = null; },

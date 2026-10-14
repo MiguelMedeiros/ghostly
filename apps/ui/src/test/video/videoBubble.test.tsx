@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NO_ROOM_TO_PLAY } from "@ghostly/browser/shared/fileBytes";
 import { MessageBubble } from "../../components/MessageBubble";
 import { VideoBubble } from "../../components/video/VideoBubble";
 import { videoBox } from "../../lib/videoPlayer";
@@ -83,6 +84,15 @@ describe("a video in the chat", () => {
     expect(screen.queryByTestId("video-player")).toBeNull();
   });
 
+  it("is named for a screen reader in the app's language, with its length or its size", () => {
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    const view = renderApp(<VideoBubble file={video()} sender="peer" peerName="Ana" />, { language: "pt" });
+    expect(screen.getByRole("group", { name: "Vídeo, 0:12" })).toBeInTheDocument();
+    view.unmount();
+    renderApp(<VideoBubble file={video({ video: undefined })} sender="peer" peerName="Ana" />, { language: "pt" });
+    expect(screen.getByRole("group", { name: "Vídeo, 35.0 MB" })).toBeInTheDocument();
+  });
+
   it("plays in place when tapped, from its bytes, with the browser's controls", async () => {
     show(video());
     fireEvent.click(screen.getByTestId("video-play"));
@@ -137,6 +147,19 @@ describe("a video in the chat", () => {
     expect(revoke).toHaveBeenCalledWith(url);
   });
 
+  it("its poster is made 200 px before it scrolls into the chat list's view, not only once it shows", () => {
+    const inits: (IntersectionObserverInit | undefined)[] = [];
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(_callback: IntersectionObserverCallback, init?: IntersectionObserverInit) { inits.push(init); }
+      observe() {}
+      disconnect() {}
+    });
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    renderApp(<div data-testid="list" data-message-list><VideoBubble file={video()} sender="peer" peerName="Ana" /></div>);
+    expect(inits).toEqual([{ root: screen.getByTestId("list"), rootMargin: "200px 0px" }]);
+    vi.unstubAllGlobals();
+  });
+
   it("scrolled out of view it stops and lets go of its bytes; played again, it goes on from there", async () => {
     let seen: ((entries: { isIntersecting: boolean }[]) => void) | null = null;
     vi.stubGlobal("IntersectionObserver", class {
@@ -176,6 +199,16 @@ describe("a video in the chat", () => {
     expect(screen.getByTestId("video-problem")).toHaveTextContent("This device can't play this video (WebM). Download it to watch.");
     fireEvent.click(screen.getByTestId("video-download"));
     await waitFor(() => expect(saveFile).toHaveBeenCalledWith(file.id, "clip.webm"));
+  });
+
+  it("a Download the system refuses (Desktop) says so in the language, not in the system's English", async () => {
+    canPlay = (type) => (type === "video/webm" ? "" : "maybe");
+    vi.spyOn(servicesPlatform!, "saveFile").mockRejectedValue(new Error("Permission denied (os error 13)"));
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    renderApp(<VideoBubble file={video({ name: "clip.webm", mime: "video/webm" })} sender="peer" peerName="Ana" />, { language: "pt" });
+    fireEvent.click(screen.getByTestId("video-download"));
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(2));
+    expect(screen.getAllByRole("alert")[1]).toHaveTextContent(/^Não foi possível salvar o arquivo ali\. Tente de novo e escolha outra pasta\.$/);
   });
 
   it("a type never served as itself (Matroska) is not handed to the player", () => {
@@ -220,6 +253,20 @@ describe("a video in the chat", () => {
     expect(screen.getByTestId("video-player").getAttribute("src")).toBe("ghostly-file://localhost/token-2");
     cleanup();
     expect(release).toHaveBeenCalledTimes(2);
+  });
+
+  it("gone while its stream is being opened (the chat closed), it lets go of the stream once it comes", async () => {
+    getFile.mockResolvedValue(null);
+    const release = vi.fn();
+    let answer: (source: { url: string; release: () => void }) => void = () => {};
+    vi.spyOn(servicesPlatform!, "streamFile").mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    const view = show(video({ size: 700 * MB }));
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    view.unmount();
+    answer({ url: "ghostly-file://localhost/token-late", release });
+    await flush();
+    expect(release).toHaveBeenCalledTimes(1);
   });
 
   it("a streamed one stops being served when another video starts", async () => {
@@ -336,6 +383,22 @@ describe("a video in the chat", () => {
     fireEvent.click(screen.getByTestId("video-play"));
     await flush();
     expect(screen.getByTestId("video-problem")).toHaveTextContent("Too large to play here. Download it to watch.");
+  });
+
+  it("no room on the disk for the player's copy of it: it is saved instead of played", async () => {
+    const streamFile = vi.spyOn(servicesPlatform!, "streamFile").mockRejectedValue(new Error(NO_ROOM_TO_PLAY));
+    const saveFile = vi.spyOn(servicesPlatform!, "saveFile").mockResolvedValue(true);
+    const file = video();
+    show(file);
+    fireEvent.click(screen.getByTestId("video-play"));
+    await flush();
+    expect(streamFile).toHaveBeenCalledWith(file.id);
+    // Not read into the page instead: the player would copy that too.
+    expect(getFile).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("video-player")).toBeNull();
+    expect(screen.getByTestId("video-problem")).toHaveTextContent("Not enough free disk space to play it here. Download it instead.");
+    fireEvent.click(screen.getByTestId("video-download"));
+    await waitFor(() => expect(saveFile).toHaveBeenCalledWith(file.id, file.name));
   });
 });
 

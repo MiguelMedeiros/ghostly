@@ -6,7 +6,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { describe, expect, it } from "vitest";
 import {
   createRelayPayload, firstDeviceSetSecret, fromBase64Url, signRelayPayload, identityFromSeed, measureRecords, nextTurnPosition, openTurnValue, readTurnBody, readTurnPacket, sealTurnBody, signTurnBody,
-  signTurnPacket, turnKeys, turnName, turnPacket, turnPayloadSequence, turnSequence, utf8Encode, MAX_DNS_PACKET_BYTES, TOMBSTONE_SEQUENCE, TOMBSTONE_TURN,
+  signTurnPacket, turnInstance, turnKeys, turnName, turnPacket, turnPayloadSequence, turnSequence, turnStatedVerifier, turnVerifierMark, utf8Encode, MAX_DNS_PACKET_BYTES, TOMBSTONE_SEQUENCE, TOMBSTONE_TURN,
   TURN_BODY_BYTES, TURN_LABEL, TURN_MAX, TURN_NO_ACTIVE, TURN_REV_LIMIT, TURN_SEALED_BYTES, TurnRecordError, type TurnFields,
 } from "../src/index";
 import { buildTurnVectors, devices, signerOf, vectorKeys, VECTOR_D, type TurnVectors } from "./turnVectors";
@@ -153,7 +153,32 @@ describe("the turn record", () => {
     expect(turnName("a\0b")).toBe("ab");
     // A character is a whole one: a family of four (25 bytes) does not fit, and is not cut into two people.
     expect(turnName("👩‍👩‍👧‍👧 family")).toBe("");
-    expect(turnName("Ana 👩‍👩‍👧‍👧")).toBe("Ana ");
+    expect(turnName("Ana 👩‍👩‍👧‍👧")).toBe("Ana");
+  });
+
+  it("keeps no control, invisible or direction-changing character in a name, as a nickname keeps none", () => {
+    expect(turnName("\u202EenohP\n\x07")).toBe("enohP");
+    expect(turnName("Pho\u200Bne\u2066\u2069\u061C\uFEFF\u2028\u2060")).toBe("Phone");
+    expect(turnName("  \tPhone \r\n")).toBe("Phone");
+    expect(turnName("\u202E\u200B \n")).toBe("");
+    // The two joiners stay: an emoji sequence and Persian or Indic text need them.
+    expect(turnName("👩‍💻 Ana")).toBe("👩‍💻 Ana");
+    expect(turnName("می\u200Cخوام")).toBe("می\u200Cخوام");
+    // A name with nothing to see in it is no name, as one with nothing left is none.
+    for (const name of ["\u200D\u200D", "\u200C", "\u3164", "\u115F", "\u1160", "\uFFA0", "\u2800", "\u034F", "\uFE0F", "\u17B5", "\u0301", " \u3164\u200D\u2800 "]) expect(turnName(name), JSON.stringify(name)).toBe("");
+    // The cut comes first: sixteen bytes of fillers and a letter after them is no name either.
+    expect(turnName(`${"\u3164".repeat(6)}Ana`)).toBe("");
+    // Beside something that shows they stay (names that fit the sixteen bytes).
+    for (const name of ["👩\u200D💻", "नमस्", "علي", "e\u0301", "❤\uFE0F"]) expect(turnName(name)).toBe(name);
+    // What it makes, it reads as it is: a name made here is never changed by the next reader.
+    for (const name of ["Ana 👩‍👩‍👧‍👧", "a name that ends \u202E in a cut", "\u200B Mac\u00ADBook Pro 16 "]) expect(turnName(turnName(name))).toBe(turnName(name));
+  });
+
+  it("reads a record's names cleaned, whatever its writer put in the slot, and still checks the signature over the bytes", async () => {
+    const slots = [{ key: all[0].publicKey, name: all[0].name }, { key: all[1].publicKey, name: "\u202EenohP\n\x07" }, null, null];
+    const read = readTurnPacket(keys, await signTurnPacket(keys, fields({ slots }), signerOf(all[0])));
+    expect(read.kind).toBe("valid");
+    expect(read.kind === "valid" && read.record.slots.map((slot) => slot?.name)).toEqual([all[0].name, "enohP", undefined, undefined]);
   });
 
   it("is read whatever way its writer cut the TXT value into DNS strings: the Desktop's Rust cuts at 254, this code at 255", async () => {
@@ -214,5 +239,48 @@ describe("the next record's place", () => {
     expect(nextTurnPosition(10, 4, 2, 2n ** 60n)).toBeNull();
     expect(nextTurnPosition(TURN_MAX, TURN_REV_LIMIT - 1, 2, 0)).toBeNull();
     expect(nextTurnPosition(TURN_MAX, TURN_REV_LIMIT - 2, 2, 0)).toEqual({ turn: TURN_MAX, rev: TURN_REV_LIMIT - 1, raised: false });
+  });
+});
+
+describe("the verifier mark in a record's instance", () => {
+  const verifier = { setup: "c2V0dXA", record: "cmVjb3Jk" }, other = { setup: "c2V0dXA", record: "b3RoZXI" };
+
+  it("is three bytes of a hash over the verifier's two fields, and a profile with none has a mark of its own", () => {
+    const mark = turnVerifierMark(verifier);
+    expect(bytesToHex(mark)).toBe(bytesToHex(sha256(utf8Encode("ghostly-turn-verifier/1\nc2V0dXA\ncmVjb3Jk")).slice(0, 3)));
+    expect(mark).toHaveLength(3);
+    expect(bytesToHex(turnVerifierMark(other))).not.toBe(bytesToHex(mark));
+    expect(bytesToHex(turnVerifierMark(null))).toBe(bytesToHex(sha256(utf8Encode("ghostly-turn-verifier/1\n\n")).slice(0, 3)));
+    expect(bytesToHex(turnVerifierMark(null))).not.toBe(bytesToHex(mark));
+    // Where the two fields meet is part of it.
+    expect(bytesToHex(turnVerifierMark({ setup: "ab", record: "c" }))).not.toBe(bytesToHex(turnVerifierMark({ setup: "a", record: "bc" })));
+  });
+
+  it("an instance states it after three random bytes, and reads back; one that states none never carries the marker", () => {
+    const mark = turnVerifierMark(verifier);
+    const instance = turnInstance(mark, (length) => new Uint8Array(length).fill(0xaa));
+    expect(bytesToHex(instance)).toBe(`aaaaaa6776${bytesToHex(mark)}`);
+    expect(turnStatedVerifier(instance)).toEqual(mark);
+    expect(bytesToHex(turnInstance(mark).subarray(0, 3))).not.toBe(bytesToHex(turnInstance(mark).subarray(0, 3)));
+    // 8 random bytes of an app from before, and what this one writes where it has no verifier at hand.
+    expect(turnStatedVerifier(new Uint8Array(8).fill(7))).toBeNull();
+    expect(turnStatedVerifier(new Uint8Array(7))).toBeNull();
+    const chance = (length: number) => Uint8Array.of(1, 2, 3, 0x67, 0x76, 4, 5, 6).slice(0, length);
+    expect(turnStatedVerifier(chance(8))).not.toBeNull();
+    expect(turnStatedVerifier(turnInstance(null, chance))).toBeNull();
+    expect(turnStatedVerifier(turnInstance())).toBeNull();
+    expect(() => turnInstance(new Uint8Array(4))).toThrow(/3 bytes/);
+  });
+
+  it("the record keeps its version and its length: it reads as every record does, with the mark in it", async () => {
+    const keys = vectorKeys();
+    const [desktop, phone] = devices();
+    const slots = [{ key: desktop.publicKey, name: "Desktop" }, { key: phone.publicKey, name: "Phone" }, null, null];
+    const packet = await signTurnPacket(keys, { turn: 9, rev: 2, author: 0, active: 0, slots, instance: turnInstance(turnVerifierMark(verifier)) }, signerOf(desktop));
+    const read = readTurnPacket(keys, packet);
+    if (read.kind !== "valid") throw new Error(read.kind);
+    expect(read.record.body).toHaveLength(TURN_BODY_BYTES);
+    expect(read.record.body[0]).toBe(1);
+    expect(turnStatedVerifier(read.record.instance)).toEqual(turnVerifierMark(verifier));
   });
 });

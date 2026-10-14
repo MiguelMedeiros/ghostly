@@ -23,6 +23,16 @@
     "updateWaits": "Version {{version}} is ready.",
     "version": "Version {{version}}"
   },
+  "builtIn": {
+    "allow": "Allow",
+    "allowOpen": "Allow and open",
+    "carried": "Comes with Ghostly. Nothing is downloaded.",
+    "carriedInfo": "This copy is part of the Ghostly you are running. Updates come from its publisher or your stores, which then learn your IP address.",
+    "hint": "Comes with Ghostly",
+    "openNamed": "Open {{title}}",
+    "remove": "Remove",
+    "removeNamed": "Remove {{title}}"
+  },
   "card": {
     "ask": "Ask {{name}} for a link to it",
     "contactCannot": "{{name}}'s app can't run apps yet",
@@ -60,7 +70,7 @@
     "rollback": "The link holds an older version.",
     "status": "Nothing found at that link.",
     "storage": "This browser can't keep apps here (private browsing?). Try a normal window.",
-    "storageInfo": "Ghostly keeps each app's files on this device. Private windows, like Safari's Private Browsing, don't let it, and a full disk stops it too. Open Ghostly in a normal window and install the app there.",
+    "storageInfo": "Ghostly keeps each app's files on this device. Private windows, like Safari's Private Browsing, don't let it, and a full disk stops it too.",
     "storeKey": "That store is signed by a different key.",
     "tooLarge": "Too large.",
     "unlistedVersion": "The link holds a version this store has not listed yet."
@@ -93,10 +103,10 @@
     "same": "Already installed.",
     "sentBy": "Sent by {{name}}",
     "unknownPublisher": "Unknown publisher",
-    "unknownPublisherInfo": "Anyone can sign an app with a new key. Only a store you added can vouch for who made it. Compare the key with the one the maker publishes.",
+    "unknownPublisherInfo": "Anyone can sign an app with a new key. Only a store you added vouches for its maker. Compare this key with the maker's own.",
     "update": "Update",
     "webkit": "In this browser, an app can still contact other servers.",
-    "webkitInfo": "Safari, and every browser on iPhone and iPad, lets an app open connections Ghostly cannot block, even without the internet permission. Those servers learn your IP address. The desktop app blocks them."
+    "webkitInfo": "Safari and every iPhone or iPad browser let apps open connections Ghostly cannot block. Those servers learn your IP address. The desktop app blocks them."
   },
   "page": {
     "add": "Add",
@@ -120,13 +130,16 @@
     "countOne": "1 app",
     "curated": "Curated",
     "empty": "This store lists no apps.",
+    "filter": "Search this store",
     "indexed": "Indexed",
     "installed": "Installed",
+    "noMatch": "No app in this store matches.",
     "notRead": "Not read yet",
     "problem": "The last read failed.",
     "read": "Read",
     "refresh": "Refresh",
     "remove": "Remove",
+    "showMore": "Show more ({{count}})",
     "stale": "Out of date since {{date}}"
   },
   "title": "Apps",

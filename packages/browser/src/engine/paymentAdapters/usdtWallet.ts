@@ -6,7 +6,7 @@ import type { WalletMode } from '../../shared/mints';
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from './modeGate';
 import { walletKey } from './walletNetworks';
 import { STORES, store, transact, wrap } from '../../shared/idb';
-import { UsdtAdapter, type UsdtConfig } from './usdt';
+import type { UsdtAdapter, UsdtConfig } from './usdt';
 import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from './persistence';
 import type { SavedIntent } from './coordinator';
 
@@ -17,6 +17,8 @@ export interface UsdtWalletView {
   balance:string; gasBalance:string; error?:string;
 }
 export interface UsdtCreate {network:UsdtConfig['network'];provider:string;token:string;password?:string;mnemonic?:string}
+/** The Ethereum libraries, a large part of the app: loaded once a USDT wallet is made, opened or restored, not with the engine. */
+const loadUsdt=()=>import('./usdt');
 /** Every new profile starts with this wallet: an address to receive on, nothing to set up. */
 export const DEFAULT_USDT = {network:'ethereum',provider:USDT_PUBLIC_RPC.ethereum,token:ETHEREUM_USDT} as const satisfies Omit<UsdtCreate,'password'|'mnemonic'>;
 /** A Testnet USDT wallet starts on Sepolia, with Aave's test USDT (anyone can mint it from their faucet). */
@@ -83,6 +85,7 @@ export class UsdtWallet {
     if(!validateMnemonic(mnemonic,wordlist))throw new Error('Invalid recovery phrase');
     const deviceKey=params.password?undefined:newDeviceKey();
     const seed=await sealSeed(mnemonic,params.password??deviceKey!);
+    const {UsdtAdapter}=await loadUsdt();
     const config=await this.gate.within(UsdtAdapter.inspect({network:params.network,chainId:params.network==='ethereum'?1:EVM_TEST_CHAINS[params.network],provider:params.provider.replace(/\/$/,''),token:params.token}));
     const replaced=this.saved && await this.retirable('This USDT wallet already has funds or payments; it will not be replaced');
     const saved:SavedWallet={config,seed,deviceKey};
@@ -104,7 +107,7 @@ export class UsdtWallet {
     if(this.adapter)return;
     const key=this.saved.deviceKey??password;
     if(!key)throw new Error('Enter the USDT wallet password');
-    const epoch=++this.epoch;const mnemonic=await unsealSeed(this.saved.seed,key);const adapter=await this.gate.within(UsdtAdapter.connect(this.saved.config,mnemonic),a=>a.dispose());
+    const epoch=++this.epoch;const mnemonic=await unsealSeed(this.saved.seed,key);const {UsdtAdapter}=await loadUsdt();const adapter=await this.gate.within(UsdtAdapter.connect(this.saved.config,mnemonic),a=>a.dispose());
     if(epoch!==this.epoch){await adapter.dispose();return;}
     this.adapter=adapter;await this.refresh();
   }
@@ -149,7 +152,7 @@ export class UsdtWallet {
     const payload=JSON.parse(await unsealSeed(envelope.vault,password)) as {format:string;version:number;config:UsdtConfig;mnemonic:string;intents:SavedIntent[]};
     if(payload.format!=='ghostly-usdt'||payload.version!==1||!validateMnemonic(payload.mnemonic,wordlist)||!Array.isArray(payload.intents))throw new Error('Invalid USDT backup');
     if(usdtMode(payload.config.network)!==this.network)throw new WrongNetworkError(usdtMode(payload.config.network),`This backup is a ${networkLabel(usdtMode(payload.config.network))} USDT wallet`);
-    const config=await UsdtAdapter.inspect(payload.config);
+    const config=await (await loadUsdt()).UsdtAdapter.inspect(payload.config);
     if(config.codeHash!==payload.config.codeHash||config.decimals!==payload.config.decimals||payload.intents.some(i=>i.review.method!=='usdt'||i.review.chainId!==config.chainId||i.review.token?.toLowerCase()!==config.token.toLowerCase()))throw new Error('Backup token or network mismatch');
     const deviceKey=newDeviceKey();
     const saved:SavedWallet={config,seed:await sealSeed(payload.mnemonic,deviceKey),deviceKey};

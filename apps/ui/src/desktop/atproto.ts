@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AtprotoHost } from "@ghostly/browser/proofs/atproto/oauth";
+import { androidApp } from "../lib/touchOnly";
+import { signInPageLanguage } from "./oidc";
 
 /**
  * Signing in to an AT Protocol server from the desktop app, the native-client way: the server's page
@@ -11,7 +13,7 @@ import type { AtprotoHost } from "@ghostly/browser/proofs/atproto/oauth";
 export const desktopAtproto: AtprotoHost = {
   platform: "desktop",
   async open() {
-    const port = await invoke<number>("oidc_loopback_start");
+    const port = await invoke<number>("oidc_loopback_start", { lang: signInPageLanguage() });
     const redirectUri = `http://127.0.0.1:${port}/oidc-callback`;
     return {
       redirectUri,
@@ -30,3 +32,12 @@ export const desktopAtproto: AtprotoHost = {
     };
   },
 };
+
+/**
+ * The sign-in this app has, if any. None in the Android app: Rust listens on no loopback port there
+ * (`oidc_loopback_start` says 0), and the client metadata registers only a loopback redirect for native
+ * clients (packages/browser/src/proofs/atproto/oauth.ts), so Bluesky is not offered rather than failing.
+ */
+export function desktopAtprotoHost(): AtprotoHost | undefined {
+  return androidApp() ? undefined : desktopAtproto;
+}

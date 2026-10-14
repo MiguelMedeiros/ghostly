@@ -42,7 +42,7 @@ profile publishes its records within seconds of starting ([Private networks](#pr
 ```bash
 ghostly profile set --name "Echo bot"        # the name contacts see
 ghostly daemon --detach                        # keep the profile online
-ghostly invite create --label alice            # {"chat":"…","invite":"ghostly1…","link":"https://ghostly.tools/#ghostly1…"}
+ghostly invite create --label alice            # {"chat":"…","invite":"ghostly1…","link":"https://ghostly.tools/#ghostly1…","published":true}
 ghostly chat wait alice --until live           # once Alice joined (in the app, or another ghostly)
 ghostly send alice "hello"                     # {"chat":"…","messageId":"me_…","delivery":"sending"}
 ghostly listen                                 # one JSON event per line, until stopped
@@ -73,7 +73,8 @@ and `send --reply` for its answer: [examples/claude-code-agent.sh](examples/clau
 Each profile is a folder, `~/.ghostly/profiles/<name>/` (0700; files 0600), with its own chats, keys and wallets.
 `--profile <name>` (or `GHOSTLY_PROFILE`) picks one; `ghostly profile use <name>` sets the current one;
 `--home <dir>` (or `GHOSTLY_HOME`) moves the whole folder. The `default` profile is made on first use, others with
-`ghostly profile create <name>`.
+`ghostly profile create <name>`. An empty `--profile` or `--home` (`-p "$BOT"` with `BOT` unset) is a usage error;
+an empty `GHOSTLY_PROFILE` or `GHOSTLY_HOME` counts as unset.
 
 Only one process opens a profile at a time. When a daemon runs it, every command goes through the daemon's socket.
 When none does, a command runs the profile itself for as long as it needs (a **one-shot**) and leaves: `send` then
@@ -90,8 +91,12 @@ The rows are in alphabetical order of their first command, and every command of 
 
 | Command | What it does |
 |---|---|
+| `app init <dir> [--name <name>] [--title <title>] [--force]` | Start an app (WISP 1200, Apps), run here with no profile or daemon: a small working one in `<dir>` (made when missing), which `app publish <dir>` signs as it is. It writes `ghostly-app.json` (`view: chat`, the `chat` permission), an `index.html` that says hello to the same app on the contact's side, typed against `@ghostlytools/sdk/app`, and a `README.md` with build, publish, verify and how to list it in a store. The name is `--name` (a lowercase letter, then up to 31 lowercase letters, digits or hyphens), else the folder's (`My App` gives `my-app`); the title is `--title` (one line, up to 40 characters), else the name's. When one of the three files is there nothing is written and it is `refused` (`details.reason` `exists`, `details.files`), unless `--force`, which replaces those three only. Answers `{dir, name, title, files, replaced?, next}` |
+| `app open <chat> <ref\|name> [--no-card]`, `app close <chat> <ref\|name>` | A served app in a chat, as a bot (WISP 1200, Apps; needs the daemon, and `app serve` first). `app open` says the app is open on this side, in the version served, and sends the contact the app's card ("opened Chess", with what their app needs to get the same app and check it), unless their app is open in that chat already or `--no-card`. The two sides talk once both opened it; while the app stays open here, the engine says so again on every session that comes back. It answers `{chat, app, version, card, peer, live}`: `card` is the card's message id or null, `peer` the version the contact has open or null. A card that cannot go leaves nothing open. `app close` ends it: `{chat, app, closed}`. What is open is kept in memory: a restarted daemon opens again. `unavailable` in a one-shot, or on a daemon that started before the first app was served (`daemon restart`); `not_found` for an app not served; `refused`, in the engine's words, for a chat that is not a paired 1:1 chat |
 | `app publish <dir> --key <file> [--out <file>] [--sequence n]`, `app verify <bundle\|url>` | The publisher tools of WISP 1200 (Apps), run here with no profile or daemon. `app publish` bundles and signs an app: `<dir>/ghostly-app.json` holds the manifest's fields but `publisher`, `sequence` and `files`, and every other file in `<dir>` goes in (dot files are left out and listed in `skipped`). It writes `<dir>/app.ghostlyapp` (or `--out`), its `sequence` one more than the bundle already there, which only the same key may follow (`--sequence n` sets it, refused unless higher). `--key` names the publisher key file, a PKCS #8 PEM: made owner-only on first use (back it up: an app is updated only with its key), refused when others may read it or when it is inside `<dir>`, never printed; a folder holding any private key file is refused (`details.reason` `private-key`). `app verify` checks a bundle from a file or an `https` URL as a client does (jsDelivr only at a full commit, 16 MiB at most) and answers its manifest and digest, or `refused` (exit 1) with the WISP's reason in `details.reason` |
 | `app revoke <dir> --key <file> (--digest <digest>… \| --up-to <sequence>) [--reason <text>] [--bundle <file>]` | Revoke versions of your app (WISP 1200 · Revocation): by digest (base64url, as `app verify` prints it; `--digest` again for each, up to 64) or every version up to a `sequence`, with an optional one-line reason. The statement names the app of `<dir>/app.ghostlyapp` (or `--bundle`), is signed with that app's publisher key (any other key is refused, and none is made here), and is added to `<dir>/ghostly-revoke.json`, published beside the bundle; a client that reads it stops those versions. Answers `{app, digests \| upTo, current, added, revocations, file}`; `current` says whether the bundle in `<dir>` is among them |
+| `app send <chat> <ref\|name> <json\|->` | One message of a served app's own protocol to the same app on the contact's side (WISP 1200, Apps; needs the daemon): any JSON value, on the command line or `-` for stdin, at most 32 KiB, at most 48 a second. It goes on the live session only, while both sides have the app open, and is never kept for later: `{chat, app, sent: true}`, or an error whose `details.reason` is the WISP's name for why it did not go: `not-open` (`refused`: `app open` first), `too-large` (`bad_request`), `offline` and `peer-closed` (`unavailable`: the chat is not live, or the contact's app is not open; wait for `app.opened`), `too-fast` (`refused`). The contact's messages come as `app.message` events |
+| `app serve <bundle\|url> --grant chat [--grant name] [--url <url>]`, `app served`, `app unserve <ref\|name>` | Serve an app as a bot (WISP 1200, Apps): the profile speaks the app's messages in its chats itself, and no app runs here. `app serve` reads the signed bundle from a file or an `https` URL and checks it as `app verify` does (`refused` with the WISP's reason in `details.reason`). Each permission the manifest asks needs its `--grant`: `chat` (talk to the same app on the contact's side) and `name` (the profile's name in that chat); one left out is `confirm` (exit 5), naming it in `details.missing`. `internet` cannot be granted (no page runs here), a permission the app does not ask is `bad_request`, and an app that does not ask for `chat` is `refused`. A newer version replaces the one served; an older one, or another bundle under the same `sequence`, is `refused`. It answers `{served: {ref, title, version, sequence, digest, url?, permissions, granted, servedAt}, offered, restart?}`; `url` is where a contact's app reads the bundle (`--url`, else the URL served from, else the manifest's first source). The list is kept in the profile's folder (`apps.json`). A profile's engine offers `apps/1` to contacts only while it serves an app, and reads the list when it starts: `offered` says whether it does now, and `restart: true` that `daemon restart` is needed for it. `app served` answers `{apps, offered, restart?}`; `app unserve` removes one by its reference or its name |
 | `button press <chat\|group> <message> <button> [--wait none\|sent\|delivered] [--timeout s]` | Press a button of someone else's question, as a tap in the app does (WISP 406 · Message Buttons): the reply carries the button's label, and the asker hears `button.pressed`. `<message>` is the question's id (its event or `chat history`), `<button>` a button's id from its `card`. Refused (exit 1) like a tap: closed buttons, a second answer past `--once`, a second press within a second. A one-shot in a chat waits until it went out, as `send`. Answers `{chat \| group, messageId, button, label, replyId, delivery \| edges}` |
 | `button update <chat\|group> <message> [--chosen <button>] [--close] [--text <text>] [--force] [--wait none\|confirmed\|sent] [--timeout s]` | Answer a question you sent with `send --button` (WISP 406 · Message Buttons): `--chosen` shows which button won, `--close` takes presses no more, `--text` changes the text (shown as edited; refused if it looks like a secret, unless `--force`); the buttons and, unless given, the text stay. `<message>` is the `messageId` send gave. Answers `{chat \| group, buttons, messageId, card, edits}` |
 | `call auto [on\|off] [--from <chat>]… [--rate n]` | Answer calls by themselves, from anyone or the chats named (kept in the profile) |
@@ -101,21 +106,21 @@ The rows are in alphabetical order of their first command, and every command of 
 | `chat accept <chat> <method> [--off] [--networks mainnet,testnet]` | Which ways of paying the chat takes |
 | `chat connect <chat>`, `chat disconnect <chat> [--hold <minutes>]` | Reconnect now (ends a hold); close the live session, or with `--hold` stay off the direct link that long ([Staying off the direct link](#staying-off-the-direct-link)) |
 | `chat history <chat> [--limit n] [--before x] [--after x]` | Messages, oldest first; `x` is a message id or a time in ms |
-| `chat list`, `chat show <chat>` | Chats, and one chat's connection: transports, last attempt, comparison code |
+| `chat list [--show-secret]`, `chat show <chat> [--show-secret]` | Chats, and one chat's connection: transports, last attempt, comparison code. A pending chat's `invite` prints as `<hidden>` without `--show-secret` |
 | `chat pay <chat> <sats> [--memo t] [--network n] [--confirm-real]` | Ecash to a contact |
 | `chat rename <chat> <name>`, `chat remove <chat> --yes` | Name it here; delete it (keys and history) here |
 | `chat request <chat> <sats> [--memo t] [--method m] [--rail r]`, `chat pay-request <chat> <payment>` | Ask a contact to pay; pay the contact's request |
 | `chat transport <chat> <auto\|dht\|webrtc\|iroh\|hyperdht>` | What carries the chat |
 | `chat verify <chat> --code <code>` | Mark the contact verified after comparing the codes out of band |
 | `chat wait <chat> [--until live\|text\|paired] [--timeout s]` | Wait for a chat to go live, carry text, or see its contact. Live means a session that exists now, in this run of the daemon: a chat that was live before a restart counts once its contact answers again |
-| `daemon [--detach]`, `daemon status`, `daemon stop`, `daemon restart` | Keep the profile online; `status` names its version and its socket (`socket`, for the [socket API](#the-socket-api)); `restart` stops it and starts this release's code in the background ([After an upgrade](#after-an-upgrade)). Ctrl-C, SIGTERM and the terminal closing (SIGHUP) stop it cleanly |
+| `daemon [--detach] [--timeout s]`, `daemon status`, `daemon stop [--timeout s]`, `daemon restart [--timeout s]` | Keep the profile online; `status` names its version and its socket (`socket`, for the [socket API](#the-socket-api)); `restart` stops it and starts this release's code in the background ([After an upgrade](#after-an-upgrade)). Ctrl-C, SIGTERM and the terminal closing (SIGHUP) stop it cleanly |
 | `edit <chat> <message> [text… \| --text <text> \| --stdin] [--force] [--wait none\|confirmed] [--timeout s]` | Replace the text of a message you sent (1:1 chats, `group edit` for a group; `<message>` is the `messageId` `send` gave, or its wire id). The contact sees it in place, marked edited; `--wait confirmed` waits for its app to confirm (the default without a daemon). At most 100 edits a message, no time limit; an older contact app gets it once it shows edits |
 | `engine <method> [json \| -] [--confirm-real] [--show-secret]`, `engine --list` | Any call of the app's engine |
 | `events [--since seq]` | What the event journal holds, without following |
-| `file list <chat>`, `file accept\|decline\|pause\|resume\|cancel [<chat>] <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3). A file's id names its chat, so `<chat>` may be left out |
-| `file resend [<chat>] <file>`, `file request [<chat>] <file>` | A file that stopped moving: sent again from here, or asked for again from the contact; either goes on from the bytes the receiver holds (files/3) |
-| `file save [<chat>] <file> [--dir d \| --path p] [--force] [--wait [--timeout s]]` | Write a received file to disk (never over one without `--force`; an unfinished one says how many bytes are here; `--wait` waits for it first) |
-| `file send <chat> <path> [--name n] [--mime t] [--voice [ms] [--peaks …]] [--reply <message>]` | A file, or a voice note (its length and waveform measured from the file unless given); `--reply` quotes a message, as `send --reply` does |
+| `file list <chat\|group>`, `file accept\|decline\|pause\|resume\|cancel [<chat>] <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3), and so does a group's file that did not come by itself (over 8 MiB). A file's id names its chat or its group, so `<chat>` may be left out |
+| `file resend [<chat>] <file>`, `file request [<chat>] <file>` | A file that stopped moving: sent again from here, or asked for again from the contact (a group's file: from whoever holds it); either goes on from the bytes the receiver holds (files/3) |
+| `file save [<chat>] <file> [--dir d \| --path p] [--force] [--wait [--timeout s]]` | Write a received file to disk: to `--path`, or into `--dir` under the name its sender gave it, with a `_` first when that name starts with `-`, so no tool run in the folder takes it for an option (the answer's `path` is what was written). Never over a file without `--force`; an unfinished one says how many bytes are here; `--wait` waits for it first |
+| `file send <chat\|group> <path> [--name n] [--mime t] [--voice [ms] [--peaks …]] [--reply <message>]` | A file, or a voice note (its length and waveform measured from the file unless given); `--reply` quotes a message, as `send --reply` does. To a group (`group:<id>` when a chat has the same name), up to 100 MiB: every member sees it at once and each member's app fetches it from a member who has it (WISP 503) |
 | `file wait [<chat>] <file> [--timeout s]` | Wait until a transfer ends: exit `0` when the file is all here, `1` with the transfer's error when it failed (`details.retry`: `file resend` can go on), `4` on timeout (default 300 s) |
 | `forward <chat\|group> <message>… --to <chat\|group>… [--force] [--wait none\|sent] [--timeout s]` | Forward messages to up to 5 chats and groups (`--to` again for each; `group:<id>` names a group when a chat has the same name; an id that starts with a dash is taken as it is, `--to -Ab…` or `--to=-Ab…`). Each is a new message of yours that says it was forwarded (`forwarded`, the hop count) and nothing of who wrote it. Files go from the bytes this profile holds, never fetched again; a group takes texts only. A text that looks like a seed, a key or ecash needs `--force`. Answers `{from, results: [{to, kind, messageIds, error}]}`; any refusal fails the command (exit 1) with the results in `details`. `--wait sent`: each text on its way (a group's taken by an edge), each file's transfer done |
 | `group create <name> [--mesh]`, `group join <link>` | A community (a link anyone can open), or a private mesh. `group join` with the link of a community the profile was removed from asks to be let in again, and keeps its history |
@@ -140,22 +145,23 @@ The rows are in alphabetical order of their first command, and every command of 
 | `message retry\|delete\|details <chat> <message>` | One message |
 | `pay <invoice\|address\|lnurl> [--amount sats] [--network n] [--max-fee sats] [--confirm-real]` | Pay over Lightning (Testnet unless `--network mainnet`) |
 | `payment list [--chat c]`, `payment check <chat> <payment>`, `payment reclaim <payment>` | Payments and requests |
-| `pin <chat\|group> <message> [--remove]` | Pin a message at the top of a chat or group, for everyone in it: one per chat, a new pin replaces it, `--remove` unpins. In a community only the admin pins. A 1:1 pin reaches the contact on the next live session; the other side hears `chat.pinned` or `group.pinned` |
+| `pin <chat\|group> <message> \| --remove` | Pin a message at the top of a chat or group, for everyone in it: one per chat, a new pin replaces it; `pin <chat\|group> --remove` unpins (it names no message). In a community only the admin pins. A 1:1 pin reaches the contact on the next live session; the other side hears `chat.pinned` or `group.pinned` |
 | `profile backup --out <file>`, `profile restore <file> <new profile>` | A backup (WISP 05 envelope, written and read a piece at a time), encrypted with the passphrase from `--passphrase-file` or `GHOSTLY_BACKUP_PASSPHRASE`. `--no-passphrase` makes one that is not encrypted: the file then holds the profile's keys and wallet secrets in the clear. Neither given, nothing is made. `--light` leaves out files over 1 MB (voice messages over 4 MB): their messages stay, and the restored copy says each one is not in this backup |
 | `profile create <name> [--use] [--name <shown>]`, `profile list`, `profile use <name>` | Profiles |
 | `profile picture <jpeg> \| --clear` | The picture contacts see (a JPEG within 512 px; 128 px is what the app sends) |
 | `profile show`, `profile set [--name <name>] [--share-profile \| --no-share-profile]` | The name contacts see |
 | `react <chat> <message> <emoji> [--remove]` | React to a message with one emoji; a new one replaces yours, `--remove` takes it back |
-| `routine send <chat\|group> --name <name> --schedule "every day 01:00" [--cron "0 1 * * *"] [--state active\|paused] [--next <time>] [--run ok\|failed\|skipped[:summary]] [--link url]… [--id id] [--json json\|-\|file]`, `routine update <chat\|group> <routine> [fields…]` | A routine card for something a bot runs on a schedule (WISP 405 · Status Cards): its name, schedule (and cron line, shown only), state, last run and result, next run and up to 10 recent runs. `--run` records a run now as the last one; `--next` takes milliseconds or a date. Updates merge and are paced as `task update`'s. The app shows it, and runs nothing |
+| `routine send <chat\|group> --name <name> --schedule "every day 01:00" [--cron "0 1 * * *"] [--state active\|paused] [--next <time>] [--run ok\|failed\|skipped[:summary]] [--link url]… [--id id] [--json json\|-\|file] [--force]`, `routine update <chat\|group> <routine> [fields…]` | A routine card for something a bot runs on a schedule (WISP 405 · Status Cards): its name, schedule (and cron line, shown only), state, last run and result, next run and up to 10 recent runs. `--run` records a run now as the last one; `--next` takes milliseconds or a date. Updates merge and are paced as `task update`'s. The app shows it, and runs nothing |
 | `send <chat> [text…] [--reply <message>] [--button id:Label]… [--style id=primary\|neutral\|danger]… [--once] [--id id] [--stdin] [--force] [--wait none\|sent\|delivered] [--timeout s]` | Send text (arguments, or stdin); `--reply` quotes a message of the chat. `--button yes:Yes` (1 to 6; the id ends at the first colon; no two labels alike ignoring case and spaces, and no label that is another button's id, else exit 2) puts buttons under the text, which is the question and what older apps show, so say how to answer in words. `--once`: one answer a person. A question that goes on the DHT floor or into a hold (the contact's app closed) reaches them as text alone; the engine sends its buttons again once the chat is live, as an edit of the buttons alone (no `message.edited` for it). The answer adds `buttons` (the question's id, `ask-…` unless `--id`), `card`, and `pressable`: whether the contact's app shows buttons (null until it says). A press comes back as `button.pressed` ([Events](#events)) |
 | `service add <name> <http://127.0.0.1:port>`, `service share <service> <chat> [--off]`, `service list`, `service remove\|enable` | Share a web app on this machine, per contact |
 | `service peer <chat>`, `service open <chat> <service> [--port p]`, `service close <chat> <service>` | A contact's app on a loopback port here (daemon). `url` is a link for your browser, `http://<random>.localhost:<port>/.ghostly-open/<token>`: it sets the service's cookie and shows the app on a host name of its own; any other host name, or a request without that cookie, gets 404. Chrome, Edge and curl reach `*.localhost` names by themselves; Safari and Node's `fetch` on macOS may not (add the name to `/etc/hosts` for them) |
 | `settings get [--show-secret]`, `settings set <key> <json>` | Relays, Iroh relays, the HyperDHT relay, ICE servers, `sendTyping` (false: contacts are never told you type), … |
 | `status` | The profile, its chats, whether WebRTC and calls run, the last event seq |
 | `store sign <index> --key <file> [--out <dir>]` | Sign a store index (WISP 1200 · Stores) with the store key file (kept offline; made when missing and the index names no `key`): writes `ghostly-store.json`, canonical, and `ghostly-store.sig` beside the index or in `--out`. Refused, with the reason, when a client would refuse the index (`expires` more than 90 days ahead, a bad field), or when the index already there, signed by the same key, has a higher `sequence` (`rollback`) or the same one with other content (`equivocation`) |
-| `task send <chat\|group> --title <title> [--status s] [--progress n \| --steps a/b] [--step "…"] [--item state:text]… [--pr-url url --pr-number n --additions n --deletions n --files n --pr-state s --pr-checks c] [--branch b] [--tag label]… [--parent task] [--link url]… [--id id] [--json json\|-\|file]`, `task update <chat\|group> <task> [fields…]` | A task card for a bot's work (WISP 405 · Status Cards): a title, a status (queued, running, blocked, done, failed, cancelled), progress, the step it is on, up to 20 steps or log lines (`--item done:Codec`; a lowercase word before the colon must be an item state: pending, running, done, failed or skipped) and its pull request, shown as a small card that apps without cards read as text. Optional, and ignored by apps from before them: where the pull request stands (`--pr-state draft`, `open`, `merged` or `closed`; an open one puts the task in the board's Review column) and its checks (`--pr-checks passing`, `failing` or `pending`), up to 3 tags of 24 characters (`--tag core --tag web`; an update's tags replace the card's), and `--parent <task>`, a task of yours in the same chat that this one is a part of (sent first; its parts stack under it on the board). `send` prints the task's id and message; `update` merges the fields given over the card (an update's `--item` list replaces the card's: give all of them) and edits its message, at most once per 2.5 s (sooner updates merge into the next). `--json` takes the whole card; `null` in it removes a field. Only the CLI sends cards: the app shows them |
+| `task send <chat\|group> --title <title> [--status s] [--progress n \| --steps a/b] [--step "…"] [--item state:text]… [--pr-url url --pr-number n --additions n --deletions n --files n --pr-state s --pr-checks c] [--branch b] [--tag label]… [--parent task] [--link url]… [--id id] [--json json\|-\|file] [--force]`, `task update <chat\|group> <task> [fields…]` | A task card for a bot's work (WISP 405 · Status Cards): a title, a status (queued, running, blocked, done, failed, cancelled), progress, the step it is on, up to 20 steps or log lines (`--item done:Codec`; a lowercase word before the colon must be an item state: pending, running, done, failed or skipped) and its pull request, shown as a small card that apps without cards read as text. Optional, and ignored by apps from before them: where the pull request stands (`--pr-state draft`, `open`, `merged` or `closed`; an open one puts the task in the board's Review column) and its checks (`--pr-checks passing`, `failing` or `pending`), up to 3 tags of 24 characters (`--tag core --tag web`; an update's tags replace the card's), and `--parent <task>`, a task of yours in the same chat that this one is a part of (sent first; its parts stack under it on the board). `send` prints the task's id and message; `update` merges the fields given over the card (an update's `--item` list replaces the card's: give all of them) and edits its message, at most once per 2.5 s (sooner updates merge into the next). `--json` takes the whole card; `null` in it removes a field. Only the CLI sends cards: the app shows them |
 | `typing <chat> [--kind typing\|recording\|thinking] [--status "<text>"] [--for s] [--stop]` | Show the contact you are writing, recording or thinking, or a short status line in its place ("Transcribing your audio…", 40 characters, no links): live chats only, it holds 6 s there; `--for s` keeps it on that long (up to 600 s; a one-shot stays that long); a new kind or status shows at once; a message to the chat or `--stop` ends it |
-| `usage send [<chat\|group>] [--all] --left <percent> [--window "5 h"] [--resets <time>] [--label Claude] [--account <name>] [--also week=80@<time>]… [--used n --limit n] [--id id] [--json json\|-\|file]` | How much of a quota the bot has left (WISP 405 § Usage): the percent (or `--used` of `--limit`), what it is of, the account, the window, when it resets, and up to 3 other windows (`--also week=80@2026-10-10T00:00:00Z`). The app shows a small meter on the chat's row and in its header, amber under 20%, red under 5%, muted once 6 h old or past the reset. One card per chat: the first report sends it, later ones edit it in place (quiet, paced as `task update`'s); each report is whole, so a field it leaves out goes. `--all` reports to every 1:1 chat with a contact. See [docs/AI-AGENTS.md](../../docs/AI-AGENTS.md#reporting-usage) for where a bot gets its numbers |
+| `usage send [<chat\|group>] [--all] --left <percent> [--window "5 h"] [--resets <time>] [--label Claude] [--account <name>] [--also week=80@<time>]… [--used n --limit n] [--id id] [--json json\|-\|file] [--force]` | How much of a quota the bot has left (WISP 405 § Usage): the percent (or `--used` of `--limit`), what it is of, the account, the window, when it resets, and up to 3 other windows (`--also week=80@2026-10-10T00:00:00Z`). The app shows a small meter on the chat's row and in its header, amber under 20%, red under 5%, muted once 6 h old or past the reset. One card per chat: the first report sends it, later ones edit it in place (quiet, paced as `task update`'s); each report is whole, so a field it leaves out goes. `--all` reports to every 1:1 chat with a contact. See [docs/AI-AGENTS.md](../../docs/AI-AGENTS.md#reporting-usage) for where a bot gets its numbers |
+| `version` | This CLI's version, `{"version":"…"}` (also `ghostly --version`) |
 | `wallet create <type> [--network testnet] [--provider id] [--value name=value]… [--stdin] [--invite code] [--api-key key]` | A wallet: `cashu`, `lightning` (a card: its source's form in `--value`), `arkade`, `spark` (on Mainnet, `--api-key` is your Breez API key), `bitcoin` (BDK), `fedimint` (`--invite` is the federation's invite code), `usdt`. With `--stdin`, secret fields come as `name=value` lines on stdin (`api-key=…` too), out of `ps` and the shell's history |
 | `wallet faucet <type>`, `wallet add-mint <url> [--primary]` | Test coins; another Cashu mint |
 | `wallet list [--network n]` | Wallets and balances, and what `wallet create` can make on each network |
@@ -222,7 +228,8 @@ service manager instead.
 ### The secret guard
 
 `send` and `group send` refuse text that looks like a recovery phrase, a private key (nsec, WIF, xprv, 64 hex
-characters named as a key) or a Cashu token (money anyone who reads it can take), with exit `5`, unless `--force`.
+characters named as a key) or a Cashu token (money anyone who reads it can take), with exit `5`, unless `--force`;
+so do `edit`, `forward`, `button update --text` and the task, routine and usage cards (any text on the card).
 It is the app's own detector.
 
 ### Real money
@@ -234,9 +241,10 @@ A spend on Mainnet needs the engine's `confirmedReal` (the app asks the person).
 
 SSH (`ssh-keygen`), OpenPGP (`gpg`) and Bitcoin (a wallet's "sign message") proofs are made with the tool: `identity
 add` prints the statement and the command, `identity complete` takes its output. A domain or a DID publishes a record,
-then `identity complete` asks the engine to look it up. In-app signers (a Nostr signer over NIP-46, Pubky, AT
-Protocol) run in one `identity add`, with their fields in `--field`, and print what they wait on (a link, a code) to
-stderr. OpenID Connect needs a browser window: make that proof in the app.
+then `identity complete` asks the engine to look it up. In-app signers (a Nostr signer over NIP-46, Pubky) run in one
+`identity add`, with their fields in `--field`, and print what they wait on (a link, a code) to stderr. OpenID Connect,
+AT Protocol and a NIP-07 browser extension need a browser window: make those proofs in the app. `identity providers`
+marks each signer that runs here as `headless`.
 
 ### Wallets on Node
 
@@ -257,7 +265,9 @@ Nothing prints a seed, a key, a wallet phrase or ecash unless asked with `--show
 credentials, and engine calls that answer with secrets (`exportLinks`, `walletExport`, the wallets' backups) are
 refused without it. A group's entry link lets anyone who reads it join: `group show`, `group list`, the admin
 commands, `group.created` events and `engine getState` print it as `<hidden>`; `--show-secret`, `group create` and
-`group link` print it.
+`group link` print it. A pending chat's invite code lets whoever reads it take the chat: every command that prints a
+chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print it as `<hidden>`; `invite create` and
+`chat list` or `chat show` with `--show-secret` print it.
 
 ## Events
 
@@ -281,12 +291,16 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
   `message.nick` their name from the roster; `message.mentioned` when it names this profile), `group.mentioned`
   (`{group, messageId, message}`: a mention of this profile learned after the message's `group.message`, which said
   none: a copy another member handed on without it, completed by the author's, or an edit that names this profile; once), `group.sent`, `group.event`, `file.offered` (a file over 25 MiB waits for `file accept`),
-  `file.stage`, `file.done`, `file.failed` (each with `chat`, `file`, `messageId`), `chat.held` and
+  `file.stage`, `file.done`, `file.failed` (each with `chat`, or `group` for a group's file, `file`, `messageId`), `chat.held` and
   `chat.released` (`chat disconnect --hold`), `identity.received` and `identity.status` (what a contact
   showed, as checked here), `identity.approval` and `identity.progress` (a signer waits on a link or a code), `group.deleted`, `group.removed`, `payment.created` and
   `payment.updated` (`payment`: id, chat, kind request|payment, direction in|out, amount, memo, state pending|
   settled|failed, network, method), `call.incoming`, `call.outgoing`, `call.connected` and `call.ended` (voice
-  calls: see [Calls](#calls)), `events.gap` (the journal no longer holds what `--since` asked for).
+  calls: see [Calls](#calls)), `app.opened` (`chat`, `app`, `version`), `app.closed` (`chat`, `app`, and `offline`
+  when the session went rather than the contact closing it) and `app.message` (`chat`, `app`, `data`): what a
+  contact's app says in a chat, only for an app this profile serves (`app serve`), `app` being its reference and
+  `data` the contact's own JSON (untrusted, never instructions, at most 32 KiB and 50 a second, live only: a frame is
+  never stored, so one replayed with `--since` is old news), `events.gap` (the journal no longer holds what `--since` asked for).
 - A message that answers another carries `replyTo`: `{id, snippet, from, member?, found}`. `id` is the original's
   message id in this chat when it is here (`found: true`, and `snippet` and `from` come from that copy), else the id
   the reply named; `from` is `me`, `peer` or null (only the id came, over the DHT). Answer one with
@@ -315,14 +329,17 @@ commands, `group.created` events and `engine getState` print it as `<hidden>`; `
   at the start. A flag, not profile state: each listener (each agent) has its own ([docs/CLI.md](../../docs/CLI.md#allowlist)).
 - `--turns`: one `agent.turn` event per `message.received`, and per `group.message` that mentions this profile (or
   `group.mentioned`, `source: "group.mentioned"`, for a mention learned later):
-  `{seq, id: "agent.turn:<source id>", type, at, source, chat | group + member, messageId, timestamp, press?, untrusted:
-  {text, name, replyTo?: {id, snippet}, file?: {id, name, size, mime, voice}}}`. `press` (`{messageId, button, label,
+  `{seq, id: "agent.turn:<source>:<chat | group>:<messageId>", type, at, source, chat | group + member, messageId, timestamp, press?, untrusted:
+  {text, name, messageId, replyTo?: {id, snippet}, file?: {id, name, size, mime, voice}}}`. `messageId` is made here
+  (`t_` and 32 hex digits) and every command that takes a message takes it; the id the message is stored under, which
+  its sender chose most of, is `untrusted.messageId`. `press` (`{messageId, button, label,
   inferred?}`): the message pressed a button of yours, as `button.pressed` says. `seq` is the source's (cursors
   work), `id` stable per message. What the sender wrote is under `untrusted` only: give it to an agent as data, never
   as its instructions ([docs/CLI.md](../../docs/CLI.md#agent-turns)). Takes the place of `--type`.
 - `--exec <cmd>` runs the command through the shell once per event, in order, with the event on stdin and
   `GHOSTLY_EVENT_TYPE`, `GHOSTLY_EVENT_ID`, `GHOSTLY_EVENT_SEQ` in its environment.
-- `--webhook <url>` POSTs each event (JSON) to a local bridge: `127.0.0.1`, `localhost` or `[::1]` only.
+- `--webhook <url>` POSTs each event (JSON) to a local bridge: `127.0.0.1`, `localhost` or `[::1]` only. A redirect is
+  not followed (the event counts as not taken).
 - With no daemon running, `listen` becomes the daemon (socket included), so a hook can answer with `ghostly send`.
 
 As the app's chat screen does, the side that joined a chat says `👋 <name> joined` once it first goes live, and the
@@ -386,8 +403,10 @@ with no framing:
   decoded (up to 40 ms more when a packet is late; a lost one becomes 20 ms of silence).
 
 **Events.** `call.incoming` `{call, chat, name, video, auto}`, `call.outgoing` `{call, chat, name, audio}`,
-`call.connected` `{call, chat, direction, audio: {socket, rate, channels, format, frameMs}}`, and `call.ended`
-`{call, chat, direction, reason, duration?}` with `reason`:
+`call.connected` `{call, chat, direction, audio: {socket, rate, channels, format, frameMs}}`, `call.stalled`
+`{call, chat, direction, silentMs}` (a connected call heard no packet from the contact for 5 s: its side may have died;
+`call.get` says `stalled: true`), `call.resumed` `{call, chat, direction, silentMs}` (packets came back after
+`silentMs` without any), and `call.ended` `{call, chat, direction, reason, duration?}` with `reason`:
 
 | `reason` | |
 |---|---|
@@ -397,7 +416,7 @@ with no framing:
 | `rejected` | The contact declined this side's call |
 | `unanswered` | This side's call rang 60 s with no answer |
 | `crossed` | Both sides called at once and the contact's call came first: it rings here instead (`call.incoming` follows) |
-| `failed` | The media did not connect within 30 s, or dropped, or the contact's app could not connect (it hung up saying so) |
+| `failed` | The media did not connect within 30 s, or dropped, or heard no packet from the contact for 15 s, or the contact's app could not connect (it hung up saying so) |
 | `stopped` | The daemon stopped (its calls are hung up first) |
 
 **Rules**, as in the apps: one call per chat, several chats may each have one; a call needs the chat live (the call
@@ -417,7 +436,9 @@ nothing on that machine can answer: allow local network traffic in the VPN, or p
 `ghostly settings set iceServers '[{"urls":"turn:turn.example.org:3478","username":"…","credential":"…"}]'` (the
 same setting chats use). A relay connects the calls no direct path can: a VPN that takes every packet through its
 tunnel, a NAT that maps each destination apart. The media stays encrypted end to end; the relay sees both
-addresses and when and how much is sent.
+addresses and when and how much is sent. The CLI (libdatachannel) reaches TURN over UDP only: a `turns:` or
+`?transport=tcp` address stays in the setting for the apps, which use it, and `settings set` warns that the CLI does
+not. Behind a network that blocks UDP, the CLI has no relay.
 
 ## Transports
 

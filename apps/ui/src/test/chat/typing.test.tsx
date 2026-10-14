@@ -40,6 +40,22 @@ describe("the contact typing", () => {
     expect(screen.getByTestId("chat-subtitle")).toHaveTextContent("aaaa…aaaa");
   });
 
+  it("a screen reader is told what the contact is doing, never their key again each time they stop", () => {
+    const { engine } = renderApp(<ChatSubtitle peerKey={key("a")} keyLabel="aaaa…aaaa" />);
+    act(() => engine.update({ links: [typingLink(false)] }));
+    // The key is there the whole time: it is not news, so it is outside the line's live region, which is empty.
+    const live = screen.getByTestId("chat-subtitle").querySelector("[aria-live]")!;
+    expect(live).toHaveAttribute("role", "status");
+    expect(live).toHaveTextContent("");
+    expect(screen.getByTestId("chat-subtitle")).not.toHaveAttribute("aria-live");
+    act(() => engine.update({ links: [typingLink(true)] }));
+    expect(live).toHaveTextContent("typing…");
+    expect(screen.getByTestId("chat-subtitle")).toHaveTextContent(/^typing…$/);
+    act(() => engine.update({ links: [typingLink(false)] }));
+    expect(live).toHaveTextContent("");
+    expect(screen.getByTestId("chat-subtitle")).toHaveTextContent("aaaa…aaaa");
+  });
+
   it("the header says recording audio…, thinking…, or the bot's own status, in the same place", () => {
     const { engine } = renderApp(<ChatSubtitle peerKey={key("a")} keyLabel="aaaa…aaaa" />);
     act(() => engine.update({ links: [typingLink(true, { peerTypingKind: "recording" })] }));
@@ -51,6 +67,9 @@ describe("the contact typing", () => {
     act(() => engine.update({ links: [typingLink(true, { peerTypingKind: "thinking", peerTypingStatus: "Transcribing your audio…" })] }));
     expect(screen.getByTestId("chat-typing")).toHaveTextContent("Transcribing your audio…");
     expect(screen.getByTestId("chat-typing")).not.toHaveTextContent("thinking…");
+    // No wider than its line, so a long status ends in an ellipsis where the usage meter starts.
+    expect(screen.getByTestId("chat-typing")).toHaveClass("max-w-full", "min-w-0");
+    expect(screen.getByTestId("chat-typing-status")).toHaveClass("truncate");
     // The status is the contact's text: isolated, and never read as markup or a link.
     const status = screen.getByTestId("chat-typing-status");
     expect(status.tagName).toBe("BDI");

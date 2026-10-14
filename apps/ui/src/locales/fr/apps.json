@@ -23,6 +23,16 @@
     "updateWaits": "La version {{version}} est prête.",
     "version": "Version {{version}}"
   },
+  "builtIn": {
+    "allow": "Autoriser",
+    "allowOpen": "Autoriser et ouvrir",
+    "carried": "Fournie avec Ghostly. Rien n'est téléchargé.",
+    "carriedInfo": "Cette copie fait partie du Ghostly que vous utilisez. Les mises à jour viennent de son éditeur ou de vos boutiques, qui voient alors votre adresse IP.",
+    "hint": "Fournie avec Ghostly",
+    "openNamed": "Ouvrir {{title}}",
+    "remove": "Retirer",
+    "removeNamed": "Retirer {{title}}"
+  },
   "card": {
     "ask": "Demandez un lien à {{name}}",
     "contactCannot": "L'app de {{name}} ne lance pas encore d'apps",
@@ -60,7 +70,7 @@
     "rollback": "Le lien contient une version plus ancienne.",
     "status": "Rien à ce lien.",
     "storage": "Ce navigateur ne peut pas garder d'apps ici (navigation privée ?). Essayez une fenêtre normale.",
-    "storageInfo": "Ghostly garde les fichiers de chaque app sur cet appareil. Les fenêtres privées, comme la Navigation privée de Safari, ne le permettent pas, et un disque plein l'empêche aussi. Ouvrez Ghostly dans une fenêtre normale et installez-y l'app.",
+    "storageInfo": "Ghostly garde les fichiers de chaque app sur cet appareil. Les fenêtres privées, comme la Navigation privée de Safari, ne le permettent pas, et un disque plein l'empêche aussi.",
     "storeKey": "Cette boutique est signée par une autre clé.",
     "tooLarge": "Trop volumineux.",
     "unlistedVersion": "Le lien contient une version que cette boutique ne propose pas encore."
@@ -96,7 +106,7 @@
     "unknownPublisherInfo": "N'importe qui peut signer une app avec une nouvelle clé. Seule une boutique que vous avez ajoutée peut garantir qui l'a faite. Comparez la clé avec celle que publie son auteur.",
     "update": "Mettre à jour",
     "webkit": "Dans ce navigateur, une app peut quand même contacter d'autres serveurs.",
-    "webkitInfo": "Safari, et tout navigateur sur iPhone et iPad, laisse une app ouvrir des connexions que Ghostly ne peut pas bloquer, même sans la permission Internet. Ces serveurs apprennent votre adresse IP. L'app de bureau les bloque."
+    "webkitInfo": "Safari et tout navigateur sur iPhone ou iPad laissent une app ouvrir des connexions que Ghostly ne peut pas bloquer. Ces serveurs apprennent votre adresse IP. L'app de bureau les bloque."
   },
   "page": {
     "add": "Ajouter",
@@ -120,13 +130,16 @@
     "countOne": "1 app",
     "curated": "Choisie",
     "empty": "Cette boutique ne propose aucune app.",
+    "filter": "Rechercher dans cette boutique",
     "indexed": "Indexée",
     "installed": "Installée",
+    "noMatch": "Aucune app de cette boutique ne correspond.",
     "notRead": "Pas encore lue",
     "problem": "La dernière lecture a échoué.",
     "read": "Lire",
     "refresh": "Actualiser",
     "remove": "Retirer",
+    "showMore": "Afficher plus ({{count}})",
     "stale": "Pas à jour depuis le {{date}}"
   },
   "title": "Apps",

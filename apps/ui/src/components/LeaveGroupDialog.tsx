@@ -11,8 +11,10 @@ import { Notice } from "./ui/Notice";
  * Leaving a group, said before it happens: it goes from this device with its history, and an admin
  * hands the role to a member who is online (the engine picks the first one over a direct edge, as here). Closed without
  * leaving, it gives the focus back to what opened it, or to `returnFocus` (the group's ⋮, whose row went with its menu).
+ * `forget`: asked by "Delete from this device", which leaves an active group as well, under the same checks, but for a
+ * community nobody is connected to: a member's delete goes ahead, and the dialog says the others still list them.
  */
-export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus }: { group: GroupView; onClose(): void; onConfirm(): Promise<void>; returnFocus?: RefObject<HTMLElement | null> }) {
+export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forget }: { group: GroupView; onClose(): void; onConfirm(): Promise<void>; returnFocus?: RefObject<HTMLElement | null>; forget?: boolean }) {
   const { t } = useI18n();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null), cancel = useRef<HTMLButtonElement>(null);
@@ -35,24 +37,37 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus }: { g
   // member reached through a hub is online, but the role commit does not travel through hubs.
   const community = group.profile === "community";
   const successor = !group.isAdmin ? undefined : community ? others.find(m => m.online) ?? others[0] : others.find(m => m.online && !m.viaHub);
-  const blocked = others.length > 0 && (community ? !group.community?.connected : group.isAdmin && !successor);
+  const unheard = community && others.length > 0 && !group.community?.connected;
+  // A member deleting a community nobody is connected to: it goes anyway (the engine's `deleteHere`), the leave unsaid.
+  const unsaid = unheard && forget && !group.isAdmin;
+  const blocked = others.length > 0 && !unsaid && (community ? unheard : group.isAdmin && !successor);
+  // A community's admin waits for members who may never come back: what works with nobody connected is removing them
+  // (alone, the admin leaves or deletes it), or, for Delete, making one admin (a member's delete goes ahead unsaid).
+  const blockedNext = !community ? "group.leave.blockedNext" : !group.isAdmin ? "group.leave.blockedCommunityNext"
+    : forget ? "group.leave.blockedCommunityAdminForgetNext" : "group.leave.blockedCommunityAdminNext";
   const leave = async () => {
     setBusy(true); setError(null);
     try { await onConfirm(); } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); setBusy(false); }
   };
   return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} aria-describedby={`${id}-body`}
     data-testid="group-leave-dialog" className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
-    <h2 id={`${id}-title`} className="text-base font-semibold">{group.name ? t("group.leave.title", { name: group.name }) : t("group.leave.titleUnnamed")}</h2>
+    <h2 id={`${id}-title`} className="text-base font-semibold">{forget
+      ? group.name ? t("group.leave.forgetTitle", { name: group.name }) : t("group.leave.forgetTitleUnnamed")
+      : group.name ? t("group.leave.title", { name: group.name }) : t("group.leave.titleUnnamed")}</h2>
     <div id={`${id}-body`} className="mt-2 space-y-2 text-sm text-text-muted">
-      <p>{t("group.leave.body")}</p>
-      {successor && others.length > 0 && <p data-testid="group-leave-successor">{t("group.leave.successor", { name: memberName(successor, t) })}</p>}
-      {blocked && <Notice tone={community ? "wait" : "error"} className="text-sm" testId="leave-blocked" title={community ? t("group.leave.blockedCommunity") : t("group.leave.blocked")} next={community ? t("group.leave.blockedCommunityNext") : t("group.leave.blockedNext")} />}
+      {forget && <p>{t("group.leave.forgetBody")}</p>}
+      <p>{t(community ? "group.leave.bodyCommunity" : "group.leave.body")}</p>
+      {successor && others.length > 0 && <p data-testid="group-leave-successor">{t("group.leave.successor", { name: memberName(successor, t) })}
+        {/* A private group's link works from the admin's app: the one shared so far stops working with the role. */}
+        {group.entryLink && !community && <> {t("group.link.endsOnHandover", { name: memberName(successor, t) })}</>}</p>}
+      {unsaid && <Notice tone="warning" className="text-sm" testId="leave-unsaid" title={t("group.leave.blockedCommunity")} next={t("group.leave.unsaidNext")} />}
+      {blocked && <Notice tone={community ? "wait" : "error"} className="text-sm" testId="leave-blocked" title={community ? t("group.leave.blockedCommunity") : t("group.leave.blocked")} next={t(blockedNext)} />}
     </div>
     {error && <Notice problem={error} className="mt-2 text-sm" />}
     <div className="mt-5 flex justify-end gap-2">
       <button ref={cancel} onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
       <button disabled={busy || blocked} onClick={() => void leave()} data-testid="group-leave-confirm"
-        className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger disabled:opacity-40">{t("group.menu.leave")}</button>
+        className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger-ink hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger disabled:opacity-40">{forget ? t("group.menu.forget") : t("group.menu.leave")}</button>
     </div>
   </dialog>, document.body);
 }

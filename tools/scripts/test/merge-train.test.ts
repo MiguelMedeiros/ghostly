@@ -1,14 +1,22 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, BudgetLow, canGoAlone, ciState, gitLayer, isBatch, LABEL, localBases, order, ordinal, pickBatch, queuedAt, readState, restLayer, rounds, squashMessage, tick, trainBases, waiting } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, isBatch, LABEL, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting } from "../merge-train.mjs";
 
-type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string; merged?: boolean };
+type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string; merged?: boolean; author?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
 const red = [{ name: "CI Success", status: "completed", conclusion: "failure", started_at: "2026-10-08T00:00:00Z", id: 1 }];
 const running = [{ name: "CI Success", status: "in_progress", conclusion: null, started_at: "2026-10-08T00:00:00Z", id: 1 }];
+const fastGreen = [{ name: "CI Success (draft)", status: "completed", conclusion: "success", id: 1 }];
+const fastRed = [{ name: "CI Success (draft)", status: "completed", conclusion: "failure", id: 1 }];
+/** A green run planned from files in docs/ only: ci.yml left out the packages' tests, the CLI on ARM64 and the macOS jobs. */
+const greenForDocs = [
+  ...green,
+  ...["Frontend tests (packages ${{ matrix.shard }}/4)", "CLI on Linux ARM64", "Desktop media (macOS WKWebView)", "Desktop on macOS", "Website browser checks (${{ matrix.shard }}/4)", "Affected unit tests (draft)"].map((name, i) => ({ name, status: "completed", conclusion: "skipped", id: 10 + i })),
+  ...["Changed paths", "Frontend lint and types", "Frontend tests (app)", "Frontend builds", "Tauri Backend (apps/desktop)", "Website"].map((name, i) => ({ name, status: "completed", conclusion: "success", id: 20 + i })),
+];
 
 /** A fake repository: pull requests, labels, label events, comments, CI per commit, and the base's tip. */
 function fakeRepo() {
@@ -16,6 +24,14 @@ function fakeRepo() {
   const events = new Map<number, { event: string; label: { name: string }; created_at: string }[]>();
   const comments = new Map<number | string, { id: number; body: string; user?: { login: string } }[]>();
   const runs = new Map<string, object[]>();
+  /** CI's runs on a commit before the newest one (newest first), and the files each pull request changes (unset: one source file). */
+  const earlier = new Map<string, object[][]>();
+  const files = new Map<number, string[]>();
+  /** The draft gate's jobs per commit (the fast tier), and CI's runs still going on each head, which the train may cancel. */
+  const drafts = new Map<string, object[]>();
+  const going = new Map<string, number[]>();
+  const cancelled: number[] = [];
+  const cancelAccess = { denied: null as string | null };
   /** When each head was pushed (its first check suite); unset: long before anything was queued, null: no suite yet. */
   const pushed = new Map<string, string | null>();
   const tips: Record<string, string> = { dev: "dev0", "epic/x": "epic0" };
@@ -55,7 +71,20 @@ function fakeRepo() {
     pulls: async (base: string) => [...pulls.values()].filter((p) => p.open && p.base === base).map((p) => ({ ...p, labels: [...p.labels] })),
     mergedPulls: async (base: string) => [...pulls.values()].filter((p) => p.merged && p.base === base).map((p) => ({ ...p, labels: [...p.labels] })),
     events: async (n: number) => events.get(n) ?? [],
-    checkRuns: async (sha: string) => runs.get(sha) ?? [],
+    /** The newest run on the commit, then the ones before it (`earlier`): the first the train counts. */
+    ciJobs: async (sha: string, counts: (jobs: object[]) => boolean | Promise<boolean> = () => true) => {
+      for (const jobs of [runs.get(sha) ?? [], ...(earlier.get(sha) ?? [])]) if (await counts(jobs)) return jobs;
+      return [];
+    },
+    pullFiles: async (n: number) => (readState(pulls.get(n)?.body) ? readState(pulls.get(n)!.body).prs.flatMap((m: { number: number }) => files.get(m.number) ?? [`packages/core/src/fix${m.number}.ts`]) : (files.get(n) ?? [`packages/core/src/fix${n}.ts`])),
+    draftJobs: async (sha: string) => drafts.get(sha) ?? [],
+    cancelCi: async (sha: string) => {
+      if (cancelAccess.denied) return { cancelled: [], denied: cancelAccess.denied };
+      const ids = going.get(sha) ?? [];
+      going.delete(sha);
+      cancelled.push(...ids);
+      return { cancelled: ids };
+    },
     headPushedAt: async (sha: string) => (pushed.has(sha) ? pushed.get(sha) : "2026-10-01T00:00:00Z"),
     comments: async (n: number) => comments.get(n) ?? [],
     branchSha: async (base: string) => tips[base],
@@ -77,7 +106,7 @@ function fakeRepo() {
     deleteBranch: async () => {},
     createPull: async ({ base, head, title, body }: { base: string; head: string; title: string; body: string }) => {
       const number = next++;
-      pulls.set(number, { number, title, body, draft: false, sha: built.get(head)!, branch: head, fork: false, labels: [], createdAt: "", open: true, base });
+      pulls.set(number, { number, title, body, draft: false, sha: built.get(head)!, branch: head, fork: false, labels: [], createdAt: "", open: true, base, author: "train" });
       return { number };
     },
     /** A pull request's commits: a batch's are the ones the train built (one per member), with their trees. */
@@ -123,6 +152,8 @@ function fakeRepo() {
   };
   const built = new Map<string, string>();
   const conflicts = new Set<number>();
+  /** Pull requests whose commits do not replay on the tip while their head merges cleanly (a conflict resolved in a merge of the base). */
+  const unrebasable = new Set<number>();
   let lastSha = "";
   const git = {
     build: async (base: string, prs: Pr[]) => {
@@ -155,7 +186,7 @@ function fakeRepo() {
     /** A rebase onto the tip: a new head that sits on it, unless the head already does and nothing forces new commits. */
     rebase: async (base: string, p: Pr, { force = false } = {}) => {
       if (moved.has(p.number)) return { baseSha: tips[base], dropped: "moved" };
-      if (conflicts.has(p.number)) return { baseSha: tips[base], dropped: "conflict" };
+      if (conflicts.has(p.number) || unrebasable.has(p.number)) return { baseSha: tips[base], dropped: "conflict" };
       if (!force && sitsOn.get(p.sha) === tips[base]) return { baseSha: tips[base], sha: p.sha };
       const sha = `r${p.number}.${++rebases}`;
       sitsOn.set(sha, tips[base]);
@@ -172,10 +203,10 @@ function fakeRepo() {
     },
   };
   /** A pull request with `queue`; its head sits on the base's tip unless it is `behind`. */
-  const add = (number: number, { ci = green as object[], draft = false, priority = false, base = "dev", behind = false } = {}) => {
+  const add = (number: number, { ci = green as object[], draft = false, priority = false, priorityOnly = false, base = "dev", behind = false } = {}) => {
     const sha = `h${number}`;
-    pulls.set(number, { number, title: `fix ${number}`, body: "", draft, sha, branch: `fix-${number}`, fork: false, labels: [LABEL.queue, ...(priority ? [LABEL.priority] : [])], createdAt: "2026-10-01T00:00:00Z", open: true, base });
-    events.set(number, [{ event: "labeled", label: { name: LABEL.queue }, created_at: new Date(Date.UTC(2026, 9, 8, 0, 0, clock++)).toISOString() }]);
+    pulls.set(number, { number, title: `fix ${number}`, body: "", draft, sha, branch: `fix-${number}`, fork: false, labels: priorityOnly ? [LABEL.priority] : [LABEL.queue, ...(priority ? [LABEL.priority] : [])], createdAt: "2026-10-01T00:00:00Z", open: true, base });
+    events.set(number, [{ event: "labeled", label: { name: priorityOnly ? LABEL.priority : LABEL.queue }, created_at: new Date(Date.UTC(2026, 9, 8, 0, 0, clock++)).toISOString() }]);
     runs.set(sha, ci);
     sitsOn.set(sha, behind ? "old" : tips[base]);
   };
@@ -195,7 +226,7 @@ function fakeRepo() {
   const flight = () => (batch() ? members() : [...pulls.values()].filter((p) => p.open && alone(p.number)?.sha === p.sha).map((p) => p.number));
   let stamp = 0;
   const run = (opts = {}) => tick({ gh, git, base: "dev", login: "train", stamp: String(stamp++), pause: async () => {}, ...opts });
-  return { gh, git, pulls, comments, runs, pushed, tips, landed, conflicts, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, add, settle, batch, members, alone, flight, run };
+  return { gh, git, pulls, comments, runs, earlier, files, drafts, going, cancelled, cancelAccess, pushed, tips, landed, conflicts, unrebasable, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, add, settle, batch, members, alone, flight, run };
 }
 
 describe("the line", () => {
@@ -213,16 +244,29 @@ describe("the line", () => {
     const at = (name: string, created_at: string, event = "labeled") => ({ event, label: { name }, created_at });
     expect(queuedAt([at("queue", "2026-10-08T01:00:00Z"), at("queue", "2026-10-08T01:00:00Z", "unlabeled"), at("queue", "2026-10-08T04:00:00Z"), at("bug", "2026-10-08T09:00:00Z")], "x")).toBe("2026-10-08T04:00:00Z");
     expect(queuedAt([], "2026-10-01T00:00:00Z")).toBe("2026-10-01T00:00:00Z");
+    // queue:priority alone puts a pull request in the line, so the time it was given counts too.
+    expect(queuedAt([at("queue:priority", "2026-10-08T02:00:00Z"), at("bug", "2026-10-08T09:00:00Z")], "x")).toBe("2026-10-08T02:00:00Z");
   });
 
-  it("lets only ready, green pull requests board, five at most", () => {
+  it("lets only ready, green pull requests board, twelve at most", () => {
     const pr = (number: number, extra = {}) => ({ number, ci: "success", draft: false, fork: false, ...extra });
     expect(waiting(pr(1, { draft: true }))).toMatch(/draft/);
     expect(waiting(pr(1, { fork: true }))).toMatch(/fork/);
     expect(waiting(pr(1, { ci: "failure" }))).toMatch(/red/);
     expect(waiting(pr(1, { ci: "pending" }))).toMatch(/not passed/);
-    const line = [pr(1), pr(2, { ci: "pending" }), pr(3), pr(4), pr(5), pr(6), pr(7), pr(8)];
-    expect(pickBatch(line).map((p) => p.number)).toEqual([1, 3, 4, 5, 6]);
+    const line = [pr(1), pr(2, { ci: "pending" }), ...Array.from({ length: 13 }, (_, i) => pr(i + 3))];
+    expect(pickBatch(line).map((p) => p.number)).toEqual([1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+  });
+
+  it("lets a ready pull request board on its fast tier alone, unless CI Success is red", () => {
+    const pr = (extra = {}) => ({ number: 1, ci: "pending", draft: false, fork: false, ...extra });
+    expect(waiting(pr({ fast: "success" }))).toBeNull();
+    expect(waiting(pr({ ci: "none", fast: "success" }))).toBeNull();
+    expect(waiting(pr({ fast: "failure" }))).toMatch(/CI Success \(draft\) is red/);
+    expect(waiting(pr({ fast: "none" }))).toMatch(/not passed/);
+    expect(waiting(pr({ fast: "pending" }))).toMatch(/not passed/);
+    expect(waiting(pr({ ci: "failure", fast: "success" }))).toMatch(/CI Success is red/);
+    expect(waiting(pr({ draft: true, fast: "success" }))).toMatch(/draft/);
   });
 
   it("splits a red batch in halves down to one culprit", () => {
@@ -247,44 +291,66 @@ describe("the line", () => {
     expect(readState(body)).toMatchObject({ baseSha: "abc", prs: [{ number: 1, sha: "s1" }] });
   });
 
-  it("counts as a batch only a pull request from this repository on a batch/<base>- branch", () => {
-    const body = batchBody("dev", "abc", "b1", [], []);
-    expect(isBatch({ fork: false, branch: "batch/dev-1", body }, "dev")).toBe(true);
-    expect(isBatch({ fork: true, branch: "batch/dev-1", body }, "dev")).toBe(false);
-    expect(isBatch({ fork: false, branch: "dev", body }, "dev")).toBe(false);
-    expect(isBatch({ fork: false, branch: "batch/epic/x-1", body }, "dev")).toBe(false);
+  it("counts as a batch only a pull request the train opened from this repository on a batch/<base>- branch", () => {
+    const body = batchBody("dev", "abc", "b1", [{ number: 1, sha: "s1", title: "one" }], []);
+    const own = { fork: false, branch: "batch/dev-1", body, author: "train" };
+    expect(isBatch(own, "dev", "train")).toBe(true);
+    expect(isBatch({ ...own, fork: true }, "dev", "train")).toBe(false);
+    expect(isBatch({ ...own, branch: "dev" }, "dev", "train")).toBe(false);
+    expect(isBatch({ ...own, branch: "batch/epic/x-1" }, "dev", "train")).toBe(false);
+    expect(isBatch({ ...own, author: "stranger" }, "dev", "train")).toBe(false);
+    expect(isBatch(own, "dev", undefined)).toBe(false);
+    // The train never opens a batch of nobody.
+    expect(isBatch({ ...own, body: batchBody("dev", "abc", "b1", [], []) }, "dev", "train")).toBe(false);
   });
 });
 
 describe("a run of the train", () => {
-  it("boards the five oldest green pull requests and tells everyone in line where they are", async () => {
+  it("takes a pull request with queue:priority and no queue as in the line, first", async () => {
     const repo = fakeRepo();
-    for (const n of [11, 12, 13, 14, 15, 16, 17]) repo.add(n);
+    for (const n of [31, 32]) repo.add(n);
+    repo.add(33, { priorityOnly: true });
     const r = await repo.run();
-    expect(repo.members()).toEqual([11, 12, 13, 14, 15]);
+    expect(repo.members()).toEqual([33, 31, 32]);
+    expect(repo.comments.get(33)![0].body).toMatch(new RegExp(`in batch #${r.inFlight}`));
+
+    // Alone in the line it is still a line: the train has something to run.
+    const lone = fakeRepo();
+    lone.add(41, { priorityOnly: true });
+    await lone.run();
+    expect(lone.landed).toEqual(["#41"]);
+  });
+
+  it("boards the twelve oldest green pull requests and tells everyone in line where they are", async () => {
+    const repo = fakeRepo();
+    const twelve = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+    for (const n of [...twelve, 23, 24]) repo.add(n);
+    const r = await repo.run();
+    expect(repo.members()).toEqual(twelve);
     expect(r.inFlight).toBe(repo.batch()!.number);
     expect(repo.comments.get(11)![0].body).toMatch(new RegExp(`in batch #${r.inFlight}`));
-    expect(repo.comments.get(16)![0].body).toMatch(/\*\*1st\*\*/);
-    expect(repo.comments.get(17)![0].body).toMatch(/\*\*2nd\*\*/);
+    expect(repo.comments.get(23)![0].body).toMatch(/\*\*1st\*\*/);
+    expect(repo.comments.get(24)![0].body).toMatch(/\*\*2nd\*\*/);
 
     repo.runs.set(repo.batch()!.sha, running);
     const again = await repo.run(); // CI still running: nothing moves, and the position comments are not posted again
     expect(again.inFlight).toBe(r.inFlight);
     expect(again.log.join("\n")).not.toMatch(/warning/);
-    expect(repo.members()).toEqual([11, 12, 13, 14, 15]);
-    expect(repo.comments.get(16)).toHaveLength(1);
+    expect(repo.members()).toEqual(twelve);
+    expect(repo.comments.get(23)).toHaveLength(1);
   });
 
   it("lands a green batch one pull request at a time, each merged by GitHub, closes the batch, and boards the next", async () => {
     const repo = fakeRepo();
-    for (const n of [11, 12, 13, 14, 15, 16]) repo.add(n);
+    const twelve = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+    for (const n of [...twelve, 23]) repo.add(n);
     const first = (await repo.run()).inFlight;
     repo.settle();
     const r = await repo.run();
-    expect(r.merged).toEqual([11, 12, 13, 14, 15]);
-    expect(repo.landed).toEqual(["#11", "#12", "#13", "#14", "#15"]);
-    expect(repo.merges).toEqual(["squash #11", "squash #12", "squash #13", "squash #14", "squash #15"]); // in the batch's order, never the rebase merge
-    for (const n of [11, 12, 13, 14, 15]) {
+    expect(r.merged).toEqual(twelve);
+    expect(repo.landed).toEqual(twelve.map((n) => `#${n}`));
+    expect(repo.merges).toEqual(twelve.map((n) => `squash #${n}`)); // in the batch's order, never the rebase merge
+    for (const n of twelve) {
       expect(repo.pulls.get(n)).toMatchObject({ open: false, merged: true, labels: [] }); // merged, not closed
       expect(repo.comments.get(n)).toEqual([]); // the position comment goes, and no "Merged via"
       // The title and message of the batch's own commit of it: what CI tested is what `git log` shows.
@@ -295,13 +361,13 @@ describe("a run of the train", () => {
     expect(repo.trees.get(repo.tips.dev)).toBe(repo.trees.get(repo.pulls.get(first)!.sha));
     expect(repo.pulls.get(first)).toMatchObject({ open: false });
     expect(repo.pulls.get(first)!.merged).toBeUndefined();
-    expect(repo.comments.get(first)!.map((c) => c.body)).toEqual(["Merge train: #11 #12 #13 #14 #15 landed on `dev`, each with GitHub's squash merge, so this batch closes."]);
+    expect(repo.comments.get(first)!.map((c) => c.body)).toEqual([`Merge train: ${twelve.map((n) => `#${n}`).join(" ")} landed on \`dev\`, each with GitHub's squash merge, so this batch closes.`]);
     expect(r.closed).toEqual([]);
     expect(r.log.join("\n")).not.toMatch(/::(warning|error)::/);
-    // #16 is next, alone: dev moved under it, so the train rebases its branch instead of opening a batch.
-    expect(r.inFlight).toBe(16);
+    // #23 is next, alone: dev moved under it, so the train rebases its branch instead of opening a batch.
+    expect(r.inFlight).toBe(23);
     expect(repo.batch()).toBeUndefined();
-    expect(repo.flight()).toEqual([16]);
+    expect(repo.flight()).toEqual([23]);
   });
 
   it("drops a conflicting pull request with one comment and boards the rest", async () => {
@@ -330,6 +396,89 @@ describe("a run of the train", () => {
     expect(repo.landed).toEqual(["#11", "#12", "#14"]);
     expect(repo.pulls.get(13)!.labels).toEqual([LABEL.failed]);
     expect(repo.comments.get(13)!.at(-1)!.body).toMatch(/failed twice in a batch with only this pull request on `dev`/);
+  });
+
+  it("boards ready pull requests on a green fast tier while their own full CI runs, and cancels those runs", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) {
+      repo.add(n, { ci: running });
+      repo.drafts.set(`h${n}`, fastGreen);
+      repo.going.set(`h${n}`, [100 + n]);
+    }
+    repo.add(14); // CI Success green already: nothing of its own to cancel
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11, 12, 13, 14]);
+    expect(repo.cancelled).toEqual([111, 112, 113]);
+    expect(r.log).toContain("CANCEL #11: its own CI run 111 (the batch's CI is its gate)");
+    // The batch's own CI is the gate: nothing lands until it is green.
+    expect(repo.landed).toEqual([]);
+    repo.settle();
+    await repo.run();
+    expect(repo.landed).toEqual(["#11", "#12", "#13", "#14"]);
+  });
+
+  it("does not board a pull request whose fast tier is red or missing on its head, or green only on an older commit", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13, 14, 15]) repo.add(n, { ci: running });
+    repo.drafts.set("h11", fastRed);
+    repo.drafts.set("h13", fastGreen);
+    repo.drafts.set("h12-older", fastGreen); // #12's head is h12: a green fast tier elsewhere does not count
+    repo.drafts.set("h15", fastGreen);
+    repo.going.set("h11", [111]);
+    const r = await repo.run();
+    expect(repo.members()).toEqual([13, 15]);
+    expect(repo.cancelled).toEqual([]);
+    expect(repo.comments.get(11)![0].body).toMatch(/1st\*\*\. Waiting: CI Success \(draft\) is red/);
+    expect(repo.comments.get(12)![0].body).toMatch(/2nd\*\*\. Waiting: CI Success has not passed/);
+    expect(repo.comments.get(14)![0].body).toMatch(/3rd\*\*\. Waiting: CI Success has not passed/);
+    expect(r.dropped).toEqual([]);
+  });
+
+  it("boards without cancelling, and says so once, when the token may not cancel workflow runs", async () => {
+    const repo = fakeRepo();
+    repo.cancelAccess.denied = "HTTP 403 Resource not accessible by integration";
+    for (const n of [11, 12]) {
+      repo.add(n, { ci: running });
+      repo.drafts.set(`h${n}`, fastGreen);
+      repo.going.set(`h${n}`, [100 + n]);
+    }
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11, 12]);
+    expect(repo.cancelled).toEqual([]);
+    expect(r.log.filter((l) => l.startsWith("Not cancelling"))).toEqual([
+      `Not cancelling the boarded pull requests' own CI: this token may not cancel workflow runs (HTTP 403 Resource not accessible by integration); it needs "Actions: write".`,
+    ]);
+    expect(r.log.join("\n")).not.toMatch(/::(warning|error)::/);
+  });
+
+  it("keeps a failed cancel from stopping the train", async () => {
+    const repo = fakeRepo();
+    repo.gh.cancelCi = async () => Promise.reject(new Error("POST cancel of run 1: HTTP 500"));
+    for (const n of [11, 12]) {
+      repo.add(n, { ci: running });
+      repo.drafts.set(`h${n}`, fastGreen);
+    }
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11, 12]);
+    expect(r.log).toContain("::warning::Could not cancel #11's own CI: POST cancel of run 1: HTTP 500");
+  });
+
+  it("finds the culprit of a red batch boarded on fast tiers by the same halves", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13, 14]) {
+      repo.add(n, { ci: running });
+      repo.drafts.set(`h${n}`, fastGreen);
+    }
+    await repo.run();
+    const seen: number[][] = [repo.flight()];
+    for (let i = 0; i < 10 && repo.flight().length; i++) {
+      repo.settle([13]);
+      await repo.run();
+      seen.push(repo.flight());
+    }
+    expect(seen).toEqual([[11, 12, 13, 14], [11, 12], [13, 14], [13], [13], [14], []]);
+    expect(repo.landed).toEqual(["#11", "#12", "#14"]);
+    expect(repo.pulls.get(13)!.labels).toEqual([LABEL.failed]);
   });
 
   it("never lets a newer pull request overtake an older one (FIFO)", async () => {
@@ -400,6 +549,50 @@ describe("a run of the train", () => {
     expect(repo.landed).toEqual([]);
     expect(r.closed).toEqual([]);
     expect(deleted).toEqual([]);
+  });
+
+  it("never merges a batch branch of this repository that another login opened, nor lets it retire the train's", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    const real = (await repo.run()).inFlight;
+    const mark = (prs: object[]) => `<!-- merge-train:batch ${JSON.stringify({ base: "dev", baseSha: "dev0", head: "evil", prs, next: [] })} -->`;
+    const forged = { title: "x", draft: false, sha: "evil", fork: false, labels: [], createdAt: "", open: true, base: "dev" };
+    repo.pulls.set(1, { ...forged, number: 1, body: mark([]), branch: "batch/dev-20261008", author: "stranger" });
+    repo.pulls.set(2, { ...forged, number: 2, body: mark([{ number: 11, sha: "h11" }]), branch: "batch/dev-20261009", author: "stranger" });
+    repo.runs.set("evil", green);
+    const r = await repo.run();
+    expect(repo.landed).toEqual([]);
+    expect(r.closed).toEqual([]);
+    expect(r.inFlight).toBe(real);
+    expect(repo.pulls.get(1)!.open && repo.pulls.get(2)!.open).toBe(true);
+  });
+
+  it("takes out a pull request that changes a workflow when GitHub refuses the batch's push for it, and boards the rest", async () => {
+    // The queue app's token has no `workflows` permission: GitHub refuses any push whose commits change a workflow, so
+    // every run failed and the whole line waited behind that one pull request.
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    repo.add(13);
+    repo.files.set(12, [".github/workflows/ci.yml", "tools/scripts/ci-changes.mjs"]);
+    const push = repo.git.push;
+    repo.git.push = async (branch: string, sha: string) => {
+      if (sha.split(":")[1]?.split(",").includes("12")) {
+        throw new Error(`Command failed: git push -q --force origin ${sha}:refs/heads/${branch}\n ! [remote rejected]   ${sha} -> ${branch} (refusing to allow a GitHub App to create or update workflow \`.github/workflows/ci.yml\` without \`workflows\` permission)\nerror: failed to push some refs`);
+      }
+      return push(branch, sha);
+    };
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11, 13]);
+    expect(r.dropped).toEqual([12]);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.failed]);
+    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/changes a workflow \(\.github\/workflows\/ci\.yml\)/);
+    // Any other refusal is still the run's error.
+    repo.git.push = async () => { throw new Error("Command failed: git push\nfatal: unable to access"); };
+    repo.add(14);
+    repo.batch()!.open = false;
+    await expect(repo.run()).rejects.toThrow(/unable to access/);
   });
 
   it("closes a batch whose branch got a commit the train did not build", async () => {
@@ -1121,6 +1314,40 @@ describe("one pull request alone", () => {
     expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/conflicts with `dev`/)]);
   });
 
+  it("sends one that resolved its conflict in a merge of the base the batch way, where its head merges cleanly", async () => {
+    const repo = fakeRepo();
+    repo.unrebasable.add(11);
+    repo.add(11, { behind: true });
+    const r = await repo.run();
+    expect(r.dropped).toEqual([]);
+    expect(r.log).toContain("ALONE #11: its commits do not rebase onto `dev`; it goes the batch way.");
+    expect(r.opened).toHaveLength(1);
+    expect(repo.members()).toEqual([11]);
+    expect(repo.pushes).toEqual([]); // its branch stays as the author left it
+    expect(repo.pulls.get(11)!.labels).toEqual([LABEL.queue]);
+    repo.settle();
+    expect((await repo.run()).merged).toEqual([11]);
+    expect(repo.landed).toEqual(["#11"]);
+  });
+
+  it("sends a rebased one the batch way when the base moves and its commits no longer replay, with its rerun still spent", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    repo.settle([11]);
+    await repo.run(); // red once: a second run on a fresh rebase
+    expect(repo.alone(11)!.retried).toBe(true);
+    repo.tips.dev = "dev1";
+    repo.unrebasable.add(11);
+    const r = await repo.run();
+    expect(repo.members()).toEqual([11]);
+    expect(readState(repo.batch()!.body).retried).toBe(true);
+    repo.settle([11]);
+    const red = await repo.run();
+    expect(red.failed).toEqual([11]); // no third run
+    expect(r.dropped).toEqual([]);
+  });
+
   it("still builds a batch for two or more, and never pushes to their branches", async () => {
     const repo = fakeRepo();
     repo.add(11, { behind: true });
@@ -1159,6 +1386,15 @@ describe("one pull request alone", () => {
     expect(r.log).toContain("VERIFIED #11: GitHub signed s11 (verified=true)");
     expect(r.log.join("\n")).not.toMatch(/::warning::/);
     expect(squashMessage({ title: "feat: x", number: 7 }, [])).toEqual({ title: "feat: x (#7)", message: "" });
+  });
+
+  it("writes the words that make GitHub skip CI in round brackets, in every message it composes", () => {
+    // In a batch's head commit they stop the batch's CI from ever starting: the train then rebuilds the same batch
+    // every 20 minutes for good. A title edited while queued, or an earlier commit of the pull request, can carry them.
+    for (const words of ["skip ci", "ci skip", "no ci", "skip actions", "actions skip", "Skip CI"]) expect(noSkip(`docs: typo [${words}]`)).toBe(`docs: typo (${words})`);
+    expect(noSkip("fix: [skip] a [ci] label")).toBe("fix: [skip] a [ci] label");
+    const commits = [{ commit: { message: "docs: typo [skip ci]\n\nbody" } }, { commit: { message: "fix: the real change" } }];
+    expect(squashMessage({ title: "fix: x [ci skip]", number: 7 }, commits)).toEqual({ title: "fix: x (ci skip) (#7)", message: "* docs: typo (skip ci)\n* fix: the real change" });
   });
 
   it("lands a rebased pull request by the same squash merge, at the commit CI passed on", async () => {
@@ -1240,6 +1476,45 @@ describe("one pull request alone", () => {
     expect(repo.members()).toEqual([11]);
   });
 
+  it("never pushes its rebase to a branch whose pushes a workflow acts on", async () => {
+    // Every branch a workflow names under `on.push` (or under a `workflow_run` that follows such a push): CI on a push
+    // to `claude/security-auto-*` ends in security-autorelease.yml, which releases that commit.
+    const dir = resolve(import.meta.dirname, "../../../.github/workflows");
+    const named = new Set<string>();
+    for (const file of readdirSync(dir)) {
+      const text = readFileSync(resolve(dir, file), "utf8");
+      for (const m of text.matchAll(/^ {2}(?:push|workflow_run):\n(?: {4}.*\n)*? {4}branches: \[(.*)\]/gm)) for (const b of m[1].split(",")) named.add(b.trim().replace(/^"|"$/g, ""));
+    }
+    expect([...named]).toEqual(expect.arrayContaining(["main", "dev", "claude/security-auto-**", "epic/**"]));
+    for (const pattern of named) expect([pattern, canGoAlone({ fork: false, branch: pattern.replace(/\*+/, "20261008") })]).toEqual([pattern, false]);
+
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    repo.pulls.get(11)!.branch = "claude/security-auto-20261008";
+    const r = await repo.run();
+    expect(repo.pushes).toEqual([]);
+    expect(repo.pulls.get(11)!.sha).toBe("h11"); // the routine's own commit stays the branch's head
+    expect(repo.alone(11)).toBeNull();
+    expect(repo.members()).toEqual([11]);
+    expect(r.inFlight).toBe(repo.batch()!.number);
+  });
+
+  it("stops flying alone a head it may no longer push to: the next rebase is a batch", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    await repo.run();
+    const head = repo.pulls.get(11)!.sha;
+    expect(repo.pushes).toEqual([`fix-11=${head}`]);
+    repo.pulls.get(11)!.branch = "claude/security-auto-20261008"; // a mark left by a train that still pushed there
+    repo.tips.dev = "dev1";
+    expect((await repo.run()).inFlight).toBeNull(); // in line like any other, until CI is green on its head
+    repo.settle();
+    await repo.run();
+    expect(repo.pushes).toHaveLength(1);
+    expect(repo.pulls.get(11)!.sha).toBe(head);
+    expect(repo.members()).toEqual([11]);
+  });
+
   it("changes nothing in a dry run, and says what it would do", async () => {
     const repo = fakeRepo();
     repo.add(11);
@@ -1289,6 +1564,145 @@ describe("CI on a commit", () => {
     expect(ciState([run("CI Success", "completed", "cancelled"), run("Changed paths", "queued")])).toBe("pending");
     expect(ciState([run("CI Success", "completed", "cancelled")])).toBe("none");
   });
+
+  it("takes the newest gate by id, never by a start time the caller set", () => {
+    const forged = run("CI Success", "completed", "success", "2099-01-01T00:00:00Z", 5);
+    expect(ciState([run("CI Success", "completed", "failure", "2026-10-07T10:00:00Z", 4), forged])).toBe("success");
+    expect(ciState([forged, run("CI Success", "completed", "failure", "2026-10-07T12:00:00Z", 6)])).toBe("failure");
+  });
+
+  it("is CI's own run: the newest run of this repository's ci.yml on exactly that commit", () => {
+    const wf = (id: number, path = ".github/workflows/ci.yml", repo = "o/r", head_sha = "abc") => ({ id, path, head_sha, repository: { full_name: repo } });
+    expect(ciRun([wf(1), wf(3), wf(2)], "o/r", "abc")?.id).toBe(3);
+    expect(ciRun([wf(1), wf(9, ".github/workflows/forge.yml"), wf(8, ".github/workflows/ci.yml", "evil/r"), wf(7, ".github/workflows/ci.yml", "o/r", "def")], "o/r", "abc")?.id).toBe(1);
+    expect(ciRun([wf(9, ".github/workflows/forge.yml")], "o/r", "abc")).toBeNull();
+  });
+});
+
+describe("a green CI run planned for other files", () => {
+  it("names the gate of every job ci.yml's plan may leave out", () => {
+    const yml = readFileSync(resolve(import.meta.dirname, "../../../.github/workflows/ci.yml"), "utf8");
+    // Each job's name and condition: `  <id>:`, then `    name: ...` and, within its first lines, `    if: needs.changes.outputs.<gate> == 'true'`.
+    const gated = [...yml.matchAll(/^ {2}[\w-]+:\n {4}name: (.+)\n(?: {4}.+\n){0,3}? {4}if: needs\.changes\.outputs\.(\w+) == 'true'$/gm)].map((m) => ({ name: m[1], gate: m[2] }));
+    expect(gated.map((j) => j.gate).sort()).toEqual(["affected", "app", "app", "full", "full", "packages", "packages", "rust", "website", "website_e2e"]);
+    // The draft tier's job is skipped in every full run: it is no path gate.
+    for (const { name, gate } of gated) expect([name, gateOf(name)]).toEqual([name, gate === "affected" ? undefined : gate]);
+    expect(Object.keys(PLANNED_JOBS).filter((start) => !gated.some((j) => j.name.startsWith(start)))).toEqual([]);
+    expect(gateOf("Frontend tests (packages 3/4)")).toBe("packages");
+    expect(gateOf("Desktop on macOS / Desktop calls and shared apps (macOS WKWebView)")).toBe("app");
+    expect(gateOf("CI Success")).toBeUndefined();
+  });
+
+  it("reads the gates a run planned off from its skipped jobs", () => {
+    expect(skippedGates(green)).toEqual([]);
+    expect(skippedGates(greenForDocs).sort()).toEqual(["app", "packages", "website_e2e"]);
+  });
+
+  it("plans as ci.yml does for a ready pull request", async () => {
+    expect(await ciPlan(["docs/NOTES.md"])).toMatchObject({ packages: false, app: false, website: false, full: true, rust: true });
+    expect(await ciPlan(["packages/core/src/x.ts", "docs/NOTES.md"])).toMatchObject({ packages: true, app: true });
+    expect(await ciPlan(null)).toMatchObject({ packages: true, app: true, website: true, website_e2e: true });
+  });
+
+  it("does not land a pull request on it: its own red run still speaks", async () => {
+    const repo = fakeRepo();
+    repo.add(21, { ci: greenForDocs });
+    repo.earlier.set("h21", [red]);
+    repo.files.set(21, ["packages/core/src/x.ts", "docs/NOTES.md"]);
+    const r = await repo.run();
+    expect(r.merged).toEqual([]);
+    expect(repo.landed).toEqual([]);
+    expect(repo.comments.get(21)![0].body).toMatch(/1st\*\*\. Waiting: CI Success is red on its last commit/);
+    expect(r.log.join("\n")).toMatch(/#21: a green CI run skipped what its files turn on \(packages, app\)/);
+  });
+
+  it("keeps the pull request waiting when that run is the only one, and says to run CI again", async () => {
+    const repo = fakeRepo();
+    repo.add(21, { ci: greenForDocs });
+    const r = await repo.run();
+    expect(r.merged).toEqual([]);
+    expect(repo.landed).toEqual([]);
+    expect(repo.comments.get(21)![0].body).toMatch(/Waiting: the green CI run on its last commit skipped jobs that its changes need/);
+  });
+
+  it("passes over it for the pull request's own green run before it", async () => {
+    const repo = fakeRepo();
+    repo.add(21, { ci: greenForDocs });
+    repo.earlier.set("h21", [green]);
+    expect((await repo.run()).merged).toEqual([21]);
+  });
+
+  it("lands a pull request whose own files skip those jobs", async () => {
+    const repo = fakeRepo();
+    repo.add(21, { ci: greenForDocs });
+    repo.files.set(21, ["docs/NOTES.md"]);
+    expect((await repo.run()).merged).toEqual([21]);
+    expect(repo.landed).toEqual(["#21"]);
+  });
+
+  it("lands a pull request that changes the plan itself: its runs are planned by its own copy", async () => {
+    const repo = fakeRepo();
+    repo.add(21, { ci: greenForDocs });
+    repo.files.set(21, ["tools/scripts/ci-changes.mjs", "tools/scripts/test/ci-changes.test.ts"]);
+    expect((await repo.run()).merged).toEqual([21]);
+  });
+
+  it("does not land a batch on it", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    await repo.run();
+    expect(repo.members()).toEqual([11, 12]);
+    repo.runs.set(repo.batch()!.sha, greenForDocs);
+    const r = await repo.run();
+    expect(r.merged).toEqual([]);
+    expect(repo.landed).toEqual([]);
+    // Every member changes only docs/: the same run is the batch's own.
+    repo.files.set(11, ["docs/A.md"]);
+    repo.files.set(12, ["docs/B.md"]);
+    expect((await repo.run()).merged).toEqual([11, 12]);
+  });
+
+  it("is passed over over REST: the run before it is read, and the files are the pull request's, renames by both names", async () => {
+    const sent: string[] = [];
+    const wf = (id: number) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" } });
+    const answers: Record<string, object> = {
+      "/actions/workflows/ci.yml/runs?head_sha=abc&per_page=100": { workflow_runs: [wf(5001), wf(5002)] },
+      "/actions/runs/5002/jobs?filter=latest&per_page=100&page=1": { jobs: greenForDocs },
+      "/actions/runs/5001/jobs?filter=latest&per_page=100&page=1": { jobs: red },
+      "/pulls/21/files?per_page=100&page=1": [{ filename: "docs/NOTES.md" }, { filename: "packages/core/src/new.ts", previous_filename: "packages/core/src/old.ts" }],
+      "/pulls/22/files?per_page=100&page=1": [],
+    };
+    const fetchImpl = async (url: string) => {
+      const path = url.replace("https://api.github.com/repos/o/r", "");
+      sent.push(path);
+      return { status: 200, ok: true, headers: new Headers({ "x-ratelimit-remaining": "4000" }), text: async () => JSON.stringify(answers[path] ?? {}) };
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    expect(await gh.pullFiles(21)).toEqual(["docs/NOTES.md", "packages/core/src/new.ts", "packages/core/src/old.ts"]);
+    expect(await gh.pullFiles(22)).toBeNull();
+    expect(ciState(await gh.ciJobs("abc"))).toBe("success"); // nobody asked: the newest, as before
+    const seen: string[] = [];
+    const counts = async (jobs: { name: string }[]) => (seen.push(ciState(jobs)), skippedGates(jobs).length === 0);
+    expect(ciState(await gh.ciJobs("abc", counts))).toBe("failure");
+    expect(seen).toEqual(["success", "failure"]);
+    expect(ciState(await gh.ciJobs("abc", () => false))).toBe("none");
+    // Each run's jobs are read once for the three questions.
+    expect(sent.filter((p) => p.includes("/jobs"))).toEqual(["/actions/runs/5002/jobs?filter=latest&per_page=100&page=1", "/actions/runs/5001/jobs?filter=latest&per_page=100&page=1"]);
+  });
+});
+
+describe("the fast tier on a commit", () => {
+  it("reads the newest draft gate, and nothing else", () => {
+    const gate = (status: string, conclusion: string | null, id = 1) => ({ name: "CI Success (draft)", status, conclusion, id });
+    expect(draftState([gate("completed", "success")])).toBe("success");
+    expect(draftState([gate("completed", "failure")])).toBe("failure");
+    expect(draftState([gate("in_progress", null)])).toBe("pending");
+    expect(draftState([gate("completed", "cancelled")])).toBe("none");
+    expect(draftState([gate("completed", "failure", 1), gate("completed", "success", 2)])).toBe("success");
+    expect(draftState([{ name: "CI Success", status: "completed", conclusion: "success", id: 3 }])).toBe("none");
+    expect(draftState([])).toBe("none");
+  });
 });
 
 describe("the bases with a train", () => {
@@ -1298,8 +1712,96 @@ describe("the bases with a train", () => {
     const pulls = [pr("dev", [LABEL.queue]), pr("dev", [LABEL.queue]), pr("epic/apps-1.2", [], batch, "batch/epic/apps-1.2-1"), pr("epic/x"), pr("main", [LABEL.queue]), pr("dev")];
     expect(trainBases(pulls)).toEqual(["dev", "epic/apps-1.2"]);
     expect(trainBases([pr("dev", ["bug"])])).toEqual([]);
+    // queue:priority alone is in the line: the base has a train to run (three green fixes waited 8 h without it).
+    expect(trainBases([pr("dev", [LABEL.priority])])).toEqual(["dev"]);
     // Only bases tick accepts, so a strange epic name never turns the workflow red; a forged batch names no base.
     expect(trainBases([pr("epic/a/b", [LABEL.queue]), pr("epic/z", [], batchBody("epic/z", "a", "b", [], []), "batch/epic/z-1", true)])).toEqual([]);
+  });
+
+  it("woken by a CI run are only those where its commit is the head of a queued pull request or of a batch", () => {
+    const a = "a".repeat(40), b = "b".repeat(40), c = "c".repeat(40), d = "d".repeat(40);
+    const pr = (base: string, sha: string, labels: string[] = [], body = "", branch = "fix") => ({ base, sha, labels, body, branch, fork: false });
+    const pulls = [pr("dev", a, [LABEL.queue]), pr("dev", b), pr("epic/x", c, [], batchBody("epic/x", "abc", c, [], []), "batch/epic/x-1"), pr("epic/y", d, [LABEL.priority])];
+    // No CI run woke it (the schedule, a label, a push, by hand): every base with a train, as before.
+    expect(trainBases(pulls)).toEqual(["dev", "epic/x", "epic/y"]);
+    // The head of a queued pull request, and of a batch: its base's train alone.
+    expect(trainBases(pulls, a)).toEqual(["dev"]);
+    expect(trainBases(pulls, c)).toEqual(["epic/x"]);
+    expect(trainBases(pulls, d)).toEqual(["epic/y"]);
+    // A pull request not in line (a draft still worked on, a ready one before `queue`), and a commit that heads none
+    // (the head a queued one had before a push): no train can do anything with that run.
+    expect(trainBases(pulls, b)).toEqual([]);
+    expect(trainBases(pulls, "e".repeat(40))).toEqual([]);
+    // The same commit at the head of two pull requests (a fork of a queued branch): the base of the queued one.
+    expect(trainBases([...pulls, pr("epic/y", a)], a)).toEqual(["dev"]);
+    // Not a commit (the workflow gave nothing, or something else): every base, never none by mistake.
+    expect(trainBases(pulls, "")).toEqual(["dev", "epic/x", "epic/y"]);
+    expect(trainBases(pulls, "abc")).toEqual(["dev", "epic/x", "epic/y"]);
+  });
+
+  it("woken by a CI run are read from the open pull requests' heads as GitHub lists them", async () => {
+    const queued = "1".repeat(40), draft = "2".repeat(40);
+    const open = (number: number, sha: string, labels: string[]) => ({ number, title: "t", body: "", draft: false, head: { sha, ref: `fix-${number}`, repo: { full_name: "o/r" } }, labels: labels.map((name) => ({ name })), created_at: "2026-10-12T00:00:00Z", base: { ref: "dev" } });
+    const gh = restLayer("t", "o/r", { fetchImpl: async () => ({ status: 200, ok: true, headers: new Headers({ "x-ratelimit-remaining": "4000" }), text: async () => JSON.stringify([open(1, queued, [LABEL.queue]), open(2, draft, [])]) }), wait: async () => {} });
+    const pulls = await gh.pulls();
+    expect(trainBases(pulls, queued)).toEqual(["dev"]);
+    expect(trainBases(pulls, draft)).toEqual([]);
+  });
+
+  // A run that waits in the `bases` job's group is replaced by the next one that joins it (merge-queue.yml): that one
+  // serves it too, so a queued pull request's CI ending is never lost to a draft's CI ending just after it.
+  it("woken by a CI run are also those of the runs it replaced while they waited", async () => {
+    const a = "a".repeat(40), b = "b".repeat(40), c = "c".repeat(40), d = "d".repeat(40);
+    const pr = (base: string, sha: string, labels: string[] = []) => ({ base, sha, labels, body: "", branch: "fix", fork: false });
+    const pulls = [pr("dev", a, [LABEL.queue]), pr("dev", b), pr("epic/x", c, [LABEL.queue]), pr("epic/y", d, [LABEL.queue])];
+    const ci = (id: number, head: string, conclusion: string | null) => ({ id, conclusion, display_title: `Merge queue: CI ended on ${head}` });
+    const run = (id: number, display_title: string, conclusion: string | null) => ({ id, conclusion, display_title });
+    // Each cancelled one waited: its bases job was cancelled before it started.
+    const waited = async () => [{ name: "Bases with a train", status: "completed", conclusion: "cancelled", steps: [] }];
+    // Newest first, as GitHub lists them: 9 runs now; 8 (a draft's CI, after 7) and 6 (the queued pull request's CI)
+    // waited and were replaced; 7 was the train's own label (all skipped); 5 ran; 4 waited before 5 ran and is served.
+    const runs = [run(10, "Merge queue", null), ci(9, b, null), ci(8, b, "cancelled"), run(7, "fix: x", "skipped"), ci(6, a, "cancelled"), ci(5, d, "success"), ci(4, c, "cancelled")];
+    expect(await missedWakes(runs, 9, waited)).toEqual([b, a]);
+    expect(trainBases(pulls, [b, ...(await missedWakes(runs, 9, waited))!])).toEqual(["dev"]);
+    // Before: the draft's CI alone, so no train ran until the schedule.
+    expect(trainBases(pulls, b)).toEqual([]);
+    // Nothing replaced (the one before ran, or is running), and a run not on the page: its own head alone.
+    expect(await missedWakes(runs, 6, waited)).toEqual([]);
+    expect(await missedWakes([ci(2, a, null), ci(1, b, null)], 2, waited)).toEqual([]);
+    expect(await missedWakes(runs, 11, waited)).toEqual([]);
+    expect(trainBases(pulls, [b])).toEqual([]);
+    // A replaced run that was not woken by CI (a `queue` label, a person's push, the schedule): every base.
+    const label = [ci(3, b, null), run(2, "perf(chat): rows", "cancelled"), ci(1, a, "success")];
+    expect(await missedWakes(label, 3, waited)).toBeNull();
+    expect(trainBases(pulls, null)).toEqual(["dev", "epic/x", "epic/y"]);
+    // A name that only looks like a head is no head.
+    expect(await missedWakes([ci(2, b, null), run(1, "Merge queue: CI ended on abc", "cancelled")], 2, waited)).toBeNull();
+  });
+
+  // A run whose bases job ran but whose train job was replaced in its base's own group ends `cancelled` too: it was
+  // served, so the walk stops there, and the `queue` label run before it never makes this one wake every base.
+  it("woken by a CI run stop at a cancelled run whose bases job ran", async () => {
+    const a = "a".repeat(40), b = "b".repeat(40), e = "e".repeat(40);
+    const pr = (base: string, sha: string, labels: string[] = []) => ({ base, sha, labels, body: "", branch: "fix", fork: false });
+    const pulls = [pr("dev", a, [LABEL.queue]), pr("dev", b), pr("epic/x", "c".repeat(40), [LABEL.queue]), pr("epic/y", e, [LABEL.queue])];
+    const ci = (id: number, head: string, conclusion: string | null) => ({ id, conclusion, display_title: `Merge queue: CI ended on ${head}` });
+    const job = (name: string, conclusion: string, steps: { name: string; conclusion: string }[] = []) => ({ name, status: "completed", conclusion, steps });
+    const waited = [job("Bases with a train", "cancelled"), job("Train into ${{ matrix.base }}", "cancelled")];
+    const listed = [job("Bases with a train", "success", [{ name: "List the bases", conclusion: "success" }]), job("Train into epic/y", "cancelled")];
+    const jobs: Record<number, ReturnType<typeof job>[]> = { 8: waited, 7: listed, 6: listed };
+    const asked: number[] = [];
+    const jobsOf = async (id: number) => (asked.push(id), jobs[id] ?? []);
+    // Newest first: 9 lists now; 8 waited and was replaced; 7 listed epic/y and its train job was replaced in
+    // `merge-train-epic/y`; 6 (a `queue` label) the same; 5 ran.
+    const runs = [ci(9, b, null), ci(8, a, "cancelled"), ci(7, e, "cancelled"), { id: 6, conclusion: "cancelled", display_title: "fix: x" }, ci(5, e, "success")];
+    expect(await missedWakes(runs, 9, jobsOf)).toEqual([a]);
+    expect(trainBases(pulls, [b, a])).toEqual(["dev"]);
+    expect(asked).toEqual([8, 7]);
+    // A run whose jobs could not be told (none listed) counts as one that waited: no wake is lost.
+    expect(await missedWakes([ci(3, b, null), ci(2, a, "cancelled"), ci(1, e, "success")], 3, async () => [])).toEqual([a]);
+    // A bases job cancelled after it started (by hand, or its time ran out) listed nothing: that wake is served here.
+    const cut = [job("Bases with a train", "cancelled", [{ name: "List the bases", conclusion: "cancelled" }])];
+    expect(await missedWakes([ci(3, b, null), ci(2, a, "cancelled"), ci(1, e, "success")], 3, async () => cut)).toEqual([a]);
   });
 
   it("on a Mac are dev and every epic branch, queued or not, with no queue app", async () => {
@@ -1377,6 +1879,142 @@ describe("GitHub over REST", () => {
     ]);
   });
 
+  it("reads CI from the jobs of ci.yml's own run, never from check runs a workflow can post", async () => {
+    const sent: string[] = [];
+    const ciYml = { id: 41, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" } };
+    const forge = { id: 42, path: ".github/workflows/forge.yml", head_sha: "abc", repository: { full_name: "o/r" } };
+    const gate = (id: number, conclusion: string, started_at: string) => ({ id, name: "CI Success", status: "completed", conclusion, started_at });
+    const answers: Record<string, object> = {
+      "/actions/workflows/ci.yml/runs?head_sha=abc&per_page=100": { workflow_runs: [ciYml, forge] },
+      "/actions/runs/41/jobs?filter=latest&per_page=100&page=1": { total_count: 1, jobs: [gate(7, "failure", "2026-10-09T00:30:00Z")] },
+      "/actions/workflows/ci.yml/runs?head_sha=def&per_page=100": { workflow_runs: [] },
+      "/commits/abc/check-runs?filter=latest&per_page=100&page=1": { check_runs: [gate(9, "success", "2099-01-01T00:00:00Z")] },
+    };
+    const fetchImpl = async (url: string) => {
+      const path = url.replace("https://api.github.com/repos/o/r", "");
+      sent.push(path);
+      return reply(200, answers[path] ?? {});
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    expect(ciState(await gh.ciJobs("abc"))).toBe("failure");
+    expect(await gh.ciJobs("def")).toEqual([]);
+    expect(sent.some((p) => p.includes("check-runs"))).toBe(false);
+  });
+
+  it("falls back to GitHub Actions' check runs, with one warning, when the token may not read Actions", async () => {
+    const warnings: string[] = [];
+    const checks = [
+      { id: 7, name: "CI Success", status: "completed", conclusion: "failure", app: { slug: "github-actions" } },
+      { id: 9, name: "CI Success", status: "completed", conclusion: "success", app: { slug: "some-other-app" } },
+    ];
+    const fetchImpl = async (url: string) =>
+      url.includes("/actions/") ? reply(403, { message: "Resource not accessible by integration" }) : reply(200, { total_count: 2, check_runs: checks });
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {}, warn: (m: string) => void warnings.push(m) });
+    expect(ciState(await gh.ciJobs("abc"))).toBe("failure");
+    expect(ciState(await gh.ciJobs("def"))).toBe("failure");
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/Actions: read/);
+  });
+
+  it("reads the fast tier from the newest of CI's runs on a commit that has a draft gate", async () => {
+    const wf = (id: number, extra = {}) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", status: "completed", ...extra });
+    const answers: Record<string, object> = {
+      // 52: the full run leaving draft started; 51: the draft's run; 60: another workflow.
+      "/actions/workflows/ci.yml/runs?head_sha=abc&per_page=100": { workflow_runs: [wf(51), wf(52, { status: "in_progress" }), wf(60, { path: ".github/workflows/forge.yml" })] },
+      "/actions/runs/52/jobs?filter=latest&per_page=100&page=1": { jobs: [{ id: 9, name: "CI Success", status: "queued", conclusion: null }] },
+      "/actions/runs/51/jobs?filter=latest&per_page=100&page=1": { jobs: [{ id: 5, name: "CI Success (draft)", status: "completed", conclusion: "success" }] },
+      "/actions/workflows/ci.yml/runs?head_sha=def&per_page=100": { workflow_runs: [] },
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl: async (url: string) => reply(200, answers[url.replace("https://api.github.com/repos/o/r", "")] ?? {}), wait: async () => {} });
+    expect(draftState(await gh.draftJobs("abc"))).toBe("success");
+    expect(draftState(await gh.draftJobs("def"))).toBe("none");
+    const checks = [
+      { id: 7, name: "CI Success (draft)", status: "completed", conclusion: "success", app: { slug: "github-actions" } },
+      { id: 8, name: "CI Success (draft)", status: "completed", conclusion: "success", app: { slug: "some-other-app" } },
+    ];
+    const noActions = restLayer("t", "o/r", { fetchImpl: async (url: string) => (url.includes("/actions/") ? reply(403, { message: "no" }) : reply(200, { check_runs: checks })), wait: async () => {} });
+    expect((await noActions.draftJobs("abc")).map((c: { id: number }) => c.id)).toEqual([7]);
+  });
+
+  it("reads CI's runs on a commit and each run's jobs once per run of the train, and the runs again only to cancel", async () => {
+    const sent: string[] = [];
+    const wf = (id: number, extra = {}) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", status: "completed", ...extra });
+    const answers: Record<string, object> = {
+      // 52: the full run leaving draft started; 51: the draft's run.
+      "/actions/workflows/ci.yml/runs?head_sha=abc&per_page=100": { workflow_runs: [wf(51), wf(52, { status: "in_progress" })] },
+      "/actions/runs/52/jobs?filter=latest&per_page=100&page=1": { jobs: [{ id: 9, name: "CI Success", status: "queued", conclusion: null }] },
+      "/actions/runs/51/jobs?filter=latest&per_page=100&page=1": { jobs: [{ id: 5, name: "CI Success (draft)", status: "completed", conclusion: "success" }] },
+    };
+    const fetchImpl = async (url: string, init: { method: string }) => {
+      const path = url.replace("https://api.github.com/repos/o/r", "");
+      sent.push(`${init.method} ${path}`);
+      return init.method === "POST" ? reply(202, {}) : reply(200, answers[path] ?? {});
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    // What one run of the train asks about a pull request on the fast tier.
+    expect(ciState(await gh.ciJobs("abc"))).toBe("pending");
+    expect(draftState(await gh.draftJobs("abc"))).toBe("success");
+    expect(sent).toEqual([
+      "GET /actions/workflows/ci.yml/runs?head_sha=abc&per_page=100",
+      "GET /actions/runs/52/jobs?filter=latest&per_page=100&page=1",
+      "GET /actions/runs/51/jobs?filter=latest&per_page=100&page=1",
+    ]);
+    // The same commit asked again in the same run (a base's commit, by two failed batches): nothing more is read.
+    expect(ciState(await gh.ciJobs("abc"))).toBe("pending");
+    expect(sent).toHaveLength(3);
+    // Boarding: the cancel reads the runs afresh, since a full run may have started since.
+    expect(await gh.cancelCi("abc")).toEqual({ cancelled: [52] });
+    expect(sent.slice(3)).toEqual(["GET /actions/workflows/ci.yml/runs?head_sha=abc&per_page=100", "POST /actions/runs/52/cancel"]);
+    // The next run of the train has its own layer, and reads again.
+    const next = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    expect(ciState(await next.ciJobs("abc"))).toBe("pending");
+    expect(sent).toHaveLength(7);
+  });
+
+  it("asks again in the same run for runs or jobs whose read failed", async () => {
+    let down = true;
+    const wf = { id: 41, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" } };
+    const fetchImpl = async (url: string) => {
+      if (down) return reply(404, { message: "Not Found" });
+      return url.includes("/jobs") ? reply(200, { jobs: [{ id: 7, name: "CI Success", status: "completed", conclusion: "success" }] }) : reply(200, { workflow_runs: [wf] });
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    await expect(gh.ciJobs("abc")).rejects.toThrow(/GET CI runs of abc: HTTP 404/);
+    await expect(gh.draftJobs("abc")).rejects.toThrow(/GET CI runs of abc: HTTP 404/);
+    down = false;
+    expect(ciState(await gh.ciJobs("abc"))).toBe("success");
+  });
+
+  it("cancels only CI's pull request runs still going on the commit", async () => {
+    const sent: string[] = [];
+    const wf = (id: number, extra = {}) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", status: "in_progress", ...extra });
+    const runs = [wf(1, { status: "completed" }), wf(2), wf(3, { status: "queued" }), wf(4, { event: "push" }), wf(5, { path: ".github/workflows/e2e.yml" }), wf(6, { head_sha: "def" }), wf(7)];
+    const fetchImpl = async (url: string, init: { method: string }) => {
+      const path = url.replace("https://api.github.com/repos/o/r", "");
+      sent.push(`${init.method} ${path}`);
+      if (path === "/actions/runs/7/cancel") return reply(409, { message: "Cannot cancel a workflow run that is completed." });
+      return init.method === "POST" ? reply(202, {}) : reply(200, { workflow_runs: runs });
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    expect(await gh.cancelCi("abc")).toEqual({ cancelled: [3, 2] });
+    expect(sent.filter((s) => s.startsWith("POST"))).toEqual(["POST /actions/runs/7/cancel", "POST /actions/runs/3/cancel", "POST /actions/runs/2/cancel"]);
+  });
+
+  it("asks nothing more once the token may not cancel runs, and never throws for it", async () => {
+    let calls = 0;
+    const wf = { id: 2, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", status: "in_progress" };
+    const fetchImpl = async (_url: string, init: { method: string }) => {
+      calls++;
+      return init.method === "POST" ? reply(403, { message: "Resource not accessible by integration" }) : reply(200, { workflow_runs: [wf] });
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    expect(await gh.cancelCi("abc")).toEqual({ cancelled: [], denied: "HTTP 403 Resource not accessible by integration" });
+    expect(await gh.cancelCi("abc")).toEqual({ cancelled: [], denied: "HTTP 403 Resource not accessible by integration" });
+    expect(calls).toBe(2);
+    const noRead = restLayer("t", "o/r", { fetchImpl: async () => reply(403, { message: "no" }), wait: async () => {} });
+    expect(await noRead.cancelCi("abc")).toEqual({ cancelled: [], denied: "HTTP 403 no" });
+  });
+
   it("stops the run when the token's budget runs low", async () => {
     const gh = restLayer("t", "o/r", { fetchImpl: async () => reply(200, []), wait: async () => {} });
     const low = restLayer("t", "o/r", { fetchImpl: async () => reply(200, [], { "x-ratelimit-remaining": "40" }), wait: async () => {} });
@@ -1399,10 +2037,10 @@ describe("building a batch with git", () => {
         for (const part of ["first", "second"]) {
           writeFileSync(join(origin, `${part}-${number}.txt`), "x\n");
           git(["add", `${part}-${number}.txt`]);
-          git(["commit", "-q", "-m", `${part} of ${number}`, "-m", "A body that stays out."]);
+          git(["commit", "-q", "-m", `${part} of ${number}${number === 2 && part === "first" ? " [skip ci]" : ""}`, "-m", "A body that stays out."]);
         }
         git(["update-ref", `refs/pull/${number}/head`, "HEAD"]);
-        return { number, title: `fix: number ${number}`, sha: git(["rev-parse", "HEAD"]) };
+        return { number, title: `fix: number ${number}${number === 2 ? " [no ci]" : ""}`, sha: git(["rev-parse", "HEAD"]) };
       });
       git(["clone", "-q", "origin", "clone"], root);
       const clone = join(root, "clone");
@@ -1419,6 +2057,8 @@ describe("building a batch with git", () => {
       expect(git(["rev-parse", `${built.sha}^`], clone)).toBe(built.commits[1]);
       expect(git(["rev-parse", `${built.commits[1]}^`], clone)).toBe(built.baseSha);
       expect(git(["log", "-1", "--format=%B", built.commits[1]], clone)).toBe("fix: number 1 (#1)\n\n* first of 1\n* second of 1");
+      // The batch's head commit never holds the words that make GitHub start no CI for it.
+      expect(git(["log", "-1", "--format=%B", built.sha], clone)).toBe("fix: number 2 (no ci) (#2)\n\n* first of 2 (skip ci)\n* second of 2");
       expect(batchBody("dev", built.baseSha, built.sha, prs, [], {}, built.commits)).toContain(`{"number":2,"sha":"${prs[1].sha}","commit":"${built.sha}"}`);
       layer.close();
     } finally {
@@ -1429,6 +2069,43 @@ describe("building a batch with git", () => {
       rmSync(root, { recursive: true, force: true });
     }
   }, 60_000); // some forty git calls: slow on a busy machine
+
+  it("takes a head that resolved a conflict in a merge of the base, which a rebase of its commits cannot", async () => {
+    const root = mkdtempSync(join(tmpdir(), "merge-train-test-"));
+    const origin = join(root, "origin");
+    const git = (args: string[], cwd = origin) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const write = (text: string, message: string) => {
+      writeFileSync(join(origin, "file.txt"), text);
+      git(["add", "file.txt"]);
+      git(["commit", "-q", "-m", message]);
+    };
+    try {
+      git(["init", "-q", "-b", "dev", "origin"], root);
+      write("base\n", "base");
+      git(["checkout", "-q", "-b", "fix-1"]);
+      write("theirs\n", "the fix");
+      git(["checkout", "-q", "dev"]);
+      write("ours\n", "dev moves");
+      // The author merges dev in and resolves the conflict there: the branch's own commit still conflicts by itself.
+      git(["checkout", "-q", "fix-1"]);
+      expect(() => git(["merge", "-q", "dev"])).toThrow();
+      write("ours and theirs\n", "Merge dev");
+      git(["update-ref", "refs/pull/1/head", "HEAD"]);
+      const pr = { number: 1, title: "fix: number 1", sha: git(["rev-parse", "HEAD"]) };
+      git(["checkout", "-q", "dev"]);
+      git(["clone", "-q", "origin", "clone"], root);
+      const clone = join(root, "clone");
+      const layer = gitLayer({ cwd: clone });
+      expect(await layer.rebase("dev", pr)).toEqual({ baseSha: git(["rev-parse", "dev"]), dropped: "conflict" });
+      const built = await layer.build("dev", [pr]);
+      expect(built).toMatchObject({ applied: [1], dropped: [] });
+      expect(git(["show", `${built.sha}:file.txt`], clone)).toBe("ours and theirs");
+      expect(git(["rev-parse", `${built.sha}^`], clone)).toBe(built.baseSha);
+      layer.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
 });
 
 describe("a stalled request or git call", () => {

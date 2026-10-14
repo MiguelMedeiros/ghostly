@@ -7,7 +7,7 @@ import { chat, connect, expect, link, say, test } from "../support/fixtures";
  * app's engine).
  *
  * The bound on the rows in the page while messages keep coming (`useRowWindow`'s trim) is in the unit tests
- * (apps/ui/src/test/chat/chatScroll.test.tsx): it needs 300 rows.
+ * (apps/ui/src/test/chat/chatScroll.test.tsx): it needs more rows than the window's most.
  */
 
 test("messages that come while a chat is open leave nothing of their entry behind", { tag: ["@feature:chat.scroll"] }, async ({ peer }) => {

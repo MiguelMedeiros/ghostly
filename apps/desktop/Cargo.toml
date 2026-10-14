@@ -1,6 +1,6 @@
 [package]
 name = "ghostly"
-version = "1.1.6"
+version = "1.2.4"
 edition = "2021"
 
 # The app is a library (src/lib.rs) that src/main.rs runs on Desktop; Android and iOS load it as a shared or static
@@ -48,7 +48,7 @@ fs4 = { version = "1.1", features = ["sync"] }
 tauri = { version = "2", features = ["test"] }
 rcgen = { version = "0.14", default-features = false, features = ["ring", "crypto"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
-tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net", "test-util"] }
 
 # Desktop only (Android and iOS have neither): the updater plugin, and the system clipboard.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
@@ -58,11 +58,13 @@ arboard = { version = "3.6.1", default-features = false, features = ["image-data
 
 # Android: HTTPS from Rust (reqwest, so the Pkarr relays, link previews and push) checks certificates with Android's
 # own verifier, which needs the JVM and the app's context before the first request (src/lib.rs `android_tls`). Its
-# Kotlin half comes from the crate's Maven folder (gen/android/app/build.gradle.kts).
+# Kotlin half is an .aar from the crate's Maven repository, at the version Cargo.lock gives the
+# `rustls-platform-verifier-android` crate and pinned by hash (gen/android/app/build.gradle.kts). tauri and wry keep
+# jni 0.21 for themselves; nothing here hands them a jni type.
 [target.'cfg(target_os = "android")'.dependencies]
-jni = "0.21"
+jni = "0.22"
 ndk-context = "0.1"
-rustls-platform-verifier = "0.6"
+rustls-platform-verifier = "0.7.1"
 # The Android host (src/android.rs) never waits on its Kotlin half from Android's main thread: gettid against getpid.
 libc = "0.2"
 
@@ -78,6 +80,12 @@ bytes = "1"
 webkit2gtk = "2"
 # One app per profile (src/single_instance.rs): a second launch brings the running window forward.
 tauri-plugin-single-instance = "2"
+# Which targets the clipboard offers (src/copied_files.rs), which arboard does not say: the two crates arboard reads
+# the clipboard with, at the versions it uses.
+x11rb = "0.13"
+wl-clipboard-rs = "0.9"
+# Notifications whose click opens the chat (src/notifications.rs): the version notify-rust already brings.
+zbus = "5"
 
 # The window follows WebView2 in and out of full screen (src/fullscreen.rs): the versions Tauri's wry uses.
 [target.'cfg(windows)'.dependencies]

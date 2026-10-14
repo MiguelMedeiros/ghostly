@@ -9,7 +9,7 @@ import type { HoldStore } from "../src/backup/storage";
 import { buttonPress, buttonsState } from "../src/shared/buttons";
 import { withEdit } from "../src/shared/edits";
 import type { StoredMessage } from "../src/shared/types";
-import { FakeNativeNet } from "./helpers/fakeNative";
+import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
 // covers: chat.buttons.wire
 
 /**
@@ -42,10 +42,11 @@ async function setup({ keys, rows = [], contactButtons = true, confirmEdits = tr
   await db.putLink({ ...invitation.mine, id, profile: "paired-chat/1", participationSeed: mine, createdAt: 1,
     pairedPeerKey: identityFromSeedB64(theirs).pubKeyZ32, peerTrust: { version: 1 },
     peerTransports: ["iroh/1"], peerFallback: true, preferredTransport: "iroh/1", transportFallback: true,
-    peerDescriptors: { "iroh/1": { id: "contact:iroh/1" } }, ...(hold && { hold: { ...emptyHoldState(), enabled: true, peerAllows: true } }) });
+    peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "contact") }, ...(hold && { hold: { ...emptyHoldState(), enabled: true, peerAllows: true } }) });
   for (const row of rows) await db.putMessage({ ...row, linkId: id });
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
-  const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() }, { transport, automaticWallets: false,
+  const onMessages = vi.fn<(linkId: string, messages: StoredMessage[]) => void>();
+  const node = new GhostlyNode({ onState: vi.fn(), onMessages, onCallSignal: vi.fn(), onAttention: vi.fn() }, { transport, automaticWallets: false,
     nativeTransports: { "iroh/1": async () => net.endpoint("iroh/1", "app") } });
   if (hold) Object.assign((node as unknown as { hold: { host: object } }).hold.host, hold);
   let contactState: PairingState = { status: "connecting" };
@@ -53,7 +54,7 @@ async function setup({ keys, rows = [], contactButtons = true, confirmEdits = tr
   const contact = new GhostLink({
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
-    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": { id: "app:iroh/1" } } },
+    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "app") } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
     editSupport: true, statusCardSupport: contactButtons, buttonsSupport: contactButtons, holdSupport: !!hold,
     events: { onPairingState: state => { contactState = state; }, onMessage: message => { contactGot.push(message); }, onMessageEdit: edit => { contactEdits.push(edit); return confirmEdits; },
@@ -76,7 +77,7 @@ async function setup({ keys, rows = [], contactButtons = true, confirmEdits = tr
   await vi.waitFor(() => expect([view().pairing?.status, contactState.status]).toEqual(["ready", "ready"]));
   const row = async (messageId: string) => (await db.getMessages(id)).find(m => m.id === messageId)!;
   const peerRow = async (text: string) => { await vi.waitFor(async () => expect((await db.getMessages(id)).find(m => m.text === text && m.sender === "peer")).toBeDefined()); return (await db.getMessages(id)).filter(m => m.text === text && m.sender === "peer").at(-1)!; };
-  return { node, contact, id, contactGot, contactEdits, contactReceipts, row, peerRow, view, stop, keys: { invitation, mine, theirs, id } as Keys };
+  return { node, onMessages, contact, id, contactGot, contactEdits, contactReceipts, row, peerRow, view, stop, keys: { invitation, mine, theirs, id } as Keys };
 }
 
 const ask = (extra: Record<string, unknown> = {}) => ({ kind: "buttons", id: "ask-30", buttons: [{ id: "yes", label: "Yes", style: "primary", once: true }, { id: "no", label: "No", once: true }, { id: "more", label: "Tell me more" }], ...extra });
@@ -161,6 +162,30 @@ describe("pressing a contact's buttons", () => {
     expect(await t.contact.sendMessage(QUESTION, Date.now(), WIRE("Q"), undefined, undefined, undefined, readStatusCard(ask({ closed: true, chosen: "no" }))!)).toBeNull();
     const question = await t.peerRow(QUESTION);
     expect(await t.node.pressButton({ linkId: t.id, messageId: question.id, buttonId: "yes" })).toMatchObject({ refused: true, error: "These buttons are closed" });
+  });
+
+  it("reads the question alone, the chat only when a once button may have answered it already", async () => {
+    const t = await setup();
+    const open = { kind: "buttons", id: "any-1", buttons: [{ id: "again", label: "Again" }, { id: "back", label: "Back" }] };
+    expect(await t.contact.sendMessage("Any time", Date.now(), WIRE("A"), undefined, undefined, undefined, readStatusCard(open)!)).toBeNull();
+    expect(await t.contact.sendMessage(QUESTION, Date.now(), WIRE("Q"), undefined, undefined, undefined, readStatusCard(ask({ closed: true, chosen: "no" }))!)).toBeNull();
+    const [any, closed] = [await t.peerRow("Any time"), await t.peerRow(QUESTION)];
+    const whole = vi.spyOn(db, "getMessages");
+    const mine = await t.node.sendMessage({ linkId: t.id, text: "Mine?", card: ask() });
+    // The contact's receipt reads the whole chat once more for this host (no onMessageChanges), and on a busy machine it
+    // comes after "sent": wait until the page has been told the row is delivered, so that read is over before counting.
+    await vi.waitFor(() => expect(t.onMessages.mock.calls.some(([, rows]) => rows.some(m => m.id === mine.messageId && m.delivery === "delivered"))).toBe(true));
+    whole.mockClear();
+    expect(await t.node.pressButton({ linkId: t.id, messageId: closed.id, buttonId: "yes" })).toMatchObject({ refused: true, error: "These buttons are closed" });
+    expect(await t.node.pressButton({ linkId: t.id, messageId: mine.messageId!, buttonId: "yes" })).toMatchObject({ refused: true });
+    expect(await t.node.pressButton({ linkId: t.id, messageId: "peer_notHere", buttonId: "yes" })).toMatchObject({ refused: true, error: "That message is not in this chat" });
+    expect(await t.node.pressButton({ linkId: t.id, messageId: any.id, buttonId: "nope" })).toMatchObject({ refused: true });
+    expect(whole).not.toHaveBeenCalled();
+    whole.mockRestore();
+    // Buttons with no once among them are pressed as often as I like.
+    expect((await t.node.pressButton({ linkId: t.id, messageId: any.id, buttonId: "again" })).error).toBeNull();
+    await new Promise(resolve => setTimeout(resolve, 1_050));
+    expect((await t.node.pressButton({ linkId: t.id, messageId: any.id, buttonId: "back" })).error).toBeNull();
   });
 });
 

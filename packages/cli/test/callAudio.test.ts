@@ -1,6 +1,7 @@
+import { createSocket } from "node:dgram";
 import { describe, expect, it, vi } from "vitest";
 import { CallAudio, type RtpTrack } from "../src/calls/audio";
-import { callIceServers, loadCallStack, type CallStack } from "../src/calls/media";
+import { callIceServers, CallMedia, gathering, HOST_GATHER_MS, loadCallStack, type CallStack } from "../src/calls/media";
 import { bytesToMs, frameBytes, PARTIAL_WAIT_MS, PlaybackQueue, type CallRate } from "../src/calls/pcm";
 import { isRtcp, parseRtp, ReorderBuffer, RtpWriter, sequenceDelta, TICKS_PER_FRAME, type RtpPacket } from "../src/calls/rtp";
 import { dominantHz, level, tone } from "./support/tone";
@@ -132,6 +133,83 @@ describe("a call's ICE servers", () => {
   });
 });
 
+describe("a call's candidates", () => {
+  it("go out with the host ones after a short wait when the STUN server never answers, not after the whole 5 s", async () => {
+    const stack = await loadCallStack();
+    if (typeof stack === "string") throw new Error(stack);
+    // A STUN server that swallows every request, as on a network that blocks UDP to it (many offices and hotels).
+    const silent = createSocket("udp4");
+    let asked = 0;
+    silent.on("message", () => { asked++; });
+    await new Promise<void>((bound) => silent.bind(0, "127.0.0.1", bound));
+    const before = { bind: process.env.GHOSTLY_CALL_BIND, stun: process.env.GHOSTLY_STUN };
+    process.env.GHOSTLY_CALL_BIND = "127.0.0.1";
+    process.env.GHOSTLY_STUN = "0";
+    let media: CallMedia | undefined;
+    try {
+      const started = Date.now();
+      media = await CallMedia.offer(stack, { rate: 48000, onFrame: () => {}, onState: () => {}, iceServers: [{ urls: `stun:127.0.0.1:${silent.address().port}` }] });
+      const took = Date.now() - started;
+      expect(asked, "the STUN server was asked").toBeGreaterThan(0);
+      expect(media.local.c?.length, "the offer has its host candidate").toBeGreaterThan(0);
+      expect(took, "it did wait for an answer").toBeGreaterThanOrEqual(HOST_GATHER_MS - 100);
+      expect(took, "but not the whole cap").toBeLessThan(HOST_GATHER_MS + 1500);
+    } finally {
+      media?.close();
+      silent.close();
+      for (const [name, value] of [["GHOSTLY_CALL_BIND", before.bind], ["GHOSTLY_STUN", before.stun]] as const) {
+        if (value === undefined) delete process.env[name]; else process.env[name] = value;
+      }
+    }
+  }, 20_000);
+
+  it("wait a moment after a server reflexive one, end at once when gathering completes, and up to 5 s for a first one", async () => {
+    vi.useFakeTimers();
+    try {
+      /** A connection whose candidates and gathering state come when the test says, and when its wait ended. */
+      const waiting = () => {
+        let candidate: (line: string) => void = () => {}, state: (state: string) => void = () => {};
+        const started = Date.now();
+        let ended: number | null = null;
+        void gathering({ onLocalCandidate: (cb) => { candidate = cb as typeof candidate; }, onGatheringStateChange: (cb) => { state = cb as typeof state; } }).then(() => { ended = Date.now() - started; });
+        return { candidate: (line: string) => candidate(line), state: (s: string) => state(s), ended: () => ended };
+      };
+      const host = "a=candidate:1 1 UDP 2122317823 192.168.1.20 50000 typ host", srflx = "a=candidate:2 1 UDP 1686109951 203.0.113.7 50000 typ srflx raddr 192.168.1.20 rport 50000";
+
+      // The STUN server answers: the reflexive candidate, and 400 ms for what comes with it.
+      const answered = waiting();
+      answered.candidate(host);
+      await vi.advanceTimersByTimeAsync(30);
+      answered.candidate(srflx);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(answered.ended()).toBe(430);
+
+      // It never answers: the host candidate goes after the bounded wait.
+      const silent = waiting();
+      silent.candidate(host);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(silent.ended()).toBe(HOST_GATHER_MS);
+
+      // Gathering completes (no server to ask): at once.
+      const complete = waiting();
+      complete.candidate(host);
+      await vi.advanceTimersByTimeAsync(5);
+      complete.state("complete");
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(complete.ended()).toBe(5);
+
+      // Not one candidate yet when the bounded wait ends: the cap, as before.
+      const late = waiting();
+      await vi.advanceTimersByTimeAsync(HOST_GATHER_MS + 500);
+      late.candidate(host);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(late.ended()).toBe(5000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 /** Two CallAudio ends joined by a fake track, with the real Opus codec. */
 async function pair(rate: CallRate) {
   const stack = await loadCallStack();
@@ -141,6 +219,34 @@ async function pair(rate: CallRate) {
   const track = (me: "a" | "b", them: "a" | "b"): RtpTrack => ({ send: (p) => lanes[them].forEach((l) => l(p)), onPacket: (l) => lanes[me].push(l) });
   const make = (me: "a" | "b", them: "a" | "b", s: CallStack) => new CallAudio({ rate, payloadType: 111, ssrc: me === "a" ? 1 : 2, track: track(me, them), encoder: s.opus(rate), decoder: s.opus(rate), onFrame: (f) => heard[me].push(f) });
   return { a: make("a", "b", stack), b: make("b", "a", stack), heard };
+}
+
+/**
+ * An event loop turned by hand, in libuv's order: the timers that are due when the turn starts, then what came in
+ * meanwhile (the program's writes, read from its socket), then the immediates. A timer set during a turn waits for
+ * the next one, as a 0 ms timer does in Node.
+ */
+function handLoop() {
+  let time = 1_000_000;
+  let timers: { at: number; run: () => void }[] = [];
+  let immediates: (() => void)[] = [];
+  vi.stubGlobal("setTimeout", (run: () => void, ms = 0) => { const timer = { at: time + Math.max(1, ms), run }; timers.push(timer); return timer; });
+  vi.stubGlobal("clearTimeout", (timer: unknown) => { timers = timers.filter((t) => t !== timer); });
+  vi.stubGlobal("setImmediate", (run: () => void) => { immediates.push(run); });
+  vi.spyOn(Date, "now").mockImplementation(() => time);
+  return {
+    turn(ms: number, read: () => void): void {
+      time += ms;
+      const due = timers.filter((t) => t.at <= time).sort((x, y) => x.at - y.at);
+      timers = timers.filter((t) => t.at > time);
+      for (const timer of due) timer.run();
+      read();
+      const check = immediates;
+      immediates = [];
+      for (const run of check) run();
+    },
+    restore(): void { vi.unstubAllGlobals(); vi.restoreAllMocks(); },
+  };
 }
 
 describe("a call's audio through Opus", () => {
@@ -158,6 +264,53 @@ describe("a call's audio through Opus", () => {
       for (let i = 0; i < 25; i++) a.tick();
       expect(level(Buffer.concat(heard.b.slice(-10)))).toBeLessThan(0.01);
       a.stop(); b.stop();
+    });
+  }
+
+  for (const rate of [48000, 16000] as const) {
+    it(`does not encode silence again once its packet stopped changing, at ${rate} Hz: the contact still gets one every 20 ms`, async () => {
+      const stack = await loadCallStack();
+      if (typeof stack === "string") throw new Error(stack);
+      const real = stack.opus(rate), decoder = stack.opus(rate);
+      let encodes = 0;
+      const packets: RtpPacket[] = [];
+      const audio = new CallAudio({
+        rate, payloadType: 111, ssrc: 1, track: { send: (p) => packets.push(parseRtp(p)!), onPacket: () => {} },
+        encoder: { encode: (pcm, size) => { encodes++; return real.encode(pcm, size); }, decode: (packet) => real.decode(packet), delete: () => real.delete?.() },
+        decoder: stack.opus(rate), onFrame: () => {},
+      });
+      const ticks = (count: number) => { const from = encodes; for (let i = 0; i < count; i++) audio.tick(); return encodes - from; };
+      audio.queue.push(tone(440, rate, 1000));
+      expect(ticks(50)).toBe(50);
+      // The program has nothing to say for three seconds: the encoder runs until its packet settled, within a second.
+      expect(ticks(150)).toBeLessThanOrEqual(50);
+      // Silence the program writes itself (a microphone that is muted) is the same silence.
+      audio.queue.push(Buffer.alloc(frameBytes(rate) * 100));
+      expect(ticks(100)).toBe(0);
+      // Its audio again: every frame of it is encoded, and silence after it settles anew.
+      audio.queue.push(tone(660, rate, 1000));
+      expect(ticks(50)).toBe(50);
+      const again = ticks(150);
+      expect(again).toBeGreaterThan(0);
+      expect(again).toBeLessThanOrEqual(50);
+
+      // What the contact got: a packet per frame, numbered and timed in step, a talkspurt marked where the program's
+      // audio starts after the queue's own silence, as before.
+      expect(packets.length).toBe(500);
+      for (let i = 1; i < packets.length; i++) {
+        expect(sequenceDelta(packets[i].sequence, packets[i - 1].sequence)).toBe(1);
+        expect((packets[i].timestamp - packets[i - 1].timestamp) >>> 0).toBe(TICKS_PER_FRAME);
+      }
+      expect(packets.flatMap((p, i) => (p.marker ? [i] : []))).toEqual([0, 200]);
+      // And what it hears: the tone, silence all through the three seconds and the two that follow, the next tone, silence.
+      const heard = packets.map((p) => Buffer.from(decoder.decode(p.payload)));
+      expect(dominantHz(Buffer.concat(heard.slice(10, 50)), rate)).toBeCloseTo(440, -1);
+      expect(level(Buffer.concat(heard.slice(60, 300)))).toBeLessThan(0.01);
+      expect(dominantHz(Buffer.concat(heard.slice(310, 350)), rate)).toBeCloseTo(660, -1);
+      expect(level(Buffer.concat(heard.slice(310, 350)))).toBeGreaterThan(0.1);
+      expect(level(Buffer.concat(heard.slice(360)))).toBeLessThan(0.01);
+      audio.stop();
+      decoder.delete?.();
     });
   }
 
@@ -188,6 +341,59 @@ describe("a call's audio through Opus", () => {
       a.stop(); b.stop();
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it("keeps up while the daemon's loop turns slower than a frame, as it does while a large file goes out", async () => {
+    const { a, b } = await pair(48000);
+    const loop = handLoop();
+    try {
+      const frame = tone(440, 48000, 20);
+      // A program writing 20 ms every 20 ms: a turn of the loop reads what it wrote since the last one.
+      const turns = (count: number, ms: number) => { for (let i = 0; i < count; i++) loop.turn(ms, () => { for (let w = 0; w < ms / 20; w++) a.queue.push(frame); }); };
+      a.start();
+      turns(50, 20);
+      const sent = a.sent;
+      turns(200, 40);
+      expect(a.sent - sent).toBeGreaterThanOrEqual(398);
+      expect(a.queue.queuedMs).toBeLessThanOrEqual(40);
+      turns(50, 20);
+      expect(a.queue.queuedMs).toBeLessThanOrEqual(20);
+    } finally {
+      a.stop(); b.stop();
+      loop.restore();
+    }
+  });
+
+  it("is back at real time after a stall too long to catch up, and keeps a clip that was written ahead", async () => {
+    const { a, b } = await pair(48000);
+    const loop = handLoop();
+    try {
+      const frame = tone(440, 48000, 20);
+      const turns = (count: number, ms: number) => { for (let i = 0; i < count; i++) loop.turn(ms, () => { for (let w = 0; w < ms / 20; w++) a.queue.push(frame); }); };
+      a.start();
+      turns(50, 20);
+      const sent = a.sent;
+      turns(1, 2000);
+      // Not replayed as two seconds of audio at once, and not left in the queue either.
+      expect(a.sent - sent).toBeLessThanOrEqual(2);
+      expect(a.queue.queuedMs).toBeLessThanOrEqual(20);
+      // A longer one does not fit the program's socket: the rest of what it wrote comes on the next turn.
+      loop.turn(3000, () => { for (let w = 0; w < 50; w++) a.queue.push(frame); });
+      loop.turn(20, () => { for (let w = 0; w < 101; w++) a.queue.push(frame); });
+      turns(50, 20);
+      expect(a.queue.queuedMs).toBeLessThanOrEqual(40);
+
+      // A clip written ahead (speech from a TTS) is not what the stall left behind: all of it is still played.
+      a.queue.flush();
+      a.queue.push(tone(440, 48000, 5000));
+      for (let i = 0; i < 10; i++) loop.turn(20, () => {});
+      const queued = a.queue.queuedMs;
+      loop.turn(2000, () => {});
+      expect(a.queue.queuedMs).toBe(queued - 20);
+    } finally {
+      a.stop(); b.stop();
+      loop.restore();
     }
   });
 

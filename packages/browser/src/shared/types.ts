@@ -1,4 +1,4 @@
-import type { DiscoveryStatus, GroupMention, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, RoutineCard, StatusCard, TaskCard, TypingKind, UsageCard, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
+import type { DiscoveryStatus, GroupMention, GroupMessageFrame, ImageMeta, LinkPreview, PairingProgress, PaymentMethodName, RoutineCard, StatusCard, TaskCard, TypingKind, UsageCard, VideoMeta, VoiceMeta, WirePin, WireReaction } from "@ghostly/core";
 import type { UsdtWalletView } from "../engine/paymentAdapters/usdtWallet";
 import type { ArkWalletView } from "../engine/paymentAdapters/arkWallet";
 import type { BarkWalletView } from "../engine/paymentAdapters/barkWallet";
@@ -137,7 +137,22 @@ export interface StoredGroup {
     pieces: { t: "group-chain"; g: string; commits: GroupCommit[] }[];
     /** Joining through the group's link: its entry key, the admin's side of `linkId` (an entry session, not a contact chat). */
     entry?: string;
+    /**
+     * Removed and invited again over a contact chat: the hash of the genesis of the chain I held. The id alone names no
+     * group (anyone may sign a genesis under it): only a welcome whose chain starts there joins the history I kept.
+     */
+    genesis?: string;
+    /**
+     * Taken back by who sent it (`group-decline` over its chat), and when: kept a week so the list says so where the
+     * invitation was, instead of it going with no word. Nothing is accepted or owed for it; another invitation replaces it.
+     */
+    takenBack?: number;
   };
+  /**
+   * On the admin's side: contact chats invited and not answered yet, and when. Kept so that an accept after my app
+   * started again still lets them in.
+   */
+  invited?: Record<string, number>;
   /** On the admin's side: the group's link is on, with this entry key seed (`group-entry/1`). */
   entry?: { seedB64: string; createdAt: number };
   state?: GroupState;
@@ -149,11 +164,20 @@ export interface StoredGroup {
    */
   large?: string[];
   /**
+   * On the admin's side: members I let in over a contact chat or the group's link whose edge has not come up with me
+   * yet, so whose app may never have had the group's keys (its welcome lost on the way). A `group-decline` from that
+   * chat takes such a member out again, and one that knocks on the link again gets its welcome again; one seen on an
+   * edge once is a member, whatever its chat says after.
+   */
+  unseen?: string[];
+  /**
    * Removed, then invited again over a contact chat: the names my app knew members by (member key → name). The history
    * stays while the invitation waits, and still names who wrote it; once in again, the names of members who are gone
    * since go on naming what they wrote.
    */
   formerNames?: Record<string, string>;
+  /** Removed, then invited again: the removed group as it was, which a Decline puts back (with the history it kept). */
+  previous?: StoredGroup;
   /**
    * Past 16 members, with hubs (WISP 902 · Group Mesh § Hubs): the hubs I kept edges with (as a hub, the other hubs),
    * where my edges go when the app starts again, before the beacon is read.
@@ -168,6 +192,12 @@ export interface StoredGroup {
    * signed leave (`bye`) that they carry to the admin.
    */
   left?: { at: number; admin: string; hubs?: string[]; bye?: GroupByeFrame };
+  /**
+   * I declined an invitation while its inviter's chat (`linkId`) was down: the answer is said when that chat is up, or
+   * dropped once `at` is a week old. Alone when nothing else of the group is kept; beside `state` when the invitation
+   * was to a group I was removed from, which stays.
+   */
+  declined?: { at: number; linkId: string };
   /**
    * On the admin's side: members I removed while they could not be told (their edge was down, and no contact chat
    * carried the notice), by member key. `e`: the epoch of the commit that removed them; `at`: when. The edge to each
@@ -241,9 +271,11 @@ export type GroupEdgeCause = "relays" | "session" | "other";
 
 /**
  * How far a join through a group's link got, as the joiner can know it: the knock is being left,
- * it is there for the admin's app to read, that app opened the entry session, it let me in.
+ * it is there for the admin's app to read, that app opened the entry session, it let me in. Or a member's app
+ * answered that there is no room yet (`group-full`, WISP 902 § A full group): `full`, or `blocked` while the group
+ * waits for every member's app to take more than eight; the joiner goes on knocking.
  */
-export type GroupJoinStage = "knocking" | "knocked" | "answered" | "admitted";
+export type GroupJoinStage = "knocking" | "knocked" | "answered" | "admitted" | "full" | "blocked";
 
 export interface GroupView {
   id: string;
@@ -264,8 +296,16 @@ export interface GroupView {
   adminOff?: true;
   members: GroupMemberView[];
   /** On the invitee's side, until the welcome arrives. */
-  /** `waiting`: joining a community through its link, how many others were knocking with me when I last knocked. */
-  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number };
+  /**
+   * `waiting`: joining a community through its link, how many others were knocking with me when I last knocked.
+   * `since`: joining a community through its link, when the knock started (a group kept here, knocking to get back in,
+   * was created long before).
+   * `full`: with stage `full` or `blocked`, the members the group has and the most it holds, as the answer said.
+   * `unanswered`: accepted over a contact chat, said again as often as it is, and the inviter's app answered nothing
+   * while that chat was up: the answer is offered again.
+   * `takenBack`: who sent it took it back (the group is gone from its app, or the admin role from it): nothing to answer.
+   */
+  invitation?: { linkId: string; contact: string; admin: string; members: number; accepted: boolean; unanswered?: boolean; takenBack?: boolean; viaLink?: boolean; stage?: GroupJoinStage; waiting?: number; since?: number; full?: { n: number; max: number } };
   /** The group's link while it is on (`group1/<id>/<entry key>`); only the admin who made it sees it. */
   entryLink?: string;
   /** Contacts (by chat id) invited by me and not yet in. */
@@ -392,7 +432,12 @@ export interface FileTransferView {
    * (`resend`), the receiver ask for it again (`request`). Either goes on from what the receiver holds.
    */
   stalled?: boolean;
-  /** A group file (WISP 503) waiting, `waiting`: why, in a few words ("Nobody you are connected to has this file yet"). */
+  /**
+   * A group file (WISP 503) waiting, `waiting`: why. `nobody`: nobody this device is connected to has it; `busy`: its
+   * holders answered busy; `damaged`: what came failed the author's digest (`stalled`: its person can ask again).
+   */
+  wait?: "nobody" | "busy" | "damaged";
+  /** The same, in a few words ("Nobody you are connected to has this file yet"). */
   note?: string;
 }
 
@@ -842,6 +887,12 @@ export interface StoredMessage {
   mentions?: GroupMention[];
   /** A group message someone else sent that names me (or everyone). */
   mentioned?: true;
+  /**
+   * A private group's message from another member: the frame it came in (sealed, signed by its author), kept on the
+   * group's newest rows to hand on to members who were away (`GROUP_LIMITS.relay`, WISP 902 § Catch-up). The engine's
+   * own: a row goes to a page without it (`withoutFrame`).
+   */
+  frame?: GroupMessageFrame;
   /** How this message travelled, as the engine saw it go or come (the message's details view). */
   details?: MessageDetails;
   /** A link preview that came with the text (WISP 401 § Link previews): made by the sender's app, never fetched here. */
@@ -1659,6 +1710,11 @@ export interface EngineState {
    * yet may still be moving, not finished.
    */
   transfersRestored?: boolean;
+  /**
+   * The kept groups are in `groups`. Unset while the peer starts: until then a group missing from the list may only not
+   * be loaded yet, not gone (the app forgets a gone group's draft and read mark only between two states that have it).
+   */
+  groupsLoaded?: true;
   wallet: WalletView;
   payments: Record<string, PaymentView>;
   /** This profile's identity proofs. */

@@ -17,6 +17,8 @@ export type MoneyInText =
  */
 export function findMoney(text: string): MoneyInText | null {
   const link = findLinkMoney(text);
+  // A link that must not be paid stays text: the invoice or address inside it is not read as money on its own.
+  if (link === "refused") return null;
   if (link) return link;
   const trimmed = text.trim();
   if (trimmed.length < 40) {

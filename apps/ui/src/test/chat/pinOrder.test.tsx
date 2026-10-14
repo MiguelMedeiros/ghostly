@@ -6,13 +6,14 @@ import { Sidebar } from "../../components/Sidebar";
 import { ANNOUNCE_CLEAR_MS } from "../../components/chat/MessageAnnouncer";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { dropIndex, REORDER_HOLD_MS } from "../../hooks/useRowReorder";
+import { createFolder, sectionOrder, setChatFolder, setSectionOrder } from "../../lib/chatFolders";
 import { pinnedOrder, saveSession, setSessionPinned } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 import { Chat } from "../../pages/Chat";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: chats.list.pin-order
+// covers: chats.list.pin-order, chats.folders
 
 vi.mock("../../lib/sounds", () => ({ playSound: vi.fn(() => () => {}), startRinging: vi.fn(() => () => {}), installAudioGestures: () => () => {} }));
 
@@ -80,6 +81,33 @@ describe("a pinned chat's place, from the chat's ⋮", () => {
     expect(down).toHaveAttribute("title", "Already last");
     await user.click(rows.getByTestId("chat-pin-up"));
     expect(pinnedOrder()).toEqual(["b", "a", "c"]);
+  });
+
+  it("in a folder, is its place among the folder's pinned chats; the others keep theirs", async () => {
+    chats();
+    const folder = createFolder("Agents")!;
+    setChatFolder("a", folder.id);
+    setChatFolder("c", folder.id);
+    // Cy is the last of its folder's two (Ana, Cy), with Ben, in no folder, between them in the whole order.
+    const { user } = openChat("c");
+    const rows = await menu(user);
+    expect(rows.getByTestId("chat-pin-down")).toBeDisabled();
+    await user.click(rows.getByTestId("chat-pin-up"));
+    expect(screen.getByTestId("chat-pin-announcement")).toHaveTextContent("Moved to place 1 of 2 pinned chats");
+    // One press put it above Ana: it did not stop behind Ben, who is not shown with them.
+    expect(pinnedOrder()).toEqual(["c", "a", "b"]);
+    expect((await menu(user)).getByTestId("chat-pin-up")).toBeDisabled();
+  });
+
+  it("offers no move to the only pinned chat of its folder, nor to the only one in no folder", async () => {
+    chats();
+    const folder = createFolder("Agents")!;
+    setChatFolder("a", folder.id);
+    setChatFolder("c", folder.id);
+    const { user } = openChat("b");
+    const rows = await menu(user);
+    expect(rows.getByTestId("chat-pin-toggle")).toHaveTextContent("Unpin chat");
+    expect(rows.queryByTestId("chat-pin-up")).not.toBeInTheDocument();
   });
 
   it("moves with the keys: the rows are the menu's, a disabled one is passed over", async () => {
@@ -186,6 +214,49 @@ describe("dragging a pinned chat in the list", () => {
     await act(() => vi.advanceTimersByTimeAsync(150));
     fireEvent.click(rowOf("Ben"));
     expect(screen.getByTestId("where")).toHaveTextContent("/chat/b");
+  });
+
+  it("with a folder in the list, a part keeps the order the person drags its rows into, pinned or not, and the pins are left as they were", async () => {
+    chats();
+    const agents = createFolder("Agents")!;
+    setChatFolder("a", agents.id);
+    list();
+    // Ana is alone in the folder, first in the list; Ben, Cy (pinned) and Dee (not) are in no folder, the latest first.
+    expect(names()).toEqual(["Ana", "Ben", "Cy", "Dee"]);
+    expect(rowOf("Ana")).not.toHaveAttribute("data-reorder-id");
+    for (const name of ["Ben", "Cy", "Dee"]) expect(rowOf(name)).toHaveAttribute("data-reorder-id");
+    // Dee, the last row and not pinned, goes to the top of its part.
+    const dee = rowOf("Dee");
+    fireEvent.pointerDown(dee, pointer("mouse", middle("Dee")));
+    fireEvent.pointerMove(window, pointer("mouse", 0));
+    expect(dee.style.transform).toBe(`translateY(${-2 * ROW}px)`);
+    expect(within(rowOf("Ben")).getByTestId("chat-row-drop")).toHaveAttribute("data-edge", "before");
+    fireEvent.pointerUp(window, pointer("mouse", 0));
+    await vi.waitFor(() => expect(names()).toEqual(["Ana", "Dee", "Ben", "Cy"]));
+    expect(sectionOrder(undefined)).toEqual(["d", "b", "c"]);
+    expect(sectionOrder(agents.id)).toBeUndefined();
+    expect(pinnedOrder()).toEqual(["a", "b", "c"]);
+  });
+
+  it("the order a part was given is kept across a restart, a row that comes in later goes on top, and the folder's menu gives the latest-first order back", async () => {
+    chats();
+    const agents = createFolder("Agents")!;
+    for (const id of ["a", "b", "c"]) setChatFolder(id, agents.id);
+    setSectionOrder(agents.id, ["c", "a", "b"]);
+    const { user, unmount } = list();
+    expect(names()).toEqual(["Cy", "Ana", "Ben", "Dee"]);
+    unmount();
+    // Dee comes into the folder: not in the order yet, so on top of the rows the person arranged.
+    setChatFolder("d", agents.id);
+    list();
+    expect(names()).toEqual(["Dee", "Cy", "Ana", "Ben"]);
+    await user.click(screen.getByTestId("chat-folder-options"));
+    await user.click(await screen.findByTestId("chat-folder-by-latest"));
+    expect(sectionOrder(agents.id)).toBeUndefined();
+    // Pinned first, in the pins' order, then the latest: as before the person arranged anything.
+    await vi.waitFor(() => expect(names()).toEqual(["Ana", "Ben", "Cy", "Dee"]));
+    await user.click(screen.getByTestId("chat-folder-options"));
+    expect(screen.queryByTestId("chat-folder-by-latest")).not.toBeInTheDocument();
   });
 
   it("drags up too, and back where it was changes nothing", async () => {

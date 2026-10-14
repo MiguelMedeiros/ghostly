@@ -1,13 +1,29 @@
 import { useRef, useState } from "react";
 import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
-import type { PeerLinkState } from "../lib/platform";
+import type { PeerHoldState, PeerLinkState } from "../lib/platform";
 import { Switch } from "./wallet/ui";
+import { Notice } from "./ui/Notice";
 import { useI18n } from "../contexts/I18nContext";
-import { problemLine } from "../lib/problemText";
+import { problemLine, problemText } from "../lib/problemText";
 import { sizeIn } from "../lib/sizeText";
 import type { Translate } from "../locales/translate";
 
 const mb = (bytes: number, t: Translate) => sizeIn(bytes / 1024 / 1024, "mb", t, bytes < 1024 * 1024 ? 2 : 1, true);
+
+/** Under the chat, above the composer: what waits for the contact, and the hold's last problem with its ⓘ. */
+export function ChatHoldLine({ hold, name }: { hold: PeerHoldState; name: string }) {
+  const { t, language } = useI18n();
+  if (hold.outstanding <= 0 && !hold.error) return null;
+  return (
+    <div data-testid="hold-indicator" className="px-4 py-1 text-[11px] text-text-secondary bg-surface-alt/60 border-t border-border" role="status">
+      {hold.outstanding > 0 && <p className="m-0 truncate">{t(hold.outstanding === 1 ? "chat.hold.heldOne" : "chat.hold.heldMany", {
+        count: hold.outstanding, name,
+        used: new Intl.NumberFormat(language, { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(hold.bytes / 1024 / 1024),
+        max: new Intl.NumberFormat(language).format(Math.round(hold.maxBytes / 1024 / 1024)) })}</p>}
+      {hold.error && <Notice testId="hold-error" problem={problemText(hold.error, t)} className="text-[11px]" />}
+    </div>
+  );
+}
 
 /**
  * Store-and-forward for one chat (WISP 404): whether what is sent while the contact is away waits in
@@ -47,7 +63,7 @@ export function ChatHoldDialog({ peer, name, onSave, onClose }: { peer: PeerLink
               {hold ? t("chat.hold.quota", { name, count: hold.outstanding, max: hold.maxItems, bytes: mb(hold.bytes, t), maxBytes: mb(hold.maxBytes, t) }) : t("chat.hold.nothing")}
             </p>
             {hold?.refused ? <p className="text-[11px] text-danger" data-testid="chat-hold-refused">{hold.refused === 1 ? t("chat.hold.refusedOne", { name }) : t("chat.hold.refusedMany", { count: hold.refused, name })}</p> : null}
-            {hold?.error && <p className="text-[11px] text-danger" data-testid="chat-hold-error">{problemLine(hold.error, t)}</p>}
+            {hold?.error && <Notice testId="chat-hold-error" problem={problemText(hold.error, t)} className="text-[11px]" />}
           </div>
         </div>
         <p className="text-[11px] text-text-muted">{t("chat.hold.privacy")}</p>

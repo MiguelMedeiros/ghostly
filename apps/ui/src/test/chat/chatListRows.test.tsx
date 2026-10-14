@@ -1,11 +1,12 @@
 import { act, screen, within } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Sidebar } from "../../components/Sidebar";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { formatListTime, previewText } from "../../lib/chatList";
-import { locales as translations } from "../../locales";
+import { languageTag } from "../../lib/documentLanguage";
+import { LOCALES as translations } from "../i18n/locales";
 import { translateWith } from "../../locales/translate";
 import { publicKeyLabel } from "../../lib/publicKeyLabel";
 import { isSessionPinned, saveSession } from "../../lib/storage";
@@ -241,6 +242,24 @@ describe("the chat list's rows (compact, the default)", () => {
     expect(within(row).getByTestId("chat-row-pin")).toHaveAccessibleName("Desafixar conversa");
   });
 
+  it("reads again only a chat whose stored session changed, however often it is told sessions changed", () => {
+    saveSession(chat("p", { nick: "Pat", messages: Array.from({ length: 50 }, (_, i) => message({ id: `p${i}`, text: `line ${i}` })) }));
+    saveSession(chat("q", { nick: "Quin", messages: [message({ text: "one" })] }));
+    list();
+    const parse = vi.spyOn(JSON, "parse");
+    try {
+      act(() => { for (let i = 0; i < 5; i++) window.dispatchEvent(new Event("session-updated")); });
+      expect(parse.mock.calls.filter(([raw]) => raw === localStorage.getItem("ghostly_p"))).toHaveLength(0);
+      // One that changed is read again, and shown.
+      saveSession(chat("q", { nick: "Quin", messages: [message({ text: "one" }), message({ text: "two" })] }));
+      act(() => { window.dispatchEvent(new Event("session-updated")); });
+      expect(rowOf("Quin")).toHaveTextContent("two");
+      expect(parse.mock.calls.filter(([raw]) => raw === localStorage.getItem("ghostly_p"))).toHaveLength(0);
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
   it("a group with messages shows when, and its members as the second line", () => {
     act(() => fakeEngine.update({ groups: [groupView({ id: "g1", name: "Climbing", status: "active", lastMessageAt: NOW - 2 * 3_600_000 })] }));
     list();
@@ -286,6 +305,20 @@ describe("the list's words", () => {
     expect(formatListTime(NOW - 23 * 3_600_000, NOW, "ja", translateWith(translations.ja))).toBe("23時間");
     expect(formatListTime(NOW - 6 * 86_400_000, NOW, "fr", translateWith(translations.fr))).toBe("6 j");
     expect(formatListTime(NOW - 30 * 86_400_000, NOW)).not.toMatch(/^\d+[mhd]$/);
+  });
+
+  it("write a row's date as toLocaleDateString did, with one formatter per language for every row and render", () => {
+    const older = [30, 45, 400].map((d) => NOW - d * 86_400_000);
+    const expected = older.map((ts) => [new Date(ts).toLocaleDateString(languageTag("fr"), { month: "short", day: "numeric" }), new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" })]);
+    const perRow = vi.spyOn(Date.prototype, "toLocaleDateString");
+    const made = vi.spyOn(Intl, "DateTimeFormat");
+    try {
+      // 70 commits of a large list's start, each drawing every row's time.
+      for (let render = 0; render < 70; render++) for (const ts of older) { formatListTime(ts, NOW, "fr"); formatListTime(ts, NOW); }
+      expect(older.map((ts) => [formatListTime(ts, NOW, "fr"), formatListTime(ts, NOW)])).toEqual(expected);
+      expect(perRow).not.toHaveBeenCalled();
+      expect(made.mock.calls.length).toBeLessThanOrEqual(2);
+    } finally { perRow.mockRestore(); made.mockRestore(); }
   });
 
   it("read a pasted token as what it is", () => {

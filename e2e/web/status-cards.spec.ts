@@ -1,6 +1,7 @@
 import { pasteInvite } from "../support/clipboard";
 import type { Locator, Page } from "@playwright/test";
-import { chat, expect, test } from "../support/fixtures";
+import { linkTrace, watchLink, type EngineHost } from "../support/callTrace";
+import { chat, expect, headerControl, test } from "../support/fixtures";
 import { HeadlessBot } from "../support/headless";
 
 /**
@@ -123,7 +124,8 @@ test("a bot's task card moves to done, and the Tasks button follows it", { tag: 
     expect(box!.width).toBeLessThanOrEqual(375);
     await running.scrollIntoViewIfNeeded();
     await page.screenshot({ path: test.info().outputPath("phone-card.png") });
-    await page.getByTestId("chat-tasks").click();
+    // On a phone Tasks is a row of ⋮.
+    await (await headerControl(page, "chat-tasks")).click();
     await expect(page.getByTestId("chat-tasks-panel")).toBeVisible();
     await page.waitForTimeout(400); // the sheet fades in: the picture after it
     await page.screenshot({ path: test.info().outputPath("phone-panel.png") });
@@ -136,10 +138,13 @@ test("in a group, each bot's tasks are listed under its name", { tag: ["@feature
   test.setTimeout(8 * 60_000);
   const url = await relay.listen();
   const [coordinator, hermes] = [new HeadlessBot(), new HeadlessBot()];
+  let watched: EngineHost | null = null;
   try {
     await Promise.all([coordinator.start(url, "Coordinator"), hermes.start(url, "Hermes One")]);
     const person = await peer("cards-group-person");
     const page = person.page;
+    watched = { kind: "web", ...person };
+    await watchLink(watched);
 
     // The coordinator makes a private group and its link; Hermes and the person come in through it.
     const created = await coordinator.run("group", "create", "Sala de Máquinas", "--mesh");
@@ -195,6 +200,11 @@ test("in a group, each bot's tasks are listed under its name", { tag: ["@feature
     await page.keyboard.press("Escape");
     await expect(room.locator('[data-testid="status-card"][data-card-id="relay"]')).toHaveAttribute("data-status", "done", { timeout: 60_000 });
     await expect(page.getByTestId("chat-tasks-count")).toHaveText("1");
+  } catch (error) {
+    // Each side of an edge that never came up: the bots' link traces, and the page's.
+    for (const bot of [coordinator, hermes]) await bot.attachLogs(test.info());
+    if (watched) await test.info().attach("person-link-trace.txt", { body: await linkTrace(watched).catch((e) => `(no trace: ${e})`), contentType: "text/plain" });
+    throw error;
   } finally {
     await Promise.all([coordinator.stop(), hermes.stop()]);
   }
@@ -416,7 +426,7 @@ test("the review pictures: a bot room's routines and tasks at every width, both 
     const error = "RuntimeError: HTTP 429: This request would exceed your account's rate limit. Please try again later.";
     await zero.run("routine", "send", group, "--id", "zero-nas", "--name", "Zero · zero NAS backup freshness watchdog", "--schedule", "every 15 min", "--next", String(now + 11 * min), "--run", "ok", ...sent);
     await zero.run("routine", "send", group, "--id", "zero-log", "--name", "Zero · Murray Rothbot zero log auto-remediation", "--schedule", "every hour", "--next", String(now + 26 * min), "--run", "ok", ...sent);
-    await coordinator.run("task", "send", group, "--id", "ux", "--title", "Status cards: a cleaner layout for the tasks and routines in the chat", "--progress", "45", "--steps", "2/5",
+    await coordinator.run("task", "send", group, "--id", "ux", "--title", "Status cards: a cleaner layout for the tasks and routines in the chat", "--steps", "2/5",
       "--step", "Tasks panel", ...json({ startedAt: now - 12 * min }), ...sent);
     await zero.run("routine", "send", group, "--id", "zero-daily", "--name", "Zero · Murray Rothbot daily product/quality review", "--schedule", "weekdays at 10:30", "--cron", "30 10 * * 1-5",
       "--next", String(now + 23 * hr), ...json({ lastRun: { at: now - 29 * min, result: "failed", summary: error }, runs: [{ at: now - 29 * min, result: "failed", summary: error }, { at: now - 13 * hr, result: "ok", summary: "12 issues checked" }] }), ...sent);

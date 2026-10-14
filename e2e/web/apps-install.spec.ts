@@ -45,7 +45,12 @@ test("install from a store, open it in a chat, and the contact installs it from 
   await expect(ana.page.getByTestId("apps-add-store")).toContainText(store.storeName);
   await ana.page.getByTestId("apps-add-store-confirm").click();
   const listed = ana.page.getByTestId("app-store").filter({ hasText: store.storeName });
-  await listed.getByRole("button", { name: new RegExp(store.storeName) }).click();
+  // The store's app is on the page without opening anything, on a phone's width too; the store's name says it is open.
+  await expect(listed.getByRole("button", { name: new RegExp(store.storeName) })).toHaveAttribute("aria-expanded", "true");
+  const wide = ana.page.viewportSize()!;
+  await ana.page.setViewportSize({ width: 375, height: 700 });
+  await expect(listed.getByTestId("app-listing-install")).toBeInViewport();
+  await ana.page.setViewportSize(wide);
   await listed.getByTestId("app-listing-install").click();
 
   const screen = ana.page.getByTestId("app-install");

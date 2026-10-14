@@ -1,5 +1,5 @@
 import type { Translate } from "../contexts/I18nContext";
-import { knownErrorParts, rawError, readable } from "./errorText";
+import { DESKTOP_SAVE_REFUSED, knownErrorParts, rawError, readable } from "./errorText";
 import { english } from "./english";
 
 /*
@@ -90,7 +90,19 @@ export function problemLine(cause: unknown, t: Translate = english, fallback: Pr
   // wrong" in their place (an identity check's "No Ghostly TXT record at _ghostly.…" was lost that way, 2026-10-07).
   const generic = !said && detail !== undefined && title === t(fallback === "connect" ? "errors.problem.connectFailed" : "errors.generic");
   const next = generic ? detail : said;
-  if (!next) return title;
-  if (/[.!?…。！？]$/.test(title)) return `${title} ${next}`;
-  return t.language === "ja" || t.language === "zh" ? `${title}。${next}` : `${title}. ${next}`;
+  return next ? sentences(title, next, t) : title;
+}
+
+/** Two sentences in a row: a stop after the first when it has none ("。" in Japanese and Chinese). */
+export function sentences(first: string, second: string, t: Translate = english): string {
+  if (/[.!?…。！？]$/.test(first)) return `${first} ${second}`;
+  return t.language === "ja" || t.language === "zh" ? `${first}。${second}` : `${first}. ${second}`;
+}
+
+/**
+ * A save of a file that failed, as a line: one the system refused on Desktop is said as Android's (errorText.ts
+ * SAVE_REFUSED), with its next step, never as the system's English in every language.
+ */
+export function saveProblemLine(cause: unknown, t: Translate = english): string {
+  return problemLine(DESKTOP_SAVE_REFUSED.test(rawError(cause)) ? "The file could not be saved there" : cause, t);
 }

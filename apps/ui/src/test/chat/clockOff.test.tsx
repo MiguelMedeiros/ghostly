@@ -4,7 +4,7 @@ import type { LinkView } from "@ghostly/browser/shared/types";
 import { ChatConnection } from "../../components/ChatConnection";
 import { clockOffAmount } from "../../lib/clockOff";
 import { NetworkSettings } from "../../components/NetworkSettings";
-import { locales } from "../../locales";
+import { LOCALES as locales } from "../i18n/locales";
 import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 

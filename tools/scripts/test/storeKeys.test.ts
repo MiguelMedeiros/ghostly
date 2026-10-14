@@ -24,12 +24,12 @@ beforeAll(async () => {
   // The CLI's build leaves its npm dependencies out, so it runs from under the repository, where they resolve.
   mkdirSync(join(root, "node_modules/.cache"), { recursive: true });
   cli = mkdtempSync(join(root, "node_modules/.cache/store-keys-cli-"));
-  // Chess's pinned build (e2e/fixtures/chess, tools/scripts/refresh-chess-fixture.mjs): the index.html it publishes and
+  // The Chess the store was set up with, 1.0.2, as pinned in e2e/fixtures/chess/1.0.2: the index.html it publishes and
   // its manifest, so this test does not read apps/mini/chess.
   chess = join(tmp, "chess");
   mkdirSync(chess);
-  copyFileSync(join(root, "e2e/fixtures/chess/index.html.txt"), join(chess, "index.html"));
-  copyFileSync(join(root, "e2e/fixtures/chess/ghostly-app.json"), join(chess, "ghostly-app.json"));
+  copyFileSync(join(root, "e2e/fixtures/chess/1.0.2/index.html.txt"), join(chess, "index.html"));
+  copyFileSync(join(root, "e2e/fixtures/chess/1.0.2/ghostly-app.json"), join(chess, "ghostly-app.json"));
   await build({ configFile: join(root, "packages/cli/vite.config.ts"), root: join(root, "packages/cli"), logLevel: "silent", build: { outDir: cli, emptyOutDir: true } });
 }, 180_000);
 

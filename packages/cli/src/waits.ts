@@ -14,7 +14,7 @@ const DELIVERY_RANK: Record<string, number> = { sending: 0, waiting: 1, queued: 
 export async function waitForEdit(ctx: ApiContext, chat: string, messageId: string, ms: number): Promise<StoredMessage> {
   const until = Date.now() + ms;
   for (;;) {
-    const message = (await node(ctx).getMessages(chat)).find((m) => m.id === messageId);
+    const message = await node(ctx).getMessage(chat, messageId);
     if (!message) throw new CliError("not_found", `No message ${messageId} in this chat`);
     if (!message.edit?.pending) return message;
     if (Date.now() >= until) throw new CliError("timeout", `Timed out after ${Math.round(ms / 1000)} s: the contact has not confirmed the edit yet. It goes by itself once the chat is live and the contact's app shows edits, while this profile is online`, { messageId, edits: message.edit.seq });
@@ -52,8 +52,7 @@ export async function waitForMessage(ctx: ApiContext, chat: string, messageId: s
       settled = true; clearTimeout(timer); off();
       if (error) reject(error); else resolve(message!);
     };
-    const check = (last = false) => void node(ctx).getMessages(chat).then((messages) => {
-      const message = messages.find((m) => m.id === messageId);
+    const check = (last = false) => void node(ctx).getMessage(chat, messageId).then((message) => {
       try {
         const done = look(message);
         if (done) finish(null, done);

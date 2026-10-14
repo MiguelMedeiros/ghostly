@@ -248,6 +248,44 @@ describe("hubs in a private group past 16 members", () => {
     for (let i = 0; i < 600 && (await leaver.store.getGroups()).some(g => g.id === id); i++) await world.run(500, 500);
     expect((await leaver.store.getGroups()).some(g => g.id === id)).toBe(false);
   }, 300_000);
+
+  it("the only hub leaves: its members drop it at once, and a message said right after reaches everyone over direct edges", async () => {
+    const b = await build(20, { hubs: [3] });
+    const { world, id, peers } = b;
+    await world.until(() => onHubs(b) && allReach(b), 10 * 60_000, 1000);
+    await world.run(150_000);
+    const hub = peers[3], hubKey = keyOf(b, hub), rest = peers.filter(p => p !== hub);
+    expect(view(b, hub).hubs).toEqual({ hub: true });
+    await hub.groups.leave(id);
+    // On its way out it took itself out of the beacon.
+    const epoch = view(b, peers[9]).epoch!;
+    const state = (await peers[9].store.getGroups()).find(g => g.id === id)!.state!;
+    const keys = beaconKeys(meshRendezvous(fromBase64Url(state.secrets[epoch]), id, epoch), id);
+    expect(readBeacon(keys, world.pkarr.get(keys.identity.pubKeyZ32) ?? []).some(h => h.key === hubKey)).toBe(false);
+    await world.run(1_000);
+    await peers[9].groups.send(id, "after the hub left");
+    // Seconds, not the beacon's freshness and the hubs' grace (about 3.5 minutes).
+    await world.until(() => rest.every(p => world.texts(p, id).includes("after the hub left")), 30_000, 1000,
+      () => rest.filter(p => !world.texts(p, id).includes("after the hub left")).map(p => p.name).join(","));
+    expect(rest.every(p => !view(b, p).hubs)).toBe(true);
+  }, 300_000);
+
+  it("a member leaves through its hubs while the admin's app is closed: the admin removes it once back", async () => {
+    const b = await build(20, { hubs: [2, 5] });
+    const { world, id, admin, peers } = b;
+    await world.until(() => onHubs(b) && allReach(b), 10 * 60_000, 1000);
+    await world.run(150_000);
+    const leaver = peers[13], leaverKey = keyOf(b, leaver);
+    admin.online = false;
+    await leaver.groups.leave(id);
+    await world.run(30_000);
+    world.reopen(admin);
+    // A hub kept the leave it passed on and hands it to the admin when their edge opens again.
+    await world.until(() => !view(b, admin).members.some(m => m.key === leaverKey), 5 * 60_000, 500);
+    await world.until(() => !view(b, peers[9]).members.some(m => m.key === leaverKey), 60_000, 500);
+    for (let i = 0; i < 600 && (await leaver.store.getGroups()).some(g => g.id === id); i++) await world.run(500, 500);
+    expect((await leaver.store.getGroups()).some(g => g.id === id)).toBe(false);
+  }, 300_000);
 });
 
 /**
@@ -333,5 +371,20 @@ describe("a Mac's budget of connections", () => {
     // Room again: every edge.
     mac.heldElsewhere = 0;
     await world.until(() => edgesOf(b, mac).length === 11, 5 * 60_000, 1000);
+  }, 300_000);
+
+  it("a Mac hub taken out of the group holds no room for it once its edges closed", async () => {
+    const b = await build(20, { hubs: [2, 5], budgets: { 2: onMac(0) } });
+    const { world, id, peers } = b;
+    const mac = peers[2];
+    await world.until(() => isHub(b, mac) && onHubs(b) && allReach(b), 10 * 60_000, 1000);
+    const hubs = (mac.groups as unknown as { hubs: { isHub(g: string): boolean; room(g: string): number | undefined } }).hubs;
+    await b.admin.groups.remove(id, keyOf(b, mac));
+    await world.until(() => view(b, mac).status === "removed", 60_000, 1000);
+    await world.run(60_000);
+    expect(edgesOf(b, mac)).toHaveLength(0);
+    expect(hubs.isHub(id)).toBe(false);
+    // Another group has the whole budget again, not 40 less the 19 edges this one no longer keeps.
+    expect(hubs.room("another-group")).toBe(40);
   }, 300_000);
 });

@@ -1,14 +1,15 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import { getBrowserHost } from "@ghostly/browser/host";
 import type { EnrollFailure } from "@ghostly/browser/devices/enroll";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { WalletView } from "@ghostly/browser/shared/types";
-import type { TranslationKey } from "../contexts/I18nContext";
-import { DEVICE_INVITE_LIFETIME_S, inviteLink, inviteQrSegments, readInviteCode } from "@ghostly/core";
+import { useI18n, type TranslationKey } from "../contexts/I18nContext";
+import { DEVICE_INVITE_LIFETIME_S, inviteLink, inviteQrSegments, readInviteCode, sanitizeDisplayText } from "@ghostly/core";
 import { handOverUnlock } from "./lockHandover";
 import { activeProfileId, createProfile, currentProfile, settingsKeyFor, switchProfile } from "./profiles";
 import { protocolLinkCode } from "./url";
+import { useShownPoll } from "../hooks/useShownPoll";
 
 /*
  * One profile on several devices (WISP 06), as the pages need it: the lock password a device set needs, the name a
@@ -99,17 +100,62 @@ export function enrollLoading(error: unknown): boolean {
   return message.startsWith("enroll-loading:");
 }
 
-/** The profile's device set, read when the page opens and every `everyMs` while it shows (0: once). Null until read. */
+/** Said on the window with each device set the page reads (`useDeviceSet`): what waits for a profile to get one hears it. */
+export const DEVICE_SET_EVENT = "ghostly-device-set";
+
+const readDeviceSet = () => engine.call("deviceSet").then((next) => {
+  window.dispatchEvent(new CustomEvent<DeviceSetView>(DEVICE_SET_EVENT, { detail: next }));
+  return next;
+});
+
+/**
+ * The profile's device set, read when the page opens and every `everyMs` while it shows (0: once). Null until read.
+ * Not read behind a hidden window, and the same object while the set says the same (`useShownPoll`).
+ */
 export function useDeviceSet(everyMs = 3_000): DeviceSetView | null {
-  const [view, setView] = useState<DeviceSetView | null>(null);
+  return useShownPoll(readDeviceSet, everyMs);
+}
+
+/** How long the answer of Check connection stays under a device's row, while its link stays as it was. */
+export const CHECK_ANSWER_MS = 10_000;
+
+/**
+ * Check connection on a device's row: `answers` holds what to say under each row, by device key, and `check` asks one
+ * device. An answer is kept while it is news: it goes when that device's link changes, and ten seconds after it came.
+ */
+export function useConnectionCheck(devices: DeviceSetView["devices"]): { answers: Record<string, string>; check(key: string): Promise<void> } {
+  const { t } = useI18n();
+  const [answers, setAnswers] = useState<Record<string, { text: string; status?: string; run: number }>>({});
+  const runs = useRef(0);
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const links = devices.map((device) => `${device.key}:${device.status ?? ""}`).join(" ");
+  const statusOf = useRef(new Map<string, string | undefined>());
+  statusOf.current = new Map(devices.map((device) => [device.key, device.status]));
   useEffect(() => {
-    let live = true;
-    const read = () => void engine.call("deviceSet").then((next) => { if (live) setView(next); }, () => {});
-    read();
-    const timer = everyMs > 0 ? setInterval(read, everyMs) : undefined;
-    return () => { live = false; clearInterval(timer); };
-  }, [everyMs]);
-  return view;
+    setAnswers((was) => {
+      const kept = Object.entries(was).filter(([key, answer]) => statusOf.current.get(key) === answer.status);
+      return kept.length === Object.keys(was).length ? was : Object.fromEntries(kept);
+    });
+  }, [links]);
+  useEffect(() => { const all = timers.current; return () => { for (const timer of all) clearTimeout(timer); }; }, []);
+  const check = useCallback(async (key: string) => {
+    const run = ++runs.current;
+    setAnswers((was) => ({ ...was, [key]: { text: t("devices.section.checking"), status: statusOf.current.get(key), run } }));
+    let text: string;
+    try { text = t("devices.section.answered", { ms: Math.max(1, Math.round((await engine.call("devicePing", { key })).ms)) }); }
+    catch { text = t("devices.section.noAnswer"); }
+    // Not after the link changed meanwhile, nor over the answer of a later check.
+    const mine = (was: typeof answers) => was[key]?.run === run;
+    setAnswers((was) => (mine(was) ? { ...was, [key]: { ...was[key], text } } : was));
+    const timer = setTimeout(() => {
+      timers.current.delete(timer);
+      setAnswers((was) => { if (!mine(was)) return was; const { [key]: _gone, ...rest } = was; return rest; });
+    }, CHECK_ANSWER_MS);
+    timers.current.add(timer);
+  }, [t]);
+  const texts: Record<string, string> = {};
+  for (const [key, answer] of Object.entries(answers)) texts[key] = answer.text;
+  return { answers: texts, check };
 }
 
 /** The lock password hash of a profile here, as its settings keep it: what a handover of the lock is checked against. */
@@ -131,7 +177,7 @@ export async function reloadIntoGate(options: { keepUnlocked?: boolean } = {}): 
 const TAKEOVER_FAILURES: Record<string, TranslationKey> = {
   password: "devices.password.wrong", "locked-out": "devices.takeover.fail.lockedOut", refused: "devices.takeover.fail.refused",
   "no-copy": "devices.takeover.fail.noCopy", "no-password": "devices.takeover.fail.noPassword", name: "devices.takeover.fail.name",
-  offline: "devices.takeover.fail.offline", state: "devices.takeover.fail.state",
+  offline: "devices.takeover.fail.offline", state: "devices.takeover.fail.state", changed: "devices.takeover.fail.changed",
 };
 
 export function takeoverErrorKey(error: unknown): TranslationKey | null {
@@ -244,14 +290,10 @@ export const LINK_PROFILE_MAX = 32;
 
 /** A profile name as a link carries it: no `#`, at most `LINK_PROFILE_MAX` characters, escaped. Empty for none. */
 /**
- * A profile's name as a link may carry it, made and read alike: no `#`, no control character, no invisible mark that
- * reorders or hides text (bidirectional overrides, zero-width marks), at most `LINK_PROFILE_MAX` characters.
+ * A profile's name as a link may carry it, made and read alike: no `#`, and cleaned as any display text another party
+ * chooses (`sanitizeDisplayText`: no control, invisible or direction-changing character), at most `LINK_PROFILE_MAX` characters.
  */
-const cleanProfileName = (name: string): string =>
-  Array.from(name.trim()).filter((ch) => {
-    const code = ch.codePointAt(0)!;
-    return ch !== "#" && code >= 32 && !(code >= 0x7f && code <= 0x9f) && !(code >= 0x200b && code <= 0x200f) && !(code >= 0x202a && code <= 0x202e) && !(code >= 0x2066 && code <= 0x2069);
-  }).slice(0, LINK_PROFILE_MAX).join("").trim();
+const cleanProfileName = (name: string): string => sanitizeDisplayText(name.replace(/#/g, ""), LINK_PROFILE_MAX) ?? "";
 
 const linkProfile = (profile: string | undefined): string => {
   const clean = cleanProfileName(profile ?? "");

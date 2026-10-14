@@ -18,11 +18,27 @@ const HIDDEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 /** Zero-width non-joiner and zero-width joiner. */
 const KEEP = /[\u200c\u200d]/;
 
+/** `text` without its invisible and direction-changing characters, at any length: for display text with a cut of its own. */
+export function stripHidden(text: string): string {
+  return text.replace(HIDDEN, (char) => (KEEP.test(char) ? char : ""));
+}
+
+/**
+ * What draws nothing when it stands alone and `HIDDEN` leaves in, since text needs it beside something else: the
+ * joiners, the fillers, the variation selectors and the other default-ignorable code points, combining marks, white
+ * space and the blank Braille pattern.
+ */
+const UNSEEN = /^[\p{Default_Ignorable_Code_Point}\p{M}\p{White_Space}\u2800]*$/u;
+
+/** Whether `text` holds a character that shows by itself: a name of joiners, fillers or marks alone has none. */
+export function hasVisible(text: string): boolean {
+  return !UNSEEN.test(text);
+}
+
 /** Undefined when nothing visible is left, so callers can fall back. */
 export function sanitizeDisplayText(text: string, max: number): string | undefined {
-  const visible = text.replace(HIDDEN, (char) => (KEEP.test(char) ? char : ""));
-  const clean = [...visible].slice(0, max).join("").trim();
-  return clean || undefined;
+  const clean = [...stripHidden(text)].slice(0, max).join("").trim();
+  return hasVisible(clean) ? clean : undefined;
 }
 
 /** A nickname as it arrived from a peer, ready to show. */

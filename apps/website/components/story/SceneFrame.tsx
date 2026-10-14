@@ -4,8 +4,8 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { animate as tween, motion, motionValue, useInView, useMotionValue, useMotionValueEvent, useTransform, type MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
 import { BEAT, DUR, EASE } from "@/lib/motion";
-import { useBeats, usePlayheadProgress } from "@/lib/playhead";
-import { EXIT, orientationOf, StageFramingContext, stepAt, stepOf, useCards, usePortrait, type Camera } from "@/components/home/stage";
+import { jumpPlayhead, useBeats, usePlayheadProgress } from "@/lib/playhead";
+import { ENTER, EXIT, orientationOf, StageFramingContext, stepAt, stepOf, useCards, usePortrait, type Camera } from "@/components/home/stage";
 import { IDENTITY, measureFraming, sameFraming, STILL_LIGHT, stillCamera, type Framing } from "./framing";
 import { BLOCKING, ROOMS, valueAt, type Chapter } from "./poses";
 
@@ -38,6 +38,22 @@ export function useScene(): SceneState {
 
 /** How long a chapter's picture and copy take to fade in after it pins, and out before the hand-off (fractions of the chapter). */
 const FADE = 0.04;
+/**
+ * Where a link to a chapter (/#invite) lands in it, as a fraction of the chapter: after the fade-in, before the
+ * first step's beat. At the chapter's first pixel its picture and copy are still at opacity 0 (site.css reads it
+ * as --scene-arrive).
+ */
+const ARRIVE = (FADE + ENTER) / 2;
+/** The settled picture of a chapter's last step rests whole for at least this much of the chapter before the fade-out. */
+const REST = 0.001;
+/**
+ * Where a chapter of n steps starts fading out: FADE before the hand-off, and never before its last step has
+ * settled. With four steps or more that step's beat ends later than EXIT - FADE, and a stop that finishes the beat
+ * would rest on a half-faded panel.
+ */
+function leaveAt(n: number): number {
+  return Math.max(EXIT - FADE, stepAt(n - 1, BEAT.settle, n) + REST);
+}
 
 function hexToRgb(hex: string) {
   const n = parseInt(hex.slice(1), 16);
@@ -55,6 +71,7 @@ function useBlocking(p: MotionValue<number>, chapter: Chapter, portrait: boolean
 
 export function SceneFrame({
   id,
+  alias,
   chapter,
   eyebrow,
   steps,
@@ -67,6 +84,8 @@ export function SceneFrame({
   children,
 }: {
   id: string;
+  /** A second name a link may use for this chapter (/#story is the invitation). */
+  alias?: string;
   chapter: Chapter;
   eyebrow: string;
   steps: SceneStep[];
@@ -103,7 +122,7 @@ export function SceneFrame({
       const at = (f: number) => top + f * travel;
       const seen: [number, number] = [top, top + travel];
       const beats = steps.map((_, i) => ({ from: at(stepAt(i, BEAT.establish, n)), to: at(stepAt(i, BEAT.settle, n)), seen }));
-      return seams ? [{ from: at(0), to: at(FADE), seen }, ...beats, { from: at(EXIT - FADE), to: at(EXIT), seen }] : beats;
+      return seams ? [{ from: at(0), to: at(FADE), seen }, ...beats, { from: at(leaveAt(n)), to: at(EXIT), seen }] : beats;
     },
     [article, n, seams],
   );
@@ -151,7 +170,7 @@ export function SceneFrame({
   // shows only the backdrop and the two ghosts. While it is invisible it takes
   // no clicks.
   const enter = useTransform(p, [0, FADE], [0, 1]);
-  const leave = useTransform(p, [EXIT - FADE, EXIT], [1, 0]);
+  const leave = useTransform(p, [leaveAt(n), EXIT], [1, 0]);
   const furniture = useTransform([enter, leave], ([a, b]) => (seams ? Math.min(a as number, b as number) : 1));
   // The copy rises the last few pixels into place as it fades in, and slips up a little as it leaves.
   const copyY = useTransform([enter, leave], ([a, b]) => (seams ? 12 * (1 - (a as number)) - 8 * (1 - (b as number)) : 0));
@@ -159,21 +178,40 @@ export function SceneFrame({
   useMotionValueEvent(furniture, "change", (v) => setHidden(v < 0.05));
   const state = useMemo<SceneState>(() => ({ p, step, n, still: false, portrait, camera, focus }), [p, step, n, portrait, camera, focus]);
 
-  const jump = (i: number) => {
+  const jump = (i: number, atOnce = false) => {
     const el = ref.current;
     if (!el) return;
     const top = el.getBoundingClientRect().top + window.scrollY;
     const travel = el.offsetHeight - window.innerHeight;
-    window.scrollTo({ top: top + travel * stepAt(i, 0.2, n), behavior: "smooth" });
+    const to = top + travel * stepAt(i, 0.2, n);
+    if (atOnce) jumpPlayhead(to);
+    else window.scrollTo({ top: to, behavior: "smooth" });
+  };
+
+  // A step button the keyboard lands on is one the reader sees: the browser brings it on screen at the chapter's
+  // nearest edge, where the panel is still (or already) faded out, so the chapter goes to that step, at once: a smooth
+  // scroll and the playhead's glide after it kept the panel faded out for one to two seconds, and a reader tabbing at
+  // a normal pace was on the next step before the first one showed. A pointer's focus is left to its click, and so is
+  // the focus the window hands back when the reader returns to it.
+  const away = useRef(false);
+  const onStepBlur = (e: React.FocusEvent<HTMLButtonElement>) => {
+    away.current = document.activeElement === e.currentTarget;
+  };
+  const onStepFocus = (e: React.FocusEvent<HTMLButtonElement>, i: number) => {
+    const back = away.current;
+    away.current = false;
+    if (back || !e.currentTarget.matches(":focus-visible")) return;
+    if (i !== step || furniture.get() < 1) jump(i, true);
   };
 
   const room = ROOMS[chapter];
   const style = { "--chapter-bg": room, "--chapter-rgb": hexToRgb(room) } as React.CSSProperties;
+  const anchor = alias ? <span id={alias} className="scene-alias" /> : null;
 
   if (article && portrait) {
     // Phones: one picture per chapter, its steps as captions that take turns (PhoneChapter).
     return (
-      <PhoneChapter id={id} chapter={chapter} eyebrow={eyebrow} label={label} steps={steps} stills={stills} calm={calm} state={state} style={style} visual={visual}>
+      <PhoneChapter id={id} anchor={anchor} chapter={chapter} eyebrow={eyebrow} label={label} steps={steps} stills={stills} calm={calm} state={state} style={style} visual={visual}>
         {children}
       </PhoneChapter>
     );
@@ -184,6 +222,7 @@ export function SceneFrame({
     return (
       <SceneContext.Provider value={{ ...state, still: true }}>
       <section ref={ref} id={id} className="scene scene--static" data-chapter={chapter} aria-label={label} style={style}>
+        {anchor}
         <div className="wrap scene-static">
           <h2 className="eyebrow">{eyebrow}</h2>
           <ol className="scene-static-steps">
@@ -216,9 +255,11 @@ export function SceneFrame({
         data-chapter={chapter}
         data-inview={inView}
         data-copy={copyAt}
+        data-seams={seams}
         aria-label={label}
-        style={{ ...style, height: `${100 + n * length}svh` }}
+        style={{ ...style, height: `${100 + n * length}svh`, ["--scene-arrive" as string]: `${n * length * ARRIVE}svh` }}
       >
+        {anchor}
         <div className="scene-sticky">
           <motion.div className="scene-visual" aria-hidden="true" style={{ opacity: furniture }}>
             <StageFramingContext.Provider value={framing}>{visual}</StageFramingContext.Provider>
@@ -239,7 +280,7 @@ export function SceneFrame({
             </ol>
             <div className="scene-progress" role="group" aria-labelledby={`${id}-eyebrow`}>
               {steps.map((s, i) => (
-                <button key={i} type="button" data-on={i <= step} aria-current={i === step ? "step" : undefined} onClick={() => jump(i)}>
+                <button key={i} type="button" data-on={i <= step} aria-current={i === step ? "step" : undefined} onClick={() => jump(i)} onFocus={(e) => onStepFocus(e, i)} onBlur={onStepBlur}>
                   <span className="sr-only">
                     {i + 1}: {s.title}
                   </span>
@@ -304,6 +345,7 @@ function holdFor(s: SceneStep): number {
  */
 function PhoneChapter({
   id,
+  anchor,
   chapter,
   eyebrow,
   label,
@@ -316,6 +358,7 @@ function PhoneChapter({
   children,
 }: {
   id: string;
+  anchor: React.ReactNode;
   chapter: Chapter;
   eyebrow: string;
   label?: string;
@@ -375,6 +418,7 @@ function PhoneChapter({
   return (
     <SceneContext.Provider value={value}>
       <section id={id} className="scene scene--static scene--phone" data-chapter={chapter} data-calm={calm} aria-label={label} style={style}>
+        {anchor}
         <div className="wrap scene-static">
           <h2 className="eyebrow" id={`${id}-eyebrow`}>
             {eyebrow}

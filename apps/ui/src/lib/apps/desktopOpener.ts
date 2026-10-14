@@ -7,11 +7,14 @@
  *   checks every other request (the caller's label, 64 KiB, 50 a second) and hands it here as `ghostly-app-request`
  *   with the window's label; the broker knows the app by that label, never by anything the app says.
  * - The broker's answers and events go back through `app_post`: an answer to the request waiting for it (the
- *   result of the app's `app_broker` call), an event into that window alone.
+ *   result of the app's `app_broker` call), an event into that window alone. A `file` answer names where the bytes lie
+ *   in Rust's file storage (`byReference`): Rust reads and checks them and hands them to the app window as they are,
+ *   so a 16 MiB file is never base64 and JSON on this window's thread (32 ms each in Chromium).
  * - There is no frame load to count: the window loads once, and Rust refuses every navigation after it. The broker's
  *   second load is the answer to `writing`.
  * - The app stops when the broker says so (`app_close`) or when the person closes its window (`ghostly-app-closed`).
  */
+import { toBase64 } from "@ghostly/core";
 import { createBroker, runnerFor, START_TIMEOUT_MS, type AppStopReason, type AppView, type Broker } from "./broker";
 import { registerRunningApp, type AppOpener } from "./open";
 import type { AppsPlatform } from "../platform";
@@ -45,14 +48,11 @@ const defaultView: AppView = {
   locale: () => document.documentElement.lang || navigator.language,
 };
 
-/** Base64 of bytes, in pieces (a file may be megabytes). */
-export function toBase64(bytes: Uint8Array): string {
-  let text = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(text);
-}
-
-/** A broker message as it travels to Rust: JSON, a file's bytes as base64 (`bytes`), which the runner turns back. */
+/**
+ * A broker message as it travels to Rust: JSON, a file's bytes as base64 (`bytes`), which the runner turns back. A file
+ * may be 16 MiB and is encoded on this window's thread: with core's encoder (the runtime's own, or a table), not `btoa`
+ * over character codes, which took about 100 ms a MiB.
+ */
 export function forIpc(message: unknown): unknown {
   if (!message || typeof message !== "object") return message;
   const { value, ...rest } = message as { value?: unknown };
@@ -97,12 +97,13 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
     });
     let timer: ReturnType<typeof setTimeout> | null = null;
     // A version found revoked, or removed without Run anyway, while it runs: its window closes (WISP 1200 § Takedowns).
-    const unregister = registerRunningApp({ ref, runAnyway: options?.runAnyway === true, takeDown: () => broker.stop("stopped") });
+    const unregister = registerRunningApp({ ref, digest: entry.digest, runAnyway: options?.runAnyway === true, takeDown: () => broker.stop("stopped"), stop: () => broker.stop("stopped") });
     const broker = createBroker({
       host,
       launch: { ...entry, chat: linkId ? { linkId, name: nameIn(linkId) } : null },
       view,
       post: (message) => { void invoke("app_post", { label, message: forIpc(message) }).catch(() => { /* the window went */ }); },
+      byReference: true,
       stopped: (reason) => {
         if (timer) clearTimeout(timer);
         unregister();

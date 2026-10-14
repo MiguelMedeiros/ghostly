@@ -212,7 +212,7 @@ function TheirCardBack({ t, entry, linkId, name, nostr, turning, onCards }: { t:
           <dt>{t("identities.contact.how")}</dt>
           <dd>{r.verified.source}</dd>
           <dt>{t("identities.contact.checked")}</dt>
-          <dd data-testid="chat-identity-checked">{r.checkedAt !== r.verifiedAt ? t("identities.contact.checkedAgain", { time: dateTime(r.verifiedAt), last: dateTime(r.checkedAt) }) : t("identities.contact.checkedOnce", { time: dateTime(r.verifiedAt) })}</dd>
+          <dd data-testid="chat-identity-checked">{r.checkedAt !== r.verifiedAt ? t("identities.contact.checkedAgain", { time: dateTime(r.verifiedAt, t.language), last: dateTime(r.checkedAt, t.language) }) : t("identities.contact.checkedOnce", { time: dateTime(r.verifiedAt, t.language) })}</dd>
           <dt>{t("identities.contact.validity")}</dt>
           <dd>{card.validity}</dd>
           <dt>{t("identities.contact.status")}</dt>

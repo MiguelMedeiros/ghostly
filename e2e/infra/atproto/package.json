@@ -3,10 +3,18 @@
   "private": true,
   "description": "A local AT Protocol network for the e2e suite: a PLC directory (in memory) and a reference PDS with test accounts.",
   "type": "module",
-  "scripts": { "start": "node server.mjs" },
+  "scripts": {
+    "start": "node server.mjs"
+  },
   "dependencies": {
-    "@atproto/crypto": "0.5.5",
-    "@atproto/pds": "0.5.35",
+    "@atproto/crypto": "0.5.7",
+    "@atproto/pds": "0.5.38",
     "@did-plc/server": "0.0.1"
+  },
+  "overrides": {
+    "@opentelemetry/auto-instrumentations-node": "0.79.0",
+    "@opentelemetry/propagator-jaeger": "2.12.0",
+    "kysely": "0.29.6",
+    "nodemailer": "10.0.16"
   }
 }

@@ -30,13 +30,22 @@ export const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"
 export const REACTION_LIMITS = {
   /** UTF-8 bytes of one emoji: a family or a subdivision flag fits, a run of emoji does not. */
   emojiBytes: 32,
-  /** Reaction frames a receiver takes per window on one chat; the rest are dropped unconfirmed and come again. */
+  /**
+   * Reaction frames a receiver takes per window on one chat; the rest are dropped unconfirmed and come again. In a
+   * group nothing comes again (a community's catch-up hands a frame once), so there the rest wait for the next window.
+   */
   receive: 30,
+  /** Group members' reactions past a window, kept per group until it has room: as many as a community's store hands back. */
+  held: 256,
   /** Reactions a sender says per window on one chat; the newest of each message waits for room. */
   send: 20,
   windowMs: 10_000,
-  /** A reaction to a message not here yet waits this long for it, at most `buffer` of them per chat. */
-  bufferMs: 60_000,
+  /**
+   * A reaction to a message not here yet waits this long for it, at most `buffer` of them per sender in each chat: a
+   * member back in a busy group hears every member's latest reactions as their edges open, before the catch-up (over a
+   * minute for a full log) brings what they name.
+   */
+  bufferMs: 300_000,
   buffer: 64,
   /** Reactions of this side not confirmed yet, per chat: the oldest is dropped past it. */
   pending: 32,

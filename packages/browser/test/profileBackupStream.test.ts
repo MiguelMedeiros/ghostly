@@ -1,4 +1,5 @@
 import "fake-indexeddb/auto";
+import { gunzipSync } from "node:zlib";
 import { afterEach, beforeEach, expect, it, onTestFinished, vi } from "vitest";
 import { encode } from "../src/backup/codec";
 import { snapshotDatabase } from "../src/backup/database";
@@ -38,7 +39,20 @@ afterEach(() => { vi.restoreAllMocks(); });
 
 const PASS = "a long backup passphrase";
 const MIB = 1024 * 1024;
+/** What a bundle shows to someone without its passphrase: the header line and every frame's body, unzipped where it is gzip. */
+function readable(bundle: Uint8Array): string {
+  const parts = [bundle.subarray(0, bundle.indexOf(10) + 1)];
+  for (let at = bundle.indexOf(10) + 1; at < bundle.length;) {
+    const body = bundle.subarray(at + 5, at + 5 + new DataView(bundle.buffer, bundle.byteOffset + at + 1, 4).getUint32(0));
+    try { parts.push(gunzipSync(body)); } catch { parts.push(body); }
+    at += 5 + body.length;
+  }
+  return Buffer.concat(parts).toString("latin1");
+}
+// What the seeded profile holds, as a bundle that is not sealed shows it. Each is long enough not to turn up by chance in megabytes of
+// ciphertext: a 4-byte ".png" does, about once in a thousand runs.
 const pattern = (length: number, seed: number) => { const out = new Uint8Array(length); for (let i = 0; i < length; i++) out[i] = (i * 31 + seed * 17 + (i >> 8)) & 255; return out; };
+const CLEAR = ["Nick Kept Secret", '"text":"message 1"', '"linkId":"link1"', '"name":"1.png"', Buffer.from(pattern(1001, 1).subarray(0, 32)).toString("latin1")];
 const same = (a: Uint8Array, b: Uint8Array) => Buffer.compare(a, b) === 0;
 const databases = async () => (await indexedDB.databases()).map((d) => d.name).sort();
 async function readAll(dbName: string, store: string) {
@@ -122,9 +136,9 @@ it("a profile with many files and large ones comes back whole: every record, eve
   const bundle = sink.bytes();
   const fileBytesTotal = Array.from({ length: 120 }, (_, i) => 1000 + i).reduce((a, b) => a + b, 0) + SMALL_FILE_BYTES + 3 + 2 * MIB;
   expect(result).toEqual({ bytes: bundle.length, files: 122, fileBytes: fileBytesTotal, skipped: 0 });
-  // Sealed: no name, no nickname, no message in the clear.
-  const text = new TextDecoder("latin1").decode(bundle.subarray(0, 4 * MIB));
-  for (const secret of ["Nick Kept Secret", "message 1", "link1", ".png"]) expect(text).not.toContain(secret);
+  // Sealed: no name, no nickname, no message, no file bytes in the clear.
+  const text = readable(bundle);
+  for (const secret of CLEAR) expect(text.includes(secret), JSON.stringify(secret)).toBe(false);
   // Progress: collecting, then writing, files and bytes counted up to their totals.
   expect(told[0]).toEqual({ stage: "collecting", files: 0, filesTotal: 0, bytes: 0, bytesTotal: 0 });
   expect(told.find((p) => p.stage === "writing")).toEqual({ stage: "writing", files: 0, filesTotal: 122, bytes: 0, bytesTotal: fileBytesTotal });
@@ -162,6 +176,9 @@ it("a backup without a passphrase says so, restores with none, and is still refu
   const bundle = await createProfileBackup(null);
   expect(new TextDecoder().decode(bundle.subarray(0, bundle.indexOf(10)))).toBe('{"format":"ghostly-backup","version":2,"protection":"none","check":{"name":"SHA-256-chain"}}');
   expect(await backupProtectionOf(bundle)).toBe("none");
+  // Not sealed: what the sealed bundle must not show is readable here.
+  const text = readable(bundle);
+  for (const clear of CLEAR) expect(text.includes(clear), JSON.stringify(clear)).toBe(true);
   const opened = await openProfileBackup(bundle);
   expect(opened.protection).toBe("none");
   expect(opened.name).toBe("Personal");

@@ -12,8 +12,8 @@ import { InfoButton } from "../layout/Section";
 
 /*
  * A bot's usage (WISP 405 § Usage): how much of its quota is left, at a glance. A small meter and the percent on its
- * chat's row (`UsagePill`); the same in the chat's header with when it resets, a tap opening the details
- * (`UsageButton`); and the card itself in the chat, one quiet line that opens in place (`UsageView`). Colour only when
+ * chat's row (`UsagePill`); the same in the chat's header, with when it resets where there is room, a tap opening the
+ * details (`UsageButton`); and the card itself in the chat, one quiet line that opens in place (`UsageView`). Colour only when
  * it runs low; muted once the numbers are stale. Every string is the card's as the reader kept it, as plain text.
  */
 
@@ -42,7 +42,7 @@ function meterLabel(entry: UsageEntry, level: UsageLevel, now: number, t: Transl
 
 /**
  * The meter on a chat's row: the gauge and the percent, in the level's colour (none while there is plenty). `reset`:
- * with when the window starts again ("62% · 18:00"), as the header shows it.
+ * with when the window starts again ("62% · 18:00"), as a wide header shows it (a phone's keeps to the percent).
  */
 export function UsagePill({ entry, testId, reset = false, className = "" }: { entry: UsageEntry; testId: string; reset?: boolean; className?: string }) {
   const { t, language } = useI18n();
@@ -58,7 +58,8 @@ export function UsagePill({ entry, testId, reset = false, className = "" }: { en
       className={`inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 h-[18px] text-[11px] font-medium leading-none tabular-nums whitespace-nowrap ${tone.pill} ${tone.text} ${className}`}>
       <UsageGauge left={left} level={level} />
       <span dir="ltr">{left}%</span>
-      {resets && <><span aria-hidden="true" className="opacity-60">·</span><span>{resets}</span></>}
+      {/* A phone's header has no room for the time beside the contact's status: there the details say it. */}
+      {resets && <span data-testid={`${testId}-resets`} className="inline-flex items-center gap-1 max-md:hidden"><span aria-hidden="true" className="opacity-60">·</span><span>{resets}</span></span>}
     </span>
   );
 }
@@ -71,22 +72,26 @@ export function UsageDetails({ entry, now }: { entry: UsageEntry; now: number })
   const ago = agoIn(language);
   // "18:00 · in 3 h": the time, and how long until then.
   const when = (at: number) => `${resetTime(at, now, language)} · ${untilIn(language)(at, now)}`;
-  const rows: [string, ReactNode, string][] = [
+  // A reset that has passed is no time to come: "reset 1 d ago", muted, as what was left before it says nothing now.
+  const past = (at: number | undefined): at is number => at !== undefined && at <= now;
+  const wasReset = (at: number) => t("cards.usage.wasReset", { ago: ago(at / 1000, now / 1000) });
+  type Row = [term: string, value: ReactNode, key: string, past?: boolean];
+  const rows: Row[] = [
     [t("cards.usage.leftLabel"), <><span dir="ltr">{usageLeft(card)}%</span>{card.window && <> · <bdi>{card.window}</bdi></>}</>, "left"],
-    ...(card.used !== undefined && card.limit !== undefined ? [[t("cards.usage.usedLabel"), t("cards.usage.used", { used: card.used, limit: card.limit }), "used"] as [string, ReactNode, string]] : []),
-    ...(card.resetsAt ? [[t("cards.usage.resetsLabel"), when(card.resetsAt), "resets"] as [string, ReactNode, string]] : []),
-    ...(card.account ? [[t("cards.usage.accountLabel"), <bdi>{card.account}</bdi>, "account"] as [string, ReactNode, string]] : []),
-    ...(card.windows ?? []).map((w, i) => [w.window, <>{t("cards.usage.left", { left: w.left })}{w.resetsAt && <> · {t("cards.usage.resets", { time: resetTime(w.resetsAt, now, language) })}</>}</>, `window-${i}`] as [string, ReactNode, string]),
+    ...(card.used !== undefined && card.limit !== undefined ? [[t("cards.usage.usedLabel"), t("cards.usage.used", { used: card.used, limit: card.limit }), "used"] as Row] : []),
+    ...(card.resetsAt ? [[t("cards.usage.resetsLabel"), past(card.resetsAt) ? wasReset(card.resetsAt) : when(card.resetsAt), "resets", past(card.resetsAt)] as Row] : []),
+    ...(card.account ? [[t("cards.usage.accountLabel"), <bdi>{card.account}</bdi>, "account"] as Row] : []),
+    ...(card.windows ?? []).map((w, i) => [w.window, <>{t("cards.usage.left", { left: w.left })}{w.resetsAt && <> · {past(w.resetsAt) ? wasReset(w.resetsAt) : t("cards.usage.resets", { time: resetTime(w.resetsAt, now, language) })}</>}</>, `window-${i}`, past(w.resetsAt)] as Row),
     [t("cards.usage.updatedLabel"), ago(usageReadAt(entry) / 1000, now / 1000), "updated"],
   ];
   return (
     <div data-testid="usage-details" data-level={level} className="flex flex-col gap-1.5 text-xs leading-snug">
       {level === "stale" && <p data-testid="usage-details-stale" className="m-0 text-text-muted">{t("cards.usage.staleHint")}</p>}
       <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-        {rows.map(([term, value, key]) => (
-          <div key={key} data-testid={`usage-details-${key}`} className="contents">
+        {rows.map(([term, value, key, old]) => (
+          <div key={key} data-testid={`usage-details-${key}`} data-past={old ? "" : undefined} className="contents">
             <dt className="text-text-muted"><bdi>{term}</bdi></dt>
-            <dd className="m-0 min-w-0 text-text-primary [overflow-wrap:anywhere]">{value}</dd>
+            <dd className={`m-0 min-w-0 [overflow-wrap:anywhere] ${old ? "text-text-muted" : "text-text-primary"}`}>{value}</dd>
           </div>
         ))}
       </dl>
@@ -150,7 +155,7 @@ function UsagePanel({ entry, anchorRef, onClose }: { entry: UsageEntry; anchorRe
       className="fixed z-50 flex flex-col rounded-lg border border-border bg-surface-alt shadow-lg outline-none animate-fade-in">{body}</div>, document.body);
 }
 
-/** The meter in a chat's header, with when it resets: a tap opens the details (a sheet on a phone). */
+/** The meter in a chat's header, with when it resets on a wide one: a tap opens the details (a sheet on a phone). */
 export function UsageButton({ entry }: { entry: UsageEntry }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);

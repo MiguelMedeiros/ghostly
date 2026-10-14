@@ -35,6 +35,19 @@ afterEach(() => {
   document.documentElement.style.removeProperty("--app-height");
 });
 
+describe("a pinch on the page", () => {
+  it("is not Safari's zoom of the whole app (a picture zooms in its viewer)", () => {
+    const { unmount } = renderHook(() => useViewportHeight());
+    const pinch = new Event("gesturestart", { cancelable: true, bubbles: true });
+    document.body.dispatchEvent(pinch);
+    expect(pinch.defaultPrevented).toBe(true);
+    unmount();
+    const after = new Event("gesturestart", { cancelable: true, bubbles: true });
+    document.body.dispatchEvent(after);
+    expect(after.defaultPrevented).toBe(false);
+  });
+});
+
 describe("the app's height and the keyboard", () => {
   it("in Safari, where the page keeps its height under the keyboard", () => {
     renderHook(() => useViewportHeight());

@@ -23,6 +23,16 @@
     "updateWaits": "版本 {{version}} 已就绪。",
     "version": "版本 {{version}}"
   },
+  "builtIn": {
+    "allow": "允许",
+    "allowOpen": "允许并打开",
+    "carried": "随 Ghostly 提供，无需下载。",
+    "carriedInfo": "此副本是你正在使用的 Ghostly 的一部分。更新来自其发布者或你的商店，届时它们会看到你的 IP 地址。",
+    "hint": "随 Ghostly 提供",
+    "openNamed": "打开 {{title}}",
+    "remove": "移除",
+    "removeNamed": "移除 {{title}}"
+  },
   "card": {
     "ask": "向 {{name}} 要一个链接",
     "contactCannot": "{{name}} 的应用还不能运行小应用",
@@ -60,7 +70,7 @@
     "rollback": "这个链接里是较旧的版本。",
     "status": "该链接下没有内容。",
     "storage": "此浏览器无法在这里保存应用（无痕浏览？）。请试试普通窗口。",
-    "storageInfo": "Ghostly 会把每个应用的文件保存在此设备上。无痕窗口（如 Safari 的无痕浏览）不允许这样做，磁盘已满时也不行。请在普通窗口中打开 Ghostly，并在那里安装应用。",
+    "storageInfo": "Ghostly 会把每个应用的文件保存在此设备上。无痕窗口（如 Safari 的无痕浏览）不允许这样做，磁盘已满时也不行。",
     "storeKey": "该商店由另一把密钥签名。",
     "tooLarge": "太大了。",
     "unlistedVersion": "这个链接里是该商店尚未列出的版本。"
@@ -96,7 +106,7 @@
     "unknownPublisherInfo": "任何人都可以用新密钥签名应用。只有你添加的商店才能担保是谁制作的。请将密钥与作者公布的密钥进行比对。",
     "update": "更新",
     "webkit": "在此浏览器中，应用仍可能连接其他服务器。",
-    "webkitInfo": "Safari 以及 iPhone 和 iPad 上的所有浏览器，都允许应用建立 Ghostly 无法阻止的连接，即使没有互联网权限。这些服务器会知道你的 IP 地址。桌面应用会阻止这些连接。"
+    "webkitInfo": "Safari 以及 iPhone 和 iPad 上的所有浏览器，都允许应用建立 Ghostly 无法阻止的连接。这些服务器会知道你的 IP 地址。桌面应用会阻止这些连接。"
   },
   "page": {
     "add": "添加",
@@ -120,13 +130,16 @@
     "countOne": "1 个应用",
     "curated": "精选",
     "empty": "这个商店没有列出应用。",
+    "filter": "搜索此商店",
     "indexed": "索引",
     "installed": "已安装",
+    "noMatch": "此商店中没有匹配的应用。",
     "notRead": "尚未读取",
     "problem": "上次读取失败。",
     "read": "读取",
     "refresh": "刷新",
     "remove": "移除",
+    "showMore": "显示更多 ({{count}})",
     "stale": "自 {{date}} 起已过期"
   },
   "title": "应用",

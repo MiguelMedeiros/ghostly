@@ -13,6 +13,7 @@ import { NextSection } from "./NextSection";
 import { SpaceSection } from "./SpaceSection";
 import { OpenScene } from "./OpenScene";
 import { Finale } from "./Finale";
+import { LandOnHash } from "./LandOnHash";
 import "@/app/home.css";
 
 /**
@@ -27,6 +28,7 @@ export function HomePage({ version }: { version: string }) {
   const t = home;
   return (
     <Shell>
+      <LandOnHash />
       <StoryRail
         label={t.rail}
         marks={[
@@ -38,7 +40,7 @@ export function HomePage({ version }: { version: string }) {
           { id: "next", label: t.next.eyebrow },
           { id: "space", label: t.space.eyebrow },
           { id: "open", label: t.open.eyebrow },
-          { id: "download", label: t.finale.eyebrow },
+          { id: "finale", label: t.finale.eyebrow },
         ]}
       />
       <Act
@@ -53,10 +55,8 @@ export function HomePage({ version }: { version: string }) {
         ]}
       >
         <Hero t={t.hero} />
-        <div id="story">
-          <InviteScene eyebrow={t.invite.eyebrow} label={t.invite.label} steps={t.invite.steps} card={t.invite.card} />
-          <DhtScene eyebrow={t.dht.eyebrow} label={t.dht.label} steps={t.dht.steps} tags={t.dht.tags} />
-        </div>
+        <InviteScene eyebrow={t.invite.eyebrow} label={t.invite.label} steps={t.invite.steps} card={t.invite.card} />
+        <DhtScene eyebrow={t.dht.eyebrow} label={t.dht.label} steps={t.dht.steps} tags={t.dht.tags} />
       </Act>
       <Statement before={t.statement.before} accent={t.statement.accent} after={t.statement.after} />
       <Act

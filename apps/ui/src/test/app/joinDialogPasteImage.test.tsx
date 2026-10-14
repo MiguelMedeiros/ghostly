@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { createLink, encodeInviteCode } from "@ghostly/core";
+import type { ClipboardFile } from "@ghostly/browser/host";
 import { JoinDialog } from "../../components/JoinDialog";
+import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 // covers: invite.qr.image
 
@@ -13,9 +15,9 @@ const qr = vi.hoisted(() => ({ data: null as string | null, calls: 0 }));
 vi.mock("jsqr", () => ({ default: () => { qr.calls++; return qr.data === null ? null : { data: qr.data }; } }));
 
 /** What a clipboard or a drag hands the page: happy-dom has no DataTransfer to build one with. */
-function transfer({ files = [], text = "", html = "" }: { files?: File[]; text?: string; html?: string }) {
+function transfer({ files = [], text = "", html = "", types = [] }: { files?: File[]; text?: string; html?: string; types?: string[] }) {
   return {
-    files, types: [...(files.length ? ["Files"] : []), ...(text ? ["text/plain"] : []), ...(html ? ["text/html"] : [])],
+    files, types: [...(files.length ? ["Files"] : []), ...(text ? ["text/plain"] : []), ...(html ? ["text/html"] : []), ...types],
     items: files.map((file) => ({ kind: "file", type: file.type, getAsFile: () => file })),
     getData: (type: string) => type === "text/plain" ? text : type === "text/html" ? html : "",
     dropEffect: "none",
@@ -76,6 +78,75 @@ describe("A QR screenshot pasted or dropped on Join", () => {
     expect(fireEvent.paste(dialog(), { clipboardData: transfer({ files: [new File(["%PDF"], "a.pdf", { type: "application/pdf" })] }) })).toBe(true);
     expect(createImageBitmap).not.toHaveBeenCalled();
     expect(qr.calls).toBe(0);
+  });
+
+  describe("where the webview shows the page nothing of a copied picture (Desktop on Linux)", () => {
+    /** What the desktop host holds for a paste, read back by token as Rust hands it. */
+    const held = (name: string | null, size: number, mime: string | null = null) =>
+      ({ name, size, mime, read: vi.fn(async (offset: number, length: number) => new Uint8Array(Math.max(0, Math.min(length, size - offset)))), done: vi.fn<() => void>() }) satisfies ClipboardFile;
+    afterEach(() => { fakeEngine.readClipboardFiles = undefined; });
+
+    it("the app reads the picture, and its QR joins", async () => {
+      const { invite } = createLink();
+      qr.data = encodeInviteCode(invite);
+      const shot = held(null, 4, "image/png");
+      fakeEngine.readClipboardFiles = vi.fn(async () => [shot]);
+      const onJoin = vi.fn();
+      renderApp(<JoinDialog onJoin={onJoin} onClose={() => {}} />);
+      expect(fireEvent.paste(dialog(), { clipboardData: transfer({}) })).toBe(false);
+      await waitFor(() => expect(onJoin).toHaveBeenCalledTimes(1));
+      expect(onJoin.mock.calls[0][0]).toMatchObject({ seedB64: invite.seedB64 });
+      expect(createImageBitmap).toHaveBeenCalledTimes(1);
+      expect(shot.done).toHaveBeenCalledTimes(1);
+    });
+
+    it("a picture copied as a file is read too, alone; a picture too large is not read, and says so", async () => {
+      const notes = held("notes.pdf", 9), code = held("invite.PNG", 4);
+      fakeEngine.readClipboardFiles = vi.fn(async () => [notes, code]);
+      renderApp(<JoinDialog onJoin={() => {}} onClose={() => {}} />);
+      fireEvent.paste(dialog(), { clipboardData: transfer({}) });
+      expect(await screen.findByRole("alert")).toHaveTextContent("No QR found. Try a clearer image.");
+      expect(notes.read).not.toHaveBeenCalled();
+      expect(notes.done).toHaveBeenCalledTimes(1);
+      expect(code.done).toHaveBeenCalledTimes(1);
+
+      const huge = held(null, 12 * 1024 * 1024 + 1, "image/png");
+      fakeEngine.readClipboardFiles = vi.fn(async () => [huge]);
+      fireEvent.paste(dialog(), { clipboardData: transfer({}) });
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Choose an image smaller than 12 MB."));
+      expect(huge.read).not.toHaveBeenCalled();
+      expect(huge.done).toHaveBeenCalledTimes(1);
+    });
+
+    it("copied files with no picture among them say so; an empty clipboard, and what the app refuses, are told apart", async () => {
+      fakeEngine.readClipboardFiles = vi.fn(async () => []);
+      renderApp(<JoinDialog onJoin={() => {}} onClose={() => {}} />);
+      expect(fireEvent.paste(dialog(), { clipboardData: transfer({}) })).toBe(false);
+      await waitFor(() => expect(fakeEngine.readClipboardFiles).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Paste from clipboard" })).toBeEnabled());
+      expect(screen.queryByRole("alert")).toBeNull();
+
+      fakeEngine.readClipboardFiles = vi.fn(async () => [held("a.pdf", 4)]);
+      fireEvent.paste(dialog(), { clipboardData: transfer({ types: ["text/uri-list"] }) });
+      expect(await screen.findByRole("alert")).toHaveTextContent("Could not read the image. Try PNG or JPEG.");
+
+      // What the app refuses is said in the dialog's own words: the composer's point at its +, which Join has none of.
+      fakeEngine.readClipboardFiles = vi.fn(async () => { throw "That picture is too large to paste"; });
+      fireEvent.paste(dialog(), { clipboardData: transfer({}) });
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Choose an image smaller than 12 MB."));
+      fakeEngine.readClipboardFiles = vi.fn(async () => { throw "The clipboard's picture is damaged"; });
+      fireEvent.paste(dialog(), { clipboardData: transfer({}) });
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Could not read the image. Try PNG or JPEG."));
+      expect(createImageBitmap).not.toHaveBeenCalled();
+    });
+
+    it("text never asks the app, and the web app has no such read", () => {
+      renderApp(<JoinDialog onJoin={() => {}} onClose={() => {}} />);
+      expect(fireEvent.paste(dialog(), { clipboardData: transfer({}) })).toBe(true);
+      fakeEngine.readClipboardFiles = vi.fn(async () => []);
+      expect(fireEvent.paste(dialog(), { clipboardData: transfer({ text: "ghostly1…" }) })).toBe(true);
+      expect(fakeEngine.readClipboardFiles).not.toHaveBeenCalled();
+    });
   });
 
   it("a dropped image joins; a dropped file of another kind is refused", async () => {

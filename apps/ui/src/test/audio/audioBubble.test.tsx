@@ -1,5 +1,6 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { NO_ROOM_TO_PLAY } from "@ghostly/browser/shared/fileBytes";
 import { AudioBubble } from "../../components/audio/AudioBubble";
 import { MessageBubble } from "../../components/MessageBubble";
 import { VoiceBubble } from "../../components/voice/VoiceBubble";
@@ -68,6 +69,22 @@ describe("an audio file in the chat", () => {
       fireEvent.ended(audio);
       expect(session.playbackState).toBe("none");
       expect(handlers.get("play")).toBeNull();
+    } finally {
+      Reflect.deleteProperty(navigator, "mediaSession");
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("names the person who sent it to the system's media controls in the app's language", async () => {
+    const session = { metadata: null as unknown, playbackState: "none", setActionHandler: vi.fn(), setPositionState: vi.fn() };
+    Object.defineProperty(navigator, "mediaSession", { configurable: true, value: session });
+    vi.stubGlobal("MediaMetadata", class { constructor(public init: object) {} });
+    try {
+      fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+      renderApp(<AudioBubble file={song()} sender="me" peerName="Ana" />, { language: "pt" });
+      fireEvent.click(screen.getByTestId("audio-play"));
+      await flush();
+      expect(session.metadata).toMatchObject({ init: { title: "Ghost Town.mp3", artist: "Você" } });
     } finally {
       Reflect.deleteProperty(navigator, "mediaSession");
       vi.unstubAllGlobals();
@@ -154,6 +171,16 @@ describe("an audio file in the chat", () => {
     await waitFor(() => expect(saveFile).toHaveBeenCalledWith(file.id, "live.flac"));
   });
 
+  it("a Download the system refuses (Desktop) says so behind the ⓘ in the language, not in the system's English", async () => {
+    canPlay = (type) => (type === "audio/flac" ? "" : "maybe");
+    vi.spyOn(servicesPlatform!, "saveFile").mockRejectedValue(new Error("No space left on device (os error 28)"));
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    renderApp(<AudioBubble file={song({ name: "live.flac", mime: "audio/flac" })} sender="peer" peerName="Ana" />, { language: "fr" });
+    fireEvent.click(screen.getByTestId("audio-download"));
+    fireEvent.click(await screen.findByTestId("audio-why"));
+    expect(screen.getByTestId("audio-why-text")).toHaveTextContent(/^Impossible d'enregistrer le fichier à cet endroit\. Réessayez et choisissez un autre dossier\.$/);
+  });
+
   it("refused by the player once started, it says so and offers Download", async () => {
     play.mockImplementationOnce(() => Promise.reject(new DOMException("no decoder", "NotSupportedError")));
     show(song());
@@ -179,6 +206,20 @@ describe("an audio file in the chat", () => {
     expect(audio.getAttribute("src")).toBe("ghostly-file://localhost/song-1");
     expect(screen.queryByTestId("audio-problem")).toBeNull();
     fireEvent.ended(audio);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("gone while its stream is being opened (the chat closed), it lets go of the stream once it comes", async () => {
+    getFile.mockResolvedValue(null);
+    const release = vi.fn();
+    let answer: (source: { url: string; release: () => void }) => void = () => {};
+    vi.spyOn(servicesPlatform!, "streamFile").mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    const view = show(song());
+    fireEvent.click(screen.getByTestId("audio-play"));
+    await flush();
+    view.unmount();
+    answer({ url: "ghostly-file://localhost/song-late", release });
+    await flush();
     expect(release).toHaveBeenCalledTimes(1);
   });
 
@@ -235,6 +276,20 @@ describe("an audio file in the chat", () => {
     expect(screen.getByTestId("audio-problem")).toHaveTextContent("Too large to play here. Download it to listen.");
   });
 
+  it("no room on the disk for the player's copy of it: it is saved instead of played", async () => {
+    vi.spyOn(servicesPlatform!, "streamFile").mockRejectedValue(new Error(NO_ROOM_TO_PLAY));
+    const saveFile = vi.spyOn(servicesPlatform!, "saveFile").mockResolvedValue(true);
+    const file = song();
+    show(file);
+    fireEvent.click(screen.getByTestId("audio-play"));
+    await flush();
+    expect(getFile).not.toHaveBeenCalled();
+    expect(screen.getByTestId("audio-bubble")).toHaveAttribute("data-state", "idle");
+    expect(screen.getByTestId("audio-problem")).toHaveTextContent("Not enough free disk space to play it here. Download it instead.");
+    fireEvent.click(screen.getByTestId("audio-download"));
+    await waitFor(() => expect(saveFile).toHaveBeenCalledWith(file.id, file.name));
+  });
+
   it("its bytes left out of a light backup, or gone: it says so, not that it is too large", async () => {
     getFile.mockResolvedValue(null);
     vi.spyOn(servicesPlatform!, "streamFile").mockResolvedValue(null);
@@ -265,6 +320,16 @@ describe("an audio file not here yet", () => {
     await waitFor(() => expect(fakeEngine.callsTo("fileAction")).toEqual([{ linkId: "chat1", fileId: file.id, action: "accept" }]));
     fireEvent.click(screen.getByTestId("audio-decline"));
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("decline"));
+  });
+
+  it("Download pressed from the keyboard keeps the focus in the bubble once the offer is answered", async () => {
+    const file = song({ size: 40 * MB });
+    const { user } = show(file, { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: file.size, room: 12 * 1024 * MB });
+    screen.getByTestId("audio-accept").focus();
+    await user.keyboard("{Enter}");
+    act(() => fakeEngine.update({ transfers: { [file.id]: { state: "transferring", direction: "in", transferred: 0, size: file.size } } }));
+    expect(screen.queryByTestId("audio-accept")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId("audio-bubble"));
   });
 
   it("an offer larger than the room here cannot be accepted", () => {

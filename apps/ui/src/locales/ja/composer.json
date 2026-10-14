@@ -48,6 +48,7 @@
   "noEmoji": "絵文字が見つかりません",
   "noGifs": "GIF が見つかりません",
   "overSoft": "DHT で送れる {{bytes}} バイトを超えています。直接接続されると送信されます",
+  "pasteReading": "貼り付けた内容を読み込んでいます…",
   "payment": "支払い",
   "placeholder": "メッセージ…",
   "previewLoading": "{{host}} のプレビューを読み込み中…",
@@ -70,5 +71,6 @@
   "skinTone": "肌の色",
   "takePhoto": "写真を撮る",
   "tooLong": "長すぎて送信できません（{{count}} 文字、上限は {{max}}）。",
+  "tooLongBytes": "長すぎて送信できません（{{bytes}} バイト、上限は {{max}}）。短くするか、ファイルとして送信してください。",
   "tooLongDht": "DHT には長すぎます。直接つながれば送れます。"
 }

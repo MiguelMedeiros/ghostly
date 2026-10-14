@@ -23,8 +23,13 @@ function start({ agent = NEW_ANDROID, language = "en-US", loaded = true } = {}) 
   vi.spyOn(navigator, "language", "get").mockReturnValue(language);
   vi.spyOn(document, "readyState", "get").mockReturnValue(loaded ? "complete" : "loading");
   document.body.innerHTML = '<div id="root"></div>';
+  // The guard listens for as long as the page lives: a test takes its listeners away with the page.
+  const listen = window.addEventListener.bind(window);
+  const spy = vi.spyOn(window, "addEventListener").mockImplementation((...args: Parameters<typeof window.addEventListener>) => { listening.push(args); listen(...args); });
   new Function(SOURCE)();
+  spy.mockRestore();
 }
+const listening: Parameters<typeof window.addEventListener>[] = [];
 
 function fail(message: string, name = "TypeError") {
   const error = new Error(message);
@@ -36,8 +41,9 @@ const draw = () => { document.getElementById("root")!.appendChild(document.creat
 
 beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => {
-  // What the guard set up goes with it: a drawn root ends it (listeners and timers), then the page is emptied.
-  if (document.getElementById("root")) { draw(); vi.advanceTimersByTime(1000); }
+  // What the guard set up goes with it: a drawn root takes its panel and timers, then its listeners and the page.
+  if (document.getElementById("root")) { draw(); vi.advanceTimersByTime(2000); }
+  for (const args of listening.splice(0)) window.removeEventListener(...args);
   vi.useRealTimers();
   document.body.innerHTML = "";
   delete (window as unknown as { __ghostlyBoot?: Guard }).__ghostlyBoot;
@@ -112,9 +118,60 @@ describe("the boot guard", () => {
     draw();
     vi.advanceTimersByTime(600);
     expect(panel()).toBeNull();
-    // Over for good: a later error is the app's own error screen's business.
+    // A later error with the app still on screen is the app's own error screen's business.
     fail("later");
     vi.advanceTimersByTime(5000);
+    expect(panel()).toBeNull();
+  });
+
+  it("says Ghostly could not start when the \"open in another tab\" screen drew and the app then failed to", () => {
+    start();
+    // The lock was slow: the entry drew the waiting screen, then got the lock and the app threw on its first render.
+    draw();
+    vi.advanceTimersByTime(600);
+    document.getElementById("root")!.replaceChildren();
+    fail("window.matchMedia is not a function");
+    expect(panel()).toBeNull();
+    vi.advanceTimersByTime(1500);
+    expect(panel()).toHaveAttribute("data-reason", "error");
+    expect(panel()).toHaveTextContent("Ghostly could not start");
+    expect(panel()!.querySelector("textarea")!.value).toContain("error: TypeError: window.matchMedia is not a function");
+  });
+
+  it("hears the error that comes just before the page is emptied", () => {
+    start();
+    draw();
+    vi.advanceTimersByTime(600);
+    fail("thrown while the first screen was still there");
+    document.getElementById("root")!.replaceChildren();
+    vi.advanceTimersByTime(1500);
+    expect(panel()).toHaveAttribute("data-reason", "error");
+  });
+
+  it("forgets an error the app stayed on screen through", () => {
+    start();
+    draw();
+    vi.advanceTimersByTime(600);
+    fail("an old one, survived");
+    vi.advanceTimersByTime(60_000);
+    document.getElementById("root")!.replaceChildren();
+    fail("the one that emptied the page");
+    vi.advanceTimersByTime(1500);
+    const details = panel()!.querySelector("textarea")!.value;
+    expect(details).toContain("the one that emptied the page");
+    expect(details).not.toContain("an old one, survived");
+  });
+
+  it("leaves again when the app draws over it", () => {
+    start();
+    draw();
+    vi.advanceTimersByTime(600);
+    document.getElementById("root")!.replaceChildren();
+    fail("x");
+    vi.advanceTimersByTime(1500);
+    expect(panel()).not.toBeNull();
+    draw();
+    vi.advanceTimersByTime(600);
     expect(panel()).toBeNull();
   });
 

@@ -39,3 +39,7 @@ blob-report-matrix
 
 # TypeScript build info (tsc -b): never committed
 *.tsbuildinfo
+
+# The bundles of the built-in apps: read from each app's own repository by apps/ui/scripts/built-in-apps.mjs (npm run sync:apps)
+apps/ui/src/assets/apps/*.ghostlyapp
+apps/ui/src/assets/apps/*.part

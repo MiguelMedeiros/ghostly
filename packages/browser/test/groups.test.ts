@@ -161,7 +161,8 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     await world.settle();
     expect(world.peers.get("alice")!.edges.size).toBe(0);
     expect(world.peers.get("bob")!.edges.size).toBe(0);
-    expect(world.events("alice")).toEqual(["created", "joined", "gone"]);
+    // He left on his own: the line says so, not that he is no longer a member.
+    expect(world.events("alice")).toEqual(["created", "joined", "left"]);
     // Nothing of it is left on Bob's device once the admin confirmed.
     expect(await world.peers.get("bob")!.store.getGroups()).toEqual([]);
   });
@@ -254,6 +255,7 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     expect(alice.views()[0].lastMentionAt).toBeUndefined();
     // After a restart it is what it was: when the mention came, not only when it was written.
     const before = bob.views()[0].lastMentionAt;
+    await bob.flush();
     const again = new Groups({ ...(bob as unknown as { host: GroupsHost }).host, emit: vi.fn() }, world.peers.get("bob")!.store);
     await again.load();
     expect(again.views()[0].lastMentionAt).toBe(before);
@@ -587,6 +589,14 @@ describe("group engine: admission over a contact chat, edges from the roster", (
       expect(await alice.messages(solo)).toEqual([]);
     });
 
+    it("the admin cannot delete the group from this device either when nobody is online to take over: it would be left with no admin", async () => {
+      const { world, alice, bob, carol, groupId, edge } = await trio();
+      edge("alice", bob, false); edge("alice", carol, false);
+      await expect(alice.forget(groupId)).rejects.toThrow(/nobody else in the group is online/);
+      expect(alice.views()[0]).toMatchObject({ id: groupId, status: "active", isAdmin: true });
+      expect((await world.peers.get("alice")!.store.getGroups()).map(g => g.id)).toEqual([groupId]);
+    });
+
     it("a leave the admin never hears is forgotten after a week", async () => {
       const { world, alice, bob, groupId, edge } = await trio();
       edge("alice", bob, false);
@@ -599,6 +609,20 @@ describe("group engine: admission over a contact chat, edges from the roster", (
       expect(await world.peers.get("bob")!.store.getGroups()).toEqual([]);
       expect(world.peers.get("bob")!.edges.size).toBe(0);
       void alice;
+    });
+
+    it("a member away when the admin role moved reads that the group was renamed, not that the new admin did it", async () => {
+      const { world, alice, bob, carol, groupId, key, edge } = await trio();
+      edge("carol", alice, false); edge("carol", bob, false);
+      await alice.rename(groupId, "Book club"); await world.settle();
+      await alice.makeAdmin(groupId, key(bob)); await world.settle();
+      edge("carol", alice, true); edge("carol", bob, true);
+      await world.meet();
+      expect(carol.views()[0].name).toBe("Book club");
+      const renamed = (name: string) => world.peers.get(name)!.messages.filter(m => m.event === "renamed").map(m => ({ text: m.text, member: m.member }));
+      // Bob signed again what Alice set: Carol cannot tell it from a rename of his.
+      expect(renamed("carol")).toEqual([{ text: "The group is now called “Book club”", member: undefined }]);
+      expect(renamed("bob")).toEqual([{ text: expect.stringMatching(/ renamed the group to “Book club”$/), member: key(alice) }]);
     });
 
     it("a membership line is written once: a name or a secret arriving later does not write the admin's line again", async () => {
@@ -832,6 +856,42 @@ describe("group engine: admission over a contact chat, edges from the roster", (
         expect(inner.farewellKeys(group, session, t0 + 35_000)).not.toContain(keys[9]);
         inner.tickNow = 0;
       });
+    });
+
+    it("an invitation from another contact does not end a leave the admin has not heard", async () => {
+      const { world, alice, bob, groupId, key, edge } = await trio();
+      const [aliceKey, bobKey] = [key(alice), key(bob)];
+      edge("alice", bob, false);
+      world.chats.delete("chat-ab");
+      await bob.leave(groupId); await world.settle();
+      const tombstone = async () => (await world.peers.get("bob")!.store.getGroups())[0];
+      expect((await tombstone()).left).toMatchObject({ admin: aliceKey });
+      // Someone else names the group's id on their chat with Bob, with a key of their own or with the admin's.
+      await bob.handleContactFrame("chat-xb", { t: "group-invite", g: groupId, name: "Ghosts", admin: createIdentity().pubKeyZ32, e: 0, n: 3 });
+      await bob.handleContactFrame("chat-xb", { t: "group-invite", g: groupId, name: "Ghosts", admin: aliceKey, e: 0, n: 3 });
+      expect(bob.views()).toEqual([]);
+      expect((await tombstone()).left).toMatchObject({ admin: aliceKey });
+      expect((await tombstone()).invitation).toBeUndefined();
+      expect([...world.peers.get("bob")!.edges.values()].map(e => e.peer)).toEqual([aliceKey]);
+      // The leave is still owed, and said when the admin is back.
+      edge("alice", bob, true);
+      await world.meet(); await world.settle();
+      expect(alice.views()[0].members.map(m => m.key)).not.toContain(bobKey);
+      expect(await world.peers.get("bob")!.store.getGroups()).toEqual([]);
+    });
+
+    it("the admin a leave is owed to invites again over the chat that let the member in", async () => {
+      const { world, alice, bob, groupId, key, edge } = await trio();
+      const aliceKey = key(alice);
+      edge("alice", bob, false);
+      world.chats.delete("chat-ab");
+      await bob.leave(groupId); await world.settle();
+      // The admin took Bob out itself meanwhile; its invitation says as much as its answer to the leave would.
+      await alice.remove(groupId, key(bob)); await world.settle();
+      world.chats.set("chat-ab", ["alice", "bob"]);
+      await alice.invite(groupId, "chat-ab"); await world.settle();
+      expect(bob.views().map(v => v.invitation)).toMatchObject([{ linkId: "chat-ab", admin: aliceKey, accepted: false }]);
+      expect((await world.peers.get("bob")!.store.getGroups())[0].left).toBeUndefined();
     });
 
     it("a tombstone survives a restart and still delivers the leave", async () => {

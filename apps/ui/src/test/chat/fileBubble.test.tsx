@@ -1,10 +1,11 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileBubble } from "../../components/FileBubble";
 import { fileStatus, timeLeft } from "../../lib/fileStatus";
 import { servicesPlatform, type FileTransferState } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
+import { everythingOnScreen } from "../onScreen";
 import { renderApp } from "../render";
 
 // covers: files.large.offer, files.large.resume, files.size-label, files.large.resend, files.large.request, backup.light
@@ -19,9 +20,11 @@ const show = (transfer: FileTransferState | null, patch: Partial<ChatFile> = {})
 };
 
 beforeEach(() => {
+  everythingOnScreen();
   vi.spyOn(servicesPlatform!, "getFile").mockResolvedValue(null);
   fakeEngine.on("fileAction", () => undefined);
 });
+afterEach(() => vi.unstubAllGlobals());
 
 describe("what a file's status line says", () => {
   const f = file();
@@ -44,6 +47,10 @@ describe("what a file's status line says", () => {
     ["broken off, sent from here", { state: "failed", direction: "out", transferred: 0, size: f.size, error: "Connection lost" } as FileTransferState, "Not sent"],
     ["stuck", t({ stalled: true, rate: 12 * 1024 ** 2 }), "Not moving · 62% of 4.2 GB"],
     ["stuck, no connection: the connection is the reason", t({ stalled: true, stage: "waiting" }), "Waiting for connection · 62% done"],
+    ["a group's file, its holders busy", t({ stage: "waiting", direction: "in", wait: "busy" }), "Busy, trying again soon · 62% done"],
+    ["a group's file, its holders busy, nothing here yet", t({ stage: "waiting", direction: "in", wait: "busy", transferred: 0 }), "Busy, trying again soon · 4.2 GB"],
+    ["a group's file that came damaged", t({ stage: "waiting", direction: "in", wait: "damaged", stalled: true, transferred: 0 }), "Arrived damaged · 4.2 GB"],
+    ["a group's file nobody in reach has", t({ stage: "waiting", direction: "in", wait: "nobody", transferred: 0 }), "Waiting for connection · 4.2 GB"],
   ])("%s", (_, transfer, text) => {
     expect(fileStatus(f, transfer, "Ana", false)).toBe(text);
   });
@@ -71,6 +78,36 @@ describe("FileBubble: files/3", () => {
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))?.action).toBe("decline"));
   });
 
+  it("Accept pressed from the keyboard keeps the focus in the bubble once the offer is answered", async () => {
+    const { user } = show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB, room: 12 * GB });
+    const bubble = screen.getByTestId("file-bubble");
+    screen.getByTestId("file-accept").focus();
+    await user.keyboard("{Enter}");
+    // Chromium says the focus left the button as it takes it out, to nothing.
+    const accept = screen.getByTestId("file-accept");
+    act(() => {
+      fakeEngine.update({ transfers: { "chat1-in-abc": { state: "transferring", direction: "in", transferred: 0, size: 4.2 * GB } } });
+      fireEvent.focusOut(accept);
+    });
+    expect(screen.queryByTestId("file-accept")).toBeNull();
+    expect(document.activeElement).toBe(bubble);
+    // Tab goes on to what the bubble offers now, and the bubble is no stop of its own once the focus left it.
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByTestId("file-pause"));
+    expect(bubble).not.toHaveAttribute("tabindex");
+  });
+
+  it("an offer whose buttons the focus left before it was answered moves no focus", async () => {
+    show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB, room: 12 * GB });
+    screen.getByTestId("file-decline").focus();
+    screen.getByTestId("file-decline").blur();
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+    act(() => fakeEngine.update({ transfers: { "chat1-in-abc": { state: "transferring", direction: "in", transferred: 0, size: 4.2 * GB } } }));
+    expect(screen.queryByTestId("file-accept")).toBeNull();
+    expect(document.activeElement).toBe(document.body);
+    expect(screen.getByTestId("file-bubble")).not.toHaveAttribute("tabindex");
+  });
+
   it("a contact with no name: \"your contact\" mid-sentence, \"Your contact\" to start one", () => {
     fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: { "chat1-out-p": { state: "transferring", stage: "paused", pausedBy: "peer", direction: "out", transferred: GB, size: 4.2 * GB } } });
     const sent = renderApp(<FileBubble file={file({ id: "chat1-out-p" })} />);
@@ -79,6 +116,14 @@ describe("FileBubble: files/3", () => {
     fakeEngine.update({ transfers: { "chat1-in-abc": { state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB } } });
     renderApp(<FileBubble file={file()} />);
     expect(screen.getByTestId("file-offer")).toHaveTextContent("Your contact wants to send movie.mkv (4.2 GB).");
+  });
+
+  it("an offer of a name with nothing to break at wraps inside the bubble", () => {
+    const name = `report_${"x".repeat(150)}.bin`;
+    show({ state: "transferring", stage: "asking", direction: "in", transferred: 0, size: 4.2 * GB }, { name });
+    const line = screen.getByText(`Ana wants to send ${name} (4.2 GB).`);
+    // jsdom lays nothing out: the line must be allowed to break inside the name (e2e/web/file-offer-layout.spec.ts measures it).
+    expect(line.className).toContain("[overflow-wrap:anywhere]");
   });
 
   it("an offer larger than the room here cannot be accepted", () => {
@@ -119,6 +164,27 @@ describe("FileBubble: files/3", () => {
 
     show({ state: "transferring", stage: "waiting", direction: "in", transferred: GB, size: 4.2 * GB, stalled: true });
     expect(screen.queryByTestId("file-resend")).toBeNull();
+    fireEvent.click(screen.getByTestId("file-request"));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: "chat1-in-abc", action: "request" }));
+  });
+
+  it("a file that arrived damaged from everyone who had it offers Ask again; one that just did not arrive does not", async () => {
+    const lost = show({ state: "failed", direction: "in", transferred: 0, size: 10, error: "Connection lost" });
+    expect(screen.queryByTestId("file-request")).toBeNull();
+    lost.unmount();
+    show({ state: "failed", direction: "in", transferred: 0, size: 10, retry: true, error: "Every copy of this file arrived damaged and was deleted. Ask for it again later." });
+    expect(screen.getByTestId("file-status")).toHaveTextContent(/^Did not arrive$/);
+    fireEvent.click(screen.getByTestId("file-why"));
+    expect(screen.getByTestId("file-why-text")).toHaveTextContent("arrived damaged");
+    expect(screen.getByTestId("file-request")).toHaveAttribute("title", "Asks the group's members for it again, those whose copy came damaged too.");
+    fireEvent.click(screen.getByTestId("file-request"));
+    await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: "chat1-in-abc", action: "request" }));
+  });
+
+  it("a group's file that came damaged offers Ask again, which asks the group anew", async () => {
+    show({ state: "transferring", stage: "waiting", direction: "in", wait: "damaged", stalled: true, transferred: 0, size: 4.2 * GB });
+    expect(screen.getByTestId("file-status")).toHaveTextContent("Arrived damaged · 4.2 GB");
+    expect(screen.getByTestId("file-request")).toHaveAttribute("title", "Asks the group for it again. The damaged bytes are gone.");
     fireEvent.click(screen.getByTestId("file-request"));
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: "chat1-in-abc", action: "request" }));
   });
@@ -188,8 +254,9 @@ describe("FileBubble: files/3", () => {
       expect(screen.getByRole("img", { name: "Pasted image.png" })).toHaveAttribute("src", src);
       expect(created).toEqual([src]);
       expect(revoked).toEqual([]);
+      // Kept for the run once the bubble goes: the chat opened again shows it without reading it (lib/pictureReads.ts).
       view.unmount();
-      expect(revoked).toEqual([src]);
+      expect(revoked).toEqual([]);
     } finally {
       Object.assign(URL, { createObjectURL, revokeObjectURL });
     }
@@ -211,7 +278,7 @@ describe("FileBubble: files/3", () => {
   });
 
   it("right after a start, a file whose transfer is not restored yet does not look finished", async () => {
-    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["part"], { type: "application/octet-stream" }));
+    vi.spyOn(servicesPlatform!, "fileHeld").mockResolvedValue("here");
     // The engine is up (its wallets starting) but has not put its kept transfers back: nothing is known of the file.
     fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {}, transfersRestored: false });
     renderApp(<FileBubble file={file({ size: 80 })} peerName="Ana" />);
@@ -227,7 +294,7 @@ describe("FileBubble: files/3", () => {
   });
 
   it("a file from history is shown finished once the transfers are restored with none for it", async () => {
-    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["x".repeat(80)], { type: "application/octet-stream" }));
+    vi.spyOn(servicesPlatform!, "fileHeld").mockResolvedValue("here");
     fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {}, transfersRestored: false });
     renderApp(<FileBubble file={file({ size: 80 })} peerName="Ana" />);
     expect(screen.getByTestId("file-status")).toHaveTextContent("Loading…");
@@ -236,19 +303,45 @@ describe("FileBubble: files/3", () => {
     expect(await screen.findByTestId("file-save")).toBeInTheDocument();
   });
 
+  it("a received file that is no picture reads none of its bytes, on each open: whether it is here decides Save", async () => {
+    const fileHeld = vi.spyOn(servicesPlatform!, "fileHeld").mockResolvedValue("here");
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["%PDF"], { type: "application/pdf" }));
+    const MB = 1024 ** 2;
+    const pdf = { name: "report.pdf", mime: "application/pdf", size: 40 * MB };
+    const first = show({ state: "done", transferred: 40 * MB, size: 40 * MB }, pdf);
+    expect(await screen.findByTestId("file-save")).not.toHaveAttribute("href");
+    first.unmount();
+    // The chat opened again, the file from its history.
+    show(null, pdf);
+    expect(await screen.findByTestId("file-save")).toBeInTheDocument();
+    expect(screen.getByTestId("file-status")).toHaveTextContent(/^40\.0 MB$/);
+    expect(fileHeld).toHaveBeenCalledWith("chat1-in-abc");
+    expect(servicesPlatform!.getFile).not.toHaveBeenCalled();
+  });
+
+  it("where the platform cannot tell whether a file is here, the file is asked for as before", async () => {
+    const { fileHeld } = servicesPlatform!;
+    delete (servicesPlatform as { fileHeld?: unknown }).fileHeld;
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["x".repeat(80)], { type: "application/octet-stream" }));
+    try {
+      show(null, { size: 80 });
+      expect(await screen.findByTestId("file-save")).toBeInTheDocument();
+      expect(servicesPlatform!.getFile).toHaveBeenCalledWith("chat1-in-abc");
+    } finally { Object.assign(servicesPlatform!, { fileHeld }); }
+  });
+
   it("a file still arriving when the app starts is not offered to save once its transfer shows it moving", async () => {
-    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["part"], { type: "application/octet-stream" }));
+    const fileHeld = vi.spyOn(servicesPlatform!, "fileHeld").mockResolvedValue("here");
     // Just started: the chat is drawn before its transfers are restored, and what is stored is a part of the file.
     show(null, { size: 80 });
     expect(await screen.findByTestId("file-save")).toBeInTheDocument();
     act(() => fakeEngine.update({ transfers: { "chat1-in-abc": { state: "transferring", direction: "in", transferred: 4, size: 80 } } }));
     expect(screen.queryByTestId("file-save")).toBeNull();
     expect(screen.getByTestId("file-cancel")).toBeInTheDocument();
-    // All here: read again, and offered.
-    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["x".repeat(80)], { type: "application/octet-stream" }));
+    // All here: looked at again, and offered.
     act(() => fakeEngine.update({ transfers: { "chat1-in-abc": { state: "done", direction: "in", transferred: 80, size: 80 } } }));
     expect(await screen.findByTestId("file-save")).toBeInTheDocument();
-    expect(vi.mocked(servicesPlatform!.getFile)).toHaveBeenCalledTimes(2);
+    expect(fileHeld).toHaveBeenCalledTimes(2);
   });
 
   it("a file kept but too large to show here is saved through the system (Desktop)", async () => {
@@ -259,6 +352,39 @@ describe("FileBubble: files/3", () => {
       fireEvent.click(await screen.findByTestId("file-save"));
       expect(saveFile).toHaveBeenCalledWith("chat1-in-abc", "movie.mkv");
       expect(screen.getByTestId("file-status")).toHaveTextContent("4.2 GB");
+    } finally { delete (servicesPlatform as { saveFile?: unknown }).saveFile; }
+  });
+
+  it("a group's picture all here, too large to show here, is saved through the system though it shows no transfer (Desktop)", async () => {
+    const saveFile = vi.fn(async () => true);
+    Object.assign(servicesPlatform!, { saveFile, fileHeld: vi.fn(async () => "here" as const) });
+    try {
+      // The engine keeps no transfer for a group's file all here: its record says it is done.
+      const picture = { id: "group-g1-in-abc", name: "huge.png", mime: "image/png", size: 900 * 1024 ** 2 };
+      fakeEngine.update({ links: [], transfers: {}, transfersRestored: true });
+      renderApp(<FileBubble file={file(picture)} peerName="Ana" />);
+      fireEvent.click(await screen.findByTestId("file-save"));
+      expect(saveFile).toHaveBeenCalledWith("group-g1-in-abc", "huge.png");
+    } finally { delete (servicesPlatform as { saveFile?: unknown; fileHeld?: unknown }).saveFile; delete (servicesPlatform as { fileHeld?: unknown }).fileHeld; }
+  });
+
+  // The save command (apps/desktop file_store.rs) rejects with the system's English: a folder that cannot be written
+  // to, a full disk, a place without a file name.
+  it.each([
+    ["en", "Permission denied (os error 13)", "Couldn't save the file there. Try again and choose another folder."],
+    ["pt", "No space left on device (os error 28)", "Não foi possível salvar o arquivo ali. Tente de novo e escolha outra pasta."],
+    ["ja", "The chosen place has no file name", "その場所にファイルを保存できませんでした。別のフォルダを選んでもう一度お試しください。"],
+  ] as const)("a Save the system refuses (Desktop) says so in the language, with the next step (%s)", async (language, refusal, said) => {
+    const saveFile = vi.fn(async () => { throw new Error(refusal); });
+    Object.assign(servicesPlatform!, { saveFile });
+    try {
+      fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: { "chat1-in-abc": { state: "done", transferred: 4.2 * GB, size: 4.2 * GB } } });
+      renderApp(<FileBubble file={file()} peerName="Ana" />, { language });
+      fireEvent.click(await screen.findByTestId("file-save"));
+      fireEvent.click(await screen.findByTestId("file-why"));
+      expect(screen.getByTestId("file-why-text")).toHaveTextContent(said);
+      // Still offered: another folder can be chosen.
+      expect(screen.getByTestId("file-save")).toBeEnabled();
     } finally { delete (servicesPlatform as { saveFile?: unknown }).saveFile; }
   });
 

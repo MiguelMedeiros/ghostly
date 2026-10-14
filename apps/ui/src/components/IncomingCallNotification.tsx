@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef } from "react";
 import { useI18n } from "../contexts/I18nContext";
 import { useTabTrap } from "../hooks/useDismiss";
+import { initial } from "../lib/initial";
 
 interface IncomingCallNotificationProps {
   peerName: string;
@@ -70,7 +71,7 @@ export function IncomingCallNotification({
         <div className="flex flex-col items-center gap-3">
           <div aria-hidden="true" className="w-20 h-20 rounded-full bg-surface-hover flex items-center justify-center animate-pulse-dot">
             <span className="text-text-muted text-2xl">
-              {peerName.charAt(0).toUpperCase()}
+              {initial(peerName)}
             </span>
           </div>
           <div>

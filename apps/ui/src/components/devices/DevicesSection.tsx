@@ -3,14 +3,14 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import { MAX_DEVICES } from "@ghostly/browser/devices/state";
 import { useI18n } from "../../contexts/I18nContext";
-import { listNames, openJoinAnother, removeErrorKey, useDeviceSet } from "../../lib/devices";
+import { listNames, openJoinAnother, removeErrorKey, useConnectionCheck, useDeviceSet } from "../../lib/devices";
 import { useServicesPlatform } from "../../hooks/useServicesPlatform";
 import { Button, Notice, Row, Section, Switch } from "../wallet/ui";
 import { Menu, MenuItem, MenuSeparator } from "../Menu";
 import { hasStandby, keepAwakeSupported, useKeepAwakeSetting } from "../../lib/keepAwake";
 import { AddDeviceDialog } from "./AddDeviceDialog";
 import { DeviceGlyph } from "./DeviceGlyph";
-import { MoveDialog } from "./Handoff";
+import { HandoffProgress, MoveDialog } from "./Handoff";
 import { LostChecklist, RemoveDeviceDialog } from "./RemoveDeviceDialog";
 import { FAILURES, dayText, useHandoffView, walletNameOf } from "../../lib/handoff";
 import { nextOf, said } from "../../lib/notices";
@@ -44,17 +44,19 @@ export function DevicesSection() {
     try { await engine.call("deviceNewSecret"); setSecret({ done: true }); }
     catch (cause) { const key = removeErrorKey(cause); setSecret({ error: key ? said(key, t) : problemText(cause, t) }); }
   };
+  // What the engine refused of "Not now" on the secret offer and of "Let <device> try again": said under each.
+  const [refused, setRefused] = useState<{ dismiss?: Problem; allow?: Problem }>({});
+  const ask = (which: "dismiss" | "allow", work: Promise<unknown>) => {
+    setRefused((was) => ({ ...was, [which]: undefined }));
+    void work.catch((cause: unknown) => setRefused((was) => ({ ...was, [which]: problemText(cause, t) })));
+  };
   const handoff = useHandoffView(!moving);
   const thisActive = view?.devices.some((device) => device.self && device.active) ?? false;
-  const [checked, setChecked] = useState<Record<string, string>>({});
-  const check = async (key: string) => {
-    setChecked((was) => ({ ...was, [key]: t("devices.section.checking") }));
-    try {
-      const { ms } = await engine.call("devicePing", { key });
-      setChecked((was) => ({ ...was, [key]: t("devices.section.answered", { ms: Math.max(1, Math.round(ms)) }) }));
-    } catch { setChecked((was) => ({ ...was, [key]: t("devices.section.noAnswer") })); }
-  };
+  // A move under way from this device (WISP 06 § Handoff progress, "on both devices"): one started here whose dialog was
+  // closed ("You can keep using Ghostly"), or one the other device started with Use here.
+  const running = thisActive && !moving && handoff?.role === "giver" && handoff.step !== "failed" ? handoff : null;
   const devices = view?.devices ?? [];
+  const { answers: checked, check } = useConnectionCheck(devices);
   const full = devices.length >= MAX_DEVICES;
   // The device a takeover stopped, while it is still in the set: what "Remove <device>" after the offer removes.
   const stopped = view?.secretOffer?.device ? devices.find((device) => !device.self && device.name === view.secretOffer!.device) : undefined;
@@ -71,8 +73,14 @@ export function DevicesSection() {
           <Button data-testid="device-join-another-open" onClick={() => openJoinAnother()}>{t("devices.join.anotherButton")}</Button>
         </Row>
       )}
+      {/* Where that move stands, with Cancel while nothing has changed yet: the dialog is not the only place that says it. */}
+      {running && (
+        <div data-testid="handoff-running" className="px-4 py-3.5 text-sm">
+          <HandoffProgress view={running} onCancel={() => void engine.call("deviceHandoffCancel")} />
+        </div>
+      )}
       {devices.map((device) => (
-        <DeviceRow key={device.key} device={device} thisActive={thisActive} checked={checked[device.key]}
+        <DeviceRow key={device.key} device={device} thisActive={thisActive} busy={!!running} checked={checked[device.key]}
           onMove={() => setMoving({ key: device.key, name: device.name })} onCheck={() => void check(device.key)}
           onRemove={() => { setRemoved(null); setRemoving({ key: device.key, name: device.name }); }} />
       ))}
@@ -92,9 +100,10 @@ export function DevicesSection() {
           {stopped
             ? <Button variant="primary" data-testid="device-secret-offer-remove" onClick={() => setRemoving({ key: stopped.key, name: stopped.name })}>{t("devices.secret.removeOffer", { device: stopped.name })}</Button>
             : <Button variant="primary" data-testid="device-secret-offer-new" disabled={secret.busy} onClick={() => void newSecret()}>{t("devices.secret.button")}</Button>}
-          <Button data-testid="device-secret-offer-dismiss" onClick={() => void engine.call("deviceSecretOfferDismiss")}>{t("devices.secret.notNow")}</Button>
+          <Button data-testid="device-secret-offer-dismiss" onClick={() => ask("dismiss", engine.call("deviceSecretOfferDismiss"))}>{t("devices.secret.notNow")}</Button>
         </Row>
       )}
+      {thisActive && view?.secretOffer && refused.dismiss && <div className="px-4 py-3"><Notice problem={refused.dismiss} testId="device-secret-offer-error" /></div>}
       {/* On a Desktop with a standby device (WISP 06 § User experience): this device's own switch, never the profile's. */}
       {keepAwakeSupported() && hasStandby(view) && (
         <Row label={t("devices.section.keepAwake")} info={t("devices.section.keepAwakeHint")} testId="device-keep-awake">
@@ -114,9 +123,10 @@ export function DevicesSection() {
       )}
       {handoff?.failure === "password" && handoff.role === "giver" && (
         <Row testId="handoff-wrong-password" label={t("devices.handoff.wrongPassword", { device: handoff.device })}>
-          <Button data-testid="handoff-allow" onClick={() => void engine.call("deviceHandoffAllow", { key: handoff.key })}>{t("devices.handoff.allowAgain", { device: handoff.device })}</Button>
+          <Button data-testid="handoff-allow" onClick={() => ask("allow", engine.call("deviceHandoffAllow", { key: handoff.key }))}>{t("devices.handoff.allowAgain", { device: handoff.device })}</Button>
         </Row>
       )}
+      {handoff?.failure === "password" && handoff.role === "giver" && refused.allow && <div className="px-4 py-3"><Notice problem={refused.allow} testId="handoff-allow-error" /></div>}
       {/* A move whose copy stopped (WISP 06 § Handoff progress, Failures): the profile is still here; Try again moves it. */}
       {thisActive && handoff?.role === "giver" && handoff.step === "failed" && handoff.failure && STOPPED.has(handoff.failure) && (() => {
         const name = devices.find((device) => device.key === handoff.key)?.name || handoff.device || t("devices.join.otherDevice");
@@ -141,10 +151,11 @@ export function DevicesSection() {
 
 /**
  * One device: its mark, its name, its state and, for another device, whether its link is connected. "Move to
- * <device>" stays on the row, the main thing to do with a device; the rest is in its menu.
+ * <device>" stays on the row, the main thing to do with a device; the rest is in its menu. While a move runs (`busy`)
+ * no other is offered: the engine would refuse it.
  */
-function DeviceRow({ device, thisActive, checked, onMove, onCheck, onRemove }: {
-  device: Device; thisActive: boolean; checked?: string; onMove(): void; onCheck(): void; onRemove(): void;
+function DeviceRow({ device, thisActive, busy, checked, onMove, onCheck, onRemove }: {
+  device: Device; thisActive: boolean; busy: boolean; checked?: string; onMove(): void; onCheck(): void; onRemove(): void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -152,7 +163,7 @@ function DeviceRow({ device, thisActive, checked, onMove, onCheck, onRemove }: {
   const live = device.status === "live";
   const state = device.self ? (device.active ? t("devices.section.thisActive") : t("devices.section.thisStandby"))
     : device.active ? t("devices.section.active") : t("devices.section.standby");
-  const canMove = !device.self && live && thisActive;
+  const canMove = !device.self && live && thisActive && !busy;
   const canCheck = !device.self && live;
   const canRemove = !device.self && thisActive;
   const menuLabel = t("devices.section.menu", { device: device.name });

@@ -37,7 +37,7 @@ describe("Settings, Network: Pkarr relays", () => {
     const { engine, user } = renderApp(<NetworkSettings />);
     act(() => engine.update({ transport: { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS }, settings: { relays: RELAYS } }));
     expect(screen.queryByTestId("network-read-relays")).toBeNull();
-    expect(await info(user, screen.getByTestId("network-relays-field"))).toHaveTextContent(/Browsers cannot reach the Mainline DHT directly/);
+    expect(await info(user, screen.getByTestId("network-relays-field"))).toHaveTextContent(/Browsers cannot reach the Mainline DHT/);
   });
 });
 
@@ -116,6 +116,20 @@ describe("Settings, Network: Iroh relays on the Desktop", () => {
     await user.type(within(row).getByTestId("network-iroh-relays"), "http://127.0.0.1:3340/");
     await user.click(screen.getByTestId("network-save"));
     expect(engine.callsTo("updateSettings").slice(-1)[0]).toMatchObject({ settings: { irohRelays: ["http://127.0.0.1:3340/"] } });
+  });
+});
+
+describe("Settings, Network: HyperDHT relay", () => {
+  it("is offered in a browser, and not on the Desktop, which runs HyperDHT itself and ignores it", async () => {
+    const { engine, user } = renderApp(<NetworkSettings />);
+    act(() => engine.update({ transport: { protocol: "Pkarr relays (HTTP) → Mainline DHT (BEP44)", relays: RELAYS }, settings: { relays: RELAYS } }));
+    expect(screen.getByTestId("network-hyperdht-relay")).toBeInTheDocument();
+    act(() => engine.update({ transport: { protocol: "Mainline DHT (BEP44) — Direct UDP", relays: [], direct: true }, settings: { relays: RELAYS, hyperdhtRelay: "wss://relay.example.org" } }));
+    expect(screen.queryByTestId("network-hyperdht-relay")).toBeNull();
+    expect(screen.queryByText("HyperDHT relay")).toBeNull();
+    // Saving the rest leaves the relay as it is (a web app standing by for this profile may still use it).
+    await user.click(screen.getByTestId("network-save"));
+    expect(engine.callsTo("updateSettings").slice(-1)[0]).not.toHaveProperty("settings.hyperdhtRelay");
   });
 });
 

@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { CONTACT_KEY } from "./apiKit";
 import { CliError } from "./errors";
 import type { GhostlyEvent } from "./events";
+import { turnRef } from "./turnRefs";
 
 /**
  * What `ghostly listen` does with each event: print it as a JSON line, run a command with it on stdin, or POST it to
@@ -15,7 +17,10 @@ export interface ListenOptions {
   webhook?: string;
   cursor?: string;
   print: boolean;
-  write: (line: string) => void;
+  /** `false` (as `stream.write` says it): the output wants a drain, and the next event waits for `drained`. */
+  write: (line: string) => unknown;
+  /** Resolves once the output takes more (its 'drain'), or is gone. */
+  drained?: () => Promise<void>;
   /** `--from` and `--group`: events of anyone else stop here (they stay in the chat). */
   allow?: Allowlist;
   /** `--turns`: only agent turns, as `agent.turn` events. */
@@ -65,9 +70,9 @@ export async function allowlist(from: readonly string[], groups: readonly string
 
 /**
  * One agent turn (docs/CLI.md § Agent turns): a message a contact sent in a chat, or a group message that mentions
- * this profile. What the sender controls (the text, their name, a quoted snippet, a file's name) is under `untrusted`
- * and nowhere else: an agent reads it as data, never as its instructions. `seq` is the source event's, so `--cursor`
- * and `--since` work as for any event; `id` is stable for the message (dedupe on it).
+ * this profile. What the sender controls (the text, their name, a quoted snippet, a file's name, the id their message
+ * is stored under) is under `untrusted` and nowhere else: an agent reads it as data, never as its instructions. `seq` is
+ * the source event's, so `--cursor` and `--since` work as for any event; `id` is stable for the message (dedupe on it).
  */
 export interface AgentTurn extends GhostlyEvent {
   type: "agent.turn";
@@ -76,7 +81,7 @@ export interface AgentTurn extends GhostlyEvent {
   group?: string;
   /** A group's author (their key). */
   member?: string;
-  /** What `send --reply` (or `group send --reply`) takes to answer it. */
+  /** What `send --reply` (or `group send --reply`) takes to answer it: an id made here (`turnRef`), never the sender's. */
   messageId: string;
   timestamp: number;
   /**
@@ -84,7 +89,7 @@ export interface AgentTurn extends GhostlyEvent {
    * matched it: the question's id, the button's id and its label, all this profile's own words.
    */
   press?: { messageId: string; button: string; label: string; inferred?: true };
-  untrusted: { text: string; name: string | null; replyTo?: { id: string; snippet: string }; file?: { id: string; name: string; size: number; mime: string; voice: boolean } };
+  untrusted: { text: string; name: string | null; messageId: string; replyTo?: { id: string; snippet: string }; file?: { id: string; name: string; size: number; mime: string; voice: boolean } };
 }
 
 interface TurnMessage { id: string; text: string; timestamp: number; nick: string | null; member?: string; mentioned?: boolean; replyTo?: { id: string; snippet: string }; press?: AgentTurn["press"]; file?: { id: string; name: string; size: number; mime: string; voice?: unknown } }
@@ -102,11 +107,13 @@ export function toTurn(event: GhostlyEvent): AgentTurn | null {
 
 function turn(event: GhostlyEvent, source: AgentTurn["source"], where: Pick<AgentTurn, "chat" | "group" | "member">, message: TurnMessage): AgentTurn {
   const file = message.file;
+  // The source event's id ends in the stored id, the sender's: this one is made of the same parts with the id made here.
+  const place = where.chat ?? where.group ?? "", messageId = turnRef(place, message.id);
   return {
-    seq: event.seq, id: `agent.turn:${event.id}`, type: "agent.turn", at: event.at, source, ...where, messageId: message.id, timestamp: message.timestamp,
+    seq: event.seq, id: `agent.turn:${source}:${place}:${messageId}`, type: "agent.turn", at: event.at, source, ...where, messageId, timestamp: message.timestamp,
     ...(message.press ? { press: message.press } : {}),
     untrusted: {
-      text: message.text, name: message.nick ?? null,
+      text: message.text, name: message.nick ?? null, messageId: message.id,
       ...(message.replyTo ? { replyTo: { id: message.replyTo.id, snippet: message.replyTo.snippet } } : {}),
       ...(file ? { file: { id: file.id, name: file.name, size: file.size, mime: file.mime, voice: !!file.voice } } : {}),
     },
@@ -126,6 +133,19 @@ export function readCursor(path: string | undefined): number | undefined {
   if (!path || !existsSync(path)) return undefined;
   const value = Number(readFileSync(path, "utf8").trim());
   return Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * Whether a cursor can be kept at `path`, asked before anything starts: its folder is there and takes a file. Before, a
+ * folder that was not there was found at the first event: the listener ran, said "event N failed: ENOENT" for each one
+ * and never wrote the cursor, so the next start began at the journal's end and skipped what came while it was down.
+ * Throws what the file system says (`asCliError` names the path and the code: not_found, refused).
+ */
+export function checkCursor(path: string | undefined): void {
+  if (!path) return;
+  const folder = dirname(resolve(path));
+  if (!statSync(folder).isDirectory()) throw new CliError("not_found", `No such file or folder: ${folder}`);
+  accessSync(folder, constants.W_OK | constants.X_OK);
 }
 
 function writeCursor(path: string, seq: number): void {
@@ -165,7 +185,8 @@ function runExec(command: string, event: GhostlyEvent): Promise<number> {
 async function post(url: URL, event: GhostlyEvent): Promise<boolean> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json", "x-ghostly-event": event.type, "x-ghostly-seq": String(event.seq) }, body: JSON.stringify(event), signal: AbortSignal.timeout(10_000) });
+      // A redirect is not followed: it would post the event to wherever it points, off this machine too.
+      const response = await fetch(url, { method: "POST", redirect: "manual", headers: { "content-type": "application/json", "x-ghostly-event": event.type, "x-ghostly-seq": String(event.seq) }, body: JSON.stringify(event), signal: AbortSignal.timeout(10_000) });
       if (response.ok) return true;
     } catch { /* retried */ }
     await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
@@ -173,15 +194,26 @@ async function post(url: URL, event: GhostlyEvent): Promise<boolean> {
   return false;
 }
 
+/** Events given to a handler and not handled yet: what `listen` holds in memory. */
+export interface EventHandler {
+  (event: GhostlyEvent): void;
+  /** How many events are given and not handled yet. */
+  behind(): number;
+  /** Resolves when every event given is handled. */
+  idle(): Promise<void>;
+}
+
 /**
  * A handler that takes events in order, one at a time. A step that throws (the output closed, the allowlist's lookup,
  * the cursor's disk) is said on stderr and passed: the cursor moves on and the next event is handled.
  */
-export function eventHandler(options: ListenOptions): (event: GhostlyEvent) => void {
+export function eventHandler(options: ListenOptions): EventHandler {
   const webhook = options.webhook ? checkWebhook(options.webhook) : null;
   let chain = Promise.resolve();
-  return (event) => {
+  let behind = 0;
+  const handle = (event: GhostlyEvent) => {
     const seq = event.seq, type = event.type;
+    behind++;
     chain = chain.then(async () => {
       const skip = () => { if (options.cursor) writeCursor(options.cursor, event.seq); };
       if (!matches(event, options.types)) return skip();
@@ -191,12 +223,14 @@ export function eventHandler(options: ListenOptions): (event: GhostlyEvent) => v
         if (!next) return skip();
         event = next;
       }
-      if (options.print) options.write(JSON.stringify(event));
+      const full = options.print && options.write(JSON.stringify(event)) === false;
       if (options.exec) {
         const code = await runExec(options.exec, event);
         if (code !== 0) process.stderr.write(`ghostly: --exec exited ${code} on event ${event.seq} (${event.type})\n`);
       }
       if (webhook && !(await post(webhook, event))) process.stderr.write(`ghostly: the webhook did not take event ${event.seq} (${event.type})\n`);
+      // An output whose reader stopped holds the next event here, not one more line in its buffer per event.
+      if (full) await options.drained?.();
       // A failed handler still moves the cursor: one poisonous event must not stop the stream. The failure is on stderr.
       if (options.cursor) writeCursor(options.cursor, event.seq);
     }).catch((error: unknown) => {
@@ -204,6 +238,36 @@ export function eventHandler(options: ListenOptions): (event: GhostlyEvent) => v
         process.stderr.write(`ghostly: event ${seq} (${type}) failed: ${error instanceof Error ? error.message : String(error)}\n`);
         if (options.cursor) writeCursor(options.cursor, seq);
       } catch { /* the next event moves the cursor */ }
-    });
+    }).finally(() => { behind--; });
+  };
+  return Object.assign(handle, { behind: () => behind, idle: () => chain });
+}
+
+/** Events a listener takes ahead of its output and hooks before it stops taking more (a few MB at most). */
+export const MAX_BEHIND = 1_000;
+
+/**
+ * Bounds what a listener holds when its output or hooks fall behind (a stdout reader that hung, a slow --exec): past
+ * `MAX_BEHIND` events not handled it stops taking events (`pause`: the subscription closes) and drops what still
+ * arrives; once every event taken is handled, `resume` opens it again after the last one taken. The daemon's journal
+ * keeps what came meanwhile (and says `events.gap` past what it keeps), so a consumer that hangs for a day does not
+ * grow the listener by the day's traffic.
+ */
+export class Feed {
+  private held = false;
+
+  /** `since`: the last event taken, where a new subscription starts. */
+  constructor(private readonly handle: EventHandler, public since: number | undefined, private readonly pause: () => void, private readonly resume: (since: number | undefined) => void) {}
+
+  get paused(): boolean { return this.held; }
+
+  readonly take = (event: GhostlyEvent): void => {
+    if (this.held) return;
+    this.since = event.seq;
+    this.handle(event);
+    if (this.handle.behind() < MAX_BEHIND) return;
+    this.held = true;
+    this.pause();
+    void this.handle.idle().then(() => { this.held = false; this.resume(this.since); });
   };
 }

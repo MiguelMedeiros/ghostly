@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { IntentLink } from "@/components/site/IntentLink";
 import { Shell } from "@/components/site/Shell";
 import { catalog } from "@/content/catalog";
 import { isListed, wisps } from "@/lib/wisps";
@@ -21,7 +21,7 @@ export function CatalogPage() {
           <h1 className="h-section">{t.title}</h1>
           <p className="lead">{t.lead}</p>
           <p className="catalog-next">
-            {t.next} <Link href={"/roadmap"}>{t.roadmap} →</Link>
+            {t.next} <IntentLink href="/roadmap">{t.roadmap} →</IntentLink>
           </p>
         </div>
       </section>

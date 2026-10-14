@@ -4,6 +4,7 @@ import type { ProfileDidView } from "@ghostly/browser/shared/types";
 import { IdentityProofsSection } from "../../components/identities/IdentityProofsSection";
 import { renderApp as render } from "../render";
 import { DAY, now, proofView } from "./views";
+import { formatAt } from "../../lib/time";
 
 // covers: did.dht.public-links, did.dht.profile
 
@@ -43,7 +44,7 @@ describe("Public DID", () => {
     const at = Date.UTC(2026, 8, 25, 12, 0);
     act(() => engine.update({ did: didView({ published: { at, versionId: "1790000000" }, upToDate: true }) }));
     expect(screen.getByTestId("did-published")).toHaveTextContent("Published");
-    expect(screen.getByTestId("did-status")).toHaveTextContent(`Published ${new Date(at).toLocaleString()}`);
+    expect(screen.getByTestId("did-status")).toHaveTextContent(`Published ${formatAt(at, { dateStyle: "medium", timeStyle: "short" }, "en")}`);
     act(() => engine.update({ did: didView({ published: { at, versionId: "1790000000" }, upToDate: false }) }));
     expect(screen.getByTestId("did-status")).toHaveTextContent("Publishing the change…");
     act(() => engine.update({ did: didView({ published: { at, versionId: "1790000000" }, error: "Publish failed on every relay" }) }));

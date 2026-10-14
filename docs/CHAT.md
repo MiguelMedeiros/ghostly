@@ -42,12 +42,13 @@ In order, some rows only when they apply:
 
 1. Pin chat / Unpin chat
 2. Mute notifications… / Unmute notifications
-3. Copy invite code (until the contact arrives)
-4. Hold messages… (paired chats)
-5. Continue in a new chat (compatibility chats)
-6. Refresh
-7. Tech Info
-8. Delete chat
+3. Move to folder…
+4. Copy invite code (until the contact arrives)
+5. Hold messages… (paired chats)
+6. Continue in a new chat (compatibility chats)
+7. Refresh
+8. Tech Info
+9. Delete chat
 
 Connection, Payments, Services and Identities are no longer in the ⋮ (#264, #267, #268): they live in the header icon, the header marks and the composer's +.
 
@@ -56,6 +57,18 @@ Connection, Payments, Services and Identities are no longer in the ⋮ (#264, #2
 - From the chat list: the row's bell in the hover actions (#262), or the ⋮ on a phone.
 - 15 minutes, 1 hour, 1 day, or until unmuted. Groups add "Still notify me when I'm mentioned".
 - Messages still arrive, and **calls still ring**. Only the message sound, the system notification and the connected sound are silenced (`apps/ui/src/lib/chatMute.ts`). Local to this device.
+
+### Folders
+
+- Your own sections of the chat list ("Agents", "Personal"), for 1:1 chats, groups and communities. A chat is in one folder or in none.
+- Make one from **New ▾ → Folder**, or from a chat's ⋮ → **Move to folder… → New folder…**, which puts the chat in it. The same menu moves a chat to another folder or back to **No folder**.
+- Folders come first in the list, in your order, then **Other chats**: the chats in no folder, as the list always was. Inside a folder the order is the list's: groups, pinned chats, then the latest first. A search shows what it finds as one list, without folders.
+- A folder's header is a button that folds and unfolds it. Folded, only the header shows. What is folded is remembered.
+- The header counts what is unread in the folder, as the app icon's badge counts: each unmuted chat's unread messages, and 1 for each unmuted group with something new (a mention gets through a group's mute). When only muted chats have something unread, the count is their sum, in grey.
+- An invitation to a group stays in sight under Other chats until it is answered, whatever folder the group is in.
+- A folder's ⋮: Rename folder, Move up, Move down, Delete folder. Deleting a folder deletes no chat: its chats go back to Other chats.
+- Pinned chats are put in order among the pinned chats shown with them: those in no folder by dragging or from the chat's ⋮ (Move up, Move down), those of a folder from the chat's ⋮.
+- Local to this profile on this device, like pins and mutes (`apps/ui/src/lib/chatFolders.ts`): not synced to your other devices. A profile backup and a move to another device carry them.
 
 ## Composer
 
@@ -107,7 +120,7 @@ One mark beside the time, as in WhatsApp (#360, `apps/ui/src/components/chat/Del
 - The list itself getting taller or shorter (a phone turned on its side, the keyboard, a window resized) keeps what was at the bottom of the view in place, scrolled up as at the bottom: a video playing there stays in view.
 - A **↓ N new** pill counts the contact's new messages (reactions, edits and notices do not count) and goes to the first one. Older messages that arrive late, such as a group's catch-up after a reconnect, are not new (#506). With nothing new, a plain ↓ shows once you are far from the bottom. **End** or **Ctrl/Cmd+↓** jumps to the bottom.
 - A message you send always goes to the bottom. At the bottom, a composer that grows (a long draft, a saved one) keeps the last message in view (#524).
-- A chat opens at its last message. One you left scrolled up opens where you left it, while the app runs, also when you come to a group from another group (#468).
+- A chat opens at its last message. One you left scrolled up opens where you left it, while the app runs, also when you come to a group from another group (#468). A chat kept loaded in the background (on a call, with a mini-app running) is where it was when it shows again: WebKit starts a list that comes back on screen at its top, and that move is not taken for a hand's.
 - A long chat has a window of its messages in the page, never its whole history (`apps/ui/src/hooks/useRowWindow.ts`): it opens on its last 100, and as you scroll near the top 100 older ones come in above without moving the view. Past 300, the ones at the far end leave the page, so a chat of 20,000 messages opens and scrolls like a short one. A chat left open at its bottom while messages keep coming does the same: past 300, it goes back to its last 100 (all above the view), so a bot posting all day does not grow the page; scrolled up, nothing is taken away. A jump to a message not in the page (a quote, a search match, a Tasks row, the pinned message) brings in the messages around it first. A long group reads its newest 50 from the store first (#494). A chat left scrolled up opens around the message you left it on.
 - 1:1 chats, groups and communities alike.
 - A 1:1 chat's history lives in the engine (IndexedDB). The page keeps a copy of each chat's last 200 messages in localStorage, for the chat list and a chat's first moment, plus the lines only the page keeps (a call's). The rest it reads from the engine's copy (`STORED_MESSAGES`, `apps/ui/src/lib/storage.ts`, `packages/browser/src/platform/sync.ts`). A chat of thousands of messages used to fill that storage (5 MB in WebKit, the Desktop app's), and then stopped showing new messages.
@@ -142,6 +155,7 @@ Double click, or the message's ⋮ → **Details** (#240, `apps/ui/src/component
 `files/3` ([WISP 501 Chat Files](wisps/501-paired-files.md), #228, #233, `packages/core/src/chatFiles.ts`):
 
 - Any size. Offered first, then sent in 16 KiB chunks with 1 MiB in flight, resumed from the last confirmed byte, checked against the sender's SHA-256.
+- The bytes as they are (`files/4`, `encodeFileData`): with a contact whose app has it, on a session that carries binary messages (WebRTC; HyperDHT from the Desktop, the CLI and a browser), each chunk is one binary message, not base64 text in a JSON frame. A 200 MiB file is 200.4 MiB on the wire instead of 267.6 MiB. In a group's file sessions too. Older apps and Iroh keep `files/3` frames.
 - Taken without asking up to 25 MiB per file and 500 MiB per contact; past that, the receiver is asked. Offers expire after 7 days.
 - Bytes stream to storage, never whole in memory: OPFS on web and extension, files on Desktop, IndexedDB as fallback.
 - A transfer that has not moved for 60 s offers **Send again** (sender) or **Ask again** (receiver); both go on from what the receiver already holds. A receiver with no data for 30 s asks again by itself (#348, #352).
@@ -151,6 +165,7 @@ Double click, or the message's ⋮ → **Details** (#240, `apps/ui/src/component
 - **Audio files** (#379): an MP3, M4A/AAC, Ogg/Opus, WebM, WAV or FLAC sent as a file plays in its bubble, with a seek bar, Save and the 1×, 1.5×, 2× pill of voice messages. It keeps playing when scrolled away. MIDI, AIFF and WMA stay files.
 - **On Desktop** (#381, #405), every stored video and audio file plays and seeks from the file on disk, read in ranges, so size is no limit. Videos go full screen on every system; on Linux, where WebKitGTK has no element full screen, the bubble's own **Full screen** button fills the window.
 - Older contacts: files/2, up to 100 MiB ([WISP 500](wisps/500-files.md)).
+- In a group, a file is announced to everyone and fetched from a member who has it: [Groups](#files-and-voice-messages-in-a-group).
 
 ## Calls and shared services
 
@@ -187,8 +202,20 @@ Double click, or the message's ⋮ → **Details** (#240, `apps/ui/src/component
 
 - New group offers Community (default) or Private (`apps/ui/src/components/NewGroupDialog.tsx`). Negotiation: [WISP 900](wisps/900-group-sessions.md).
 - The admin renames the group in Members… (Rename) or with `ghostly group rename` (#438); every member sees the new name, and apps from before keep the old one. The group link can be replaced or turned off by the admin. Leaving deletes the group and its history from the device; an admin hands the role on first.
-- Group ⋮: Members…, Mute, Rotate keys (admin), Leave group, Delete from this device.
+- Group ⋮: Members…, Mute, Move to folder… ([Folders](#folders)), Rotate keys (admin), Leave group, Delete from this device.
 - Hubs (private groups past 16 members, #402): the Desktop app and the CLI, which stay online, pass messages on. The admin makes a member a hub, or keeps one from being one, in Members…. A Mac holds at most 40 group connections, and past that stops being a hub (#439). As a community's hub, a Mac takes only the members its 40 leave free beside its other groups and 1:1 chats, then says it is full (#503).
 - Typing, recording and thinking show in private groups (#442, [Header](#header)). A message that mentions you wakes your closed web app, if you turned on Wake me while closed (#448, [WEB.md](WEB.md#install-it)).
 - A member's name stays while their connection is down; only the member changes or removes it (#533).
 - In a community, the admin's changes are final: a member's longer branch cannot undo them (#300).
+
+### Files and voice messages in a group
+
+From 1.2, in private groups and communities ([WISP 503 Group Files](wisps/503-group-files.md), #1438, #1535, `packages/browser/src/engine/groupFiles.ts`):
+
+- The composer takes files, pictures, videos and voice messages as a chat's does (+ → Document, Media, Camera, paste, drop, the microphone), a reply included. Up to 100 MiB a file, a voice message up to 15 minutes.
+- Everyone sees the bubble at once, under the sender's name. The bytes do not go through the group: each member's app fetches them from a member who has the file, over a link between the two, and checks them against the sender's digest. Whoever stored the file serves it, so a member who was away gets it from anyone who is there, not only from the sender.
+- Voice messages, and files up to 8 MiB, download by themselves until what came that way from a group adds up to 256 MiB on the device. Larger ones show their size and **Download**. Settings → Data & storage → **Download automatically in groups** is Off, Wi-Fi only (where the browser can tell) or Always (the default), per device; nothing about it is sent to the group.
+- A file that cannot come yet says why: "Asking a member who has it…", "Nobody you are connected to has this file yet" (it comes by itself when one is online), "Busy, trying again soon", or "Arrived damaged" with **Ask again**. One that stops mid-way goes on from what already came.
+- Forward and Share to list groups for files too.
+- An app from before 1.2 shows a line that names the file and says to update. Hubs carry the announcement, never the bytes.
+- No calls in groups.

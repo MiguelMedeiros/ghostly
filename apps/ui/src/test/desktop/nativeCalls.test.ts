@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/fakes";
 
-// covers: calls.linux-native, calls.devices-linux, calls.reconnect
+// covers: calls.linux-native, calls.devices-linux, calls.reconnect, calls.speaking
 
 /**
  * Ghostly Desktop on Linux calls without WebRTC in its WebView: apps/ui/src/desktop/nativeCalls.ts stands in for
@@ -9,22 +9,42 @@ import { FakeMediaStream, FakeTrack } from "../../../../../packages/react/test/f
  * stand-in does for the call hook: the commands it sends, the lanes it reports, the states it relays.
  */
 
+/** What Tauri evals for a channel's message: numbered, each one by itself (a picture by a fetch of its own). */
+type Raw = { message?: unknown; index: number; end?: true };
 const tauri = vi.hoisted(() => ({
   invoke: vi.fn(async (_command: string, _args?: Record<string, unknown>): Promise<unknown> => undefined),
-  channels: [] as { onmessage: (message: unknown) => void }[],
+  /** Each channel the page opened: `onmessage` sends it the next message, `raw` one numbered as Rust numbered it. */
+  channels: [] as { onmessage: (message: unknown) => void; raw: (raw: Raw) => void }[],
 }));
 // The UI tests alias every `@tauri-apps/api/*` to one stand-in (packages/browser/src/platform/tauri.ts): one mock.
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: tauri.invoke,
+  // Tauri's own: it hands the messages over in the order they were sent, a later one waiting for any before it.
   Channel: class {
     onmessage: (message: unknown) => void = () => {};
+    private next = 0;
+    private readonly held = new Map<number, unknown>();
     constructor() { tauri.channels.push(this); }
+    raw({ message, index }: Raw) {
+      this.held.set(index, message);
+      while (this.held.has(this.next)) {
+        const held = this.held.get(this.next);
+        this.held.delete(this.next++);
+        this.onmessage(held);
+      }
+    }
+  },
+  // A callback Rust evals: what a channel of the page's own is made of.
+  transformCallback: (callback: (raw: Raw) => void) => {
+    let index = 0;
+    return tauri.channels.push({ onmessage: (message) => callback({ message, index: index++ }), raw: callback }) - 1;
   },
 }));
 
 const { NativePeerConnection, SCREEN_UNAVAILABLE, askedDevice, bytesOf, connectionStateOf, deviceList, deviceName, isJpeg, nativeCallMedia, nativeCallOptions, nativeDevices, ownIceServers } = await import("../../desktop/nativeCalls");
 const { callRtcConfig } = await import("@ghostly/core");
 const { chooseDevice } = await import("../../lib/mediaDevices");
+const { callLevels } = await import("../../lib/voiceLevels");
 
 const commands = () => tauri.invoke.mock.calls.map(([command]) => command);
 const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).buffer;
@@ -109,6 +129,30 @@ describe("the RTCPeerConnection stand-in", () => {
     expect(pc.getTransceivers().map((t) => [t.mid, t.currentDirection])).toEqual([["0", "sendrecv"], ["1", "sendrecv"]]);
   });
 
+  it("closes its video lane on an answer whose video section is closed (vr: 0, a bot): no camera button, no camera sent", async () => {
+    const section = (direction: string) => `v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=mid:0\r\na=sendrecv\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=mid:1\r\n${direction}\r\n`;
+    const pc = new NativePeerConnection({});
+    await pc.createOffer();
+    await pc.setRemoteDescription({ type: "answer", sdp: section("a=inactive") });
+    expect(pc.getTransceivers().map((t) => [t.mid, t.currentDirection])).toEqual([["0", "sendrecv"], ["1", "inactive"]]);
+
+    // Answering a bot's offer: our answer to a closed section is closed as well.
+    const answering = new NativePeerConnection({});
+    await answering.setRemoteDescription({ type: "offer", sdp: section("a=inactive") });
+    await answering.createAnswer();
+    expect(answering.getTransceivers().map((t) => t.currentDirection)).toEqual(["sendrecv", "inactive"]);
+
+    // What the other side only sends or only takes, our half does the other.
+    const receiving = new NativePeerConnection({});
+    await receiving.createOffer();
+    await receiving.setRemoteDescription({ type: "answer", sdp: section("a=sendonly") });
+    expect(receiving.getTransceivers()[1].currentDirection).toBe("recvonly");
+    const sending = new NativePeerConnection({});
+    await sending.createOffer();
+    await sending.setRemoteDescription({ type: "answer", sdp: section("a=recvonly") });
+    expect(sending.getTransceivers()[1].currentDirection).toBe("sendonly");
+  });
+
   it("hands the peer's picture over with its first frame, not before: no frame, no black screen in place of the name", async () => {
     vi.stubGlobal("createImageBitmap", async () => ({ width: 640, height: 480, close() {} }));
     const pc = new NativePeerConnection({});
@@ -139,6 +183,49 @@ describe("the RTCPeerConnection stand-in", () => {
     await new Promise((done) => setTimeout(done, 10));
     await pc.setRemoteDescription({ type: "answer", sdp: "their answer" });
     await vi.waitFor(() => expect(ontrack).toHaveBeenCalledTimes(1));
+  });
+
+  it("keeps showing the peer's picture after one is lost on the way: the ones after it are not held back for good", async () => {
+    // A picture comes by a fetch of its own; one that fails never comes, and Tauri's channel held every message
+    // after it, pictures and states, for the rest of the call: the call window's <video> never started.
+    const decoded = vi.fn(async () => ({ width: 640, height: 480, close() {} }));
+    vi.stubGlobal("createImageBitmap", decoded);
+    const pc = new NativePeerConnection({});
+    await pc.createOffer();
+    await pc.setRemoteDescription({ type: "answer", sdp: "their answer" });
+    const events = tauri.channels[0];
+    const jpeg = () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer;
+    events.raw({ message: jpeg(), index: 0 });
+    await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(1));
+    // Index 1 is lost.
+    events.raw({ message: jpeg(), index: 2 });
+    events.raw({ message: json({ ice: "connected" }), index: 3 });
+    events.raw({ message: jpeg(), index: 4 });
+    await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(3), { timeout: 3000 });
+    expect(pc.connectionState).toBe("connected");
+    // One that comes after all, too late, is not shown over the newer ones.
+    events.raw({ message: jpeg(), index: 1 });
+    events.raw({ message: jpeg(), index: 5 });
+    await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(4));
+    await new Promise((done) => setTimeout(done, 20));
+    expect(decoded).toHaveBeenCalledTimes(4);
+  });
+
+  it("keeps showing the peer's picture after one never finishes decoding", async () => {
+    let calls = 0;
+    // The second picture's decode never settles; the ones after it are drawn anyway.
+    const decoded = vi.fn(() => (++calls === 2 ? new Promise<never>(() => {}) : Promise.resolve({ width: 640, height: 480, close() {} })));
+    vi.stubGlobal("createImageBitmap", decoded);
+    const pc = new NativePeerConnection({});
+    await pc.createOffer();
+    await pc.setRemoteDescription({ type: "answer", sdp: "their answer" });
+    const jpeg = () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer;
+    tauri.channels[0].onmessage(jpeg());
+    await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(1));
+    await new Promise((done) => setTimeout(done, 10));
+    tauri.channels[0].onmessage(jpeg());
+    tauri.channels[0].onmessage(jpeg());
+    await vi.waitFor(() => expect(decoded).toHaveBeenCalledTimes(3), { timeout: 3000 });
   });
 
   it("answers an offer through Rust, the lanes known as soon as the offer is", async () => {
@@ -232,6 +319,47 @@ describe("the RTCPeerConnection stand-in", () => {
     accepted();
     await answering;
     await vi.waitFor(() => expect(seen).toEqual(["answer taken", "ice connected"]));
+  });
+
+  it("tells who is speaking: each side's level as Rust reads it, found from the call's microphone", async () => {
+    const pc = new NativePeerConnection({});
+    const ice = vi.fn();
+    pc.oniceconnectionstatechange = ice;
+    // The page hears neither side: the microphone's track is a silent stand-in, and a voice call has no stream of the peer.
+    const local = await nativeCallMedia().getUserMedia({ audio: true });
+    pc.addTrack(local.getAudioTracks()[0]);
+    const levels = callLevels(local)!;
+    const [mic, peer]: number[][] = [[], []];
+    const stopMic = levels.own((level) => mic.push(level));
+    levels.peer((level) => peer.push(level));
+    expect([mic, peer]).toEqual([[0], [0]]);
+
+    const events = tauri.channels[0];
+    events.onmessage(json({ levels: { mic: 0.4 } }));
+    events.onmessage(json({ levels: { peer: 0.25 } }));
+    events.onmessage(json({ levels: { mic: 7, peer: -1 } }));
+    events.onmessage(json({ levels: { mic: "loud" } }));
+    expect([mic, peer]).toEqual([[0, 0.4, 1], [0, 0.25, 0]]);
+    // A level is no ICE state.
+    expect(ice).not.toHaveBeenCalled();
+
+    stopMic();
+    events.onmessage(json({ levels: { mic: 0.1, peer: 0.1 } }));
+    expect([mic, peer]).toEqual([[0, 0.4, 1], [0, 0.25, 0, 0.1]]);
+    // Whoever listens later starts from the last level said.
+    const late: number[] = [];
+    levels.own((level) => late.push(level));
+    expect(late).toEqual([0.1]);
+  });
+
+  it("has no levels to tell for a microphone no call sends, or a stream that is not a call's", async () => {
+    const idle = await nativeCallMedia().getUserMedia({ audio: true });
+    const heard = vi.fn();
+    callLevels(idle)!.own(heard)();
+    expect(heard).not.toHaveBeenCalled();
+    // Such a stream's sound is measured by the page itself.
+    expect(callLevels(new FakeMediaStream([new FakeTrack("audio")]) as unknown as MediaStream)).toBeUndefined();
+    expect(callLevels(null)).toBeUndefined();
   });
 
   it("mutes the microphone in Rust once the call has started", async () => {

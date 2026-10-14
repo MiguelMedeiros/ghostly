@@ -35,6 +35,8 @@ function warnStop(title: string, reason: AppStopReason): void {
 }
 
 export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, nameIn, onStop }: WebOpenerOptions): AppOpener {
+  /** The layer of each app open alone, by app and chat: the same one opened again is shown as it is. */
+  const alone = new Map<string, HTMLElement>();
   return async (ref, linkId, options) => {
     const host = apps();
     if (!host) throw new Error("Apps cannot run in this app");
@@ -59,8 +61,9 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
       let running: RunningApp | null = null;
       let takenDown: AppTakedown | null = null;
       const unregister = registerRunningApp({
-        ref, runAnyway: options?.runAnyway === true,
+        ref, digest: entry.digest, runAnyway: options?.runAnyway === true,
         takeDown: (takedown) => { takenDown = takedown; running?.stop(); },
+        stop: () => running?.stop(),
       });
       running = startApp({
         container: slot, host, launch, view,
@@ -80,6 +83,9 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
 
     // Alone: full screen and modal. The app under it is inert until it goes; Close has the focus, Escape closes, and
     // the focus goes back to what opened it (or that app's Open on the Apps page, when a dialog opened it and went).
+    // Open pressed twice before it shows (a double click) gets here twice: the second finds the first one's layer.
+    const place = `${linkId ?? ""} ${ref}`;
+    if (alone.get(place)?.isConnected) return;
     const before = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
     const overlay = document.createElement("div");
     overlay.setAttribute("role", "dialog");
@@ -89,7 +95,9 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
     overlay.setAttribute("data-place", "alone");
     overlay.className = "fixed inset-0 z-50 flex flex-col bg-sidebar-bg text-text-primary";
     const bar = document.createElement("div");
-    bar.className = "flex items-center gap-2 border-b border-border px-3 py-2 text-sm";
+    // `alone-bar`: on a phone the layer covers the whole screen, status bar included, so the bar starts below the clock
+    // and the notch (index.css), or Close sits under them and cannot be pressed (the installed web app on an iPhone).
+    bar.className = "alone-bar flex items-center gap-2 border-b border-border px-3 py-2 text-sm";
     const title = document.createElement("span");
     title.className = "flex-1 truncate font-medium";
     title.setAttribute("data-testid", "mini-app-title");
@@ -97,7 +105,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
     title.textContent = entry.title;
     const close = document.createElement("button");
     close.type = "button";
-    close.className = "rounded px-2 py-1 hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
+    close.className = "min-h-11 rounded px-3 py-1 hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
     close.textContent = closeLabel();
     const box = document.createElement("div");
     box.className = "relative flex-1 [&>iframe]:absolute [&>iframe]:inset-0 [&>iframe]:h-full [&>iframe]:w-full [&>iframe]:border-0";
@@ -106,19 +114,22 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
     // The app's shell (App.tsx), not the whole page: the lock screen, drawn above the app, must still take a password.
     const under = [...document.querySelectorAll<HTMLElement>(".two-pane, .app-shell")].filter((node) => !node.inert);
     document.body.appendChild(overlay);
+    alone.set(place, overlay);
     for (const node of under) node.inert = true;
     close.focus({ preventScroll: true });
 
     const dismiss = () => {
       for (const node of under) node.inert = false;
       overlay.remove();
+      if (alone.get(place) === overlay) alone.delete(place);
       const row = document.querySelector<HTMLElement>(`[data-testid=installed-app][data-ref="${CSS.escape(ref)}"] [data-testid=installed-app-open]`);
       (before?.isConnected ? before : row)?.focus({ preventScroll: true });
     };
     let takenDown: AppTakedown | null = null;
     const unregister = registerRunningApp({
-      ref, runAnyway: options?.runAnyway === true,
+      ref, digest: entry.digest, runAnyway: options?.runAnyway === true,
       takeDown: (takedown) => { takenDown = takedown; running.stop(); },
+      stop: () => running.stop(),
     });
     const running = startApp({
       container: box, host, launch, view,

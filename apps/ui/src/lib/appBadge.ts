@@ -1,6 +1,6 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
-import { getUnreadCount, listSessions } from "./storage";
+import { getUnreadCount, listSessions, type SessionCache } from "./storage";
 import { groupReadAt, groupUnreadAt } from "./groups";
 import { MUTE_EVENT, groupChat, mutedFor } from "./chatMute";
 import type { ChatSession } from "./types";
@@ -48,6 +48,27 @@ export function badgeCount(sessions: readonly ChatSession[], groups: readonly Ba
     if (!mutedFor(groupChat(group.id), mention, now)) count += 1;
   }
   return count;
+}
+
+/** What a folder's badge says: how many, and grey when all of it is in muted chats. Undefined: nothing unread. */
+export interface FolderUnread {
+  count: number;
+  muted: boolean;
+}
+
+/**
+ * A folder's unread, from its chats and groups (the one open is left out, as its row leaves it out). It counts what
+ * the app's icon counts (`badgeCount`): each unmuted chat's unread messages, and one for each unmuted group with
+ * something new, a mention getting through a group's mute. When only muted chats have something unread, their sum is
+ * shown instead, in grey, as a muted chat's own count is.
+ */
+export function folderUnread(sessions: readonly ChatSession[], groups: readonly BadgeGroup[], now = Date.now()): FolderUnread | undefined {
+  const loud = badgeCount(sessions, groups, now);
+  if (loud > 0) return { count: loud, muted: false };
+  let quiet = 0;
+  for (const session of sessions) quiet += getUnreadCount(session);
+  for (const group of groups) if (!group.invitation && groupUnreadAt(group) > groupReadAt(group.id)) quiet += 1;
+  return quiet > 0 ? { count: quiet, muted: true } : undefined;
 }
 
 export interface BadgeNavigator {
@@ -101,9 +122,11 @@ const REFRESH_MS = 3000;
 export function useAppBadge(): void {
   const state = useSyncExternalStore(subscribeEngine, engineSnapshot);
   const groups = state?.groups;
+  // Only a chat whose stored text changed is parsed again, as the chat list reads them: the badge never changes one.
+  const [cache] = useState<SessionCache>(() => new Map());
   useEffect(() => {
     if (!canBadge()) return;
-    const update = () => showAppBadge(badgeCount(listSessions(), groups ?? []));
+    const update = () => showAppBadge(badgeCount(listSessions(cache), groups ?? []));
     update();
     const timer = setInterval(update, REFRESH_MS);
     window.addEventListener("session-updated", update);
@@ -115,5 +138,5 @@ export function useAppBadge(): void {
       window.removeEventListener(MUTE_EVENT, update);
       window.removeEventListener("storage", update);
     };
-  }, [groups]);
+  }, [groups, cache]);
 }

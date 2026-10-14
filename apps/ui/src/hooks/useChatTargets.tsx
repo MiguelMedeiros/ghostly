@@ -30,10 +30,10 @@ export interface ChatTarget {
 }
 
 /**
- * The chats and groups to pick from, most recent first. Groups take text only (files are not part of groups yet): with
- * `files`, they are left out. A group still an invitation, or one this device cannot write in, is never offered.
+ * The chats and groups to pick from, most recent first; groups take texts and files alike (WISP 503), private groups
+ * and communities. A group still an invitation, or one this device cannot write in, is never offered.
  */
-export function useChatTargets({ files }: { files: boolean }): ChatTarget[] {
+export function useChatTargets(): ChatTarget[] {
   const { t } = useI18n();
   const faceOf = useContactFaces();
   const state = useSyncExternalStore(subscribeEngine, engineSnapshot);
@@ -47,7 +47,7 @@ export function useChatTargets({ files }: { files: boolean }): ChatTarget[] {
       avatar: <PeerAvatar peerPubKey={session.peerPubKeyB64} label={shown.name} named={shown.from !== "key"} photo={face?.photo} />,
     };
   });
-  const groups = files ? [] : (state?.groups ?? []).filter(group => !group.invitation && group.canSend).map((group): ChatTarget => ({
+  const groups = (state?.groups ?? []).filter(group => !group.invitation && group.canSend).map((group): ChatTarget => ({
     kind: "group", chat: groupChat(group.id), target: `group:${group.id}`, path: groupPath(group.id), name: group.name, at: group.lastMessageAt,
     avatar: <GroupAvatar picture={group.picture} size={36} />,
   }));

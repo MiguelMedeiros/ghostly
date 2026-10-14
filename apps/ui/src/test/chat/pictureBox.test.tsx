@@ -6,6 +6,7 @@ import { servicesPlatform, type FileTransferState } from "../../lib/platform";
 import { pictureBox } from "../../lib/pictureBox";
 import type { ChatFile } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
+import { everythingOnScreen } from "../onScreen";
 import { renderApp } from "../render";
 
 // covers: files.image.box
@@ -31,12 +32,16 @@ const settle = () => act(async () => { await new Promise((resolve) => setTimeout
 
 const { createObjectURL, revokeObjectURL } = URL;
 beforeEach(() => {
+  everythingOnScreen();
   // The bytes are slow to come: whatever the bubble lays out, it lays out before the picture is there.
   vi.spyOn(servicesPlatform!, "getFile").mockReturnValue(new Promise(() => {}));
   URL.createObjectURL = () => "blob:picture";
   URL.revokeObjectURL = () => {};
 });
-afterEach(() => Object.assign(URL, { createObjectURL, revokeObjectURL }));
+afterEach(() => {
+  Object.assign(URL, { createObjectURL, revokeObjectURL });
+  vi.unstubAllGlobals();
+});
 
 describe("the box of a picture", () => {
   it("fits 330 × 330, keeps its proportions, and is never larger than the picture", () => {

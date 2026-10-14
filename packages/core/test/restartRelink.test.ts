@@ -1,6 +1,6 @@
 import { appendFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GhostLink, RACE_DIRECT_MS, UNPROVEN_AUTH_MS } from "../src/ghostlink";
+import { CROSSED_WAIT_MS, GhostLink, RACE_DIRECT_MS, UNPROVEN_AUTH_MS } from "../src/ghostlink";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { RELAY_POLL_INTERVALS } from "../src/link";
 import { DiscoveryBudgetError, type PkarrTransport } from "../src/transport";
@@ -71,7 +71,7 @@ function startApp(world: { pkarr: MemoryPkarr; native: NativeWorld }, name: stri
   upgrade: { mine?: boolean; contact?: boolean } = {}): App {
   const app = { name, side, dhtState, requests: [] } as unknown as App;
   const native = kind === "webrtc" ? undefined : kind === "webrtc+hyperdht" ? "hyperdht/1" as const : "iroh/1" as const;
-  const peerNative = native === "hyperdht/1" ? { publicKey: `${contact.name}:hyperdht/1` } : { id: `${contact.name}:iroh/1`, relay: "https://relay.test./", addresses: [] };
+  const peerNative = native === "hyperdht/1" ? { publicKey: world.native.key("hyperdht/1", contact.name) } : { id: world.native.key("iroh/1", contact.name), relay: "https://relay.test./", addresses: [] };
   const rtcToo = kind !== "iroh";
   app.link = new GhostLink({
     params: side.params,
@@ -146,10 +146,11 @@ function report(result: Result): void {
  * `endpointAfterMs`: the restarted app's native endpoint starts this long after it.
  * `cli`: the staying side's WebRTC never says `disconnected` and goes `failed` `rtcFailsAfterMs` after the crash
  * (node-datachannel), and the restarted app's native dials do not reach it, failing after `dialFailMs`.
+ * `restartAfterMs`: how long the app is gone.
  */
 async function restart(kind: Kind, restarted: "lower" | "higher", how: How, budgetHeldMs?: number, endpointAfterMs?: number,
   cli?: { rtcFailsAfterMs: number; dialFailMs: number },
-  readsHeld?: { afterMs: number; forMs: number; restartedWrites?: { afterMs: number; forMs: number } }): Promise<Result> {
+  readsHeld?: { afterMs: number; forMs: number; restartedWrites?: { afterMs: number; forMs: number } }, restartAfterMs = RESTART_AFTER_MS): Promise<Result> {
   const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
   // The inviter has the lower link key here: it is the one that dials.
   const made = invitationWhere("inviter");
@@ -169,7 +170,7 @@ async function restart(kind: Kind, restarted: "lower" | "higher", how: How, budg
   // When the staying side lets the old session go (it may only do so once the other app is back).
   let downSeenAt = 0;
   const watch = () => { if (!downSeenAt && channelOf(stays) !== before) downSeenAt = Date.now(); };
-  for (let t = 0; t < RESTART_AFTER_MS; t += 100) { await run(100); watch(); }
+  for (let t = 0; t < restartAfterMs; t += 100) { await run(100); watch(); }
   const dhtState = goes.dhtState;
   goes = startApp(world, "goes", goesSide, { side: staysSide, name: "stays" }, kind, dhtState, true, endpointAfterMs);
   const restartedAt = Date.now();
@@ -222,6 +223,22 @@ describe.each(["iroh", "webrtc"] as const)("a paired chat over %s after one app 
 });
 
 /**
+ * A tab that crashed is opened again by hand, or by a busy machine: seconds later, once the contact's connection already
+ * went `disconnected` (5 s here, 7.6 s in Chromium). The contact read the packet once as it did, found no offer yet, and
+ * read again only when the connection's grace ran out, 12 s later: two pages were live 11 s after the reload (19.9 s
+ * after the crash), past the 15 s e2e/web/restart-relink.spec.ts allows whenever the reload was that slow.
+ */
+describe("a WebRTC chat whose crashed app is back after the contact's connection went disconnected", () => {
+  it.each(["lower", "higher"] as const)("the app with the %s key: its offer is read while the connection stays so, not when its grace runs out", async restarted => {
+    const result = await restart("webrtc", restarted, "crash", undefined, undefined, undefined, undefined, 6_000);
+    // Before: 9.3 s (lower) and 9.6 s (higher), the rest of the grace; 3.3 s and 3.6 s now.
+    expect(result.liveAgainMs, "from the restart to live on both sides").toBeLessThanOrEqual(5_000);
+    expect(result.requestsPerMin).toBeLessThanOrEqual(10);
+    expect(result.dialFailures).toBe(0);
+  }, 240_000);
+});
+
+/**
  * The Linux Desktop (no WebRTC, the lower key here) and the web app, a chat live over Iroh between them; both go, the web
  * app is back first and knocks on the Desktop, which is not there yet. The Desktop is back 30 s later and knocks in turn:
  * its connection is accepted, then nothing crosses it (a relay path that died with the handshake). The web app refused
@@ -246,7 +263,7 @@ describe("the web app back first, the Desktop's knock on a path that dies", () =
     world.native.deadPaths.add("desktop");
     desktop = startApp(world, "desktop", made.inviter, { side: made.joiner, name: "web" }, "iroh", desktop.dhtState, true);
     // The web app's capability record, read a few seconds after the knock went out, says how to dial it now.
-    if (record) setTimeout(() => desktop.link.learnPeerTransports(["iroh/1"], { "iroh/1": { id: "web:iroh/1", relay: "https://relay2.test./", addresses: [] } }, true), record.afterMs);
+    if (record) setTimeout(() => desktop.link.learnPeerTransports(["iroh/1"], { "iroh/1": { id: world.native.key("iroh/1", "web"), relay: "https://relay2.test./", addresses: [] } }, true), record.afterMs);
     let rejected = false;
     const liveMs = await until(() => {
       rejected ||= (desktop.link as unknown as { securityRejected: boolean }).securityRejected;
@@ -285,6 +302,36 @@ describe("coming back after a restart, the edges", () => {
     expect([channelOf(low), channelOf(high)]).toEqual([lowChannel, highChannel]);
     expect(low.link.isDataLinkOpen && high.link.isDataLinkOpen).toBe(true);
   }, 120_000);
+
+  /**
+   * The lower key's app is back after a restart and its knock carries the chat again; seconds later the contact's app
+   * crashes and is back too, and knocks in turn. The lower key took that knock for one crossing its own (its session
+   * was under `CROSSED_FRESH_MS` old) and refused it, so the contact waited for the dead session's end: live again
+   * 16.6-18.9 s after the contact's start, 5 of 5, against 0.5 s with the crash 13 s after the knock (CLI daemons over
+   * HyperDHT on a loopback testnet, 2026-10-13).
+   */
+  it("the contact crashes seconds after the lower key's knock, and its own knock carries the chat", async () => {
+    const kind = "iroh";
+    const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
+    const made = invitationWhere("inviter");
+    const [lowSide, highSide] = [made.inviter, made.joiner];
+    let low = startApp(world, "low", lowSide, { side: highSide, name: "high" }, kind, emptyDhtDeliveryState());
+    let high = startApp(world, "high", highSide, { side: lowSide, name: "low" }, kind, emptyDhtDeliveryState());
+    expect(await until(() => low.link.isDataLinkOpen && high.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    await run(20_000);
+    await quit(world, low, "crash");
+    await run(1_000);
+    low = startApp(world, "low", lowSide, { side: highSide, name: "high" }, kind, low.dhtState, true);
+    expect(await until(() => low.link.isDataLinkOpen && high.link.isDataLinkOpen && channelOf(high) !== null, 30_000), "the lower key's knock").toBeLessThanOrEqual(5_000);
+    await run(2_000);
+    const held = channelOf(low);
+    await quit(world, high, "crash");
+    await run(500);
+    high = startApp(world, "high", highSide, { side: lowSide, name: "low" }, kind, high.dhtState, true);
+    const liveMs = await until(() => low.link.isDataLinkOpen && high.link.isDataLinkOpen && channelOf(low) !== held, 120_000);
+    // Before: 30 s and more (the dead session's idle timeout). After: the contact's knock, a round trip and a ping's wait.
+    expect(liveMs, "from the contact's start to live on both sides").toBeLessThanOrEqual(5_000);
+  }, 240_000);
 
   it("a dial in from another key than the pinned one leaves the held session as it was", async () => {
     const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
@@ -592,7 +639,7 @@ describe("back from the background (a phone that slept), the contact's chat not 
    * `times`: the app sleeps and wakes this many times, the same link throughout (the lab: only the first was fast).
    * The numbers are the last return's.
    */
-  async function sleepAndWake({ higher, awayMs, frozen = false, afterAttempt = false, times = 1 }: { higher: boolean; awayMs: number; frozen?: boolean; afterAttempt?: boolean; times?: number }) {
+  async function sleepAndWake({ higher, awayMs, frozen = false, afterAttempt = false, duringAttemptMs = 0, times = 1 }: { higher: boolean; awayMs: number; frozen?: boolean; afterAttempt?: boolean; duringAttemptMs?: number; times?: number }) {
     const world = { pkarr: new MemoryPkarr(DESKTOP_NETWORK), native: new NativeWorld() };
     const made = invitationWhere("inviter");
     const [phoneSide, cliSide] = higher ? [made.joiner, made.inviter] : [made.inviter, made.joiner];
@@ -611,8 +658,16 @@ describe("back from the background (a phone that slept), the contact's chat not 
       const inner = phone.link as unknown as { livenessTimer: ReturnType<typeof setInterval> | null };
       if (frozen && inner.livenessTimer) { clearInterval(inner.livenessTimer); inner.livenessTimer = null; }
       await run(awayMs);
+      const state = () => (cli.link as unknown as { dataLink: { state: string } }).dataLink.state;
+      if (duringAttemptMs) {
+        await until(() => state() === "idle", 4 * 60_000);
+        await until(() => state() === "offering", 4 * 60_000);
+        await run(duringAttemptMs);
+        expect(state(), "the CLI's offer stands at the wake").toBe("offering");
+        // The wake's read of the CLI's record brings that offer before the app's own has gathered.
+        rtc.srflxAfterMs = 450;
+      }
       if (afterAttempt) {
-        const state = () => (cli.link as unknown as { dataLink: { state: string } }).dataLink.state;
         await until(() => state() === "offering", 4 * 60_000);
         await until(() => state() === "idle", 4 * 60_000);
         await run(1_400);
@@ -651,5 +706,33 @@ describe("back from the background (a phone that slept), the contact's chat not 
     expect(directMs, "then to WebRTC, on the session").toBeLessThan(5_000);
     // A knock costs the relays nothing: the reads and publishes of a return, no more (4 to 8 here).
     expect(requestsToLive).toBeLessThanOrEqual(10);
+  }, 240_000);
+
+  it.each([
+    { duringAttemptMs: 20_000, crossed: false },
+    { duringAttemptMs: 30_000, crossed: false },
+    { duringAttemptMs: 47_400, crossed: false },
+    // The CLI's own dial of the relayed Iroh is under way (`RACE_RELAYED_MS`, to an app asleep): the knock crosses it,
+    // and waits for it there (WISP 100, "Crossed dials": `CROSSED_WAIT_MS` at most).
+    { duringAttemptMs: 40_000, crossed: true },
+  ])("the higher key wakes while the contact's offer stands (out $duringAttemptMs ms): it answers it, and knocks too", async ({ duringAttemptMs, crossed }) => {
+    // Two web pages, one stopped for 4 minutes (e2e): the contact, with the lower key, dials for the whole absence, and
+    // its offer is read 70 ms after the wake, while the app's own still gathers. The answer took that offer's place
+    // with the dial that made it still under way (it waited 2 s more for candidates of a connection already closed),
+    // and no knock went: live at the contact's next read (every 8 s).
+    const knocks: string[] = [];
+    const traceFile = process.env.RESTART_TRACE;
+    setLinkTraceSink(line => {
+      if (traceFile) appendFileSync(traceFile, line + "\n");
+      const step = JSON.parse(line) as { step: string; transport?: string }; if (step.step === "knock") knocks.push(step.transport ?? "");
+    });
+    const { liveMs, firstOn, directMs } = await sleepAndWake({ higher: true, awayMs: 4 * 60_000, frozen: true, duringAttemptMs });
+    setLinkTraceSink(null);
+    if (process.env.WAKE_REPORT) appendFileSync(process.env.WAKE_REPORT, JSON.stringify({ duringAttemptMs, crossed, liveMs, firstOn, directMs, knocks }) + "\n");
+    // Before: 7.6, 5.6 and 4.2 s over WebRTC, no knock (3.6 s crossed). After: 1.0 s over the knocked relay (4.0 s crossed).
+    expect(knocks).toEqual(["iroh/1"]);
+    expect(liveMs, "from the return to live on both sides").toBeLessThan(crossed ? 2_000 + CROSSED_WAIT_MS : 2_000);
+    expect(firstOn).toBe("iroh/1");
+    expect(directMs, "then to WebRTC, on the session").toBeLessThan(5_000);
   }, 240_000);
 });

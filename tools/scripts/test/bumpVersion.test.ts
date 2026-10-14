@@ -104,8 +104,9 @@ describe("bump-version", () => {
       return dir;
     };
 
-    it("is as the repository's own version ships it (off on dev at 1.1.x, on from release/1.2.0)", () => {
-      expect(guardProblems(root, json(root, "package.json").version, undefined, readFragments(root))).toEqual([]);
+    it("is on in the repository, which releases as 1.2.0 or later and never as a 1.1.x patch", () => {
+      expect(guardProblems(root, "1.2.0", undefined, readFragments(root))).toEqual([]);
+      expect(guardProblems(root, "1.1.99")).toEqual([expect.stringMatching(/APPS_ENABLED is true.*1\.2\.0/)]);
     });
 
     it("stops a version before 1.2.0 while it is on, and lets 1.2.0 and later go", () => {
@@ -150,6 +151,14 @@ describe("bump-version", () => {
       // Nothing about Apps goes out: no reason to stop.
       expect(guardProblems(off, "1.2.0", undefined, [groups, later])).toEqual([]);
       expect(guardProblems(off, "1.2.1", undefined, [])).toEqual([]);
+    });
+
+    it("leaves a guard without a flag to the entries' check (the Android app, held for 1.3)", () => {
+      const empty = mkdtempSync(join(tmpdir(), "ghostly-guard-"));
+      dirs.push(empty);
+      const android = [{ from: "1.3.0", release: "1.3", about: "Android app", entry: () => true }];
+      const entry = { name: "android.md", group: "Android", body: "- A fix.", release: "1.3" };
+      for (const version of ["1.2.0", "1.3.0"]) expect(guardProblems(empty, version, android, [entry]), version).toEqual([]);
     });
 
     it("stops the bump before any file changes", () => {

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Amount, MeltChangeError, MintOperationError, PaymentRequest, getEncodedToken, getTokenMetadata, type Proof } from "@cashu/cashu-ts";
 import { CashuWallet, assertAmount, normalizeMintUrl } from "../src/engine/wallet";
 import { TEST_MINT } from "../src/shared/mints";
+import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import type { PendingMelt, StoredPayment, StoredProof, StoredQuote, WalletTx } from "../src/shared/types";
 import { FakeWallet, failures, mint, resetDb, rows, seed as seedRows } from "./fakes";
 // covers: wallet.cashu.mint.add, wallet.cashu.receive-lightning, wallet.cashu.pay-invoice, wallet.cashu.receive-token, wallet.cashu.test-sats, wallet.history
@@ -114,7 +115,7 @@ describe("checking a mint before it is added", () => {
 });
 
 describe("the balance and history shown", () => {
-  it("counts neither reserved proofs nor the other network's mints, and shows the latest 100 records with every fee", async () => {
+  it("counts neither reserved proofs nor the other network's mints, and shows the latest 100 records with their fees", async () => {
     seed("proofs", [stored(64, "a"), stored(32, "held", MINT, true), stored(500, "test", TEST_MINT)]);
     seed("walletTx", Array.from({ length: 120 }, (_, i) => ({ id: `tx${i}`, timestamp: i, mint: MINT, kind: "ecash-in", amount: 1, fee: 1 })));
     const events = { onChange: vi.fn(), onTestMintNeeded: vi.fn(async (_mint: string) => {}), onQuotePaid: vi.fn(), onMeltResolved: vi.fn() };
@@ -125,7 +126,7 @@ describe("the balance and history shown", () => {
     expect(view.mints.map((m) => m.url)).toEqual([MINT]);
     expect(view.history).toHaveLength(100);
     expect(view.history[0].timestamp).toBe(119);
-    expect(view.feesPaid).toBe(120);
+    expect(view.feesPaid).toBe(100);
     // Kept, and counted in its own network's wallet, but never spent by a send of the other network.
     expect(await wallet.view("testnet")).toMatchObject({ balance: 500, mints: [expect.objectContaining({ url: TEST_MINT })] });
     expect(await wallet.balanceAt(TEST_MINT)).toBe(500);
@@ -139,7 +140,8 @@ describe("ecash in", () => {
   it("refuses text that is not a sat token, before asking any mint", async () => {
     const { wallet } = setup();
     await expect(wallet.receiveToken("cashuBnotatoken")).rejects.toThrow("That is not a valid ecash token");
-    await expect(wallet.receiveToken(tokenFrom(MINT, [8], "usd"))).rejects.toThrow("That is not a valid ecash token");
+    // A token of another unit is a token: said as such, not as an invalid one.
+    await expect(wallet.receiveToken(tokenFrom(MINT, [8], "usd"))).rejects.toThrow("This ecash is in usd: only sat ecash can be redeemed here");
     expect(mint.receive).not.toHaveBeenCalled();
   });
 
@@ -279,31 +281,38 @@ describe("Lightning in", () => {
 });
 
 describe("Lightning out", () => {
-  const meltQuote = (state: string, extra: object = {}) => ({ quote: "m1", request: "lnbc90", amount: Amount.from(90), fee_reserve: Amount.from(10), unit: "sat", state, expiry: 0, ...extra });
+  const INVOICE = fakeInvoice(90, new Uint8Array(32).fill(9));
+  const meltQuote = (state: string, extra: object = {}) => ({ quote: "m1", request: INVOICE, amount: Amount.from(90), fee_reserve: Amount.from(10), unit: "sat", state, expiry: 0, ...extra });
   const unspent = [{ state: "UNSPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }];
 
   beforeEach(() => {
     // 108 sats; paying 90 + 10 reserve hands 64 + 32 + 4 to the mint and keeps 8.
     seed("proofs", [stored(64, "a"), stored(32, "b"), stored(8, "c"), stored(4, "d")]);
     mint.send.mockResolvedValue({ keep: [proof(8, "c")], send: [proof(64, "a"), proof(32, "b"), proof(4, "d")] });
+    extra.createMeltQuoteBolt11.mockImplementation(async () => meltQuote("UNPAID"));
   });
+  // Only a quote shown to the person is paid: each payment is quoted first, as the app does.
+  const pay = async (wallet: CashuWallet, note?: string) => {
+    const { quote, mint: at } = await wallet.quoteInvoice(INVOICE);
+    return wallet.payQuote(quote, at, note);
+  };
 
   it("quotes from the first mint that can afford the invoice, and says why when none can", async () => {
     extra.createMeltQuoteBolt11.mockImplementation(async () => meltQuote("UNPAID"));
     seed("proofs", [stored(8, "p", POOR)]);
-    await expect(setup([POOR, MINT]).wallet.quoteInvoice("  lnbc90  ")).resolves.toEqual({ quote: "m1", mint: MINT, amount: 90, feeReserve: 10 });
-    expect(extra.createMeltQuoteBolt11).toHaveBeenCalledWith(POOR, "lnbc90");
-    await expect(setup([POOR]).wallet.quoteInvoice("lnbc90")).rejects.toThrow("Not enough sats in your wallet");
-    await expect(setup([]).wallet.quoteInvoice("lnbc90")).rejects.toThrow("Add a mint in Settings first");
+    await expect(setup([POOR, MINT]).wallet.quoteInvoice(`  ${INVOICE}  `)).resolves.toEqual({ quote: "m1", mint: MINT, amount: 90, feeReserve: 10 });
+    expect(extra.createMeltQuoteBolt11).toHaveBeenCalledWith(POOR, INVOICE);
+    await expect(setup([POOR]).wallet.quoteInvoice(INVOICE)).rejects.toThrow("Not enough sats in your wallet");
+    await expect(setup([]).wallet.quoteInvoice(INVOICE)).rejects.toThrow("Add a mint in Settings first");
     extra.createMeltQuoteBolt11.mockRejectedValue("invoice expired");
-    await expect(setup().wallet.quoteInvoice("lnbc90")).rejects.toThrow("invoice expired");
+    await expect(setup().wallet.quoteInvoice(INVOICE)).rejects.toThrow("invoice expired");
   });
 
   it("writes the payment down before the mint sees the proofs: a record that cannot be written never reaches the mint", async () => {
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
     failures.nextTransact = true;
     const { wallet, events } = setup();
-    await expect(wallet.payQuote("m1", MINT)).rejects.toThrow("QuotaExceeded");
+    await expect(pay(wallet)).rejects.toThrow("QuotaExceeded");
     expect(mint.completeMelt).not.toHaveBeenCalled();
     expect(rows("melts")).toEqual([]);
     expect(events.onChange).toHaveBeenCalled();
@@ -312,14 +321,14 @@ describe("Lightning out", () => {
   it("a payment that could not be prepared gives back everything the swap returned", async () => {
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
     vi.spyOn(FakeWallet.prototype, "prepareMelt").mockRejectedValueOnce(new Error("keyset gone"));
-    await expect(setup().wallet.payQuote("m1", MINT)).rejects.toThrow("keyset gone");
+    await expect(pay(setup().wallet)).rejects.toThrow("keyset gone");
     expect(mint.completeMelt).not.toHaveBeenCalled();
     expect(rows("melts")).toEqual([]);
     expect(balance()).toBe(108);
   });
 
   it("refuses the same invoice under another quote while the first payment is in flight", async () => {
-    seed("melts", [{ quote: "earlier", mint: MINT, request: "lnbc90", amount: 90, secrets: [], outlay: 100, outputs: [], createdAt: 0 } satisfies PendingMelt]);
+    seed("melts", [{ quote: "earlier", mint: MINT, request: INVOICE, amount: 90, secrets: [], outlay: 100, outputs: [], createdAt: 0 } satisfies PendingMelt]);
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
     await expect(setup().wallet.payQuote("m1", MINT)).rejects.toThrow("This invoice is already being paid");
     expect(mint.send).not.toHaveBeenCalled();
@@ -329,7 +338,7 @@ describe("Lightning out", () => {
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
     mint.completeMelt.mockResolvedValue({ quote: meltQuote("PAID"), change: [proof(4, "change")] });
     const { wallet } = setup();
-    expect(await wallet.payQuote("m1", MINT, "coffee")).toBe(true);
+    expect(await pay(wallet, "coffee")).toBe(true);
     expect(secrets()).toEqual(["c", "change"]);
     expect(rows<WalletTx>("walletTx")).toMatchObject([{ kind: "lightning-out", amount: 90, fee: 6, note: "coffee" }]);
     expect(rows("melts")).toEqual([]);
@@ -339,7 +348,7 @@ describe("Lightning out", () => {
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("PENDING"));
     mint.completeMelt.mockResolvedValue({ quote: meltQuote("PENDING"), change: [] });
     const { wallet, events } = setup();
-    expect(await wallet.payQuote("m1", MINT)).toBe(false);
+    expect(await pay(wallet)).toBe(false);
 
     const ensure = vi.spyOn(FakeWallet.prototype, "ensureOperableKeysets");
     vi.spyOn(FakeWallet.prototype, "createMeltChangeProofs").mockReturnValue([proof(4, "change")]);
@@ -356,7 +365,7 @@ describe("Lightning out", () => {
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("PENDING"));
     mint.completeMelt.mockResolvedValue({ quote: meltQuote("PENDING"), change: [] });
     const { wallet, events } = setup();
-    await wallet.payQuote("m1", MINT);
+    await pay(wallet);
     vi.spyOn(FakeWallet.prototype, "createMeltChangeProofs").mockImplementation(() => { throw new Error("bad signature"); });
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("PAID", { change: [{ id: KEYSET, amount: 4, C_: C }] }));
     await vi.advanceTimersByTimeAsync(30_000);
@@ -371,7 +380,7 @@ describe("Lightning out", () => {
     mint.completeMelt.mockRejectedValue(new MintOperationError(11001, "Token Already Spent"));
     mint.checkProofsStates.mockImplementation(async (asked: { secret: string }[]) => asked.map((p) => ({ state: p.secret === "c" ? "UNSPENT" : "SPENT" })));
     const { wallet } = setup();
-    await expect(wallet.payQuote("m1", MINT)).rejects.toThrow("This ecash was already spent somewhere else");
+    await expect(pay(wallet)).rejects.toThrow("This ecash was already spent somewhere else");
     await vi.advanceTimersByTimeAsync(0);
     expect(rows<WalletTx>("walletTx").filter((tx) => tx.kind === "fee"), "spent elsewhere is no fee").toEqual([]);
     expect(rows<PendingMelt>("melts")).toEqual([]);
@@ -384,7 +393,7 @@ describe("Lightning out", () => {
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("PENDING"));
     mint.completeMelt.mockResolvedValue({ quote: meltQuote("PENDING"), change: [] });
     const { wallet, events } = setup();
-    await wallet.payQuote("m1", MINT);
+    await pay(wallet);
     mint.checkMeltQuoteBolt11.mockResolvedValue(meltQuote("UNPAID"));
     // The payment's own proofs first; then the rest of the wallet's ecash at that mint is asked about, once.
     mint.checkProofsStates.mockResolvedValueOnce([{ state: "SPENT" }, { state: "UNSPENT" }, { state: "UNSPENT" }]);
@@ -402,7 +411,7 @@ describe("Lightning out", () => {
     mint.checkMeltQuoteBolt11.mockResolvedValueOnce(meltQuote("UNPAID")).mockRejectedValue(new TypeError("Failed to fetch"));
     mint.completeMelt.mockRejectedValue(new MintOperationError(20000, "lightning backend error"));
     const { wallet, events } = setup();
-    expect(await wallet.payQuote("m1", MINT)).toBe(false);
+    expect(await pay(wallet)).toBe(false);
     expect(rows<PendingMelt>("melts")).toMatchObject([{ quote: "m1" }]);
     expect(balance()).toBe(8);
 
@@ -417,7 +426,7 @@ describe("Lightning out", () => {
   it("a change error means the mint took the proofs: its word decides, and a paid quote is paid", async () => {
     mint.checkMeltQuoteBolt11.mockResolvedValueOnce(meltQuote("UNPAID")).mockResolvedValue(meltQuote("PAID"));
     mint.completeMelt.mockRejectedValue(new MeltChangeError([], meltQuote("PAID") as never));
-    expect(await setup().wallet.payQuote("m1", MINT)).toBe(true);
+    expect(await pay(setup().wallet)).toBe(true);
     expect(secrets()).toEqual(["c"]);
   });
 
@@ -426,7 +435,7 @@ describe("Lightning out", () => {
     mint.completeMelt.mockResolvedValue({ quote: meltQuote("UNPAID"), change: [] });
     mint.checkProofsStates.mockResolvedValue(unspent);
     const { wallet } = setup();
-    await expect(wallet.payQuote("m1", MINT)).rejects.toThrow("The Lightning payment did not go through. The sats are back in your wallet.");
+    await expect(pay(wallet)).rejects.toThrow("The Lightning payment did not go through. The sats are back in your wallet.");
     expect(balance()).toBe(108);
     expect(rows("melts")).toEqual([]);
     expect(await wallet.meltQuoteState(MINT, "m1")).toBe("UNPAID");
@@ -439,6 +448,8 @@ describe("reading ecash and backing it up", () => {
     expect(wallet.inspect(` ${tokenFrom(`${MINT}/`, [8, 2])} `)).toMatchObject({ kind: "token", amount: 10, unit: "sat", mint: MINT, accepted: true });
     expect(wallet.inspect(tokenFrom("https://evil.example", [8]))).toMatchObject({ accepted: false });
     expect(wallet.inspect(tokenFrom(TEST_MINT, [8]))).toMatchObject({ accepted: true });
+    // Ecash of another unit, from a mint this wallet has: read, but this wallet only takes sat.
+    expect(wallet.inspect(tokenFrom(MINT, [256, 128, 64, 32, 16, 4], "usd"))).toMatchObject({ amount: 500, unit: "usd", accepted: false });
     const request = new PaymentRequest(undefined, "r1", 21, "sat", [MINT], "for pizza").toEncodedCreqA();
     expect(wallet.inspect(request)).toEqual({ kind: "request", amount: 21, unit: "sat", mints: [MINT], description: "for pizza" });
     expect(wallet.inspect(new PaymentRequest(undefined, "r2").toEncodedCreqA())).toEqual({ kind: "request", amount: null, unit: "sat", mints: [], description: undefined });

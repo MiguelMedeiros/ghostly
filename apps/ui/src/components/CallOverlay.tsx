@@ -5,7 +5,12 @@ import { CORNERS, useFloatingBox, type Corner } from "../hooks/useFloatingBox";
 import type { CallDevices } from "../hooks/useCallDevices";
 import { applySpeaker, type DeviceKind } from "../lib/mediaDevices";
 import { useI18n } from "../contexts/I18nContext";
+import { useTabTrap } from "../hooks/useDismiss";
+import { useVoiceRing } from "../hooks/useVoiceRing";
+import { callLevels } from "../lib/voiceLevels";
 import { Menu, MenuItem } from "./Menu";
+import { initial } from "../lib/initial";
+import { errorText } from "../lib/errorText";
 
 interface CallOverlayProps {
   callState: CallState;
@@ -20,9 +25,12 @@ interface CallOverlayProps {
   canSendVideo?: boolean;
   /** The share button works: that lane, in a browser that can capture the screen. */
   canShareScreen?: boolean;
-  /** The share button shows, turned off, with this reason: the screen could be captured, but this call cannot carry it. */
+  /**
+   * The share button shows, turned off, with this reason: the screen could be captured, but this call cannot carry it.
+   * In English, as the call hook and the Desktop media layer say it; shown in the app's language (lib/errorText.ts).
+   */
   screenShareUnavailable?: string | null;
-  /** Why sharing the screen just failed. */
+  /** Why sharing the screen just failed, in English as the call hook says it; shown in the app's language. */
   screenShareError?: string | null;
   /** The peer is sending a picture. */
   remoteHasVideo: boolean;
@@ -116,6 +124,25 @@ export function CallOverlay({
     { enabled: mini, minWidth: 190, minHeight: 128 },
   );
 
+  // Whole-screen, the call covers its chat: the focus comes into it and Tab stays in it, as with a ringing call, and
+  // what had the focus (the button that started the call) has it back when the call ends. Not in the small window:
+  // the chat beside it is in use.
+  const box = miniWindow.boxProps.ref;
+  const opener = useRef<HTMLElement | null>(null);
+  useTabTrap(box, !mini);
+  useEffect(() => {
+    if (mini) return;
+    const active = document.activeElement as HTMLElement | null;
+    if (box.current && !box.current.contains(active)) {
+      if (active && active !== document.body) opener.current = active;
+      box.current.focus({ preventScroll: true });
+    }
+    return () => {
+      const before = opener.current;
+      if (before?.isConnected && (!document.activeElement || document.activeElement === document.body)) before.focus({ preventScroll: true });
+    };
+  }, [mini, box]);
+
   // Your own picture keeps the shape of what it shows (camera or screen), so there are never bars around it.
   const [selfAspect, setSelfAspect] = useState(4 / 3);
   const selfView = useFloatingBox(
@@ -177,6 +204,13 @@ export function CallOverlay({
   }[callState];
 
   const showRemoteVideo = remoteHasVideo && remoteStream && callState === "connected";
+  // Who is speaking: the contact's avatar wears a ring as wide as their voice is loud.
+  // A Linux Desktop call keeps its sound in Rust: the page hears neither side, and the call says both levels.
+  const told = callLevels(localStream);
+  const peerRing = useVoiceRing<HTMLDivElement>(remoteStream, callState === "connected" && !showRemoteVideo, told?.peer);
+  // And yours, beside it, in a call where no picture of you shows: your own ring, quiet while you are muted.
+  const showSelf = callState === "connected" && !showRemoteVideo && isVideoOff;
+  const selfRing = useVoiceRing<HTMLDivElement>(localStream, showSelf && !isMuted, told?.own);
   // A screen in place of the camera leaves the camera off, and its button says so.
   const cameraOn = !isVideoOff && !isScreenSharing;
   // Sharing is never a surprise, to either side.
@@ -191,10 +225,11 @@ export function CallOverlay({
       {...miniWindow.boxProps}
       data-testid="call-window"
       data-mini={mini}
+      {...(mini ? {} : { role: "dialog", "aria-label": peerName, tabIndex: -1 })}
       className={
         mini
           ? "call-mini floating fixed z-50 bg-chat-bg flex flex-col items-center justify-center rounded-xl border border-border shadow-2xl"
-          : "fixed inset-0 z-50 bg-chat-bg/95 max-md:bg-chat-bg flex flex-col items-center justify-center"
+          : "fixed inset-0 z-50 bg-chat-bg/95 max-md:bg-chat-bg flex flex-col items-center justify-center focus:outline-none"
       }
     >
       {mini && <Grips handleProps={miniWindow.handleProps} />}
@@ -231,13 +266,23 @@ export function CallOverlay({
       
       {/* Placeholder when no remote video */}
       {!showRemoteVideo && (
-        <div className="call-peer flex flex-col items-center gap-4">
-          <div className="call-avatar w-24 h-24 rounded-full bg-surface-hover flex items-center justify-center">
-            <span className="text-text-muted text-3xl">
-              {peerName.charAt(0).toUpperCase()}
-            </span>
+        <div className="call-sides flex items-end justify-center gap-10 max-w-full px-4">
+          <div className="call-peer min-w-0 flex flex-col items-center gap-4">
+            <div ref={peerRing} data-testid="call-peer-avatar" className="call-avatar shrink-0 w-24 h-24 rounded-full bg-surface-hover flex items-center justify-center">
+              <span className="text-text-muted text-3xl">
+                {initial(peerName)}
+              </span>
+            </div>
+            <p className="call-name max-w-full truncate text-text-primary text-lg font-medium">{peerName}</p>
           </div>
-          <p className="call-name text-text-primary text-lg font-medium">{peerName}</p>
+          {showSelf && (
+            <div className="call-peer call-self flex flex-col items-center gap-4">
+              <div ref={selfRing} data-testid="call-self-avatar" data-muted={isMuted} className="call-avatar shrink-0 w-16 h-16 rounded-full bg-surface-hover flex items-center justify-center">
+                <span className="text-text-muted text-xl">{initial(t("calls.you"))}</span>
+              </div>
+              <p className="call-name text-text-muted text-lg">{t("calls.you")}</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -248,7 +293,7 @@ export function CallOverlay({
             <span className="text-accent">{t("calls.audio")}</span>
           )}
           {statusText && (
-            <span className={callState === "connected" ? "ml-2" : ""}>
+            <span className={callState === "connected" ? "ms-2" : ""}>
               {statusText}
             </span>
           )}
@@ -299,7 +344,7 @@ export function CallOverlay({
       {screenShareError && (
         <p role="alert" data-testid="share-screen-error"
           className="call-share-error absolute bottom-32 max-md:bottom-[calc(8.5rem+env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 z-10 w-max max-w-[calc(100%-2rem)] rounded-lg bg-black/70 px-3 py-2 text-center text-xs text-white">
-          {screenShareError}
+          {errorText(screenShareError, t)}
         </p>
       )}
 
@@ -412,7 +457,7 @@ export function CallOverlay({
             className={`w-14 h-14 max-md:w-16 max-md:h-16 rounded-full flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
               isScreenSharing ? "bg-accent text-on-accent" : "bg-white/10 text-white enabled:hover:bg-white/20"
             }`}
-            title={isScreenSharing ? t("calls.stopSharing") : canShareScreen ? t("calls.shareScreen") : screenShareUnavailable ?? t("calls.shareScreen")}
+            title={isScreenSharing ? t("calls.stopSharing") : canShareScreen ? t("calls.shareScreen") : screenShareUnavailable ? errorText(screenShareUnavailable, t) : t("calls.shareScreen")}
           >
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <rect x="2" y="4" width="20" height="13" rx="2" />

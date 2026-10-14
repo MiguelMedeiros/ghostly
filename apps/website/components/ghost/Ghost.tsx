@@ -139,9 +139,11 @@ export const Ghost = memo(function Ghost({
       </defs>
       {halo && <ellipse cx="40" cy="46" rx="56" ry="60" fill={`url(#halo-${id})`} />}
       <g className="ghost-lean" style={{ transform: `rotate(${tilt}deg)` }}>
+        {/* A sleeping ghost's hem is still: a `d` morph lays out and repaints the whole page at every frame for as long
+            as the ghost is on screen, and the footer's sleeper is on screen at the end of every page. */}
         {[fill, `url(#sheen-${id})`].map((paint, i) => (
           <path key={i} d={STILL} fill={paint}>
-            {!reduce && (
+            {!reduce && !closed && (
               <animate
                 attributeName="d"
                 dur="3.2s"

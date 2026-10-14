@@ -1,9 +1,11 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
+  useState,
   type ReactNode,
 } from "react";
 import { useSettings } from "./SettingsContext";
@@ -11,8 +13,8 @@ import type { Language } from "../lib/settings";
 import { applyDocumentLanguage, textDirection } from "../lib/documentLanguage";
 import { setDefaultProfileName, setRestoredProfileName } from "../lib/profiles";
 
-import { locales as translations } from "../locales";
-import { englishT, translateWith, type Translate } from "../locales/translate";
+import { loadLocale, loadedLocale, translatorFor } from "../locales";
+import { englishT, type Translate } from "../locales/translate";
 
 export type { Translate, TranslationKey } from "../locales/translate";
 
@@ -20,13 +22,46 @@ interface I18nContextValue {
   t: Translate;
   language: Language;
   dir: "ltr" | "rtl";
+  /** The chosen language's file did not arrive: the app stays in `language`, the one shown before. */
+  languageNotLoaded: boolean;
+  /** Asks for the chosen language again. */
+  retryLanguage: () => void;
 }
 
 const I18nContext = createContext<I18nContextValue | null>(null);
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const { settings } = useSettings();
-  const language = settings.language;
+  // A language is shown once its dictionary is here (the entry loads the profile's before the first render); one just
+  // chosen waits for its own, with the one shown before kept meanwhile.
+  const chosen = settings.language;
+  const [shown, setShown] = useState<Language>(() => (loadedLocale(chosen) ? chosen : "en"));
+  // A language's file may not arrive (the network dropped, a deploy replaced the files): it is said (Settings, on the
+  // Language row) and asked for again there, and by itself when the network is back or the window is shown again.
+  const [failed, setFailed] = useState<Language | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const retryLanguage = useCallback(() => setAttempt((n) => n + 1), []);
+  useEffect(() => {
+    let live = true;
+    void loadLocale(chosen).then(() => {
+      if (!live) return;
+      if (loadedLocale(chosen)) setShown(chosen);
+      setFailed(loadedLocale(chosen) ? null : chosen);
+    });
+    return () => { live = false; };
+  }, [chosen, attempt]);
+  const languageNotLoaded = failed === chosen && !loadedLocale(chosen);
+  useEffect(() => {
+    if (!languageNotLoaded) return;
+    const shownAgain = () => { if (document.visibilityState !== "hidden") retryLanguage(); };
+    window.addEventListener("online", retryLanguage);
+    document.addEventListener("visibilitychange", shownAgain);
+    return () => {
+      window.removeEventListener("online", retryLanguage);
+      document.removeEventListener("visibilitychange", shownAgain);
+    };
+  }, [languageNotLoaded, retryLanguage]);
+  const language = loadedLocale(chosen) ? chosen : shown;
 
   const dir = textDirection(language);
 
@@ -35,7 +70,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     applyDocumentLanguage(language);
   }, [language]);
 
-  const t = useMemo(() => translateWith(translations[language] || translations.en, translations[language] ? language : "en"), [language]);
+  const t = useMemo(() => translatorFor(language), [language]);
   // The first profile's built-in name in this language, for whatever lists profiles (lib/profiles has no translator):
   // set as this renders, so the screens rendered in the new language read it; those keeping a list hear it after.
   setDefaultProfileName(t("profile.defaultName"));
@@ -44,7 +79,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   useEffect(() => { window.dispatchEvent(new Event("profiles-updated")); }, [t]);
 
   return (
-    <I18nContext.Provider value={{ t, language, dir }}>
+    <I18nContext.Provider value={{ t, language, dir, languageNotLoaded, retryLanguage }}>
       {children}
     </I18nContext.Provider>
   );

@@ -35,6 +35,7 @@ describe("file send of a picture", () => {
   const node = {
     getState: () => ({ links: [link], groups: [], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
     getMessages: vi.fn(async () => []),
+    getMessage: vi.fn(async () => undefined),
     sendFile: vi.fn(async ({ file }: { file: MessageFile }) => { sent.push(file); }),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;

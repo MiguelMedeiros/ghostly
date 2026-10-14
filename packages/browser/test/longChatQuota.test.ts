@@ -164,6 +164,33 @@ describe("a long chat past the page's storage", () => {
     expect(storage.loadSession(SESSION)!.lastSyncAt).toBe(Date.now());
   });
 
+  it("after a reload, the histories made whole again tell the page once for all its chats, not once each", async () => {
+    // A second long chat, as the first.
+    const link2 = { ...link, id: "link-2", peerPubKeyZ32: "peer-2" } as LinkView;
+    engine.messages.set(link2.id, engine.messages.get(LINK)!.map((m) => ({ ...m, linkId: link2.id })));
+    space.quota = Infinity;
+    space.items.set("ghostly_s2", JSON.stringify({ ...JSON.parse(space.getItem(KEY)!), id: "s2", peerPubKeyB64: "peer-2", mySeedB64: "seed-2" }));
+    const speak = async () => {
+      sync.startSessionSync();
+      engine.state = { links: [link, link2] };
+      for (const listener of engine.stateListeners) listener();
+      // As the engine posts them: one chat's history at a time.
+      for (const [id, messages] of engine.messages) for (const listener of engine.messageListeners) listener(id, messages);
+    };
+    await speak();
+    await vi.advanceTimersByTimeAsync(100);
+    await page();
+    let told = 0;
+    window.addEventListener("session-updated", () => told++);
+    await speak();
+    expect(told).toBe(0);
+    await vi.advanceTimersByTimeAsync(100);
+    // Once, so the open chat reads the older messages it now has.
+    expect(told).toBe(1);
+    expect(storage.loadSession(SESSION)!.messages).toHaveLength(COUNT + 3);
+    expect(storage.loadSession("s2")!.messages).toHaveLength(COUNT + 3);
+  });
+
   it("two pages over one storage (the extension's) settle: once both have mirrored, neither writes the chat again", async () => {
     await engineSpeaks();
     const first = { sync, storage };

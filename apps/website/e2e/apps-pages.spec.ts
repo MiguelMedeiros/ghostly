@@ -237,6 +237,53 @@ test.describe("once the released Ghostly has Apps", () => {
     }
   });
 
+  test("at 320 px a title and a tagline of one long word, as long as the store takes, wrap inside the card and the header", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 812 });
+    // The store's own limits: 40 characters for a title, 80 for a tagline (lib/store-core/appBundle.ts). They ran
+    // over the card's border, and the app page's text column grew to the word and cut the title and Version.
+    const title = "W".repeat(40), tagline = "M".repeat(80);
+    await page.goto(LIVE + "/apps");
+    const card = page.locator(".ap-card").first();
+    await card.locator(".ap-card-title").evaluate((el, text) => { el.textContent = text; }, title);
+    await card.locator(".ap-card-tagline").evaluate((el, text) => { el.textContent = text; }, tagline);
+    const edge = (await card.boundingBox())!;
+    for (const part of [".ap-card-title", ".ap-card-tagline"]) {
+      const box = (await card.locator(part).boundingBox())!;
+      expect(box.x + box.width, part).toBeLessThanOrEqual(edge.x + edge.width);
+    }
+    await page.goto(LIVE + `/apps/${CHESS}`);
+    await page.locator(".ap-app-title").evaluate((el, text) => { el.textContent = text; }, title);
+    await page.locator(".ap-head-copy .lead").evaluate((el, text) => { el.textContent = text; }, tagline);
+    for (const part of [".ap-head-copy", ".ap-app-title", ".ap-head-copy .lead"]) {
+      const box = (await page.locator(part).boundingBox())!;
+      expect(box.x + box.width, part).toBeLessThanOrEqual(320);
+    }
+  });
+
+  test("at 320 px a version and a developer as long as the store takes wrap inside the card and the header", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 812 });
+    // The store's own limits: 64 characters for a version (lib/store-core/appBundle.ts), 40 for a developer's name
+    // (appStore.ts). A valid semver that long, or one long name, ran off the screen and past the card's border.
+    const version = "1.0.0-beta.20261013+build.sha.9f3c2a1b7e5d4c6f8a0b1c2d3e4f5a6b7c", developer = "Schachbrettweltmeisterschaftsvereinigung";
+    expect([version.length, developer.length]).toEqual([64, 40]);
+    await page.goto(LIVE + "/apps");
+    const card = page.locator(".ap-card").first();
+    await card.locator(".ap-card-meta").evaluate((el, text) => { el.textContent = text; }, `Games · ${developer}`);
+    const edge = (await card.boundingBox())!, meta = (await card.locator(".ap-card-meta").boundingBox())!;
+    expect.soft(meta.x + meta.width, "the card's developer").toBeLessThanOrEqual(edge.x + edge.width);
+    await page.goto(LIVE + `/apps/${CHESS}`);
+    // Version's value as long as a version, every other (By, Category) as long as a name.
+    await page.locator(".ap-meta div").evaluateAll((rows, [version, developer]) => {
+      for (const row of rows) row.querySelector("dd")!.textContent = row.querySelector("dt")!.textContent === "Version" ? version : developer;
+    }, [version, developer]);
+    const values = page.locator(".ap-meta dd");
+    await expect(values.filter({ hasText: version })).toHaveCount(1);
+    for (const value of await values.all()) {
+      const box = (await value.boundingBox())!;
+      expect.soft(box.x + box.width, (await value.textContent())!).toBeLessThanOrEqual(320);
+    }
+  });
+
   test("axe finds nothing serious on either page", async ({ page }) => {
     for (const path of ["/apps", `/apps/${CHESS}`, `/apps/${NOTES}`]) {
       await page.goto(LIVE + path);

@@ -1,18 +1,23 @@
 import { useRef, useState } from "react";
-import type { InstalledAppView } from "@ghostly/browser/engine/apps";
+import type { BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { useI18n } from "../../contexts/I18nContext";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { Button } from "../wallet/ui";
 import { AppIcon } from "./AppIcon";
-import { sendAppCard, useInstalledApps } from "../../lib/apps/installed";
+import { AppInstallDialog } from "./AppInstallDialog";
+import { refreshInstalledApps, sendAppCard, useBuiltInApps, useInstalledApps } from "../../lib/apps/installed";
 import { openApp } from "../../lib/apps/open";
 import { appErrorText } from "../../lib/apps/errors";
+
+/** Open is offered for an app that may run, and for one whose files are missing here (a restored profile): opening it fetches them. */
+const opens = (app: InstalledAppView) => app.run.status === "ok" || app.run.status === "needs-files";
 
 /*
  * The composer's + → Apps in a 1:1 chat (WISP 1200 § In a chat): the installed apps, one to open with this contact.
  * Opening one sends the "opened" app card (WISP 405 § An app), made from the app as installed, so the contact sees
  * "Ana opened Chess" and can install the same app; then the app opens in this chat. Nothing is advertised before.
+ * An app that comes with Ghostly and was never opened here is listed too: choosing it shows what it asks first.
  */
 export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, onClose }: {
   linkId: string;
@@ -25,6 +30,9 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
   const { t } = useI18n();
   const nav = useAppNavigation();
   const installed = useInstalledApps(true);
+  const builtIns = useBuiltInApps(true);
+  // A built-in app chosen for the first time: its install screen, then it opens with this contact.
+  const [first, setFirst] = useState<BuiltInAppOffer | null>(null);
   const backdrop = useBackdropDismiss(onClose);
   const ref = useRef<HTMLDivElement>(null);
   // Once an app opened, its panel has the focus: closing this does not take it back.
@@ -42,10 +50,15 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
       const failed = await sendAppCard(linkId, app, true);
       if (failed) throw new Error(failed);
       onClose();
-    } catch (e) { setError(appErrorText(e, t)); } finally { setBusy(null); }
+    } catch (e) { setError(appErrorText(e, t)); } finally {
+      setBusy(null);
+      // Opening is what fetched its files: every screen's list says so (or that they are still missing).
+      if (app.run.status === "needs-files") void refreshInstalledApps();
+    }
   };
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 sm:p-4 animate-fade-in" {...backdrop}>
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="chat-apps-title" data-testid="chat-apps"
         className="focus:outline-none w-full sm:max-w-md bg-panel-header border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 space-y-4 max-h-[85dvh] overflow-y-auto pb-safe">
@@ -55,17 +68,27 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
         </div>
         <div className="bg-surface rounded-xl divide-y divide-border">
           {installed === null ? <p className="px-4 py-3 text-xs text-text-muted">{t("apps.page.loading")}</p>
-            : installed.length === 0 ? <p className="px-4 py-3 text-xs text-text-muted" data-testid="chat-apps-none">{t("apps.composer.none")}</p>
+            : installed.length === 0 && builtIns.length === 0 ? <p className="px-4 py-3 text-xs text-text-muted" data-testid="chat-apps-none">{t("apps.composer.none")}</p>
               : installed.map((app) => (
                 <div key={app.ref} className="flex items-center gap-3 px-4 py-3" data-testid="chat-app" data-ref={app.ref}>
                   <AppIcon size={36} installed={app} />
                   <div className="min-w-0 flex-1">
                     <p dir="auto" className="text-sm text-text-primary truncate">{app.title}</p>
-                    <p dir="auto" className="text-xs text-text-muted truncate">{app.run.status === "ok" ? app.tagline : t("apps.app.stopped")}</p>
+                    <p dir="auto" className="text-xs text-text-muted truncate">{app.run.status === "ok" ? app.tagline : t(app.run.status === "needs-files" ? "apps.app.needsFiles" : "apps.app.stopped")}</p>
                   </div>
-                  <Button variant="primary" data-testid="chat-app-open" disabled={app.run.status !== "ok" || busy !== null} onClick={() => void open(app)}>{t("apps.page.open")}</Button>
+                  <Button variant="primary" data-testid="chat-app-open" disabled={!opens(app) || busy !== null} onClick={() => void open(app)}>{t("apps.page.open")}</Button>
                 </div>
               ))}
+          {installed !== null && builtIns.map((app) => (
+            <div key={app.ref} className="flex items-center gap-3 px-4 py-3" data-testid="chat-built-in-app" data-ref={app.ref}>
+              <AppIcon size={36} />
+              <div className="min-w-0 flex-1">
+                <p dir="auto" className="text-sm text-text-primary truncate">{app.title}</p>
+                <p dir="auto" className="text-xs text-text-muted truncate">{app.tagline}</p>
+              </div>
+              <Button variant="primary" data-testid="chat-built-in-app-open" disabled={busy !== null} onClick={() => setFirst(app)}>{t("apps.page.open")}</Button>
+            </div>
+          ))}
           <button type="button" data-testid="chat-apps-browse" onClick={() => { onClose(); nav.open("/apps"); }}
             className="w-full px-4 py-3 text-sm text-text-secondary hover:text-accent hover:bg-surface-alt text-start cursor-pointer rounded-b-xl">
             {t("apps.composer.browse")}
@@ -77,5 +100,7 @@ export function ChatAppsDialog({ linkId, name, waiting, error: failed = null, on
         </div>
       </div>
     </div>
+    {first && <AppInstallDialog source={{ builtIn: first.ref }} title={first.title} openAfter onClose={() => setFirst(null)} onInstalled={(app) => void open(app)} />}
+    </>
   );
 }

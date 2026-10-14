@@ -73,10 +73,11 @@ endpoint from there, never a literal port. Their names are stable: other suites 
 | 47097 | HyperDHT relay for browsers (`infra/services/hyperdht-relay`, on a HyperDHT network of its own) | `GHOSTLY_HYPERDHT_RELAY_URL` (gate `GHOSTLY_HYPERDHT_RELAY`) |
 | 47100 | the web build under test (`vite preview`) | `E2E_WEB_PORT` |
 | 47110-47119 | Lightning address server, in the test process | `E2E_LNURL_PORT` |
-| 47120-47199 | domain-proof DoH + well-known servers, in the test process | `E2E_DOMAIN_PORT` |
 
-The last three are the suite's own servers: `e2e:full` sets them, and they are left out of `.env.e2e` so that
-another runner reading that file (the scenario matrix, 47300-47399) keeps its own defaults.
+The last two are the suite's own servers: `e2e:full` sets them, and they are left out of `.env.e2e` so that
+another runner reading that file (the scenario matrix, 47300-47399) keeps its own defaults. The domain-proof
+servers (`support/domain.ts`, DoH and well-known, in the test process) have no port here: each listens on a free one
+the system gives it.
 
 On Linux these ports sit inside the ephemeral range (32768-60999), so an outgoing connection can hold one as its
 local port just when a server wants it ("Port 47300 is already in use"). The `E2E (full)` jobs reserve 47000-47399
@@ -216,6 +217,8 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `extension/services.spec.ts` | a local web app shared by one extension and opened by another over WebRTC, stopped, offline, gone |
 | `extension/paired-services.spec.ts` · `services-extras.spec.ts` | sharing from the chat itself; the contact opens it from Services; removed, it is gone everywhere |
 | `desktop/smoke.spec.ts` | the bundled Tauri app opens, the peer behind it is the one Rust backs, and `<html lang>`/`<html dir>` follow the language |
+| `desktop/composer-rtl.spec.ts` | in Arabic the message field shows no scrollbar after the window narrows to the phone layout with a chat open (WebKitGTK kept a sideways overflow in the empty field) |
+| `desktop/select.spec.ts` | the Desktop tests' `choose` waits for a select on a page that is not drawn yet (Settings loads when first opened), with a stand-in page and no app |
 | `desktop/private-bus.spec.ts` | the D-Bus session bus each Linux Desktop app under test gets activates only xdg-desktop-portal and its permission store (a call's picture needs them): on a Linux desktop it started the person's portals and their backends once per app |
 | `desktop/wayland-clipboard.spec.ts` | Linux: Join → Paste reads text a Wayland app copied, on a headless Sway of its own (the person's clipboard is never touched). Skips without `sway` and `wl-copy` |
 | `desktop/dht-direct.spec.ts` | two Desktop apps pair and go live reading the Mainline DHT directly (a DHT of their own, `support/mainlineTestnet.ts`), never reading a relay |
@@ -225,6 +228,7 @@ Some of the specs, not all (`e2e/web/` alone has over 100). To list the tests of
 | `desktop/call-devices.spec.ts` | Linux: the microphone, camera and speaker chosen in Settings (PulseAudio null sources and sinks stand in for named devices) are the ones a call uses, the call's menu switches them live, an unplugged microphone falls back and is offered back, and Settings meters the microphone and plays the test tone through Rust. Skips without PulseAudio |
 | `desktop/video-stream.spec.ts` | a 100 MB video plays and seeks from the stored file in WebKitGTK (HTTP on 127.0.0.1) and WebView2 (`http://ghostly-file.localhost/<token>`), each answer a range of at most 4 MiB; video full screen. Run by `desktop-media.yml` |
 | `desktop/native-upgrade.spec.ts` | two Desktop apps with no WebRTC (WebKitGTK) pair, text over the DHT, then go live on Iroh or HyperDHT by dialling each other's capability-record descriptors; On DHT before live, never failed, every text shown once |
+| `desktop/compat-v115.spec.ts` | the current Desktop with a real v1.1.5 Desktop (the release's own Linux package): a chat from either side's invite, texts both ways over the DHT, then live on Iroh or HyperDHT with texts both ways, each shown once. See [Compatibility with older releases](#compatibility-with-older-releases) |
 | `compat/v04.spec.ts` | the current app with a real v0.4.0 built from its tag: a compatibility chat both ways (DHT text, then WebRTC), Continue in a new chat, v0.4 refusing a ghostly1 invite. See [Compatibility with older releases](#compatibility-with-older-releases) |
 | `compat/v11.spec.ts` | the current app (mini-apps on) with a real v1.1.4, which has no apps/1: an app card reaches it as its text with the bundle URL a link, the chat goes on both ways, and + → Apps says the contact's app can't run apps. See [Compatibility with older releases](#compatibility-with-older-releases) |
 | `compat/v115.spec.ts` | the current app with a real v1.1.5: a chat from either side's invite, texts delivered both ways; in a private group the 1.1.5 member back after its app was closed catches up from a current member, and a current member from the 1.1.5 one. See [Compatibility with older releases](#compatibility-with-older-releases) |
@@ -388,7 +392,7 @@ the DHT (docs/TESTING.md has what each transport value settles on).
 The matrix runs every night with the ephemeral environment (`e2e-full.yml`: four shards, the Desktop scenarios in a
 job of their own on ubuntu-22.04, then one report with the matrix in the run's summary), not on pull requests. By
 hand, `gh workflow run e2e-full.yml --ref <branch> -f jobs=desktop` runs only the Desktop job and the report. It serves its own
-build on port 47300 (`MATRIX_WEB_PORT`), and its test domain uses 47320-47399.
+build on port 47300 (`MATRIX_WEB_PORT`).
 
 ## Compatibility with older releases
 
@@ -399,6 +403,9 @@ last release with no mini-apps, gets an app card as its text and never offers `a
 `compat/v11.spec.ts` checks that, and what + → Apps says about such a contact. A contact on v1.1.5, the last release,
 pairs from either side's invite with texts delivered both ways, and in a private group each side catches the other up
 (WISP 902): `compat/v115.spec.ts`. `compat/release.ts` opens a peer on a v1.1.x build.
+The Desktop side, the Rust host and its native transports, which no web build runs: `desktop/compat-v115.spec.ts`
+pairs the current Desktop with a real v1.1.5 Desktop from either side's invite, over the DHT and then live on Iroh or
+HyperDHT. It runs with the other Desktop specs (`npm run test:e2e:desktop`, Linux x64).
 
 ```bash
 npm run test:e2e:compat                                        # builds v0.4.0, v1.1.4 and v1.1.5 the first time (a few minutes)
@@ -410,6 +417,12 @@ E2E_WEB_PORT=50310 E2E_COMPAT_PORT=50311 E2E_COMPAT_11_PORT=50312 E2E_COMPAT_115
   `web/dist` or, after the 2026-09-30 layout, `apps/web/dist`) in `~/.cache/ghostly/compat/<tag>/dist`
   (`E2E_COMPAT_CACHE` moves it), shared by every worktree; later runs reuse it, `--force` rebuilds. `--serve <port>`
   serves it with a small static server: the export keeps no `node_modules`.
+- **The old Desktop.** A release attaches its Desktop build, so nothing is built: `tools/scripts/fetch-compat-desktop.mjs`
+  downloads the release's `Ghostly_<version>_amd64.deb`, checks it against the release's `SHA256SUMS.txt`, unpacks it
+  with `dpkg-deb -x` (or, where there is none, as on Arch, with `tar` on the package's `data.tar.*`) into
+  `~/.cache/ghostly/compat/desktop-<tag>` (same cache and `E2E_COMPAT_CACHE`) and prints `usr/bin/ghostly`; the spec opens that binary (`binary` in `openDesktop` and `desktopPerson`). It needs the same
+  system libraries as the current Desktop (WebKitGTK 4.1, GStreamer). A machine where no tool unpacks the package skips
+  the spec with the reason.
 - **The config.** `playwright.compat.config.ts` starts four servers (the current build, with mini-apps on as in the
   main suite, v0.4.0, v1.1.4 and v1.1.5) and hands the old ones' addresses to the specs as `config.metadata.compatURL`
   and `releases` (by version). The apps meet on the test's Pkarr relay, as everywhere.

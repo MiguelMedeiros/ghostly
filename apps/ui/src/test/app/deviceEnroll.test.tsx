@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { configure, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
@@ -13,6 +13,14 @@ import { Home } from "../../pages/Home";
 import { renderApp } from "../render";
 import type { EnrollView } from "@ghostly/browser/devices/enroll";
 // covers: devices.enroll
+
+/*
+ * What these tests wait for sits behind the lock password's hash (600,000 rounds): about 200 ms on an idle machine,
+ * over a second on a busy runner. The default wait of 1 s is too short for that; and a test gets longer than its
+ * longest wait, so one that fails still says what it waited for.
+ */
+configure({ asyncUtilTimeout: 10_000 });
+vi.setConfig({ testTimeout: 30_000 });
 
 /** happy-dom has no <dialog> modal; the dialog only needs to open. */
 HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) { this.open = true; };
@@ -136,6 +144,27 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     expect(engine.callsTo("deviceEnrollConfirm")).toEqual([{ match: true }]);
   }, 20_000);
 
+  it("a double click on They match is one answer: both buttons are off until the engine has answered", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceEnrollInvite", () => waiting);
+    engine.on("deviceHandoffVerifier", () => undefined);
+    engine.on("deviceEnrollView", () => ({ role: "inviter", step: "confirm", digits: "482913", device: "Phone", kind: "web" }));
+    // The engine takes its time over the answer (it reads and writes the device record first).
+    let answer!: (view: EnrollView) => void;
+    engine.on("deviceEnrollConfirm", () => new Promise<EnrollView>((resolve) => { answer = resolve; }));
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    await user.dblClick(await screen.findByTestId("device-add-match", {}, { timeout: 3_000 }));
+    expect(screen.getByTestId("device-add-match")).toBeDisabled();
+    expect(screen.getByTestId("device-add-no-match")).toBeDisabled();
+    await user.click(screen.getByTestId("device-add-no-match"));
+    expect(engine.callsTo("deviceEnrollConfirm")).toEqual([{ match: true }]);
+    answer({ role: "inviter", step: "adding", device: "Phone" });
+    expect(await screen.findByTestId("device-add-adding")).toHaveTextContent("Phone");
+    expect(screen.queryByTestId("device-add-error")).toBeNull();
+  }, 20_000);
+
   it("says a device is connecting once one read the code, and Try again after a failure makes a new code", async () => {
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
     const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
@@ -166,6 +195,57 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     const failed = await screen.findByTestId("device-add-failed", {}, { timeout: 3_000 });
     expect(failed).toHaveAttribute("data-reason", "unreached");
     expect(failed).toHaveTextContent("The devices couldn't connect" + "Keep both online and make a new code.");
+  }, 20_000);
+
+  it("Try again says the new code is being made, and one the engine refuses keeps Try again under the reason", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceEnrollInvite", () => waiting);
+    engine.on("deviceHandoffVerifier", () => undefined);
+    let view: EnrollView | null = { role: "inviter", step: "failed", reason: "unreached" };
+    engine.on("deviceEnrollView", () => view);
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    await screen.findByTestId("device-add-failed", {}, { timeout: 3_000 });
+    // The turn address cannot be read: the engine refuses the new code, and drops the enrollment that ended.
+    let refuse = (_: Error) => {};
+    engine.on("deviceEnrollInvite", () => new Promise<EnrollView>((_, reject) => { refuse = reject; }));
+    await user.click(screen.getByTestId("device-add-again"));
+    await waitFor(() => expect(engine.callsTo("deviceEnrollInvite")).toHaveLength(2));
+    // While it is asked for: a status line in place of the reason and its button, and the focus stays in the dialog.
+    expect(screen.getByTestId("device-add-preparing")).toHaveTextContent("Getting ready…");
+    expect(screen.queryByTestId("device-add-failed")).toBeNull();
+    expect(screen.queryByTestId("device-add-again")).toBeNull();
+    expect(screen.getByTestId("device-add")).toContainElement(document.activeElement as HTMLElement);
+    view = null;
+    refuse(new Error("enroll-unreachable: The active device's turn could not be read"));
+    expect(await screen.findByTestId("device-add-error")).toHaveTextContent("Can't check which device is active. Check your connection.");
+    expect(screen.queryByTestId("device-add-preparing")).toBeNull();
+    // Try again is still there, and asks for a code again: no closing the dialog to type the password once more.
+    engine.on("deviceEnrollInvite", () => waiting);
+    await user.click(screen.getByTestId("device-add-again"));
+    await waitFor(() => expect(engine.callsTo("deviceEnrollInvite")).toHaveLength(3));
+    expect(await screen.findByTestId("device-add-code")).toBeInTheDocument();
+    expect(screen.queryByTestId("device-add-error")).toBeNull();
+  }, 20_000);
+
+  it("Try again refused while offline shows that reason only: the enrollment that ended stays off the dialog", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceEnrollInvite", () => waiting);
+    engine.on("deviceHandoffVerifier", () => undefined);
+    // The engine refuses before it replaces the old enrollment: it keeps answering with the one that ended.
+    engine.on("deviceEnrollView", () => ({ role: "inviter", step: "failed", reason: "dropped" }));
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    await screen.findByTestId("device-add-failed", {}, { timeout: 3_000 });
+    engine.on("deviceEnrollInvite", () => { throw new Error("enroll-offline: You are offline"); });
+    await user.click(screen.getByTestId("device-add-again"));
+    expect(await screen.findByTestId("device-add-error")).toHaveTextContent("You are offline.");
+    const reads = engine.callsTo("deviceEnrollView").length;
+    await waitFor(() => expect(engine.callsTo("deviceEnrollView").length).toBeGreaterThan(reads + 1), { timeout: 3_000 });
+    expect(screen.queryByTestId("device-add-failed")).toBeNull();
+    expect(screen.getByTestId("device-add-again")).toBeInTheDocument();
   }, 20_000);
 });
 

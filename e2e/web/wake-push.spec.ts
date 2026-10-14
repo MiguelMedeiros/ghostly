@@ -13,7 +13,19 @@ import { chat, connect, expect, link, openProfilePage, say, test, type Peer } fr
  */
 const deployed = !!process.env.E2E_WEB_URL;
 // Chromium's headless shell refuses notifications outright; the full browser in its headless mode shows them.
-test.use({ channel: "chromium" });
+test.use({
+  channel: "chromium",
+  launchOptions: {
+    args: [
+      // The project's own arguments, and `NativeNotifications` off: Chromium then keeps a notification in its own list.
+      // Handed to the machine's notification service instead, it stays in `getNotifications()` only as long as that
+      // service keeps it (under 50 ms on a desktop whose service drops it), and the specs read that list.
+      "--disable-features=WebRtcHideLocalIpsWithMdns,NativeNotifications",
+      "--use-fake-device-for-media-stream",
+      "--use-fake-ui-for-media-stream",
+    ],
+  },
+});
 const ENDPOINT = "https://fcm.googleapis.com/fcm/send/bo";
 
 /** Bo's browser subscription: the test keeps its private halves, to read what arrives. */
@@ -240,6 +252,15 @@ test("a call to a closed web app wakes it with \"Incoming call\", and rings once
   // Away, and the call buttons still work: Ana's app wakes Bo's and waits.
   await ana.page.getByTestId("call-audio").click();
   await expect(ana.page.getByTestId("wake-call")).toHaveAttribute("data-state", "waking");
+  // On a phone the notice is as wide as its words, on one line with its Cancel, inside the screen: it was laid out in
+  // the half of the screen right of the middle (187px), on two lines or more.
+  const desktop = ana.page.viewportSize()!;
+  await ana.page.setViewportSize({ width: 375, height: 740 });
+  const notice = (await ana.page.getByTestId("wake-call").boundingBox())!;
+  expect(notice.height, "one line").toBeLessThan(45);
+  expect(notice.x).toBeGreaterThanOrEqual(15.5);
+  expect(notice.x + notice.width).toBeLessThanOrEqual(375 - 15.5);
+  await ana.page.setViewportSize(desktop);
   await expect.poll(() => posts.length, { timeout: 60_000 }).toBe(1);
   const pushed = readPush(posts[0]!, keys);
   expect(JSON.parse(pushed)).toEqual({ wake: 1, k: row!.token, c: 1 });

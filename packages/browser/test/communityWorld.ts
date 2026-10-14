@@ -106,6 +106,11 @@ export class CommunityWorld {
   private sameSide(a: Peer, b: Peer): boolean { return (!this.part || this.part(a) === this.part(b)) && !this.cut?.(a, b); }
   /** Keeps the edges between two peers from coming up (their entry session still does): an edge whose signaling is slow. */
   holdEdge: ((a: Peer, b: Peer) => boolean) | null = null;
+  /**
+   * Two hubs answering one joiner run the same end of its entry session: here nobody gets through. On relays the record
+   * written last stands, and the joiner may get through to that hub (CLI daemons, 2026-10-11): a test says which.
+   */
+  entryWinner: Peer | null = null;
   /** Fails an app's Pkarr reads (a test says whose, and of which key): the relays' budget, or the network. */
   failRead: ((peer: Peer, key: string) => boolean) | null = null;
   /**
@@ -118,6 +123,14 @@ export class CommunityWorld {
   redialSeen = false;
   /** Loses frames on the way (a test says which): the network is not perfect. */
   drop: ((from: Peer, to: Peer, frame: Record<string, unknown>) => boolean) | null = null;
+  /**
+   * How many frames from one peer reach another at a time (a test says whose; 0 for all at once, as without it): the
+   * rest wait their turn while the other links go on, as a long answer does on a slow connection.
+   */
+  slow: ((from: Peer, to: Peer) => number) | null = null;
+  /** With `slow`: the frames that wait go once per step of the clock (`run`), not all within one: an answer that takes time. */
+  slowByClock = false;
+  private readonly slowed = new Map<string, { per: number; frames: (() => void)[] }>();
   private pending: Promise<unknown>[] = [];
 
   constructor(private readonly timings: CommunityTimings = { ...COMMUNITY_TIMINGS, hubJitterMs: 0 }, readonly network: NetworkModel | null = null, private readonly random: () => number = Math.random) {}
@@ -164,7 +177,12 @@ export class CommunityWorld {
         // An app from before hubs drops the frames it does not know (its session has no case for them).
         if (there.peer.legacy && (copy.t === "group-bye" || copy.t === "group-reach" || copy.t === "group-reacted")) return;
         if (this.drop?.(peer, there.peer, copy)) return;
-        this.pending.push(edge.kind === "edge" ? there.peer.groups.handleEdgeFrame(edge.g, edge.me, copy) : there.peer.groups.handleContactFrame(there.linkId, copy));
+        const deliver = () => { this.pending.push(edge.kind === "edge" ? there.peer.groups.handleEdgeFrame(edge.g, edge.me, copy) : there.peer.groups.handleContactFrame(there.linkId, copy)); };
+        const per = this.slow?.(peer, there.peer) ?? 0, way = `${peer.name}>${there.peer.name}`;
+        if (per <= 0 && !this.slowed.get(way)?.frames.length) { deliver(); return; }
+        const queue = this.slowed.get(way) ?? { per: Math.max(per, 1), frames: [] };
+        this.slowed.set(way, queue);
+        queue.frames.push(deliver);
       },
       // Version 4 (hubs) only between two apps that announce it.
       linkReady: (linkId, version = 1) => { const edge = links.get(linkId), there = edge && this.counterpart(edge); return !!there && this.up(peer, edge, there.peer) && (version < 4 || (!peer.legacy && !there.peer.legacy)); },
@@ -214,6 +232,15 @@ export class CommunityWorld {
         return peer.online ? structuredClone(store.get(key) ?? null) : null;
       },
       storeMessage: async message => { if (messages.some(m => m.id === message.id)) return false; messages.push(message); return true; },
+      forgetFrame: async (linkId, id) => { const row = messages.find(m => m.linkId === linkId && m.id === id); if (row) delete row.frame; },
+      keepFrame: async (linkId, id, frame) => { const row = messages.find(m => m.linkId === linkId && m.id === id); if (row) row.frame = frame; },
+      // The history is the order rows came in: these go to its end, in this order.
+      placeAgain: async (linkId, ids) => {
+        for (const id of ids) {
+          const i = messages.findIndex(m => m.linkId === linkId && m.id === id);
+          if (i >= 0) messages.push(...messages.splice(i, 1));
+        }
+      },
       emit: () => {},
       myNick: () => peer.nick,
       staysOnline: () => !!peer.staysOnline,
@@ -242,6 +269,11 @@ export class CommunityWorld {
       if (e.kind === want && e.g === edge.g && e.me === edge.peer && e.peer === edge.me) found.push({ peer, linkId });
     }
     const same = [...this.peers.values()].flatMap(peer => [...peer.links.values()].filter(e => e.kind === edge.kind && e.g === edge.g && e.me === edge.me && e.peer === edge.peer));
+    if (this.entryWinner && edge.kind !== "edge") {
+      const winner = this.entryWinner;
+      if (edge.kind === "guest") return found.find(f => f.peer === winner) ?? (found.length === 1 ? found[0] : undefined);
+      if (same.length > 1) return [...winner.links.values()].includes(edge) && found.length === 1 ? found[0] : undefined;
+    }
     return found.length === 1 && same.length === 1 ? found[0] : undefined;
   }
 
@@ -257,6 +289,17 @@ export class CommunityWorld {
     const copy = JSON.parse(data) as Record<string, unknown>;
     if (this.drop?.(peer, there.peer, copy)) return true;
     this.pending.push(there.peer.groups.filesFrame(edge.g, edge.me, there.linkId, copy));
+    return true;
+  }
+
+  /** A file's bytes on an edge as a binary message (files/4): the receiver's app hears the `pf-data` frame with them as bytes. */
+  sendData(peer: Peer, linkId: string, id: string, offset: number, bytes: Uint8Array): boolean {
+    const edge = peer.links.get(linkId), there = edge && this.counterpart(edge);
+    if (!edge || edge.kind !== "edge" || !there || !this.up(peer, edge, there.peer)) return false;
+    peer.sent.frames++; peer.sent.bytes += 2 + id.length + 8 + bytes.length;
+    const frame = { t: "pf-data", id, offset, data: bytes.slice() };
+    if (this.drop?.(peer, there.peer, frame)) return true;
+    this.pending.push(there.peer.groups.filesFrame(edge.g, edge.me, there.linkId, frame));
     return true;
   }
 
@@ -336,9 +379,13 @@ export class CommunityWorld {
     }
   }
 
+  /** A slow way's next frames, in the order they were sent. */
+  private slowNext(): void { for (const queue of this.slowed.values()) for (const deliver of queue.frames.splice(0, queue.per)) deliver(); }
+
   async settle(): Promise<void> {
     for (let i = 0; i < 500; i++) {
       this.announce();
+      if (!this.slowByClock) this.slowNext();
       const batch = this.pending.splice(0);
       if (!batch.length) {
         // What the engines handed on (payments) may send more.
@@ -361,6 +408,7 @@ export class CommunityWorld {
    * quit, with nothing of the last run's memory; its links start over as `reopen` says.
    */
   async restart(peer: Peer): Promise<void> {
+    await peer.groups.flush();
     peer.groups = new Groups(peer.host, peer.store, undefined, this.timings, this.random);
     await peer.groups.load();
     this.reopen(peer);
@@ -373,6 +421,7 @@ export class CommunityWorld {
       if (this.readsFromStepStart) this.stepStart = new Map(this.pkarr);
       for (const peer of this.peers.values()) if (peer.online) await peer.groups.tick(this.now + (peer.clock ?? 0));
       this.signal();
+      if (this.slowByClock) this.slowNext();
       await this.settle();
     }
   }

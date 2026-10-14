@@ -18,11 +18,13 @@ import { guardFileDrops } from "./lib/pastedFiles";
 import { useWakeLock } from "./hooks/useWakeLock";
 import { useAppCommands } from "./hooks/useAppCommands";
 import { useAppBadge } from "./lib/appBadge";
+import { useGoneGroups } from "./hooks/useGoneGroups";
 import { deviceWakeWords, useWakeTableSync } from "./lib/wakePush";
 import { useComputerAwake } from "./lib/keepAwake";
 import { useCallOnSync } from "./hooks/useCallOnSync";
 import { useI18n } from "./contexts/I18nContext";
 import { useAppSessions } from "./lib/apps/running";
+import { useGroupDownloadsSync } from "./lib/groupDownloads";
 
 /** The browser's status bar follows the header of whichever theme is active. */
 function useThemeColor() {
@@ -161,6 +163,8 @@ function useLoadedChats() {
 export function App() {
   useHoldStorageSync();
   useProfileNameSync();
+  // Download automatically in groups, Wi-Fi only: the engine's switch follows the connection (WISP 503).
+  useGroupDownloadsSync();
   const isMobile = useIsMobile();
   const { pathname } = useLocation();
   useViewportHeight();
@@ -169,6 +173,8 @@ export function App() {
   useEffect(() => guardFileDrops(), []);
   useWakeOnReturn();
   useAppBadge();
+  // A group gone from the list by itself takes its draft, read mark, mute and folder with it.
+  useGoneGroups();
   useProfilePeek();
   // Desktop's menu and shortcuts: New Chat, Settings.
   useAppCommands();

@@ -772,6 +772,27 @@ describe("DHT delivery: sending and lifecycle", () => {
     await h.bob.stop();
   });
 
+  it("keeps its mailbox alive in the background while live; a text, or the keep-alive once layer 1 is lost, is no background write", async () => {
+    // A profile's live chats must not take the relays' requests its groups need (a daemon with 30 live chats, 2026-10-08).
+    const h = setup({ pollMs: null, mode: "stream", state: { ...emptyDhtDeliveryState(), peerMode: "stream" }, bobCredentials: pinned() });
+    await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    h.bob.setLive(true); await vi.advanceTimersByTimeAsync(0);
+    const lastOptions = () => (h.transport.publish.mock.lastCall as unknown[] | undefined)?.[2];
+    const live = h.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(LIVE_POLL_MS + 1_000);
+    expect(h.transport.publish.mock.calls.length - live, "the keep-alive went").toBeGreaterThan(0);
+    expect(lastOptions()).toEqual({ background: true });
+    expect(await h.bob.send("hello", Date.now(), ID)).toBeNull();
+    expect(lastOptions(), "a text is what the contact waits for").toBeUndefined();
+    await h.bob.acknowledge(ID);
+    h.bob.setLive(false); await vi.advanceTimersByTimeAsync(0);
+    const dropped = h.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(h.transport.publish.mock.calls.length - dropped, "the keep-alive went").toBeGreaterThan(0);
+    expect(lastOptions()).toBeUndefined();
+    await h.bob.stop();
+  });
+
   it("tells its capability-record revision in the envelope and reports the contact's", async () => {
     const revs: number[] = [];
     const h = setup({ mode: "dht", capsRev: 7, peerCapsRev: rev => revs.push(rev) }); await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
@@ -859,6 +880,32 @@ describe("DHT delivery: the relays' request budget", () => {
     expect(h.last().pending).toMatchObject({ attempts: 1 });
     expect(h.views.every(v => !v.error)).toBe(true);
     await h.bob.stop();
+  });
+
+  it("an idle chat's keep-alives cost a couple of disk writes an hour, the budget free or spent, and a restart still publishes above every sequence sent", async () => {
+    const seqs = (h: ReturnType<typeof setup>) => h.transport.publish.mock.calls.map(c => JSON.parse(decrypt(c[1][0].value, h.envelopeKey))[0][1] as number);
+    const free = setup({ pollMs: null, bobCredentials: { seedB64: createIdentity().seedB64 } }); await free.bob.start();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(free.transport.publish.mock.calls.length, "a keep-alive every four minutes").toBeGreaterThanOrEqual(14);
+    expect(free.saved.length, "budget free").toBeLessThanOrEqual(2);
+    await free.bob.stop();
+    const sent = seqs(free);
+    expect(sent.every((s, i) => i === 0 || s > sent[i - 1])).toBe(true);
+    // A crash right now, from what the disk holds: the next envelope still reads as newer than every one sent.
+    const again = new DhtDelivery({ params: free.link.invite, mode: "dht", state: free.last(), credentials: free.credentials, transport: free.transport,
+      save: async () => {}, pin: async () => {}, message: async () => {}, receipt: async () => {}, changed: () => {} });
+    await again.start(); await vi.advanceTimersByTimeAsync(0);
+    expect(seqs(free).at(-1)).toBeGreaterThan(Math.max(...sent));
+    await again.stop();
+
+    // At the relays' budget every keep-alive is refused, every 30 s: a refusal is not worth a disk sync.
+    const spent = setup({ pollMs: null, bobCredentials: { seedB64: createIdentity().seedB64 } });
+    spent.transport.publish.mockRejectedValue(held(30_000));
+    await spent.bob.start();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(spent.transport.publish.mock.calls.length).toBeGreaterThanOrEqual(100);
+    expect(spent.saved.length, "budget spent").toBeLessThanOrEqual(3);
+    await spent.bob.stop();
   });
 
   it("a read the budget held back is no error either", async () => {

@@ -11,10 +11,15 @@ import { groupJson } from "./views";
  * engine enforces who may do what (the admin); these check the arguments and name members.
  */
 
-/** A member by key, unique key prefix or name; never this profile itself. */
+/**
+ * A member by key, unique key prefix or name; never this profile itself. A whole key is that member, whatever another
+ * member calls itself; a prefix and a name stand side by side (two members is an error, not a guess).
+ */
 export function findMember(group: GroupView, ref: string) {
   const lower = ref.toLowerCase();
-  const matches = group.members.filter((m) => !m.me && (m.key === ref || m.key.startsWith(ref) || m.nick?.trim().toLowerCase() === lower));
+  const others = group.members.filter((m) => !m.me);
+  const byKey = others.filter((m) => m.key === ref);
+  const matches = byKey.length ? byKey : others.filter((m) => m.key.startsWith(ref) || m.nick?.trim().toLowerCase() === lower);
   if (matches.length === 1) return matches[0];
   throw new CliError(matches.length ? "bad_request" : "not_found", matches.length ? `${JSON.stringify(ref)} names more than one member` : `No member ${JSON.stringify(ref)} in ${group.name}`);
 }

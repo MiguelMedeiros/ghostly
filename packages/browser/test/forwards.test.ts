@@ -7,7 +7,7 @@ import { db } from "../src/engine/db";
 import { forwardKind } from "../src/engine/forwards";
 import { fileStore } from "../src/shared/idb";
 import type { StoredMessage } from "../src/shared/types";
-import { FakeNativeNet } from "./helpers/fakeNative";
+import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
 // covers: chat.forward.wire, chat.forward.files, files.paired.send
 
 /**
@@ -40,7 +40,7 @@ async function contactOf(net: FakeNativeNet, name: string, transport: Constructo
   await db.putLink({ ...invitation.mine, id, profile: "paired-chat/1", participationSeed: mine, createdAt: 1, transportSeeds: { "iroh/1": transportSeed },
     pairedPeerKey: identityFromSeedB64(theirs).pubKeyZ32, peerTrust: { version: 1 },
     peerTransports: ["iroh/1"], peerFallback: true, preferredTransport: "iroh/1", transportFallback: true,
-    peerDescriptors: { "iroh/1": { id: `${name}:iroh/1` } } });
+    peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", `${name}`) } });
   const got: IncomingMessage[] = [];
   const frames: Record<string, unknown>[] = [];
   const received = new Map<string, { hash: ReturnType<typeof createHash>; length: number }>();
@@ -68,7 +68,7 @@ async function contactOf(net: FakeNativeNet, name: string, transport: Constructo
     // Without files: an app that takes none, neither files/2 (no handler) nor files/3.
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false, largeFilesSupport: files,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
-    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": { id: `app-${name}:iroh/1` } } },
+    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", `app-${name}`) } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
     events: {
       onMessage: message => { got.push(message); },
@@ -155,8 +155,13 @@ describe("forwarding between chats", { timeout: 60_000 }, () => {
     expect(await t.b.link.sendMessage("seen before", Date.now(), undefined, undefined, undefined, 4)).toBeNull();
     const first = await t.row(t.b, m => m.text === "first"), again = await t.row(t.b, m => m.text === "seen before");
     expect(again.forwarded).toBe(4);
+    // The messages chosen are read by their ids: the chat they come from is not read whole, however long it is.
+    const whole = vi.spyOn(db, "getMessages");
     const { results } = await t.node.forwardMessages({ linkId: t.b.id, messageIds: [again.id, first.id], to: [t.a.id] });
+    expect(whole.mock.calls.filter(([chat]) => chat === t.b.id)).toEqual([]);
+    whole.mockRestore();
     expect(results[0]).toMatchObject({ error: null, messageIds: [expect.any(String), expect.any(String)] });
+    await expect(t.node.forwardMessages({ linkId: t.b.id, messageIds: [first.id, "peer_notHere"], to: [t.a.id] })).rejects.toThrow("That message is not in this chat");
     await vi.waitFor(() => expect(t.a.got).toHaveLength(2));
     expect(t.a.got.map(m => [m.text, m.forwarded])).toEqual([["first", 1], ["seen before", 5]]);
     expect(forwardedMany(t.a.got[1]!.forwarded)).toBe(true);

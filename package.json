@@ -1,11 +1,14 @@
 {
   "name": "ghostly",
   "private": true,
-  "version": "1.1.6",
+  "version": "1.2.4",
   "type": "module",
   "scripts": {
+    "predev": "npm run sync:apps",
     "dev": "vite apps/ui",
+    "prebuild": "npm run sync:apps",
     "build": "tsc -b && vite build apps/ui",
+    "sync:apps": "node apps/ui/scripts/built-in-apps.mjs",
     "preview": "vite preview apps/ui",
     "tauri": "tauri",
     "lint": "eslint apps/ui/src packages apps/extension/src apps/extension/test/*.ts apps/web/src apps/mini e2e",
@@ -45,7 +48,7 @@
     "build:web": "npm run build -w @ghostly/web",
     "check:desktop-bundle": "node tools/scripts/check-desktop-bundle.mjs",
     "check:wkwebview-media": "node tools/scripts/voice-media/check-wkwebview.mjs",
-    "postinstall": "patch-package --patch-dir tools/patches",
+    "postinstall": "patch-package --patch-dir tools/patches && node apps/ui/scripts/built-in-apps.mjs --soft",
     "build:sdk": "npm run build -w @ghostlytools/sdk",
     "test:sdk-example": "node tools/scripts/sdk-example.mjs",
     "test:group-load": "GROUP_LOAD=${GROUP_LOAD:-256} npm run test:group-load -w @ghostly/browser"
@@ -82,10 +85,10 @@
     "@testing-library/user-event": "^14.6.7",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.1",
+    "@vitejs/plugin-react": "^6.1.2",
     "@vitest/coverage-v8": "^5.0.3",
     "@web5/dids": "1.2.0",
-    "eslint": "^10.11.0",
+    "eslint": "^10.12.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^17.13.0",
@@ -95,8 +98,8 @@
     "solc": "0.8.37",
     "tailwindcss": "^4.2.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.71.0",
-    "vite": "^8.3.2",
+    "typescript-eslint": "^8.71.1",
+    "vite": "^8.3.3",
     "vitest": "^5.0.3"
   },
   "workspaces": [

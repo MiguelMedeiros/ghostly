@@ -27,7 +27,7 @@
   "dhtOnly": "Solo DHT",
   "directBlocked": {
     "hint": "Las conexiones directas están bloqueadas en esta red (¿una VPN o un cortafuegos?). Los chats siguen funcionando por relays, pero conectan más despacio.",
-    "info": "Los últimos intentos de conexión directa de este dispositivo fallaron todos: no se encontró ninguna dirección pública, o no se pudo llegar directamente a varios contactos. Una VPN, un cortafuegos o un operador móvil puede causarlo, y la app no sabe cuál. Los mensajes y archivos van por relays o por la DHT. Un relay ve qué dispositivos hablan y cuándo, nunca lo que dicen. Las llamadas necesitan un camino directo o un servidor TURN (Configuración, Red). Este aviso desaparece cuando una conexión directa funciona o la red cambia.",
+    "info": "Este aviso desaparece cuando una conexión directa funciona. Un relay ve qué dispositivos hablan y cuándo, nunca lo que dicen. Las llamadas necesitan un servidor TURN (Configuración, Red).",
     "title": "Conexiones directas bloqueadas"
   },
   "discovery": {
@@ -119,6 +119,7 @@
   "option": {
     "automatic": "Automático",
     "automaticHint": "Las apps eligen, WebRTC primero",
+    "automaticHintNative": "Las apps eligen, {{transport}} primero: esta app no tiene WebRTC",
     "chosenNotInUse": "Elegido · sin usar",
     "chosenWaiting": "Elegido · esperándolo",
     "contactLacks": "La app de tu contacto no admite {{transport}}",
@@ -198,6 +199,7 @@
     "afterDrop": "Automático: el chat volvió por {{transport}} después de que se cayera el transporte anterior.",
     "afterDropShort": "automático, tras un corte",
     "automatic": "Automático: ambas apps prefieren {{transport}}.",
+    "automaticNoWebrtc": "Automático: las apps usan {{transport}}, que ambas tienen; una de ellas no tiene WebRTC.",
     "automaticWebrtc": "Automático: ambas apps prefieren WebRTC, y un primer emparejamiento siempre usa WebRTC.",
     "contactChose": "{{contact}} eligió {{transport}} para este chat.",
     "fallback": "Elegiste {{preferred}} para este chat; no está disponible ahora, así que el chat usa {{transport}}.",

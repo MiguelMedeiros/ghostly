@@ -163,6 +163,7 @@ function PeerTile({
   agreed,
   t,
   relayedLabel,
+  sizer,
 }: {
   who: "boo" | "casper";
   peer: Peer;
@@ -172,6 +173,7 @@ function PeerTile({
   agreed: ReadonlySet<string>;
   t: Copy;
   relayedLabel: string;
+  sizer?: boolean;
 }) {
   const mood: GhostMood = phase === 0 ? "calm" : connected ? "happy" : "lonely";
   const transportState = (tr: Transport): ChipState => (phase < 1 ? "idle" : shared.has(tr) ? "shared" : "off");
@@ -179,7 +181,8 @@ function PeerTile({
   return (
     <div className="ng-peer" data-who={who}>
       <div className="ng-peer-head">
-        <Ghost who={who} size={44} float={false} mood={mood} />
+        {/* An unseen copy needs the ghost's room, not a second ghost stirring and blinking. */}
+        {sizer ? <svg width={44} height={55} /> : <Ghost who={who} size={44} float={false} mood={mood} />}
         <div>
           <div className="ng-peer-name">{who === "boo" ? t.boo : t.casper}</div>
           <div className="ng-peer-platform">
@@ -273,6 +276,64 @@ function ResultCard({ s, phase, t, relayedLabel }: { s: Scenario; phase: number;
   );
 }
 
+/**
+ * One scenario at one phase: phase caption, stage, sub-caption. A `sizer` is a finished frame nobody sees or hears:
+ * the frame lays every scenario's sizer in the cell the playing scene is drawn in, so the tallest one sets the
+ * height and the page below never moves as the loop plays (on a phone the tiles stack, and each scenario and phase
+ * has a height of its own).
+ */
+function Scene({
+  s,
+  phase,
+  t,
+  relayedLabel,
+  leaving,
+  sizer,
+}: {
+  s: Scenario;
+  phase: number;
+  t: Copy;
+  relayedLabel: string;
+  leaving?: boolean;
+  sizer?: boolean;
+}) {
+  const out = outcome(s);
+  const shared = new Set<string>(out.order);
+  const agreed = new Set(out.caps);
+  const verdict = phase === 0 ? "wait" : out.connected ? "ok" : "no";
+  const step =
+    phase === 0
+      ? t.phases.offers
+      : out.connected
+        ? phase === 1
+          ? t.phases.ranked
+          : t.phases.agreed
+        : phase === 1
+          ? t.phases.nothing
+          : t.phases.none;
+  const peer = { phase, connected: out.connected, shared, agreed, t, relayedLabel, sizer };
+  return (
+    <div className="ng-scene" data-leaving={leaving || undefined} data-sizer={sizer ? "" : undefined} aria-hidden={sizer || undefined}>
+      <p className="ng-step" aria-hidden="true">
+        <span className="ng-step-dots">
+          {[0, 1, 2].map((i) => (
+            <i key={i} data-on={i <= phase || undefined} />
+          ))}
+        </span>
+        <span key={step} className="ng-step-text" data-kind={verdict}>
+          {step}
+        </span>
+      </p>
+      <div className="ng-stage" data-verdict={verdict}>
+        <PeerTile who="boo" peer={s.boo} {...peer} />
+        <ResultCard s={s} phase={phase} t={t} relayedLabel={relayedLabel} />
+        <PeerTile who="casper" peer={s.casper} {...peer} />
+      </div>
+      <p className="ng-caption">{t.captions[s.id]}</p>
+    </div>
+  );
+}
+
 /** What a screen reader hears once a scenario settles: the verdict and the plan. */
 function summary(s: Scenario, t: Copy): string {
   const out = outcome(s);
@@ -362,21 +423,8 @@ export function Negotiation({ t, relayedLabel }: { t: Copy; relayedLabel: string
 
   const s = SCENARIOS[play.scenario];
   const phase = play.elapsed < PHASE_1 ? 0 : play.elapsed < PHASE_2 ? 1 : 2;
-  const out = outcome(s);
-  const shared = new Set<string>(out.order);
-  const agreed = new Set(out.caps);
   const progress = Math.min(1, play.elapsed / SCENE_MS);
   const leaving = !calm && play.elapsed >= SCENE_MS - FADE_MS / 2;
-  const step =
-    phase === 0
-      ? t.phases.offers
-      : out.connected
-        ? phase === 1
-          ? t.phases.ranked
-          : t.phases.agreed
-        : phase === 1
-          ? t.phases.nothing
-          : t.phases.none;
   // Announced once a picked scenario settles; while the loop plays on its own
   // the region stays quiet, so a screen reader is not interrupted every few seconds.
   const announce = phase >= 2 ? summary(s, t) : "";
@@ -419,26 +467,13 @@ export function Negotiation({ t, relayedLabel }: { t: Copy; relayedLabel: string
         {t.scenarioNames[s.id]}
       </p>
 
-      {/* The frame stays mounted (the observer watches it); the scene inside remounts per scenario. */}
-      <div ref={stageRef} onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}>
-        <div className="ng-scene" key={s.id} data-leaving={leaving || undefined}>
-          <p className="ng-step" aria-hidden="true">
-            <span className="ng-step-dots">
-              {[0, 1, 2].map((i) => (
-                <i key={i} data-on={i <= phase || undefined} />
-              ))}
-            </span>
-            <span key={step} className="ng-step-text" data-kind={phase === 0 ? "wait" : out.connected ? "ok" : "no"}>
-              {step}
-            </span>
-          </p>
-          <div className="ng-stage" data-verdict={phase < 1 ? "wait" : out.connected ? "ok" : "no"}>
-            <PeerTile who="boo" peer={s.boo} phase={phase} connected={out.connected} shared={shared} agreed={agreed} t={t} relayedLabel={relayedLabel} />
-            <ResultCard s={s} phase={phase} t={t} relayedLabel={relayedLabel} />
-            <PeerTile who="casper" peer={s.casper} phase={phase} connected={out.connected} shared={shared} agreed={agreed} t={t} relayedLabel={relayedLabel} />
-          </div>
-          <p className="ng-caption">{t.captions[s.id]}</p>
-        </div>
+      {/* The frame stays mounted (the observer watches it) and keeps the height of the tallest finished scenario;
+          the scene inside remounts per scenario. */}
+      <div ref={stageRef} className="ng-frame" onPointerEnter={() => setHover(true)} onPointerLeave={() => setHover(false)}>
+        {SCENARIOS.map((sc) => (
+          <Scene key={`sizer-${sc.id}`} s={sc} phase={2} t={t} relayedLabel={relayedLabel} sizer />
+        ))}
+        <Scene key={s.id} s={s} phase={phase} t={t} relayedLabel={relayedLabel} leaving={leaving} />
       </div>
       <p className="sr-only" aria-live={picked ? "polite" : "off"} aria-atomic="true">
         {announce}

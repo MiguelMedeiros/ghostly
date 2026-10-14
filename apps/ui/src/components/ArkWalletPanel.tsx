@@ -45,7 +45,7 @@ export function ArkWalletPanel({ wallet, state, backupNow = false }: { wallet: W
   {!ark?.configured || (ark.locked && ark.automatic) ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="ark-connecting"><p className="text-text-primary">{t("wallet.panel.connecting", { wallet: "Ark" })}</p>{ark?.error ? <Notice problem={problemText(ark.error, t)} tone="muted" /> : <Notice>{t("wallet.panel.firstTime")}</Notice>}</div>
   : !ready ? <Section title={t("wallet.panel.unlock.title")}><Row label={t("wallet.panel.unlock.withPassword")} /><Block><InputGroup><input aria-label={t("wallet.panel.unlock.password", { wallet: "Ark" })} type="password" autoComplete="current-password" className={input} value={password} onChange={e => setPassword(e.target.value)} /><Button variant="primary" disabled={busy} onClick={() => void run(async () => { await wallet.arkUnlock(password); setPassword(""); })}>{t("wallet.panel.unlock.button", { wallet: "Ark" })}</Button></InputGroup></Block></Section>
   : <div className="space-y-4">
-   <p className="text-text-primary" data-testid="ark-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(ark.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>{test && <span className="block text-xs text-yellow-500 mt-1">{t("wallet.panel.testCoins", { network: NETWORKS[network].label })}</span>}</p>
+   <p className="text-text-primary" data-testid="ark-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(ark.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>{test && <span className="block text-xs text-warn-ink mt-1">{t("wallet.panel.testCoins", { network: NETWORKS[network].label })}</span>}</p>
    <Actions value={action} onChange={setAction} />
    {action === "receive" && <div className="bg-surface rounded-xl p-4 space-y-4 animate-fade-in">
     <Segmented label={t("wallet.panel.receiveOn")} value={via} onChange={setVia} options={[{ value: "ark", label: t("wallet.panel.instant", { wallet: "Ark" }) }, { value: "onchain", label: t("wallet.panel.onchain") }]} />
@@ -56,14 +56,14 @@ export function ArkWalletPanel({ wallet, state, backupNow = false }: { wallet: W
        can be neither spent nor recovered (a recovery then fails, and the server bans the coins for a while): say
        so plainly, and offer Recover only once every expired coin is swept. */}
    {!!ark.sweeping && <div className="rounded-xl bg-yellow-500/10" data-testid="ark-sweeping">
-    <Row label={<span className="text-xs text-yellow-500">{t("wallet.ark.sweeping", { amount: formatAmount(ark.sweeping, t.language), unit })}</span>} info={t("wallet.ark.sweepingInfo")} />
+    <Row label={<span className="text-xs text-warn-ink">{t("wallet.ark.sweeping", { amount: formatAmount(ark.sweeping, t.language), unit })}</span>} info={t("wallet.ark.sweepingInfo")} />
    </div>}
    {/* Swept, but too few together for the one coin a recovery makes: they wait for more to expire. */}
    {!!ark.small && <div className="rounded-xl bg-yellow-500/10" data-testid="ark-small">
-    <Row label={<span className="text-xs text-yellow-500">{t("wallet.ark.small", { amount: formatAmount(ark.small, t.language), unit })}</span>} info={t("wallet.ark.smallInfo")} />
+    <Row label={<span className="text-xs text-warn-ink">{t("wallet.ark.small", { amount: formatAmount(ark.small, t.language), unit })}</span>} info={t("wallet.ark.smallInfo")} />
    </div>}
    {!!ark.recoverable && !ark.sweeping && <div className="flex flex-wrap items-center gap-3 rounded-xl bg-yellow-500/10 px-3 py-2" data-testid="ark-recoverable">
-    <p className="flex-[1_1_12rem] min-w-0 text-xs text-yellow-500">{t("wallet.ark.expired", { amount: formatAmount(ark.recoverable, t.language), unit })}</p>
+    <p className="flex-[1_1_12rem] min-w-0 text-xs text-warn-ink">{t("wallet.ark.expired", { amount: formatAmount(ark.recoverable, t.language), unit })}</p>
     <Button data-testid="ark-recover" disabled={busy} onClick={() => void run(() => wallet.arkRecover())}>{busy ? t("wallet.ark.recovering") : t("wallet.ark.recover")}</Button>
    </div>}
    {!!ark.incoming && <Notice tone="warning" testId="ark-incoming">{t("wallet.ark.incoming", { amount: formatAmount(ark.incoming, t.language), unit })}</Notice>}

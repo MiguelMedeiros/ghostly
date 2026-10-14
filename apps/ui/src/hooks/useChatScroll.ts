@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { reducedMotion } from "../lib/motion";
-import { JUMP_EVENT } from "../lib/replies";
+import { JUMP_EVENT, jumpGlides } from "../lib/replies";
 import type { RowWindow } from "./useRowWindow";
 
 /** A message row of the timeline, in order: its id (the row's `data-message-id`) and whether I sent it. */
@@ -58,7 +58,18 @@ export function forgetChatScroll() {
 }
 
 const rowsOf = (list: HTMLElement) => list.querySelectorAll<HTMLElement>("[data-message-id]");
-const rowById = (list: HTMLElement, id: string) => list.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`);
+/**
+ * What stands for a row on screen. A row folded away (a bot's routine cards, in RoutineStack's `hidden`) has no box,
+ * 0 x 0 at 0, 0: its fold's own row is where it is, for the pill, the row the view is held on and putting it back.
+ */
+const shown = (list: HTMLElement, row: HTMLElement): HTMLElement => {
+  const fold = row.closest<HTMLElement>("[hidden]");
+  return fold && fold !== list && list.contains(fold) && fold.parentElement ? fold.parentElement : row;
+};
+const rowById = (list: HTMLElement, id: string) => {
+  const row = list.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(id)}"]`);
+  return row && shown(list, row);
+};
 const editable = (target: EventTarget | null) =>
   target instanceof Element && !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false']), [role='dialog'], [role='menu']");
 
@@ -115,6 +126,8 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
    * hand takes over, or after `JUMP_MS`.
    */
   const jumping = useRef(0);
+  /** Where a jump that glides (`jumpGlides`) is taking the list's scroll position; null when it went at once. */
+  const aim = useRef<number | null>(null);
   /**
    * The rows in the page, when they are a window of the timeline (`useRowWindow`). Detached, the page's end is not the
    * chat's: the view is never at the bottom there, and going to the bottom brings the last rows back first.
@@ -129,6 +142,11 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
   const distance = (el: HTMLElement) => el.scrollHeight - el.scrollTop - el.clientHeight;
   /** A list not on screen (a chat kept loaded for a call) has no size: nothing about it says where the view is. */
   const hidden = (el: HTMLElement) => el.clientHeight === 0;
+  /**
+   * The list went off screen since the view was last put in its place. Back on screen, Chromium has it where it was;
+   * WebKit starts it at the top again and says so with a scroll event, before the list's size reaches `settle`.
+   */
+  const away = useRef(false);
 
   /** The first row not wholly above the view, and where it is. Rows are in order, so it is a binary search. */
   const capture = useCallback((el: HTMLElement) => {
@@ -139,9 +157,9 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
     let found = -1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (all[mid].getBoundingClientRect().bottom > top) { found = mid; hi = mid - 1; } else lo = mid + 1;
+      if (shown(el, all[mid]).getBoundingClientRect().bottom > top) { found = mid; hi = mid - 1; } else lo = mid + 1;
     }
-    anchor.current = found < 0 ? null : { id: all[found].dataset.messageId!, offset: all[found].getBoundingClientRect().top - top, height: el.clientHeight };
+    anchor.current = found < 0 ? null : { id: all[found].dataset.messageId!, offset: shown(el, all[found]).getBoundingClientRect().top - top, height: el.clientHeight };
   }, []);
 
   const clear = useCallback(() => {
@@ -158,7 +176,9 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
    */
   const settle = useCallback(() => {
     const el = list.current;
-    if (!el || !hasRows.current || hidden(el)) return;
+    if (!el || !hasRows.current) return;
+    if (hidden(el)) { away.current = true; return; }
+    away.current = false;
     if (atBottom.current) {
       el.scrollTop = el.scrollHeight;
     } else if (anchor.current) {
@@ -168,7 +188,17 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
       const row = rowById(el, anchor.current.id);
       if (row) {
         const moved = row.getBoundingClientRect().top - el.getBoundingClientRect().top - anchor.current.offset;
-        if (Math.abs(moved) >= 1) el.scrollTop += moved;
+        if (jumping.current && aim.current !== null) {
+          // Gliding to its row: putting the scroll there would stop the glide, and the rest of the way would be one
+          // frame. It goes on, and only when the row's place moved (rows above it laid out at their real height), the
+          // view moves with it and glides on from there to its new place.
+          const to = Math.min(el.scrollHeight - el.clientHeight, Math.max(0, el.scrollTop + moved));
+          if (Math.abs(to - aim.current) >= 1) {
+            el.scrollTop += to - aim.current;
+            aim.current = to;
+            el.scrollTo({ top: to, behavior: "smooth" });
+          }
+        } else if (Math.abs(moved) >= 1) el.scrollTop += moved;
       }
     }
     lastTop.current = el.scrollTop;
@@ -299,12 +329,16 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
     /** The list's size at its last scroll event. */
     let lastSize = sizeOf();
     const onScroll = () => {
-      if (hidden(el)) return;
+      if (hidden(el)) { away.current = true; return; }
       const size = sizeOf();
       const resized = size !== lastSize;
       lastSize = size;
       // Not moved since it was last set or seen: content grew or shrank under the view, and no hand scrolled it.
       if (Math.abs(el.scrollTop - lastTop.current) < 1) { settle(); return; }
+      const hand = pressed.current || performance.now() - handAt.current < HAND_MS;
+      // Back on screen (a chat kept loaded for a call or a mini-app, shown again) and moved with no hand on it: the
+      // browser started it at the top again. Back where it was: at its bottom, or on its message.
+      if (away.current && !hand) { settle(); return; }
       if (jumping.current) {
         const row = anchor.current && rowById(el, anchor.current.id);
         const landed = !row || Math.abs(row.getBoundingClientRect().top - el.getBoundingClientRect().top - anchor.current!.offset) < 1;
@@ -317,7 +351,6 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
       // Moved a little short of the bottom with no hand on it: the browser pulled it back while something under it was
       // measured one size and drawn another in the same moment (the composer measuring its text grows the list for an
       // instant). Nothing reports that, and the view would stay short of the last message: back to the bottom.
-      const hand = pressed.current || performance.now() - handAt.current < HAND_MS;
       if (atBottom.current && !hand && d <= NEAR_BOTTOM_PX) { following.current = false; settle(); return; }
       // The list itself changed size (a phone turned on its side, a window resized): the browser moved it to keep what
       // was on screen, before the resize reaches `settle`. Not a hand's: at the bottom it stays there, scrolled up it
@@ -366,6 +399,7 @@ export function useChatScroll({ rows, chat, keys = true, window: rowWindow }: { 
       if (max - target <= NEAR_BOTTOM_PX) { handAt.current = performance.now(); return; }
       atBottom.current = false;
       anchor.current = { id: row.dataset.messageId, offset: box.top - view.top - (target - el.scrollTop), height: el.clientHeight };
+      aim.current = jumpGlides(row) && typeof el.scrollTo === "function" ? target : null;
       jumping.current = performance.now() + JUMP_MS;
     };
     el.addEventListener(JUMP_EVENT, onJump);

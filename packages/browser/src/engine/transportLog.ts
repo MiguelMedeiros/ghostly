@@ -125,7 +125,7 @@ export const TRANSPORT_LOG_MAX = 50;
 /** History events kept per chat. */
 export const TRANSPORT_HISTORY_MAX = 200;
 /** A round trip that moved less than this is not news in the history. */
-const RTT_STEP_MS = 10;
+export const RTT_STEP_MS = 10;
 
 let sequence = 0;
 const lineId = (at: number) => `${at.toString(36)}-${(++sequence).toString(36)}`;
@@ -180,7 +180,8 @@ function historyFromRows(rows: readonly TransportEntry[]): TransportEvent[] {
   for (const e of rows) {
     const base = { at: e.at, ...(e.transport ? { transport: e.transport } : {}), ...(e.from ? { from: e.from } : {}), ...(e.cause ? { cause: e.cause } : {}), ...(e.rttMs !== undefined ? { rttMs: e.rttMs } : {}) };
     if (e.kind === "lost") events.push({ ...base, kind: "down", ...(e.fallback === "dht" || e.fallback === "hold" ? { text: e.fallback } : {}) });
-    else if (e.kind === "flapping") events.push({ ...base, kind: e.live ? "live" : "down", reason: `Dropped and came back ${e.count ?? 0} times` });
+    // No words of its own: the app says the history in its language.
+    else if (e.kind === "flapping") events.push({ ...base, kind: e.live ? "live" : "down" });
     else if (e.kind === "connected" || e.kind === "back") events.push({ ...base, kind: "live", ...(e.downMs !== undefined ? { downMs: e.downMs } : {}) });
     else if (e.kind === "failed") events.push({ ...base, kind: "failed", ...(e.target ? { target: e.target } : {}), ...(e.reason ? { reason: e.reason } : {}) });
     else if (e.kind === "chose") events.push({ ...base, kind: "chose", ...(e.target ? { target: e.target } : {}) });

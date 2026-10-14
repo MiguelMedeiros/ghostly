@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { AppStoreSummary, InstalledAppView } from "@ghostly/browser/engine/apps";
+import type { AppStoreSummary, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import type { AppListing } from "@ghostly/core";
 import { Block, Page, PageAction, Section } from "../components/layout";
 import { Button, Notice } from "../components/wallet/ui";
@@ -14,7 +14,7 @@ import { AppInstallDialog, InstalledAppDialog } from "../components/apps/AppInst
 import { AddAppDialog } from "../components/apps/AddAppDialog";
 import { AppChatPicker } from "../components/apps/AppChatPicker";
 import { useAppsState } from "../lib/apps/flag";
-import { refreshInstalledApps, useInstalledApps } from "../lib/apps/installed";
+import { refreshInstalledApps, useBuiltInApps, useInstalledApps } from "../lib/apps/installed";
 import { openApp, type OpenAppOptions } from "../lib/apps/open";
 import { appErrorText } from "../lib/apps/errors";
 import { date } from "../lib/identities";
@@ -31,7 +31,9 @@ function appHint(app: InstalledAppView, t: Translate): { text: string; tone: "mu
   if (app.run.status === "revoked" || app.run.status === "removed") return { text: t("apps.app.stopped"), tone: "danger" };
   if (app.run.status === "needs-files") return { text: t("apps.app.needsFiles"), tone: "warning" };
   if (app.pending) return { text: t("apps.app.updateAsks"), tone: "warning" };
-  if (app.unknownPublisher) return { text: `${app.tagline} · ${t("apps.install.unknownPublisher")}`, tone: "muted" };
+  // The version this client's own list pins is no stranger's (WISP 1200 § Built-in apps).
+  // What the row is there to say comes first: on a phone the one line is cut at its end, and a tagline is long.
+  if (app.unknownPublisher && !app.builtIn) return { text: `${t("apps.install.unknownPublisher")} · ${app.tagline}`, tone: "muted" };
   return { text: app.tagline, tone: "muted" };
 }
 
@@ -57,8 +59,39 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
   );
 }
 
-function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError }: {
+/**
+ * An app that comes with Ghostly and was never opened here (WISP 1200 § Built-in apps): nothing of it is installed yet.
+ * Open is the install screen with what it asks; Remove takes it off the list for good (it stays in the store).
+ */
+function BuiltInRow({ app, busy, onOpen, onRemove }: { app: BuiltInAppOffer; busy: boolean; onOpen: () => void; onRemove: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" data-testid="built-in-app" data-ref={app.ref}>
+      <div className="flex items-center gap-3 min-w-0 flex-[1_1_12rem]">
+        <AppIcon />
+        <span className="min-w-0">
+          <span dir="auto" className="block text-sm text-text-primary truncate">{app.title}</span>
+          <span dir="auto" data-testid="built-in-app-hint" className="block text-xs text-text-muted truncate">{t("apps.builtIn.hint")} · {app.tagline}</span>
+        </span>
+      </div>
+      <div className="flex items-center gap-2 ms-auto">
+        <Button data-testid="built-in-app-remove" disabled={busy} aria-label={t("apps.builtIn.removeNamed", { title: app.title })} onClick={onRemove}>{t("apps.builtIn.remove")}</Button>
+        <Button variant="primary" data-testid="built-in-app-open" disabled={busy} aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={onOpen}>{t("apps.page.open")}</Button>
+      </div>
+    </div>
+  );
+}
+
+/** How many listings a store's block shows at a time: a page a phone draws in a frame or two. */
+const LISTING_PAGE = 50;
+
+/** A store that lists this many apps or fewer shows them without being asked, beside other stores too. */
+const LISTING_FEW = 6;
+
+function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, onError }: {
   store: AppStoreSummary;
+  /** The only store of the page. */
+  alone: boolean;
   installed: readonly InstalledAppView[];
   onInstall: (listing: AppListing) => void;
   onChanged: () => void;
@@ -67,7 +100,10 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
   onError: (e: unknown) => void;
 }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  // Its apps show from the start when it is the only store or lists a few: nothing told a person on a phone that the
+  // name opens them. Once the person closed or opened it, that stays.
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const open = chosen ?? (store.apps.length > 0 && (alone || store.apps.length <= LISTING_FEW));
   const [busy, setBusy] = useState(false);
   const focusBack = useFocusBack(busy);
   const work = async (call: () => Promise<unknown>, done?: () => void) => {
@@ -75,21 +111,51 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
     setBusy(true);
     try { await call(); done?.(); onChanged(); } catch (e) { onError(e); } finally { setBusy(false); }
   };
+  // A store may list up to 4096 apps: one page of them at a time, and a search over them all.
+  const [limit, setLimit] = useState(LISTING_PAGE);
+  const [filter, setFilter] = useState("");
+  // Show more goes under the listings it adds, and away after the last ones: the focus goes to the first listing it
+  // added (its Install, or the row when it has none), so Tab goes on from there and not from the top of the page.
+  const [added, setAdded] = useState<number | null>(null);
+  const list = useRef<HTMLUListElement>(null);
+  useEffect(() => {
+    if (added === null) return;
+    const row = list.current?.querySelectorAll<HTMLElement>("[data-testid=app-listing]")[added];
+    (row?.querySelector<HTMLElement>("button") ?? row)?.focus({ preventScroll: true });
+  }, [added]);
+  const have = useMemo(() => new Map(installed.map((a) => [a.ref, a])), [installed]);
+  const removals = useMemo(() => new Map(store.removed.map((r) => [`${r.ref} ${r.digest}`, r])), [store.removed]);
+  const matching = useMemo(() => {
+    const words = filter.trim().toLocaleLowerCase();
+    return words ? store.apps.filter((l) => `${l.title}\n${l.tagline}`.toLocaleLowerCase().includes(words)) : store.apps;
+  }, [store.apps, filter]);
   const read = store.fetchedAt !== undefined || store.apps.length > 0;
   const kind = store.kind === "indexed" ? t("apps.store.indexed") : store.kind === "curated" ? t("apps.store.curated") : null;
+  const toggle = () => {
+    setChosen(!open);
+    setLimit(LISTING_PAGE);
+    setAdded(null);
+    setFilter("");
+  };
   return (
     <div data-testid="app-store" data-key={store.key}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
-        <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} disabled={!read}
+        <button type="button" aria-expanded={open} onClick={toggle} disabled={!read}
           className="flex-[1_1_12rem] min-w-0 text-start cursor-pointer disabled:cursor-default rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-          <span dir="auto" className="block text-sm text-text-primary truncate">{store.name ?? store.url}</span>
+          <span className="flex items-center gap-1.5">
+            <span dir="auto" className="min-w-0 text-sm text-text-primary truncate">{store.name ?? store.url}</span>
+            {read && (
+              <svg aria-hidden="true" data-testid="app-store-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                className={`shrink-0 text-text-muted transition-transform motion-reduce:transition-none ${open ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6" /></svg>
+            )}
+          </span>
           <span className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
             {kind && <span>{kind}</span>}
             {read && <span>{t(store.apps.length === 1 ? "apps.store.countOne" : "apps.store.count", { count: store.apps.length })}</span>}
             <Fingerprint value={store.fingerprint} />
           </span>
           {!read && <span className="block text-xs text-text-muted">{t("apps.store.notRead")}</span>}
-          {store.expired && store.fetchedAt !== undefined && <span data-testid="app-store-stale" className="block text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires ?? 0) })}</span>}
+          {store.expired && store.fetchedAt !== undefined && <span data-testid="app-store-stale" className="block text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires ?? 0, t.language) })}</span>}
           {store.problem && <span data-testid="app-store-problem" className="block text-xs text-danger">{t("apps.store.problem")}</span>}
         </button>
         <div className="flex items-center gap-2">
@@ -98,24 +164,41 @@ function StoreBlock({ store, installed, onInstall, onChanged, onRemoved, onError
           <Button variant="danger" data-testid="app-store-remove" disabled={busy} onClick={() => void work(() => engine.call("appStoreRemove", { key: store.key }), onRemoved)}>{t("apps.store.remove")}</Button>
         </div>
       </div>
+      {open && store.apps.length > LISTING_PAGE && (
+        <div className="border-t border-border px-4 py-2">
+          <input type="search" data-testid="app-store-filter" value={filter} onChange={(e) => { setFilter(e.target.value); setLimit(LISTING_PAGE); setAdded(null); }}
+            placeholder={t("apps.store.filter")} aria-label={t("apps.store.filter")}
+            className="w-full rounded-lg border-none bg-search-bg px-2.5 py-1.5 text-sm text-text-primary placeholder-text-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-accent" />
+        </div>
+      )}
       {open && (
-        <ul className="border-t border-border divide-y divide-border bg-surface-alt/40" data-testid="app-store-listing">
+        <ul ref={list} className="border-t border-border divide-y divide-border bg-surface-alt/40" data-testid="app-store-listing">
           {store.apps.length === 0 && <li className="px-4 py-3 text-xs text-text-muted">{t("apps.store.empty")}</li>}
-          {store.apps.map((listing) => {
-            const have = installed.find((a) => a.ref === listing.ref);
-            const removed = store.removed.find((r) => r.ref === listing.ref && r.digest === listing.digest);
+          {store.apps.length > 0 && matching.length === 0 && <li className="px-4 py-3 text-xs text-text-muted">{t("apps.store.noMatch")}</li>}
+          {matching.slice(0, limit).map((listing, i) => {
+            const app = have.get(listing.ref);
+            const removed = removals.get(`${listing.ref} ${listing.digest}`);
             return (
-              <li key={listing.ref} className="flex items-center gap-3 px-4 py-3" data-testid="app-listing" data-ref={listing.ref}>
-                <AppIcon size={32} installed={have} />
+              <li key={listing.ref} tabIndex={i === added ? -1 : undefined} data-testid="app-listing" data-ref={listing.ref}
+                className="flex items-center gap-3 px-4 py-3 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+                <AppIcon size={32} installed={app} />
                 <span className="min-w-0 flex-1">
                   <span dir="auto" className="block text-sm text-text-primary truncate">{listing.title}</span>
                   <span dir="auto" className="block text-xs text-text-muted truncate">{removed ? t("apps.install.removed", { store: store.name ?? "", reason: removed.reason }) : listing.tagline}</span>
                 </span>
-                {have ? <span className="text-xs text-text-muted">{t("apps.store.installed")}</span>
+                {app ? <span className="text-xs text-text-muted">{t("apps.store.installed")}</span>
                   : !removed && <Button data-testid="app-listing-install" onClick={() => onInstall(listing)}>{t("apps.install.install")}</Button>}
               </li>
             );
           })}
+          {matching.length > limit && (
+            <li>
+              <button type="button" data-testid="app-store-more" onClick={() => { setAdded(limit); setLimit(limit + LISTING_PAGE); }}
+                className="w-full cursor-pointer px-4 py-2.5 text-xs font-medium text-accent hover:bg-surface-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent">
+                {t("apps.store.showMore", { count: matching.length - limit })}
+              </button>
+            </li>
+          )}
         </ul>
       )}
     </div>
@@ -127,32 +210,36 @@ export function Apps() {
   const available = state === "on";
   const { t } = useI18n();
   const installed = useInstalledApps(available);
+  const builtIns = useBuiltInApps(available);
   const [stores, setStores] = useState<AppStoreSummary[] | null>(null);
   const [adding, setAdding] = useState(false);
   const [details, setDetails] = useState<string | null>(null);
   const [installing, setInstalling] = useState<{ store: string; listing: AppListing } | null>(null);
+  // A built-in app opened for the first time: its install screen, then it opens.
+  const [first, setFirst] = useState<BuiltInAppOffer | null>(null);
+  const [removing, setRemoving] = useState(false);
   const [picking, setPicking] = useState<{ app: InstalledAppView; options?: OpenAppOptions } | null>(null);
   // Installed from a listing or a pasted link: what had the focus is gone, so it goes to the app's row (its Open), not the page.
   const [justInstalled, setJustInstalled] = useState<string | null>(null);
   useEffect(() => {
-    if (!justInstalled || installing) return;
+    if (!justInstalled || installing || first) return;
     const row = document.querySelector(`[data-testid=installed-app][data-ref="${CSS.escape(justInstalled)}"]`);
     const target = row?.querySelector<HTMLElement>("[data-testid=installed-app-open]") ?? row?.querySelector<HTMLElement>("button");
     if (!target) return;
     target.focus({ preventScroll: true });
     setJustInstalled(null);
-  }, [justInstalled, installing, installed]);
+  }, [justInstalled, installing, first, installed]);
   // An app uninstalled or a store removed: the control that had the focus went with its row, so the focus goes to Add
   // rather than being lost on the page. Only once the row is gone and its screen closed, and only if nothing has it.
   const [gone, setGone] = useState<{ app: string } | { store: string } | null>(null);
   useEffect(() => {
     if (!gone || details) return;
-    if ("app" in gone ? installed?.some((a) => a.ref === gone.app) : stores?.some((s) => s.key === gone.store)) return;
+    if ("app" in gone ? installed?.some((a) => a.ref === gone.app) || builtIns.some((a) => a.ref === gone.app) : stores?.some((s) => s.key === gone.store)) return;
     setGone(null);
     const active = document.activeElement;
     if (active && active !== document.body && active.isConnected) return;
     document.querySelector<HTMLElement>("[data-testid=apps-add]")?.focus({ preventScroll: true });
-  }, [gone, details, installed, stores]);
+  }, [gone, details, installed, builtIns, stores]);
   const notice = useToast();
   const { show } = notice;
   const fail = useCallback((e: unknown) => show(appErrorText(e, t)), [show, t]);
@@ -173,24 +260,36 @@ export function Apps() {
     else setPicking({ app, ...(options && { options }) });
   };
   const shown = details ? installed?.find((a) => a.ref === details) : undefined;
+  // Removed, never opened: nothing to export, and the store still has it. It is not offered again.
+  const removeBuiltIn = async (app: BuiltInAppOffer) => {
+    setRemoving(true);
+    try { await engine.call("appUninstall", { ref: app.ref }); setGone({ app: app.ref }); await refreshInstalledApps(); } catch (e) { fail(e); } finally { setRemoving(false); }
+  };
   return (
     <Page title={t("apps.title")} width="md" testId="apps-page" overlay={<Toast toast={notice.toast} onDismiss={notice.dismiss} place="page" />}
       trailing={<PageAction label={t("apps.page.add")} title={t("apps.page.addHint")} testId="apps-add" onClick={() => setAdding(true)} />}>
       <p className="text-sm text-text-secondary">{t("apps.page.intro")}</p>
       <Section title={t("apps.page.installed")} testId="apps-installed">
         {installed === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
-          : installed.length === 0 ? <Block testId="apps-none"><Notice>{t("apps.page.none")}</Notice></Block>
-            : installed.map((app) => <InstalledRow key={app.ref} app={app} onDetails={() => setDetails(app.ref)} onOpen={() => open(app)} />)}
+          : installed.length === 0 && builtIns.length === 0 ? <Block testId="apps-none"><Notice>{t("apps.page.none")}</Notice></Block>
+            : <>
+              {installed.map((app) => <InstalledRow key={app.ref} app={app} onDetails={() => setDetails(app.ref)} onOpen={() => open(app)} />)}
+              {builtIns.map((app) => <BuiltInRow key={app.ref} app={app} busy={removing} onOpen={() => setFirst(app)} onRemove={() => void removeBuiltIn(app)} />)}
+            </>}
       </Section>
       <Section title={t("apps.page.stores")} testId="apps-stores">
         {stores === null ? <Block><Notice>{t("apps.page.loading")}</Notice></Block>
           : stores.length === 0 ? <Block testId="apps-no-stores"><Notice>{t("apps.page.noStores")}</Notice></Block>
-            : stores.map((store) => <StoreBlock key={store.key} store={store} installed={installed ?? []} onError={fail} onRemoved={() => setGone({ store: store.key })}
+            : stores.map((store) => <StoreBlock key={store.key} store={store} alone={stores.length === 1} installed={installed ?? []} onError={fail} onRemoved={() => setGone({ store: store.key })}
               onChanged={() => void Promise.all([reloadStores(), refreshInstalledApps()])} onInstall={(listing) => setInstalling({ store: store.key, listing })} />)}
       </Section>
       {adding && <AddAppDialog onClose={() => setAdding(false)} onStoreAdded={() => void reloadStores()} onInstalled={(app) => setJustInstalled(app.ref)} />}
       {shown && <InstalledAppDialog app={shown} onClose={() => setDetails(null)} onOpen={open} onUninstalled={() => setGone({ app: shown.ref })} />}
       {picking && <AppChatPicker app={picking.app} options={picking.options} onClose={() => setPicking(null)} />}
+      {first && (
+        <AppInstallDialog source={{ builtIn: first.ref }} title={first.title} openAfter onClose={() => setFirst(null)}
+          onInstalled={(app) => { setJustInstalled(app.ref); open(app); }} />
+      )}
       {installing && (
         <AppInstallDialog source={{ store: installing.store, ref: installing.listing.ref }} title={installing.listing.title} onClose={() => setInstalling(null)}
           onInstalled={(app) => setJustInstalled(app.ref)} />

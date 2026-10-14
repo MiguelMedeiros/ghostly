@@ -31,8 +31,9 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Default)]
 pub struct ViewerState {
-    /// Window label → (peer public key, service id). The window decides where a request goes, not its URL.
-    windows: Mutex<HashMap<String, (String, String)>>,
+    /// Window label → (peer public key, service id, what a request with no answer says). The window decides where a
+    /// request goes, not its URL.
+    windows: Mutex<HashMap<String, (String, String, String)>>,
     pending: Mutex<HashMap<u64, oneshot::Sender<ServiceResponse>>>,
     next_id: AtomicU64,
 }
@@ -53,6 +54,24 @@ pub struct ServiceResponse {
     pub status: u16,
     pub headers: Vec<(String, String)>,
     pub body_b64: String,
+}
+
+/// What a request the main window never answered says, when the page gave no sentence of its own.
+const UNREACHABLE: &str =
+    "This service is not reachable. Services exist while their ghost is online.";
+/// The longest sentence taken from the page for it: a line or two in any of the app's languages.
+const UNREACHABLE_MAX_CHARS: usize = 400;
+
+/// The page's sentence for a request with no answer, in the profile's language, or the English one when it gave
+/// none, an empty one, or something that is not a short line of text.
+fn unreachable_text(said: Option<String>) -> String {
+    said.map(|text| text.trim().to_string())
+        .filter(|text| {
+            !text.is_empty()
+                && text.chars().count() <= UNREACHABLE_MAX_CHARS
+                && !text.chars().any(char::is_control)
+        })
+        .unwrap_or_else(|| UNREACHABLE.to_string())
 }
 
 fn is_label_safe(value: &str) -> bool {
@@ -112,11 +131,20 @@ fn may_open_now(last: Option<std::time::Instant>, now: std::time::Instant) -> bo
     last.is_none_or(|last| now.saturating_duration_since(last) >= EXTERNAL_LINK_SPACING)
 }
 
+/// Whether a download a page asks for may start: never, in a window that shows a contact's page or an
+/// installed app (`app_sandbox`). With no answer at all WebKitGTK and WebView2 save the file themselves, in
+/// the person's Downloads folder under the name the page gives, with no click and no question. Answering no
+/// to the request cancels it before a byte is written.
+pub fn may_download(event: &tauri::webview::DownloadEvent<'_>) -> bool {
+    !matches!(event, tauri::webview::DownloadEvent::Requested { .. })
+}
+
 pub fn open<R: tauri::Runtime>(
     app: &AppHandle<R>,
     peer: String,
     service: String,
     title: String,
+    unreachable: Option<String>,
 ) -> Result<(), String> {
     if !is_label_safe(&peer) || !is_label_safe(&service) {
         return Err("Invalid service".into());
@@ -127,7 +155,10 @@ pub fn open<R: tauri::Runtime>(
         .windows
         .lock()
         .map_err(|_| "viewer state poisoned")?
-        .insert(label.clone(), (peer.clone(), service.clone()));
+        .insert(
+            label.clone(),
+            (peer.clone(), service.clone(), unreachable_text(unreachable)),
+        );
 
     // One origin per contact and service keeps their storage apart.
     let url = format!("{}://{}.{}/", SCHEME, service, peer)
@@ -154,6 +185,8 @@ pub fn open<R: tauri::Runtime>(
             }
             tauri::webview::NewWindowResponse::Deny
         })
+        // The app never saves a file by itself.
+        .on_download(|_, event| may_download(&event))
         .inner_size(1100.0, 760.0)
         .build()
         .map_err(|e| format!("Window: {}", e))?;
@@ -182,7 +215,7 @@ pub async fn handle<R: tauri::Runtime>(
     request: Request<Vec<u8>>,
 ) -> Response<Vec<u8>> {
     let state = app.state::<ViewerState>();
-    let Some((peer, service)) = state
+    let Some((peer, service, unreachable)) = state
         .windows
         .lock()
         .ok()
@@ -239,10 +272,7 @@ pub async fn handle<R: tauri::Runtime>(
         pending.remove(&id);
     }
     let Ok(Ok(answer)) = answer else {
-        return plain(
-            StatusCode::GATEWAY_TIMEOUT,
-            "This service is not reachable. Services exist while their ghost is online.",
-        );
+        return plain(StatusCode::GATEWAY_TIMEOUT, &unreachable);
     };
 
     let mut response = Response::builder().status(answer.status);
@@ -286,11 +316,10 @@ mod tests {
     /// The window shows `atlas` from PEER; every other host is another origin.
     fn status_for(url: &str) -> StatusCode {
         let app = app();
-        app.state::<ViewerState>()
-            .windows
-            .lock()
-            .unwrap()
-            .insert("svc-1".into(), (PEER.into(), "atlas".into()));
+        app.state::<ViewerState>().windows.lock().unwrap().insert(
+            "svc-1".into(),
+            (PEER.into(), "atlas".into(), UNREACHABLE.into()),
+        );
         let request = Request::builder()
             .uri(url)
             .body(Vec::new())
@@ -422,6 +451,24 @@ mod tests {
     }
 
     #[test]
+    fn every_download_a_page_asks_for_is_refused() {
+        let url: url::Url = format!("{SCHEME}://atlas.{PEER}/report.pdf")
+            .parse()
+            .unwrap();
+        let mut destination = std::path::PathBuf::from("/home/someone/Downloads/report.pdf");
+        assert!(!may_download(&tauri::webview::DownloadEvent::Requested {
+            url: url.clone(),
+            destination: &mut destination,
+        }));
+        // The end of one is only told, nothing is asked: wry does not read the answer.
+        assert!(may_download(&tauri::webview::DownloadEvent::Finished {
+            url,
+            path: None,
+            success: false,
+        }));
+    }
+
+    #[test]
     fn links_open_outside_at_most_once_every_two_seconds() {
         let start = std::time::Instant::now();
         assert!(may_open_now(None, start));
@@ -451,11 +498,10 @@ mod routing_tests {
     }
 
     fn bind(app: &tauri::App<MockRuntime>, label: &str) {
-        app.state::<ViewerState>()
-            .windows
-            .lock()
-            .unwrap()
-            .insert(label.into(), (PEER.into(), "atlas".into()));
+        app.state::<ViewerState>().windows.lock().unwrap().insert(
+            label.into(),
+            (PEER.into(), "atlas".into(), UNREACHABLE.into()),
+        );
     }
 
     /// Every request the main window is asked to carry.
@@ -491,15 +537,29 @@ mod routing_tests {
             (long.as_str(), "atlas"),
         ] {
             assert_eq!(
-                open(app.handle(), peer.into(), service.into(), "t".into()).unwrap_err(),
+                open(app.handle(), peer.into(), service.into(), "t".into(), None).unwrap_err(),
                 "Invalid service",
                 "{peer} {service}"
             );
         }
         assert!(app.webview_windows().is_empty());
 
-        open(app.handle(), PEER.into(), "atlas".into(), "Atlas".into()).unwrap();
-        open(app.handle(), PEER.into(), "notes".into(), "Notes".into()).unwrap();
+        open(
+            app.handle(),
+            PEER.into(),
+            "atlas".into(),
+            "Atlas".into(),
+            None,
+        )
+        .unwrap();
+        open(
+            app.handle(),
+            PEER.into(),
+            "notes".into(),
+            "Notes".into(),
+            Some("Este serviço não está acessível.".into()),
+        )
+        .unwrap();
         let windows = app.webview_windows();
         let mut labels: Vec<_> = windows.keys().cloned().collect();
         labels.sort();
@@ -509,7 +569,60 @@ mod routing_tests {
             format!("{SCHEME}://atlas.{PEER}/")
         );
         let bound = app.state::<ViewerState>().windows.lock().unwrap().clone();
-        assert_eq!(bound["svc-1"], (PEER.to_string(), "notes".to_string()));
+        assert_eq!(
+            bound["svc-0"],
+            (
+                PEER.to_string(),
+                "atlas".to_string(),
+                UNREACHABLE.to_string()
+            )
+        );
+        assert_eq!(
+            bound["svc-1"],
+            (
+                PEER.to_string(),
+                "notes".to_string(),
+                "Este serviço não está acessível.".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn a_request_nobody_answered_says_so_in_the_sentence_the_page_gave_for_the_window() {
+        let app = app();
+        app.state::<ViewerState>().windows.lock().unwrap().insert(
+            "svc-1".into(),
+            (
+                PEER.into(),
+                "atlas".into(),
+                unreachable_text(Some("Este serviço não está acessível.".into())),
+            ),
+        );
+        let response = tauri::async_runtime::block_on(handle(
+            app.handle().clone(),
+            "svc-1".into(),
+            request("GET", &format!("{SCHEME}://atlas.{PEER}/"), b""),
+        ));
+        assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(
+            String::from_utf8_lossy(response.body()),
+            "Este serviço não está acessível."
+        );
+    }
+
+    #[test]
+    fn a_sentence_that_is_no_short_line_of_text_leaves_the_english_one() {
+        assert_eq!(unreachable_text(None), UNREACHABLE);
+        assert_eq!(unreachable_text(Some("  ".into())), UNREACHABLE);
+        assert_eq!(unreachable_text(Some("a\nb".into())), UNREACHABLE);
+        assert_eq!(
+            unreachable_text(Some("x".repeat(UNREACHABLE_MAX_CHARS + 1))),
+            UNREACHABLE
+        );
+        assert_eq!(
+            unreachable_text(Some(" このサービスには届きません。 ".into())),
+            "このサービスには届きません。"
+        );
     }
 
     #[test]
@@ -655,5 +768,25 @@ mod routing_tests {
             assert_eq!(response.status(), StatusCode::FORBIDDEN, "{label}");
         }
         assert!(asked.try_recv().is_err(), "nothing reached the main window");
+    }
+}
+
+/// The real window on WebKitGTK: what a contact's page can leave on disk.
+#[cfg(all(test, target_os = "linux"))]
+mod download_tests {
+    use super::*;
+
+    const PEER: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    #[test]
+    #[ignore = "needs a display and a process of its own (test_support::saved_by_a_window)"]
+    fn a_download_the_page_starts_saves_no_file() {
+        // covers: services.desktop-viewer
+        let saved = crate::test_support::saved_by_a_window(
+            SCHEME,
+            |app| app.manage(ViewerState::default()),
+            |app| open(app, PEER.into(), "atlas".into(), "Atlas".into(), None).unwrap(),
+        );
+        assert_eq!(saved, Vec::<String>::new());
     }
 }

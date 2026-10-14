@@ -39,6 +39,7 @@ describe.each(["pt", "ar"] as const)("in %s", (language) => {
       stored({ id: "e1", event: "joined", member: ANA, text: "Ana joined" }),
       stored({ id: "e2", event: "rotated", text: "Keys rotated: a fresh epoch" }),
       stored({ id: "e3", event: "gone", text: "Bia is no longer a member" }),
+      stored({ id: "e4", event: "left", text: "Caio left" }),
     ]);
 
     expect(screen.getByTestId("group-share")).toHaveAccessibleName(t(language, "group.chat.shareLink"));
@@ -49,8 +50,9 @@ describe.each(["pt", "ar"] as const)("in %s", (language) => {
       t(language, "group.event.joined", { name: "Ana" }),
       t(language, "group.event.rotated"),
       t(language, "group.event.gone", { name: "Bia" }),
+      t(language, "group.event.left", { name: "Caio" }),
     ]);
-    expect(lines.join(" ")).not.toMatch(/joined|rotated|no longer/);
+    expect(lines.join(" ")).not.toMatch(/joined|rotated|no longer| left/);
     expect(container.textContent).not.toMatch(RAW_KEY);
   });
 
@@ -89,6 +91,7 @@ describe.each(["pt", "ar"] as const)("in %s", (language) => {
       stored({ id: "e3", event: "gone", member: GONE, text: "Member 46ishssi is no longer a member" }),
       // A name someone chose stays as written, whatever it looks like.
       stored({ id: "e4", event: "gone", text: "Member of Parliament is no longer a member" }),
+      stored({ id: "e5", event: "left", member: "zz5yxauc".padEnd(52, "y"), text: "Member zz5yxauc left" }),
     ]);
     const unnamed = t(language, "group.member.unnamed", { key: "46ishssi" });
     const lines = (await screen.findAllByTestId("group-event")).map(e => e.textContent);
@@ -97,6 +100,7 @@ describe.each(["pt", "ar"] as const)("in %s", (language) => {
       t(language, "group.event.renamed", { name: unnamed, group: "Amigos" }),
       t(language, "group.event.gone", { name: unnamed }),
       t(language, "group.event.gone", { name: "Member of Parliament" }),
+      t(language, "group.event.left", { name: t(language, "group.member.unnamed", { key: "zz5yxauc" }) }),
     ]);
     expect(lines.slice(0, 3).join(" ")).not.toMatch(/Member /);
   });

@@ -46,7 +46,7 @@ interface Side {
   engine: HoldEngine;
   stored: StoredLink;
   messages: Map<string, { text?: string; file?: { name: string; size: number; mime: string }; request?: PaymentRequest; timestamp: number }>;
-  received: { kind: string; id: string; text?: string; name?: string; bytes?: Uint8Array; request?: PaymentRequest; voice?: VoiceMeta; video?: VideoMeta; image?: ImageMeta; reply?: unknown; timestamp: number }[];
+  received: { kind: string; id: string; text?: string; name?: string; mime?: string; bytes?: Uint8Array; request?: PaymentRequest; voice?: VoiceMeta; video?: VideoMeta; image?: ImageMeta; reply?: unknown; timestamp: number }[];
   replies: Map<string, { i: string; s: string; f: string }>;
   delivery: Map<string, { state: string; error?: string }>;
   files: Map<string, { bytes: Uint8Array; name: string; size: number; mime: string; voice?: VoiceMeta; video?: VideoMeta; image?: ImageMeta }>;
@@ -55,7 +55,7 @@ interface Side {
   refuseFiles?: string;
 }
 
-function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: () => number; aliceNow?: () => number; fetch?: (inner: typeof fetch) => typeof fetch } = {}) {
+function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: () => number; aliceNow?: () => number; loopbackStorage?: boolean; fetch?: (inner: typeof fetch) => typeof fetch } = {}) {
   const link = createLink();
   const alice = createIdentity(), bob = createIdentity();
   const transport = relay();
@@ -74,11 +74,12 @@ function setup(options: { aliceStorage?: boolean; bobStorage?: boolean; now?: ()
       file: async (fileId) => side.files!.get(fileId) ?? null,
       paymentRequest: (paymentId) => side.requests!.get(paymentId) ?? null,
       receiveText: async (_id, m) => { side.received!.push({ kind: "text", id: m.id, text: m.text, timestamp: m.timestamp, ...(m.reply && { reply: m.reply }) }); },
-      receiveFile: async (_id, f, bytes) => { if (side.refuseFiles) return side.refuseFiles; side.received!.push({ kind: "file", id: f.wireId, name: f.name, bytes, timestamp: f.timestamp, ...(f.voice && { voice: f.voice }), ...(f.video && { video: f.video }), ...(f.image && { image: f.image }) }); return null; },
+      receiveFile: async (_id, f, bytes) => { if (side.refuseFiles) return side.refuseFiles; side.received!.push({ kind: "file", id: f.wireId, name: f.name, mime: f.mime, bytes, timestamp: f.timestamp, ...(f.voice && { voice: f.voice }), ...(f.video && { video: f.video }), ...(f.image && { image: f.image }) }); return null; },
       receivePaymentRequest: async (_id, request) => { side.received!.push({ kind: "pay-req", id: request.id, request, timestamp: request.timestamp }); },
       changed: () => {},
       // Bob reads Alice's bucket and Alice reads Bob's: each fetches from wherever the manifest points.
       fetch: options.fetch ? options.fetch(other.fetcher) : other.fetcher,
+      ...(options.loopbackStorage && { loopbackStorage: () => true }),
       now,
     };
     side.engine = new HoldEngine(host);
@@ -165,6 +166,34 @@ describe("store-and-forward engine", () => {
     b.engine.start();
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(b.received).toEqual([]);
+  });
+
+  it("cleans the name and the media type of a held file as it does for a file that arrives live", async () => {
+    const { a, b } = setup();
+    engines.push(a.engine, b.engine);
+    const voice: VoiceMeta = { duration: 2, waveform: "AQID" };
+    const held = [
+      { name: "../../.bashrc\u202Efdp.exe\n", mime: "text/html\r\nx" },
+      { name: "..\\..\\CON", mime: "IMAGE/PNG" },
+      { name: "\u200B/\u0000", mime: "audio/webm; codecs=opus\u0000", voice },
+    ];
+    for (const [i, file] of held.entries()) {
+      a.files.set(`link-a-out-n${i}`, { bytes: new Uint8Array(10).fill(i), size: 10, ...file });
+      a.messages.set(`me_${i}`, { file: { name: file.name, size: 10, mime: file.mime }, timestamp: 1000 + i });
+      await a.engine.hold("link-a", { kind: "file", id: `wire-name-${i}`, messageId: `me_${i}`, ref: `link-a-out-n${i}`, bytes: 10, timestamp: 1000 + i });
+    }
+    b.engine.start();
+    await vi.waitFor(() => expect(b.received).toHaveLength(3));
+    expect(b.received.map((r) => [r.name, r.mime])).toEqual([
+      ["bashrcfdp.exe", "application/octet-stream"],
+      ["_CON", "image/png"],
+      ["file", "application/octet-stream"],
+    ]);
+    // No path part, no control or direction character, never a dotfile.
+    for (const r of b.received) expect(r.name).toMatch(/^[^./\\:\p{Cc}\p{Cf}][^/\\:\p{Cc}\p{Cf}]*$/u);
+    // A description of a voice message stands only beside a media type that is audio once cleaned.
+    expect(b.received[2].voice).toBeUndefined();
+    expect(b.engine.view("link-b").refused).toBe(0);
   });
 
   it("holds text, a file and a payment request in order, the contact picks them up in order and the sender sees them delivered", async () => {
@@ -294,6 +323,53 @@ describe("store-and-forward engine", () => {
     b.engine.wake("link-b");
     await vi.waitFor(() => expect(b.stored.hold!.inSeq).toBe(4));
     expect(b.stored.hold!.refused).toBe(2);
+  });
+
+  it("asks nothing of an address on this machine or its network, whether the pointer or the manifest names it, and follows no redirect", async () => {
+    // What a contact's app would be made to ask, were the address taken as given: the router, this machine's own ports.
+    for (const [which, address] of [["manifest", "http://192.168.1.1/cgi-bin/luci?reboot=1"], ["manifest", "http://127.0.0.1:4959/admin"], ["manifest", "https://10.0.0.5:8080/admin/delete?all=1"],
+      ["item", "http://127.0.0.1:4959/admin?x"], ["item", "http://169.254.169.254/latest/meta-data/"], ["item", "https://192.168.1.1/o"]] as const) {
+      const asked: string[] = [], inits: (RequestInit | undefined)[] = [];
+      const { a, b, buckets, transport } = setup({ fetch: (inner) => (async (input: RequestInfo | URL, init?: RequestInit) => {
+        asked.push(String(input)); inits.push(init);
+        // The address answers, and not with a held item: what told the contact "something is there" before.
+        return new URL(String(input)).host === "s3.test" ? inner(input, init) : new Response("hello");
+      }) as typeof fetch });
+      engines.push(a.engine, b.engine);
+      const presign = buckets.alice.store.presign;
+      buckets.alice.store.presign = async (name, seconds) => (name.endsWith("manifest.ghostly-held") === (which === "manifest") ? address : presign(name, seconds));
+      a.messages.set("me_1", { text: "held", timestamp: 1000 });
+      await a.engine.hold("link-a", { kind: "text", id: "wire-id-0001", messageId: "me_1", bytes: 4, timestamp: 1000 });
+      // Bob reads Alice's pointer; stopping waits for the pickup under way to end.
+      const resolve = vi.spyOn(transport, "resolve");
+      b.engine.start();
+      await vi.waitFor(() => expect(resolve).toHaveBeenCalled());
+      await b.engine.stop();
+      expect(asked.filter((url) => !url.startsWith("https://s3.test/")), address).toEqual([]);
+      expect(asked.length, address).toBe(which === "manifest" ? 0 : 1);
+      for (const init of inits) expect(init?.redirect).toBe("error");
+      // Nothing is taken, and nothing about the address is told back: no sequence passed, none listed as refused.
+      expect(b.received, address).toEqual([]);
+      expect(b.stored.hold!.inSeq, address).toBe(0);
+      expect(b.stored.hold!.refusedSeqs ?? [], address).toEqual([]);
+    }
+  });
+
+  it("reads plain HTTP on this machine only where the host says so: the e2e suite's local storage", async () => {
+    const asked: string[] = [];
+    const { a, b, buckets } = setup({ loopbackStorage: true, fetch: (inner) => (async (input: RequestInfo | URL, init?: RequestInit) => {
+      asked.push(String(input));
+      const url = new URL(String(input));
+      return inner(`https://s3.test${url.pathname}${url.search}`, init);
+    }) as typeof fetch });
+    engines.push(a.engine, b.engine);
+    const presign = buckets.alice.store.presign;
+    buckets.alice.store.presign = async (name, seconds) => (await presign(name, seconds)).replace("https://s3.test/", "http://127.0.0.1:9000/");
+    a.messages.set("me_1", { text: "held", timestamp: 1000 });
+    await a.engine.hold("link-a", { kind: "text", id: "wire-id-0001", messageId: "me_1", bytes: 4, timestamp: 1000 });
+    b.engine.start();
+    await vi.waitFor(() => expect(b.received.map((r) => r.text)).toEqual(["held"]));
+    expect(asked.every((url) => url.startsWith("http://127.0.0.1:9000/"))).toBe(true);
   });
 
   it("a storage request that never answers is given up after its timeout, and the next poll picks everything up", async () => {

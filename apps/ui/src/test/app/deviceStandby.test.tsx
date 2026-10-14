@@ -9,7 +9,7 @@ import { Root } from "../../Root";
 import { DeviceStandby } from "../../components/DeviceStandby";
 import { desktopDeviceMirror } from "../../desktop/deviceMirror";
 import { createProfile, lastRouteOf, switchProfile } from "../../lib/profiles";
-import { locales } from "../../locales";
+import { LOCALES as locales } from "../i18n/locales";
 import { fakeEngine } from "../fakeEngine";
 import { renderApp } from "../render";
 
@@ -122,7 +122,7 @@ describe("the standby screen", () => {
     renderApp(<DeviceStandby gate={{ state: "unreadable", detail: "VersionError: The requested version (1) is less than the existing version (2)." }} />);
     await user.click(screen.getByRole("button", { name: "More info" }));
     const text = screen.getByTestId("device-standby-text");
-    expect(text).toHaveTextContent("nothing was started, nothing was sent and nothing was changed");
+    expect(text).toHaveTextContent("nothing was sent or changed");
     expect(text).toHaveTextContent("VersionError: The requested version (1) is less than the existing version (2).");
   });
 
@@ -188,6 +188,57 @@ describe("the standby screen", () => {
         expect(text, language).not.toContain("—");
       }
     }
+  });
+});
+
+describe("a device whose enrollment did not finish", () => {
+  const unfinished: DeviceGateView = { state: "standby", activeDevice: "MacBook", unfinished: true };
+
+  it("Try again says the other device has not listed it yet, where it said nothing", async () => {
+    const user = userEvent.setup();
+    fakeEngine.on("deviceEnrollFinish", () => ({ finished: false }));
+    renderApp(<DeviceStandby gate={unfinished} />);
+    expect(screen.queryByTestId("device-standby-unfinished-notice")).toBeNull();
+    await user.click(screen.getByTestId("device-standby-finish"));
+    expect(await screen.findByTestId("device-standby-unfinished-notice")).toHaveTextContent("Not finished: your other device has not listed this one yet.");
+    // Both buttons are back: the person tries again, or removes it.
+    expect(screen.getByTestId("device-standby-finish")).toBeEnabled();
+    expect(screen.getByTestId("device-standby-remove")).toBeEnabled();
+  });
+
+  it("says it in the app's language", async () => {
+    const user = userEvent.setup();
+    fakeEngine.on("deviceEnrollFinish", () => ({ finished: false }));
+    renderApp(<DeviceStandby gate={unfinished} />, { language: "pt" });
+    await user.click(screen.getByTestId("device-standby-finish"));
+    expect(await screen.findByTestId("device-standby-unfinished-notice")).toHaveTextContent("Não concluído: seu outro dispositivo ainda não listou este.");
+  });
+
+  it("a Try again or a Remove the engine refuses says why, and a new press takes the old answer away", async () => {
+    const user = userEvent.setup();
+    let answer: () => { finished: boolean } = () => { throw new Error("The device record could not be read"); };
+    fakeEngine.on("deviceEnrollFinish", () => answer());
+    fakeEngine.on("deviceEnrollRemove", () => { throw new Error("Only an enrollment that did not finish is removed here"); });
+    renderApp(<DeviceStandby gate={unfinished} />);
+    await user.click(screen.getByTestId("device-standby-finish"));
+    expect(await screen.findByTestId("device-standby-unfinished-notice")).toHaveTextContent("The device record could not be read");
+    await user.click(screen.getByTestId("device-standby-remove"));
+    await waitFor(() => expect(screen.getByTestId("device-standby-unfinished-notice")).toHaveTextContent("Only a device that did not finish joining is removed here"));
+    expect(screen.getByTestId("device-standby-unfinished-notice")).not.toHaveTextContent("The device record could not be read");
+    answer = () => ({ finished: false });
+    await user.click(screen.getByTestId("device-standby-finish"));
+    await waitFor(() => expect(screen.getByTestId("device-standby-unfinished-notice")).toHaveTextContent("your other device has not listed this one yet"));
+  });
+
+  it("an enrollment that finished starts the app again, with nothing to say", async () => {
+    const user = userEvent.setup();
+    const reload = vi.fn();
+    vi.spyOn(window, "location", "get").mockReturnValue({ ...window.location, reload } as Location);
+    fakeEngine.on("deviceEnrollFinish", () => ({ finished: true }));
+    renderApp(<DeviceStandby gate={unfinished} />);
+    await user.click(screen.getByTestId("device-standby-finish"));
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    expect(screen.queryByTestId("device-standby-unfinished-notice")).toBeNull();
   });
 });
 

@@ -1,8 +1,9 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { CELEBRATE_MS, useNow, type PairingProgressState } from "../../hooks/usePairingProgress";
-import { PAIRING_STEPS, SLOW_AFTER_MS, failureReason, formatElapsed, type PairingStage } from "../../lib/pairingProgress";
+import { PAIRING_STEPS, SLOW_AFTER_MS, failureReason, formatElapsed, pairingDetail, type PairingStage } from "../../lib/pairingProgress";
 import { useMotionRest, useWindowAway } from "../../lib/windowAway";
+import { PairingDetail } from "./PairingDetail";
 import { usePairingWords } from "./words";
 import "./pairing-scene.css";
 
@@ -104,6 +105,8 @@ export function PairingScene({ progress, contact, retry, retrying, retryError, i
   const slowWords = slow ? words.slow(stage, progress.peerSeen) : "";
   const steps = PAIRING_STEPS[role];
   const reason = stage === "failed" ? failureReason(progress.reason) : undefined;
+  // The engine's English is behind an ⓘ, after the words it explains: on the slow line while slow, on the failure's.
+  const detail = slow || reason ? pairingDetail(progress) : undefined;
   const titleId = useId();
   // A marker is referenced through url(#…), where the colons of a React id would not survive.
   const arrow = `ps-arrow-${titleId.replace(/[^\w-]/g, "")}`;
@@ -159,12 +162,10 @@ export function PairingScene({ progress, contact, retry, retrying, retryError, i
     <div className="ps-caption">
       <p id={titleId} className="ps-label" data-testid="pairing-stage-label">{label}</p>
       {ticking && <p className="ps-time" data-testid="pairing-elapsed"><time dateTime={`PT${Math.floor(elapsed / 1000)}S`} aria-label={t("pairing.elapsed", { time: formatElapsed(elapsed) })}>{formatElapsed(elapsed)}</time>{progress.attempt > 1 && <span> · {t("pairing.attempt", { n: progress.attempt })}</span>}</p>}
-      {slowWords && <p className="ps-slow" data-testid="pairing-slow">{slowWords}</p>}
-      {slow && progress.detail && <p className="ps-slow ps-detail" data-testid="pairing-detail">{progress.detail}</p>}
+      {slowWords && <div className="ps-slow" data-testid="pairing-slow">{slowWords}<PairingDetail detail={detail} testId="pairing-detail" className="ps-detail" /></div>}
       {stage === "live" && <p className="ps-slow">{t("pairing.sayHello")}</p>}
       {reason && <div role="alert" className="ps-failure" data-testid="pairing-failure">
-        <p>{words.reason(reason)}</p>
-        {progress.detail && <p className="ps-detail">{progress.detail}</p>}
+        <div>{words.reason(reason)}<PairingDetail detail={detail} testId="pairing-detail" className="ps-detail" /></div>
         {progress.retryable ? <button type="button" className="ps-retry" data-testid="pairing-retry" disabled={retrying || !progress.linkId} onClick={retry}>{retrying ? t("pairing.retrying") : t("pairing.retry")}</button>
           : reason !== "offline" && <p className="ps-detail">{t("pairing.newInvite")}</p>}
         {retryError && <p className="ps-detail">{retryError}</p>}

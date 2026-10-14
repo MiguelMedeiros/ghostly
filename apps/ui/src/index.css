@@ -39,7 +39,7 @@
   /* Its words ("Test money"): that yellow on a dark page, a darker one on a light page, where the yellow reads at
      about 2:1 (html[data-theme="light"] below). A wallet card is dark in every theme and keeps the yellow. */
   --color-test-money-ink: var(--theme-test-money-ink, #e0a800);
-  /* Words that warn without alarm (a bot's quota running low): amber on a dark page, a darker amber on a light one. */
+  /* Words that warn without alarm (a bot's quota running low, a blocked task): amber on a dark page, a darker amber on a light one. */
   --color-warn-ink: var(--theme-warn-ink, #f5a524);
   --color-text-primary: var(--theme-text-primary);
   --color-text-secondary: var(--theme-text-secondary);
@@ -415,6 +415,14 @@ html[data-standalone="true"] {
   body {
     overscroll-behavior: none;
   }
+
+  /* A pinch on a touch screen zoomed the whole app (its bars, the composer, the list) and left it zoomed, while the
+     picture under the fingers could not be looked at closer. The page scrolls and pans as before, and never zooms:
+     a picture zooms in its viewer (components/AvatarViewer.tsx). A descendant's own `touch-action` narrows this
+     further (a floating call window, the viewer: `none`). Text still follows the system's text size. */
+  html {
+    touch-action: pan-x pan-y;
+  }
 }
 
 .pb-safe {
@@ -500,13 +508,40 @@ html[data-standalone="true"] {
   height: 15px;
 }
 
+/* The small window's state line ("Audio call" and the clock) starts after the corner button (30 px at 8 px) instead
+   of being centred over the whole width: at the window's narrowest (190 px, where a phone opens it) "Chamada de áudio
+   00:05" began behind the button. The line is one row of a wrapping flex box with the clock placed first, so when the
+   words do not fit beside it they go to a second row, which is cut off, and the clock stays; row-reverse puts the
+   words back before the clock for the eye. */
 .call-mini .call-top {
   top: 12px;
+  left: 42px;
+  right: 6px;
 }
 
 .call-mini .call-top p {
+  display: flex;
+  flex-flow: row-reverse wrap;
+  justify-content: center;
+  column-gap: 6px;
+  height: 20px;
+  overflow: hidden;
   font-size: 12px;
+  line-height: 20px;
   text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+}
+
+.call-mini .call-top p > span {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.call-mini .call-top p > span:last-child {
+  order: -1;
 }
 
 .call-mini .call-controls {
@@ -623,7 +658,35 @@ html[data-standalone="true"] {
   font-size: 18px;
 }
 
+/* Who is speaking in a call (hooks/useVoiceRing.ts): a ring on the avatar, as wide as the voice is loud. With
+   motion reduced it is a steady ring while they speak. No transition: one on box-shadow restarts at every new
+   level and repaints the call window all the time someone speaks. */
+.call-avatar {
+  --voice-swing: 9px;
+}
+.call-mini .call-avatar { --voice-swing: 4px; }
+.call-avatar[data-speaking="true"] {
+  box-shadow: 0 0 0 calc(3px + var(--voice-level, 0) * var(--voice-swing)) var(--color-accent);
+}
+:root[data-reduce-motion="true"] .call-avatar { --voice-swing: 0px; }
+@media (prefers-reduced-motion: reduce) { .call-avatar, .call-mini .call-avatar { --voice-swing: 0px; } }
+
 .call-mini .call-name {
+  font-size: 13px;
+}
+
+/* Your own side of a voice call, beside the contact: smaller, so it is never taken for them. */
+.call-mini .call-sides {
+  gap: 14px;
+  padding: 0 10px;
+}
+
+.call-mini .call-self .call-avatar {
+  width: 32px;
+  height: 32px;
+}
+
+.call-mini .call-self .call-avatar span {
   font-size: 13px;
 }
 
@@ -845,6 +908,19 @@ html .toast-place.toast-place-page[data-at="top"] {
   top: 0.75rem;
 }
 
+/* A notice at the top of the window (a call that waits for the contact, a link that could not be used): in the middle,
+   as wide as its words up to the window less 1rem a side (a fixed box at 50% with no width is laid out in the half
+   that is left to its right), and below the status bar an installed iPhone app draws under. */
+.top-notice {
+  position: fixed;
+  top: calc(0.75rem + env(safe-area-inset-top));
+  left: 50%;
+  translate: -50% 0;
+  z-index: 60;
+  width: max-content;
+  max-width: calc(100% - 2rem);
+}
+
 .animate-pulse-dot {
   animation: pulse-dot 1.5s ease-in-out infinite;
 }
@@ -912,6 +988,27 @@ html .toast-place.toast-place-page[data-at="top"] {
  */
 [data-message-list] {
   contain: size;
+}
+
+/*
+ * The rows of a long chat off screen are left out of its layout and paint: each page of older rows coming in laid out
+ * and painted all the rows in the page (150), 50-90 ms on a mid phone, a freeze at every step of a wheel up the history.
+ * A row never drawn takes a typical row's height; one drawn keeps its last real one (`auto`), and the view stays on its
+ * message as a row comes on screen at its real height (useChatScroll's `settle`). Not the last rows: one arriving there
+ * would first take the typical height, and a chat at its bottom would go past its end and come back. Every row
+ * remembers its size, so the one that stops being among the last as another arrives keeps its own. Its bubble's
+ * shadow and outline pass the row's edge by a few pixels: still painted, so only where the clip can be widened (WebKit
+ * can't, and would cut them). Not a row playing its video full screen (`position: fixed`), which the containment would
+ * hold inside the row.
+ */
+@supports (overflow-clip-margin: 8px) {
+  [data-message-row] {
+    contain-intrinsic-block-size: auto 90px;
+    overflow-clip-margin: 8px;
+  }
+  [data-message-row]:nth-last-child(n + 11 of [data-message-row]):not(:has([data-theater])) {
+    content-visibility: auto;
+  }
 }
 
 /* On a touch screen a long press on a message opens its quick bar (Copy is there). iOS fires no `contextmenu` to cancel,
@@ -1209,6 +1306,8 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 .connection-switch-track::after { content: ""; display: block; width: 16px; height: 16px; margin: 3px; border-radius: 50%; background: var(--theme-text-primary); transition: transform 160ms ease; }
 .connection-switch input:checked + .connection-switch-track { background: var(--theme-accent); border-color: var(--theme-accent); }
 .connection-switch input:checked + .connection-switch-track::after { transform: translateX(16px); background: var(--theme-panel-header); }
+/* Right to left the knob starts at the right end, so on it moves left: else it leaves its track (Arabic). */
+[dir="rtl"] .connection-switch input:checked + .connection-switch-track::after { transform: translateX(-16px); }
 .connection-switch input:focus-visible + .connection-switch-track { outline: 2px solid var(--theme-accent); outline-offset: 3px; }
 .connection-switch input:disabled + .connection-switch-track { opacity: 0.55; }
 @media (prefers-reduced-motion: reduce) {
@@ -1244,3 +1343,10 @@ button:disabled, button[aria-disabled="true"], input[type="checkbox"]:disabled, 
 .money-ink-mainnet,[data-message-bubble] .network-tag[data-network="mainnet"]{color:color-mix(in oklab,var(--color-accent) 50%,var(--color-text-primary))}
 [data-message-bubble] .network-tag[data-network="testnet"]{color:color-mix(in oklab,var(--color-test-money) 50%,var(--color-text-primary))}
 .payment-back-network{margin-left:8px;font-size:9px}
+
+/* An app opened alone covers the whole screen: its bar keeps clear of a phone's status bar and notch (webOpener.ts). */
+.alone-bar {
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+  padding-inline-start: max(0.75rem, env(safe-area-inset-left));
+  padding-inline-end: max(0.75rem, env(safe-area-inset-right));
+}

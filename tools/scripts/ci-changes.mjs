@@ -3,11 +3,12 @@
 //
 //   gh api --paginate repos/o/r/pulls/N/files --jq '.[].filename' | node tools/scripts/ci-changes.mjs --draft=false
 //   node tools/scripts/ci-changes.mjs --draft=false --all     # no file list: every path gate on
+//   node tools/scripts/ci-changes.mjs --draft=false --tree=T  # a push to dev: see testedAs; else as --all
 //
 // writes one `<gate>=true|false` line per gate (`rust=`, `website=`, `website_e2e=`, `app=`, `packages=`, `full=`,
-// `affected=`) to $GITHUB_OUTPUT (and prints them), with a notice for each job it skips. A path gate may only leave a
-// job out when that job cannot read any of the changed files: tools/scripts/test/ci-changes.test.ts holds the
-// website's list to what the site's scripts actually read.
+// `affected=`, `tested=`) to $GITHUB_OUTPUT (and prints them), with a notice for each job it skips. A path gate may
+// only leave a job out when that job cannot read any of the changed files: tools/scripts/test/ci-changes.test.ts holds
+// the website's list to what the site's scripts actually read.
 //
 // A draft gets the fast tier: lint and types, the unit tests the change can reach (test-affected.mjs), the site's checks
 // when the site changed, and the Rust job when Rust changed. Everything else waits for the pull request to leave
@@ -53,6 +54,10 @@ export const WEBSITE_INPUTS = [
   "apps/ui/src/components/walletCardTypes.ts",
   "apps/ui/src/components/wallet-deck.css",
   "apps/ui/src/components/wallet-cards.css",
+  // The brand test (brand.test.mjs) compares the app's lockup and themes, and the README's logos, with the brand page's.
+  "apps/ui/src/components/AppBrand.tsx",
+  "docs/assets/readme/",
+  "apps/ui/src/index.css",
   // The store pages' readers: sync-store-core.mjs's FILES, which `sync-store-core.mjs --check` compares.
   "packages/core/src/appStore.ts",
   "packages/core/src/appBundle.ts",
@@ -95,11 +100,73 @@ export const PACKAGES_READ_FROM_SITE = [
 
 export const covers = (inputs, file) => inputs.some((p) => (p.endsWith("/") ? file.startsWith(p) : file === p));
 
+/** How many pages of CI's green pull request runs (100 each, newest first) a push to dev searches: about a day's. */
+export const TESTED_PAGES = 3;
+
+/**
+ * The green CI run that already tested the tree a push to dev holds, or null. The merge train lands a batch on dev only
+ * while dev's tip is still the batch's base, and a lone pull request only at a head that holds dev's tip, so dev's new
+ * commit holds the tree of a head whose CI Success passed one landing earlier. A run counts when:
+ * - its head has that tree, and its "CI Success" (not the draft's) passed in its latest attempt;
+ * - it ran dev's own ci.yml: its head is a branch of this repository, and every pull request ever opened from that
+ *   branch (closed ones too: the batch has closed by the time dev's last push runs, and its run's `pull_requests` is
+ *   empty then) is into dev, and always was. A pull request into an epic (or a fork's) runs the ci.yml of its own base,
+ *   which a writer can make a stub; `base.ref` is the base now, and ci.yml has no `edited` trigger, so a pull request
+ *   moved to dev keeps the green run it made on the old base's ci.yml;
+ * - every commit of the push that its head lacks was committed after the run started. A pull request's run tests the
+ *   head merged with its base as it was then: had dev held a commit the head lacks, that run tested another tree.
+ * @param {{ sha: string, tree: string, repo: string, api: (path: string) => Promise<any> }} push  `repo` is owner/name;
+ *   `api` reads that repository's REST API
+ * @returns {Promise<string | null>} the run's address
+ */
+export async function testedAs({ sha, tree, repo, api }) {
+  const owner = repo.split("/")[0];
+  for (let page = 1; page <= TESTED_PAGES; page++) {
+    const { workflow_runs: runs } = await api(`actions/workflows/ci.yml/runs?event=pull_request&status=success&per_page=100&page=${page}`);
+    for (const run of runs.filter((r) => r.head_commit?.tree_id === tree)) {
+      if (run.path !== ".github/workflows/ci.yml" || run.head_repository?.full_name !== repo) continue;
+      const pulls = await api(`pulls?state=all&per_page=100&head=${encodeURIComponent(`${owner}:${run.head_branch}`)}`);
+      if (!pulls.length || pulls.some((p) => p.base.ref !== "dev" || p.base.repo?.full_name !== repo)) continue;
+      if (await retargeted(api, pulls)) continue;
+      const { jobs } = await api(`actions/runs/${run.id}/jobs?per_page=100`);
+      if (!jobs.some((j) => j.name === "CI Success" && j.conclusion === "success")) continue;
+      const { ahead_by: ahead, commits } = await api(`compare/${run.head_sha}...${sha}`);
+      const started = Date.parse(run.created_at);
+      if (commits.length < ahead || commits.some((c) => !(Date.parse(c.commit.committer.date) >= started))) continue;
+      return run.html_url;
+    }
+    if (runs.length < 100) break;
+  }
+  return null;
+}
+
+// A writer's base change, and GitHub's own when the old base branch was deleted (it tried: failed counts too).
+const BASE_CHANGES = new Set(["base_ref_changed", "automatic_base_change_succeeded", "automatic_base_change_failed"]);
+
+/**
+ * Whether any of these pull requests ever had its base changed (by a writer, or by GitHub when the old base was
+ * deleted). Only the issue events list these, not the timeline. A full page is a doubt: it counts as yes.
+ * @param {(path: string) => Promise<any>} api
+ * @param {{ number: number }[]} pulls
+ */
+async function retargeted(api, pulls) {
+  for (const { number } of pulls) {
+    const events = await api(`issues/${number}/events?per_page=100`);
+    if (events.length >= 100 || events.some((e) => BASE_CHANGES.has(e.event))) return true;
+  }
+  return false;
+}
+
 /**
  * @param {string[] | null} files  null: the files are not known (a push, a list too long to read): every path gate is on
- * @param {{ draft: boolean }} options
+ * @param {{ draft: boolean, tested?: boolean }} options  tested: a push to dev whose tree a green run already tested
  */
-export function plan(files, { draft }) {
+export function plan(files, { draft, tested = false }) {
+  // Only Tauri Backend runs: only a push to dev saves the Cargo cache that pull requests restore.
+  if (tested) {
+    const why = ["This tree already passed CI Success: only Tauri Backend runs, to keep the Cargo cache saved"];
+    return { rust: true, website: false, website_e2e: false, app: false, packages: false, full: false, affected: false, tested, why };
+  }
   const why = [];
   const all = files === null;
   const any = (test) => all || files.some(test);
@@ -124,18 +191,36 @@ export function plan(files, { draft }) {
     packages: shards && !draft,
     full: !draft,
     affected: draft,
+    tested,
     why,
   };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const draft = process.argv.includes("--draft=true");
+  const tree = process.argv.find((a) => a.startsWith("--tree="))?.slice("--tree=".length);
   let files = null;
-  if (!process.argv.includes("--all")) {
+  let tested = false;
+  if (tree) {
+    const base = `${process.env.GITHUB_API_URL ?? "https://api.github.com"}/repos/${process.env.GITHUB_REPOSITORY}/`;
+    const api = async (path) => {
+      const res = await fetch(base + path, { headers: { authorization: `Bearer ${process.env.GH_TOKEN}`, accept: "application/vnd.github+json" } });
+      if (!res.ok) throw new Error(`${path}: HTTP ${res.status}`);
+      return res.json();
+    };
+    // Any doubt (the API failed, no run found) runs everything, as before.
+    const run = await testedAs({ sha: process.env.GITHUB_SHA, tree, repo: process.env.GITHUB_REPOSITORY, api }).catch((e) => {
+      console.log(`::notice::Could not look for a green run of this tree (${e.message}): everything runs`);
+      return null;
+    });
+    if (run) console.log(`::notice::Tested as ${run}`);
+    else console.log("No green pull request run has this tree: everything runs");
+    tested = Boolean(run);
+  } else if (!process.argv.includes("--all")) {
     files = (await new Response(process.stdin).text()).split("\n").filter(Boolean);
     if (!files.length) throw new Error("no changed files on stdin");
   }
-  const { why, ...jobs } = plan(files, { draft });
+  const { why, ...jobs } = plan(files, { draft, tested });
   for (const line of why) console.log(`::notice::${line}`);
   const lines = Object.entries(jobs).map(([job, run]) => `${job}=${run}`);
   console.log(lines.join("\n"));

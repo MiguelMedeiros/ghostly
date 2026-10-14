@@ -109,11 +109,19 @@ export const UNIT_PROJECTS = [
     tests: ["apps/mini/chess/test/**"],
   },
   {
-    // The pinned Chess the e2e runs (e2e/fixtures/chess): its test reads apps/mini/chess and the fixture from disk,
-    // which no import graph shows, so a change to either runs it (whole: that one file).
+    // The pinned Chess the e2e runs (e2e/fixtures/chess, from Chess's signed bundle): its test reads the fixture from
+    // disk, which no import graph shows, so a change to it runs it (whole: that one file).
     name: "chess fixture", cwd: ".", args: ["-c", "tools/scripts/vitest.config.ts", "test/chessFixture.test.ts"],
     sources: [],
-    whole: ["apps/mini/chess/{ghostly-app.json,index.html,package.json,tsconfig.json,vite.config.ts}", "apps/mini/chess/src/**", "e2e/fixtures/chess/**"],
+    whole: ["e2e/fixtures/chess/**"],
+    tests: [],
+  },
+  {
+    // The Android app's Kotlin: only the APK builds compile it, and they are not part of CI Success. Its test reads
+    // the sources from disk for a comment Kotlin would never close (whole: that one file).
+    name: "android kotlin", cwd: ".", args: ["-c", "tools/scripts/vitest.config.ts", "test/androidKotlinComments.test.ts"],
+    sources: [],
+    whole: ["apps/desktop/gen/android/**/*.{kt,kts}"],
     tests: [],
   },
 ];

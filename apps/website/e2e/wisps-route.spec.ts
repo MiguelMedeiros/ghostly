@@ -27,7 +27,9 @@ test("the layers stack the families, the core at the top", async ({ page }) => {
   await expect(layers.last().locator(".wmap-layer-label")).toHaveText("Programs");
   // Each family is one full-width band with its tiles side by side.
   const bands = page.locator(".wmap-family");
-  await expect(bands).toHaveCount(11);
+  await expect(bands).toHaveCount(12);
+  // Apps is the last family, drawn since release 1.2 has it.
+  await expect(layers.last().locator(".wmap-family[data-group='apps'] .wmap-tile[href='/wisps/1200-marketplace']")).toBeVisible();
   const stack = await page.locator(".wmap-bands").first().boundingBox();
   const band = await bands.first().boundingBox();
   expect(Math.abs(band!.width - stack!.width)).toBeLessThan(1);
@@ -86,6 +88,22 @@ test("old links into the full list land on the layers, a draft's page or the roa
   await expect(page).toHaveURL(/\/roadmap#candidate-webrtc$/);
   await open("/wisps#inventory");
   await expect(page).toHaveURL(/\/roadmap#inventory-title$/);
+});
+
+test("a link whose #anchor is not valid percent-encoding still shows the WISPs page", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  // "%" alone, a cut escape, and bytes that are no UTF-8: none decodes, and none is an old anchor.
+  for (const hash of ["#%", "#wisp-%E0%A4%A", "#100%-private", "#%FF"]) {
+    await page.goto("about:blank");
+    await page.goto(`/wisps${hash}`);
+    // The nav's chevron is enabled once the page hydrated, which is when the old anchors are read.
+    await expect(page.getByRole("button", { name: "Ways to open Ghostly" })).toBeEnabled();
+    await expect(page.locator(".wmap-tile").first()).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect(page).toHaveURL(/\/wisps#/);
+  }
+  expect(errors).toEqual([]);
 });
 
 // Old addresses land on /wisps in one hop.

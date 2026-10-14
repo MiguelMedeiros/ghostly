@@ -34,6 +34,8 @@ const DEEP_LINK_PREFIX: &str = "ghostly://oidc";
 struct Pending {
     listener: Option<TcpListener>,
     cancelled: Arc<AtomicBool>,
+    /// The app's language when the sign-in started, for the page the browser lands on.
+    lang: String,
 }
 
 /// A deep-link sign-in waiting for its answer: the state it expects, and where the answer goes.
@@ -97,14 +99,120 @@ pub fn deep_link_answer(link: &str) -> Option<String> {
 /// The page the browser lands on. The provider's answer is in its fragment,
 /// which only a script can read; it posts it back to this same listener and
 /// removes it from the browser's history entry.
-const PAGE: &str = "<!doctype html><meta charset=utf-8><meta name=referrer content=no-referrer><title>Ghostly</title>\
+///
+/// It speaks the language the app named when the sign-in started (`lang`, a tag like "pt-BR"), English for any
+/// other. The tag only chooses among the texts here; it is never written into the page.
+fn page(lang: &str) -> String {
+    let primary = lang
+        .split(['-', '_'])
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let (code, [returning, done, other, gone]) = TEXTS
+        .iter()
+        .find(|(code, _)| *code == primary)
+        .unwrap_or(&TEXTS[0]);
+    let dir = if *code == "ar" { "rtl" } else { "ltr" };
+    let returning = returning.replace('&', "&amp;").replace('<', "&lt;");
+    let (done, other, gone) = (quoted(done), quoted(other), quoted(gone));
+    format!(
+        "<!doctype html><html lang={code} dir={dir}><meta charset=utf-8><meta name=referrer content=no-referrer><title>Ghostly</title>\
 <body style=\"font:16px system-ui;background:#050d14;color:#e2e8f0;display:grid;place-items:center;height:100vh;margin:0\">\
-<p id=m>Returning to Ghostly…</p><script>\
+<p id=m>{returning}</p><script>\
 const a=location.search+location.hash;history.replaceState(null,'','/oidc-callback');\
-fetch('/oidc-callback',{method:'POST',body:a,headers:{'content-type':'text/plain'}}).then(r=>{\
-document.getElementById('m').textContent=r.ok?'Done. You can close this tab and return to Ghostly.':'This sign-in is no longer awaited. Return to Ghostly and try again.'})\
-.catch(()=>{document.getElementById('m').textContent='Ghostly is not waiting for this sign-in anymore.'});\
-</script>";
+fetch('/oidc-callback',{{method:'POST',body:a,headers:{{'content-type':'text/plain'}}}}).then(r=>{{\
+document.getElementById('m').textContent=r.ok?{done}:{other}}})\
+.catch(()=>{{document.getElementById('m').textContent={gone}}});\
+</script>"
+    )
+}
+
+/// What the page says, in the languages the app speaks (English first, the fallback): while the answer goes
+/// back, once it is taken, when it is not the awaited one, and when nothing listens anymore.
+const TEXTS: &[(&str, [&str; 4])] = &[
+    (
+        "en",
+        [
+            "Returning to Ghostly…",
+            "Done. You can close this tab and return to Ghostly.",
+            "This sign-in is no longer awaited. Return to Ghostly and try again.",
+            "Ghostly is not waiting for this sign-in anymore.",
+        ],
+    ),
+    (
+        "ar",
+        [
+            "جارٍ العودة إلى Ghostly…",
+            "تم. يمكنك إغلاق علامة التبويب هذه والعودة إلى Ghostly.",
+            "تسجيل الدخول هذا لم يعد منتظرًا. عُد إلى Ghostly وحاول مرة أخرى.",
+            "Ghostly لم يعد ينتظر تسجيل الدخول هذا.",
+        ],
+    ),
+    (
+        "es",
+        [
+            "Volviendo a Ghostly…",
+            "Listo. Puedes cerrar esta pestaña y volver a Ghostly.",
+            "Este inicio de sesión ya no se espera. Vuelve a Ghostly y vuelve a intentarlo.",
+            "Ghostly ya no espera este inicio de sesión.",
+        ],
+    ),
+    (
+        "fr",
+        [
+            "Retour à Ghostly…",
+            "Terminé. Vous pouvez fermer cet onglet et revenir à Ghostly.",
+            "Cette connexion n'est plus attendue. Revenez à Ghostly, puis réessayez.",
+            "Ghostly n'attend plus cette connexion.",
+        ],
+    ),
+    (
+        "it",
+        [
+            "Ritorno a Ghostly…",
+            "Fatto. Puoi chiudere questa scheda e tornare a Ghostly.",
+            "Questo accesso non è più atteso. Torna a Ghostly, poi riprova.",
+            "Ghostly non attende più questo accesso.",
+        ],
+    ),
+    (
+        "ja",
+        [
+            "Ghostly に戻っています…",
+            "完了しました。このタブを閉じて Ghostly に戻れます。",
+            "このサインインはもう待たれていません。Ghostly に戻って、もう一度お試しください。",
+            "Ghostly はもうこのサインインを待っていません。",
+        ],
+    ),
+    (
+        "pt",
+        [
+            "Voltando ao Ghostly…",
+            "Pronto. Você pode fechar esta aba e voltar ao Ghostly.",
+            "Este login não é mais aguardado. Volte ao Ghostly e tente de novo.",
+            "O Ghostly não está mais aguardando este login.",
+        ],
+    ),
+    (
+        "zh",
+        [
+            "正在返回 Ghostly…",
+            "完成。可以关闭此标签页并返回 Ghostly。",
+            "此登录已不再等待。请返回 Ghostly，然后重试。",
+            "Ghostly 已不再等待此登录。",
+        ],
+    ),
+];
+
+/// A text as a string of the page's script.
+fn quoted(text: &str) -> String {
+    format!(
+        "'{}'",
+        text.replace('\\', "\\\\")
+            .replace('\'', "\\'")
+            .replace('<', "\\x3c")
+    )
+}
 
 fn respond(stream: &mut TcpStream, status: &str, content_type: &str, body: &str) {
     let _ = write!(
@@ -170,10 +278,12 @@ fn state_of(answer: &str) -> Option<String> {
         .map(|(_, v)| v)
 }
 
-/// Serves the listener until an answer with `state` arrives, the wait ends, or it is cancelled.
+/// Serves the listener until an answer with `state` arrives, the wait ends, or it is cancelled. Its page is in
+/// `lang`.
 pub fn serve(
     listener: &TcpListener,
     state: &str,
+    lang: &str,
     deadline: Instant,
     cancelled: &AtomicBool,
 ) -> Result<String, String> {
@@ -207,7 +317,12 @@ pub fn serve(
         }
         let path = target.split(['?', '#']).next().unwrap_or("");
         match (method.as_str(), path) {
-            ("GET", PATH) => respond(&mut stream, "200 OK", "text/html; charset=utf-8", PAGE),
+            ("GET", PATH) => respond(
+                &mut stream,
+                "200 OK",
+                "text/html; charset=utf-8",
+                &page(lang),
+            ),
             ("POST", PATH) if state_of(&body).as_deref() == Some(state) => {
                 respond(&mut stream, "200 OK", "text/plain", "OK");
                 return Ok(body);
@@ -265,9 +380,13 @@ fn open_in_browser(url: &str) -> Result<(), String> {
 }
 
 /// Listens on a free loopback port for one sign-in answer. Returns the port. Android and iOS listen for the app's
-/// deep link instead, and say so with port 0 ([`DEEP_LINK`]): the page asks with an `a.` state then.
+/// deep link instead, and say so with port 0 ([`DEEP_LINK`]): the page asks with an `a.` state then. `lang` is the
+/// app's language, for the page the browser lands on ([`page`]).
 #[tauri::command]
-pub fn oidc_loopback_start(state: tauri::State<'_, OidcState>) -> Result<u16, String> {
+pub fn oidc_loopback_start(
+    state: tauri::State<'_, OidcState>,
+    lang: Option<String>,
+) -> Result<u16, String> {
     if cfg!(mobile) {
         state.link_cancel();
         return Ok(DEEP_LINK);
@@ -285,6 +404,7 @@ pub fn oidc_loopback_start(state: tauri::State<'_, OidcState>) -> Result<u16, St
         Pending {
             listener: Some(listener),
             cancelled: Arc::new(AtomicBool::new(false)),
+            lang: lang.unwrap_or_default(),
         },
     );
     Ok(port)
@@ -308,7 +428,7 @@ pub async fn oidc_loopback_wait(
     if cfg!(mobile) && port == DEEP_LINK {
         return wait_for_link(&state, &url, &expected_state, open_in_browser).await;
     }
-    let (listener, cancelled) = {
+    let (listener, cancelled, lang) = {
         let mut pending = state.0.lock().map_err(|e| e.to_string())?;
         let entry = pending
             .get_mut(&port)
@@ -319,6 +439,7 @@ pub async fn oidc_loopback_wait(
                 .take()
                 .ok_or("This sign-in is already waiting")?,
             entry.cancelled.clone(),
+            entry.lang.clone(),
         )
     };
     open_in_browser(&url)?;
@@ -326,6 +447,7 @@ pub async fn oidc_loopback_wait(
         serve(
             &listener,
             &expected_state,
+            &lang,
             Instant::now() + WAIT,
             &cancelled,
         )
@@ -431,12 +553,86 @@ mod tests {
         let answer = serve(
             &listener,
             STATE,
+            "en",
             Instant::now() + Duration::from_secs(10),
             &cancelled,
         )
         .unwrap();
         client.join().unwrap();
         assert_eq!(answer, format!("#id_token=abc&state={STATE}"));
+    }
+
+    #[test]
+    fn the_page_speaks_each_of_the_apps_languages() {
+        let english = TEXTS[0].1;
+        for lang in ["ar", "en", "es", "fr", "it", "ja", "pt", "zh"] {
+            let page = page(lang);
+            let texts = TEXTS
+                .iter()
+                .find(|(code, _)| *code == lang)
+                .unwrap_or_else(|| panic!("no texts for {lang}"))
+                .1;
+            assert!(page.contains(&format!("<html lang={lang} ")), "{lang}");
+            let dir = if lang == "ar" { "dir=rtl" } else { "dir=ltr" };
+            assert!(page.contains(dir), "{lang}: {dir}");
+            assert!(
+                page.contains(&format!("<p id=m>{}</p>", texts[0])),
+                "{lang}"
+            );
+            for (text, english) in texts.iter().zip(english).skip(1) {
+                assert!(page.contains(&quoted(text)), "{lang}: {text}");
+                if lang != "en" {
+                    assert_ne!(*text, english, "{lang}");
+                    assert!(!page.contains(english), "{lang}: {english}");
+                }
+            }
+            // The script is the same in every language.
+            assert!(
+                page.contains("fetch('/oidc-callback'") && page.contains("history.replaceState")
+            );
+        }
+        // An apostrophe in a text does not end the script's string.
+        assert!(page("fr").contains("n\\'attend plus"));
+    }
+
+    #[test]
+    fn the_page_takes_a_language_tag_and_falls_back_to_english() {
+        assert_eq!(page("pt-BR"), page("pt"));
+        assert_eq!(page("ZH_cn"), page("zh"));
+        for lang in ["", "de", "x", "<script>", "en-US"] {
+            assert_eq!(page(lang), page("en"), "{lang}");
+        }
+        assert!(page("en").contains("<p id=m>Returning to Ghostly…</p>"));
+    }
+
+    #[test]
+    fn the_listener_serves_the_page_in_the_language_the_sign_in_started_in() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let cancelled = AtomicBool::new(false);
+        let host = format!("127.0.0.1:{port}");
+        let client = std::thread::spawn(move || {
+            let answer = request(
+                port,
+                format!("GET /oidc-callback HTTP/1.1\r\nHost: {host}\r\n\r\n"),
+            );
+            assert!(post(port, &host, &format!("#id_token=abc&state={STATE}"))
+                .starts_with("HTTP/1.1 200"));
+            answer
+        });
+        serve(
+            &listener,
+            STATE,
+            "pt-BR",
+            Instant::now() + Duration::from_secs(10),
+            &cancelled,
+        )
+        .unwrap();
+        let answer = client.join().unwrap();
+        let body = answer.split_once("\r\n\r\n").unwrap().1;
+        assert_eq!(body, page("pt"));
+        assert!(answer.contains(&format!("Content-Length: {}\r\n", body.len())));
+        assert!(!body.contains("Returning to Ghostly"));
     }
 
     #[test]
@@ -453,12 +649,13 @@ mod tests {
         assert!(serve(
             &listener,
             STATE,
+            "en",
             Instant::now() + Duration::from_secs(10),
             &cancelled
         )
         .is_err());
         let cancelled = AtomicBool::new(false);
-        assert!(serve(&listener, STATE, Instant::now(), &cancelled)
+        assert!(serve(&listener, STATE, "en", Instant::now(), &cancelled)
             .unwrap_err()
             .contains("timed out"));
     }
@@ -524,7 +721,7 @@ mod command_tests {
     #[test]
     fn listens_on_loopback_for_one_sign_in_at_a_time() {
         let app = app();
-        let first = oidc_loopback_start(app.state()).unwrap();
+        let first = oidc_loopback_start(app.state(), None).unwrap();
         let state = app.state::<OidcState>();
         let first_cancelled = {
             let pending = state.0.lock().unwrap();
@@ -535,7 +732,7 @@ mod command_tests {
             entry.cancelled.clone()
         };
 
-        let second = oidc_loopback_start(app.state()).unwrap();
+        let second = oidc_loopback_start(app.state(), None).unwrap();
         assert_ne!(first, second);
         assert!(
             first_cancelled.load(Ordering::SeqCst),
@@ -551,7 +748,7 @@ mod command_tests {
     #[tokio::test]
     async fn refuses_before_any_browser_opens() {
         let app = app();
-        let port = oidc_loopback_start(app.state()).unwrap();
+        let port = oidc_loopback_start(app.state(), None).unwrap();
         let wait = |url: &str, state: &str, port: u16| {
             oidc_loopback_wait(app.state(), port, url.into(), state.into())
         };
@@ -599,7 +796,7 @@ mod command_tests {
     #[test]
     fn cancelling_ends_a_wait_in_progress_and_closes_the_port() {
         let app = app();
-        let port = oidc_loopback_start(app.state()).unwrap();
+        let port = oidc_loopback_start(app.state(), None).unwrap();
         // What `oidc_loopback_wait` does once the browser is open.
         let state = app.state::<OidcState>();
         let (listener, cancelled) = {
@@ -611,6 +808,7 @@ mod command_tests {
             let result = serve(
                 &listener,
                 STATE,
+                "en",
                 Instant::now() + Duration::from_secs(30),
                 &cancelled,
             );
@@ -690,6 +888,7 @@ mod command_tests {
         let answer = serve(
             &listener,
             STATE,
+            "en",
             Instant::now() + Duration::from_secs(20),
             &cancelled,
         )

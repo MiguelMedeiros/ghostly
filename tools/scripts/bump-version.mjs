@@ -15,8 +15,8 @@
  *
  * It refuses a version that must not ship a feature flag that is on (RELEASE_GUARDS in changes.mjs): Apps
  * (APPS_ENABLED) ship from 1.2.0, so a 1.1.x bump stops while the flag is true. And the other way: a bump to 1.2.0 or
- * later stops while the flag is still false and Apps entries held for 1.2 would go out. The flag flips only on the
- * release/1.2.0 branch, before its bump.
+ * later stops while the flag is still false and Apps entries held for 1.2 would go out. The flag is on from the 1.2
+ * cut (docs/RELEASING.md), so a 1.1.x patch is cut from `main`.
  *
  *   node tools/scripts/bump-version.mjs --check [<version>]   only the flag check, for the package.json version by
  *                                                             default (the release workflow runs it on the tag)
@@ -83,6 +83,7 @@ export function guardProblems(root, next, guards = RELEASE_GUARDS, fragments = [
   const problems = [];
   for (const guard of guards) {
     const { file, flag, from } = guard;
+    if (!flag) continue;
     const early = versionBefore(next, from);
     const announced = early ? [] : fragments.filter((f) => f.release && !heldFor(f.release, next) && guard.entry?.(f));
     if (!early && !announced.length) continue;
@@ -171,6 +172,6 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
     const problems = guardProblems(ROOT, next);
     for (const problem of problems) console.error(`✗ ${problem}`);
     if (problems.length) process.exit(1);
-    console.log(`✓ ${next}: no flag on before its release (${RELEASE_GUARDS.map((g) => g.flag).join(", ")})`);
+    console.log(`✓ ${next}: no flag on before its release (${RELEASE_GUARDS.flatMap((g) => g.flag ?? []).join(", ")})`);
   } else bump(ROOT, next);
 }

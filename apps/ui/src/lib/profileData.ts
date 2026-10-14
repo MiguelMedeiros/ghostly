@@ -5,7 +5,7 @@ import { deviceStateOf, forgetDevice } from "@ghostly/browser/devices/store";
 import { dropFileSpace } from "@ghostly/browser/shared/fileBytes";
 import { dropBreezDatabasesOf } from "@ghostly/browser/engine/paymentAdapters/providers/breezDatabases";
 import { activeProfileId, chosenProfileId, listProfiles, namespaceOf, prefixOf, settingsKeyFor, unregisterProfile } from "./profiles";
-import { unreadUnder } from "./storage";
+import { retryUnsaved, unreadUnder } from "./storage";
 import { peekFresh } from "./profilePeek";
 import { verifyPassword } from "./settings";
 import { pushPlatform } from "./wakePush";
@@ -245,6 +245,8 @@ export async function deleteProfile(id: string, password?: string): Promise<void
   await dropBreezDatabasesOf(dbName).catch(() => {});
   const prefix = `ghostly_${ns}_`;
   for (const key of Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((k): k is string => !!k?.startsWith(prefix))) localStorage.removeItem(key);
+  // The room its keys made may fit what the open profile's page held (the storage-full notice).
+  retryUnsaved();
   // Its push subscription (WISP 401 § Wake-up push) ends with it: its worker goes, and contacts who kept it get 410.
   await pushPlatform()?.unsubscribe(id).catch(() => {});
   // Its device state goes with it (WISP 06): a profile made later under the same name must not inherit it.

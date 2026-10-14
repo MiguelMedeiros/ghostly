@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import type { StatusCard } from "@ghostly/core";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
-import { previewText } from "../../lib/chatList";
+import { filePreview, previewText } from "../../lib/chatList";
 import { servicesPlatform } from "../../lib/platform";
+import type { ChatFile } from "../../lib/types";
 import { paymentLine } from "../paymentWords";
 import { cardLine, showsCard } from "../../lib/statusCards";
 
@@ -14,6 +15,8 @@ export interface Announceable {
   card?: StatusCard;
   /** A payment or a request: read out as the chat list says it, not as the English line the engine keeps. */
   paymentId?: string;
+  /** A voice message or a video: read out as the chat list says it too, its text being the history's English line. */
+  file?: ChatFile;
   member?: string;
   systemEvent?: unknown;
   callEvent?: unknown;
@@ -27,12 +30,15 @@ export const ANNOUNCE_CLEAR_MS = 1_000;
 /** A message is read out up to this many characters. */
 const PREVIEW_CHARS = 80;
 
-/** What a message says, read out: a status card's line, a payment's (paymentLine, as the chat list), else its text. */
+/**
+ * What a message says, read out: a status card's line, a payment's (paymentLine, as the chat list), a voice message's
+ * or a video's (filePreview, as the chat list), else its text.
+ */
 function spoken(message: Announceable, t: Translate): string {
   if (showsCard(message.card)) return cardLine(message.card);
   const wallet = message.paymentId ? servicesPlatform?.wallet : undefined;
   const payment = wallet?.getPayment(message.paymentId!);
-  return payment ? paymentLine(t, payment, wallet!.getState()) : previewText(message.text, t);
+  return payment ? paymentLine(t, payment, wallet!.getState()) : filePreview(message.file, t) ?? previewText(message.text, t);
 }
 
 const short = (text: string) => {

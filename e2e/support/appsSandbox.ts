@@ -295,9 +295,69 @@ function floodApp() {
     await G.storage.set("report", { ok: answers.length - refused.length, refused: [...new Set(refused)], large });
   })();
 }
+/** Posts what it knows to every frame of the page, every 100 ms for 3 s, outside the broker. */
+function talkerApp(P: any) {
+  const G: any = (window as any).ghostly;
+  (async () => {
+    const context = await G.context();
+    let n = 0;
+    const frames = parent.frames.length;
+    const timer = setInterval(() => {
+      n++;
+      for (let i = 0; i < parent.frames.length; i++) { try { parent.frames[i]!.postMessage({ from: P.name, context, n }, "*"); } catch (e) { /* refused */ } }
+      try { window.postMessage({ from: P.name, self: true, n }, "*"); } catch (e) { /* refused */ }
+    }, 100);
+    await new Promise((r) => setTimeout(r, 3000));
+    clearInterval(timer);
+    await G.storage.set("talked", { n, frames });
+  })();
+}
+
+/** Listens on its window every way an app can, then reports what reached it. */
+function eavesdropperApp() {
+  const G: any = (window as any).ghostly;
+  const heard: string[] = [];
+  const hear = (way: string) => (event: any) => { heard.push(way + " " + JSON.stringify(event.data).slice(0, 80)); };
+  addEventListener("message", hear("listener"));
+  addEventListener("message", hear("capture"), true);
+  addEventListener("messageerror", hear("messageerror"), true);
+  window.onmessage = hear("onmessage");
+  window.onmessageerror = hear("onmessageerror");
+  (async () => {
+    await G.storage.set("ready", true);
+    await new Promise((r) => setTimeout(r, 4000));
+    await G.storage.set("heard", heard.slice(0, 5).concat(heard.length > 5 ? ["... " + heard.length] : []));
+  })();
+}
+
+/** Sends far past the request rate for as long as it runs: 2000 requests in each task. */
+function stormApp() {
+  const G: any = (window as any).ghostly;
+  const burst = () => {
+    for (let i = 0; i < 2000; i++) G.storage.get("k").catch(() => {});
+    setTimeout(burst, 0);
+  };
+  burst();
+}
+
+/** Reads its own `big.bin` 50 times at the start of each second for 3 s, drops the bytes, then reports what it was told. */
+function fileFloodApp() {
+  const G: any = (window as any).ghostly;
+  (async () => {
+    let ok = 0;
+    const refused: string[] = [];
+    for (let second = 0; second < 3; second++) {
+      const started = Date.now();
+      const answers = await Promise.allSettled(Array.from({ length: 50 }, () => G.file("big.bin")));
+      for (const a of answers as any[]) { if (a.status === "fulfilled") ok++; else refused.push(a.reason.message); }
+      await new Promise((r) => setTimeout(r, Math.max(0, 1050 - (Date.now() - started))));
+    }
+    await G.storage.set("report", { ok, refused: [...new Set(refused)] });
+  })();
+}
 /* eslint-enable */
 
-const SOURCES = { net: netProbes, escape: escapeProbe, victim: victimApp, flood: floodApp, internet: internetApp } as const;
+const SOURCES = { net: netProbes, escape: escapeProbe, victim: victimApp, flood: floodApp, storm: stormApp, fileFlood: fileFloodApp, internet: internetApp, talker: talkerApp, eavesdropper: eavesdropperApp } as const;
 
 /** An app's entry: the probe's source, given its targets. */
 export function appEntry(kind: keyof typeof SOURCES, targets: object = {}): string {

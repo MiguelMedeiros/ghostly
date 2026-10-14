@@ -51,6 +51,9 @@ const set = (patch: Partial<DeviceSetView> = {}): DeviceSetView => ({
 
 afterEach(() => { states.clear(); vi.useRealTimers(); });
 
+/** Lets `ms` of the faked clock pass, and what it started settle. */
+const later = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+
 describe("Profile, Devices", () => {
   it("lists each device with its kind, its state and its link, and says what the section is for behind the ⓘ", async () => {
     const { user, engine } = renderApp(<DevicesSection />);
@@ -105,6 +108,43 @@ describe("Profile, Devices", () => {
     expect(screen.getByTestId("device-remove-open")).toBeInTheDocument();
   });
 
+  it("the answer of Check connection goes when that device's link is no longer connected", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "setTimeout"] });
+    let status: "live" | "connecting" = "live";
+    fakeEngine.on("deviceSet", () => set({ devices: set().devices.map((device) => (device.key === PHONE ? { ...device, status } : device)) }));
+    fakeEngine.on("deviceHandoffView", () => null);
+    fakeEngine.on("devicePing", () => ({ ms: 12 }));
+    renderApp(<DevicesSection />);
+    await later(0);
+    const phone = screen.getAllByTestId("device-row")[1];
+    act(() => within(phone).getByTestId("device-menu").click());
+    act(() => screen.getByTestId("device-check").click());
+    await later(0);
+    expect(within(phone).getByTestId("device-check-result")).toHaveTextContent("Answered in 12 ms");
+    // The link drops: the next read of the set says so, and the old answer no longer stands under it.
+    status = "connecting";
+    await later(3_000);
+    expect(within(phone).getByTestId("device-link-status")).toHaveTextContent("Not connected");
+    expect(within(phone).queryByTestId("device-check-result")).toBeNull();
+  });
+
+  it("the answer of Check connection stays ten seconds under a device whose link holds", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "setTimeout"] });
+    fakeEngine.on("deviceSet", () => set());
+    fakeEngine.on("deviceHandoffView", () => null);
+    fakeEngine.on("devicePing", () => { throw new Error("timeout"); });
+    renderApp(<DevicesSection />);
+    await later(0);
+    const phone = screen.getAllByTestId("device-row")[1];
+    act(() => within(phone).getByTestId("device-menu").click());
+    act(() => screen.getByTestId("device-check").click());
+    await later(9_000);
+    expect(within(phone).getByTestId("device-check-result")).toHaveTextContent("No answer");
+    await later(1_000);
+    expect(within(phone).queryByTestId("device-check-result")).toBeNull();
+    expect(within(phone).getByTestId("device-link-status")).toHaveTextContent("Connected");
+  });
+
   it("on a standby device's list nothing acts on another device", async () => {
     const { engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, active: device.key === PHONE, self: device.key === TABLET })) }));
@@ -130,11 +170,64 @@ describe("Profile, Devices", () => {
     await waitFor(() => expect(engine.callsTo("deviceHandoffPush")).toEqual([{ key: PHONE }]));
   });
 
+  it("a move under way whose dialog was closed: its steps and Cancel stay in the section, and no second Move to is offered", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => set());
+    let handoff: HandoffView | null = null;
+    engine.on("deviceHandoffView", () => handoff);
+    engine.on("deviceHandoffPush", () => (handoff = { role: "giver", device: "iPhone", key: PHONE, step: "copying", bytes: 120 * 1024 ** 2, total: 480 * 1024 ** 2 }));
+    engine.on("deviceHandoffCancel", () => { handoff = null; });
+    const [, phone] = await screen.findAllByTestId("device-row");
+    expect(screen.queryByTestId("handoff-running")).toBeNull();
+    await user.click(within(phone).getByTestId("device-move"));
+    const dialog = await screen.findByTestId("handoff-move-dialog");
+    expect(await within(dialog).findByTestId("handoff-line", {}, { timeout: 3_000 })).toHaveTextContent("Copying files");
+    expect(within(dialog).getByTestId("handoff-amount")).toHaveTextContent("120 MB of 480 MB");
+    // While the dialog shows the move, the section does not show it a second time.
+    expect(screen.queryByTestId("handoff-running")).toBeNull();
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    // "You can keep using Ghostly": the move goes on, and the section says where it stands.
+    const running = await screen.findByTestId("handoff-running", {}, { timeout: 3_000 });
+    expect(screen.queryByTestId("handoff-move-dialog")).toBeNull();
+    expect(running).toHaveTextContent("Moving your profile");
+    expect(within(running).getByTestId("handoff-line")).toHaveTextContent("Copying files");
+    expect(within(running).getByTestId("handoff-amount")).toHaveTextContent("120 MB of 480 MB");
+    // The engine refuses a second move as busy: none is offered while one runs.
+    expect(screen.queryByTestId("device-move")).toBeNull();
+    await user.click(within(running).getByTestId("handoff-cancel"));
+    expect(engine.callsTo("deviceHandoffCancel")).toHaveLength(1);
+    await waitFor(() => expect(screen.queryByTestId("handoff-running")).toBeNull(), { timeout: 3_000 });
+    expect(await screen.findByTestId("device-move")).toHaveTextContent("Move to iPhone");
+    expect(engine.callsTo("deviceHandoffPush")).toEqual([{ key: PHONE }]);
+  });
+
+  it("a move the other device started with Use here: the section shows it on the active device too", async () => {
+    const { engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => set());
+    engine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "authorizing", bytes: 0, total: 0 }) satisfies HandoffView);
+    const running = await screen.findByTestId("handoff-running");
+    expect(within(running).getByTestId("handoff-line")).toHaveTextContent("Checking the password");
+    expect(within(running).getByTestId("handoff-cancel")).toBeInTheDocument();
+    expect(screen.queryByTestId("device-move")).toBeNull();
+  });
+
+  it("on a standby the section shows no move: its screen does", async () => {
+    const { engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, active: device.key === PHONE, self: device.key === TABLET })) }));
+    engine.on("deviceHandoffView", () => ({ role: "taker", device: "iPhone", key: PHONE, step: "copying", bytes: 1, total: 2 }) satisfies HandoffView);
+    await screen.findAllByTestId("device-row");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByTestId("handoff-running")).toBeNull();
+  });
+
   it("draws each device's kind from its name", () => {
     expect(["iPhone", "Phone", "Pixel 8", "iPad", "Tablet", "Chrome on Mac", "Firefox", "Mac app", "Desktop", "Linux"].map(deviceLook))
       .toEqual(["phone", "phone", "phone", "tablet", "tablet", "browser", "browser", "computer", "computer", "computer"]);
   });
 });
+
+/** The live region an element sits in, itself aside: what is read again, whole, when the element's text changes. */
+const liveRegionAround = (element: HTMLElement) => element.parentElement?.closest("[role=status], [role=alert], [role=log], [aria-live]") ?? null;
 
 const view = (patch: Partial<HandoffView>): HandoffView => ({ role: "taker", device: "MacBook", key: DESKTOP, step: "connecting", bytes: 0, total: 0, ...patch });
 
@@ -146,10 +239,27 @@ describe("the handoff's progress", () => {
       "connecting:done", "copying:now", "ready:next", "rest:next", "checking:next", "switching:next", "settling:next",
     ]);
     expect(steps[1]).toHaveAttribute("aria-current", "step");
-    expect(screen.getByTestId("handoff-line")).toHaveTextContent("Copying files · 120 MB of 480 MB");
+    expect(steps[1]).toHaveTextContent("Copying files · 120 MB of 480 MB");
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "25");
     expect(screen.getByTestId("handoff-cancel")).toHaveTextContent("Cancel");
     expect(screen.getByTestId("handoff-progress")).toHaveTextContent("Nothing changes until the last step.");
+  });
+
+  it("reads the step aloud once while files are copied: the bytes are beside the live line and on the bar, not in it", () => {
+    const copying = (bytes: number) => <HandoffProgress view={view({ step: "copying", bytes, total: 480 * 1024 ** 2 })} onCancel={() => {}} />;
+    const { rerender } = renderApp(copying(120 * 1024 ** 2));
+    const line = screen.getByTestId("handoff-line");
+    expect(line).toHaveAttribute("role", "status");
+    expect(line.textContent).toBe("Copying files");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuetext", "120 MB of 480 MB");
+    rerender(copying(240 * 1024 ** 2));
+    // The next read of the copy: the same element with the same words, so a screen reader has nothing new to say.
+    expect(screen.getByTestId("handoff-line")).toBe(line);
+    expect(line.textContent).toBe("Copying files");
+    expect(screen.getByTestId("handoff-amount")).toHaveTextContent("240 MB of 480 MB");
+    expect(liveRegionAround(screen.getByTestId("handoff-amount"))).toBeNull();
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuetext", "240 MB of 480 MB");
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50");
   });
 
   it("says where a dropped copy stopped, and that it goes on by itself", () => {
@@ -216,6 +326,46 @@ describe("the standby screen", () => {
     expect(screen.getByRole("button", { name: "Use here" })).toBeInTheDocument();
   });
 
+  it("is a landmark, not a live region: only the state is read when it changes, and no live part sits in another", async () => {
+    fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === PHONE, active: device.key === DESKTOP, status: device.key === DESKTOP ? "live" as const : undefined })) }));
+    fakeEngine.on("deviceHandoffView", () => ({ role: "taker", device: "MacBook", key: DESKTOP, step: "copying", bytes: 120 * 1024 ** 2, total: 480 * 1024 ** 2 }) satisfies HandoffView);
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    fakeEngine.on("devicePing", () => ({ ms: 12 }));
+    const { user } = renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
+    const standby = screen.getByRole("main");
+    expect(standby).toBe(screen.getByTestId("device-standby"));
+    expect(standby).not.toHaveAttribute("role");
+    expect(standby).not.toHaveAttribute("aria-live");
+    // The state in words is what a change of state reads: the title and the hint, each alone.
+    expect(screen.getByTestId("device-standby-title")).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByTestId("device-standby-hint")).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByTestId("device-standby-hint").textContent).toBe("This device is on standby for this profile.");
+    await user.click(await screen.findByTestId("device-standby-check"));
+    const live = [screen.getByTestId("device-standby-title"), screen.getByTestId("device-standby-hint"), await screen.findByTestId("handoff-line"), await screen.findByTestId("device-standby-check-result")];
+    for (const part of live) expect(liveRegionAround(part)).toBeNull();
+    // Nothing a person presses is read again with them.
+    for (const part of [...standby.querySelectorAll<HTMLElement>("[role=status], [role=alert], [aria-live]")]) expect(part.querySelector("button")).toBeNull();
+  });
+
+  it("the answer of Check connection goes when that device's link is no longer connected", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "setTimeout"] });
+    let status: "live" | "connecting" = "live";
+    fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === PHONE, active: device.key === DESKTOP, status: device.key === DESKTOP ? status : undefined })) }));
+    fakeEngine.on("deviceHandoffView", () => null);
+    fakeEngine.on("deviceTakeoverInfo", () => ({ offered: false }));
+    fakeEngine.on("devicePing", () => ({ ms: 12 }));
+    renderApp(<DeviceStandby gate={{ state: "standby", activeDevice: "MacBook" }} />);
+    await later(0);
+    const mac = screen.getAllByTestId("device-standby-link")[0];
+    act(() => within(mac).getByTestId("device-standby-check").click());
+    await later(0);
+    expect(within(mac).getByTestId("device-standby-check-result")).toHaveTextContent("Answered in 12 ms");
+    status = "connecting";
+    await later(3_000);
+    expect(mac).toHaveAttribute("data-status", "connecting");
+    expect(within(mac).queryByTestId("device-standby-check-result")).toBeNull();
+  });
+
   it("a device that released the profile and has not heard back: the step it waits at, and Use here all the same", async () => {
     fakeEngine.on("deviceSet", () => set({ state: "standby", devices: set().devices.map((device) => ({ ...device, self: device.key === DESKTOP, active: device.key === PHONE })) }));
     fakeEngine.on("deviceHandoffView", () => ({ role: "giver", device: "iPhone", key: PHONE, step: "switching", bytes: 0, total: 0 }) satisfies HandoffView);
@@ -270,7 +420,7 @@ describe("the standby screen", () => {
     expect(screen.getByTestId("device-standby-title")).toHaveTextContent("Can't read this device's state");
     expect(screen.getByTestId("device-standby")).toHaveTextContent("Nothing was started.");
     await user.click(screen.getByTestId("device-standby-info"));
-    expect(screen.getByTestId("device-standby-text")).toHaveTextContent("Restart the app or the device, then try again.");
+    expect(screen.getByTestId("device-standby-text")).toHaveTextContent("Restart the app or device, then retry.");
   });
 });
 
@@ -334,7 +484,7 @@ describe("a limited start (WISP 06 § When a device checks)", () => {
     expect(line).toHaveTextContent("Restored copy, offline for now");
     expect(line).toHaveTextContent("Checking whether your profile runs on another device.");
     act(() => screen.getByTestId("restore-limited-info").click());
-    expect(screen.getByTestId("restore-limited-text")).toHaveTextContent("this copy goes on standby; if none does, it starts by itself");
+    expect(screen.getByTestId("restore-limited-text")).toHaveTextContent("this copy goes on standby; if not, it starts");
     // A tombstone: only the person starts it as a profile of its own, by typing its name.
     act(() => fakeEngine.setState({ limited: true, restoreCheck: "removed" }));
     expect(screen.getByTestId("restore-limited-banner")).toHaveTextContent("This backup is from before a device was removed.");

@@ -83,6 +83,59 @@ describe("a first pairing with no WebRTC on either side", () => {
     expect(a?.peer, "one session, the same connection at both ends").toBe(b);
     expect(native.dials, "no dial after the crossing").toBe(2);
   }, 60_000);
+
+  it("the lower key's own dial stalling, the contact's that crossed it carries the chat once it connected, not after the redial", async () => {
+    // A HyperDHT dial that opened and brought no preface: dialled again at 2 s (redial.mjs `PREFACE_WAIT_MS`); the
+    // contact never saw the first. Before, the joiner kept the inviter's connection waiting for that redial (lab, DHT
+    // direct: 5 of 20 pairings live 0.9-1.2 s after a working connection was there).
+    const { native, inviter, joiner } = await pair("joiner");
+    const connect = joiner.endpoint.connect;
+    let stalled = false;
+    joiner.endpoint.connect = async descriptor => {
+      if (!stalled) { stalled = true; await new Promise(resolve => setTimeout(resolve, 2_000)); }
+      return connect(descriptor);
+    };
+    joiner.side.link.learnPeerTransports(...record(inviter), true);
+    await run(200);
+    inviter.side.link.learnPeerTransports(...record(joiner), true);
+    const took = await until(() => inviter.dials.length > 0, 10_000);
+    expect(took, "the inviter dials").toBeLessThan(Infinity);
+    const liveMs = await until(() => live(inviter) && live(joiner), 10_000) + took;
+    // The inviter's dial connects in `dialMs` (0.4 s). Before: live 2.4 s after it dialled, with the joiner's redial; 1.15 s after.
+    expect(liveMs, "live soon after the inviter's dial connected").toBeLessThan(native.dialMs + 1_000);
+    // The joiner's redial, landing late, is closed on both sides: the session stays where it is.
+    await run(15_000);
+    for (const desk of [inviter, joiner]) expect(live(desk), `${desk.side.link.pairingProgress?.role} still live`).toBe(true);
+    const a = channelOf(inviter.side.link) as { peer?: unknown }, b = channelOf(joiner.side.link);
+    expect(a?.peer, "one session, the same connection at both ends").toBe(b);
+  }, 60_000);
+});
+
+/**
+ * A slow DHT (a busy public one, or a testnet with dead nodes: puts 5-12 s, reads 2.5-7.5 s): for 20 s neither Desktop
+ * has read the other's capability record, so a dial has nothing to try ("No transport both apps allow is available
+ * yet"). Each such dial used to count as a failed one: the pairing turned `on-dht` with a transport reason at 12-15 s,
+ * and the next dial waited 160 s.
+ */
+const SLOW_DHT: NetworkModel = { publishMs: 5_000, visibleAfterMs: 5_000, readMs: 2_500 };
+
+describe("a first pairing with no WebRTC, before either side read the other's record", () => {
+  it("counts no dial that had nothing to try: no on-dht for a transport, no wait grown", async () => {
+    const pkarr = new MemoryPkarr(SLOW_DHT), native = new NativeWorld(), made = invitationWhere("inviter");
+    const inviter = desktop(native, "ana", open(made.inviter, pkarr, { dht: true, link: { rtcAvailable: false } }));
+    await run(8_000);
+    const joiner = desktop(native, "bia", open(made.joiner, pkarr, { dht: true, link: { rtcAvailable: false } }));
+    await run(20_000);
+    for (const desk of [inviter, joiner]) {
+      const role = desk.side.link.pairingProgress?.role;
+      expect(desk.dials, `${role}: nothing was dialled`).toEqual([]);
+      expect(desk.side.progress.filter(p => p.reason === "transport"), `${role}: no transport failed`).toEqual([]);
+      const attempt = desk.side.link.liveAttempt;
+      expect(attempt?.reason, `${role}: says why nothing was tried`).toMatch(/No transport both apps allow/);
+      // At most the first wait of the background pace (20 s), not 160 s.
+      expect(attempt!.retryAt! - Date.now(), `${role}: the next dial is not pushed back`).toBeLessThanOrEqual(20_000);
+    }
+  }, 60_000);
 });
 
 /**

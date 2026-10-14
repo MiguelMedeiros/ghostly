@@ -15,6 +15,7 @@ import { Root } from "./Root";
 import { createDesktopHost } from "./desktop/host";
 import { nativeCallSupport } from "./desktop/nativeCalls";
 import { setProfileBase } from "./lib/profiles";
+import { restartWhenRestored } from "./lib/restoredPage";
 import { openProfile } from "./lib/profileStart";
 import { listen } from "@tauri-apps/api/event";
 import { setAppOpener } from "./lib/apps/open";
@@ -22,13 +23,14 @@ import { desktopOpener } from "./lib/apps/desktopOpener";
 import { nameInChat } from "./lib/apps/nameInChat";
 import { appWithContact } from "./lib/apps/running";
 import { loadSettings } from "./lib/settings";
-import { locales } from "./locales";
-import { translateWith } from "./locales/translate";
+import { loadLocale, translatorFor } from "./locales";
 import { servicesPlatform } from "./lib/platform";
 import { androidApp } from "./lib/touchOnly";
 import { followAppVisibility, followSystemBars, leaveOutPublicStun, takeIncomingShares } from "./desktop/android";
 
 async function boot() {
+  // Asked first, so Rust starts GStreamer while the profile opens (see createDesktopHost below).
+  const calls = nativeCallSupport();
   let profile = "";
   try {
     profile = await invoke<string>("get_profile");
@@ -42,6 +44,8 @@ async function boot() {
   // A profile a handoff moved whose pointer was lost is pointed at its state again before anything opens storage. Each
   // profile gets its own sessions, database and peer (they share the WebView's storage area), and its language on <html>.
   profile = await openProfile(recoverHandoffPointer);
+  // Its words too: only English is in the entry, every other language is loaded when a profile reads in it.
+  await loadLocale(loadSettings().language);
 
   const root = createRoot(document.getElementById("root")!);
   await becomeThePeer(`ghostly-peer-${profile}`, () =>
@@ -57,7 +61,9 @@ async function boot() {
   const version = await getVersion().catch(() => "0.0.0");
   // What a handoff reads and writes of a profile's storage (WISP 06 § The handoff), before the host starts the engine.
   setHandoffProfileHost(handoffProfileHost(version, "desktop"));
-  const host = createDesktopHost(version, await nativeCallSupport());
+  // Whether calls work here is not waited for: on Linux the answer starts GStreamer (0.6 s on a first launch), and
+  // the page is drawn meanwhile. The engine starts once it has come.
+  const host = createDesktopHost(version, calls);
   setBrowserHost(host);
   // The Android app: its system bars follow the theme, shares from other apps open the Share to… picker, and the
   // page knows when the app is in the background (its WebView never says so).
@@ -68,13 +74,12 @@ async function boot() {
   }
   // Mini-apps (WISP 1200) open in windows of their own, each with its broker here (lib/apps/desktopOpener.ts).
   // Its window is named after the app and the contact ("Chess with Ana"), in the profile's language.
-  const windowTitle = (title: string, linkId: string | null) => {
-    const language = loadSettings().language;
-    return appWithContact(title, linkId, translateWith(locales[language] || locales.en, locales[language] ? language : "en"));
-  };
+  const windowTitle = (title: string, linkId: string | null) => appWithContact(title, linkId, translatorFor(loadSettings().language));
   setAppOpener(desktopOpener({ apps: () => servicesPlatform?.apps, invoke, listen, nameIn: nameInChat, windowTitle }));
   if (gate.full) startSessionSync();
   addEventListener("pagehide", () => host.announceDeparture());
+  // Shown again after that (Back, out of the back/forward cache), the page has no peer: it starts over.
+  restartWhenRestored();
   // The app is exiting (apps/desktop's lib.rs `on_run_event`): contacts hear it now, in the moment it waits for this.
   addEventListener("ghostly-departing", () => host.announceDeparture());
 

@@ -258,9 +258,12 @@
   max-width: 760px;
   margin-bottom: clamp(36px, 5vw, 64px);
 }
+/* A column that never sizes to its content: the deck is 100cqw wide and bleeds out of the column by a margin in % of
+   it, and WebKit sizes an auto column from that width, so the margin came out 0 and the deck sat a gutter right. */
 .sp-deck {
   position: relative;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 28px;
   justify-items: center;
 }

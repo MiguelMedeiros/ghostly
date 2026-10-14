@@ -2,31 +2,30 @@
 /**
  * The Chess the end-to-end tests run: e2e/fixtures/chess/index.html.txt, its one self-contained HTML file,
  * e2e/fixtures/chess/ghostly-app.json, the manifest it is published with, and e2e/fixtures/chess/chess.json saying
- * where both came from. The e2e specs (e2e/support/chessFixture.ts) and the store-keys test (CHESS_DIST and
- * CHESS_MANIFEST) read this pinned copy instead of apps/mini/chess, so they keep working once Chess lives in a
- * repository of its own. The page is kept as .txt so code scanning does not read the code it inlines (chess.js,
- * minified) as this repository's own.
+ * where both came from. Chess lives in a repository of its own (MiguelMedeiros/ghostly-chess), so the fixture is taken
+ * from the bundle its publisher signed there and is never built here. The e2e specs (e2e/support/chessFixture.ts) read
+ * this pinned copy. The page is kept as .txt so code scanning does not read the code it inlines (chess.js, minified)
+ * as this repository's own.
  *
- *   node tools/scripts/refresh-chess-fixture.mjs                      build it from apps/mini/chess (today's source)
- *   node tools/scripts/refresh-chess-fixture.mjs --bundle <file|url>  take it from a signed Chess bundle
- *   node tools/scripts/refresh-chess-fixture.mjs --check              change nothing; exit 1 if the fixture is stale
+ *   node tools/scripts/refresh-chess-fixture.mjs --bundle <file|url>          take it from a signed Chess bundle
+ *   node tools/scripts/refresh-chess-fixture.mjs --check                      change nothing; exit 1 if the fixture is
+ *                                                                             not what the bundle chess.json names holds
+ *   node tools/scripts/refresh-chess-fixture.mjs --check --bundle <file|url>  the same, against that bundle
  *
  * A bundle must be signed by Chess's publisher key (CHESS_PUBLISHER) and is read with the client's own reader
  * (readAppBundle: signature, file hashes). A URL must name one commit: raw.githubusercontent.com/<owner>/<repo>/<40-hex
  * commit>/... or cdn.jsdelivr.net/gh/<owner>/<repo>@<40-hex commit>/...; a branch or HEAD moves, so it is refused.
  *
- * Built from source, chess.json keeps the hash of the build's inputs (chessInputs), and
- * tools/scripts/test/chessFixture.test.ts fails while apps/mini/chess differs from what the fixture was built from.
- * CI also runs --check, which builds apps/mini/chess and compares the result byte for byte with the fixture.
+ * --check fetches the bundle, so CI does not run it: tools/scripts/test/chessFixture.test.ts checks, with no network,
+ * that the files are the ones chess.json describes. e2e/fixtures/chess/1.0.2 is the last Chess built in this
+ * repository, kept as it was for the update test; this script leaves it alone.
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const ROOT = resolve(fileURLToPath(new URL(".", import.meta.url)), "../..");
-export const CHESS_SOURCE = "apps/mini/chess";
 export const FIXTURE_DIR = "e2e/fixtures/chess";
 /** The fixture's copy of Chess's entry (index.html in its bundle). */
 export const FIXTURE_ENTRY = "index.html.txt";
@@ -37,42 +36,6 @@ export const CHESS_PUBLISHER = "odcgw6wjw8dynqop84r47jbjcdqossbgrfiejd367e14hgxm
 
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
-/**
- * The files of apps/mini/chess the built index.html and the fixture's manifest come from: not its tests, and not
- * package.json, whose version a release bump rewrites and whose devDependencies dependabot moves (chessInputs hashes
- * its dependencies, the code that gets bundled).
- */
-function inputFiles(dir) {
-  const out = ["ghostly-app.json", "index.html", "tsconfig.json", "vite.config.ts"].filter((f) => existsSync(join(dir, f)));
-  const walk = (sub) => {
-    for (const entry of readdirSync(join(dir, sub), { withFileTypes: true })) {
-      const path = `${sub}/${entry.name}`;
-      if (entry.isDirectory()) walk(path);
-      else out.push(path);
-    }
-  };
-  if (existsSync(join(dir, "src"))) walk("src");
-  return out.sort();
-}
-
-/**
- * One SHA-256 over the build's inputs in apps/mini/chess (each file's path and its text with \n line ends, then
- * package.json's dependencies with sorted keys), or null when the folder is gone (Chess moved to its own repository).
- */
-export function chessInputs(root = ROOT) {
-  const dir = join(root, CHESS_SOURCE);
-  if (!existsSync(join(dir, "vite.config.ts"))) return null;
-  const hash = createHash("sha256");
-  for (const file of inputFiles(dir)) {
-    const text = readFileSync(join(dir, file), "utf8").replace(/\r\n/g, "\n");
-    hash.update(`${file}\0${Buffer.byteLength(text)}\0`).update(text);
-  }
-  const deps = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).dependencies ?? {};
-  const text = JSON.stringify(Object.fromEntries(Object.keys(deps).sort().map((k) => [k, deps[k]])));
-  hash.update(`package.json#dependencies\0${Buffer.byteLength(text)}\0`).update(text);
-  return hash.digest("hex");
-}
-
 /** Whether `url` names one commit of a repository on GitHub's raw host or jsDelivr. */
 export function isPinnedUrl(url) {
   let u;
@@ -81,23 +44,6 @@ export function isPinnedUrl(url) {
   if (u.hostname === "raw.githubusercontent.com") return /^\/[^/]+\/[^/]+\/[0-9a-f]{40}\/.+/.test(u.pathname);
   if (u.hostname === "cdn.jsdelivr.net") return /^\/gh\/[^/]+\/[^/@]+@[0-9a-f]{40}\/.+/.test(u.pathname);
   return false;
-}
-
-/** Builds apps/mini/chess with its own Vite config: its one HTML file, its manifest and chess.json's fields. */
-export async function fromSource() {
-  const { build } = await import("vite");
-  const dir = join(ROOT, CHESS_SOURCE);
-  if (!existsSync(join(dir, "vite.config.ts"))) throw new Error(`${CHESS_SOURCE} is not here: refresh from a signed bundle (--bundle)`);
-  const out = mkdtempSync(join(tmpdir(), "chess-fixture-"));
-  try {
-    await build({ configFile: join(dir, "vite.config.ts"), root: dir, logLevel: "error", build: { outDir: out, emptyOutDir: true } });
-    const html = readFileSync(join(out, "index.html"));
-    const manifest = readFileSync(join(dir, "ghostly-app.json"), "utf8").replace(/\r\n/g, "\n");
-    const { name, version } = JSON.parse(manifest);
-    return { html, manifest, meta: { name, version, from: { source: CHESS_SOURCE, inputs: chessInputs() } } };
-  } finally {
-    rmSync(out, { recursive: true, force: true });
-  }
 }
 
 /**
@@ -143,18 +89,22 @@ async function main(args) {
   const at = args.indexOf("--bundle");
   const check = args.includes("--check");
   if (at >= 0 && !args[at + 1]) throw new Error("--bundle needs a file or a URL");
-  const { html, manifest, meta } = at >= 0 ? await fromBundle(args[at + 1]) : await fromSource();
   const dir = join(ROOT, FIXTURE_DIR);
+  // --check alone: against the bundle the fixture says it came from.
+  const where = at >= 0 ? args[at + 1] : check ? JSON.parse(readFileSync(join(dir, "chess.json"), "utf8")).from?.bundle : undefined;
+  if (!where) throw new Error("--bundle <file|url> is needed: Chess is not built in this repository");
+  if (at < 0 && !/^https:/i.test(where)) throw new Error(`chess.json names a file (${where}): pass it with --bundle`);
+  const { html, manifest, meta } = await fromBundle(where);
   const json = describe(html, manifest, meta);
   if (check) {
     const read = (file) => (existsSync(join(dir, file)) ? readFileSync(join(dir, file)) : null);
     const same = read(FIXTURE_ENTRY)?.equals(html) && read(FIXTURE_MANIFEST)?.toString("utf8") === manifest && read("chess.json")?.toString("utf8") === json;
     if (!same) {
-      console.error(`${FIXTURE_DIR} is stale: run node tools/scripts/refresh-chess-fixture.mjs${at >= 0 ? ` --bundle ${args[at + 1]}` : ""}`);
+      console.error(`${FIXTURE_DIR} is not what ${where} holds: run node tools/scripts/refresh-chess-fixture.mjs --bundle ${where}`);
       process.exitCode = 1;
       return;
     }
-    console.log(`${FIXTURE_DIR} is up to date (${meta.name} ${meta.version}, sha256 ${sha256(html).slice(0, 12)})`);
+    console.log(`${FIXTURE_DIR} is what ${where} holds (${meta.name} ${meta.version}, sha256 ${sha256(html).slice(0, 12)})`);
     return;
   }
   mkdirSync(dir, { recursive: true });

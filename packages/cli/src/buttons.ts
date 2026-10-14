@@ -1,7 +1,7 @@
 import { BUTTONS_CAPABILITY, STATUS_CARD_LIMITS, buttonLabelClash, checkStatusCard, randomBytes, toBase64Url, type ButtonsCard } from "@ghostly/core";
 import type { LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { Parsed } from "./args";
-import { bool, chatOrGroup, node, num, oneOf, str, type Method, type Params } from "./apiKit";
+import { bool, chatOrGroup, messageOf, node, num, oneOf, str, type Method, type Params } from "./apiKit";
 import { CliError } from "./errors";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
@@ -78,8 +78,7 @@ export function pressable(link: LinkView): boolean | null {
 }
 
 /** The message of mine with buttons that `button update` names, by its id here (or the id both sides know). */
-function buttonsMessage(messages: readonly StoredMessage[], ref: string, group: boolean): StoredMessage & { card: ButtonsCard } {
-  const message = messages.find((m) => m.sender === "me" && m.id === ref) ?? messages.find((m) => m.sender === "me" && m.wireId === ref);
+function buttonsMessage(message: StoredMessage | undefined, ref: string, group: boolean): StoredMessage & { card: ButtonsCard } {
   if (!message) throw new CliError("not_found", `No message ${JSON.stringify(ref)} of yours in this ${group ? "group" : "chat"}: the messageId send gave`);
   if (message.card?.kind !== "buttons") throw new CliError("bad_request", "That message has no buttons: send one with send --button id:Label");
   return message as StoredMessage & { card: ButtonsCard };
@@ -101,18 +100,20 @@ async function updateButtons(ctx: Parameters<Method>[0], params: Params): Promis
     const secret = findSecret(newText);
     if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; update with --force if you mean to`, { kind: secret.kind });
   }
-  const messages = target.group ? await node(ctx).groupMessages({ groupId: target.id }) : await node(ctx).getMessages(target.linkId);
-  const message = buttonsMessage(messages, ref, target.group);
+  const message = buttonsMessage(await messageOf(ctx, target.linkId, ref, (m) => m.sender === "me"), ref, target.group);
   if ((message.edit?.seq ?? 0) >= STATUS_CARD_LIMITS.edits)
     throw new CliError("refused", `This message took ${STATUS_CARD_LIMITS.edits} updates, the most one takes: ask again with a new send`, { messageId: message.id, edits: message.edit!.seq });
   const before = message.card;
+  // Said here, with the buttons it has, as a press says it: the card's own check names only the field.
+  if (chosen !== undefined && !before.buttons.some((b) => b.id === chosen))
+    throw new CliError("bad_request", `That message has no button ${JSON.stringify(chosen)}; its buttons: ${before.buttons.map((b) => b.id).join(", ")}`, { card: before });
   const card = checked({ ...before, ...(chosen !== undefined && { chosen }), ...((close || before.closed) && { closed: true }) });
   const text = newText ?? message.text;
   const wait = oneOf(params, "wait", target.group ? ["none", "sent"] as const : ["none", "confirmed"] as const, "none");
   const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
   const result = await node(ctx).editMessage({ linkId: target.linkId, messageId: message.id, text, card });
   if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
-  let edited = (target.group ? await node(ctx).groupMessages({ groupId: target.id }) : await node(ctx).getMessages(target.linkId)).find((m) => m.id === message.id);
+  let edited = await node(ctx).getMessage(target.linkId, message.id);
   if (wait === "confirmed" && edited?.edit?.pending) edited = await waitForEdit(ctx, target.linkId, message.id, ms);
   const edges = wait === "sent" && edited?.edit ? await waitForGroupFrame(ctx, target.id, message.id, edited.edit.seq, ms) : undefined;
   return {
@@ -132,9 +133,7 @@ async function pressButton(ctx: Parameters<Method>[0], params: Params): Promise<
   const ref = str(params, "message", true);
   const buttonId = str(params, "button", true);
   const where = target.group ? "group" : "chat";
-  const messages = target.group ? await node(ctx).groupMessages({ groupId: target.id }) : await node(ctx).getMessages(target.linkId);
-  const theirs = messages.filter((m) => m.sender !== "me");
-  const message = theirs.find((m) => m.id === ref) ?? theirs.find((m) => m.wireId === ref);
+  const message = await messageOf(ctx, target.linkId, ref, (m) => m.sender !== "me");
   if (!message) throw new CliError("not_found", `No message ${JSON.stringify(ref)} from someone else in this ${where}: the id its event or history gave`);
   if (message.card?.kind !== "buttons") throw new CliError("bad_request", "That message has no buttons");
   const button = message.card.buttons.find((b) => b.id === buttonId);
@@ -152,7 +151,7 @@ async function pressButton(ctx: Parameters<Method>[0], params: Params): Promise<
     const edges = wait === "sent" ? await waitForGroupFrame(ctx, target.id, replyId, undefined, ms) : node(ctx).groupTaken({ groupId: target.id, messageId: replyId });
     return { ...answer, edges };
   }
-  const reply = wait === "none" ? (await node(ctx).getMessages(target.linkId)).find((m) => m.id === replyId) : await waitForMessage(ctx, target.linkId, replyId, wait, ms);
+  const reply = wait === "none" ? await node(ctx).getMessage(target.linkId, replyId) : await waitForMessage(ctx, target.linkId, replyId, wait, ms);
   return { ...answer, delivery: reply?.delivery ?? null };
 }
 

@@ -1,0 +1,1 @@
+The `app` kind is no longer planned: it is built with 1200 and drawn in a 1:1 chat by the web app and Desktop from release 1.2. The header's Implementation row and § An app say so. No field and no rule changed.

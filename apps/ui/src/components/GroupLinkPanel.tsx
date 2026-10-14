@@ -11,6 +11,7 @@ import { GroupAvatar } from "./GroupAvatar";
 import { useI18n } from "../contexts/I18nContext";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+import { GroupLinkAskDialog } from "./GroupLinkAskDialog";
 
 function ShareIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 16V3m0 0L7 8m5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" /></svg>;
@@ -31,10 +32,22 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   const [error, setError] = useState<Problem | null>(null);
   const [said, setSaid] = useState<"" | "copied" | "shared">("");
   const [showQr, setShowQr] = useState(large);
+  const [asking, setAsking] = useState<"reset" | "disable" | null>(null);
   const saidTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const shareButton = useRef<HTMLButtonElement>(null);
+  const shareButton = useRef<HTMLButtonElement>(null), enableButton = useRef<HTMLButtonElement>(null);
   useEffect(() => () => clearTimeout(saidTimer.current), []);
   const url = groupLinkUrl(group);
+  // Turning the link off or on swaps the panel and takes the button pressed with it: the focus follows to the one in
+  // its place (Turn on the link, or Share), unless it went somewhere else meanwhile.
+  const follow = useRef(false);
+  const on = !!url;
+  useEffect(() => {
+    if (!follow.current) return;
+    follow.current = false;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected && !(active instanceof HTMLDialogElement)) return;
+    (on ? shareButton : enableButton).current?.focus();
+  }, [on]);
   const community = group.profile === "community";
   const cap = community ? COMMUNITY_LIMITS.members : MAX_GROUP_MEMBERS;
   const full = group.members.length >= cap;
@@ -42,9 +55,9 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
     setSaid(what); clearTimeout(saidTimer.current);
     saidTimer.current = setTimeout(() => setSaid(""), 2500);
   };
-  const run = async (action: () => Promise<unknown>) => {
-    setBusy(true); setError(null);
-    try { await action(); } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); } finally { setBusy(false); }
+  const run = async (action: () => Promise<unknown>, swaps = false) => {
+    setBusy(true); setError(null); follow.current = swaps;
+    try { await action(); } catch (e) { follow.current = false; setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); } finally { setBusy(false); }
   };
   const copy = async () => {
     setError(null);
@@ -62,28 +75,32 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
   if (!url) return <div className={large ? "text-center" : "mt-4"} data-testid="group-link" data-state="off">
     {!large && <h3 className="text-xs font-bold uppercase tracking-wider text-accent">{t("group.link.title")}</h3>}
     <p className="mt-1 text-sm text-text-muted">{t("group.link.off")}</p>
-    <button disabled={busy || full} onClick={() => void run(() => engine.call("enableGroupLink", { groupId: group.id }))} data-testid="group-link-enable"
+    <button ref={enableButton} disabled={busy || full} onClick={() => void run(() => engine.call("enableGroupLink", { groupId: group.id }), true)} data-testid="group-link-enable"
       className="mt-2 min-h-9 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{full ? t("group.link.fullShort") : t("group.link.enable")}</button>
     {error && <Notice problem={error} className="mt-2 text-xs" />}
   </div>;
 
-  const field = <input readOnly value={url} aria-label={t("group.link.title")} data-testid="group-link-url" onFocus={e => e.currentTarget.select()}
+  const field = <input readOnly dir="ltr" value={url} aria-label={t("group.link.title")} data-testid="group-link-url" onFocus={e => e.currentTarget.select()}
     className={`min-w-0 flex-1 rounded-lg bg-input-bg px-3 font-mono text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent ${large ? "py-2.5 text-xs" : "py-1.5 text-[11px]"}`} />;
   const copyButton = <button onClick={() => void copy()} data-testid="group-link-copy"
-    className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg font-semibold ${large ? "min-h-11 flex-1 bg-surface-alt px-4 text-sm text-text-primary hover:bg-surface-hover" : "bg-surface-alt px-2.5 py-1.5 text-xs text-text-primary hover:bg-surface-hover"}`}>
+    className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg font-semibold ${large ? "min-h-11 flex-1 bg-surface-alt px-4 text-sm text-text-primary hover:bg-surface-hover" : "bg-surface-alt px-2.5 py-1.5 text-xs text-text-primary hover:bg-surface-hover max-md:min-h-11 max-md:px-3"}`}>
     <CopyIcon /><span>{said === "copied" ? t("group.link.copied") : t("common.copy")}</span>
   </button>;
   const shareButtonEl = <button ref={shareButton} onClick={() => void share()} data-testid="group-link-share"
-    className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover ${large ? "min-h-11 flex-1 px-4 text-sm" : "px-2.5 py-1.5 text-xs"}`}>
+    className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-accent font-semibold text-panel-header hover:bg-accent-hover ${large ? "min-h-11 flex-1 px-4 text-sm" : "px-2.5 py-1.5 text-xs max-md:min-h-11 max-md:px-3"}`}>
     <ShareIcon /><span>{said === "shared" ? t("group.link.shared") : t("group.link.share")}</span>
   </button>;
   // For every member who sees the panel, not the admin alone: a community group's member hands its link out too.
-  const qrToggle = <button onClick={() => setShowQr(v => !v)} aria-expanded={showQr} data-testid="group-link-qr-toggle" className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary">{showQr ? t("group.link.hideQr") : t("group.link.showQr")}</button>;
-  const adminControls = group.isAdmin && <div className={`flex flex-wrap gap-1 ${large ? "justify-center" : ""}`}>
-    <button disabled={busy} onClick={() => void run(() => engine.call("enableGroupLink", { groupId: group.id, reset: true }))} data-testid="group-link-reset"
-      title={t("group.link.resetHint")} className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary disabled:opacity-40">{t("group.link.reset")}</button>
-    <button disabled={busy} onClick={() => void run(() => engine.call("disableGroupLink", { groupId: group.id }))} data-testid="group-link-disable"
-      title={t("group.link.disableHint")} className="rounded px-2 py-1 text-xs text-danger hover:bg-danger/10 disabled:opacity-40">{t("group.link.disable")}</button>
+  // On a phone the panel's everyday buttons (Share, Copy, this one) are a thumb's height, as the two that end the link.
+  const qrToggle = <button onClick={() => setShowQr(v => !v)} aria-expanded={showQr} data-testid="group-link-qr-toggle" className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary max-md:min-h-11 max-md:px-3">{showQr ? t("group.link.hideQr") : t("group.link.showQr")}</button>;
+  // On a phone the two that end the shared link are a thumb's height, on a row of their own: not one mis-tap from Show QR.
+  const adminControls = group.isAdmin && <div className={`flex flex-wrap gap-1 max-md:basis-full max-md:gap-2 ${large ? "justify-center" : ""}`}>
+    <button disabled={busy} onClick={() => setAsking("reset")} data-testid="group-link-reset"
+      title={t("group.link.resetHint")} className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-hover hover:text-text-primary disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.link.reset")}</button>
+    <button disabled={busy} onClick={() => setAsking("disable")} data-testid="group-link-disable"
+      title={t("group.link.disableHint")} className="rounded px-2 py-1 text-xs text-danger hover:bg-danger/10 disabled:opacity-40 max-md:min-h-11 max-md:px-3">{t("group.link.disable")}</button>
+    {asking && <GroupLinkAskDialog kind={asking} onClose={() => setAsking(null)}
+      onConfirm={() => { const reset = asking === "reset"; setAsking(null); void run(() => reset ? engine.call("enableGroupLink", { groupId: group.id, reset: true }) : engine.call("disableGroupLink", { groupId: group.id }), !reset); }} />}
   </div>;
   // Large, on a short screen it gives up some of its size (never under 140px) before the dialog has to scroll.
   const qr = <div data-testid="group-link-qr" className={`mx-auto w-fit max-w-full rounded-2xl bg-white p-3 [&_svg]:h-auto [&_svg]:max-w-full ${large ? "[&_svg]:w-[clamp(140px,28dvh,248px)]" : "mt-2"}`}>
@@ -94,7 +111,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
     {qr}
     <div className="flex">{field}</div>
     <div className="flex gap-2">{shareButtonEl}{copyButton}</div>
-    <p data-testid="group-link-note" className={`rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed ${full ? "text-amber-500" : "text-text-secondary"}`}>{note}</p>
+    <p data-testid="group-link-note" className={`rounded-lg bg-surface-alt/80 p-3 text-xs leading-relaxed ${full ? "text-warn-ink" : "text-text-secondary"}`}>{note}</p>
     {adminControls}
     {error && <Notice problem={error} className="text-center text-xs" />}
   </div>;
@@ -103,7 +120,7 @@ export function GroupLinkPanel({ group, large = false }: { group: GroupView; lar
     <h3 className="text-xs font-bold uppercase tracking-wider text-accent">{t("group.link.title")}</h3>
     <div className="mt-2 flex">{field}</div>
     <div className="mt-2 flex flex-wrap items-center gap-1.5">{shareButtonEl}{copyButton}{qrToggle}{adminControls}</div>
-    <p data-testid="group-link-note" className={`mt-2 text-xs ${full ? "text-amber-500" : "text-text-muted"}`}>{note}</p>
+    <p data-testid="group-link-note" className={`mt-2 text-xs ${full ? "text-warn-ink" : "text-text-muted"}`}>{note}</p>
     {showQr && qr}
     {error && <Notice problem={error} className="mt-2 text-xs" />}
   </div>;

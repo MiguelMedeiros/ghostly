@@ -11,11 +11,11 @@ import { isolatedNetworkEnv } from "./support/network";
 // covers: headless.daemon
 
 /*
- * The CLI runs no mini-app (WISP 1200 § Per client: CLI), and the bot side of apps/1 is phase 2: its engine is made with
- * `apps: false`, so it offers no apps/1 to a contact and refuses every app call, whatever `APPS_ENABLED` says. Here the
- * build's flag is on, as in a release that ships apps, and the runtime is the daemon's own (`startRuntime`), in this
+ * The CLI runs no mini-app (WISP 1200 § Per client: CLI). A profile that serves no app (`app serve`) has its engine made
+ * with `apps: false`, so it offers no apps/1 to a contact and refuses every app call, whatever `APPS_ENABLED` says. Here
+ * the build's flag is on, as in a release that ships apps, and the runtime is the daemon's own (`startRuntime`), in this
  * process, on a new profile and on this machine's network only. That an engine made so offers no apps/1 on a live
- * chat is packages/browser/test/appsPinnedOff.test.ts.
+ * chat is packages/browser/test/appsPinnedOff.test.ts; a profile that serves an app is test/appServe.test.ts.
  */
 
 vi.mock("@ghostly/browser/shared/features", async (actual) => ({ ...await actual<typeof import("@ghostly/browser/shared/features")>(), APPS_ENABLED: true }));

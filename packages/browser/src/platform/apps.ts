@@ -16,26 +16,30 @@ engine.onAppFrame((linkId, frame) => {
 });
 
 /** The mini-app broker's way to the engine (WISP 1200), for a host that frames apps in its runner at `runnerUrl`. */
-export function engineApps(runnerUrl: string, netRunnerUrl?: string, runnerServed?: boolean): AppsPlatform {
+export function engineApps(runnerUrl: string, netRunnerUrl?: string, runnerServed?: boolean, digest?: string): AppsPlatform {
+  // The version a running app's calls name (`running`), so the engine judges that one; none: the installed version.
+  const runs = digest === undefined ? {} : { digest };
   return {
     runnerUrl,
     ...(netRunnerUrl ? { netRunnerUrl } : {}),
     ...(runnerServed ? { runnerServed: true } : {}),
     entry: (ref, runAnyway) => engine.call("appEntry", { ref, ...(runAnyway ? { runAnyway } : {}) }),
-    file: (ref, path) => engine.call("appFile", { ref, path }),
+    running: (of) => engineApps(runnerUrl, netRunnerUrl, runnerServed, of),
+    file: (ref, path) => engine.call("appFile", { ref, path, ...runs }),
+    fileAt: (ref, path) => engine.call("appFileAt", { ref, path, ...runs }),
     storage: {
       get: async (ref, scope, key) => {
-        const found = await engine.call("appStorageGet", { ref, scope, key });
+        const found = await engine.call("appStorageGet", { ref, scope, key, ...runs });
         return found ? { value: found.value as MiniAppJson } : null;
       },
-      set: (ref, scope, key, value) => engine.call("appStorageSet", { ref, scope, key, value }),
-      delete: (ref, scope, key) => engine.call("appStorageDelete", { ref, scope, key }),
-      keys: (ref, scope) => engine.call("appStorageKeys", { ref, scope }),
+      set: (ref, scope, key, value) => engine.call("appStorageSet", { ref, scope, key, value, ...runs }),
+      delete: (ref, scope, key) => engine.call("appStorageDelete", { ref, scope, key, ...runs }),
+      keys: (ref, scope) => engine.call("appStorageKeys", { ref, scope, ...runs }),
     },
     chat: {
-      open: (linkId, ref, version) => engine.call("appOpen", { linkId, ref, version }),
+      open: (linkId, ref, version) => engine.call("appOpen", { linkId, ref, version, ...runs }),
       close: (linkId, ref) => engine.call("appClose", { linkId, ref }),
-      send: async (linkId, ref, data) => (await engine.call("appSend", { linkId, ref, data })).error,
+      send: async (linkId, ref, data) => (await engine.call("appSend", { linkId, ref, data, ...runs })).error,
       onFrame: (listener: (linkId: string, frame: AppFrameEvent) => void) => engine.onAppFrame(listener),
       peer: (linkId, app) => peers.get(peerKey(linkId, app)) ?? null,
     },

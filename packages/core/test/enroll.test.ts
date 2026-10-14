@@ -190,6 +190,19 @@ describe("enroll/1", () => {
     expect(Number(digits)).toBe(new DataView(h.buffer, h.byteOffset).getUint32(0) % 1_000_000);
   });
 
+  it("a device's name is cleaned as display text, by the device that tells it and by the one that reads it", async () => {
+    const dirty = "\u202EenohP\n\x07";
+    const hello = await enrollHelloFrame(HASH, inviter.publicKey, joiner, { name: dirty, kind: "web", app: "1.1.0" });
+    expect(hello.name).toBe("enohP");
+    // A joiner that does not clean its name: the inviter's confirm screen shows what this reader returns.
+    expect(readEnrollHello({ ...hello, name: dirty }, HASH, inviter.publicKey, joiner.publicKey)?.name).toBe("enohP");
+    expect(readEnrollHello({ ...hello, name: "\u202E\u200B" }, HASH, inviter.publicKey, joiner.publicKey)?.name).toBe("");
+    const grant = enrollGrantFrame({ d: seed("D"), set: [{ key: inviter.publicKey, name: "Mac\u200BBook\u2029" }, { key: joiner.publicKey, name: dirty }], turn: 5, rev: 0 });
+    expect(grant.set).toEqual([[toBase64Url(inviter.publicKey), "MacBook"], [toBase64Url(joiner.publicKey), "enohP"]]);
+    const read = readEnrollGrant({ ...grant, set: [[toBase64Url(inviter.publicKey), "Mac\u200BBook\u2029"], [toBase64Url(joiner.publicKey), dirty]] }, inviter.publicKey, joiner.publicKey);
+    expect(read?.set.map((slot) => slot?.name)).toEqual(["MacBook", "enohP"]);
+  });
+
   it("a grant keeps every slot in its place and lists both devices once", () => {
     const frame = enrollGrantFrame({ d: seed("D"), set: [null, { key: inviter.publicKey, name: "MacBook" }, { key: joiner.publicKey, name: "Phone" }, null], turn: 5, rev: 2 });
     expect(frame.set).toEqual([null, [toBase64Url(inviter.publicKey), "MacBook"], [toBase64Url(joiner.publicKey), "Phone"]]);

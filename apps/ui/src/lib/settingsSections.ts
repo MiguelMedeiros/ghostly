@@ -99,6 +99,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   { section: "network", label: "network.turn", words: "settings.searchWords.turn" },
   { section: "network", label: "network.domainLookups", words: "settings.searchWords.domains" },
   { section: "storage", label: "settings.storageUsed", words: "settings.searchWords.storage" },
+  { section: "storage", label: "settings.groupDownloads.title", words: "settings.searchWords.groupDownloads" },
   { section: "storage", label: "sidebar.deleteAllChats", words: "settings.searchWords.deleteChats" },
   { section: "storage", label: "settings.clearAllData", words: "settings.searchWords.clearData" },
   { section: "about", label: "updates.auto", words: "settings.searchWords.updates", needs: "updates" },

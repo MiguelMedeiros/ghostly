@@ -194,4 +194,14 @@ test.describe("join page", () => {
     await expect(page.getByRole("heading", { name: "You're invited to a chat" })).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/");
   });
+
+  // The layout takes the code out of the address on every page, so every page shows the dialog that reads it.
+  for (const path of ["/privacy", "/terms", "/no-such-page", "/wisps/no-such"]) {
+    test(`an invite link pasted after ${path} opens the dialog there`, async ({ page }) => {
+      await standInApp(page);
+      await page.goto(`${path}#${CODE}`);
+      await expect(page.getByTestId("join-landing").getByRole("heading", { name: "You're invited to a chat" })).toBeVisible();
+      expect(page.url()).not.toContain("#");
+    });
+  }
 });

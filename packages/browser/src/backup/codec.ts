@@ -1,9 +1,10 @@
-/** Base64url without padding, in chunks: bundles can be many megabytes. */
-export function toBase64Url(bytes: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
+import { toBase64Url } from "@ghostly/core";
+
+/**
+ * Base64url without padding. Core's encoder, not `btoa`: every picture, voice note and kept file (up to 16 MiB each)
+ * goes through it on the page's thread, where `btoa` spends over a second per 16 MiB.
+ */
+export { toBase64Url };
 export function fromBase64Url(text: string): Uint8Array {
   if (!/^[A-Za-z0-9_-]*$/.test(text)) throw new Error("Invalid base64url");
   const binary = atob(text.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (text.length % 4)) % 4));

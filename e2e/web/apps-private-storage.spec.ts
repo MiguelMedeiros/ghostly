@@ -24,7 +24,7 @@ test("in a browser that keeps no app files, installing says to try a normal wind
   const error = screen.getByTestId("app-install-error");
   await expect(error).toHaveText("This browser can't keep apps here (private browsing?). Try a normal window.");
   await screen.getByTestId("app-install-error-info").click();
-  await expect(screen.getByTestId("app-install-error-text")).toContainText("Open Ghostly in a normal window and install the app there.");
+  await expect(screen.getByTestId("app-install-error-text")).toContainText("Private windows, like Safari's Private Browsing, don't let it");
   await expect(error).not.toContainText(/Blob|IndexedDB|object store/);
 
   // Nothing was installed.

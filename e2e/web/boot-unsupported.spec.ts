@@ -9,13 +9,16 @@ import type { LocalRelay } from "../support/relay";
  * else (an uncaught error before the first render), or an app that looked fine and never connected.
  *
  * Three outcomes:
- * - the app works without the thing (it is optional: service workers, push, notifications, persistence, OPFS);
+ * - the app works without the thing (it is optional: service workers, push, notifications, persistence, OPFS,
+ *   WebAssembly, missing or refused);
  * - the app says it cannot run here and names what is missing (storage, IndexedDB, Web Crypto, Web Locks);
  * - the boot guard (apps/web/public/boot-guard.js, plain HTML outside React) says the app could not start, with
- *   "Copy details": an engine too old for the bundle, WebAssembly refused, a bundle that did not load.
+ *   "Copy details": an engine too old for the bundle, no matchMedia, a bundle that did not load.
  */
 
 const ANDROID_WEBVIEW = "Mozilla/5.0 (Linux; Android 9; SM-G960F Build/PPR1.180610.011; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/92.0.4515.159 Mobile Safari/537.36";
+
+const IPHONE_CHROME = "Mozilla/5.0 (iPhone; CPU iPhone OS 26_6_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/155.0.0.0 Mobile/15E148 Safari/604.1";
 
 const remove = (owner: string, name: string) => `try { delete ${owner}.${name}; Object.defineProperty(${owner}, "${name}", { value: undefined, configurable: true, writable: true }); } catch (e) {}`;
 const denied = `new DOMException("denied", "SecurityError")`;
@@ -53,6 +56,9 @@ const OPTIONAL: [string, string][] = [
   ["BroadcastChannel", remove("window", "BroadcastChannel")],
   ["WebRTC", remove("window", "RTCPeerConnection") + remove("window", "webkitRTCPeerConnection")],
   ["WebAssembly", remove("window", "WebAssembly")],
+  // Nothing the app starts with compiles WebAssembly: what does (the Ark and USDT wallets' libraries, Iroh) loads when
+  // it is first used, and fails there. With those libraries in the first bundle this was the boot guard's screen.
+  ["WebAssembly the browser agrees to compile", `WebAssembly.Module = function () { throw new WebAssembly.CompileError("refused"); }; for (const m of ["instantiate", "compile", "instantiateStreaming", "compileStreaming"]) WebAssembly[m] = () => Promise.reject(new WebAssembly.CompileError("refused"));`],
   // What an Android WebView lacks next to Chrome, all at once.
   ["what an Android WebView lacks", remove("Navigator.prototype", "serviceWorker") + remove("window", "Notification") + remove("window", "PushManager") + `if (navigator.storage) { StorageManager.prototype.getDirectory = undefined; StorageManager.prototype.persist = undefined; }`],
 ];
@@ -134,6 +140,19 @@ test("the cannot-run screen speaks the profile's language, and its details hold 
   await context.close();
 });
 
+test("an iPhone that looks to be in Lockdown Mode is told so, and how to exclude the site", tags, async ({ browser, relay, baseURL }) => {
+  // What the friend's iPhone reported (Chrome on iOS 26, all WebKit): no IndexedDB, Web Locks, WebAssembly or WebRTC.
+  const lockdown = remove("window", "indexedDB") + remove("Navigator.prototype", "locks") + remove("window", "WebAssembly") + remove("window", "RTCPeerConnection") + remove("window", "webkitRTCPeerConnection");
+  const { page, context } = await open(browser, relay, baseURL, lockdown, { userAgent: IPHONE_CHROME });
+  await expect(page.getByTestId("unsupported-browser")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId("unsupported-lockdown")).toContainText("Lockdown Mode looks to be on");
+  await expect(page.getByTestId("unsupported-browser")).not.toContainText("open Ghostly in another one");
+  await page.getByRole("button", { name: "How to turn it off for this site" }).click();
+  await expect(page.getByText(/Website Settings/)).toBeVisible();
+  await expect(page.getByTestId("unsupported-details")).toHaveValue(/missing: indexedDB, locks/);
+  await context.close();
+});
+
 test("a lock another tab holds is still \"open in another tab\", not an error", tags, async ({ browser, relay, baseURL }) => {
   const { page, context } = await open(browser, relay, baseURL, `LockManager.prototype.request = () => ${never};`);
   await expect(page.getByText("Ghostly is already open in another tab.")).toBeVisible({ timeout: 20_000 });
@@ -149,7 +168,6 @@ test("a lock another tab holds is still \"open in another tab\", not an error", 
 const FATAL: [string, string][] = [
   // What an engine older than the bundle's floor fails on first (Chrome and WebView before 93, Safari before 15.4).
   ["an engine too old for the bundle (no Object.hasOwn)", `Object.hasOwn = undefined;`],
-  ["WebAssembly that the browser refuses to compile", `WebAssembly.Module = function () { throw new WebAssembly.CompileError("refused"); }; for (const m of ["instantiate", "compile", "instantiateStreaming", "compileStreaming"]) WebAssembly[m] = () => Promise.reject(new WebAssembly.CompileError("refused"));`],
   ["no matchMedia", remove("window", "matchMedia")],
 ];
 
@@ -173,6 +191,20 @@ for (const [what, script] of FATAL) {
     await context.close();
   });
 }
+
+test("a lock that is slow, then an app that cannot start: the page says so after the \"open in another tab\" screen", tags, async ({ browser, relay, baseURL }) => {
+  // A busy phone grants the lock late: the entry draws "open in another tab" while it waits, and the app that then
+  // gets the lock fails on its first render. The page was left empty, with the guard gone since that first screen.
+  const slowLock = `const request = LockManager.prototype.request; LockManager.prototype.request = function (...args) { return new Promise((resolve) => setTimeout(resolve, 1500)).then(() => request.apply(this, args)); };`;
+  const { page, context } = await open(browser, relay, baseURL, slowLock + remove("window", "matchMedia"), { userAgent: ANDROID_WEBVIEW });
+  await expect(page.getByText("Ghostly is already open in another tab.")).toBeVisible({ timeout: 20_000 });
+  const fallback = page.getByTestId("boot-fallback");
+  await expect(fallback).toBeVisible({ timeout: 20_000 });
+  await expect(fallback).toHaveAttribute("data-reason", "error");
+  await expect(fallback).toContainText("Ghostly could not start");
+  await expect(page.getByTestId("boot-fallback-details")).toHaveValue(/error: \S/);
+  await context.close();
+});
 
 test("a bundle the browser cannot parse, or that does not load: the page says so", tags, async ({ browser, relay, baseURL }) => {
   for (const broken of ["syntax", "blocked"] as const) {

@@ -1,5 +1,8 @@
 import { useEffect, useId, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { deliveryShape, useDeliveryWords, type DeliveryShape, type DhtOnlyBy } from "../../lib/delivery";
+import { useI18n } from "../../contexts/I18nContext";
+import { holdFull } from "../../lib/errorText";
+import { problemLine } from "../../lib/problemText";
 import type { ChatMessage } from "../../lib/types";
 
 /**
@@ -41,8 +44,10 @@ const TIP_MS = 2500;
  * held, it says in one line what it means; the details panel (⋮ → Details) has the rest. A message that was not
  * sent is a button: pressing the red mark sends it again.
  */
-export function DeliveryStatus({ delivery, acked = false, onPicture = false, onRetry, live, group }: {
+export function DeliveryStatus({ delivery, acked = false, onPicture = false, onRetry, live, group, error }: {
   delivery?: ChatMessage["delivery"];
+  /** Why it was not sent (the message's `deliveryError`): said on the mark when the person must wait for something. */
+  error?: string;
   /** A waiting file in a DHT-only chat: it waits for a live connection, and who chose DHT only. */
   live?: DhtOnlyBy;
   acked?: boolean;
@@ -50,10 +55,11 @@ export function DeliveryStatus({ delivery, acked = false, onPicture = false, onR
   group?: boolean;
   /** On the dark chip over a picture, dark in every theme. */
   onPicture?: boolean;
-  /** Sends a message that was not sent again. */
-  onRetry?: () => void;
+  /** Sends a message that was not sent again; a refusal it rejects with shows the mark's line again. */
+  onRetry?: () => void | Promise<void>;
 }) {
   const words = useDeliveryWords();
+  const { t } = useI18n();
   const state = delivery ?? (acked ? "delivered" : "sent");
   const shape = deliveryShape(delivery, acked);
   const [tip, setTip] = useState(false);
@@ -71,6 +77,8 @@ export function DeliveryStatus({ delivery, acked = false, onPicture = false, onR
     ? shape === "delivered" ? "text-[#53bdeb]" : shape === "failed" ? "text-[#ff9a8f]" : "text-[hsla(0,0%,100%,0.9)]"
     : shape === "delivered" ? "text-link" : shape === "failed" ? "text-danger-ink" : "text-text-primary/65";
   const failed = shape === "failed" && !!onRetry;
+  // The contact's storage has no room (WISP 404): sending again now is refused again, so the mark says why and when.
+  const full = delivery === "failed" && !!error && holdFull(error) ? problemLine(error, t) : undefined;
 
   const handlers = {
     // The message's own long press (its details) and swipe (a reply) start from here otherwise.
@@ -104,7 +112,7 @@ export function DeliveryStatus({ delivery, acked = false, onPicture = false, onR
   return (
     <span className="relative inline-flex">
       {failed ? (
-        <button type="button" {...common} aria-label={words.retry}
+        <button type="button" {...common} aria-label={full ?? words.retry}
           onFocus={() => show(false)} onBlur={() => setTip(false)}
           onClick={() => {
             // A press held long enough to read the line is not a request to send.
@@ -112,7 +120,7 @@ export function DeliveryStatus({ delivery, acked = false, onPicture = false, onR
             press.current = null;
             if (held) return;
             setTip(false);
-            onRetry!();
+            void Promise.resolve(onRetry!()).catch(() => show(true));
           }}>
           <DeliveryIcon shape={shape} cutout={onPicture ? "#0b141a" : undefined} />
         </button>
@@ -125,7 +133,7 @@ export function DeliveryStatus({ delivery, acked = false, onPicture = false, onR
       {tip && (
         <span role="tooltip" id={tipId} data-testid="message-delivery-tip"
           className="absolute bottom-full end-0 mb-1.5 z-20 w-max max-w-[15rem] whitespace-normal rounded-md border border-border bg-surface-alt px-2 py-1 text-start text-[11.5px] leading-snug text-text-primary shadow-lg pointer-events-none animate-fade-in">
-          {words.hint(state, live, group)}
+          {full ?? words.hint(state, live, group)}
         </span>
       )}
     </span>

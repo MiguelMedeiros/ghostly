@@ -143,7 +143,7 @@ test("on a phone a pinned chat is held, then dragged; a swipe still scrolls and 
   const [a, b, c] = chats;
   const pinned = async () => (await order(page)).slice(0, 3);
   await expect.poll(pinned).toEqual([c, b, a]);
-  const list = rows(page).first().locator("xpath=..");
+  const list = page.getByTestId("chat-list");
   const scrolled = () => list.evaluate(el => el.scrollTop);
 
   // A swipe that starts on a pinned row scrolls the list, and moves no chat.

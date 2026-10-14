@@ -97,7 +97,8 @@ test("the sender's own pasted picture shows at once, stays through the transfer,
   expect(await liveSource(picture), "its URL still serves the picture").toBe(true);
 
   await cdp.send("Debugger.resume");
-  await expect(chat(bob).getByTestId("file-bubble").filter({ hasText: /Pasted image .*\.png/ }).getByRole("img")).toBeVisible({ timeout: 60_000 });
+  // The picture by its name: the bubble also holds icons, which are images to a screen reader too.
+  await expect(chat(bob).getByTestId("file-bubble").filter({ hasText: /Pasted image .*\.png/ }).getByRole("img", { name: /^Pasted image .*\.png$/ })).toBeVisible({ timeout: 60_000 });
   expect(await loadedWidth(picture), "still loaded once the transfer ended").toBeGreaterThan(0);
   await expect.poll(() => liveSource(picture), { timeout: 5_000 }).toBe(true);
 

@@ -52,11 +52,15 @@ function steps(since: number): string {
     let held = 0;
     // A door reads its knocks every few seconds: a read only when what it found changed.
     const lastRead = new Map<string, string>();
+    // A link waiting out its backoff says so at every look, every 2 s: once per count of failed dials (minutes of
+    // them were all of the last 150 lines, the refused answers before them cut off).
+    const lastBackoff = new Map<string, number | undefined>();
     for (const line of readFileSync(file, "utf8").split("\n")) {
       try {
-        const { t, me, g, step, ...rest } = JSON.parse(line) as { t: number; me?: string; g?: string; step: string; error?: string };
+        const { t, me, g, step, ...rest } = JSON.parse(line) as { t: number; me?: string; g?: string; step: string; error?: string; failures?: number };
         if (t < since) continue;
         if (rest.error?.includes("budget")) held++;
+        if (step === "dial-backoff" && me) { if (lastBackoff.has(me) && lastBackoff.get(me) === rest.failures) continue; lastBackoff.set(me, rest.failures); }
         if (step === "knock.read" && g) { const found = JSON.stringify(rest); if (lastRead.get(g) === found) continue; lastRead.set(g, found); }
         if (step !== "poll") lines.push(`${new Date(t).toISOString().slice(11, 23)} ${name} ${me ?? `group ${g?.slice(0, 6)}`} ${step} ${JSON.stringify(rest)}`);
       } catch { /* a partial line */ }
@@ -69,16 +73,24 @@ function steps(since: number): string {
  * Waits until `dir`'s side of the community has a group link up (`community.connected`). A member's name alone says
  * nothing about it: names also come in the link's Pkarr packet, before its session opens. With the two relays' budget
  * shared by both daemons' groups, that session took more than two minutes once on a CI runner.
+ *
+ * Six minutes: on a loaded runner libdatachannel's race refuses the dialer's answers (two in five, with both daemons
+ * on one core), and after five in a row (`ANSWER_REFUSED_REDIALS` and the first) its next offer waits the three
+ * minutes of its backoff. That offer went 229 s after the first, 1 run in 90, and the session opens a few seconds on.
+ * A sixth refused after it (1 run in 180 so) waits three minutes more, which this does not cover.
  */
 async function linked(dir: string, group: string): Promise<void> {
-  const until = Date.now() + 240_000;
+  const until = Date.now() + 360_000;
   let shown: Record<string, unknown> = {};
   while (Date.now() < until) {
     shown = ok(await as(dir, "group", "show", group));
     if (((shown.community as { connected?: number } | null)?.connected ?? 0) > 0) return;
     await new Promise((r) => setTimeout(r, 1000));
   }
-  expect.fail(`${group} on ${dir} never had a link up: ${JSON.stringify(shown)}`);
+  // The other side's view and both daemons' steps, as `member` prints: without them a run that ended here said only
+  // "connected 0 of 2 hubs", nothing of why no session opened.
+  const other = JSON.stringify((await as(dir === old ? now : old, "group", "show", group)).json);
+  expect.fail(`${group} on ${dir} never had a link up: ${JSON.stringify(shown)}\nthe other side: ${other}\n${steps(Date.now() - 370_000)}`);
 }
 
 async function hears(dir: string, from: string, group: string, text: string): Promise<void> {
@@ -110,11 +122,29 @@ beforeAll(async () => {
   }
 }, 60_000);
 
+/**
+ * Stops everything, and names what did not stop. A daemon gives its clean stop 20 s and then leaves (`stopper`, in
+ * main.ts), and `Running.stop` kills at 20 s too, so each is gone by then on a loaded runner as well; the testnet's
+ * nodes close after them. Each has its own wait inside the hook's 60 s: this hook ran out its 30 s once on CI with
+ * every test green, and "Hook timed out" said nothing of which process it waited for.
+ */
 afterAll(async () => {
-  await Promise.all(running.map((r) => r.stop()));
-  await dht?.destroy();
+  const began = Date.now();
+  const late: string[] = [];
+  const stopped = async (name: string, ms: number, work: Promise<unknown>): Promise<void> => {
+    const started = Date.now();
+    let timer: NodeJS.Timeout | undefined;
+    const inTime = await Promise.race([work.then(() => true), new Promise<boolean>((r) => { timer = setTimeout(() => r(false), ms); })]);
+    clearTimeout(timer);
+    const took = Date.now() - started;
+    if (!inTime) late.push(`${name} had not stopped after ${took} ms`);
+    else if (took > 5_000) console.log(`GROUP_COMPAT slow stop: ${name} took ${took} ms`);
+  };
+  await Promise.all(running.map((r) => stopped(r.name, 25_000, r.stop())));
+  if (dht) await stopped("the HyperDHT testnet", 20_000, dht.destroy());
   for (const relay of relays) relay.server.close();
-}, 30_000);
+  if (late.length) expect.fail(`${late.join("\n")}\n${steps(began)}`);
+}, 60_000);
 
 describe(`a community between this CLI and ${OLD_BIN ? "an older release" : "one from before native group links"}`, { timeout: 900_000 }, () => {
   it("this CLI has WebRTC (libdatachannel): its group links stay on it with an app that has it too", async () => {

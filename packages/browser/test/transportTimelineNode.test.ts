@@ -4,7 +4,7 @@ import { GhostLink, createIdentity, createLink, identityFromSeedB64, type Pairin
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import type { LinkView } from "../src/shared/types";
-import { FakeNativeNet } from "./helpers/fakeNative";
+import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
 // covers: transport.timeline, transport.chat-switch, transport.preference
 
 /**
@@ -28,7 +28,7 @@ async function setup({ appCoordinates }: { appCoordinates?: boolean } = {}) {
   await db.putLink({ ...invitation.mine, id, profile: "paired-chat/1", participationSeed: mine, createdAt: 1,
     pairedPeerKey: identityFromSeedB64(theirs).pubKeyZ32,
     peerTransports: ["iroh/1", "hyperdht/1"], peerFallback: true, preferredTransport: "iroh/1", transportFallback: true,
-    peerDescriptors: { "iroh/1": { id: "contact:iroh/1" }, "hyperdht/1": { id: "contact:hyperdht/1" } } });
+    peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "contact"), "hyperdht/1": fakeDescriptor("hyperdht/1", "contact") } });
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
   const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false,
     nativeTransports: { "iroh/1": async () => net.endpoint("iroh/1", "app"), "hyperdht/1": async () => net.endpoint("hyperdht/1", "app") } });
@@ -38,7 +38,7 @@ async function setup({ appCoordinates }: { appCoordinates?: boolean } = {}) {
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1", "hyperdht/1"], peerFallback: true,
-      peerDescriptors: { "iroh/1": { id: "app:iroh/1" }, "hyperdht/1": { id: "app:hyperdht/1" } } },
+      peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "app"), "hyperdht/1": fakeDescriptor("hyperdht/1", "app") } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
     events: { onPairingState: state => { contactState = state; }, onMessage: message => { contactGot.push(message.text); } },
   });
@@ -226,3 +226,29 @@ it("waits for a HyperDHT chosen with Fallback off that does not connect yet: no 
     expect(lines(view())).toEqual([["connected", null, "iroh/1"], ["switched", "you", "hyperdht/1"]]);
   } finally { vi.useRealTimers(); }
 }, 40_000);
+
+it("shows each round trip at once and writes it to disk at most every 5 minutes, relaxed: an internet-like path costs no disk sync per sample", async () => {
+  const { node, id, view } = await setup();
+  await vi.waitFor(() => expect(view().transportLog![0]?.rttMs).toBeGreaterThanOrEqual(0));
+  const onRtt = (node as unknown as { links: Map<string, { link: { options: { events: { onRtt(ms: number): void } } } }> })
+    .links.get(id)!.link.options.events.onRtt;
+  const writes = vi.spyOn(db, "patchLink");
+  const start = Date.now();
+  let now = start;
+  const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+  const stretchRtt = () => view().transportHistory!.filter(e => e.kind === "live" || e.kind === "switched").at(-1)!.rttMs;
+  try {
+    // One hour of 15 s samples between 30 and 70 ms, as an internet path gives them.
+    for (let i = 0; i < 240; i++) {
+      now = start + i * 15_000;
+      onRtt(30 + ((i * 37) % 41));
+    }
+    const rttWrites = writes.mock.calls.filter(([linkId, patch]) => linkId === id && "transportHistory" in patch);
+    if (process.env.RTT_SAVES) console.log(`saves in an hour (240 samples, 30-70 ms): ${rttWrites.length}`);
+    expect(rttWrites.length).toBeLessThanOrEqual(13);
+    expect(rttWrites.every(call => call[2] === true)).toBe(true);
+    // The view has the last sample that moved, though the disk may not yet.
+    onRtt(200);
+    expect(stretchRtt()).toBe(200);
+  } finally { clock.mockRestore(); writes.mockRestore(); }
+}, 20_000);

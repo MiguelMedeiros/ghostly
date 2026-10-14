@@ -137,6 +137,12 @@ test("an app from before reactions gets nothing, and its contact's chip stays on
   await expect(chat(bob).getByText("still talking")).toBeVisible();
   await expect(chips(row(bob.page, "from an old app"))).toHaveCount(0);
   await expect(chat(bob).getByText("😂")).toHaveCount(0);
+
+  // Alice takes hers back from the keyboard: the chip goes, and the focus stays on the message it was under.
+  await chip(hers, "😂").focus();
+  await alice.page.keyboard.press("Enter");
+  await expect(chips(hers)).toHaveCount(0);
+  await expect(hers).toBeFocused();
 });
 
 test("a reaction in a group reaches the other member, named", { tag: ["@feature:groups.reactions", "@feature:groups.protocol.reactions"] }, async ({ peer }) => {

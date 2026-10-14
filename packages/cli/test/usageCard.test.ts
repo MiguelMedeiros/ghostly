@@ -21,6 +21,7 @@ function fake() {
       groups: [], settings: {}, transport: {},
     }) as unknown as EngineState,
     getMessages: vi.fn(async (linkId: string) => of(linkId).map((m) => ({ ...m }))),
+    getMessage: vi.fn(async (linkId: string, id: string) => { const m = of(linkId).find((x) => x.id === id); return m && { ...m }; }),
     groupMessages: vi.fn(async () => []),
     sendMessage: vi.fn(async ({ linkId, text, card: raw }: { linkId: string; text: string; card?: unknown }) => {
       const c = card(raw) as StatusCard;
@@ -52,7 +53,7 @@ describe("usage send", () => {
   it("builds the card from flags, the JSON under them", () => {
     expect(params(["Miguel", "--left", "62", "--label", "Claude", "--account", "work", "--window", "5 h", "--resets", "2026-10-07T18:00:00Z",
       "--also", "week=80@2026-10-10T00:00:00Z", "--also", "opus=40", "--json", '{"label":"ignored","used":1,"limit":2}'])).toEqual({
-      chat: "Miguel", all: false, text: undefined, wait: undefined, timeout: undefined,
+      chat: "Miguel", all: false, text: undefined, force: false, wait: undefined, timeout: undefined,
       card: { label: "Claude", account: "work", left: 62, window: "5 h", used: 1, limit: 2, resetsAt: Date.UTC(2026, 9, 7, 18),
         windows: [{ window: "week", left: 80, resetsAt: Date.UTC(2026, 9, 10) }, { window: "opus", left: 40 }] },
     });
@@ -60,6 +61,22 @@ describe("usage send", () => {
     expect(() => params(["--left", "5"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/Name a chat or group, or give --all/) }));
     expect(() => params(["Miguel", "--also", "week"])).toThrow(/--also takes window=percent/);
     expect(() => params(["Miguel", "--resets", "soon"])).toThrow(/--resets takes a time/);
+    expect(() => params(["Miguel", "--left", "50", "--resets", "1791849403"])).toThrow(expect.objectContaining({ code: "usage", message: "--resets takes milliseconds, not seconds: 1791849403000" }));
+    expect(() => params(["Miguel", "--left", "50", "--also", "week=80@1791849403"])).toThrow(/--also takes milliseconds, not seconds/);
+  });
+
+  it("refuses a report that says no quota as a usage error (exit 2) that names the flag, not the card's field", () => {
+    const usage = (argv: string[], message: RegExp) => expect(() => params(argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
+    usage(["Alice"], /^--left is needed \(or --used with --limit\): ghostly usage send/);
+    usage(["--all", "--window", "5 h"], /^--left is needed/);
+    usage(["Alice", "--used", "5"], /^--used goes with --limit: ghostly usage send/);
+    usage(["Alice", "--limit", "50"], /^--limit goes with --used: ghostly usage send/);
+    usage(["Alice", "--limit", "50", "--left", "40"], /^--left or --used with --limit, not both$/);
+    usage(["Alice", "--left", "140"], /^--left takes a percent from 0 to 100, not 140$/);
+    // --json may give them, and the two ways to say it stand.
+    expect(params(["Alice", "--json", '{"left":40}']).card).toEqual({ left: 40 });
+    expect(params(["Alice", "--used", "5", "--limit", "50"]).card).toEqual({ used: 5, limit: 50 });
+    expect(params(["Alice", "--left", "0"]).card).toEqual({ left: 0 });
   });
 
   it("sends the card once, then edits that one message with each report: one card per chat, whole reports", async () => {
@@ -78,6 +95,8 @@ describe("usage send", () => {
     expect(rows("chat-one")).toHaveLength(1);
     // The account and the window were not said again: gone from the card.
     expect(rows("chat-one")[0].card).toEqual({ kind: "usage", id: "usage", label: "Claude", left: 12, updatedAt: T0 + 600_000 });
+    // The chat's history was read once, for the first report (is a card there?); a later report reads its card's message.
+    expect(node.getMessages).toHaveBeenCalledTimes(1);
   });
 
   it("starts a new message once the card took its edits", async () => {

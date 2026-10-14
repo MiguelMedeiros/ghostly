@@ -48,6 +48,7 @@
   "noEmoji": "No emoji found",
   "noGifs": "No GIFs found",
   "overSoft": "Over the {{bytes}} bytes the DHT carries: it is sent when you are live",
+  "pasteReading": "Reading what you pasted…",
   "payment": "Payment",
   "placeholder": "Message…",
   "previewLoading": "Loading preview of {{host}}…",
@@ -70,5 +71,6 @@
   "skinTone": "Skin tone",
   "takePhoto": "Take photo",
   "tooLong": "That is too long to send ({{count}} characters, the limit is {{max}}).",
+  "tooLongBytes": "That is too long to send ({{bytes}} bytes, the limit is {{max}}). Shorten it, or send it as a file.",
   "tooLongDht": "Too long for the DHT. It fits once you're connected peer to peer."
 }

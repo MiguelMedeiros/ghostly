@@ -67,6 +67,42 @@ describe("in the composer", () => {
     expect(onSendFile).not.toHaveBeenCalled();
   });
 
+  it("closing the sheet puts the focus in the message field, where the shared text is, though nothing had it as the sheet opened", async () => {
+    const { user } = renderApp(<LockScreenProvider><MessageInput draftId="chat-1" onSend={onSend} onSendFile={onSendFile} /></LockScreenProvider>);
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+    act(() => {
+      receiveShare(share({ text: "Look at this", files: [file("a.txt"), file("b.txt"), file("c.txt")] }));
+      sendShareTo("chat-1");
+    });
+    await screen.findByTestId("attachment-sheet");
+    expect(screen.getByTestId("attachment-caption")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("attachment-sheet")).toBeNull();
+    expect(screen.getByPlaceholderText<HTMLTextAreaElement>("Message…")).toHaveFocus();
+  });
+
+  it("files not read yet (the Android app's) are read when the composer takes them, not before", async () => {
+    const read = vi.fn(async () => [file("photo.jpg")]);
+    renderApp(<LockScreenProvider><MessageInput draftId="chat-1" onSend={onSend} onSendFile={onSendFile} /></LockScreenProvider>);
+    act(() => receiveShare(share({ files: [{ name: "photo.jpg", size: 3, type: "image/jpeg" }], read })));
+    expect(read).not.toHaveBeenCalled();
+    act(() => sendShareTo("chat-1"));
+    const sheet = await screen.findByTestId("attachment-sheet");
+    expect(within(sheet).getByTestId("attachment-item")).toHaveTextContent("photo.jpg");
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("a share whose files cannot be read any more says so", async () => {
+    renderApp(<LockScreenProvider><MessageInput draftId="chat-1" onSend={onSend} onSendFile={onSendFile} /></LockScreenProvider>);
+    act(() => {
+      receiveShare(share({ files: [{ name: "photo.jpg", size: 3, type: "image/jpeg" }], read: () => Promise.reject(new Error("Nothing pasted under that token")) }));
+      sendShareTo("chat-1");
+    });
+    expect(await screen.findByText(/Nothing pasted under that token/)).toBeInTheDocument();
+    expect(screen.queryByTestId("attachment-sheet")).toBeNull();
+  });
+
   it("another chat's composer leaves it alone", () => {
     renderApp(<LockScreenProvider><MessageInput draftId="chat-2" onSend={onSend} onSendFile={onSendFile} /></LockScreenProvider>);
     act(() => {
@@ -113,12 +149,30 @@ describe("the Share to… picker", () => {
     expect(screen.getByTestId("where")).toHaveTextContent("/chat/chat1");
   });
 
-  it("files go to 1:1 chats only: groups do not take files yet", () => {
+  it("files go to groups too (WISP 503): picking one hands them to its composer", async () => {
     receiveShare(share({ files: [file("a.png"), file("b.png")] }));
-    picker();
+    const { user } = picker();
     expect(screen.getByTestId("share-files")).toHaveTextContent("2 files");
-    expect(screen.queryByTestId("share-group")).toBeNull();
     expect(screen.getByTestId("share-chat")).toHaveTextContent("Ana");
+    await user.click(screen.getByTestId("share-group"));
+    expect(takeShareFor(groupChat("g1"))?.files.map((f) => f.name)).toEqual(["a.png", "b.png"]);
+    expect(screen.getByTestId("where")).toHaveTextContent("/group/g1");
+  });
+
+  it("shows the shared text and file name in their own direction, so in Arabic an English text keeps its '!' at its end", () => {
+    receiveShare(share({ text: "Look at this, it's great!", files: [file("Quarterly report (final draft).pdf")] }));
+    picker();
+    expect(screen.getByTestId("share-text")).toHaveAttribute("dir", "auto");
+    expect(screen.getByTestId("share-files")).toHaveTextContent("Quarterly report (final draft).pdf");
+    expect(screen.getByTestId("share-files")).toHaveAttribute("dir", "auto");
+  });
+
+  it("wraps a long one-word file name inside its card, so its end and extension stay on screen", () => {
+    const name = "IMG_20261013_021233_holiday_beach_sunset_camera_backup_final_version_2.jpg";
+    receiveShare(share({ files: [file(name)] }));
+    picker();
+    expect(screen.getByTestId("share-files")).toHaveTextContent(name);
+    expect(screen.getByTestId("share-files").className).toContain("[overflow-wrap:anywhere]");
   });
 
   it("Cancel drops the share and goes home", async () => {

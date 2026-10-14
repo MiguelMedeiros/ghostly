@@ -6,8 +6,8 @@
 //   2. builds the web app and the extension (skip with --no-build);
 //   3. serves the web app with vite preview on CAPTURE_PORT (4380);
 //   4. runs the capture specs beside this file (Playwright, CAPTURE_WORKERS=2);
-//   5. turns each PNG into a 2x WebP in public/screenshots/current/ under its stable name, and
-//      leaves the x-* shots (for looking at, never committed) in the scratch folder it prints;
+//   5. turns each PNG into a 2x WebP in public/screenshots/current/ under its stable name, with its
+//      narrower copies for `srcset` beside it (widths.mjs), and leaves the x-* shots (for looking at, never committed) in the scratch folder it prints;
 //   6. stops the server.
 //
 // Arguments after `--` go to Playwright: `npm run capture -- sats.spec.ts`, `-- -g phone`.
@@ -18,6 +18,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { writeCopies } from "./widths.mjs";
 
 const REPO = fileURLToPath(new URL("../../../..", import.meta.url));
 const WEBSITE = join(REPO, "apps", "website");
@@ -68,14 +69,15 @@ log(`shots land in ${env.SHOTS}`);
 const tests = spawnSync("npx", ["playwright", "test", "-c", "apps/website/scripts/capture/playwright.config.ts", ...playwrightArgs], { cwd: REPO, stdio: "inherit", env });
 stop();
 
-// 5. PNG to WebP, 2x as shot, quality 82: only the shots the site uses (no x-*).
+// 5. PNG to WebP, 2x as shot, quality 82: only the shots the site uses (no x-*). Then its narrower copies.
 const sharp = createRequire(join(WEBSITE, "package.json"))("sharp");
 const shots = readdirSync(env.SHOTS).filter((n) => n.endsWith(".png"));
 for (const name of shots.filter((n) => !n.startsWith("x-"))) {
   const target = join(OUT, name.replace(/\.png$/, ".webp"));
   await sharp(join(env.SHOTS, name)).webp({ quality: 82, effort: 6 }).toFile(target);
+  const copies = await writeCopies(name.replace(/\.png$/, ".webp"), join(env.SHOTS, name));
   rmSync(join(env.SHOTS, name));
-  log(`wrote ${target.slice(REPO.length)}`);
+  log(`wrote ${target.slice(REPO.length)} (and ${copies.join(", ")})`);
 }
 log(`${shots.filter((n) => n.startsWith("x-")).length} x-* shots kept in ${env.SHOTS}`);
 

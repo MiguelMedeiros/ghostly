@@ -1,6 +1,10 @@
 {
   "copied": "Copiado",
   "copy": "Copiar detalhes",
+  "lockdown": "O Modo de Isolamento parece estar ligado, e ele desliga o que o Ghostly precisa. Desligue-o para este site e recarregue.",
+  "lockdownHow": "Como desligá-lo para este site",
+  "lockdownOtherBrowser": "Outros navegadores no iPhone ou iPad: Ajustes › Privacidade e Segurança › Modo de Isolamento › Configurar Navegação na Web, e desligue-o para esse navegador.",
+  "lockdownSafari": "Safari: toque em aA na barra de endereço, depois em Ajustes do Site, e desligue o Modo de Isolamento (no Mac: Safari › Ajustes deste Site).",
   "missingCrypto": "O Web Crypto está desligado. Ele só funciona em um endereço seguro (https).",
   "missingIndexedDB": "O IndexedDB está desligado ou bloqueado, então conversas e chaves não podem ser salvas.",
   "missingLocks": "Falta o Web Locks, então o Ghostly não consegue garantir que roda uma vez só.",

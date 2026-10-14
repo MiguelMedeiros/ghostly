@@ -57,13 +57,21 @@ export const SLOW_AFTER_MS: Record<PairingStage, number> = {
   failed: Infinity,
 };
 
-/** Failure codes with words of their own; anything else reads as `unknown`, with `detail` under it. */
+/** Failure codes with words of their own; anything else reads as `unknown`, with `detail` behind its ⓘ. */
 export const FAILURE_REASONS = ["publish", "resolve", "timeout", "offline", "transport", "rejected", "keyMismatch", "expired", "taken"] as const;
 export type FailureReason = typeof FAILURE_REASONS[number] | "unknown";
 
 export function failureReason(code: string | undefined): FailureReason {
   const camel = (code ?? "").replace(/-(\w)/g, (_, c: string) => c.toUpperCase());
   return (FAILURE_REASONS as readonly string[]).includes(camel) ? camel as FailureReason : "unknown";
+}
+
+/**
+ * The engine's detail of a pairing (its English: a relay error, a dial error, a code), for an ⓘ and never a line of its
+ * own. None for an invite someone else took: the engine's sentence there is the one `pairing.reason.taken` already says.
+ */
+export function pairingDetail(progress: Pick<PairingProgress, "detail" | "reason">): string | undefined {
+  return progress.reason === "taken" ? undefined : progress.detail || undefined;
 }
 
 /** The engine's own report of a chat's first pairing (`LinkView.pairingProgress`), when it gives one. */

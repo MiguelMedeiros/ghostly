@@ -7,6 +7,8 @@
   "cameraOff": "关闭摄像头",
   "connected": "已连接",
   "connecting": "正在连接...",
+  "contactCannot": "对方的应用无法接听通话",
+  "contactOutdated": "对方需要更新 Ghostly 才能通话",
   "decline": "拒绝",
   "devices": {
     "back": "{{name}} 已重新连接",
@@ -37,6 +39,16 @@
   "reconnecting": "正在重新连接...",
   "rejected": "通话被拒绝",
   "selfView": "拖动以移动，拉动角落以调整大小，双击以重置",
+  "share": {
+    "blocked": "屏幕共享已被阻止",
+    "blockedNext": "请在系统的隐私设置中允许此应用录制屏幕。",
+    "contactCannot": "对方的应用无法在此通话中显示屏幕",
+    "failed": "无法共享屏幕",
+    "failedNext": "请重试。",
+    "noScreen": "没有可共享的屏幕",
+    "notHere": "此处无法使用屏幕共享",
+    "notOnLinux": "Linux 上暂不支持屏幕共享"
+  },
   "shareScreen": "共享屏幕",
   "sharing": {
     "both": "你和 {{name}} 正在共享屏幕",
@@ -66,6 +78,7 @@
   },
   "turnCameraOff": "关闭摄像头",
   "turnCameraOn": "打开摄像头",
+  "unavailableHere": "此应用不支持通话",
   "unmute": "取消静音",
   "video": "视频通话",
   "wakeGaveUp": "{{name}} 没有打开 Ghostly。",
@@ -74,5 +87,6 @@
     "chat": "返回聊天",
     "full": "返回全屏",
     "small": "将通话保留在小窗口中"
-  }
+  },
+  "you": "你"
 }

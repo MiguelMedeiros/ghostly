@@ -4,6 +4,24 @@
   "copyInvite": "Copy invite code",
   "deleteAllChats": "Delete all chats",
   "deleteChat": "Delete chat",
+  "folder": {
+    "byLatest": "Order by latest message",
+    "create": "Create",
+    "delete": "Delete folder",
+    "deleteBody": "Its chats are not deleted. They go back to the list, in no folder.",
+    "deleteTitle": "Delete the folder “{{name}}”?",
+    "empty": "No chats in this folder yet",
+    "move": "Move to folder…",
+    "nameLabel": "Folder name",
+    "new": "New folder…",
+    "newTitle": "New folder",
+    "none": "No folder",
+    "options": "Options for the folder {{name}}",
+    "others": "Other chats",
+    "rename": "Rename folder",
+    "unreadCount": "{{count}} unread in {{name}}",
+    "unreadOne": "1 unread in {{name}}"
+  },
   "group": {
     "adminAnswered": "The admin's app answered…",
     "answerFailed": "That did not go through. Try again.",
@@ -12,6 +30,8 @@
     "inviterAway": "{{contact}} is not connected yet. Try again in a moment.",
     "inviterAwayUnknown": "The contact who invited you is not connected yet. Try again in a moment.",
     "letting": "A member is letting you in…",
+    "takenBack": "Invitation taken back",
+    "unanswered": "No answer from the inviter's app. Accept again, or decline.",
     "waitingAdmin": "Waiting for the admin's app…",
     "waitingIn": "Waiting to be let in…"
   },
@@ -22,6 +42,8 @@
   "newMenu": {
     "chat": "Chat",
     "chatHint": "One person, with an invite",
+    "folder": "Folder",
+    "folderHint": "A section of your chat list",
     "group": "Group",
     "groupHint": "A link anyone can open",
     "label": "Create a group or a chat"

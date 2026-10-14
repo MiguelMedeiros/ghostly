@@ -75,15 +75,57 @@ describe("the pill", () => {
     expect(screen.getByTestId("pill-stale")).toHaveAccessibleName("Claude: 3% left (not updated lately)");
     expect(screen.getByTestId("pill-ok").className).not.toMatch(/amber|danger/);
   });
+});
 
-  it("sits on a chat's row beside the unread count", () => {
-    const props = { chatId: "chat-1", density: "compact", active: false, label: "Hermes", named: true, keyLabel: "abc…xyz", peerPubKey: "peer", time: "12:00",
-      unread: 2, pinned: false, syncing: false, creator: false, onOpen: () => {}, onTogglePin: () => {}, onDelete: () => {}, deleteLabel: "Delete" } as ChatRowProps;
-    renderApp(<ChatRow {...props} usage={entry({ left: 12 })} />);
+describe("the pill's place on a chat's row", () => {
+  const props = (over: Partial<ChatRowProps> = {}) => ({ chatId: "chat-1", density: "compact", active: false, label: "Hermes", named: true, keyLabel: "abcdef...uvwxyz", peerPubKey: "peer", time: "12:00",
+    unread: 2, pinned: false, syncing: false, creator: false, onOpen: () => {}, onTogglePin: () => {}, onDelete: () => {}, deleteLabel: "Delete", ...over }) as ChatRowProps;
+  /** The last line's end: what follows the preview. */
+  const trailing = () => screen.getByTestId("chat-row-preview").nextElementSibling;
+
+  it("comfortable: right after the key on the key's line, which keeps the key's height; the count stays on the last line", () => {
+    renderApp(<ChatRow {...props({ density: "comfortable" })} usage={entry({ left: 12 })} />);
     const pill = screen.getByTestId("chat-row-usage");
     expect(pill).toHaveAttribute("data-level", "low");
     expect(pill).toHaveAttribute("data-left", "12");
-    expect(screen.getByTestId("chat-row-unread")).toHaveTextContent("2");
+    const key = screen.getByTestId("chat-row-key");
+    expect(key).toHaveTextContent(/^abcdef\.\.\.uvwxyz$/);
+    // The working mark's place (kept empty: no task is running) comes between them, on every row with a meter.
+    expect(key.nextElementSibling).toBe(screen.getByTestId("chat-row-working-gap"));
+    expect(key.nextElementSibling!.nextElementSibling).toBe(pill);
+    // One line of the key's height that never wraps: the meter, a little taller, is centred over it and adds nothing.
+    expect(key.parentElement!.className).toMatch(/(^| )h-4( |$)/);
+    expect(key.parentElement!.className).toContain("whitespace-nowrap");
+    expect(key.className).toContain("shrink-0");
+    expect(trailing()).not.toContainElement(pill);
+    expect(trailing()).toContainElement(screen.getByTestId("chat-row-unread"));
+  });
+
+  it("comfortable: the same place with no unread count, when the last line ends with nothing", () => {
+    renderApp(<ChatRow {...props({ density: "comfortable", unread: 0 })} usage={entry()} />);
+    expect(screen.getByTestId("chat-row-key").nextElementSibling!.nextElementSibling).toBe(screen.getByTestId("chat-row-usage"));
+    expect(trailing()).toBeNull();
+  });
+
+  it.each([2, 0])("compact (no key line): starts a column of one width on the last line, the count (%i unread) at its end", (unread) => {
+    renderApp(<ChatRow {...props({ unread })} usage={entry({ left: 12 })} />);
+    const pill = screen.getByTestId("chat-row-usage");
+    expect(screen.queryByTestId("chat-row-key")).not.toBeInTheDocument();
+    const column = pill.parentElement!;
+    expect(trailing()).toContainElement(column);
+    expect(column.className).toContain("min-w-[105px]");
+    expect(column.className).toContain("justify-between");
+    expect(column.firstElementChild).toBe(pill);
+    expect(column.childElementCount).toBe(unread ? 2 : 1);
+    if (unread) expect(column.lastElementChild).toBe(screen.getByTestId("chat-row-unread"));
+  });
+
+  it.each(["compact", "comfortable"] as const)("a %s row with no usage card has no meter and keeps no room for one", (density) => {
+    renderApp(<ChatRow {...props({ density })} />);
+    expect(screen.queryByTestId("chat-row-usage")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-row-unread").parentElement).toBe(trailing());
+    expect(trailing()!.className).not.toContain("min-w-");
+    if (density === "comfortable") expect(screen.getByTestId("chat-row-key").nextElementSibling).toBeNull();
   });
 });
 
@@ -102,6 +144,9 @@ describe("the header's meter", () => {
     expect(pill).toHaveAttribute("data-level", "ok");
     // With when it resets, the time of day within a day.
     expect(pill.textContent).toMatch(/^62%·\d{2}:\d{2}/);
+    // A phone's header has no room for the time beside the contact's status: it is the meter and the percent there.
+    expect(within(pill).getByTestId("chat-usage-resets")).toHaveClass("max-md:hidden");
+    expect(pill).toHaveAccessibleName(/^Claude: 62% left, resets \d{2}:\d{2}/);
     await rendered.user.click(screen.getByTestId("chat-usage-open"));
     const panel = screen.getByTestId("chat-usage-panel");
     expect(panel).toHaveAttribute("data-layout", "popover");
@@ -154,6 +199,28 @@ describe("a usage card in the chat", () => {
     // A phrase of the app's language forced left to right reads backwards in Arabic ("%تبقّى 80" on screen).
     const forced = [...details.querySelectorAll('[dir="ltr"]')].map((el) => el.textContent ?? "").filter((text) => /[\u0600-\u06FF]/.test(text));
     expect(forced).toEqual([]);
+  });
+
+  it("a reset that has passed reads as how long ago it was, muted: the card's own and another window's", async () => {
+    const c = { ...usage({ left: 62, window: "5 h", windows: [{ window: "week", left: 80, resetsAt: NOW - 26 * HOUR }, { window: "opus", left: 12, resetsAt: NOW + 50 * HOUR }] }), resetsAt: NOW - 2.5 * HOUR };
+    // Half hours from an edge: the clock ticks by the minute, and "2 h ago" sharp may still read "1 h ago".
+    const { user } = renderApp(<MessageBubble message={message(c)} peerPubKey="peer" />);
+    await user.click(within(screen.getByTestId("status-card")).getByTestId("status-card-toggle"));
+    const details = screen.getByTestId("usage-details");
+    // Not "03:50 PM · now", nor "resets 10:50 AM" of a time that was yesterday.
+    const own = within(details).getByTestId("usage-details-resets");
+    expect(own).toHaveTextContent("Resetsreset 2 h ago");
+    expect(own).toHaveAttribute("data-past");
+    expect(own.querySelector("dd")).toHaveClass("text-text-muted");
+    const week = within(details).getByTestId("usage-details-window-0");
+    expect(week).toHaveTextContent("week80% left · reset 1 d ago");
+    expect(week).toHaveAttribute("data-past");
+    expect(week.querySelector("dd")).toHaveClass("text-text-muted");
+    // One that is still to come says when, as before.
+    const opus = within(details).getByTestId("usage-details-window-1");
+    expect(opus).toHaveTextContent(/^opus12% left · resets \S+ \d{2}:\d{2}/);
+    expect(opus).not.toHaveAttribute("data-past");
+    expect(opus.querySelector("dd")).toHaveClass("text-text-primary");
   });
 
   it("is no task: the Tasks button stays away, and its line elsewhere is the label and percent", () => {

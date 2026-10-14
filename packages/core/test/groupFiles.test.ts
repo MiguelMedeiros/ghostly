@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { GroupSession, type GroupEdgeFrame, type GroupIncomingMessage, type GroupMessageFrame } from "../src/groupSession";
-import { CommunitySession, type CommunityFrame, type CommunityIncomingMessage } from "../src/groupCommunity";
+import { COMMUNITY_LIMITS, CommunitySession, type CommunityFrame, type CommunityIncomingMessage } from "../src/groupCommunity";
 import { GROUP_FILE_LIMITS, fetchesByItself, groupFileFallback, isGroupMessageId, readGroupFileMeta, readGroupHave, readGroupWant, readGroupWantNo, type GroupFileMeta } from "../src/groupFiles";
 // covers: groups.files.wire
 
@@ -246,5 +246,23 @@ describe("a file in a community", () => {
     expect(alice.couldRead(bob.myKey, id)).toBe(true);
     expect(alice.couldRead(carol.myKey, id)).toBe(false);
     expect(alice.couldRead(bob.myKey, `${bob.myKey}:9:ffffffffffffffff:1`)).toBe(false);
+  });
+
+  it("could still be read by them after more membership commits than the window, not by one removed since", async () => {
+    const net = community();
+    const alice = net.push(CommunitySession.create("Ghosts"));
+    const bob = await net.admit(alice), carol = await net.admit(alice);
+    await net.settle();
+    const { id } = await alice.sendText("the report", "Alice", Date.now(), [], undefined, undefined, undefined, pdf) as { id: string };
+    await net.settle();
+    await alice.remove(carol.myKey);
+    for (let i = 0; i < COMMUNITY_LIMITS.window + 1; i++) await alice.rotate();
+    await net.settle();
+    expect(alice.couldRead(bob.myKey, id)).toBe(true);
+    expect(bob.couldRead(alice.myKey, id)).toBe(true);
+    expect(alice.couldRead(carol.myKey, id)).toBe(false);
+    expect(alice.couldRead(bob.myKey, id.replace(/:[0-9a-f]{16}:/, ":ffffffffffffffff:"))).toBe(false);
+    // Looking the old roster up does not widen whom a frame may come from.
+    expect(alice.isRecentMember(carol.myKey)).toBe(false);
   });
 });

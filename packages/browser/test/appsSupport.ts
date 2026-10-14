@@ -42,7 +42,7 @@ export function iconPng(side = 32): Uint8Array {
   return out;
 }
 
-export async function bundle(options: { sequence?: number; version?: string; permissions?: AppPermission[]; entry?: string; sources?: string[]; by?: Signer; name?: string; view?: AppViewMode; icon?: Uint8Array } = {}): Promise<Built> {
+export async function bundle(options: { sequence?: number; version?: string; permissions?: AppPermission[]; entry?: string; sources?: string[]; by?: Signer; name?: string; view?: AppViewMode; icon?: Uint8Array; data?: Uint8Array } = {}): Promise<Built> {
   const sequence = options.sequence ?? 1;
   const draft: AppManifestDraft = {
     name: options.name ?? "chess", version: options.version ?? `1.0.${sequence}`, sequence, kind: "mini-app", title: "Chess", tagline: "Play chess with a contact",
@@ -53,6 +53,7 @@ export async function bundle(options: { sequence?: number; version?: string; per
   const files = [
     { path: "index.html", bytes: utf8Encode(options.entry ?? `<!doctype html><title>Chess</title><p>v${sequence}`) }, { path: "data/openings.json", bytes: utf8Encode("[]") },
     ...(options.icon ? [{ path: "icon.png", bytes: options.icon }] : []),
+    ...(options.data ? [{ path: "data/assets.bin", bytes: options.data }] : []),
   ];
   const by = options.by ?? PUBLISHER;
   const made = await buildAppBundle(draft, files, by);
@@ -96,7 +97,7 @@ export async function emptyProfile(): Promise<void> {
 }
 
 export function apps(net: FakeNet, host: Partial<AppsHost> = {}): Apps {
-  return new Apps({ fetch: boundedAppFetch({ fetcher: net.fetch }), isChat: (scope) => scope === "chat-1" || scope === "chat-2", online: () => true, now: () => NOW_MS, defaults: [], ...host });
+  return new Apps({ fetch: boundedAppFetch({ fetcher: net.fetch }), isChat: (scope) => scope === "chat-1" || scope === "chat-2", online: () => true, now: () => NOW_MS, defaults: [], builtIns: [], ...host });
 }
 
 export async function rows(name: string): Promise<unknown[]> {

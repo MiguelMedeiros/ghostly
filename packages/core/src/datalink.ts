@@ -56,6 +56,12 @@ export interface DataLinkOptions {
    */
   onAnswerReplaced?: () => void;
   /**
+   * This side's answers were refused more times in a row than it offers again at once for (`ANSWER_REFUSED_REDIALS`):
+   * the WebRTC of this device takes none now (libdatachannel's race, on a loaded core), and the next offer would wait
+   * the caller's backoff, minutes after a few failures. Nothing about the network: the answerer was there each time.
+   */
+  onAnswersRefused?: () => void;
+  /**
    * What an attempt said about direct connections from this device (`directPath.ts`): it opened (and, later, closed);
    * it did not connect and this device had no public candidate for it, or a public port per STUN server; or this
    * side's offer was answered and no path connected.
@@ -79,7 +85,9 @@ const ICE_GATHERING_TIMEOUT_MS = 5_000;
  * settle); where they do not, every offer of a first pairing waited the full 5 s, twice when the inviter offered too
  * (One's e2e runs: 13 offers of 89 at 5 s, 9 more at 1.3-3 s, 2026-10-05). An offer without one still connects to most
  * contacts (their checks learn this side's address from its own); behind a restricted NAT on the contact's side it may
- * not, and the next offer of the chat then waits as long as it takes (`fullGather`).
+ * not, and the next offer of the chat then waits as long as it takes (`fullGather`). An answer is bounded the same way:
+ * it waited the full 5 s, and two CLI daemons whose STUN server swallowed every request went live 10 s after the offer
+ * rather than 2 s (calls bug hunt, 2026-10-12).
  */
 export const OFFER_HOST_GATHER_MS = 2_000;
 /** The data link keeps collecting this long after the candidate it waited for came (a call keeps 400 ms). */
@@ -110,6 +118,14 @@ export const REANSWERS = 2;
  * backoff (meshSignals, PR #1363). Offers through members cost no relay request; over the relays four is still a few.
  */
 export const ANSWER_REFUSED_REDIALS = 4;
+/**
+ * The same race a moment later: setRemoteDescription resolves, and the connection closes right after it (8 ms on a
+ * loaded core). A connection that ends within this long of its answer going in was refused too: no network fails one
+ * that soon (ICE gives up after tens of seconds), so it says nothing about direct connections (`DirectEvidence`).
+ * Taken for a network that lets none through, an edge between two CLIs left WebRTC for the run, and a member whose
+ * app has WebRTC alone (one from before native group links) was never reached again (groupCompat, 2026-10-12).
+ */
+const ANSWER_REFUSED_AFTER_MS = 1_000;
 /** An offer this close to the end of the offerer's attempt is not answered again: the new answer would come too late. */
 const REANSWER_MARGIN_MS = 15_000;
 
@@ -139,12 +155,13 @@ export class DataLink {
   private pc: RTCPeerConnection | null = null;
   private myOfferTs = 0;
   /**
-   * An offer of this side's that went without a public candidate came to nothing (it was answered, and no path
-   * connected): the next one waits for its STUN servers as long as it takes (`ICE_GATHERING_TIMEOUT_MS`).
+   * An offer or answer of this side's that went without a public candidate came to nothing (both descriptions were
+   * exchanged, and no path connected): the next one waits for its STUN servers as long as it takes
+   * (`ICE_GATHERING_TIMEOUT_MS`).
    */
   private fullGather = false;
-  /** The offer out has no public candidate (as it went: the connection's description gains any that come later). */
-  private offerLacksPublic = false;
+  /** The offer or answer out has no public candidate (as it went: the connection's description gains any that come later). */
+  private sentLacksPublic = false;
   private lastSignalTs = 0;
   /** The peer's description as this connection was given it: Chrome shows it as `remoteDescription` only once applied. */
   private remoteSdp: string | null = null;
@@ -156,6 +173,8 @@ export class DataLink {
   private answered: { offer: RtcSignal; at: number; again: number } | null = null;
   /** Answers refused since a connection last opened, each followed by a new offer at once (`ANSWER_REFUSED_REDIALS`). */
   private refusedAnswers = 0;
+  /** The last answer dropped as not for this side's offer (`answer-dropped`): each is said once. */
+  private droppedAnswerTs = 0;
 
   constructor(private readonly options: DataLinkOptions) {}
 
@@ -182,7 +201,7 @@ export class DataLink {
       }
 
       this.myOfferTs = Date.now();
-      this.offerLacksPublic = !PUBLIC_CANDIDATE.test(pc.localDescription?.sdp ?? "");
+      this.sentLacksPublic = !PUBLIC_CANDIDATE.test(pc.localDescription?.sdp ?? "");
       const signal: RtcSignal = { t: "o", ts: this.myOfferTs, ...extractRtcParams(pc.localDescription!.sdp) };
       this.options.publishSignal(JSON.stringify(signal));
     } catch {
@@ -219,10 +238,10 @@ export class DataLink {
       if (this.state === "offering") {
         // Both sides offered at once: the lower public key keeps its offer.
         if (this.options.myPubKeyZ32 < this.options.peerPubKeyZ32) return;
-      } else if (this.state === "answering") {
-        return;
       }
-      // A fresh offer while connected means the peer lost the old connection.
+      // A fresh offer while connected means the peer lost the old connection. One that comes while an earlier one is
+      // still being answered takes its place too: the peer gave that one up (its answer was refused there, say, and
+      // it offered again at once), and a signal is fed once, so a newer offer left aside here was never answered.
       this.lastSignalTs = signal.ts;
       const wasOpen = this.state === "open";
       this.teardown();
@@ -248,6 +267,12 @@ export class DataLink {
       } catch (error) {
         if (this.pc === pc) this.answerRefused(error);
       }
+    } else if (signal.t === "a" && signal.ts !== this.droppedAnswerTs) {
+      // An answer to an offer this side no longer waits on (one it made before, given up when its answer was refused),
+      // or one that came while this side was not offering: dropped, and said once, or a link that waited on its next
+      // answer after it showed nothing of why (meshSignals on CI, 2026-10-09).
+      this.droppedAnswerTs = signal.ts;
+      traceLink(this.options.myPubKeyZ32, "answer-dropped", { state: this.state, ...(this.myOfferTs && signal.o !== undefined ? { offerMs: signal.o - this.myOfferTs } : {}) });
     }
   }
 
@@ -273,9 +298,12 @@ export class DataLink {
     if (evidence) this.options.onDirect?.(evidence);
   }
 
-  /** This side's offer went with no public candidate, was answered, and came to nothing: the next offer gathers for as long as it takes. */
+  /**
+   * This side's offer went with no public candidate and was answered, or its answer went with none, and it came to
+   * nothing: the next offer or answer gathers for as long as it takes.
+   */
   private noteNoPublic(ended: boolean): void {
-    if (ended && this.myOfferTs && this.offerLacksPublic && this.state === "connecting") this.fullGather = true;
+    if (ended && (this.myOfferTs || this.answered) && this.sentLacksPublic && this.state === "connecting") this.fullGather = true;
   }
 
   /**
@@ -292,16 +320,21 @@ export class DataLink {
   /**
    * The attempt on this connection failed (it timed out, ICE failed or closed, its channel closed). An answer the
    * offerer may not have read yet is made again for the same offer while it still stands (`REANSWERS`); anything
-   * else goes back to idle.
+   * else goes back to idle. `byConnection`: the connection said so itself, rather than a timer of this link's.
    */
-  private failed(): void {
+  private failed(byConnection = false): void {
     // The connection failed while the answer to this side's offer was being applied: as if it was refused.
     if (this.state === "offering" && this.remoteSdp) { this.answerRefused("failed"); return; }
+    // The same when the connection ends a moment after the answer went in (`ANSWER_REFUSED_AFTER_MS`).
+    if (byConnection && this.state === "connecting" && this.myOfferTs && Date.now() - this.connectingSince < ANSWER_REFUSED_AFTER_MS) { this.answerRefused("failed"); return; }
     const answered = this.state === "connecting" ? this.answered : null;
     // How long the offerer's attempt still runs, counted on this clock from when its offer was taken (its `ts` is its clock's).
     const left = answered ? CONNECT_TIMEOUT_MS - (Date.now() - answered.at) : 0;
-    const evidence = this.directEvidence();
-    this.noteNoPublic(true);
+    // An answer to an offer the offerer has given up since (its packet no longer carries it: the answer was refused
+    // there, say) connected nothing because nobody was on the other end, whatever the network lets through.
+    const givenUp = !!answered && this.options.offerStanding?.(answered.offer.ts) === false;
+    const evidence = givenUp ? null : this.directEvidence();
+    this.noteNoPublic(!givenUp);
     if (answered && answered.again < REANSWERS && left > REANSWER_MARGIN_MS && this.options.offerStanding?.(answered.offer.ts)) {
       answered.again++;
       traceLink(this.options.myPubKeyZ32, "reanswer", { again: answered.again, leftMs: left });
@@ -318,7 +351,7 @@ export class DataLink {
     const again = this.refusedAnswers < ANSWER_REFUSED_REDIALS;
     traceLink(this.options.myPubKeyZ32, "answer-refused", { error: error instanceof Error ? error.message : String(error), again });
     this.reset();
-    if (!again) return;
+    if (!again) { this.options.onAnswersRefused?.(); return; }
     this.refusedAnswers++;
     this.options.onAnswerReplaced?.();
   }
@@ -333,6 +366,7 @@ export class DataLink {
       });
       if (!pc) return;
 
+      this.sentLacksPublic = !PUBLIC_CANDIDATE.test(pc.localDescription?.sdp ?? "");
       const signal: RtcSignal = {
         t: "a",
         ts: Date.now(),
@@ -342,7 +376,8 @@ export class DataLink {
       this.options.publishSignal(JSON.stringify(signal));
       this.setState("connecting");
     } catch {
-      this.reset();
+      // A newer offer took this one's place meanwhile (its connection was closed under it): that attempt goes on.
+      if (this.answered?.offer === offer) this.reset();
     }
   }
 
@@ -362,7 +397,7 @@ export class DataLink {
       if (this.pc !== pc) return null;
       const gathering = Date.now();
       await waitForIceGathering(pc, ICE_GATHERING_TIMEOUT_MS,
-        { stallMs: GATHER_STALL_MS, settleMs: DATA_SETTLE_MS, ...(offer && !this.fullGather ? { hostBoundMs: OFFER_HOST_GATHER_MS } : {}) });
+        { stallMs: GATHER_STALL_MS, settleMs: DATA_SETTLE_MS, ...(!this.fullGather ? { hostBoundMs: OFFER_HOST_GATHER_MS } : {}) });
       if (this.pc !== pc) return null;
       const ms = Date.now() - gathering;
       if (sdpHasCandidates(pc.localDescription?.sdp)) {
@@ -395,14 +430,14 @@ export class DataLink {
       void tracePair(this.options.myPubKeyZ32, pc);
     });
     dc.addEventListener("close", () => {
-      if (this.pc === pc) this.failed();
+      if (this.pc === pc) this.failed(true);
     });
 
     pc.addEventListener("connectionstatechange", () => {
       if (this.pc !== pc) return;
       if (this.disconnectTimer) { clearTimeout(this.disconnectTimer); if (pc.connectionState === "connected") this.options.onDisconnected?.(false); }
       this.disconnectTimer = null;
-      if (pc.connectionState === "failed" || pc.connectionState === "closed") this.failed();
+      if (pc.connectionState === "failed" || pc.connectionState === "closed") this.failed(true);
       else if (pc.connectionState === "disconnected") {
         if (this.state === "open") this.options.onDisconnected?.(true);
         this.disconnectTimer = setTimeout(() => {

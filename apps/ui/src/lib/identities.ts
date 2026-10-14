@@ -8,6 +8,8 @@ import type { IdentityStatus, SharedIdentity } from "@ghostly/core";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import { currentProfile } from "./profiles";
 import { getPrefix, listSessions } from "./storage";
+import type { Language } from "./settings";
+import { formatAt } from "./time";
 import type { ChatSession } from "./types";
 import { english } from "./english";
 import type { Translate } from "../contexts/I18nContext";
@@ -62,8 +64,9 @@ export const categoryLabel = (id: string, attester?: string, t: Translate = engl
     ? (attester ? t("identities.card.attestedBy", { attester }) : t("identities.card.attestedByProvider"))
     : mine ? t("identities.card.yourOwnKey") : t("identities.card.theirOwnKey");
 
-export const date = (seconds: number) => new Date(seconds * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-export const dateTime = (seconds: number) => new Date(seconds * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+/** A date ("Oct 12, 2026") and a date with its time, in the app's language when one is given, else as this device writes them. */
+export const date = (seconds: number, language?: Language) => formatAt(seconds * 1000, { year: "numeric", month: "short", day: "numeric" }, language);
+export const dateTime = (seconds: number, language?: Language) => formatAt(seconds * 1000, { dateStyle: "medium", timeStyle: "short" }, language);
 
 /** A contact's identity as this app last checked it, in words. */
 export function receivedStatus(status: IdentityStatus, t: Translate = english): string {

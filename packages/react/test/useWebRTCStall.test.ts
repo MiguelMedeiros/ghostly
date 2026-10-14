@@ -2,7 +2,7 @@ import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakePeerConnection, installWebRTCFakes, remote, type FakeMediaDevices } from "./fakes";
 import { renderCall, settle } from "./harness";
-import { CallUnreachableError, CONNECT_TIMEOUT_MS, GATHER_ATTEMPTS, GATHER_STALL_MS } from "../src/useWebRTC";
+import { CallUnreachableError, CONNECT_TIMEOUT_MS, GATHER_ATTEMPTS, GATHER_STALL_MS, HOST_GATHER_MS } from "../src/useWebRTC";
 
 // covers: calls.audio
 
@@ -131,6 +131,39 @@ describe("a connection that finds no candidate", () => {
     expect(FakePeerConnection.instances).toHaveLength(1);
     expect(call.onError).not.toHaveBeenCalled();
     expect(call.result.current.callState).toBe("idle");
+  });
+});
+
+describe("a STUN server that never answers", () => {
+  // Host candidates are in the description at once; gathering never completes and no reflexive one comes.
+  beforeEach(() => { FakePeerConnection.holdGathering = true; });
+
+  it("the caller offers with its host candidates once HOST_GATHER_MS has passed, not after 10 s", async () => {
+    const call = renderCall();
+    await calling(call);
+    await act(async () => { await vi.advanceTimersByTimeAsync(HOST_GATHER_MS - 1); });
+    expect(call.published).toEqual([]);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    await settle();
+
+    expect(call.publishedKinds()).toEqual(["o"]);
+    expect(candidates(call.published[0])).toHaveLength(2);
+    expect(call.result.current.callState).toBe("offering");
+  });
+
+  it("the answerer answers with its host candidates once HOST_GATHER_MS has passed", async () => {
+    const call = renderCall();
+    await answering(call);
+    await act(async () => { await vi.advanceTimersByTimeAsync(HOST_GATHER_MS - 1); });
+    expect(call.published).toEqual([]);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    await settle();
+
+    expect(call.publishedKinds()).toEqual(["a"]);
+    expect(candidates(call.published[0])).toHaveLength(2);
+    expect(call.result.current.callState).toBe("connecting");
   });
 });
 

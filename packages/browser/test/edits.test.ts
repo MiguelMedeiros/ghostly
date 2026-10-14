@@ -6,7 +6,7 @@ import { db } from "../src/engine/db";
 import { CARD_RESTORE_GAP_MS, EditBuffer, EditQueue } from "../src/engine/edits";
 import { EDIT_HISTORY_KEEP, EDIT_HISTORY_MAX_BYTES, canEdit, takesPeerEdit, withEdit } from "../src/shared/edits";
 import type { StoredMessage } from "../src/shared/types";
-import { FakeNativeNet } from "./helpers/fakeNative";
+import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
 // covers: chat.edit.wire
 
 /**
@@ -29,7 +29,7 @@ async function setup(contactOptions: { editSupport?: boolean; confirm?: () => bo
   await db.putLink({ ...invitation.mine, id, profile: "paired-chat/1", participationSeed: mine, createdAt: 1,
     pairedPeerKey: identityFromSeedB64(theirs).pubKeyZ32, peerTrust: { version: 1 },
     peerTransports: ["iroh/1"], peerFallback: true, preferredTransport: "iroh/1", transportFallback: true,
-    peerDescriptors: { "iroh/1": { id: "contact:iroh/1" } } });
+    peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "contact") } });
   const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
   const onAttention = vi.fn();
   const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention }, { transport, automaticWallets: false,
@@ -40,7 +40,7 @@ async function setup(contactOptions: { editSupport?: boolean; confirm?: () => bo
   const contact = new GhostLink({
     params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
-    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": { id: "app:iroh/1" } } },
+    native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1"], peerFallback: true, peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "app") } },
     transport, createPeerConnection: () => { throw new Error("No WebRTC here"); }, localFetch: vi.fn(), getServices: () => [], getHostedHttpService: () => undefined,
     editSupport: contactOptions.editSupport ?? true, reactionsSupport: true,
     events: { onPairingState: state => { contactState = state; }, onMessage: message => { contactGot.push(message); },
@@ -84,6 +84,26 @@ describe("editing my message", () => {
     expect((await t.row(sent.messageId!)).edit).toMatchObject({ seq: 3, history: [{ text: "Working…" }, { text: "Step 1 of 3" }, { text: "Step 2 of 3" }] });
     // Its wire id works as well as its id here (what a bot keeps from `send`).
     expect(await t.node.editMessage({ linkId: t.id, messageId: mine.wireId!, text: "Done!" })).toMatchObject({ error: null, messageId: sent.messageId });
+  });
+
+  it("an edit and its confirmation read the edited message, not the chat's whole history", async () => {
+    const t = await setup();
+    // As the CLI and the web app host it: the pages hear the rows that changed, not the whole history.
+    Object.assign((t.node as unknown as { events: object }).events, { onMessageChanges: vi.fn() });
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "Working…" });
+    const stored = () => db.getMessage(t.id, sent.messageId!);
+    await vi.waitFor(async () => expect((await stored())?.delivery).toBe("delivered"));
+    const edit = async (text: string, seq: number) => {
+      expect((await t.node.editMessage({ linkId: t.id, messageId: sent.messageId!, text })).error).toBeNull();
+      await vi.waitFor(() => expect(t.contactEdits.at(-1)?.m).toBe(text));
+      await vi.waitFor(async () => { const now = (await stored())?.edit; expect([now?.seq, now?.pending]).toEqual([seq, undefined]); });
+    };
+    // The first one: the queue learns what waits in this chat from its history, once.
+    await edit("Step 1 of 4", 1);
+    const history = vi.spyOn(db, "getMessages");
+    for (const [i, step] of ["Step 2 of 4", "Step 3 of 4", "Done"].entries()) await edit(step, i + 2);
+    expect(history).not.toHaveBeenCalled();
+    history.mockRestore();
   });
 
   it("refuses what cannot be edited: the contact's messages, files, payments, notices, empty text, the 101st edit", async () => {
@@ -301,6 +321,55 @@ describe("EditQueue", () => {
     // New edits before resends of those not confirmed yet.
     expect(sent.slice(EDIT_SEND_LIMIT, EDIT_SEND_LIMIT + 3).map(e => e.m)).toEqual(["t11", "t12", "t13"]);
     expect(sent.slice(EDIT_SEND_LIMIT + 3).map(e => e.m)).toEqual(["t1", "t2", "t3", "t4", "t5", "t6", "t7"]);
+  });
+
+  describe("with rows read by their id", () => {
+    function byId(onRow?: (id: string) => void) {
+      const now = { t: 10_000 }, sent: WireEdit[] = [], reads = { n: 0 };
+      const q = new EditQueue({
+        read: async () => { reads.n++; return [...rows.values()]; },
+        row: async id => { const r = rows.get(id); onRow?.(id); return r; },
+        ready: () => true, now: () => now.t, receiptMs: 1_000,
+        send: edit => { sent.push(edit); return null; },
+        settle: async id => { const r = rows.get(id)!; rows.set(id, { ...r, edit: { ...r.edit!, pending: undefined } }); },
+      });
+      cleanup.push(async () => q.stop());
+      return { q, sent, reads };
+    }
+
+    it("reads the history once, then only the rows it was told of; a new session reads it again", async () => {
+      rows.set("me_1", row(1));
+      const { q, sent, reads } = byId();
+      await q.flush();
+      await q.received(row(1).wireId!, 1);
+      rows.set("me_2", row(2));
+      q.edited("me_2");
+      await q.flush();
+      await q.received(row(2).wireId!, 1);
+      // A confirmation that names no edit on its way costs no read of the history either.
+      await q.received("W".repeat(22), 1);
+      await q.receivedOnDht("nothing");
+      expect([sent.map(e => e.m), reads.n, rows.get("me_2")!.edit!.pending]).toEqual([["t1", "t2"], 1, undefined]);
+      // An edit it was not told of waits for the next session, which reads the history again.
+      rows.set("me_3", row(3));
+      await q.flush();
+      expect(sent).toHaveLength(2);
+      await q.flush({ reopened: true });
+      expect([sent.map(e => e.m), reads.n]).toEqual([["t1", "t2", "t3"], 2]);
+    });
+
+    it("keeps a row edited again while it was read as settled", async () => {
+      rows.set("me_1", row(1, { edit: { seq: 1, at: 1_001, history: [] } }));
+      let edit = false;
+      const { q, sent } = byId(id => { if (edit) { edit = false; rows.set(id, row(1, { text: "again", edit: { seq: 2, at: 1_002, history: [], pending: true } })); q.edited(id); } });
+      await q.flush();
+      q.edited("me_1");
+      edit = true;
+      await q.flush();
+      expect(sent).toEqual([]);
+      await q.flush();
+      expect(sent.map(e => [e.e, e.m])).toEqual([[2, "again"]]);
+    });
   });
 
   it("goes again without a confirmation, stops after the attempts, and a new session starts over", async () => {

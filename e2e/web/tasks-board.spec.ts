@@ -215,8 +215,50 @@ test("a bot's tasks from two chats on one board: columns by status, live updates
     await expect(cards(running)).toHaveCount(100);
     // A full column scrolls: its cards keep their two lines.
     expect((await cards(running).first().boundingBox())!.height).toBeGreaterThan(44);
+    // DIAG (temporary)
+    const diag = async (label: string, scroll: boolean) => {
+      const got = await running.getByTestId("board-column-cards").evaluate(async (list, scroll) => {
+        list.scrollTop = 0;
+        const long: number[] = [];
+        const po = new PerformanceObserver((l) => long.push(...l.getEntries().map((e) => Math.round(e.duration))));
+        po.observe({ type: "longtask" });
+        let mutations = 0;
+        const mo = new MutationObserver((r) => { mutations += r.length; });
+        mo.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+        const times: number[] = [], work: number[] = [];
+        let last = performance.now();
+        for (let i = 0; i < 90; i++) {
+          const t0 = performance.now();
+          if (scroll) { list.scrollTop += 40; void list.scrollHeight; void list.firstElementChild?.getBoundingClientRect(); }
+          work.push(performance.now() - t0);
+          await new Promise(requestAnimationFrame);
+          const now = performance.now();
+          times.push(now - last);
+          last = now;
+        }
+        await new Promise((r) => setTimeout(r, 50));
+        po.disconnect(); mo.disconnect();
+        const raw = times.map((t) => Math.round(t));
+        times.sort((a, b) => a - b); work.sort((a, b) => a - b);
+        return { median: times[45], p95: times[85], worst: times[89], workMedian: work[45], workWorst: work[89], long, mutations, raw: raw.join(" ") };
+      }, scroll);
+      console.log(`DIAG ${label} ${scroll ? "scroll" : "idle"}: ${JSON.stringify(got)}`);
+    };
+    const cdp = await page.context().newCDPSession(page);
+    await diag("fresh 1x", true);
+    await diag("fresh 1x", false);
+    await page.waitForTimeout(8000);
+    await diag("settled 1x", true);
+    await diag("settled 1x", false);
+    for (const rate of [4, 8]) {
+      await cdp.send("Emulation.setCPUThrottlingRate", { rate });
+      await diag(`settled ${rate}x`, true);
+      await diag(`settled ${rate}x`, false);
+    }
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+    await running.getByTestId("board-column-cards").evaluate((list) => { list.scrollTop = 0; });
     // Scrolled a little each frame for a second and a half: how long the frames took.
-    const frames = await running.getByTestId("board-column-cards").evaluate(async (list) => {
+    const frames =await running.getByTestId("board-column-cards").evaluate(async (list) => {
       const times: number[] = [];
       let last = performance.now();
       for (let i = 0; i < 90; i++) {
@@ -258,8 +300,8 @@ test("richer task cards: a Review column for an open pull request, its checks, t
     const prOf = (n: number) => ["--pr-url", `https://github.com/MiguelMedeiros/ghostly/pull/${n}`, "--pr-number", String(n)];
 
     // The CLI refuses what a reader would leave out, and a parent that is not there.
-    await expect(bot.run("task", "send", direct, "--title", "x", ...prOf(1), "--pr-state", "approved")).rejects.toThrow(/pr.state is one of/);
-    await expect(bot.run("task", "send", direct, "--title", "x", "--tag", "a", "--tag", "b", "--tag", "c", "--tag", "d")).rejects.toThrow(/tags is a list of at most 3/);
+    await expect(bot.run("task", "send", direct, "--title", "x", ...prOf(1), "--pr-state", "approved")).rejects.toThrow(/--pr-state takes draft, open, merged or closed/);
+    await expect(bot.run("task", "send", direct, "--title", "x", "--tag", "a", "--tag", "b", "--tag", "c", "--tag", "d")).rejects.toThrow(/--tag is given at most 3 times/);
     await expect(bot.run("task", "send", direct, "--title", "x", "--parent", "never-sent")).rejects.toThrow(/never-sent/);
 
     // A task with three parts; tasks whose pull requests stand in different places.

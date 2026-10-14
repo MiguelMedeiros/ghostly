@@ -1,0 +1,1 @@
+A chat's header says in words whether its bot is working, beside the usage meter: "Working · <the title of the newest running task>" ("+2" when two more are running), or "Working? · last update 40 min ago" once its running tasks have all been quiet for 15 minutes. A press opens the chat's Tasks panel. It follows the same rule as the dot on the chat list's row.

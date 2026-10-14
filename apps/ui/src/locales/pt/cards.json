@@ -45,7 +45,7 @@
       "status": "Estado"
     },
     "hideOlder": "Ocultar antigas",
-    "info": "Os bots publicam cartões de tarefa em conversas e grupos e os mantêm atualizados. Este quadro reúne os de todas as conversas. Tarefas concluídas e paradas ficam por um dia; Paradas reúne as que falharam e as canceladas. Um cartão só mostra a tarefa: quem muda o estado é o bot. Abra um cartão para vê-lo na conversa.",
+    "info": "Os cartões de tarefa dos bots, de todas as conversas. Tarefas concluídas e paradas ficam por um dia. Um cartão só mostra a tarefa: quem muda o estado é o bot.",
     "me": "Você",
     "noMatch": "Nenhuma tarefa corresponde",
     "none": "Nenhuma",
@@ -151,6 +151,12 @@
     "title": "Uso",
     "updatedLabel": "Atualizado",
     "used": "{{used}} de {{limit}} usados",
-    "usedLabel": "Usado"
+    "usedLabel": "Usado",
+    "wasReset": "renovou {{ago}}"
+  },
+  "working": {
+    "label": "Trabalhando",
+    "quiet": "Trabalhando? · última atualização {{ago}}",
+    "stale": "Sem atualização há {{duration}}"
   }
 }

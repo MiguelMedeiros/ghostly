@@ -161,6 +161,33 @@ describe("Download in a message's menu", () => {
     await waitFor(() => expect(saveFile).toHaveBeenCalledTimes(2));
   });
 
+  it.each(["Permission denied (os error 13)", "No space left on device (os error 28)"])(
+    "says a copy the system refused on Desktop (%s) was not saved, with the system's reason, and can be saved again", async (refusal) => {
+      vi.mocked(servicesPlatform!.getFile).mockResolvedValue(null);
+      const saveFile = vi.fn(async () => { throw new Error(refusal); });
+      Object.assign(servicesPlatform!, { saveFile });
+      const { user } = show(document_(), null);
+      await menu(user);
+      await user.click(screen.getByTestId("message-download"));
+      await waitFor(() => expect(screen.getByTestId("message-download")).toHaveAttribute("data-download-state", "unsaved"));
+      expect(screen.getByTestId("message-download")).toHaveTextContent("Not saved. Try another folder");
+      expect(screen.getByTestId("message-download")).toHaveAttribute("title", `Not saved. Try another folder\n${refusal}`);
+      expect(screen.getByTestId("message-download")).not.toBeDisabled();
+      await user.click(screen.getByTestId("message-download"));
+      await waitFor(() => expect(saveFile).toHaveBeenCalledTimes(2));
+    });
+
+  it("says an MP3 made here but refused where it was to be saved was not saved, not that it could not be converted", async () => {
+    const saveBlob = vi.fn(async () => { throw new Error("Permission denied (os error 13)"); });
+    Object.assign(servicesPlatform!, { saveBlob });
+    const { user } = show(voice());
+    await menu(user);
+    await user.click(screen.getByTestId("message-download-mp3"));
+    await waitFor(() => expect(screen.getByTestId("message-download-mp3")).toHaveAttribute("data-download-state", "unsaved"));
+    expect(screen.getByTestId("message-download-mp3")).toHaveTextContent("Not saved. Try another folder");
+    expect(screen.getByTestId("message-download-mp3")).not.toBeDisabled();
+  });
+
   it("says so when the bytes are gone from this device", async () => {
     vi.mocked(servicesPlatform!.getFile).mockResolvedValue(null);
     const { user } = show(voice());

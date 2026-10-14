@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GhostLink, type GhostLinkEvents } from "../src/ghostlink";
+import { CATCH_UP_SLICE, CatchUpAnswers } from "../src/catchUp";
+import { GhostLink, HANDLED_WAIT_MS, type GhostLinkEvents } from "../src/ghostlink";
 import { createLink } from "../src/invite";
 import { createIdentity } from "../src/identity";
 import type { FrameChannel } from "../src/frames";
@@ -180,6 +181,36 @@ describe("a member's catch-up answer goes a slice at a time", { timeout: 120_000
     expect(sent).toHaveLength(3 * GROUP_LIMITS.catchUpSlice);
   });
 
+  it("a member slower than the wait for its pong still has two slices waiting at most: a late pong is not 'cannot tell'", async () => {
+    vi.useFakeTimers();
+    // Bob's app handles a frame every 600 ms (a phone with a long history) and answers pings in the order frames come;
+    // the wait for a pong gives up after `HANDLED_WAIT_MS`, as `GhostLink.handled` does: 32 frames take it 19 s.
+    const perFrameMs = 600;
+    let sent = 0, handledCount = 0, waiting = 0, mostWaiting = 0, busyUntil = 0;
+    const pings: { at: number; done: (told: boolean | "late") => void }[] = [];
+    const answers = new CatchUpAnswers<number>({
+      send: () => {
+        sent++; mostWaiting = Math.max(mostWaiting, ++waiting);
+        busyUntil = Math.max(busyUntil, Date.now()) + perFrameMs;
+        setTimeout(() => {
+          waiting--; handledCount++;
+          for (const ping of pings.filter(p => p.at <= handledCount)) ping.done(true);
+        }, busyUntil - Date.now());
+        return true;
+      },
+      handled: () => new Promise(resolve => {
+        const ping = { at: sent, done: (told: boolean | "late") => { clearTimeout(timer); pings.splice(pings.indexOf(ping), 1); resolve(told); } };
+        const timer = setTimeout(() => ping.done("late"), HANDLED_WAIT_MS);
+        pings.push(ping);
+      }),
+      active: () => true,
+    });
+    answers.handOut("Bob", Array.from({ length: 256 }, (_, i) => i));
+    await vi.advanceTimersByTimeAsync(256 * perFrameMs + 60_000);
+    expect(handledCount).toBe(256);
+    expect(mostWaiting).toBeLessThanOrEqual(2 * CATCH_UP_SLICE);
+  });
+
   it("a host that cannot tell (no `handled`) sends the answer at once, as before", async () => {
     const { alice, bob, sync } = await busyGroup(30);
     const sent: GroupEdgeFrame[] = [];
@@ -197,7 +228,7 @@ describe("GhostLink.handled: the contact's app handled what was sent before", ()
     const t = edge({ onGroupFrame: async frame => { await gate; frames.push(frame); } });
     await vi.waitFor(() => { expect(t.a.groupsSupport).toBe(true); expect(t.b.groupsSupport).toBe(true); });
     for (let i = 0; i < 10; i++) t.a.sendGroupFrame({ t: "group-msg", g: "g", n: i });
-    let done: boolean | undefined;
+    let done: boolean | "late" | undefined;
     void t.a.handled().then(exact => { done = exact; });
     await sleep(50);
     expect(done).toBeUndefined();
@@ -207,5 +238,21 @@ describe("GhostLink.handled: the contact's app handled what was sent before", ()
     await t.b.stop(false);
     await vi.waitFor(() => expect(t.a.isDataLinkOpen).toBe(false));
     expect(await t.a.handled()).toBe(false);
+  });
+
+  it("says 'late', not 'cannot tell', when the contact's app is still handling frames after `HANDLED_WAIT_MS`", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const t = edge({ onGroupFrame: async () => { await gate; } });
+    await vi.waitFor(() => { expect(t.a.groupsSupport).toBe(true); expect(t.b.groupsSupport).toBe(true); });
+    t.a.sendGroupFrame({ t: "group-msg", g: "g", n: 0 });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let told: boolean | "late" | undefined;
+    void t.a.handled().then(answer => { told = answer; });
+    await vi.advanceTimersByTimeAsync(HANDLED_WAIT_MS);
+    vi.useRealTimers();
+    expect(told).toBe("late");
+    release();
+    expect(await t.a.handled()).toBe(true);
   });
 });

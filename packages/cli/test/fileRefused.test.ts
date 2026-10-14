@@ -26,6 +26,7 @@ describe("file send refused by the engine", () => {
     const node = {
       getState: () => ({ links: [link], groups: [], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState,
       getMessages: vi.fn(async () => []),
+      getMessage: vi.fn(async () => undefined),
       sendFile: vi.fn(async () => { throw new Error("This chat stopped: your contact's key changed."); }),
     };
     const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
@@ -34,5 +35,14 @@ describe("file send refused by the engine", () => {
     await expect(callApi(ctx, "file.send", { chat: "Alice", path })).rejects.toMatchObject({ code: "refused", message: "This chat stopped: your contact's key changed." });
     expect(node.sendFile).toHaveBeenCalledOnce();
     expect(await fileStore.listForLink("chat-one")).toEqual([]);
+  });
+
+  it("a chat or group nobody has is not_found, naming both", async () => {
+    const node = { getState: () => ({ links: [link], groups: [], settings: {}, transport: {}, transfers: {} }) as unknown as EngineState, sendFile: vi.fn() };
+    const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
+    const path = join(dir, "note.txt");
+    writeFileSync(path, "boo");
+    await expect(callApi(ctx, "file.send", { chat: "alcie", path })).rejects.toMatchObject({ code: "not_found", message: 'No chat or group "alcie" (ghostly chat list, ghostly group list)' });
+    expect(node.sendFile).not.toHaveBeenCalled();
   });
 });

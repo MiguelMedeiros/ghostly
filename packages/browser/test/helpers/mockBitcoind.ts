@@ -14,7 +14,7 @@ export const REGTEST = { bech32: "bcrt", pubKeyHash: 0x6f, scriptHash: 0xc4, wif
 const TX_OPTS = { allowUnknownOutputs: true, allowUnknownInputs: true, disableScriptCheck: true };
 
 interface Utxo { txid: string; vout: number; amount: bigint; script: Uint8Array; confirmations: number; mine: boolean }
-interface WalletTx { txid: string; hex?: string; confirmations: number; entries: { category: "send" | "receive"; amount: number; fee?: number }[]; inMempool: boolean }
+interface WalletTx { txid: string; hex?: string; confirmations: number; entries: { category: "send" | "receive"; amount: number; fee?: number; address?: string }[]; inMempool: boolean }
 
 const btc = (sats: bigint | number) => Number(sats) / 1e8;
 const rpcError = (code: number, message: string): BitcoindRpcFailure => ({ kind: "rpc", code, message });
@@ -42,12 +42,12 @@ export class MockBitcoind {
     return payment.address!;
   }
 
-  /** Someone pays this wallet `sats`, confirmed. */
-  fund(sats: number) {
+  /** Someone pays this wallet `sats`, confirmed, on `address` (a fresh one of its own if none). Returns the txid. */
+  fund(sats: number, address = this.newAddress()) {
     const txid = hex.encode(crypto.getRandomValues(new Uint8Array(32)));
-    const address = this.newAddress();
     this.utxos.set(key(txid, 0), { txid, vout: 0, amount: BigInt(sats), script: addressScript(address), confirmations: 1, mine: false });
-    this.txs.set(txid, { txid, confirmations: 1, inMempool: false, entries: [{ category: "receive", amount: btc(sats) }] });
+    this.txs.set(txid, { txid, confirmations: 1, inMempool: false, entries: [{ category: "receive", amount: btc(sats), address }] });
+    return txid;
   }
 
   /** A block: whatever is in the mempool confirms. */
@@ -158,7 +158,7 @@ export class MockBitcoind {
       }
       case "listtransactions": {
         const [, count] = params as [string, number];
-        return [...this.txs.values()].flatMap((tx) => tx.entries.map((e) => ({ txid: tx.txid, category: e.category, amount: e.amount, fee: e.fee, confirmations: tx.confirmations, time: 1_700_000_000 }))).slice(-count);
+        return [...this.txs.values()].flatMap((tx) => tx.entries.map((e) => ({ txid: tx.txid, category: e.category, address: e.address, amount: e.amount, fee: e.fee, confirmations: tx.confirmations, time: 1_700_000_000 }))).slice(-count);
       }
       default: throw rpcError(-32601, "Method not found");
     }

@@ -6,8 +6,9 @@ import { encrypt, tryDecrypt } from "./crypto";
 import { identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify, type Identity } from "./identity";
 import type { LinkParams } from "./invite";
 import type { PairingCredentials } from "./pairedSession";
-import type { TransportDescriptors } from "./pairedTransports";
+import { RELAY_URL, type TransportDescriptors } from "./pairedTransports";
 import { measureRecords, MAX_DNS_PACKET_BYTES, type GhostRecord, type SignedPacket } from "./pkarr";
+import { sanitizeNick } from "./text";
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrTransport } from "./transport";
 
 /**
@@ -110,11 +111,6 @@ const HEX64 = /^[0-9a-f]{64}$/;
 const SIG = /^[A-Za-z0-9_-]{86}$/;
 const Z32 = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
 const KEY = /^[A-Za-z0-9_-]{43}$/;
-/**
- * A relay server's URL, short: https, or wss for a browser's relay; plain http or ws only on this machine's loopback,
- * as a test relay is (the same rule as the relay settings).
- */
-const RELAY = /^((https|wss):\/\/[^\s]{1,120}|(http|ws):\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?(\/[^\s]{0,100})?)$/;
 const hexToKey = (hex: string) => toBase64Url(Uint8Array.from(hex.match(/../g)!, b => parseInt(b, 16)));
 const keyToHex = (key: string) => Array.from(fromBase64Url(key), b => b.toString(16).padStart(2, "0")).join("");
 
@@ -126,10 +122,10 @@ export function capsDescriptors(descriptors: TransportDescriptors | undefined): 
   const out: CapsDescriptors = {};
   const iroh = descriptors?.["iroh/1"] as { id?: unknown; relay?: unknown } | undefined;
   if (iroh && typeof iroh.id === "string" && HEX64.test(iroh.id))
-    out["iroh/1"] = { id: hexToKey(iroh.id), ...(typeof iroh.relay === "string" && RELAY.test(iroh.relay) ? { relay: iroh.relay } : {}) };
+    out["iroh/1"] = { id: hexToKey(iroh.id), ...(typeof iroh.relay === "string" && RELAY_URL.test(iroh.relay) ? { relay: iroh.relay } : {}) };
   const hyper = descriptors?.["hyperdht/1"] as { publicKey?: unknown; relay?: unknown } | undefined;
   if (hyper && typeof hyper.publicKey === "string" && HEX64.test(hyper.publicKey))
-    out["hyperdht/1"] = { publicKey: hexToKey(hyper.publicKey), ...(typeof hyper.relay === "string" && RELAY.test(hyper.relay) ? { relay: hyper.relay } : {}) };
+    out["hyperdht/1"] = { publicKey: hexToKey(hyper.publicKey), ...(typeof hyper.relay === "string" && RELAY_URL.test(hyper.relay) ? { relay: hyper.relay } : {}) };
   return out;
 }
 
@@ -157,11 +153,11 @@ function parseDescriptors(value: unknown): CapsDescriptors | null {
   const out: CapsDescriptors = {};
   const iroh = raw["iroh/1"], hyper = raw["hyperdht/1"];
   if (iroh !== undefined) {
-    if (!iroh || typeof iroh.id !== "string" || !KEY.test(iroh.id) || (iroh.relay !== undefined && (typeof iroh.relay !== "string" || !RELAY.test(iroh.relay)))) return null;
+    if (!iroh || typeof iroh.id !== "string" || !KEY.test(iroh.id) || (iroh.relay !== undefined && (typeof iroh.relay !== "string" || !RELAY_URL.test(iroh.relay)))) return null;
     out["iroh/1"] = { id: iroh.id, ...(iroh.relay !== undefined ? { relay: iroh.relay as string } : {}) };
   }
   if (hyper !== undefined) {
-    if (!hyper || typeof hyper.publicKey !== "string" || !KEY.test(hyper.publicKey) || (hyper.relay !== undefined && (typeof hyper.relay !== "string" || !RELAY.test(hyper.relay)))) return null;
+    if (!hyper || typeof hyper.publicKey !== "string" || !KEY.test(hyper.publicKey) || (hyper.relay !== undefined && (typeof hyper.relay !== "string" || !RELAY_URL.test(hyper.relay)))) return null;
     out["hyperdht/1"] = { publicKey: hyper.publicKey, ...(hyper.relay !== undefined ? { relay: hyper.relay as string } : {}) };
   }
   return out;
@@ -292,8 +288,10 @@ export class CapsKeys {
       throw new CapsRefusedError("signature", "The capability record's signature does not verify.");
     }
     if (options.minRev !== undefined && (rev as number) < options.minRev) throw new CapsRefusedError("rev", "An older capability record than one already seen.");
+    // The name is the contact's text, shown as it is: cleaned as a nickname from any other source, empty when nothing
+    // visible is left.
     return { rev: rev as number, issued: issued as number, author, versions: versions as number[], transports: transports as string[],
-      capabilities: capabilities as string[], extensions: extensions as string[], descriptors, name, ...(choice !== undefined ? { choice: choice as string } : {}) };
+      capabilities: capabilities as string[], extensions: extensions as string[], descriptors, name: sanitizeNick(name) ?? "", ...(choice !== undefined ? { choice: choice as string } : {}) };
   }
 }
 
@@ -317,13 +315,16 @@ const digestOf = (content: CapsContent) => toBase64Url(sha256(utf8Encode(JSON.st
 
 /**
  * Publishes this side's record (at first start, at every change, hourly) and reads the contact's (at
- * pairing, when an envelope names a newer revision, when the chat drops to the DHT). Every read and
- * publish goes through one queue; reads close together are merged.
+ * pairing, when an envelope names a newer revision, when the chat drops to the DHT). Publications go one
+ * at a time, and reads one at a time beside them (a read never waits for a put); reads close together are merged.
  */
 export class CapsExchange {
   private state: CapsState;
   private readonly keys: CapsKeys;
+  /** Publications, one at a time; reads of the contact's record (another key) have their own, so neither waits for the other. */
   private chain: Promise<unknown> = Promise.resolve();
+  private readChain: Promise<unknown> = Promise.resolve();
+  private saveChain: Promise<unknown> = Promise.resolve();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   private lastRead = 0;
@@ -360,10 +361,13 @@ export class CapsExchange {
   get droppedFields(): readonly ("name" | "extensions")[] { return this.dropped; }
   get address(): string { return this.keys.identity.pubKeyZ32; }
 
-  private serialize<T>(run: () => Promise<T>): Promise<T> {
-    const next = this.chain.then(run); this.chain = next.catch(() => {}); return next;
+  private serialize<T>(run: () => Promise<T>, chain: "chain" | "readChain" | "saveChain" = "chain"): Promise<T> {
+    const next = this[chain].then(run); this[chain] = next.catch(() => {}); return next;
   }
-  private async persist(next: CapsState): Promise<void> { await this.options.save(structuredClone(next)); this.state = next; }
+  /** Saves are one at a time, each over the state as it is then: a read and a publication change different fields. */
+  private persist(patch: Partial<CapsState>): Promise<void> {
+    return this.serialize(async () => { const next = { ...this.state, ...patch }; await this.options.save(structuredClone(next)); this.state = next; }, "saveChain");
+  }
 
   start(): void {
     if (this.running || this.ended) return;
@@ -382,7 +386,8 @@ export class CapsExchange {
     if (this.readTimer) clearTimeout(this.readTimer);
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.timer = this.readTimer = this.retryTimer = null;
-    await this.chain.catch(() => {});
+    await Promise.all([this.chain, this.readChain]);
+    await this.saveChain;
   }
 
   /**
@@ -410,14 +415,14 @@ export class CapsExchange {
         this.dropped = dropped;
         // The revision is saved before it is published, so a crash never reuses it for other content; until it is
         // out, it has no `publishedAt`, so a publication that fails (or a crash) does not lose it until the hourly one.
-        await this.persist({ ...this.state, rev, digest, sealedFor: peerKey, publishedAt: undefined });
+        await this.persist({ rev, digest, sealedFor: peerKey, publishedAt: undefined });
         try { await this.options.transport.publish(this.keys.identity, records, changed || unpublished ? undefined : { background: true }); }
         catch (error) {
           // Held back by the relays' request budget: again when the budget frees a request; any other failure, in a minute.
           this.schedule(isDiscoveryBudgetError(error) ? budgetRetryMs(error, 1_000, 60_000) : 60_000);
           throw error;
         }
-        await this.persist({ ...this.state, publishedAt: now });
+        await this.persist({ publishedAt: now });
         this.lastOut = content;
         if (changed || unpublished) this.options.published?.(rev);
         // This side can dial it now: a contact's record that listed it with no descriptor is worth a few reads again.
@@ -465,12 +470,12 @@ export class CapsExchange {
         return this.state.peer;
       }
       if (this.state.peer && record.rev === this.state.peer.rev && record.author === this.state.peer.author) return this.state.peer;
-      await this.persist({ ...this.state, peer: record });
+      await this.persist({ peer: record });
       // A new revision: what it still lacks (a transport without its descriptor) is worth a few reads again.
       this.retries = 0;
       this.options.changed?.(record);
       return record;
-    });
+    }, "readChain");
     return read.finally(() => this.readAgainIfBehind());
   }
 
