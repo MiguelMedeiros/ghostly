@@ -89,7 +89,13 @@ export function decodeBolt12Offer(text: string): Bolt12Offer | null {
         offer.network = chains.has("bitcoin") ? "mainnet" : "testnet";
         break;
       }
-      case 6: offer.currency = utf8(value); break;
+      case 6: {
+        // An ISO 4217 code. One that cannot be read is no offer: its amount is in that currency, never millisats.
+        const code = utf8(value);
+        if (!code || !/^[A-Z]{3}$/.test(code)) return null;
+        offer.currency = code;
+        break;
+      }
       case 8: {
         const amount = tu64(value);
         if (amount === null) return null;
