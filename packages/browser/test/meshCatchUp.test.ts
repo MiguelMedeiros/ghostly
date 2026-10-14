@@ -80,6 +80,29 @@ describe("a private group catches up a member from whoever is there", { timeout:
     expect(new Set(world.texts(dave, id)).size).toBe(world.texts(dave, id).length);
   });
 
+  it("a member back gets what an author wrote before someone joined while it was away, though the author wrote 32 more since", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
+    const [alice, , , dave] = peers;
+    dave.online = false;
+    await world.run(2_000);
+    for (let i = 0; i < 40; i++) await alice.groups.send(id, `alice before ${i}`);
+    await world.run(2_000);
+    // Erin's join starts a new epoch: Alice's last 32 are all of it, so her own answer shows Dave nothing of the one before.
+    const erin = world.add("erin");
+    await erin.groups.joinByLink(await alice.groups.enableLink(id));
+    await world.until(() => world.view(erin, id)?.members.length === 5, 5 * 60_000, 1000);
+    for (let i = 0; i < 40; i++) await alice.groups.send(id, `alice after ${i}`);
+    await world.run(2_000);
+    const back = world.now;
+    world.reopen(dave);
+    const has = (when: string) => world.texts(dave, id).filter(t => t.startsWith(`alice ${when} `)).length;
+    await world.until(() => has("before") === 40 && has("after") === 40, 10 * 60_000, 1000,
+      () => `dave has ${has("before")} of 40 before Erin joined, ${has("after")} of 40 after`);
+    // Asked of Bob or Carol ten seconds after (`MESH_GAP_AGAIN_MS`), not of Erin, who was let in after them.
+    expect(world.now - back).toBeLessThanOrEqual(2 * MESH_GAP_AGAIN_MS);
+    expect(new Set(world.texts(dave, id)).size).toBe(world.texts(dave, id).length);
+  });
+
   it("a member back after 200 messages of one author gets them in about a minute, not 32 a gossip turn", async () => {
     const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
     const [alice, , , dave] = peers;
