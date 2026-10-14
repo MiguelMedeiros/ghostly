@@ -26,6 +26,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
 import { LinkQrDialog } from "../components/chat/LinkQrDialog";
 import { ChatConnection } from "../components/ChatConnection";
+import { focus } from "../lib/connection";
 import { PairingScene } from "../components/pairing/PairingScene";
 import { usePairingProgress } from "../hooks/usePairingProgress";
 import { contactArrived } from "../lib/pairingProgress";
@@ -422,7 +423,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const [showMute, setShowMute] = useState(false);
   const [showFolders, setShowFolders] = useState(false);
   const [showTechInfo, setShowTechInfo] = useState(false);
-  const labelInputRef = useRef<HTMLInputElement>(null);
+  const labelInputRef = useRef<HTMLInputElement>(null), nameRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -720,6 +721,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                   if (labelComposition.composing(e)) return;
                   if (e.key === "Enter") saveLabel();
                   if (e.key === "Escape") setIsEditingLabel(false);
+                  // Done from the keyboard: the focus goes back to the name, not to the page. A click elsewhere keeps its own.
+                  if (e.key === "Enter" || e.key === "Escape") setTimeout(() => nameRef.current?.focus(), 0);
                 }}
                 onBlur={saveLabel}
                 placeholder={t("chat.setName")}
@@ -728,9 +731,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               />
             ) : (
               <div className="flex items-center gap-1.5 max-md:gap-1 min-w-0">
-              <p
+              {/* The one way to rename the chat: a button, so the keyboard reaches it too. */}
+              <button
+                type="button"
+                ref={nameRef}
                 onClick={startEditLabel}
-                className={`group/name text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
+                className={`group/name min-w-0 text-start text-[15px] font-normal m-0 leading-tight truncate cursor-pointer rounded hover:text-accent transition-colors ${focus} ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
                 title={t("chat.setNameHint")}
               >
                 {/* With no name, the word alone: the start of their key ("Contact · 1kwb54" elsewhere) is on the line
@@ -746,13 +752,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                     strokeWidth="2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    className="inline ms-1.5 text-text-muted opacity-0 group-hover/name:opacity-100 max-md:hidden"
+                    aria-hidden="true"
+                    className="inline ms-1.5 text-text-muted opacity-0 group-hover/name:opacity-100 group-focus-visible/name:opacity-100 max-md:hidden"
                   >
                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                   </svg>
                 )}
-              </p>
+              </button>
               {paired && !phoneHeader && <IdentityStack peerKey={params.peerPubKeyB64} name={shownName} open={showIdentities} onOpen={() => { setIdentityCard(undefined); setShowIdentities(open => !open); }}
                 footer={face ? t("chat.shownWith", { provider: face.providerName, key: truncatedPeerKey }) : undefined} />}
               {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}
