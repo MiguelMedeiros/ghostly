@@ -149,8 +149,9 @@ describe("a member back in a private group reads what it missed in the order it 
     await world.run(2_000);
     const written: string[] = [];
     for (let i = 1; i <= 120; i++) { written.push(`alice ${i}`); await alice.groups.send(id, `alice ${i}`); await world.run(50); }
+    // Alice is told first: told another first, Dave asks that one for her messages too, and all 120 come at once.
+    comesBack(world, dave, alice);
     world.slow = (_from, to) => to === dave ? 4 : 0;
-    world.reopen(dave);
     // Her newest come first: Dave answers the last line as soon as it shows, while the older ones are on their way.
     await world.until(() => world.texts(dave, id).includes("alice 120"), 60_000);
     expect(world.texts(dave, id).filter(t => written.includes(t)).length).toBeLessThan(written.length);
@@ -171,8 +172,9 @@ describe("a member back in a private group reads what it missed in the order it 
     const placeAgain = dave.host.placeAgain!;
     let calls = 0, rows = 0;
     dave.host.placeAgain = async (linkId, ids) => { calls++; rows += ids.length; await placeAgain(linkId, ids); };
+    // Alice is told first: told another first, Dave asks that one for her messages too, and all 200 come at once.
+    comesBack(world, dave, alice);
     world.slow = (_from, to) => to === dave ? 4 : 0;
-    world.reopen(dave);
     await world.until(() => world.texts(dave, id).filter(t => written.includes(t)).length === written.length, 120_000);
     await world.run(20_000);
     expect(world.texts(dave, id).filter(t => written.includes(t))).toEqual(written);
