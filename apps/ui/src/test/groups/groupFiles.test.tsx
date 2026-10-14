@@ -107,6 +107,30 @@ describe("the composer of a group takes files and voice messages", () => {
     expect(await screen.findByText("You sent many files to this group just now. Wait a minute, then send it again.")).toBeInTheDocument();
   });
 
+  it("a file still being prepared is said at once, and the same file picked again meanwhile goes once", async () => {
+    const { engine } = openGroup();
+    // Held as a large file's copy and digest hold it, until the test lets them all go.
+    const held: (() => void)[] = [];
+    engine.on("sendGroupFile", () => new Promise((done) => { held.push(() => done({ error: null, messageId: `${ME}:1:9` })); }));
+    await screen.findByText("lunch at noon?");
+    // Picked anew each time, as the file picker gives it: another File, the same file on disk.
+    const pick = (name = "holiday.zip") => fireEvent.change(screen.getByTestId("file-input"), {
+      target: { files: [new File(["a large file"], name, { type: "application/zip", lastModified: 1_700_000_000_000 })] } });
+    pick();
+    expect(await screen.findByTestId("file-preparing")).toHaveTextContent("Preparing holiday.zip…");
+    pick();
+    pick("other.zip");
+    await vi.waitFor(() => expect(engine.callsTo("sendGroupFile").map(c => c.file.name)).toEqual(["holiday.zip", "other.zip"]));
+    engine.on("sendGroupFile", () => ({ error: null, messageId: `${ME}:1:10` }));
+    held.forEach((go) => go());
+    await vi.waitFor(() => expect(screen.queryByTestId("file-preparing")).not.toBeInTheDocument());
+    expect(engine.callsTo("sendGroupFile").map(c => c.file.name)).toEqual(["holiday.zip", "other.zip"]);
+
+    // Once it has gone, the same file again is sent again: the person meant it.
+    pick();
+    await vi.waitFor(() => expect(engine.callsTo("sendGroupFile").map(c => c.file.name)).toEqual(["holiday.zip", "other.zip", "holiday.zip"]));
+  });
+
   it("a file the group would refuse now is refused before any of it is read or kept here", async () => {
     const put = vi.spyOn(fileStore, "put");
     const { engine } = openGroup();
