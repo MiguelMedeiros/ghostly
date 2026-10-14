@@ -285,7 +285,10 @@ export const FILE_METHODS: Record<string, Method> = {
     const flags = bool(params, "force") ? "w" : "wx";
     let out;
     try { out = await open(target, flags, 0o600); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new CliError("confirm", `${target} exists: pass force (--force) to replace it`);
+      const code = (error as NodeJS.ErrnoException).code;
+      // A folder there is no file to replace: before, it asked for --force, and the --force then failed "is a folder".
+      if ((code === "EEXIST" || code === "EISDIR") && (await stat(target).catch(() => undefined))?.isDirectory()) throw new CliError("bad_request", `${target} is a folder: name a file, or use dir (--dir ${target})`);
+      if (code === "EEXIST") throw new CliError("confirm", `${target} exists: pass force (--force) to replace it`);
       throw error;
     }
     let written = 0, complete = false;
