@@ -61,6 +61,12 @@ export interface PkarrRequestOptions {
    */
   resume?: boolean;
   /**
+   * A community member's way back to its group while it has no edge up there (`Communities.wayBack`): its readings of the
+   * beacon and its request in a hub's lobby. Its own small allowance past the relay's minute (`WAY_BACK_SHARE` in
+   * relay.ts), not the edges' signaling's.
+   */
+  back?: boolean;
+  /**
    * `publishPayload` only: the payload was signed in this process, dated so (a group edge's, `CarriedTransport`). Its
    * signature is not checked again on the way to the relays, as `RelayTransport.putSigned`'s is not.
    */
