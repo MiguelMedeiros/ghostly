@@ -40,6 +40,47 @@ describe("the Fedimint panel's history", () => {
   });
 });
 
+describe("notes made in the Fedimint panel", () => {
+  const made = async () => {
+    const calls = { fedimintSpendNotes: vi.fn(async () => ({ notes: "notes-out-1", operation: "op-1" })), fedimintTakeBack: vi.fn(async () => "canceled" as const) };
+    const { user } = renderApp(<FedimintWalletPanel wallet={wallet(calls)} state={state([])} />);
+    await user.click(screen.getByTestId("wallet-send"));
+    await user.type(screen.getByTestId("fedimint-send-amount"), "100");
+    await user.click(screen.getByTestId("fedimint-spend"));
+    expect(await screen.findByTestId("fedimint-notes-out")).toHaveTextContent("notes-out-1");
+    return { calls, user };
+  };
+
+  it("stay, with their Take back, when a key lands in the amount", async () => {
+    const { calls, user } = await made();
+    await user.type(screen.getByTestId("fedimint-send-amount"), "5");
+    expect(screen.getByTestId("fedimint-notes-out")).toHaveTextContent("notes-out-1");
+    expect(screen.queryByTestId("fedimint-spend")).toBeNull();
+    await user.click(screen.getByTestId("fedimint-take-back"));
+    expect(calls.fedimintTakeBack).toHaveBeenCalledWith(ALPHA, "op-1");
+  });
+
+  it("are their federation's: another one shows none, and they are there again on the way back", async () => {
+    const { calls, user } = await made();
+    await choose(user, "Beta");
+    expect(screen.queryByTestId("fedimint-notes-out")).toBeNull();
+    expect(screen.getByTestId("fedimint-spend")).toBeInTheDocument();
+    await choose(user, "Alpha");
+    expect(screen.getByTestId("fedimint-notes-out")).toHaveTextContent("notes-out-1");
+    await user.click(screen.getByTestId("fedimint-take-back"));
+    expect(calls.fedimintTakeBack).toHaveBeenCalledWith(ALPHA, "op-1");
+  });
+
+  it("go when the person says Done, and Create notes is back", async () => {
+    const { calls, user } = await made();
+    await user.click(screen.getByTestId("fedimint-notes-done"));
+    expect(screen.queryByTestId("fedimint-notes-out")).toBeNull();
+    expect(screen.queryByTestId("fedimint-take-back")).toBeNull();
+    expect(screen.getByTestId("fedimint-spend")).toBeInTheDocument();
+    expect(calls.fedimintTakeBack).not.toHaveBeenCalled();
+  });
+});
+
 describe("notes taken back in the Fedimint panel", () => {
   it("say so under Send, and never as notes redeemed under Receive", async () => {
     const calls = { fedimintSpendNotes: vi.fn(async () => ({ notes: "notes-out-1", operation: "op-1" })), fedimintTakeBack: vi.fn(async () => "canceled" as const) };

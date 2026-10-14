@@ -67,7 +67,11 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
   const [action, setAction] = useState<Action>("receive");
   const [invite, setInvite] = useState(""), [preview, setPreview] = useState<FederationInfo | null>(null), [joining, setJoining] = useState(false);
   const [amount, setAmount] = useState(""), [invoice, setInvoice] = useState(""), [notesIn, setNotesIn] = useState(""), [received, setReceived] = useState("");
-  const [notesOut, setNotesOut] = useState<{ notes: string; operation: string; federation: string } | null>(null);
+  // Notes made here, by federation: they are money out of the balance, so they stay on screen (with their Take back)
+  // until the person closes them. Not a key in the amount field, nor a look at another federation, drops them.
+  const [made, setMade] = useState<Record<string, { notes: string; operation: string }>>({});
+  const notesOut = current ? made[current.id] : undefined;
+  const closeNotes = (id: string) => setMade((all) => Object.fromEntries(Object.entries(all).filter(([federation]) => federation !== id)));
   // What became of notes taken back, said under Send: kept apart from `received`, which Receive shows as notes redeemed.
   const [tookBack, setTookBack] = useState("");
   // The chosen federation's movements: the history holds every federation's.
@@ -89,7 +93,7 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
   }, [backupNow]);
   // Real money when the federation says Bitcoin or this is the Mainnet wallet (the engine's rule too).
   const real = current?.network === "bitcoin" || state.mode === "mainnet";
-  const spend = (confirmedReal: boolean) => { const id = current!.id; void run(async () => setNotesOut({ ...(await wallet.fedimintSpendNotes(id, Number(amount), confirmedReal || undefined)), federation: id })).finally(() => setConfirming(false)); };
+  const spend = (confirmedReal: boolean) => { const id = current!.id; void run(async () => { const notes = await wallet.fedimintSpendNotes(id, Number(amount), confirmedReal || undefined); setMade((all) => ({ ...all, [id]: notes })); }).finally(() => setConfirming(false)); };
 
   const join = <Section title={federations.length ? t("wallet.fedimint.joinAnother") : t("wallet.fedimint.join")}>
     <Block>
@@ -111,7 +115,7 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
   return <div className="space-y-6" data-testid="fedimint-wallet">
     {!federations.length ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="fedimint-empty"><p className="text-text-primary">{t("wallet.fedimint.empty")}</p><Notice>{t("wallet.fedimint.emptyNote")}</Notice></div>
     : <div className="space-y-4">
-      {federations.length > 1 && <Select aria-label={t("wallet.fedimint.federation")} value={current?.id ?? ""} onChange={(id) => { setSelected(id); setInvoice(""); setNotesOut(null); setTookBack(""); }}
+      {federations.length > 1 && <Select aria-label={t("wallet.fedimint.federation")} value={current?.id ?? ""} onChange={(id) => { setSelected(id); setInvoice(""); setTookBack(""); }}
         options={federations.map((f) => ({ value: f.id, label: f.name ?? short(f.id), description: `${formatAmount(f.balance, t.language)} ${unit}` }))} />}
       {current && <>
         <p className="text-text-primary" data-testid="fedimint-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(current.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>
@@ -135,13 +139,16 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
         </div>}
         {action === "send" && <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
           <p className="text-xs text-text-secondary">{t("wallet.fedimint.sendAbout")}</p>
-          <Amount value={amount} onChange={(v) => { setAmount(v); setNotesOut(null); setConfirming(false); setTookBack(""); }} unit={unit} testId="fedimint-send-amount" />
+          <Amount value={amount} onChange={(v) => { setAmount(v); setConfirming(false); setTookBack(""); }} unit={unit} testId="fedimint-send-amount" />
           {!notesOut ? (confirming ? <ConfirmRealMoney what={t("wallet.fedimint.asNotes", { amount: formatAmount(Number(amount), t.language) })} busy={busy} onSend={() => spend(true)} onBack={() => setConfirming(false)} />
             // Notes of a Mainnet federation are real money: the second step first, as for every other spend.
             : <Button variant="primary" className="w-full" data-testid="fedimint-spend" disabled={busy || !ready || !Number(amount) || Number(amount) > current.balance} onClick={() => (real ? setConfirming(true) : spend(false))}>{Number(amount) > current.balance ? t("wallet.fedimint.tooMuch") : t("wallet.fedimint.createNotes")}</Button>)
             : <div className="space-y-2">
               <Address value={notesOut.notes} testId="fedimint-notes-out" note={t("wallet.fedimint.notesOutNote")} />
-              <Button data-testid="fedimint-take-back" disabled={busy} onClick={() => void run(async () => { const state = await wallet.fedimintTakeBack(notesOut.federation, notesOut.operation); if (state === "pending") throw new Error(t("wallet.fedimint.notAnswered")); setNotesOut(null); setTookBack(state === "canceled" ? t("wallet.fedimint.takenBack") : t("wallet.fedimint.alreadyRedeemed")); })}>{t("wallet.fedimint.takeBack")}</Button>
+              <div className="flex flex-wrap gap-2">
+                <Button data-testid="fedimint-take-back" disabled={busy} onClick={() => void run(async () => { const id = current.id, state = await wallet.fedimintTakeBack(id, notesOut.operation); if (state === "pending") throw new Error(t("wallet.fedimint.notAnswered")); closeNotes(id); setTookBack(state === "canceled" ? t("wallet.fedimint.takenBack") : t("wallet.fedimint.alreadyRedeemed")); })}>{t("wallet.fedimint.takeBack")}</Button>
+                <Button data-testid="fedimint-notes-done" disabled={busy} onClick={() => closeNotes(current.id)}>{t("wallet.lightning.done")}</Button>
+              </div>
             </div>}
         </div>}
         {action === "history" && <div className="bg-surface rounded-xl p-2 animate-fade-in" data-testid="fedimint-history">
