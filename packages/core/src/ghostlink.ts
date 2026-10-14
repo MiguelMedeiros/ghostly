@@ -2470,8 +2470,24 @@ export class GhostLink {
     if (!rest.length) return;
     this.offered = { epoch, at: made.at };
     this.afterRtc = { epoch, rest };
+    // The record lists no WebRTC (a Linux Desktop): nothing will answer the offer. It ends now, and what both run is
+    // dialled at once, as by a joiner with no WebRTC, rather than `RACE_DIRECT_MS` after it: the inviter's own dial was
+    // all a pairing waited for, and one that stalled had nothing racing it (0.5 to 4.6 s to live, DHT-direct lab, 2026-10-14).
+    if (!this.peerTransports.includes("webrtc/1")) {
+      traceLink(this.myPubKeyZ32, "offer-unanswerable", { transports: rest });
+      this.clearRace();
+      this.raceTimer = setTimeout(() => { this.raceTimer = null; this.endUnanswerableOffer(epoch); }, 0);
+      return;
+    }
     traceLink(this.myPubKeyZ32, "race-standing", { transports: rest });
     this.scheduleRace(epoch, made.at);
+  }
+  /** The offer ends (`raceStandingOffer`), and with it going idle what is ranked after WebRTC is dialled (`dialAfterRtc`). */
+  private endUnanswerableOffer(epoch: number): void {
+    if (epoch !== this.connectionEpoch || this.channel || this.stopped || !this.offerOut || this.afterRtc?.epoch !== epoch) return;
+    // Still inside the dial that made the offer: once it is over.
+    if (this.dialing) { this.raceTimer = setTimeout(() => { this.raceTimer = null; this.endUnanswerableOffer(epoch); }, RACE_RETRY_MS); return; }
+    this.dataLink.close();
   }
   /**
    * Back after an absence, this side answers an offer the contact made while it was away (it dials whatever its key):
