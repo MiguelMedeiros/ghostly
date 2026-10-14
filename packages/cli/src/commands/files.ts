@@ -23,8 +23,10 @@ export const commands: Record<string, Command> = {
       // Empty (an unset variable in a script), it was the current folder: --path "" asked to replace it.
       if (options.path === "") throw new CliError("usage", "--path needs a file");
       if (options.dir === "") throw new CliError("usage", "--dir needs a folder");
+      if (options.dir !== undefined && options.path !== undefined) throw new CliError("usage", "--path names the file: not with --dir");
+      if (options.timeout !== undefined && options.wait !== true) throw new CliError("usage", "--timeout is how long --wait waits: not without --wait");
       return {
-        chat: a.chat, file: a.file, dir: here(options.dir ?? "."), path: options.path === undefined ? undefined : here(options.path), force: options.force === true,
+        chat: a.chat, file: a.file, dir: options.path === undefined ? here(options.dir ?? ".") : undefined, path: here(options.path), force: options.force === true,
         wait: options.wait === true ? true : undefined, timeout: options.timeout,
       };
     },
