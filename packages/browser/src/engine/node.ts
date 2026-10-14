@@ -208,7 +208,7 @@ import type { HoldStore } from "../backup/storage";
 import { PaymentDesk, refusedLine } from "./payments";
 import { CashuWallet, TEST_COINS_NOTE, normalizeMintUrl } from "./wallet";
 import { identityCues, knockCue, paymentCue, transportCue, transportMark, type Cue } from "./cues";
-import { CLOCK_SAMPLES, messageAttention, writtenAt } from "./attention";
+import { CATCH_UP_SLACK_MS, CLOCK_SAMPLES, messageAttention, writtenAt } from "./attention";
 import { DEFAULT_HYPERDHT_RELAY, hyperdhtRelayProblem } from "../shared/hyperdhtRelay";
 import { pushRelayProblem } from "../shared/pushRelay";
 import { traceJoin } from "./joinTrace";
@@ -732,6 +732,8 @@ export class GhostlyNode implements EngineImplementation {
   }
   /** The newest time written in each chat while this engine runs: a message written well before it is a catch-up. */
   private readonly newestAt = new Map<string, number>();
+  /** Per group: when the last message written well before it came, came. What comes after it, as old, is its catch-up. */
+  private readonly lateAt = new Map<string, number>();
   /** The last place given in each chat while this engine runs (`arrivalKey`). */
   private readonly placedAt = new Map<string, number>();
   /**
@@ -746,7 +748,10 @@ export class GhostlyNode implements EngineImplementation {
   }
   /** Only a new message, or mine going out, says anything (engine/attention.ts): judged by when it was written. */
   private messageFeedback(type: "message" | "sent", message: StoredMessage, newest = this.newestAt.get(message.linkId)) {
-    const attention = messageAttention(type, { ...message, timestamp: writtenAt(message, this.clockLeads.get(message.linkId)) }, { startedAt: this.feedbackStartedAt, newest, now: Date.now() });
+    const written = writtenAt(message, this.clockLeads.get(message.linkId)), now = Date.now();
+    const group = type === "message" && message.linkId.startsWith("group:"), lateAt = group ? this.lateAt.get(message.linkId) : undefined;
+    const attention = messageAttention(type, { ...message, timestamp: written }, { startedAt: this.feedbackStartedAt, newest, now, ...(lateAt !== undefined && { lateAt }) });
+    if (group && !message.event && now - written > CATCH_UP_SLACK_MS) this.lateAt.set(message.linkId, now);
     if (attention) this.feedback(attention.type, message.linkId + ":" + message.id, message.linkId, attention.mention, attention.cue);
   }
   /**
@@ -2811,6 +2816,7 @@ export class GhostlyNode implements EngineImplementation {
   private groupHistoryGone(groupId: string): void {
     const linkId = `group:${groupId}`;
     this.newestAt.delete(linkId);
+    this.lateAt.delete(linkId);
     this.placedAt.delete(linkId);
     this.reactionNotes.delete(linkId);
     this.reactionNotesBefore.delete(linkId);
