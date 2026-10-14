@@ -112,10 +112,10 @@ test("the core palette's shares add up to the whole", () => {
   assert.equal(brand.colors.core.reduce((n, c) => n + c.share, 0), 100);
 });
 
-test("the press contact is still to be set, and the kit says where to write meanwhile", () => {
-  // When Miguel gives the address, set brand.press.contact and change this test.
-  assert.equal(brand.press.contact, null);
-  assert.match(kitEntries().find((e) => e.path === "boilerplate.txt").text, /Press: no address yet\. Until there is one, write through https:\/\/github\.com\//);
+test("the kit gives the press contact, or where to write until there is one", () => {
+  const text = kitEntries().find((e) => e.path === "boilerplate.txt").text;
+  if (brand.press.contact) assert.ok(text.includes(`Press: ${brand.press.contact}`));
+  else assert.ok(text.includes(`Press: no address yet. Until there is one, write through ${brand.press.contactFallback}`));
 });
 
 test("the kit holds every logo in every colourway, the colours, the fonts, the copy, the screenshots", () => {
