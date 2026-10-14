@@ -24,8 +24,8 @@ export function IntentLink({ href, onMouseEnter, onFocus, onTouchStart, ...rest 
   );
 }
 
-/** The pages whose data is large: the roadmap (its whole inventory) and each WISP's page. */
-const isHeavy = (href: string) => /^\/roadmap(?:[#?]|$)/.test(href) || href.startsWith("/wisps/");
+/** The pages whose data is large: the roadmap (its whole inventory), /brand (linked from every footer) and each WISP's page. */
+const isHeavy = (href: string) => /^\/(?:roadmap|brand)(?:[#?]|$)/.test(href) || href.startsWith("/wisps/");
 
 /**
  * A link whose page is a variable (the nav, the footer, a list of "read more"): a heavy page loads when the reader is
