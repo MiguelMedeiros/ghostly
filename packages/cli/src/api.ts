@@ -391,7 +391,11 @@ const METHODS: Record<string, Method> = {
   async "chat.retry"(ctx, params) {
     const link = chatOf(ctx, params);
     const messageId = str(params, "message", true);
-    if (!(await node(ctx).getMessage(link.id, messageId))) throw new CliError("not_found", `No message ${messageId} in this chat`);
+    const message = await node(ctx).getMessage(link.id, messageId);
+    if (!message) throw new CliError("not_found", `No message ${messageId} in this chat`);
+    // Before, both answered done and nothing was sent: the engine sends again whatever id it is given.
+    if (message.sender !== "me") throw new CliError("not_found", `No message ${messageId} of yours in this chat: only your own messages are sent again`);
+    if (message.delivery === "delivered") throw new CliError("refused", "Nothing to send again: it was delivered");
     await node(ctx).retryMessage({ linkId: link.id, messageId });
     return { chat: link.id, messageId };
   },
