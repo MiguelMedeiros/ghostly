@@ -231,6 +231,7 @@ function netProbes(P: any) {
     try { await forged.storage.set("report-probe", { ref: P.victim }); r.storageSet = "ok"; } catch (e: any) { r.storageSet = "refused: " + e.message; }
     try { r.context = await G.context(); } catch (e: any) { r.context = "refused: " + e.message; }
     try { await G.chat.send({ hello: 1 }); r.chatSend = "sent"; } catch (e: any) { r.chatSend = "refused: " + e.message; }
+    try { r.filesList = JSON.stringify(await G.files.list()); } catch (e: any) { r.filesList = "refused: " + e.message; }
     report.done = true;
     await G.storage.set("report", JSON.parse(JSON.stringify(report)));
   })();

@@ -105,7 +105,8 @@ test("a malicious app reaches nothing: no request, no WebRTC from any frame it m
   const r = report.readings;
   expect(r.origin).toBe("null");
   expect(r.topIsSelf).toBe(false);
-  expect(r.ghostly).toBe("chat,close,context,file,storage");
+  // Every app sees the same API; what it was not granted is refused (chat and files below).
+  expect(r.ghostly).toBe("chat,close,context,file,files,storage");
   expect(r.rtcNames).toBe("none");
   // The runner's nonce: not on the script, not in the markup, not in a violation report, not guessed.
   expect(r.nonceProperty).toBe("undefined");
@@ -120,6 +121,7 @@ test("a malicious app reaches nothing: no request, no WebRTC from any frame it m
   expect(r.storageSet).toBe("ok");
   expect(r.context).toEqual({ version: "1.0.0", inChat: false, peer: null, theme: "dark", locale: "pt-BR" });
   expect(r.chatSend).toBe("refused: not-allowed");
+  expect(r.filesList).toBe("refused: not-allowed");
   const calls = await page.evaluate(() => (window as unknown as { __ghostlyApps: Hook }).__ghostlyApps.calls());
   expect(calls.filter((c) => c.ref === VICTIM).map((c) => `${c.op} ${c.key ?? ""}`)).toEqual(["storage.set secret", "storage.set ready"]);
   expect(calls.filter((c) => c.ref !== VICTIM).every((c) => c.ref === EVIL && c.scope === "alone")).toBe(true);
