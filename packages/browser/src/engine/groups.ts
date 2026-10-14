@@ -1382,7 +1382,17 @@ export class Groups {
   /** The member at the other end of an entry session (the joiner, on the admin's side) or of a chat an invitation went over. */
   private linkMember(groupId: string, linkId: string): string | undefined {
     for (const [peer, id] of this.host.entries(groupId)) if (id === linkId) return peer;
-    return Object.entries(this.stored.get(groupId)?.contacts ?? {}).find(([, id]) => id === linkId)?.[0];
+    return this.chatMember(groupId, linkId);
+  }
+
+  /**
+   * The member a chat an invitation went over is: one removed and invited back over the same chat has its old key on it
+   * too (`contacts` keeps it for the removal notice), so the key in the roster, else the newest.
+   */
+  private chatMember(groupId: string, linkId: string): string | undefined {
+    const keys = Object.entries(this.stored.get(groupId)?.contacts ?? {}).filter(([, id]) => id === linkId).map(([key]) => key);
+    const roster = this.sessions.get(groupId)?.roster;
+    return (roster && keys.find(key => rosterHas(roster, key))) || keys.at(-1);
   }
 
   /**
@@ -1703,8 +1713,7 @@ export class Groups {
       case "group-leave": {
         // A member I invited from my contacts leaves, and says so on our chat too: its edge may be down.
         const session = this.sessions.get(g);
-        const group = this.stored.get(g);
-        const member = Object.entries(group?.contacts ?? {}).find(([, id]) => id === linkId)?.[0];
+        const member = this.chatMember(g, linkId);
         if (!session?.isAdmin || !member || member === session.myKey) return;
         // Its edge may have carried the same leave a moment ago: removed once is enough.
         if (rosterHas(session.roster, member)) await session.remove(member, Date.now(), { left: true }).catch(() => {});
