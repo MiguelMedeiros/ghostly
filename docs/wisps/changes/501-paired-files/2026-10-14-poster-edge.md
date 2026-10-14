@@ -1,0 +1,1 @@
+A receiver keeps a `video` poster only when its JPEG frame header says at most 320 pixels on the longer side (`posterEdge`, the most a sender draws), and drops it (keeping the rest of the description) when it says more or does not say. Every Ghostly sender already draws within it. No wire change.

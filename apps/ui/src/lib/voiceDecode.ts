@@ -1,9 +1,15 @@
+import { VOICE_LIMITS } from "@ghostly/core";
+import { countedRecording } from "./voiceFrames";
+
 /**
  * A second way to play a voice message this device's `<audio>` refuses: Web Audio decodes it (its decoders
  * are not always the media element's), and the sound is handed back as WAV, which every engine plays and
  * seeks. Mono at 16 kHz is plenty for a voice and keeps the longest message (15 minutes) under 30 MB.
  */
 const SAMPLE_RATE = 16_000;
+
+/** How much longer than its description a recording may really play: a recorder stops a moment after it. */
+const LENGTH_MARGIN_MS = 5_000;
 
 type AudioContextClass = typeof AudioContext;
 type OfflineAudioContextClass = typeof OfflineAudioContext;
@@ -48,14 +54,19 @@ export function encodeWav(samples: Float32Array, sampleRate: number): Blob {
 /**
  * The recording as one channel of samples (-1…1) at `sampleRate`, or null when Web Audio cannot decode it.
  * Web Audio has no decoder in a worker, so this runs on the page; the engine decodes off the main thread anyway.
+ * Only its counted frames are decoded (`countedRecording`), and only when they play no longer than its
+ * description says (`describedMs`, at most the longest recording): the length of what arrives is the sender's.
  */
-export async function decodeToMono(blob: Blob, sampleRate: number): Promise<Float32Array | null> {
+export async function decodeToMono(blob: Blob, sampleRate: number, describedMs: number = VOICE_LIMITS.maxDurationMs): Promise<Float32Array | null> {
   const classes = contexts();
   if (!classes) return null;
   let live: AudioContext | null = null;
   try {
+    const limitMs = Math.min(describedMs, VOICE_LIMITS.maxDurationMs) + LENGTH_MARGIN_MS;
+    const counted = countedRecording(new Uint8Array(await blob.arrayBuffer()), limitMs / 1000);
+    if (!counted) return null;
     live = new classes.Live();
-    const decoded = await live.decodeAudioData(await blob.arrayBuffer());
+    const decoded = await live.decodeAudioData(await counted.blob.arrayBuffer());
     // Resampled and mixed down to one channel by rendering it once, offline.
     const offline = new classes.Offline(1, Math.max(1, Math.ceil(decoded.duration * sampleRate)), sampleRate);
     const source = offline.createBufferSource();
@@ -71,8 +82,8 @@ export async function decodeToMono(blob: Blob, sampleRate: number): Promise<Floa
   }
 }
 
-/** The recording as WAV, or null when Web Audio cannot decode it either. */
-export async function decodeToWav(blob: Blob): Promise<Blob | null> {
-  const samples = await decodeToMono(blob, SAMPLE_RATE);
+/** The recording as WAV, or null when Web Audio cannot decode it either (or it is longer than described). */
+export async function decodeToWav(blob: Blob, describedMs?: number): Promise<Blob | null> {
+  const samples = await decodeToMono(blob, SAMPLE_RATE, describedMs);
   return samples && encodeWav(samples, SAMPLE_RATE);
 }

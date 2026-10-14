@@ -62,7 +62,7 @@ async function downloadMp3(platform: ServicesPlatform, file: ChatFile, name: str
   const recording = await platform.getFile(file.id);
   if (!recording) return "missing";
   const { voiceToMp3 } = await import("./voiceMp3");
-  const mp3 = await voiceToMp3(recording).catch((error: unknown) => {
+  const mp3 = await voiceToMp3(recording, file.voice?.duration).catch((error: unknown) => {
     throw new Unconverted(error instanceof Error ? error.message : String(error));
   });
   const saved = await platform.saveBlob?.(mp3, name);
