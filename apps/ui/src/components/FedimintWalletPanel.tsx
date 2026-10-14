@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { paymentUri } from "@ghostly/core";
 import type { FederationInfo } from "@ghostly/browser/engine/paymentAdapters/fedimintSdk";
 import type { WalletPlatform, WalletState } from "../lib/platform";
-import { Actions, Address, Amount, Block, Button, Notice, Row, Section, input, type Action } from "./wallet/ui";
+import { Actions, Address, Amount, Block, Button, Notice, Row, Section, Signed, input, type Action } from "./wallet/ui";
 import { useRun, downloadJson } from "./wallet/run";
 import { Select } from "./ui/Select";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { satsIn } from "./NetworkTag";
 import { formatAmount } from "../lib/amount";
+import { fillNodes } from "../lib/fillNodes";
 import { problemText } from "../lib/problemText";
 
 const short = (id: string) => `${id.slice(0, 8)}…${id.slice(-4)}`;
@@ -36,8 +37,8 @@ const stateOf = (t: Translate, state: string) => {
 
 /** A history row's amount, signed, and its fee when there is one. */
 const amountOf = (t: Translate, tx: { kind: string; amount?: number; fee?: number }) => {
-  const amount = tx.amount !== undefined ? `${tx.kind.endsWith("out") ? "−" : "+"}${formatAmount(tx.amount, t.language)}` : "";
-  return tx.fee ? t("wallet.fedimint.amountFee", { amount, fee: formatAmount(tx.fee, t.language) }) : amount;
+  const amount = tx.amount !== undefined ? <Signed sign={tx.kind.endsWith("out") ? "−" : "+"} amount={formatAmount(tx.amount, t.language)} /> : "";
+  return tx.fee ? fillNodes(t("wallet.fedimint.amountFee", { fee: formatAmount(tx.fee, t.language) }), { amount }) : amount;
 };
 
 /** What a federation says about itself, before and after joining it. */
