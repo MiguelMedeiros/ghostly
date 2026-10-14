@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readSync, renameSync, writeFileSync } from "node:fs";
 import type { AppFrameEvent } from "@ghostly/core";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
@@ -14,6 +14,10 @@ export interface GhostlyEvent { seq: number; id: string; type: string; at: numbe
 
 /** Events the journal keeps for `listen --since`. */
 export const JOURNAL_KEEP = 10_000;
+/** Bytes the journal keeps at most: a contact's long texts never make it too large to read. */
+export const JOURNAL_KEEP_BYTES = 16 * 1024 * 1024;
+/** A journal past this is trimmed, and only this much of its end is ever read. */
+export const JOURNAL_MAX_BYTES = 2 * JOURNAL_KEEP_BYTES;
 const SEEN_DB = "ghostly-cli";
 const SEEN = "seen";
 
@@ -46,6 +50,7 @@ interface GroupShape { status: string | null; members: string[]; typing: Record<
 export class EventHub {
   private seq = 0;
   private journalLines = 0;
+  private journalBytes = 0;
   private readonly listeners = new Set<Listener>();
   private readonly stateListeners = new Set<(state: EngineState) => void>();
   private readonly callListeners = new Set<(chat: string, signal: string) => void>();
@@ -80,12 +85,22 @@ export class EventHub {
 
   /** Loads the journal's last seq and the seen set; call before `sink` is attached. */
   async open(): Promise<void> {
-    if (existsSync(this.journalPath)) {
-      const lines = readFileSync(this.journalPath, "utf8").split("\n").filter(Boolean);
-      this.journalLines = lines.length;
-      for (let i = lines.length - 1; i >= 0; i--) {
-        try { this.seq = (JSON.parse(lines[i]) as GhostlyEvent).seq; break; } catch { /* a torn last line */ }
+    // A journal that cannot be read never keeps the profile from opening: it is set aside and a new one begins.
+    try {
+      if (existsSync(this.journalPath)) {
+        const { lines, size } = journalTail(this.journalPath);
+        this.journalLines = lines.length;
+        this.journalBytes = size;
+        for (let i = lines.length - 1; i >= 0; i--) {
+          try { this.seq = (JSON.parse(lines[i]) as GhostlyEvent).seq; break; } catch { /* a torn last line */ }
+        }
+        if (size > JOURNAL_MAX_BYTES || lines.length > JOURNAL_KEEP * 2) this.trimJournal();
       }
+    } catch (error) {
+      process.stderr.write(`ghostly: the event journal could not be read, a new one begins: ${error instanceof Error ? error.message : String(error)}\n`);
+      try { renameSync(this.journalPath, this.journalPath + ".unreadable"); } catch { /* best effort */ }
+      this.journalLines = 0;
+      this.journalBytes = 0;
     }
     this.db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(this.seenDb, 1);
@@ -200,8 +215,7 @@ export class EventHub {
   replay(since: number): GhostlyEvent[] {
     if (!existsSync(this.journalPath) || since >= this.seq) return [];
     const out: GhostlyEvent[] = [];
-    for (const line of readFileSync(this.journalPath, "utf8").split("\n")) {
-      if (!line) continue;
+    for (const line of journalTail(this.journalPath).lines) {
       try { const event = JSON.parse(line) as GhostlyEvent; if (event.seq > since) out.push(event); } catch { /* torn */ }
     }
     if (out.length && out[0].seq > since + 1) out.unshift({ seq: since, id: `events.gap:${since}:${out[0].seq}`, type: "events.gap", at: this.now(), from: since + 1, to: out[0].seq - 1 });
@@ -213,19 +227,31 @@ export class EventHub {
   /** Emits an event the host makes itself (`daemon.started`). */
   emit(type: string, id: string, fields: Record<string, unknown> = {}): GhostlyEvent {
     const event: GhostlyEvent = { seq: ++this.seq, id, type, at: this.now(), ...fields };
-    appendFileSync(this.journalPath, JSON.stringify(event) + "\n", { mode: 0o600 });
-    if (++this.journalLines > JOURNAL_KEEP * 2) this.trimJournal();
+    // The journal failing never keeps an event from the listeners.
+    try {
+      const line = JSON.stringify(event) + "\n";
+      appendFileSync(this.journalPath, line, { mode: 0o600 });
+      this.journalBytes += Buffer.byteLength(line);
+      if (++this.journalLines > JOURNAL_KEEP * 2 || this.journalBytes > JOURNAL_MAX_BYTES) this.trimJournal();
+    } catch (error) {
+      process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
+    }
     for (const listener of this.listeners) {
       try { listener(event); } catch { /* one listener's failure is its own */ }
     }
     return event;
   }
 
+  /** Keeps the last `JOURNAL_KEEP` events, and of them no more than `JOURNAL_KEEP_BYTES`. */
   private trimJournal(): void {
-    const lines = readFileSync(this.journalPath, "utf8").split("\n").filter(Boolean).slice(-JOURNAL_KEEP);
-    writeFileSync(this.journalPath + ".tmp", lines.join("\n") + "\n", { mode: 0o600 });
+    const lines = journalTail(this.journalPath).lines.slice(-JOURNAL_KEEP);
+    let start = lines.length, bytes = 0;
+    while (start > 0 && bytes + Buffer.byteLength(lines[start - 1]) + 1 <= JOURNAL_KEEP_BYTES) bytes += Buffer.byteLength(lines[--start]) + 1;
+    const kept = lines.slice(start);
+    writeFileSync(this.journalPath + ".tmp", kept.length ? kept.join("\n") + "\n" : "", { mode: 0o600 });
     renameSync(this.journalPath + ".tmp", this.journalPath);
-    this.journalLines = lines.length;
+    this.journalLines = kept.length;
+    this.journalBytes = bytes;
   }
 
   private handle(message: EngineEvent | RpcResponse): void {
@@ -638,4 +664,29 @@ function typingFields(shape: ChatShape): { kind: string; status?: string } {
 function groupShape(group: GroupView): GroupShape {
   return { status: group.status ?? (group.invitation ? "invited" : null), members: group.members.map((m) => m.key).sort(),
     typing: Object.fromEntries((group.typing ?? []).map((t) => [t.key, { kind: t.kind ?? "typing", ...(t.status ? { status: t.status } : {}) }])), pin: group.pin ?? null };
+}
+
+/**
+ * The journal's whole lines within its last `JOURNAL_MAX_BYTES`, and its size: never the whole file as one string, so
+ * a journal grown past what a string can hold (or a trim's bound) is still read, and in bounded time.
+ */
+function journalTail(path: string): { lines: string[]; size: number } {
+  const fd = openSync(path, "r");
+  try {
+    const size = fstatSync(fd).size;
+    // From one byte before the cut, so a line that begins exactly at it is kept whole.
+    const from = Math.max(0, size - JOURNAL_MAX_BYTES - 1);
+    const buffer = Buffer.alloc(size - from);
+    let read = 0;
+    while (read < buffer.length) {
+      const n = readSync(fd, buffer, read, buffer.length - read, from + read);
+      if (!n) break;
+      read += n;
+    }
+    const lines = buffer.toString("utf8", 0, read).split("\n");
+    if (from > 0) lines.shift();
+    return { lines: lines.filter(Boolean), size };
+  } finally {
+    closeSync(fd);
+  }
 }
