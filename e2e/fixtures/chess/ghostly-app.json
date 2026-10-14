@@ -9,7 +9,7 @@
     "chat",
     "name"
   ],
-  "releaseNotes": "A new board with drawn pieces and drag and drop, a move list with review and opening names, clocks, draw offers, takebacks, rematches, premoves, PGN, sounds and players' names. Asks for your name in the chat, to show it to your contact.",
+  "releaseNotes": "Chess has its own icon: the Ghostly ghost and a knight on a green board.",
   "runtime": {
     "clients": [
       "web",
@@ -17,13 +17,13 @@
     ],
     "host": ">=1.2"
   },
-  "sequence": 4,
+  "sequence": 5,
   "sources": [
     "https://raw.githubusercontent.com/MiguelMedeiros/ghostly-chess/HEAD/app.ghostlyapp"
   ],
   "support": "https://github.com/MiguelMedeiros/ghostly-chess/issues",
   "tagline": "Play chess with a contact, live in your chat",
   "title": "Chess",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "view": "chat"
 }
