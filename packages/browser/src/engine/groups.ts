@@ -714,7 +714,11 @@ export class Groups {
     const group = this.stored.get(groupId)!;
     if (Object.entries(group.contacts ?? {}).some(([key, id]) => id === linkId && rosterHas(session.roster, key))) throw new Error("This contact is already a member");
     if (session.roster.length + (this.invited.get(groupId)?.size ?? 0) >= GROUP_MEMBER_CAP.max) throw new Error(`A group holds ${GROUP_MEMBER_CAP.max} members at most`);
-    if (!this.host.linkReady(linkId)) throw new Error("Connect to this contact first. Their app needs groups (an updated Ghostly).");
+    // A chat that is down is a contact whose app is closed, most of the time: only one that is up without groups is old.
+    if (!this.host.linkReady(linkId)) {
+      throw new Error(this.host.linkOpen?.(linkId) === false ? "This contact is not connected right now. Invite them when they are online."
+        : "Their app does not take part in groups: they need an updated Ghostly first.");
+    }
     const blocked = this.growthBlocked(group, session, session.roster.length + (this.invited.get(groupId)?.size ?? 0) + 1, linkId);
     if (blocked) throw new Error(blocked);
     this.host.sendOnLink(linkId, session.inviteFrame());
