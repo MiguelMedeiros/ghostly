@@ -23,6 +23,8 @@ const isGroupUrgentRead = (who: Asker): boolean => who.group && who.urgent && !w
  * behind the edges that watch the same contact.
  */
 const isWatch = (who: Asker): boolean => who.watch && who.group && !who.write;
+/** A 1:1 chat's read of a contact that went away from a live session and has not shown itself back (`CHAT_WATCH_SHARE`). */
+const isChatWatch = (who: Asker): boolean => who.watch && isChat(who);
 /**
  * A group edge's request for a member that may be back: it may use the groups' allowance (`GROUP_SIGNALING_ALLOWANCE_SHARE`).
  * So may its reads of a member that was live when this app last ran, until one is answered (`resume`): its offer waits on them.
@@ -30,8 +32,8 @@ const isWatch = (who: Asker): boolean => who.watch && who.group && !who.write;
 const isGroupSignal = (who: Asker): boolean => who.group && !who.background && (who.signal || isWatch(who) || who.watchWrite || who.resume);
 /** A community member's way back to its group while it has no edge up: it may use its own allowance (`WAY_BACK_SHARE`). */
 const isWayBack = (who: Asker): boolean => who.back && who.group && !who.background;
-/** Watch reads that the same other limits hold take turns together: urgent or not, background or not. */
-const watchLane = (who: Asker): string => `${+who.urgent}${+who.background}`;
+/** Watch reads that the same other limits hold take turns together: urgent or not, background or not; the chats' on their own. */
+const watchLane = (who: Asker): string => (isChat(who) ? "chat" : `${+who.urgent}${+who.background}`);
 /** A group's read that is not a background one: an edge's, a private group's knock poll (`GROUP_RATION_WINDOW_MS`). */
 const isGroupRead = (who: Asker): boolean => who.group && !who.write && !who.background;
 /**
@@ -185,6 +187,16 @@ export const GROUP_BURST_ONE_LINK = 8;
  * read only when the minute freed, 25 to 44 s on, and its edge came up then (bug hunt r12, measured again 2026-10-03).
  */
 export const WATCH_SHARE = 1 / 3;
+/**
+ * 1:1 chats' reads of contacts that went away from a live session and have not shown themselves back (`watch`) take at
+ * most this share of a relay's requests the same way, on their own (a chat never waits behind the edges that watch the
+ * same contact): 3 in any 10 s on a relay of 30, more than one contact's fast poll asks for. The key read longest ago
+ * goes first. Not the few reads of a contact that just went away past the limit (`DEPARTED_READS`). Ten contacts that
+ * left a CLI daemon at once were read every 2 s each: those reads spent both relays' minute in the 10 s after their
+ * goodbyes, when none could be back yet, then the daemon read nobody, nor answered anyone, for 45 s, and the chats with
+ * no HyperDHT listener at the daemon were live again 42 to 51 s after their contacts were back (CLI bug hunt, 2026-10-14).
+ */
+export const CHAT_WATCH_SHARE = 1 / 2;
 /**
  * A key a group reads that asked within this long and was not read since keeps its turn: while one read longer ago
  * waits, the others wait too (`WATCH_SHARE`, `GROUP_RATION_WINDOW_MS`). One that stops asking loses it.
@@ -356,6 +368,8 @@ export class RelayTransport implements PkarrTransport {
   private readonly spentGroupUrgent = new Map<string, number[]>();
   /** Watch reads on each relay in the last `GROUP_RATION_WINDOW_MS` (`WATCH_SHARE`). */
   private readonly spentWatch = new Map<string, number[]>();
+  /** 1:1 chats' watch reads on each relay in the last `GROUP_RATION_WINDOW_MS` (`CHAT_WATCH_SHARE`). */
+  private readonly spentChatWatch = new Map<string, number[]>();
   /** Groups' reads past the limit on each relay in the last `GROUP_OVER_PACE_MS` (`GROUP_SIGNALING_ALLOWANCE_SHARE`). */
   private readonly spentGroupOver = new Map<string, number[]>();
   /** Group edges' signaling requests on each relay in the last minute: their floor (`GROUP_SIGNALING_ALLOWANCE_SHARE`). */
@@ -366,7 +380,8 @@ export class RelayTransport implements PkarrTransport {
   private readonly departedOver = new Map<string, number[]>();
   /**
    * Per key a group reads (not in the background), when a read of it last went out and when it last asked: whose turn
-   * it is under the watch share (`WATCH_SHARE`) and while the groups' reads are rationed (`GROUP_RATION_WINDOW_MS`).
+   * it is under the watch share (`WATCH_SHARE`) and while the groups' reads are rationed (`GROUP_RATION_WINDOW_MS`). And
+   * per key a chat watches, whose turn it is under theirs (`CHAT_WATCH_SHARE`).
    */
   private readonly readTurns = new Map<string, { servedAt: number; askedAt: number; waiting: boolean; watch: boolean; lane: string }>();
   /** Per key read in turn (`isTurnRead`), when a read of it last went out and when it last asked (`READ_TURN_MS`). */
@@ -1034,7 +1049,7 @@ export class RelayTransport implements PkarrTransport {
       this.urgentAt = now;
       if (isChat(who)) this.chatNeed(key).urgentAt = now;
     }
-    if (isGroupRead(who)) this.readAsked(key, who, now);
+    if (isGroupRead(who) || isChatWatch(who)) this.readAsked(key, who, now);
     if (isTurnRead(who)) this.turnAsked(key, who, now);
     if (this.heldFor(relay, who, now, key) > 0) {
       // The minute is full: the groups' reads are rationed from now on.
@@ -1052,15 +1067,15 @@ export class RelayTransport implements PkarrTransport {
     }
     if (isGroupSignal(who) && !who.write && this.spent.get(relay)!.length >= this.limitOf(relay)) this.spentGroupOver.get(relay)!.push(now);
     if (isGroupSignal(who)) this.spentGroupSignal.get(relay)!.push(now);
-    if (isDepartedRead(who) && this.spent.get(relay)!.length >= this.limitOf(relay)) this.departedOverAdd(key, now);
+    const departedOver = isDepartedRead(who) && this.spent.get(relay)!.length >= this.limitOf(relay);
+    if (departedOver) this.departedOverAdd(key, now);
     this.spent.get(relay)!.push(now);
     if (who.background) this.spentBackground.get(relay)!.push(now);
     if (isGroupUrgentRead(who)) this.spentGroupUrgent.get(relay)!.push(now);
     if (isWatch(who)) this.spentWatch.get(relay)!.push(now);
-    if (isGroupRead(who)) {
-      this.spentGroupReads.get(relay)!.push(now);
-      this.readTurns.set(key, { servedAt: now, askedAt: now, waiting: false, watch: isWatch(who), lane: watchLane(who) });
-    }
+    if (isChatWatch(who) && !departedOver) this.spentChatWatch.get(relay)!.push(now);
+    if (isGroupRead(who)) this.spentGroupReads.get(relay)!.push(now);
+    if (isGroupRead(who) || isChatWatch(who)) this.readTurns.set(key, { servedAt: now, askedAt: now, waiting: false, watch: isWatch(who) || isChatWatch(who), lane: watchLane(who) });
     if (isTurnRead(who)) this.keyTurns.set(key, { servedAt: now, askedAt: now, waiting: false, who });
     return true;
   }
@@ -1119,6 +1134,14 @@ export class RelayTransport implements PkarrTransport {
       if (watched.length >= most) wait = Math.max(wait, watched[watched.length - most] + GROUP_RATION_WINDOW_MS - now);
       if (this.readsAhead(key, now, watchLane(who)) > 0) wait = Math.max(wait, TURN_WAIT_MS);
     }
+    // The chats' watch reads: theirs, the same way; not a departed read past the limit.
+    const chatWatched = (this.spentChatWatch.get(relay) ?? []).filter((at) => now - at < GROUP_RATION_WINDOW_MS);
+    this.spentChatWatch.set(relay, chatWatched);
+    if (isChatWatch(who) && !departed) {
+      const most = Math.max(1, Math.ceil(limit * CHAT_WATCH_SHARE * GROUP_RATION_WINDOW_MS / 60_000));
+      if (chatWatched.length >= most) wait = Math.max(wait, chatWatched[chatWatched.length - most] + GROUP_RATION_WINDOW_MS - now);
+      if (this.readsAhead(key, now, watchLane(who)) > 0) wait = Math.max(wait, TURN_WAIT_MS);
+    }
     // The groups' reads after one found the minute full: spread over it, in turn.
     const rationed = (this.spentGroupReads.get(relay) ?? []).filter((at) => now - at < GROUP_RATION_WINDOW_MS);
     this.spentGroupReads.set(relay, rationed);
@@ -1157,24 +1180,24 @@ export class RelayTransport implements PkarrTransport {
     return Math.floor(this.limitOf(relay) * WAY_BACK_SHARE) - (who.write ? 0 : 1) - spent.length;
   }
 
-  /** A group's read of `key` asks: it waits for its turn from now on, unless it is taken (`readsAhead`). */
+  /** A group's read of `key`, or a chat's watch read, asks: it waits for its turn from now on, unless it is taken (`readsAhead`). */
   private readAsked(key: string, who: Asker, now: number): void {
     for (const [other, turn] of this.readTurns) if (now - Math.max(turn.askedAt, turn.servedAt) >= 60_000) this.readTurns.delete(other);
     const turn = this.readTurns.get(key);
-    this.readTurns.set(key, { servedAt: turn?.servedAt ?? -Infinity, askedAt: now, waiting: true, watch: isWatch(who), lane: watchLane(who) });
+    this.readTurns.set(key, { servedAt: turn?.servedAt ?? -Infinity, askedAt: now, waiting: true, watch: isWatch(who) || isChatWatch(who), lane: watchLane(who) });
   }
 
   /**
    * Keys a group reads, still asking (within `WATCH_TURN_MS`), that were read longer ago than `key`: a share keeps a
    * request for each. With `watchLane`, only watched keys the same other limits hold: one the groups' burst holds back
-   * would keep a turn it cannot take.
+   * would keep a turn it cannot take. The chats' watched keys only in their own lane (`CHAT_WATCH_SHARE`).
    */
   private readsAhead(key: string | undefined, now: number, watchLane?: string): number {
     const mine = key === undefined ? -Infinity : this.readTurns.get(key)?.servedAt ?? -Infinity;
     let ahead = 0;
     for (const [other, turn] of this.readTurns) {
       if (other === key || !turn.waiting || now - turn.askedAt >= WATCH_TURN_MS) continue;
-      if (watchLane !== undefined && (!turn.watch || turn.lane !== watchLane)) continue;
+      if (watchLane !== undefined ? !turn.watch || turn.lane !== watchLane : turn.lane === "chat") continue;
       if (turn.servedAt < mine) ahead++;
     }
     return ahead;

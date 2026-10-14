@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, CHAT_RESERVE_MOST_SHARE, CHAT_RESERVE_PER_CHAT, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WAY_BACK_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, CHAT_RESERVE_MOST_SHARE, CHAT_RESERVE_PER_CHAT, CHAT_WATCH_SHARE, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WAY_BACK_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
 import type { PkarrRequestOptions, PkarrTransport } from "../src/transport";
 // covers: core.relay-client
 
@@ -1081,7 +1081,7 @@ describe("relay transport: reads for contacts that went away take a share of the
     /** An edge looking fast for its member that left (`LinkSession.watchPeer`), as a link reads: a read the budget holds back answers from memory. */
     const watch = (peer: ReturnType<typeof createIdentity>) => group.resolve(peer.pubKeyZ32, { urgent: true, watch: true }).catch(() => {});
     const reads = (key: string) => log.filter((r) => r.key === key && r.method === "GET").map((r) => r.at);
-    return { peers, log, group, watch, reads };
+    return { peers, log, relay, group, watch, reads };
   }
   it("leaves the rest of the minute to the member that comes back, and reads each one that left in turn", async () => {
     // Bug hunt r12 (2026-10-02), measured again on 2026-10-03 with daemons on local relays: a member alone in a private
@@ -1119,6 +1119,32 @@ describe("relay transport: reads for contacts that went away take a share of the
         const at = reads(peer.pubKeyZ32);
         const gaps = at.slice(1).map((t, i) => t - at[i]);
         expect(Math.max(...gaps), `a member read ${at.length} times`).toBeLessThanOrEqual(12_000);
+      }
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("gives the chats' reads of contacts that went away a share of their own, read in turn", async () => {
+    // CLI bug hunt, 2026-10-14: ten contacts left a daemon at once. Its chats read each one every 2 s, spent both relays'
+    // minute in 10 s, and read nobody for 45 s more, while the contacts were back with their offers out.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { peers: contacts, log, relay, reads } = watching(10);
+      const start = Date.now();
+      for (let t = 0; t < 60_000; t += 2_000) {
+        for (const [i, contact] of contacts.entries()) { vi.setSystemTime(start + t + i * 5); await relay.resolve(contact.pubKeyZ32, { urgent: true, watch: true }).catch(() => {}); }
+      }
+      // On dev they took both relays' minute in the first 6 s, and read nobody for the rest of it.
+      for (const host of ["a.test", "b.test"]) expect(log.filter((r) => r.host === host).length).toBeLessThan(REQUESTS_PER_MINUTE);
+      // Within their share on each relay, spread over the minute: the minute is never spent.
+      const share = Math.ceil(REQUESTS_PER_MINUTE * CHAT_WATCH_SHARE * GROUP_RATION_WINDOW_MS / 60_000);
+      for (const host of ["a.test", "b.test"]) {
+        const watched = log.filter((r) => r.host === host && contacts.some((p) => p.pubKeyZ32 === r.key)).map((r) => r.at);
+        for (const at of watched) expect(watched.filter((other) => other >= at && other < at + GROUP_RATION_WINDOW_MS).length).toBeLessThanOrEqual(share);
+      }
+      // Each contact is read in turn: none waits behind the others for long.
+      for (const contact of contacts) {
+        const at = [start, ...reads(contact.pubKeyZ32), start + 60_000];
+        expect(Math.max(...at.slice(1).map((t, i) => t - at[i]))).toBeLessThanOrEqual(22_000);
       }
     } finally { vi.useRealTimers(); }
   });
