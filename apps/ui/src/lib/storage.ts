@@ -581,16 +581,19 @@ export function movePinned(sessionId: string, direction: "up" | "down"): PinnedP
  */
 export type SessionCache = Map<string, { raw: string; session: ChatSession; whole?: { list: ChatMessage[]; session: ChatSession } }>;
 
+/** The keys chats are stored under, with those only this page holds (a chat made while localStorage was full). */
+function sessionKeys(): string[] {
+  const keys = new Set<string | null>([...unsaved.keys()]);
+  for (let i = 0; i < localStorage.length; i++) keys.add(localStorage.key(i));
+  return [...keys].filter(isSessionKey);
+}
+
 /** Every chat, pinned first, then the latest first. With a cache, only a session whose stored text changed is parsed. */
 export function listSessions(cache?: SessionCache): ChatSession[] {
   const sessions: ChatSession[] = [];
   const seen = new Set<string>();
-  // A chat made while localStorage was full is only in this page.
-  const keys = new Set<string | null>([...unsaved.keys()]);
-  for (let i = 0; i < localStorage.length; i++) keys.add(localStorage.key(i));
-  for (const key of keys) {
+  for (const key of sessionKeys()) {
     try {
-      if (!isSessionKey(key)) continue;
       const raw = readKey(key);
       if (!raw) continue;
       const hit = cache?.get(key);
@@ -622,6 +625,37 @@ export function listSessions(cache?: SessionCache): ChatSession[] {
     return bTime - aTime;
   });
   return sessions;
+}
+
+/** Per chat's key: its id and its contact's key, read once. Neither changes while the chat is stored under that key. */
+const contacts = new Map<string, { id: string; peer: string }>();
+
+/**
+ * The chat with this contact, as `listSessions()` would find it first, without reading any chat's messages: each chat's
+ * stored copy is parsed once, the first time it is looked through, and a long chat's whole history is never merged in.
+ * An attention event, a call offer, finds its chat this way.
+ */
+export function sessionIdForPeer(peerPubKeyB64: string): string | undefined {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const key of sessionKeys()) {
+    seen.add(key);
+    let contact = contacts.get(key);
+    if (!contact) {
+      try {
+        const session = JSON.parse(readKey(key) ?? "null") as ChatSession | null;
+        // As `listSessions` counts a chat.
+        if (!session?.id || !session.mySeedB64 || !session.peerPubKeyB64 || !session.encKeyB64) continue;
+        contacts.set(key, contact = { id: session.id, peer: session.peerPubKeyB64 });
+      } catch {
+        continue;
+      }
+    }
+    if (contact.peer === peerPubKeyB64) ids.push(contact.id);
+  }
+  for (const key of contacts.keys()) if (!seen.has(key)) contacts.delete(key);
+  // Two chats with this contact: the one the list shows first.
+  return ids.length > 1 ? listSessions().find((s) => s.peerPubKeyB64 === peerPubKeyB64)?.id : ids[0];
 }
 
 /**
