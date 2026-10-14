@@ -125,6 +125,13 @@ pub async fn cancel_notification(id: &str) -> Result<(), String> {
         .map(drop)
 }
 
+/// Takes away every message notification still there.
+pub async fn cancel_notifications() -> Result<(), String> {
+    call_async::<Value>("cancelNotifications", json!({}))
+        .await
+        .map(drop)
+}
+
 /// The app's page in the system's notification settings.
 pub fn open_notification_settings() -> Result<(), String> {
     call::<Value>("openNotificationSettings", json!({})).map(drop)
