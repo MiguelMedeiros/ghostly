@@ -305,12 +305,19 @@ describe("group leave", () => {
   // Leave deletes the group's history and files here, as forget does: it asked for nothing (issue: no word of it).
   it("needs a yes, as forget does, and the engine is not asked without one", async () => {
     const { ctx, node } = fake();
-    const leaveGroup = vi.fn(async () => undefined);
+    const leaveGroup = vi.fn(async () => ({}));
     Object.assign(node, { leaveGroup });
     await expect(callApi(ctx, "group.leave", { group: "g1" })).rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(/history and files on this device; pass yes \(--yes\)/) });
     expect(leaveGroup).not.toHaveBeenCalled();
     expect(await callApi(ctx, "group.leave", { group: "g1", yes: true })).toEqual({ left: "g1" });
     expect(leaveGroup).toHaveBeenCalledWith({ groupId: "g1" });
+  });
+
+  // An admin's leave hands the role on: the engine says to whom, and the answer names that member from the roster.
+  it("an admin's leave names the member who became the admin", async () => {
+    const { ctx, node } = fake();
+    Object.assign(node, { leaveGroup: vi.fn(async () => ({ admin: "abce9999yy" })) });
+    expect(await callApi(ctx, "group.leave", { group: "g1", yes: true })).toEqual({ left: "g1", admin: { key: "abce9999yy", name: "Bo" } });
   });
 
   it("the command takes --yes and its help says what goes", () => {

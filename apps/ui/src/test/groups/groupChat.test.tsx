@@ -679,7 +679,7 @@ describe("GroupChat: leaving", () => {
 
   it("leaves, and goes back to the chat list: the group is gone from it", async () => {
     const { user, engine } = openGroup(active());
-    engine.on("leaveGroup", () => undefined);
+    engine.on("leaveGroup", () => ({}));
     const dialog = await leaveFromMenu(user);
     await user.click(within(dialog).getByTestId("group-leave-confirm"));
     expect(engine.callsTo("leaveGroup")).toEqual([{ groupId: "group-1" }]);
@@ -689,7 +689,7 @@ describe("GroupChat: leaving", () => {
   it("forgets the group's mute with its history: rejoining by link reuses the group id, and it is not muted then", async () => {
     setChatMute(groupChat("group-1"), "forever");
     const { user, engine } = openGroup(active());
-    engine.on("leaveGroup", () => undefined);
+    engine.on("leaveGroup", () => ({}));
     const dialog = await leaveFromMenu(user);
     await user.click(within(dialog).getByTestId("group-leave-confirm"));
     expect(await screen.findByText("Chat list")).toBeInTheDocument();
@@ -698,7 +698,7 @@ describe("GroupChat: leaving", () => {
 
   it("forgets what was typed in it and its read mark: a community rejoined by link had the old words in its field", async () => {
     const { user, engine } = openGroup(active());
-    engine.on("leaveGroup", () => undefined);
+    engine.on("leaveGroup", () => ({}));
     await user.type(composer(), "the door code is 4471");
     expect(getSessionDraft("group:group-1")).toBe("the door code is 4471");
     markGroupRead("group-1");

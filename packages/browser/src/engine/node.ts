@@ -4760,7 +4760,8 @@ export class GhostlyNode implements EngineImplementation {
     const frame: GroupPinFrame = { t: "group-pin", g: groupId, id: pin.id, n: pin.n, k: pin.k, sig: pin.sig };
     try { this.links.get(edge)?.link?.sendGroupFrame(frame); } catch { /* said again when it opens */ }
   }
-  leaveGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.leave(groupId); }
+  /** `admin`: the member a leaving admin handed the role to. */
+  async leaveGroup({ groupId }: { groupId: string }): Promise<{ admin?: string }> { const admin = await this.groups.leave(groupId); return admin ? { admin } : {}; }
   removeGroupMember({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.remove(groupId, key); }
   makeGroupAdmin({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.makeAdmin(groupId, key); }
   /** The admin of a private group pins a member as a hub, excludes one, or leaves it to the member's app (`role` null). */
