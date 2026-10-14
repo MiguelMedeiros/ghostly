@@ -227,11 +227,13 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
     added.push(mapped());
   }
   if (moved) session.messages.sort((a, b) => a.timestamp - b.timestamp);
-  let changed = dirty;
+  // The chat list's note of a reaction goes in with the row it changed: one write of the chat, not a second one.
+  const noted = noteReaction(session, link);
+  let changed = dirty || noted;
   // A long history stored whole (before its stored copy kept only its last messages) is stored anew: saving writes only
   // what changed, so this writes once. Not again after a mirror that left it stored, nothing written since: that one
   // stored it as it is kept.
-  if (dirty || (!partial && !added.length && session.messages.length > STORED_MESSAGES && !untouched(linkId, session.id))) saveSession(session);
+  if (dirty || noted || (!partial && !added.length && session.messages.length > STORED_MESSAGES && !untouched(linkId, session.id))) saveSession(session);
   if (added.length) {
     const before = session.messages.length;
     // The session read above, as stored (saved just now if a row changed).
@@ -241,7 +243,6 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
   }
   if (mirrorPeerNick(session, link)) changed = true;
   if (mirrorIdentityShare(session, link)) changed = true;
-  if (mirrorReaction(session, link)) changed = true;
   if (dirty || added.length || changed) forget(session.id);
   const after = storedSession(session.id);
   mirrored.set(linkId, { messages, sessionId: session.id, stored: after });
@@ -251,21 +252,27 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
 
 /**
  * The chat's latest reaction, for the chat list: its note, and its place, as a message would move it. Not a message,
- * so the unread count stays.
+ * so the unread count stays. Put on this session, not saved: whoever holds it saves it.
  */
-function mirrorReaction(session: ChatSession, link: LinkView): boolean {
+function noteReaction(session: ChatSession, link: LinkView): boolean {
   const note = link.lastReaction;
   const shown = session.lastReaction;
   // A newer reaction, or the same one whose message was edited since (its line quotes the text).
   if (!note || note.at < (shown?.at ?? 0) || (note.at === shown?.at && note.snippet === shown.snippet)) return false;
-  const fresh = loadSession(session.id);
-  if (!fresh) return false;
-  fresh.lastReaction = note;
-  fresh.lastSyncAt = Math.max(fresh.lastSyncAt ?? 0, note.at);
-  saveSession(fresh);
   session.lastReaction = note;
-  forget(session.id);
+  session.lastSyncAt = Math.max(session.lastSyncAt ?? 0, note.at);
   return true;
+}
+
+/**
+ * Saves a write of the sync's own to a chat that changes none of its messages (its mode, its reaction note): the list
+ * last mirrored into it stays mirrored, and the next engine state does not mirror it again over the whole history.
+ */
+function saveKeepingMirrored(linkId: string, session: ChatSession): void {
+  const last = mirrored.get(linkId);
+  const kept = !!last && untouched(linkId, session.id);
+  saveSession(session);
+  if (kept) mirrored.set(linkId, { ...last, stored: storedSession(session.id) });
 }
 
 /**
@@ -343,10 +350,21 @@ async function reconcile(): Promise<void> {
     // Changed here (its delivery mode, its latest reaction or identity share), never the one the other readers hold.
     const session = { ...shown };
     const live = engine.linkByPeer(session.peerPubKeyB64);
-    if (live && session.deliveryMode !== live.deliveryMode) { session.deliveryMode = live.deliveryMode; saveSession(session); forget(session.id); }
-    if (live && mirrorPeerNick(session, live)) renamed = true;
-    if (live && mirrorIdentityShare(session, live)) renamed = true;
-    if (live && mirrorReaction(session, live)) renamed = true;
+    if (live) {
+      // The note of a reaction whose row the change tick still holds goes in with that row, when the tick ends.
+      const waiting = engine.changing(live.id);
+      if (waiting) later = true;
+      const noted = !waiting && noteReaction(session, live);
+      if (noted) renamed = true;
+      if (noted || session.deliveryMode !== live.deliveryMode) {
+        session.deliveryMode = live.deliveryMode;
+        // The session the page's cache holds, as stored: not read again.
+        saveKeepingMirrored(live.id, session);
+        forget(session.id);
+      }
+      if (mirrorPeerNick(session, live)) renamed = true;
+      if (mirrorIdentityShare(session, live)) renamed = true;
+    }
     if (session.profile && live?.pairing?.peerKey && ["ready", "waiting"].includes(live.pairing.status)) forgetInviteCode(session.id);
     if (live) continue;
     later = true;
