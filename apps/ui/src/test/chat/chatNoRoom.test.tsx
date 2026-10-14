@@ -87,8 +87,12 @@ describe("on a full localStorage", () => {
     };
 
     await press();
-    act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
-    expect(screen.queryByTestId("chat-not-stored")).toBeNull();
+    // The notice listens for Escape from an effect, which a loaded runner may run after the notice shows: an Escape
+    // before that does nothing, so press until it is heard.
+    await waitFor(() => {
+      act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+      expect(screen.queryByTestId("chat-not-stored")).toBeNull();
+    });
     expect(document.activeElement).toBe(newChat);
 
     await press();
