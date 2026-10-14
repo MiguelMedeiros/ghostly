@@ -487,6 +487,24 @@ describe("sendBody", () => {
     expect(atMark.channel.drained).not.toHaveBeenCalled();
   });
 
+  it("keeps under a quarter of a channel's send budget, and stops waiting once cancelled", async () => {
+    const { channel, sent } = recordingChannel();
+    const limited = Object.assign(channel, { sendBudget: 120 * 1024, buffered: 30 * 1024 });
+    await sendBody(limited, CHUNK_KIND.requestBody, 4, [Uint8Array.of(1)]);
+    expect(limited.drained).toHaveBeenCalledOnce();
+    expect(sent).toHaveLength(2);
+
+    // A drain that leaves the channel above the line is waited on again, until the body is cancelled.
+    const stuck = recordingChannel();
+    const drained = vi.fn(async () => {});
+    const held = Object.assign(stuck.channel, { sendBudget: 120 * 1024, buffered: 30 * 1024, drained });
+    let cancelled = false;
+    setTimeout(() => { cancelled = true; }, 50);
+    await sendBody(held, CHUNK_KIND.requestBody, 5, [Uint8Array.of(1)], () => cancelled);
+    expect(drained.mock.calls.length).toBeGreaterThan(1);
+    expect(stuck.sent).toEqual([]);
+  });
+
   it("propagates a send failure to the caller", async () => {
     const { channel } = recordingChannel();
     channel.send = () => {
