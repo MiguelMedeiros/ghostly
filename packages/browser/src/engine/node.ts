@@ -5266,8 +5266,8 @@ export class GhostlyNode implements EngineImplementation {
   async bitcoinReceiveAddress(params?: { network?: WalletNetwork }) { const address = await this.bitcoins[this.net(params?.network)].receiveAddress(); await this.refreshWallet(); return address; }
   bitcoinRefresh(params?: { network?: WalletNetwork }) { return this.bitcoins[this.net(params?.network)].sources.refresh(); }
 
-  walletInspectCashu({ text }: { text: string }) {
-    return { inspection: this.wallet.inspect(text) };
+  async walletInspectCashu({ text }: { text: string }) {
+    return { inspection: await this.wallet.inspect(text) };
   }
 
   async walletReceiveToken({ token }: { token: string }) {

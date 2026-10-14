@@ -464,7 +464,7 @@ export class PaymentDesk {
   private async refuseForGroup(request: StoredPayment, payment: Payment): Promise<string | undefined> {
     if (request.state !== "pending") return "Already paid by another member of the group";
     if (await this.wallet.redeemingFor?.(request.id)) return "Another member of the group is paying it";
-    const token = this.wallet.inspect?.(payment.endpoint[1]);
+    const token = await this.wallet.inspect?.(payment.endpoint[1]);
     if (token && token.kind === "token" && (token.amount < request.amount || !(request.mints ?? []).includes(token.mint)))
       return "This ecash does not pay the request: the amount or the mint differs";
     return undefined;
@@ -801,7 +801,7 @@ export class PaymentDesk {
       link?.sendPaymentResult({ id: payment.id, ok: false, error: "Cashu is off in this chat" });
       return;
     }
-    const inspected = this.wallet.inspect?.(payment.endpoint[1]);
+    const inspected = await this.wallet.inspect?.(payment.endpoint[1]);
     if (inspected?.kind === "token" && !this.accepts(linkId, "cashu", mintNetwork(inspected.mint))) {
       link.sendPaymentResult({ id: payment.id, ok: false, error: `${networkLabel(mintNetwork(inspected.mint))} Cashu is off in this chat` });
       return;
