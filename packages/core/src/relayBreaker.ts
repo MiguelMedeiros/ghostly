@@ -154,9 +154,13 @@ export class RelayBreaker {
     if (recovered) this.options.onRecover?.(relay);
   }
 
-  /** The relay failed a request; a probe that fails trips it again at once. */
+  /**
+   * The relay failed a request; a probe that fails trips it again at once. While it is left alone and no probe is out,
+   * a failure is a request sent before it tripped (a start burst): already counted in, it trips nothing again.
+   */
   failure(relay: string, kind: RelayFailure, reason: string): void {
     const circuit = this.circuit(relay);
+    if (!circuit.probing && circuit.openUntil > this.now()) return;
     circuit.failures++;
     circuit.kind = kind;
     circuit.reason = reason;
