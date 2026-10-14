@@ -6,9 +6,9 @@ import { traceLink } from "./linkTrace";
 import type { TurnConditions, TurnSourceAnswer, TurnSourcePut } from "./turnRead";
 
 /** Who asks, for the budget: a 1:1 chat's link comes before a group's, and both before background looks. */
-interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean; signal: boolean; watch: boolean; watchWrite: boolean; departed: boolean; resume: boolean }
+interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean; signal: boolean; watch: boolean; watchWrite: boolean; departed: boolean; resume: boolean; back: boolean }
 const asker = (options: PkarrRequestOptions, write: boolean): Asker =>
-  ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, door: !!options.door, write, signal: !!options.signal, watch: !!options.watch && !write, watchWrite: !!options.watch && write, departed: !!options.departed && !write, resume: !!options.resume && !write });
+  ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, door: !!options.door, write, signal: !!options.signal, watch: !!options.watch && !write, watchWrite: !!options.watch && write, departed: !!options.departed && !write, resume: !!options.resume && !write, back: !!options.back });
 /** A 1:1 chat's request: neither a group's nor a background one. */
 const isChat = (who: Asker): boolean => !who.background && !who.group;
 /** A 1:1 chat's offer or answer, or its read for the answer to its offer: it may use the allowance (`SIGNALING_ALLOWANCE_SHARE`). */
@@ -28,6 +28,8 @@ const isWatch = (who: Asker): boolean => who.watch && who.group && !who.write;
  * So may its reads of a member that was live when this app last ran, until one is answered (`resume`): its offer waits on them.
  */
 const isGroupSignal = (who: Asker): boolean => who.group && !who.background && (who.signal || isWatch(who) || who.watchWrite || who.resume);
+/** A community member's way back to its group while it has no edge up: it may use its own allowance (`WAY_BACK_SHARE`). */
+const isWayBack = (who: Asker): boolean => who.back && who.group && !who.background;
 /** Watch reads that the same other limits hold take turns together: urgent or not, background or not. */
 const watchLane = (who: Asker): string => `${+who.urgent}${+who.background}`;
 /** A group's read that is not a background one: an edge's, a private group's knock poll (`GROUP_RATION_WINDOW_MS`). */
@@ -149,6 +151,19 @@ export const DEPARTED_READS = 6;
  * bug hunt, 2026-10-14).
  */
 export const GROUP_SIGNALING_ALLOWANCE_SHARE = 2 / 15;
+/**
+ * A community member's way back to its group while it has no edge up (its readings of the beacon, its request in a hub's
+ * lobby: `back`) may go past everything that holds a group's request back by this fraction of a relay's minute (6 on a
+ * relay of 30, 12 on one of 60, 1 on relay.pkarr.org's 5), its own: not the edges' (`GROUP_SIGNALING_ALLOWANCE_SHARE`),
+ * and what it takes counts there alone, so it shortens no one else's minute or allowance. Its reads leave the last of it
+ * to a write. A web app opened with 30 chats whose contacts were online and 15 groups whose edges all offered at once:
+ * the edges' offers and reads for their members spent the groups' allowance in its first second, the chats' reserve
+ * and their offers still waiting held the rest, and its 5 communities read their beacon (who the hubs are) a minute
+ * later, or not in 3 minutes; 2 of them were not back in 6 (bug hunt, 2026-10-14). Sized for 5 communities' way back
+ * in the first minute on the default relays: a reading of each beacon, and a read and a write in a hub's lobby (a write
+ * goes to every relay). A member asks it only while it has no edge up in that community.
+ */
+export const WAY_BACK_SHARE = 1 / 5;
 /** Past the limit, a group's reads within its allowance go no more often than this on a relay. */
 export const GROUP_OVER_PACE_MS = 5_000;
 /**
@@ -233,7 +248,7 @@ export const FRESH_READ_MS = 500;
 const CATCH_UP_MIN_MS = 1_000;
 const CATCH_UP_RETRY_MS = 5_000;
 /** A catch-up put waits behind every link's request: a background write. */
-const CATCH_UP_ASKER: Asker = { background: true, group: false, urgent: false, door: false, write: true, signal: false, watch: false, watchWrite: false, departed: false, resume: false };
+const CATCH_UP_ASKER: Asker = { background: true, group: false, urgent: false, door: false, write: true, signal: false, watch: false, watchWrite: false, departed: false, resume: false, back: false };
 /** Keys whose last relay is remembered for their next read (`resolve`): a profile's links and lookups, with room. */
 const READ_TURNS_KEPT = 512;
 /** A relay that fails at the network level is left alone for this long. */
@@ -345,6 +360,8 @@ export class RelayTransport implements PkarrTransport {
   private readonly spentGroupOver = new Map<string, number[]>();
   /** Group edges' signaling requests on each relay in the last minute: their floor (`GROUP_SIGNALING_ALLOWANCE_SHARE`). */
   private readonly spentGroupSignal = new Map<string, number[]>();
+  /** Community members' ways back on each relay in the last minute: their allowance (`WAY_BACK_SHARE`). */
+  private readonly spentWayBack = new Map<string, number[]>();
   /** Per contact, its departed reads past the limit in the last minute, every relay together (`DEPARTED_READS`). */
   private readonly departedOver = new Map<string, number[]>();
   /**
@@ -1027,6 +1044,12 @@ export class RelayTransport implements PkarrTransport {
       return false;
     }
     if (writer) this.writeWaiting.delete(`${writer} ${relay}`);
+    // A way back that only its allowance let through counts there alone: it takes nothing from anyone else's minute.
+    if (isWayBack(who) && this.heldFor(relay, { ...who, back: false }, now, key, false) > 0) {
+      this.spentWayBack.set(relay, [...(this.spentWayBack.get(relay) ?? []), now]);
+      if (isGroupRead(who)) this.readTurns.set(key, { servedAt: now, askedAt: now, waiting: false, watch: false, lane: watchLane(who) });
+      return true;
+    }
     if (isGroupSignal(who) && !who.write && this.spent.get(relay)!.length >= this.limitOf(relay)) this.spentGroupOver.get(relay)!.push(now);
     if (isGroupSignal(who)) this.spentGroupSignal.get(relay)!.push(now);
     if (isDepartedRead(who) && this.spent.get(relay)!.length >= this.limitOf(relay)) this.departedOverAdd(key, now);
@@ -1122,7 +1145,16 @@ export class RelayTransport implements PkarrTransport {
     if (((writer === null && who.group && !pastLimit) || who.background) && !starved) wait = Math.max(wait, waiting("group"));
     // In turn per key: a key read longer ago that is asking too goes first (`READ_TURN_MS`).
     if (turns && wait <= 0 && isTurnRead(who) && this.turnAhead(relay, key, who, now)) wait = TURN_WAIT_MS;
+    // A community member's way back that all this holds goes within its own allowance (`WAY_BACK_SHARE`).
+    if (wait > 0 && isWayBack(who) && this.wayBackLeft(relay, who, now) > 0) return 0;
     return Math.max(wait, 0);
+  }
+
+  /** What is left of the community members' way back allowance on this relay (`WAY_BACK_SHARE`); its reads leave a write the last of it. */
+  private wayBackLeft(relay: string, who: Asker, now: number): number {
+    const spent = (this.spentWayBack.get(relay) ?? []).filter((at) => now - at < 60_000);
+    this.spentWayBack.set(relay, spent);
+    return Math.floor(this.limitOf(relay) * WAY_BACK_SHARE) - (who.write ? 0 : 1) - spent.length;
   }
 
   /** A group's read of `key` asks: it waits for its turn from now on, unless it is taken (`readsAhead`). */
