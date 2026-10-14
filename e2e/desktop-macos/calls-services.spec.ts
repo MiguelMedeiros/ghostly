@@ -224,7 +224,7 @@ test("two Desktop apps on a Mac pair, call with media both ways, share a screen,
       // Both apps offered calls/1 on the live session: the buttons are on, with no reason to show.
       for (const p of [alice, bob]) {
         await expect.poll(() => p.app.attribute('[data-testid="call-video"]', "title"), { timeout: 60_000 }).toBe("Video call");
-        expect(await p.app.execute<boolean>(`return document.querySelector('[data-testid="call-video"]').disabled;`)).toBe(false);
+        expect(await p.app.execute<string | null>(`return document.querySelector('[data-testid="call-video"]').getAttribute("aria-disabled");`)).toBeNull();
       }
       await alice.app.click('[data-testid="call-video"]');
       await expect.poll(() => pageText(bob), { timeout: 60_000 }).toContain("Incoming video call");
@@ -375,9 +375,10 @@ test("two Desktop apps on a Mac pair, call with media both ways, share a screen,
       for (const p of [alice, bob]) await dhtOnly(p, true);
       for (const p of [alice, bob]) {
         await expect.poll(() => p.connection(), { timeout: 60_000 }).toMatch(/DHT only/);
+        // Off through `aria-disabled`, not `disabled`: the button keeps its focus, and its reason for a screen reader.
         for (const id of ["call-audio", "call-video"]) {
-          await expect.poll(() => p.app.execute(`const b = document.querySelector('[data-testid="${id}"]'); return b && { disabled: b.disabled, title: b.title };`),
-            { timeout: 60_000, message: `${p.name}'s ${id} is off and says why` }).toEqual({ disabled: true, title: "Calls need a live connection" });
+          await expect.poll(() => p.app.execute(`const b = document.querySelector('[data-testid="${id}"]'); return b && { off: b.getAttribute("aria-disabled"), title: b.title };`),
+            { timeout: 60_000, message: `${p.name}'s ${id} is off and says why` }).toEqual({ off: "true", title: "Calls need a live connection" });
         }
       }
       for (const p of [alice, bob]) await dhtOnly(p, false);
