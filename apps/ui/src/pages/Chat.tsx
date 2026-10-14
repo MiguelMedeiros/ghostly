@@ -435,11 +435,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   }, [sessionId]);
 
   useEffect(() => {
-    const peerMessages = [...messages].reverse().filter(m => 
-      m.sender === "peer" || (m.sender === "system" && m.id.startsWith("peer_"))
-    );
-    
-    for (const msg of peerMessages) {
+    // From the newest back, to the first that names the contact: a reversed copy of the whole history was made for it on
+    // every message that came.
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]!;
+      if (msg.sender !== "peer" && !(msg.sender === "system" && msg.id.startsWith("peer_"))) continue;
       if (msg.nick) {
         const nick = peerDisplayName(msg.nick);
         if (nick && nick !== peerNick) {

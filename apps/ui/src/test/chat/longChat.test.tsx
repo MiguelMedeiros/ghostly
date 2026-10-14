@@ -119,6 +119,26 @@ describe("a long chat", () => {
     expect(styleChanges).toBeLessThanOrEqual(1);
   });
 
+  it("finds the contact's name from the newest message back, without a reversed copy of the whole history", async () => {
+    openChat();
+    await screen.findByText(`Message ${COUNT - 1}`);
+    await settle();
+    let copies = 0;
+    const { reverse } = Array.prototype;
+    vi.spyOn(Array.prototype, "reverse").mockImplementation(function (this: unknown[]) { if (this.length >= COUNT) copies++; return reverse.call(this); });
+    act(() => {
+      const session = loadSession("chat-1")!;
+      session.messages.push({ id: `peer_${wire(COUNT)}`, ref: wire(COUNT), sender: "peer", timestamp: Date.now(), text: "Hello again", nick: "Bea" });
+      saveSession(session);
+      window.dispatchEvent(new Event("session-updated"));
+    });
+    await screen.findByText("Hello again");
+    await settle();
+    expect(copies).toBe(0);
+    // The name it carries is still the contact's.
+    expect(screen.getByTestId("chat-name")).toHaveTextContent("Ana");
+  });
+
   it("draws only the new message when one comes", async () => {
     openChat();
     await screen.findByText(`Message ${COUNT - 1}`);
