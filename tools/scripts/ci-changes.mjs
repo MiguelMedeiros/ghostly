@@ -103,17 +103,14 @@ export const covers = (inputs, file) => inputs.some((p) => (p.endsWith("/") ? fi
 /** How many pages of CI's green pull request runs (100 each, newest first) a push to dev searches: about a day's. */
 export const TESTED_PAGES = 3;
 
-/** How many of the newest green batch runs a push to dev reads the commits of (see testedAs): a batch lands minutes after its run. */
-export const BUILT_BATCHES = 3;
-
 /**
  * The green CI run that already tested the tree a push to dev holds, or null. The merge train lands a batch on dev only
  * while dev's tip is still the batch's base, and a lone pull request only at a head that holds dev's tip, so dev's new
  * commit holds the tree of a head whose CI Success passed one landing earlier. A batch of N lands as N pushes, one per
- * pull request, each holding the tree of the batch's own commit of it: every push but the last holds the tree of a
- * commit below the batch's head, which the push after it extends to the head's. A run counts when:
- * - its head has that tree, or (a run of a `batch/dev-` branch, one of the newest BUILT_BATCHES) one of the commits its
- *   head has and the push lacks does; and its "CI Success" (not the draft's) passed in its latest attempt;
+ * pull request: only the last holds the tree of the batch's head. The others hold the tree of a commit below it, which
+ * no run tested whole, and a landing may stop there (one of the rest changed or left the line, GitHub refused it, the
+ * train's run ended): those pushes run all of CI. A run counts when:
+ * - its head has that tree, and its "CI Success" (not the draft's) passed in its latest attempt;
  * - it ran dev's own ci.yml: its head is a branch of this repository, and every pull request ever opened from that
  *   branch (closed ones too: the batch has closed by the time dev's last push runs, and its run's `pull_requests` is
  *   empty then) is into dev, and always was. A pull request into an epic (or a fork's) runs the ci.yml of its own base,
@@ -127,17 +124,10 @@ export const BUILT_BATCHES = 3;
  */
 export async function testedAs({ sha, tree, repo, api }) {
   const owner = repo.split("/")[0];
-  let batches = 0;
   for (let page = 1; page <= TESTED_PAGES; page++) {
     const { workflow_runs: runs } = await api(`actions/workflows/ci.yml/runs?event=pull_request&status=success&per_page=100&page=${page}`);
-    for (const run of runs) {
+    for (const run of runs.filter((r) => r.head_commit?.tree_id === tree)) {
       if (run.path !== ".github/workflows/ci.yml" || run.head_repository?.full_name !== repo) continue;
-      if (run.head_commit?.tree_id !== tree) {
-        if (!run.head_branch?.startsWith("batch/dev-") || batches++ >= BUILT_BATCHES) continue;
-        // A batch GitHub can no longer compare (its head gone) only fails to count, as one of another tree.
-        const { commits: built } = await api(`compare/${sha}...${run.head_sha}`).catch(() => ({ commits: [] }));
-        if (!built.some((c) => c.commit.tree?.sha === tree)) continue;
-      }
       const pulls = await api(`pulls?state=all&per_page=100&head=${encodeURIComponent(`${owner}:${run.head_branch}`)}`);
       if (!pulls.length || pulls.some((p) => p.base.ref !== "dev" || p.base.repo?.full_name !== repo)) continue;
       if (await retargeted(api, pulls)) continue;
