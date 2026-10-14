@@ -124,7 +124,7 @@ export function useAppBadge(): void {
   const groups = state?.groups;
   useEffect(() => {
     if (!canBadge()) return;
-    // As the chat list reads them: a chat whose stored text changed is parsed once for both, and the badge never changes one.
+    // Through the page's one cache: a chat whose stored text changed is parsed once for every reader, and the badge never changes one.
     const update = () => showAppBadge(badgeCount(listShownSessions(), groups ?? []));
     update();
     const timer = setInterval(update, REFRESH_MS);

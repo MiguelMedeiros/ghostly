@@ -6,6 +6,7 @@ import {
   getInviteCode,
   hasAnnouncedJoin,
   loadSession,
+  loadShownSession,
   markJoinAnnounced,
   saveSession,
   sessionLinkParams,
@@ -62,7 +63,8 @@ export const useChat: typeof Desktop.useChat = (params) => {
   }, [sessionId, profile, deliveryMode, seedB64, peerPubKey, encKeyB64]);
 
   const reload = useCallback(() => {
-    if (sessionId) setMessages([...(loadSession(sessionId)?.messages ?? [])]);
+    // Read as the chat list and the sync read it: a chat that changed is parsed once for all of them.
+    if (sessionId) setMessages([...(loadShownSession(sessionId)?.messages ?? [])]);
   }, [sessionId]);
 
   useEffect(() => setPending([]), [sessionId]);

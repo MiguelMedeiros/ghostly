@@ -142,7 +142,7 @@ export function Sidebar() {
   const { syncingSessions } = useBackgroundPoller(activeSessionId);
 
   const refreshSessions = useCallback(() => {
-    // Read as the badge reads them: a long chat whose stored text changed is parsed once for both (`listShownSessions`).
+    // Read through the page's one cache: a long chat whose stored text changed is parsed once for every reader (`listShownSessions`).
     const updated = listShownSessions();
 
     setSessions(updated);
