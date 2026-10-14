@@ -1216,7 +1216,13 @@ describe("what arrives from held storage", () => {
     expect(await host.receiveFile(chat.id, wire("a"), bytes("held"), "d")).toBe("duplicate file id");
     const [message] = await db.getMessages(chat.id);
     expect(message).toMatchObject({ id: "peer_a", via: "hold" });
-    expect(await fileStore.get(message.file!.id)).toMatchObject({ direction: "in", digest: "d" });
+    const stored = await fileStore.get(message.file!.id);
+    expect(stored).toMatchObject({ direction: "in", digest: "d" });
+    // In file storage as every other file, not a Blob in its record: the CLI keeps the files store in memory, and in
+    // its snapshot, so 60 held pictures took a daemon from 172 to 650 MB.
+    expect(stored!.blob).toBeUndefined();
+    expect(stored!.bytes).toBe("idb");
+    expect(await (await storedBlob(stored!, "text/plain"))!.text()).toBe("held");
   });
 });
 
