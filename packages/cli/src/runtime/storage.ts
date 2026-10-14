@@ -22,7 +22,7 @@ import { handOut, openTreeFile, SqlTree, type TreeFile } from "./sqlTree";
  *   already, and writing the whole snapshot again for them cost a second or more of every command on a large profile;
  * - a journal begins by naming the snapshot it follows: one found beside another snapshot is in that snapshot already
  *   (the process died between writing the snapshot and removing the journal), and is not replayed over it;
- * - the engine's messages, and their indexes, are kept in `rows.db` (SQLite: ./sqlTree.ts), not in memory: their
+ * - the engine's messages and file states, and their indexes, are kept in `rows.db` (SQLite: ./sqlTree.ts), not in memory: their
  *   store's tree and its indexes' are SQL trees in place of fake-indexeddb's, and the snapshot (format 3) says only that
  *   they are there. A transaction's writes go to SQLite once the journal has them (each entry is numbered, and SQLite
  *   says which it holds: a replay skips those). A profile's snapshot of format 1 (every value inline) or 2 (values in
@@ -91,6 +91,12 @@ interface Snapshot { format: 1 | 2 | 3; journal?: string; databases: { name: str
 const SNAPSHOT = "snapshot.bin";
 const JOURNAL = "journal.bin";
 const ROWS = "rows.db";
+/**
+ * The stores kept in `rows.db` by default: the engine's messages, and each file's state (its transfer and files/3
+ * record), which grew the heap by every file ever sent or received. Not the files store: a file small enough to hold
+ * whole is a Blob in its record, which SQLite does not take.
+ */
+const ON_DISK = new Set(["messages", "fileState"]);
 /** A journal past this is folded into the snapshot at the next quiet moment. */
 const COMPACT_BYTES = 32 * 1024 * 1024;
 /** A journal up to this is kept at close and at start: replaying it costs less than writing the snapshot again. */
@@ -132,7 +138,7 @@ export interface PersistentIndexedDb {
 }
 
 export interface StoreOptions {
-  /** The stores kept in `rows.db`, records and indexes: by default the engine's messages. */
+  /** The stores kept in `rows.db`, records and indexes: by default the engine's messages and file states (`ON_DISK`). */
   rowsOnDisk?: (db: string, store: string) => boolean;
 }
 
@@ -154,7 +160,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   const rowsFound = existsSync(rowsPath);
   const sqlite = await loadSqlite();
   const trees: TreeFile | null = sqlite ? openTreeFile(sqlite, rowsPath, classes.constraintError) : null;
-  const onDisk = options.rowsOnDisk ?? ((_db: string, store: string) => store === "messages");
+  const onDisk = options.rowsOnDisk ?? ((_db: string, store: string) => ON_DISK.has(store));
   // This store's own databases only: the hooks are on fake-indexeddb's shared classes, and another store opened in the
   // process (a test's) must not move this one's records into its rows.db.
   const disk = (store: RawStore) => trees !== null && raw._databases.get(store.rawDatabase.name) === store.rawDatabase && onDisk(store.rawDatabase.name, store.name);
