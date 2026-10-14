@@ -626,6 +626,39 @@ describe("linked files (WISP 1200 · Linked files)", () => {
     expect(await ask("files.read", [id, { offset: 0, length: 1 }])).toMatchObject({ ok: true });
   });
 
+  it("list shares the 16 MiB a second too: 100 000 links answer once a second, not 50 times", async () => {
+    // Each answer of 100 000 library-like paths (95 characters) is about 17 MB as JSON: 50 a second made the page copy
+    // 758 MB a second.
+    const { ask, run, host, broker, posted, clock } = setup({ permissions: ["files"] });
+    run();
+    const entries = Array.from({ length: MINI_APP_LIMITS.filesEntries }, (_, i) => ({ id: "a".repeat(22), path: `Music/Artist ${i % 500}/Album ${i % 40}/${String(i).padStart(6, "0")} A song with a long enough title.flac`.padEnd(95, "x"), size: 30_000_000, modified: 1_790_000_000_000, available: true }));
+    host.linkedFiles!.list = async () => entries;
+    host.files.set(REF, new Map([["board.svg", bytes(1)]]));
+    clock.t += 1_001;
+    const lists = Array.from({ length: MINI_APP_LIMITS.requestsPerSecond - 1 }, (_, i) => 1_000 + i);
+    for (const id of lists) broker.message({ id, type: "files.list", args: [] });
+    await vi.waitFor(() => expect(posted.filter((p) => lists.includes(p.message.id as number))).toHaveLength(lists.length));
+    const answers = posted.filter((p) => lists.includes(p.message.id as number)).map((p) => p.message);
+    expect(answers.filter((a) => a.ok === true)).toHaveLength(1);
+    expect(answers.filter((a) => a.error === "too-fast")).toHaveLength(lists.length - 1);
+    // The list spent what `file` and `files.read` may still answer that second.
+    expect(await ask("file", ["board.svg"])).toMatchObject({ ok: false, error: "too-fast" });
+    clock.t += 1_000;
+    expect(await ask("files.list")).toMatchObject({ ok: true });
+  });
+
+  it("list: a small one is counted too, by its bytes", async () => {
+    const { ask, run, host } = setup({ permissions: ["files"] });
+    run();
+    host.nextPick = [{ path: "Films/Up.mp4", bytes: bytes(1) }];
+    await ask("files.pick");
+    host.files.set(REF, new Map([["big.bin", bytes(MINI_APP_LIMITS.fileBytesPerSecond - 50)], ["board.svg", bytes(1)]]));
+    expect(await ask("file", ["big.bin"])).toMatchObject({ ok: true });
+    // Under the budget when it starts: answered whole, and it passes the budget.
+    expect(await ask("files.list")).toMatchObject({ ok: true, value: [{ path: "Films/Up.mp4" }] });
+    expect(await ask("file", ["board.svg"])).toMatchObject({ ok: false, error: "too-fast" });
+  });
+
   it("forget drops one link, or all of the app's", async () => {
     const { ask, run, host } = setup({ permissions: ["files"] });
     run();
