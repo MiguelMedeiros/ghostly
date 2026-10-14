@@ -7,15 +7,15 @@
  * - The frame loads twice: the runner, then the app the runner writes into itself after `writing`. Any other load is a
  *   navigation, and tears the app down.
  * - Requests are `{id, type, args}`, at most 64 KiB as JSON and 50 a second; answers `{id, ok, value | error}`; events
- *   `{event, data}`. An unknown type is refused. An app that sends ten times the rate is stopped. `file` and
- *   `files.read` answer at most 16 MiB a second together, one read at a time.
+ *   `{event, data}`. An unknown type is refused. An app that sends ten times the rate is stopped. `file`,
+ *   `files.read` and `files.list` answer at most 16 MiB a second together, one at a time.
  * - `files.*` (WISP 1200 · Linked files) only for an app granted `files`, through the platform's `linkedFiles`: the client
  *   asks the person and keeps the links; the app names only the ids it was given.
  *
  * `createBroker` is the protocol alone (tested without a browser); `startApp` frames it in a page.
  */
 import type { AppFileAt } from "@ghostly/browser/engine/apps";
-import { MINI_APP_LIMITS, type MiniAppContext, type MiniAppErrorCode, type MiniAppJson, type MiniAppPeerEvent, type MiniAppRequestType } from "@ghostly/core/miniApp";
+import { MINI_APP_LIMITS, type MiniAppContext, type MiniAppErrorCode, type MiniAppJson, type MiniAppLinkedFile, type MiniAppPeerEvent, type MiniAppRequestType } from "@ghostly/core/miniApp";
 import type { AppsPlatform } from "../platform";
 
 /** An app to run: its checked entry (the engine's `appEntry`), what the person granted it, and where it opens. */
@@ -193,6 +193,16 @@ function refusalOf(error: unknown): MiniAppErrorCode {
 const LINK_ID = /^[A-Za-z0-9_-]{22}$/;
 const EXTENSION = /^[a-z0-9]{1,16}$/;
 
+/**
+ * At least how many bytes a `files.list` answer takes as JSON, without writing it: each entry's path, and 80 for the
+ * rest of it (`{"id":"<22 characters>","path":"","size":0,"modified":0,"available":true}`).
+ */
+function listBytes(entries: readonly MiniAppLinkedFile[]): number {
+  let bytes = 2;
+  for (const entry of entries) bytes += 80 + entry.path.length;
+  return bytes;
+}
+
 /** `files.pick`'s options, or a refusal: `{folder?, accept?}` and nothing else that matters. */
 function pickOptions(value: unknown): { folder: boolean; accept: string[] } {
   if (value === undefined || value === null) return { folder: false, accept: [] };
@@ -272,19 +282,20 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
   };
 
   /**
-   * Counted against `fileBytesPerSecond` with every other read, one at a time: `file` and `files.read` share the
-   * chain, so an app cannot double its bytes a second by mixing them.
+   * Counted against `fileBytesPerSecond` with every other read, one at a time: `file`, `files.read` and `files.list`
+   * share the chain, so an app cannot double its bytes a second by mixing them.
    */
-  const counted = (load: () => Promise<Uint8Array>): Promise<Uint8Array> => {
+  const counted = <T>(load: () => Promise<T>, size: (answer: T) => number): Promise<T> => {
     const read = reading.then(async () => {
       if (phase === "stopped") refuse("stopped");
       const at = now();
       while (served.length && served[0]!.at <= at - 1000) servedBytes -= served.shift()!.bytes;
       if (servedBytes >= MINI_APP_LIMITS.fileBytesPerSecond) refuse("too-fast");
-      const bytes = await load();
-      served.push({ at, bytes: bytes.byteLength });
-      servedBytes += bytes.byteLength;
-      return bytes;
+      const answer = await load();
+      const bytes = size(answer);
+      served.push({ at, bytes });
+      servedBytes += bytes;
+      return answer;
     });
     reading = read.catch(() => {});
     return read;
@@ -364,7 +375,8 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
       case "files.list": {
         const files = linkedFiles();
         if (!files) return refuse("not-allowed");
-        return { value: await files.list(launch.ref) as unknown as MiniAppJson };
+        // Counted as file bytes: 100 000 links answered 15 MB, and 50 lists a second made the page copy 758 MB a second.
+        return { value: await counted(() => files.list(launch.ref), listBytes) as unknown as MiniAppJson };
       }
       case "files.read": {
         const files = linkedFiles();
@@ -372,7 +384,7 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         const id = args[0];
         if (typeof id !== "string" || !LINK_ID.test(id)) refuse("bad-request");
         const { offset, length } = readRange(args[1]);
-        const bytes = await counted(() => files.read(launch.ref, id as string, offset, length));
+        const bytes = await counted(() => files.read(launch.ref, id as string, offset, length), (read) => read.byteLength);
         if (bytes.byteLength > length) refuse("failed");
         const buffer = bytes.slice().buffer as ArrayBuffer;
         return { value: buffer, transfer: [buffer] };

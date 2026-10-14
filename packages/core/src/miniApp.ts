@@ -177,8 +177,9 @@ export const MINI_APP_LIMITS = {
   /** Requests per second, per app. */
   requestsPerSecond: 50,
   /**
-   * Bytes of `file` and `files.read` answers per second, per app, counted together: a whole bundle's worth. A read that
-   * starts under it is answered whole; past it the read is refused with `too-fast` until the second has gone.
+   * Bytes of `file`, `files.read` and `files.list` answers per second, per app, counted together: a whole bundle's
+   * worth. A request that starts under it is answered whole; past it the request is refused with `too-fast` until the
+   * second has gone.
    */
   fileBytesPerSecond: 16 * 1024 * 1024,
   /** One `files.read`, at most. */
