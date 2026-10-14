@@ -6931,8 +6931,13 @@ export class GhostlyNode implements EngineImplementation {
           try { await db.pinPeer(stored.id, key, signedSignals); }
           catch (error) { live.stored = previous; throw error; }
           // Pinned just now (not a later session or envelope confirming the same key): the record is sealed
-          // anew for the contact alone, and the contact's is read.
-          if (!previous.pairedPeerKey) { void live.caps?.update().catch(() => {}); live.caps?.refresh(true); }
+          // anew for the contact alone, and the contact's is read. The chat is a contact's now and takes its native
+          // listeners, as at start (`keepsNativeEndpoints`): an invite from before a restart had none, and a joiner
+          // with no WebRTC found nothing to dial until someone wrote in the chat.
+          if (!previous.pairedPeerKey) {
+            if (!live.stored.group && live.stored.deliveryMode !== "dht") void this.ensureNativeEndpoints(stored.id);
+            void live.caps?.update().catch(() => {}); live.caps?.refresh(true);
+          }
         },
       } : undefined,
       // A chat never paired: the one who made the invite still holds it; the one who joined does not.
