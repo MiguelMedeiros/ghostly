@@ -27,7 +27,9 @@ it("backs a profile up under a passphrase and restores it into a new one, never 
   expect(readFileSync(file, "latin1")).not.toContain("Backup bot");
   expect(statSync(file).mode & 0o777).toBe(0o600);
   expect(readdirSync(dir).filter((name) => name.includes(".partial")), "the file being written took its name only when whole").toEqual([]);
-  error(await ghostly(["--home", dir, "profile", "backup", "--out", file], { env: PASS }), "confirm", 5);
+  // A file there already: refused (exit 1), as a restore into a profile that exists. Not `confirm` (exit 5, "needs
+  // --force"): backup takes no --force.
+  expect(error(await ghostly(["--home", dir, "profile", "backup", "--out", file], { env: PASS }), "refused", 1).message).toBe(`${file} exists: choose another name`);
 
   const wrong = join(dir, "wrong");
   writeFileSync(wrong, "not the passphrase\n");
