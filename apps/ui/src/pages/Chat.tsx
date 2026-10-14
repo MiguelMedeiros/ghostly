@@ -822,7 +822,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             </button>
             <Menu testId="chat-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef} focusFirst>
               {phoneHeader && <>
-                <MenuItem testId="call-video" disabled={!!callBlocked || callBusy} title={callBlocked ?? undefined} onClick={() => { closeMenu(); startCall(true); }}
+                <MenuItem testId="call-video" disabled={!!callBlocked || callBusy} title={callBlocked ?? undefined} hint={callBlocked} onClick={() => { closeMenu(); startCall(true); }}
                   icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>}>
                   {t("calls.video")}
                 </MenuItem>

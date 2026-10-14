@@ -95,9 +95,10 @@ const callWindows = (p: DesktopPerson) => p.app.execute<number>(`return document
 const connected = (p: DesktopPerson) => p.app.execute<boolean>(`
   return /\\d{1,2}:\\d{2}/.test(document.querySelector('[data-testid="call-window"]')?.innerText ?? "");`);
 
+/** A button's state: off natively, or through `aria-disabled` (an off call button keeps its focus and its reason). */
 const button = (p: DesktopPerson, selector: string) => p.app.execute<{ disabled: boolean; title: string | null } | null>(`
   const button = document.querySelector(arguments[0]);
-  return button ? { disabled: button.disabled, title: button.getAttribute("title") } : null;`, selector);
+  return button ? { disabled: button.disabled || button.getAttribute("aria-disabled") === "true", title: button.getAttribute("title") } : null;`, selector);
 
 test("two Linux Desktops call each other: decline, then sound and pictures both ways, mute, camera off, hang up, a video call answered with voice, a voice call that marks who is speaking", {
   tag: ["@feature:calls.linux-native", "@feature:calls.paired", "@feature:calls.video", "@feature:calls.decline", "@feature:calls.audio", "@feature:calls.speaking"],

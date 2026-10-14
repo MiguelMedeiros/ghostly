@@ -33,12 +33,27 @@ describe("the chat header's call buttons", () => {
   it("are off with the reason when the chat cannot call, and off during a call", () => {
     const { rerender } = renderApp(<CallButtons blocked="Calls need a live connection" busy={false} onCall={vi.fn()} />);
     for (const id of ["call-audio", "call-video"]) {
-      expect(screen.getByTestId(id)).toBeDisabled();
+      expect(screen.getByTestId(id)).toHaveAttribute("aria-disabled", "true");
       expect(screen.getByTestId(id)).toHaveAttribute("title", "Calls need a live connection");
     }
 
     rerender(<CallButtons blocked={null} busy onCall={vi.fn()} />);
     for (const id of ["call-audio", "call-video"]) expect(screen.getByTestId(id)).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("when the chat cannot call, can still be reached and say why to a screen reader, and start nothing", async () => {
+    const onCall = vi.fn();
+    const { user } = renderApp(<CallButtons phone blocked="Calls need a live connection" busy={false} onCall={onCall} />);
+    const voice = screen.getByTestId("call-audio");
+    // A phone has no hover: a disabled button would be skipped, and its title never heard.
+    expect(voice).not.toBeDisabled();
+    expect(voice).toHaveAccessibleName("Audio call");
+    expect(voice).toHaveAccessibleDescription("Calls need a live connection");
+    await user.tab();
+    expect(voice).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await user.click(voice);
+    expect(onCall).not.toHaveBeenCalled();
   });
 
   it("keep the keyboard focus during a call, and start no second one", async () => {
