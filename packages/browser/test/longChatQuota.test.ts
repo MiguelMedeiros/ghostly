@@ -8,7 +8,7 @@ import type { LinkView, StoredMessage } from "../src/shared/types";
  * into the chat's localStorage session, which the chat list and the chat read (`platform/sync.ts`). A chat of thousands
  * of messages overflowed that storage (5 MB in WebKit, the Desktop app's), its writes failed without a word, and the
  * chat stopped showing what came. Now the session keeps only the chat's last messages, and those the engine does not
- * keep (a call's line): the chat reads the rest from the engine's copy, which the page holds.
+ * keep (a call's line, its last `CALL_LINES`): the chat reads the rest from the engine's copy, which the page holds.
  */
 const fake = vi.hoisted(() => ({
   engine: {
@@ -311,21 +311,25 @@ describe("no message has the page's storage as its only copy", () => {
     }
   });
 
-  it("a long session written whole by 1.0.0 is stored anew on the first open after the update, and loses nothing", async () => {
+  it("a long session written whole by 1.0.0 is stored anew on the first open after the update, and loses nothing but its oldest call lines", async () => {
     const next = random(42);
     scenario(next, 5_000);
     const before = storage.loadSession(SESSION)!.messages;
     expect(before.length).toBeGreaterThan(4_000);
+    // A chat keeps its last `CALL_LINES` call lines: the older ones go.
+    const lines = before.filter(m => m.callEvent);
+    expect(lines.length).toBeGreaterThan(storage.CALL_LINES);
+    const gone = new Set(lines.slice(0, -storage.CALL_LINES).map(m => m.id));
     await engineSpeaks();
-    // Stored anew, small, with every row the engine does not bring back.
+    // Stored anew, small, with every other row the engine does not bring back.
     expect(kept().messages.length).toBeLessThan(before.length / 2);
-    expect(lost()).toEqual([]);
+    expect(new Set(lost())).toEqual(gone);
     // After a reload, the chat has each row as it was, and the engine's that the session never got.
     await page();
     await engineSpeaks();
     const after = new Map(storage.loadSession(SESSION)!.messages.map(m => [m.id, m]));
-    for (const m of before) expect(after.get(m.id)?.text, m.id).toBe(m.text);
-    expect(unseen()).toEqual([]);
+    for (const m of before) if (!gone.has(m.id)) expect(after.get(m.id)?.text, m.id).toBe(m.text);
+    expect(new Set(unseen())).toEqual(gone);
   });
 
   it("a change to an older message is a new row, so its bubble is drawn again", async () => {
