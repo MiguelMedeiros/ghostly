@@ -175,6 +175,7 @@ export function MessageInput({
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState(() => draftId ? getSessionDraft(draftId) : "");
+  const textRef = useRef(text); textRef.current = text;
   const [toast, setToast] = useState<string | null>(null);
   /** `caption`: the guard asks about a pasted file's caption, not the draft. */
   const [secret, setSecret] = useState<{ finding: SecretFinding; caption?: string } | null>(null);
@@ -545,8 +546,13 @@ export function MessageInput({
       if (!waiting || (waiting.files.length && !canAttach && !fileUnavailable)) return;
       const share = takeShareFor(draftId)!;
       const shared = shareText(share);
-      // Longer than the field takes: whole, as a text file on the sheet, where files can go.
-      const asFile = shared.length > Math.max(maxLength, 16_384) && canAttach;
+      // Longer than the field takes, or than one message can be once in the draft (counted in bytes, as Send counts):
+      // whole, as a text file on the sheet, where files can go.
+      const draft = textRef.current;
+      const joined = draft.trim() ? `${draft}\n${shared}` : shared;
+      const bytes = new TextEncoder().encode(joined.trim()).length;
+      const tooLong = joined.length > Math.max(maxLength, 16_384) || (!!maxBytes && bytes > maxBytes) || (!!textBytes && bytes > textBytes);
+      const asFile = !!shared && tooLong && canAttach;
       if (shared && !asFile) setText((was) => (was.trim() ? `${was}\n${shared}` : shared));
       if (asFile) {
         const file = new File([shared], `${t("composer.sharedTextFile")}.txt`, { type: "text/plain" });
@@ -556,7 +562,7 @@ export function MessageInput({
     };
     take();
     return onShareChange(take);
-  }, [draftId, canAttach, fileUnavailable, maxLength, t]);
+  }, [draftId, canAttach, fileUnavailable, maxLength, maxBytes, textBytes, t]);
 
   // A paste where no field has the focus (the chat's messages clicked last) still brings its files here: to the chat
   // on screen only. Every loaded chat's composer is mounted, and the document has one paste for all of them.
