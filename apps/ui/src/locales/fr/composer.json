@@ -21,6 +21,7 @@
   "dropFiles": "Déposez pour envoyer",
   "emoji": "Emoji",
   "emojiCategories": "Catégories d'emoji",
+  "emojiNotLoading": "Les emoji n'ont pas pu être chargés.",
   "expressions": "Emoji et GIF",
   "gif": "GIF",
   "gifCategories": "Catégories de GIF",

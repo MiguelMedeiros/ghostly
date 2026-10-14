@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { useI18n } from "../../contexts/I18nContext";
-import { emojiCategories, emojiOf, recentEmoji, rememberEmoji, searchEmoji, setSkinTone, skinTone, withSkin } from "../../lib/emoji";
+import { emojiCategories, emojiLoaded, emojiOf, loadEmoji, recentEmoji, rememberEmoji, searchEmoji, setSkinTone, skinTone, withSkin } from "../../lib/emoji";
 import { EMOJI_CATEGORY_ICONS } from "./icons";
 import { CategoryBar, PanelSearch } from "./PanelParts";
 
@@ -15,12 +15,38 @@ function scrollToSection(box: HTMLElement | null, id: string) {
 
 const TONES = ["✋", "✋🏻", "✋🏼", "✋🏽", "✋🏾", "✋🏿"];
 
+type EmojiTabProps = { onPick: (emoji: string) => void; autoFocus?: boolean };
+
+/**
+ * The panel's emoji, once their data set is here (`loadEmoji`: the first panel shown loads it, not the first screen).
+ * While it comes the tab is empty and busy; a load that failed says so, with Try again.
+ */
+export function EmojiTab(props: EmojiTabProps) {
+  const { t } = useI18n();
+  const [state, setState] = useState<"ready" | "loading" | "failed">(() => (emojiLoaded() ? "ready" : "loading"));
+  useEffect(() => {
+    if (state !== "loading") return;
+    let live = true;
+    loadEmoji().then(() => { if (live) setState("ready"); }, () => { if (live) setState("failed"); });
+    return () => { live = false; };
+  }, [state]);
+  if (state === "ready") return <LoadedEmojiTab {...props} />;
+  return (
+    <div className="expression-tab" data-testid="emoji-tab" aria-busy={state === "loading" || undefined}>
+      {state === "failed" && <div className="expression-trouble" data-testid="emoji-trouble" role="status">
+        <p>{t("composer.emojiNotLoading")}</p>
+        <button type="button" className="expression-retry" data-testid="emoji-retry" onClick={() => setState("loading")}>{t("composer.retry")}</button>
+      </div>}
+    </div>
+  );
+}
+
 /**
  * The panel's emoji: category icons over a search field, then this profile's recent emoji and every category
  * in one scrolling grid. The icons jump to their category and follow the scroll. The recent row is the one the
  * panel opened with, so the grid does not move under a pointer while picking several.
  */
-export function EmojiTab({ onPick, autoFocus }: { onPick: (emoji: string) => void; autoFocus?: boolean }) {
+function LoadedEmojiTab({ onPick, autoFocus }: EmojiTabProps) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [skin, setSkin] = useState(skinTone);
