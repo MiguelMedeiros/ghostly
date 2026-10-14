@@ -252,6 +252,21 @@ describe("chats", () => {
     await expect(callApi(ctx, "chat.history", { chat: "chat-one", limit: -1 })).rejects.toMatchObject({ code: "bad_request" });
   });
 
+  it("a window between two messages it holds that has nothing in it is an empty page, not a message not found", async () => {
+    const { ctx } = fake([msg("a", 1), msg("b", 2), msg("c", 3)]);
+    const page = (after: unknown, before: unknown) => callApi(ctx, "chat.history", { chat: "chat-one", after, before });
+    // `after` was looked up in what `before` had already cut away: "No message b" for a message that is there.
+    expect(await page("b", "b")).toEqual({ messages: [], more: false });
+    expect(await page("c", "a")).toEqual({ messages: [], more: false });
+    expect(await page("b", "c")).toEqual({ messages: [], more: false });
+    expect(await page("a", "c")).toMatchObject({ messages: [{ id: "b" }], more: false });
+    expect(await page("c", 2)).toEqual({ messages: [], more: false });
+    expect(await page(2, "b")).toEqual({ messages: [], more: false });
+    // A message that is not there is still said, on either side.
+    await expect(page("zz", "c")).rejects.toMatchObject({ code: "not_found", message: "No message zz" });
+    await expect(page("a", "zz")).rejects.toMatchObject({ code: "not_found", message: "No message zz" });
+  });
+
   it("a history limit that is not a whole number is bad_request, not the engine failing", async () => {
     const { ctx } = fake([msg("a", 1), msg("b", 2)]);
     const wrong = { code: "bad_request", message: "limit must be a whole number from 1 to 10000" };
