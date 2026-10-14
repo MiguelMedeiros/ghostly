@@ -55,6 +55,12 @@ export interface PkarrRequestOptions {
    */
   departed?: boolean;
   /**
+   * A read of a contact that was live when this app last ran, made before any read of it this run was answered
+   * (`LinkSessionOptions.resumed`): the link's offer waits on it. A group edge's goes on the edges' floor
+   * (`GROUP_SIGNALING_ALLOWANCE_SHARE` in relay.ts).
+   */
+  resume?: boolean;
+  /**
    * `publishPayload` only: the payload was signed in this process, dated so (a group edge's, `CarriedTransport`). Its
    * signature is not checked again on the way to the relays, as `RelayTransport.putSigned`'s is not.
    */

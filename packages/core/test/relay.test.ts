@@ -1283,6 +1283,43 @@ describe("relay transport: a group edge's signaling keeps its share of the minut
     } finally { vi.useRealTimers(); }
   });
 
+  it("lets an edge back after a restart read its member while 30 chats spend the minute and keep their reserve", async () => {
+    // CLI bug hunt, 2026-10-14: the same daemon after #2154. An edge back after a restart reads its member before it
+    // offers (`resume`), and that read was a plain one: it waited behind the chats, so the edges never signaled. The
+    // first member was back 71 to 367 s after the restart, and group texts were read 2 to 7 min late.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const log: { key: string; method: string }[] = [];
+      const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        log.push({ key: new URL(String(input)).pathname.slice(1), method: init?.method ?? "GET" });
+        return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(null, { status: 404 });
+      }) as typeof fetch });
+      const group = withRequestOptions(relay, { group: true });
+      const went = async (request: () => Promise<unknown>) => { const before = log.length; await request().catch(() => {}); return log.length > before; };
+      const start = Date.now(), at = (t: number) => vi.setSystemTime(start + t);
+      const contacts = Array.from({ length: 30 }, () => createIdentity().pubKeyZ32);
+      for (let i = 0; i < REQUESTS_PER_MINUTE; i++) { at(i * 100); await relay.resolve(contacts[i], { urgent: true }); }
+      const chatAllowance = Math.floor(REQUESTS_PER_MINUTE * SIGNALING_ALLOWANCE_SHARE);
+      for (let i = 0; i < chatAllowance; i++) await relay.publish(createIdentity(), [{ label: "_ts", value: "1" }], { signal: true });
+      const floor = Math.floor(REQUESTS_PER_MINUTE * GROUP_SIGNALING_ALLOWANCE_SHARE);
+      const members = Array.from({ length: floor }, () => createIdentity().pubKeyZ32);
+      // A plain read of a member waits for the chats, as it did.
+      at(5_000);
+      expect(await went(() => group.resolve(members[0], { urgent: true }))).toBe(false);
+      // The edges' reads back after a restart go, one at a time, and leave the last of the floor to a write: an offer.
+      for (let i = 0; i < floor - 1; i++) {
+        at(5_000 + i * GROUP_OVER_PACE_MS);
+        expect(await went(() => group.resolve(members[i], { urgent: true, resume: true }))).toBe(true);
+      }
+      at(5_000 + floor * GROUP_OVER_PACE_MS);
+      expect(await went(() => group.resolve(members[floor - 1], { urgent: true, resume: true }))).toBe(false);
+      expect(await went(() => group.publish(createIdentity(), [{ label: "_ts", value: "1" }], { signal: true }))).toBe(true);
+      expect(log.slice(-floor).map((request) => request.key).slice(0, floor - 1)).toEqual(members.slice(0, floor - 1));
+      // A chat's read back after a restart is a chat's like any other: it waits for the minute.
+      expect(await went(() => relay.resolve(createIdentity().pubKeyZ32, { urgent: true, resume: true }))).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("counts the edges' signaling under the limit toward their floor", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {

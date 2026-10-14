@@ -203,6 +203,11 @@ export interface LinkSessionOptions {
    */
   firstPublish?: "at-start" | "after-first-poll";
   /**
+   * Back after a restart with the contact live when this app last ran (`GhostLinkOptions.resume`): its reads say so
+   * (`PkarrRequestOptions.resume`) until one is answered.
+   */
+  resumed?: boolean;
+  /**
    * When the chat was made, for a saved one: the wait for a peer never seen (`AWAITING_PEER_MS`) counts from then, not
    * from this start. Counted from each start of the app, every saved chat whose contact had no packet at the relays
    * (away for a day) was an invite just sent again: 50 of them read every 4 s for ten minutes, not in the background,
@@ -284,6 +289,8 @@ export class LinkSession {
   private readonly firstPublish: "at-start" | "after-first-poll";
   private firstPublishTimer: ReturnType<typeof setTimeout> | null = null;
   private firstPollDone = false;
+  /** Back after a restart, and no read of the contact answered yet in this run (`LinkSessionOptions.resumed`). */
+  private resumeReads: boolean;
   /** When this side last published (0: never). */
   lastPublishedAt = 0;
   /** A publish is in flight, or finished this recently: another packet now would only queue behind it at the relays. */
@@ -316,6 +323,7 @@ export class LinkSession {
     this.intervals = options.pollIntervals ?? DHT_POLL_INTERVALS;
     this.events = options.events ?? {};
     this.firstPublish = options.firstPublish ?? "at-start";
+    this.resumeReads = !!options.resumed;
     this.awaitingSince = Math.min(options.awaitingSince ?? this.startedAt, this.startedAt);
     this.invite = options.invite ?? (() => false);
   }
@@ -748,7 +756,9 @@ export class LinkSession {
       // alone: a packet the contact put just before its goodbye, read only after it, advertises, and looks like it is back.
       const departed = !signal && Date.now() < this.departedUntil;
       const background = pace === "background" || pace === "connected";
-      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background, urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }) });
+      // Back after a restart: the offer waits on this read (`PkarrRequestOptions.resume`).
+      const resume = !signal && !watch && this.resumeReads;
+      const packet = await this.transport.resolve(this.peerPubKeyZ32, { background, urgent: pace === "fast", ...(signal && { signal }), ...(watch && { watch }), ...(departed && { departed }), ...(resume && { resume }) });
       if (!this.running) return;
       this.discoveryResult("read");
       const ms = Date.now() - started;
@@ -758,6 +768,7 @@ export class LinkSession {
       const answered = this.transport.readAnsweredAt?.(this.peerPubKeyZ32);
       const read = answered !== undefined && answered >= started;
       if (read) this.lastReadAt = started;
+      if (read || !this.transport.readAnsweredAt) this.resumeReads = false;
       this.readMissed = !!this.transport.readAnsweredAt && !read;
       if (this.readMissed) heldBackMs = this.transport.readHeldBackFor?.(this.peerPubKeyZ32);
 
