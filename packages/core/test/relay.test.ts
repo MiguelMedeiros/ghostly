@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, CHAT_RESERVE_MOST_SHARE, CHAT_RESERVE_PER_CHAT, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, CHAT_RESERVE_MOST_SHARE, CHAT_RESERVE_PER_CHAT, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WAY_BACK_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
 import type { PkarrRequestOptions, PkarrTransport } from "../src/transport";
 // covers: core.relay-client
 
@@ -1339,5 +1339,66 @@ describe("relay transport: a group edge's signaling keeps its share of the minut
       await group.publish(createIdentity(), [{ label: "_ts", value: "1" }], { signal: true }).catch(() => {});
       expect(spent).toBe(before);
     } finally { vi.useRealTimers(); }
+  });
+});
+
+describe("relay transport: a community member's way back has its own share past a spent minute", () => {
+  // Bug hunt, 2026-10-14: a web app opened with 30 chats whose contacts were online and 15 groups whose edges all offered
+  // at once. The edges' offers and reads for their members spent the groups' allowance in the first second, and the
+  // communities' readings of their beacon, which went as an edge's signaling, waited the minute behind the limit and the
+  // chats' reserve: none of its 5 communities was back in 2 minutes.
+  function setup() {
+    const log: { key: string; method: string }[] = [];
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      log.push({ key: new URL(String(input)).pathname.slice(1), method: init?.method ?? "GET" });
+      return init?.method === "PUT" ? new Response(null, { status: 204 }) : new Response(null, { status: 404 });
+    }) as typeof fetch });
+    const group = withRequestOptions(relay, { group: true });
+    const went = async (request: () => Promise<unknown>) => { const before = log.length; await request().catch(() => {}); return log.length > before; };
+    return { relay, group, log, went };
+  }
+  const allowance = Math.floor(REQUESTS_PER_MINUTE * WAY_BACK_SHARE);
+  const offer = (relay: PkarrTransport) => () => relay.publish(createIdentity(), [{ label: "_ts", value: "1" }], { signal: true });
+  /** 30 chats look fast for their contacts and spend the minute, and the edges offer until their own allowance is spent. */
+  async function busy(relay: RelayTransport, group: PkarrTransport) {
+    for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await relay.resolve(createIdentity().pubKeyZ32, { urgent: true });
+    for (let i = 0; i < Math.floor(REQUESTS_PER_MINUTE * GROUP_SIGNALING_ALLOWANCE_SHARE); i++) await offer(group)();
+  }
+
+  it("reads the beacon and asks a hub's lobby while the edges' allowance is spent and a chat's offer waits", async () => {
+    const { relay, group, log, went } = setup();
+    await busy(relay, group);
+    // A chat still offering spends its allowance, and its next offer waits for the minute to free a request.
+    while (await went(offer(relay)));
+    // An edge's signaling waits now, and so did a way back that went as one.
+    expect(await went(() => group.resolve(createIdentity().pubKeyZ32, { signal: true }))).toBe(false);
+    expect(allowance).toBe(6);
+    const beacons = Array.from({ length: allowance - 2 }, () => createIdentity().pubKeyZ32), lobby = createIdentity();
+    const spent = log.length;
+    for (const beacon of beacons) expect(await went(() => group.resolve(beacon, { back: true }))).toBe(true);
+    // Its reads leave the last of it to a write: the request in the lobby.
+    expect(await went(() => group.resolve(lobby.pubKeyZ32, { back: true }))).toBe(true);
+    expect(await went(() => group.resolve(createIdentity().pubKeyZ32, { back: true }))).toBe(false);
+    expect(await went(() => group.publish(lobby, [{ label: "_ts", value: "1" }], { back: true }))).toBe(true);
+    expect(await went(() => group.publish(lobby, [{ label: "_ts", value: "1" }], { back: true }))).toBe(false);
+    expect(log.slice(spent).map(r => r.method)).toEqual([...Array(allowance - 1).fill("GET"), "PUT"]);
+  });
+
+  it("takes nothing from a chat's allowance past the minute", async () => {
+    const { relay, group, went } = setup();
+    for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await relay.resolve(createIdentity().pubKeyZ32, { urgent: true });
+    for (let i = 0; i < allowance - 1; i++) expect(await went(() => group.resolve(createIdentity().pubKeyZ32, { back: true }))).toBe(true);
+    expect(await went(() => group.publish(createIdentity(), [{ label: "_ts", value: "1" }], { back: true }))).toBe(true);
+    // The chat's offers still have all of theirs.
+    for (let i = 0; i < Math.floor(REQUESTS_PER_MINUTE * SIGNALING_ALLOWANCE_SHARE); i++) expect(await went(offer(relay))).toBe(true);
+    expect(await went(offer(relay))).toBe(false);
+  });
+
+  it("is a group's only: a chat's request or a background one saying `back` has none", async () => {
+    const { relay, group, went } = setup();
+    await busy(relay, group);
+    expect(await went(() => relay.resolve(createIdentity().pubKeyZ32, { back: true }))).toBe(false);
+    expect(await went(() => group.resolve(createIdentity().pubKeyZ32, { back: true, background: true }))).toBe(false);
+    expect(await went(() => group.resolve(createIdentity().pubKeyZ32, { back: true }))).toBe(true);
   });
 });

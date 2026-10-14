@@ -13,11 +13,13 @@ import { closeWorld, fakePeerConnection, invitationWhere, run, useFakeWorld, typ
  * communities (bug hunt, 2026-10-13). The chats take the first minute (`CHAT_RESERVE`), and from then on the looks of
  * the chats whose contacts are gone, each asked again the moment the budget frees, take every request: a community's
  * looks, background requests asked again 5 s after a refusal, never got one. Its reads of the beacon (who the hubs are)
- * never went out in 3 minutes, nor its request in a hub's lobby, and none of its communities came back. A member with
- * no edge up asks its way back as a group edge signals (`Communities.wayBack`): within the groups' allowance.
+ * never went out in 3 minutes, nor its request in a hub's lobby, and none of its communities came back. Asked as a group
+ * edge's signaling, they waited behind the edges of its other groups, all offering at once, which spent the groups'
+ * allowance in the first second: the beacons were read a minute later (bug hunt, 2026-10-14). A member with no edge up
+ * asks its way back within its own allowance (`back`, `WAY_BACK_SHARE`).
  */
 
-const ONLINE = 30, GONE = 20, GROUPS = 15, COMMUNITIES = 5;
+const ONLINE = 30, GONE = 20, GROUPS = 15, EDGES = 10, COMMUNITIES = 5;
 const peerKeyOf = (side: Side) => identityFromSeedB64(side.seedB64).pubKeyZ32;
 
 /** Both default relays, one packet store (the e2e suite's LocalRelay), answering in 20 ms; the GETs of each key. */
@@ -68,7 +70,8 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 describe("a community member back while 30 chats start", () => {
   it.each([
     ["as background looks: never", { background: true }, { background: true, door: true }],
-    ["as its way back: within the groups' allowance", { signal: true }, { signal: true }],
+    ["as an edge's signaling: behind the edges", { signal: true }, { signal: true }],
+    ["as its way back: within its own allowance", { back: true }, { back: true }],
   ] as [string, PkarrRequestOptions, PkarrRequestOptions][])("reads the beacon and asks a hub's lobby %s", async (how, beaconRead, lobbyAsk) => {
     const gets = new Map<string, number[]>();
     const fetch = relays(gets);
@@ -98,6 +101,12 @@ describe("a community member back while 30 chats start", () => {
       void group.resolve(g.pubKeyZ32).catch(() => {});
       void (async () => { while (on) { try { await group.publish(g, []); return; } catch { await wait(4_000); } } })();
     }
+    // The edges of the last run: each offers every 10 s and looks for its member every 2 s, as resumed edges do.
+    for (const edge of Array.from({ length: EDGES }, () => createIdentity())) {
+      const member = createIdentity().pubKeyZ32;
+      void (async () => { while (on) { await group.publish(edge, [], { signal: true }).catch(() => {}); await wait(10_000); } })();
+      void (async () => { while (on) { await group.resolve(member, { watch: true, urgent: true }).catch(() => {}); await wait(2_000); } })();
+    }
     // Each community: its first reading of the beacon, then its request in the hub's lobby (a read, then a write), each
     // asked again 5 s after a refusal (`BEACON_RETRY_MS`), as the engine does.
     const beacons = Array.from({ length: COMMUNITIES }, () => createIdentity().pubKeyZ32);
@@ -116,19 +125,21 @@ describe("a community member back while 30 chats start", () => {
       app.forEach((link, i) => { if (liveAt[i] === null && link.isDataLinkOpen && contacts[i].isDataLinkOpen) liveAt[i] = Date.now() - start; });
     }
     on = false;
-    // The chats come first either way: all of them by 3 s, as in `startOnlineContacts.test.ts`.
-    expect(liveAt.filter((at) => at !== null && at <= 10_000), JSON.stringify(liveAt)).toHaveLength(ONLINE);
+    // The chats come first either way: nearly all of them by 3 s, as in `startOnlineContacts.test.ts` (the edges' offers
+    // take a request or two from the last).
+    expect(liveAt.filter((at) => at !== null && at <= 10_000).length, JSON.stringify(liveAt)).toBeGreaterThanOrEqual(ONLINE - 2);
     const result = JSON.stringify({ read, asked, beaconGets: beacons.map((key) => gets.get(key)?.length ?? 0) });
     if (how.startsWith("as background")) {
       // Before: no reading of any beacon in 3 minutes, and so no request in any lobby.
       expect(read.filter((at) => at !== null && at <= 60_000), result).toHaveLength(0);
       expect(asked.filter((at) => at !== null), result).toHaveLength(0);
+    } else if (how.startsWith("as an edge's")) {
+      // Before: the edges took the groups' allowance, and the beacons were read once the minute freed.
+      expect(read.filter((at) => at !== null && at <= 30_000), result).toHaveLength(0);
     } else {
-      // Every beacon read within 15 s; the lobby requests within the groups' allowance (4 a minute on each relay, and
-      // the groups' records take some too): most within half a minute, every one by the next minute.
-      expect(read.filter((at) => at !== null && at <= 20_000), result).toHaveLength(COMMUNITIES);
-      expect(asked.filter((at) => at !== null && at <= 30_000).length, result).toBeGreaterThanOrEqual(3);
-      expect(asked.filter((at) => at !== null && at <= 90_000), result).toHaveLength(COMMUNITIES);
+      // Every beacon read, and every lobby asked, within seconds.
+      expect(read.filter((at) => at !== null && at <= 5_000), result).toHaveLength(COMMUNITIES);
+      expect(asked.filter((at) => at !== null && at <= 10_000), result).toHaveLength(COMMUNITIES);
     }
   }, 300_000);
 });
