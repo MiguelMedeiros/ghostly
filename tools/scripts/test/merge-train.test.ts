@@ -883,6 +883,34 @@ describe("a run of the train", () => {
     expect(r.log.join("\n")).toMatch(/\(dry run\) would merge #11 at h11 \(squash\) as "fix 11 \(#11\)"\n[^]*\(dry run\) would merge #12 at h12 \(squash\)[^]*\(dry run\) would close #9000/);
     expect(r.log.join("\n")).not.toMatch(/verified/i);
   });
+
+  it("takes its drop label off a pull request queued again, and puts it back if it drops again", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n);
+    repo.conflicts.add(12);
+    await repo.run();
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.conflict]);
+
+    // Fixed and queued again as the comment says, with the drop label left on; and one that failed, queued again.
+    repo.conflicts.delete(12);
+    repo.pulls.get(12)!.labels.push(LABEL.queue);
+    repo.add(14);
+    repo.pulls.get(14)!.labels.push(LABEL.failed);
+    const dry = await repo.run({ dry: true });
+    expect(dry.log.join("\n")).toMatch(/\(dry run\) would unlabel #12 queue:conflict/);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.conflict, LABEL.queue]);
+    await repo.run();
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.queue]);
+    expect(repo.pulls.get(14)!.labels).toEqual([LABEL.queue]);
+    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/in line for `dev`: \*\*1st\*\*/);
+
+    // Conflicting again: dropped with the label, as the first time.
+    repo.conflicts.add(12);
+    repo.settle();
+    await repo.run();
+    await repo.run();
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.conflict]);
+  });
 });
 
 describe("a green batch landing on dev", () => {
