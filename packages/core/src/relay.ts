@@ -6,9 +6,9 @@ import { traceLink } from "./linkTrace";
 import type { TurnConditions, TurnSourceAnswer, TurnSourcePut } from "./turnRead";
 
 /** Who asks, for the budget: a 1:1 chat's link comes before a group's, and both before background looks. */
-interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean; signal: boolean; watch: boolean; watchWrite: boolean; departed: boolean }
+interface Asker { background: boolean; group: boolean; urgent: boolean; door: boolean; write: boolean; signal: boolean; watch: boolean; watchWrite: boolean; departed: boolean; resume: boolean }
 const asker = (options: PkarrRequestOptions, write: boolean): Asker =>
-  ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, door: !!options.door, write, signal: !!options.signal, watch: !!options.watch && !write, watchWrite: !!options.watch && write, departed: !!options.departed && !write });
+  ({ background: !!options.background, group: !!options.group, urgent: !!options.urgent, door: !!options.door, write, signal: !!options.signal, watch: !!options.watch && !write, watchWrite: !!options.watch && write, departed: !!options.departed && !write, resume: !!options.resume && !write });
 /** A 1:1 chat's request: neither a group's nor a background one. */
 const isChat = (who: Asker): boolean => !who.background && !who.group;
 /** A 1:1 chat's offer or answer, or its read for the answer to its offer: it may use the allowance (`SIGNALING_ALLOWANCE_SHARE`). */
@@ -23,8 +23,11 @@ const isGroupUrgentRead = (who: Asker): boolean => who.group && who.urgent && !w
  * behind the edges that watch the same contact.
  */
 const isWatch = (who: Asker): boolean => who.watch && who.group && !who.write;
-/** A group edge's request for a member that may be back: it may use the groups' allowance (`GROUP_SIGNALING_ALLOWANCE_SHARE`). */
-const isGroupSignal = (who: Asker): boolean => who.group && !who.background && (who.signal || isWatch(who) || who.watchWrite);
+/**
+ * A group edge's request for a member that may be back: it may use the groups' allowance (`GROUP_SIGNALING_ALLOWANCE_SHARE`).
+ * So may its reads of a member that was live when this app last ran, until one is answered (`resume`): its offer waits on them.
+ */
+const isGroupSignal = (who: Asker): boolean => who.group && !who.background && (who.signal || isWatch(who) || who.watchWrite || who.resume);
 /** Watch reads that the same other limits hold take turns together: urgent or not, background or not. */
 const watchLane = (who: Asker): string => `${+who.urgent}${+who.background}`;
 /** A group's read that is not a background one: an edge's, a private group's knock poll (`GROUP_RATION_WINDOW_MS`). */
@@ -139,6 +142,11 @@ export const DEPARTED_READS = 6;
  * restart, had its chats signal for 332 s: they kept their reserve, their allowance took what the limit left, and the
  * edges got nothing. By then their attempts had failed and backed off, and the group members were reachable again 13
  * to 25 min after the restart (CLI bug hunt, 2026-10-08).
+ *
+ * An edge back after a restart reads its member before it offers (`resume`), and those reads are on the floor too: as
+ * plain reads, they waited behind the chats as before, and the edges never got to signal. The same daemon had its first
+ * member back 71 to 367 s after the restart, and group texts sent in its first minutes were read 2 to 7 min late (CLI
+ * bug hunt, 2026-10-14).
  */
 export const GROUP_SIGNALING_ALLOWANCE_SHARE = 2 / 15;
 /** Past the limit, a group's reads within its allowance go no more often than this on a relay. */
@@ -225,7 +233,7 @@ export const FRESH_READ_MS = 500;
 const CATCH_UP_MIN_MS = 1_000;
 const CATCH_UP_RETRY_MS = 5_000;
 /** A catch-up put waits behind every link's request: a background write. */
-const CATCH_UP_ASKER: Asker = { background: true, group: false, urgent: false, door: false, write: true, signal: false, watch: false, watchWrite: false, departed: false };
+const CATCH_UP_ASKER: Asker = { background: true, group: false, urgent: false, door: false, write: true, signal: false, watch: false, watchWrite: false, departed: false, resume: false };
 /** Keys whose last relay is remembered for their next read (`resolve`): a profile's links and lookups, with room. */
 const READ_TURNS_KEPT = 512;
 /** A relay that fails at the network level is left alone for this long. */
