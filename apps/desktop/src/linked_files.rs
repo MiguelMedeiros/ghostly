@@ -8,13 +8,16 @@
 //! - A link remembers the size and date its file had when picked: a file that changed since reads as `changed`, one
 //!   that went as `gone`, until it is picked again.
 //! - Links live in `linked/<space>/<app>.json` in the app's data folder (`space` is the page's database name, `<app>`
-//!   the SHA-256 of the app's reference in hex), and go with the profile's files (`file_bytes_remove_where`).
+//!   the SHA-256 of the app's reference in hex), and go with the profile's files (`file_bytes_remove_where`). Each
+//!   file is read once and kept in memory, so a read costs the read and not the size of the library.
 //!
 //! Refusals are `"<code>: words"`, the codes the broker passes to the app (`cancelled`, `changed`, `gone`, `too-large`).
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::UNIX_EPOCH;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -33,6 +36,8 @@ pub const MAX_ENTRIES: usize = 100_000;
 pub const MAX_READ: u64 = 1024 * 1024;
 /// Extensions a pick may name (`MINI_APP_LIMITS.filesAccept`).
 const MAX_ACCEPT: usize = 32;
+/// Apps whose links are kept in memory, at most: past it, one is let go and read from disk again when asked.
+const MAX_BOOKS: usize = 16;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 struct Link {
@@ -56,10 +61,40 @@ pub struct Entry {
     pub available: bool,
 }
 
+/// One app's links, in the order they were picked, and where each id is among them.
+#[derive(Default)]
+struct Book {
+    links: Vec<Link>,
+    by_id: HashMap<String, usize>,
+}
+
+impl Book {
+    fn new(links: Vec<Link>) -> Self {
+        let by_id = links
+            .iter()
+            .enumerate()
+            .map(|(at, link)| (link.id.clone(), at))
+            .collect();
+        Self { links, by_id }
+    }
+
+    fn get(&self, id: &str) -> Option<&Link> {
+        self.by_id.get(id).map(|&at| &self.links[at])
+    }
+}
+
 /// Where the links are: set once the app knows its data folder.
 #[derive(Clone)]
 pub struct LinkedFiles {
     base: PathBuf,
+    /// Each app's links as on disk, by their file: read once, then kept in step with every change.
+    books: Arc<Mutex<HashMap<PathBuf, Arc<Book>>>>,
+    /// Changes go one at a time (read, change, write), so two picks never lose each other's links.
+    writing: Arc<Mutex<()>>,
+}
+
+fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// An app's reference: a z-base32 key of 52 characters, a slash, a name.
@@ -183,7 +218,11 @@ pub fn picked_files(files: Vec<PathBuf>, accept: &[String]) -> Vec<(String, Path
 
 impl LinkedFiles {
     pub fn new(base: PathBuf) -> Self {
-        Self { base }
+        Self {
+            base,
+            books: Arc::default(),
+            writing: Arc::default(),
+        }
     }
 
     fn file(&self, space: &str, app: &str) -> Result<PathBuf, String> {
@@ -196,18 +235,35 @@ impl LinkedFiles {
         Ok(self.base.join(space).join(format!("{name}.json")))
     }
 
-    fn load(&self, space: &str, app: &str) -> Result<Vec<Link>, String> {
-        match fs::read(self.file(space, app)?) {
-            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| e.to_string()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
-            Err(e) => Err(e.to_string()),
+    /// The app's links: from memory, or from disk the first time. Read while the books are held, so a change written
+    /// meanwhile is never overtaken by what was on disk before it.
+    fn load(&self, space: &str, app: &str) -> Result<Arc<Book>, String> {
+        let file = self.file(space, app)?;
+        let mut books = locked(&self.books);
+        if let Some(book) = books.get(&file) {
+            return Ok(book.clone());
         }
+        let links = match fs::read(&file) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| e.to_string())?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => return Err(e.to_string()),
+        };
+        let book = Arc::new(Book::new(links));
+        keep(&mut books, file, book.clone());
+        Ok(book)
     }
 
-    fn store(&self, space: &str, app: &str, links: &[Link]) -> Result<(), String> {
+    /// Writes the app's links, then keeps them in memory. Called with `writing` held.
+    fn store(&self, space: &str, app: &str, links: Vec<Link>) -> Result<(), String> {
         let file = self.file(space, app)?;
+        self.write(&file, &links)?;
+        keep(&mut locked(&self.books), file, Arc::new(Book::new(links)));
+        Ok(())
+    }
+
+    fn write(&self, file: &Path, links: &[Link]) -> Result<(), String> {
         if links.is_empty() {
-            return match fs::remove_file(&file) {
+            return match fs::remove_file(file) {
                 Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
                 _ => Ok(()),
             };
@@ -225,7 +281,7 @@ impl LinkedFiles {
             serde_json::to_vec(links).map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
-        fs::rename(&staged, &file).map_err(|e| e.to_string())
+        fs::rename(&staged, file).map_err(|e| e.to_string())
     }
 
     /// Keeps links to what was picked, and answers them as the app sees them.
@@ -235,7 +291,8 @@ impl LinkedFiles {
         app: &str,
         picked: Vec<(String, PathBuf)>,
     ) -> Result<Vec<Entry>, String> {
-        let mut links = self.load(space, app)?;
+        let _writing = locked(&self.writing);
+        let mut links = self.load(space, app)?.links.clone();
         if links.len() + picked.len() > MAX_ENTRIES {
             return Err("too-large: Too many files for one app".into());
         }
@@ -261,7 +318,7 @@ impl LinkedFiles {
             });
             links.push(link);
         }
-        self.store(space, app, &links)?;
+        self.store(space, app, links)?;
         Ok(added)
     }
 
@@ -269,13 +326,14 @@ impl LinkedFiles {
     pub fn list(&self, space: &str, app: &str) -> Result<Vec<Entry>, String> {
         Ok(self
             .load(space, app)?
-            .into_iter()
+            .links
+            .iter()
             .map(|link| {
                 let available = fs::metadata(&link.full)
                     .is_ok_and(|meta| stamp(&meta) == (link.size, link.modified));
                 Entry {
-                    id: link.id,
-                    path: link.path,
+                    id: link.id.clone(),
+                    path: link.path.clone(),
                     size: link.size,
                     modified: link.modified,
                     available,
@@ -293,11 +351,8 @@ impl LinkedFiles {
         offset: u64,
         length: u64,
     ) -> Result<Vec<u8>, String> {
-        let link = self
-            .load(space, app)?
-            .into_iter()
-            .find(|l| l.id == id)
-            .ok_or("gone: No such file")?;
+        let book = self.load(space, app)?;
+        let link = book.get(id).ok_or("gone: No such file")?;
         let meta = fs::metadata(&link.full).map_err(|_| "gone: The file is no longer there")?;
         if stamp(&meta) != (link.size, link.modified) {
             return Err("changed: The file changed since it was picked".into());
@@ -318,24 +373,44 @@ impl LinkedFiles {
 
     /// Drops one link, or all of the app's with "all". The file itself is never touched.
     pub fn forget(&self, space: &str, app: &str, id: &str) -> Result<(), String> {
+        let _writing = locked(&self.writing);
         let links = if id == "all" {
             Vec::new()
         } else {
-            let mut links = self.load(space, app)?;
+            let book = self.load(space, app)?;
+            if book.get(id).is_none() {
+                return Ok(());
+            }
+            let mut links = book.links.clone();
             links.retain(|l| l.id != id);
             links
         };
-        self.store(space, app, &links)
+        self.store(space, app, links)
     }
 
     /// A deleted profile's links, all of them.
     pub fn drop_space(&self, space: &str) -> Result<(), String> {
         check_space(space)?;
-        match fs::remove_dir_all(self.base.join(space)) {
+        let _writing = locked(&self.writing);
+        let folder = self.base.join(space);
+        let removed = fs::remove_dir_all(&folder);
+        // After the files went: a read meanwhile finds them gone, not kept in memory.
+        locked(&self.books).retain(|file, _| !file.starts_with(&folder));
+        match removed {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
             _ => Ok(()),
         }
     }
+}
+
+/// Keeps an app's links in memory, letting another app's go past `MAX_BOOKS`.
+fn keep(books: &mut HashMap<PathBuf, Arc<Book>>, file: PathBuf, book: Arc<Book>) {
+    if books.len() >= MAX_BOOKS && !books.contains_key(&file) {
+        if let Some(other) = books.keys().next().cloned() {
+            books.remove(&other);
+        }
+    }
+    books.insert(file, book);
 }
 
 fn state<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<LinkedFiles, String> {
@@ -555,7 +630,52 @@ mod tests {
             .unwrap_err()
             .starts_with("gone: "));
         // Kept on disk: a new start reads them.
+        let base = links.base.clone();
+        assert_eq!(
+            LinkedFiles::new(base).list("ghostly", APP).unwrap().len(),
+            2
+        );
+    }
+
+    #[test]
+    fn the_links_file_is_read_once_not_on_every_read() {
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let added = links
+            .add("ghostly", APP, walk(&root, &["mp4".to_string()]).unwrap())
+            .unwrap();
+        let file = links.file("ghostly", APP).unwrap();
+        assert!(file.exists());
+        // What is on disk is not read again: reads, the list and a forget go by what is kept in memory.
+        fs::write(&file, b"not json").unwrap();
+        assert_eq!(
+            links.read("ghostly", APP, &added[1].id, 0, 2).unwrap(),
+            b"01"
+        );
         assert_eq!(links.list("ghostly", APP).unwrap().len(), 2);
+        links.forget("ghostly", APP, &added[0].id).unwrap();
+        let again = LinkedFiles::new(links.base.clone());
+        assert_eq!(again.list("ghostly", APP).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn picks_at_the_same_time_keep_each_other_s_links() {
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let picks: Vec<_> = (0..8)
+            .map(|_| {
+                let (links, root) = (links.clone(), root.clone());
+                std::thread::spawn(move || {
+                    links
+                        .add("ghostly", APP, walk(&root, &[]).unwrap())
+                        .unwrap()
+                })
+            })
+            .collect();
+        let added: usize = picks.into_iter().map(|p| p.join().unwrap().len()).sum();
+        assert_eq!(added, 8 * 4);
+        let again = LinkedFiles::new(links.base.clone());
+        assert_eq!(again.list("ghostly", APP).unwrap().len(), added);
     }
 
     #[test]
