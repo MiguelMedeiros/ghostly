@@ -352,6 +352,19 @@ describe("invitations: what the admission exchange ignores", () => {
     await expect(alice.invite(groupId, "chat-31")).rejects.toThrow(/32 members at most/);
   });
 
+  it("on a device where managing the group is off, Invite is refused with the reason: nothing goes to the contact", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    const groupId = await alice.create("Ghosts", "mesh");
+    // A restore or a forced takeover: node.ts turns adminWork off for the group, as Remove and Rotate are told.
+    world.peers.get("alice")!.host.adminWork = () => false;
+    await expect(alice.invite(groupId, "chat-ab")).rejects.toThrow("Managing this group is off on this device. Turn on Manage groups from this device first.");
+    await world.settle();
+    expect(bob.views()).toEqual([]);
+    expect(view(alice).invited).toEqual([]);
+  });
+
   it("a declined invitation leaves the admin's pending list, and the invitee keeps nothing", async () => {
     const world = new World();
     const alice = world.add("alice"), bob = world.add("bob");

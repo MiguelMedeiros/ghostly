@@ -222,6 +222,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["An edit cannot be empty", `${CORE}/groupSession.ts`],
   ["Too long to edit in this group", `${CORE}/groupCommunity.ts`],
   ["Only the admin can invite", `${BROWSER}/engine/groups.ts`],
+  ["Managing this group is off on this device. Turn on Manage groups from this device first.", `${CORE}/groupCommits.ts`],
   ["This contact is already a member", `${BROWSER}/engine/groups.ts`],
   ["A group holds 32 members at most", `${BROWSER}/engine/groups.ts`, " members at most"],
   ["Connect to this contact first. Their app needs groups (an updated Ghostly).", `${BROWSER}/engine/groups.ts`],
@@ -482,6 +483,12 @@ describe("errors in the app's language", () => {
     const refused = new Error("Ghostly could not check which device is active yet. This works once it can.");
     expect(knownErrorParts(refused, translators.pt)).toEqual({ title: "Não foi possível verificar qual dispositivo está ativo", next: "Isso volta a funcionar quando a verificação der certo. Confira sua conexão." });
     expect(knownErrorParts(refused, english)).toEqual({ title: "Can't check which device is active", next: "This works once the check does. Check your connection." });
+  });
+
+  it("an Invite or a Remove on a device where managing the group is off points at the group's Turn on, in the language", () => {
+    const off = new Error("Managing this group is off on this device. Turn on Manage groups from this device first.");
+    expect(knownErrorParts(off, english)).toEqual({ title: "Managing this group is off on this device", next: "Turn it on first: Manage groups from this device, on the group's page." });
+    expect(knownErrorParts(off, translators.pt)?.title).toBe("Gerenciar este grupo está desligado neste dispositivo");
   });
 
   it("each rule has a sample, so none stops matching unseen", () => {
