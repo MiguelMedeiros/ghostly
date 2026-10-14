@@ -140,18 +140,40 @@ pub async fn native_clear_notification(id: String) -> Result<(), String> {
     }
 }
 
-/// The page starts: the message notifications an earlier one left go. Android keeps them after the app's process
-/// ends, and the page that posted them was the only one that knew their chats. Elsewhere, nothing.
+/// The page starts: the message notifications an earlier one left go, but those posted as `keep`. Android keeps them
+/// after the app's process ends; the page kept its chats' tags, and the rest it cannot replace or open. Elsewhere,
+/// nothing.
 #[tauri::command]
-pub async fn native_clear_notifications() -> Result<(), String> {
+pub async fn native_clear_notifications(keep: Option<Vec<String>>) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
-        crate::android::cancel_notifications().await
+        crate::android::cancel_notifications(&keep.unwrap_or_default()).await
     }
     #[cfg(not(target_os = "android"))]
     {
+        let _ = keep;
         Ok(())
     }
+}
+
+/// The page's id of the notification last tapped, taken: the page asks once it listens for `notification-open`, as
+/// the tap that started the Android app came before it did. None when there is none, and always off Android.
+#[tauri::command]
+pub fn native_notification_tap<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+) -> Result<Option<String>, String> {
+    if window.label() != "main" {
+        return Err("Not allowed from this window".into());
+    }
+    #[cfg(target_os = "android")]
+    {
+        use tauri::Manager;
+        Ok(window
+            .try_state::<crate::android::NotificationTap>()
+            .and_then(|tap| tap.take()))
+    }
+    #[cfg(not(target_os = "android"))]
+    Ok(None)
 }
 
 #[cfg(target_os = "macos")]
@@ -1392,6 +1414,31 @@ mod tests {
             Ok(false)
         );
         assert_eq!(super::native_clear_notification("1".into()).await, Ok(()));
-        assert_eq!(super::native_clear_notifications().await, Ok(()));
+        assert_eq!(
+            super::native_clear_notifications(Some(vec!["1".into()])).await,
+            Ok(())
+        );
+    }
+
+    /// Off Android no tap waits for the page, and a contact's web app window may not ask.
+    #[test]
+    fn no_tap_waits_off_android() {
+        use tauri::test::mock_builder;
+        use tauri::{WebviewUrl, WebviewWindowBuilder};
+        let app = mock_builder()
+            .build(tauri::generate_context!(test = true))
+            .expect("app");
+        let main = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
+            .build()
+            .unwrap();
+        assert_eq!(super::native_notification_tap(main), Ok(None));
+        let url = "ghostly-svc://atlas.peer/".parse().unwrap();
+        let other = WebviewWindowBuilder::new(&app, "svc-1", WebviewUrl::CustomProtocol(url))
+            .build()
+            .unwrap();
+        assert_eq!(
+            super::native_notification_tap(other),
+            Err("Not allowed from this window".into())
+        );
     }
 }
