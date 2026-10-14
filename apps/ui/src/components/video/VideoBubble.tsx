@@ -121,7 +121,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
     const fullscreen = theater ? platform?.fullscreenWindow : null;
     if (!fullscreen) return;
     void fullscreen(true).catch(() => {});
-    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setTheater(false); };
+    // Spent: a notice at the top that also answers Escape stays.
+    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); setTheater(false); } };
     document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("keydown", onKey);

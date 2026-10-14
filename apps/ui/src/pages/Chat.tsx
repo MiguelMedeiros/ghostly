@@ -720,7 +720,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 onKeyDown={(e) => {
                   if (labelComposition.composing(e)) return;
                   if (e.key === "Enter") saveLabel();
-                  if (e.key === "Escape") setIsEditingLabel(false);
+                  // Spent: a notice at the top that also answers Escape stays.
+                  if (e.key === "Escape") { e.preventDefault(); setIsEditingLabel(false); }
                   // Done from the keyboard: the focus goes back to the name, not to the page. A click elsewhere keeps its own.
                   if (e.key === "Enter" || e.key === "Escape") setTimeout(() => nameRef.current?.focus(), 0);
                 }}
