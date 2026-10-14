@@ -18,6 +18,8 @@ const fake = vi.hoisted(() => ({
     connect: async () => {},
     subscribe(listener: () => void) { fake.engine.stateListeners.push(listener); return () => {}; },
     onMessages(listener: (linkId: string, messages: StoredMessage[]) => void) { fake.engine.messageListeners.push(listener); return () => {}; },
+    // No change tick here: every list comes whole.
+    changing: () => false,
     linkByPeer(peer: string) { return fake.engine.state?.links.find((l) => l.peerPubKeyZ32 === peer); },
     async call() { return undefined; },
   },
