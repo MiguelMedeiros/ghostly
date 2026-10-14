@@ -74,12 +74,13 @@ export const SETTABLE: Record<string, "strings" | "string" | "boolean" | "ice"> 
 
 /**
  * A relay address the engine refuses (node.ts `updateSettings`, irohWeb.ts, hyperdhtRelay.ts): the person's value, so
- * `bad_request` named by its key, in a terminal's words ("give", not the app's "Enter"). Before, `engine` (exit 1).
+ * `bad_request` named by its key, in a terminal's words ("give", not the app's "Enter"). Before, `engine` (exit 1). A
+ * wrong scheme ("Use an https:// relay address") too.
  */
 function relayRefused(error: unknown, patch: Record<string, unknown>): unknown {
-  if (!(error instanceof Error) || !/^(?:Enter (?:at least one|a) relay address|Not a relay address)\b/.test(error.message)) return error;
+  if (!(error instanceof Error) || !/^(?:Enter (?:at least one|a) relay address|Not a relay address|Use an? \S+ relay address)\b/.test(error.message)) return error;
   const keys = ["relays", "irohRelays", "hyperdhtRelay"].filter((key) => Object.hasOwn(patch, key));
-  return new CliError("bad_request", `${keys.join(", ") || "relays"}: ${error.message.replace(/^Enter /, "give ").replace(/^Not /, "not ")}`);
+  return new CliError("bad_request", `${keys.join(", ") || "relays"}: ${error.message.replace(/^Enter /, "give ").replace(/^(Not|Use) /, (word) => word.toLowerCase())}`);
 }
 
 // ---------- transports ----------
