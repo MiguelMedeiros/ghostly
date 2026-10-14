@@ -39,8 +39,7 @@ export type DiscoveryChange = "tripped" | "recovered";
  * `signal`: a link's WebRTC signaling, what its contact waits for: the write of a new offer or answer, or a read for
  * the answer while this side's offer is out, or the reads of a DHT-only contact's mailbox once it shows it is leaving,
  * up to three while it still says DHT only (the live link waits on them). A 1:1 chat's may go a little over the relay's minute
- * (`SIGNALING_ALLOWANCE_SHARE` in relay.ts). A community member with no edge up asks its way back so too, as a group
- * edge does (`Communities.wayBack`): its first reading of the beacon, and its request in a hub's lobby.
+ * (`SIGNALING_ALLOWANCE_SHARE` in relay.ts).
  */
 export interface PkarrRequestOptions {
   background?: boolean; urgent?: boolean; group?: boolean; door?: boolean; signal?: boolean;
