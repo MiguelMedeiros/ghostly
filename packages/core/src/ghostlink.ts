@@ -1076,8 +1076,9 @@ export class GhostLink {
         onPresence: (presence) => {
           if (presence.online) this.tracker?.sawPeer();
           this.peerPacketArrived(presence);
-          // A first contact under way: a fresh packet of the contact says its envelope is a read away.
-          if (presence.online && !options.pairing?.credentials.peerKey && Date.now() - presenceSeenAt(presence) < EXPECT_PEER_MS) this.dht?.expect();
+          // A first contact under way, or a joined chat whose inviter never answered (read at its unused-invite wait): a
+          // fresh packet of the contact says its envelope is a read away.
+          if (presence.online && (!options.pairing?.credentials.peerKey || this.dht?.unanswered) && Date.now() - presenceSeenAt(presence) < EXPECT_PEER_MS) this.dht?.expect();
           events.onPresence?.(this.mergePresence(presence));
           this.peerMayHaveLeftDht(presence);
           this.maybeAutoConnect(presence);
