@@ -228,7 +228,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Managing this group is off on this device. Turn on Manage groups from this device first.", `${CORE}/groupCommits.ts`],
   ["This contact is already a member", `${BROWSER}/engine/groups.ts`],
   ["A group holds 32 members at most", `${BROWSER}/engine/groups.ts`, " members at most"],
-  ["Connect to this contact first. Their app needs groups (an updated Ghostly).", `${BROWSER}/engine/groups.ts`],
+  ["This contact is not connected right now. Invite them when they are online.", `${BROWSER}/engine/groups.ts`],
+  ["Their app does not take part in groups: they need an updated Ghostly first.", `${BROWSER}/engine/groups.ts`],
   ["The contact who invited you is not connected. Try again when they are.", `${BROWSER}/engine/groups.ts`],
   ["You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first.", `${BROWSER}/engine/groups.ts`],
   ["Nobody in the group is connected right now to take your leave. Try again in a moment.", `${BROWSER}/engine/community.ts`],
@@ -504,6 +505,14 @@ describe("errors in the app's language", () => {
     const off = new Error("Managing this group is off on this device. Turn on Manage groups from this device first.");
     expect(knownErrorParts(off, english)).toEqual({ title: "Managing this group is off on this device", next: "Turn it on first: Manage groups from this device, on the group's page." });
     expect(knownErrorParts(off, translators.pt)?.title).toBe("Gerenciar este grupo está desligado neste dispositivo");
+  });
+
+  it("an Invite to a contact whose app is only closed says to invite them once online, not to update", () => {
+    const away = new Error("This contact is not connected right now. Invite them when they are online.");
+    expect(knownErrorParts(away, english)).toEqual({ title: "This contact is offline", next: "Invite them when they're online." });
+    expect(knownErrorParts(away, translators.pt)).toEqual({ title: "Este contato está offline", next: "Convide quando ele estiver online." });
+    const old = new Error("Their app does not take part in groups: they need an updated Ghostly first.");
+    expect(knownErrorParts(old, english)).toEqual({ title: "Their app needs an update first", next: "Their app needs groups (an updated Ghostly)." });
   });
 
   it("each rule has a sample, so none stops matching unseen", () => {
