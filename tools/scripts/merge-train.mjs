@@ -365,7 +365,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   // green run that skipped a job this pull request's files turn on was planned for other files (see `skippedGates`),
   // so the run before it speaks. The files are read only for a green run that skipped something, once per run of the train.
   const plans = new Map();
-  const planned = (p) => async (jobs) => {
+  const planned = (p) => async (jobs, run) => {
     const skipped = ciState(jobs) === "success" ? skippedGates(jobs) : [];
     if (!skipped.length) return true;
     const key = p?.number ?? null;
@@ -376,8 +376,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const plan = plans.get(key);
     if (plan === "own") return true;
     // dev's own push whose tree a green run already tested runs only Tauri Backend (ci-changes.mjs's testedAs), and its
-    // CI Success passes that plan for a push to dev alone: such a run is dev's green CI.
-    if (!p && base === "dev") {
+    // CI Success passes that plan for a push to dev alone: such a run is dev's green CI. Only that push: a pull request's
+    // run on the same commit (a branch at dev's tip into an epic, a fork's) skipped those jobs for its own files.
+    if (!p && base === "dev" && run?.event === "push" && run?.head_branch === "dev") {
       if (!plans.has("tested")) plans.set("tested", await ciPlan(null, { tested: true }));
       const tested = plans.get("tested");
       if (tested && skipped.every((gate) => !tested[gate])) return true;
@@ -1037,7 +1038,8 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
      * The jobs of CI's own run on a commit (its latest attempt; see `ciRun`), or none when CI has no run there. A token
      * that may not read Actions (a queue app without "Actions: read") gets the commit's check runs from GitHub Actions
      * instead, with a warning once: any workflow of the repository can post one named "CI Success" there. `counts`
-     * (given the jobs of a run) may pass over a run: then the one before it is read, up to CI_RUNS_READ runs. Check
+     * (given the jobs of a run, and the run: its event and branch) may pass over a run: then the one before it is read,
+     * up to CI_RUNS_READ runs. Check
      * runs are not asked: they mix every run on the commit.
      */
     ciJobs: async (sha, counts = () => true) => {
@@ -1049,7 +1051,7 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
       }
       for (const run of ciRuns(r.data.workflow_runs, repo, sha).slice(0, CI_RUNS_READ)) {
         const jobs = await runJobs(run.id);
-        if (await counts(jobs)) return jobs;
+        if (await counts(jobs, run)) return jobs;
       }
       return [];
     },
