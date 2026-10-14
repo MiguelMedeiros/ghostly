@@ -355,21 +355,25 @@ export function addMessages(
   if (!session) return null;
   if (complete) delete session.older;
 
-  const known = new Set([...session.messages.map((m) => m.id), ...(session.deletedIds ?? [])]);
+  const known = new Set(session.deletedIds);
+  for (const m of session.messages) known.add(m.id);
   const fresh = messages.filter((m) => !known.has(m.id) && known.add(m.id));
   if (!fresh.length) return session;
 
   // A history made whole again (after a reload) brings back older messages, not new ones: the chat keeps its place and
   // time in the list unless one of them is newer than what it had.
   const newest = session.messages[session.messages.length - 1]?.timestamp ?? 0;
+  // The common arrival: each one at or after the last, in order. Put after the others, they are where a (stable) sort
+  // would put them, and none sorts in among the read ones: no pass over the whole history for either.
+  const appended = fresh.every((m, i) => m.timestamp >= (i ? fresh[i - 1]!.timestamp : newest));
   session.messages.push(...fresh);
-  session.messages.sort((a, b) => a.timestamp - b.timestamp);
+  if (!appended) session.messages.sort((a, b) => a.timestamp - b.timestamp);
   if (!complete || fresh.some((m) => m.timestamp > newest)) session.lastSyncAt = Date.now();
   // Unread is "messages since the last read one". A contact's message written before one already read here (it was
   // held up on its way: a resend once the chat is back, the DHT) sorts in among the read ones, and would never be
   // counted: the count starts again from it. Not for a history made whole again after a reload: that was read. Nor for
   // one after every message the session had: read here before, when the page could not store it (`unsaved`).
-  if (!complete) {
+  if (!complete && !appended) {
     const older = session.older ?? 0;
     const read = getLastReadCount(sessionId) - older;
     const added = new Set(fresh);
