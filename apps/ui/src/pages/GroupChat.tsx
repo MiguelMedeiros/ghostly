@@ -210,9 +210,10 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
   }
   const name = member ? memberName(member, t) : authorName(group, message.member!, t);
   if (message.event === "joined") return t("group.event.joined", { name });
-  // A member back in the group (invited again): the line of their earlier removal or leave is theirs too.
-  if (message.event === "gone") return t("group.event.gone", { name });
-  if (message.event === "left") return t("group.event.left", { name });
+  // A member back in the group (invited again): the line of their earlier removal or leave is theirs too. Mine says
+  // what happened to me in its own words.
+  if (message.event === "gone") return me ? t("group.event.removed") : t("group.event.gone", { name });
+  if (message.event === "left" && !me) return t("group.event.left", { name });
   if (message.event === "admin") return me ? t("group.event.adminYou") : t("group.event.admin", { name });
   if (message.event === "picture") {
     const removed = text.endsWith("removed the group's picture");

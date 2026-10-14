@@ -88,12 +88,15 @@ describe.each(["pt", "ar"] as const)("in %s", (language) => {
       stored({ id: "e1", event: "gone", member: ANA, text: "Ana is no longer a member" }),
       stored({ id: "e2", event: "joined", member: ANA, text: "Ana joined" }),
       stored({ id: "e3", event: "left", member: ANA, text: "Ana left" }),
+      // Mine, as a community writes it when I was removed and was let in again.
+      stored({ id: "e4", event: "gone", member: ME, text: "You is no longer a member" }),
     ]);
     const lines = (await screen.findAllByTestId("group-event")).map(e => e.textContent);
     expect(lines).toEqual([
       t(language, "group.event.gone", { name: "Ana" }),
       t(language, "group.event.joined", { name: "Ana" }),
       t(language, "group.event.left", { name: "Ana" }),
+      t(language, "group.event.removed"),
     ]);
     expect(lines.join(" ")).not.toMatch(/joined|no longer| left/);
   });
