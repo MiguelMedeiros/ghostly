@@ -69,7 +69,8 @@ export function useOutsideDismiss(ref: RefObject<HTMLElement | null>, open: bool
       }
       beganOutside = false;
     };
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !blocked() && !e.defaultPrevented) callback.current(); };
+    // The Escape that closes it is spent: a notice that also answers Escape stays.
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !blocked() && !e.defaultPrevented) { e.preventDefault(); callback.current(); } };
     document.addEventListener("pointerdown", down); document.addEventListener("pointerup", up); document.addEventListener("keydown", key);
     return () => {const index=layers.indexOf(ref); if(index>=0) layers.splice(index,1);document.removeEventListener("pointerdown", down);document.removeEventListener("pointerup", up);document.removeEventListener("keydown", key);};
   }, [open, ref, anchorRef]);
