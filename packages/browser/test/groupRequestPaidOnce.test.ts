@@ -90,4 +90,28 @@ describe("a request of ours to a group, paid in ecash", () => {
     expect(results["edge-b"].at(-1)).toEqual({ id: "pay-from-b-0002", ok: false, error: "Already paid by another member of the group" });
     expect((await wallet.view("testnet")).balance).toBe(1000);
   });
+
+  it("opens again once the first member's redeem is past its watch hour with no way of knowing (spent, no NUT-09)", async () => {
+    const { desk, results, wallet } = world();
+    // A mint that cannot say what it signed (no NUT-09), and that took A's coins while its answer was lost.
+    (await wallet["wallet"](TEST_MINT) as unknown as { getMintInfo: () => unknown }).getMintInfo = () => ({ isSupported: () => ({ supported: false, params: [] }) });
+    mint.checkProofsStates.mockImplementation(async (proofs: { secret: string }[]) => proofs.map((p) => ({ state: p.secret === "member-a-coin" ? "SPENT" : "UNSPENT" })));
+    const { paymentId } = await desk.requestFromGroup({ groupId: "g1", amount: 1000, timestamp: 1_000, rail: "cashu", network: "testnet" });
+    await desk.onPayment("edge-a", { id: "pay-from-a-0001", timestamp: 2_000, requestId: paymentId, amount: { value: "1000", asset: "sat" }, endpoint: [ENDPOINT.cashu, tokenA] });
+    expect(results["edge-a"]).toEqual([]);
+
+    // Within its hour the mint may still be finishing it: B is refused, unredeemed.
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    await desk.onPayment("edge-b", { id: "pay-from-b-0001", timestamp: 3_000, requestId: paymentId, amount: { value: "1000", asset: "sat" }, endpoint: [ENDPOINT.cashu, tokenB] });
+    expect(results["edge-b"]).toEqual([{ id: "pay-from-b-0001", ok: false, error: "Another member of the group is paying it" }]);
+
+    // A day on, A's redeem is still written down (the wallet keeps asking, less and less often), and the request open:
+    // B's payment is taken.
+    await vi.advanceTimersByTimeAsync(24 * 3_600_000);
+    expect(rows<{ id: string; state: string }>("payments").find((p) => p.id === paymentId)?.state).toBe("pending");
+    await desk.onPayment("edge-b", { id: "pay-from-b-0002", timestamp: 4_000, requestId: paymentId, amount: { value: "1000", asset: "sat" }, endpoint: [ENDPOINT.cashu, tokenB] });
+    expect(results["edge-b"].at(-1)).toEqual({ id: "pay-from-b-0002", ok: true, credited: "1000" });
+    expect((await wallet.view("testnet")).balance).toBe(1000);
+    expect(rows<{ id: string; state: string }>("payments").find((p) => p.id === paymentId)?.state).toBe("settled");
+  });
 });
