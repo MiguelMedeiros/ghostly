@@ -68,6 +68,7 @@
   "services": "Servizi condivisi",
   "servicesNeedApp": "Richiede l'estensione o l'app desktop di Ghostly",
   "servicesShared": "{{count}} condivisi in questa chat",
+  "sharedTextFile": "Testo condiviso",
   "skinTone": "Tonalità della pelle",
   "takePhoto": "Scatta una foto",
   "tooLong": "È troppo lungo da inviare ({{count}} caratteri, il limite è {{max}}).",

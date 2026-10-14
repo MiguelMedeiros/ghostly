@@ -367,7 +367,8 @@ export function MessageInput({
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
-    if (value.length <= Math.max(maxLength, 16_384)) {
+    // A draft over the cap (a share, words given back after a failed send) takes every edit that shortens it.
+    if (value.length <= Math.max(maxLength, 16_384, text.length)) {
       setText(value);
       // Editing a sent message is not writing a new one.
       if (!edit) onTyping?.(value.trim() !== "");
@@ -523,13 +524,18 @@ export function MessageInput({
       if (!waiting || (waiting.files.length && !canAttach && !fileUnavailable)) return;
       const share = takeShareFor(draftId)!;
       const shared = shareText(share);
-      if (shared) setText((was) => (was.trim() ? `${was}\n${shared}` : shared));
-      if (share.files.length) offerSharedRef.current(share);
+      // Longer than the field takes: whole, as a text file on the sheet, where files can go.
+      const asFile = shared.length > Math.max(maxLength, 16_384) && canAttach;
+      if (shared && !asFile) setText((was) => (was.trim() ? `${was}\n${shared}` : shared));
+      if (asFile) {
+        const file = new File([shared], `${t("composer.sharedTextFile")}.txt`, { type: "text/plain" });
+        offerSharedRef.current({ ...share, read: async () => [file, ...await shareFiles(share)] });
+      } else if (share.files.length) offerSharedRef.current(share);
       else if (!touchOnly()) textareaRef.current?.focus();
     };
     take();
     return onShareChange(take);
-  }, [draftId, canAttach, fileUnavailable]);
+  }, [draftId, canAttach, fileUnavailable, maxLength, t]);
 
   // A paste where no field has the focus (the chat's messages clicked last) still brings its files here: to the chat
   // on screen only. Every loaded chat's composer is mounted, and the document has one paste for all of them.
