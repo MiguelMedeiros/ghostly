@@ -145,6 +145,29 @@ describe("a new message, read out to a screen reader", () => {
     expect(region()).toHaveTextContent("");
   });
 
+  it("a message coming into a long chat reads the new rows only, not the whole history again", () => {
+    const history = Array.from({ length: 5_000 }, (_, i) => i % 2 ? mine(`mine ${i}`) : peer(`old ${i}`));
+    const { update } = setup(history);
+    // Every row the announcer reads of the list, counted.
+    let reads = 0;
+    const counted = (rows: Announceable[]) => new Proxy(rows, {
+      get(target, key, receiver) { if (typeof key === "string" && /^\d+$/.test(key)) reads++; return Reflect.get(target, key, receiver); },
+    });
+    const two = [...history, peer("hello"), peer("again")];
+    update(counted(two.slice(0, -1)));
+    update(counted(two));
+    expect(reads).toBeLessThan(50);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^2 new messages from Alice$/);
+    wait(ANNOUNCE_CLEAR_MS);
+    // Older history loaded above is not news, and a message after it still is.
+    const older = [peer("older"), ...two];
+    update(older);
+    update([...older, peer("after the older ones")]);
+    wait(ANNOUNCE_WINDOW_MS);
+    expect(region()).toHaveTextContent(/^Alice: after the older ones$/);
+  });
+
   it("a chat kept open behind another one reads nothing out", () => {
     const { update } = setup(HISTORY, "chat-1", false);
     update([...HISTORY, peer("while away")]);
