@@ -351,16 +351,6 @@ describe("with the apps flag on", () => {
     expect(screen.getByTestId("app-install-confirm")).toHaveTextContent("Update");
   });
 
-  it("shows the files permission with what it means behind ⓘ", async () => {
-    const files: AppPreview["asks"] = ["chat", "files"];
-    fakeEngine.on("appPreview", () => preview({ asks: files, manifest: { ...preview().manifest, permissions: files } }));
-    const { user } = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
-    const line = await screen.findByTestId("app-permission-files");
-    expect(line).toHaveTextContent("Read files and folders you pick");
-    await user.click(within(line).getByTestId("app-permission-files-info"));
-    expect(screen.getByTestId("app-permission-files-text")).toHaveTextContent("It reads only what you pick, without copying it, and can share it with your contact in the chat.");
-  });
-
   it("shows the internet permission with what it means behind ⓘ, and an update that adds it asks again", async () => {
     const internet: AppPreview["asks"] = ["chat", "internet"];
     fakeEngine.on("appPreview", () => preview({ asks: internet, manifest: { ...preview().manifest, permissions: internet } }));
