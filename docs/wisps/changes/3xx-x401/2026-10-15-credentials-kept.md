@@ -1,0 +1,1 @@
+Credentials kept per profile are built: `x401 key new`, `x401 credential add|list|remove`. Import makes no network request: it checks the holder key, the SD-JWT VC's shape and its expiry, and the issuer's signature is checked before a presentation instead. Added the limits: 8 keys waiting for a credential, 32 credentials per profile, and "Clear all data" deletes them.

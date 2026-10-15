@@ -11,10 +11,10 @@ import { LOCAL_SETTINGS, offlineCall, readOnly } from "../src/main";
 const READS = [
   "events", "status", "chat history", "chat list", "chat show", "message details", "group history", "group list", "group show",
   "file list", "payment list", "wallet history", "wallet list", "identity contact", "identity list", "identity providers",
-  "service list", "service peer", "call auto", "call list", "app served",
+  "service list", "service peer", "call auto", "call list", "app served", "x401 credential list",
 ];
 /** Changes that stay on this device: no contact and no relay hears of them. */
-const LOCAL_WRITES = ["chat remove", "chat rename", "identity cancel", "service add"];
+const LOCAL_WRITES = ["chat remove", "chat rename", "identity cancel", "service add", "x401 credential add", "x401 credential remove", "x401 key new"];
 const ONLINE = [
   "profile picture",
   "button press", "button update", "chat connect", "chat disconnect", "chat transport", "chat verify", "chat wait",

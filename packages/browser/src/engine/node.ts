@@ -26,6 +26,7 @@ import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
 import { chatAppId, isAppRef, isAppVersion, publicKeyFromZ32, type AppFrameEvent, type AppSendError } from "@ghostly/core";
 import { GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, readGroupFileMeta } from "@ghostly/core";
 import { IdentityProofs } from './identities';
+import { X401Credentials } from './x401';
 import { setOwnDidSource } from '../proofs/ownDid';
 import { ProfileDid } from './did';
 import { NostrSocial, effectiveNostrSettings } from './nostrSocial';
@@ -1099,6 +1100,9 @@ export class GhostlyNode implements EngineImplementation {
     // Tests shorten the lifetime to watch an item expire; nothing else reads this, and it never lengthens it.
     ttlMs: () => { try { const raw = typeof localStorage !== "undefined" ? localStorage.getItem("ghostly-test-hold-ttl") : null; const ms = raw ? Number(raw) : NaN; return Number.isFinite(ms) && ms > 0 ? ms : undefined; } catch { return undefined; } },
   });
+
+  /** x401 credentials (WISP 3xx): kept for websites the headless CLI calls, never shared with a contact. */
+  private readonly x401 = new X401Credentials();
 
   /** Identity proofs: this profile's, and those shared in each paired chat (WISP 300). */
   private readonly identities = new IdentityProofs({
@@ -2586,6 +2590,10 @@ export class GhostlyNode implements EngineImplementation {
   shareIdentityProof(params: { linkId: string; id: string }): Promise<void> { return this.identities.share(params); }
   withdrawIdentityProof(params: { linkId: string; id: string }): Promise<void> { return this.identities.withdraw(params); }
   recheckIdentityProof(params: { linkId: string; id: string }): Promise<void> { return this.identities.recheck(params); }
+  newX401HolderKey() { return this.x401.newKey(); }
+  addX401Credential(params: { credential: string; label?: string }) { return this.x401.add(params); }
+  x401Credentials(params: { values?: boolean } = {}) { return this.x401.list(params); }
+  removeX401Credential(params: { id: string }): Promise<boolean> { return this.x401.remove(params); }
   setDidListed(params: { id: string; listed: boolean }): Promise<void> { return this.did.setListed(params); }
   lookupIdentityDisplay(params: { linkId: string; id: string }): Promise<void> {
     // A Nostr profile comes through the social layer, from the relays the person configured.
