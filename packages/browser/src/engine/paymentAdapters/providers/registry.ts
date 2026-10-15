@@ -4,7 +4,7 @@ import { breez } from "./breez";
 import { cashuMint } from "./cashuMint";
 import { fedimint } from "./fedimint";
 import { coreLightning } from "./coreLightning";
-import { nwc } from "./nwc";
+import { nwc } from "./nwcProvider";
 import { lnd } from "./lnd";
 import type { LightningProviderDescriptor } from "./lightning";
 import type { OnchainProviderDescriptor } from "./onchain";
