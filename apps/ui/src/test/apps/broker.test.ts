@@ -617,6 +617,21 @@ describe("linked files (WISP 1200 · Linked files)", () => {
     expect(host.calls.filter((c) => c.op === "files.read").every((c) => c.ref === REF)).toBe(true);
   });
 
+  it("read: the host's copy is handed over as it is, not copied again; a view on a larger buffer is copied", async () => {
+    const { ask, run, host } = setup({ permissions: ["files"] });
+    run();
+    host.nextPick = [{ path: "film.mp4", bytes: Uint8Array.from({ length: 100 }, (_, i) => i) }];
+    const id = ((await ask("files.pick")).value as { id: string }[])[0]!.id;
+    const whole = new Uint8Array([1, 2, 3]);
+    vi.spyOn(host.linkedFiles!, "read").mockResolvedValueOnce(whole);
+    expect((await ask("files.read", [id, { offset: 0, length: 3 }])).value).toBe(whole.buffer);
+    const shared = new Uint8Array([9, 4, 5, 6, 9]);
+    vi.spyOn(host.linkedFiles!, "read").mockResolvedValueOnce(shared.subarray(1, 4));
+    const part = (await ask("files.read", [id, { offset: 0, length: 3 }])).value as ArrayBuffer;
+    expect(part).not.toBe(shared.buffer);
+    expect(new Uint8Array(part)).toEqual(new Uint8Array([4, 5, 6]));
+  });
+
   it("read: bad ids and ranges are refused before the client reads; a changed or gone file says so", async () => {
     const { ask, run, host } = setup({ permissions: ["files"] });
     run();
