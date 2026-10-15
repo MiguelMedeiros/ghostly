@@ -4,6 +4,14 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.3.2
+
+### Fixed
+
+**Apps**
+
+- After Allow and open on an app that comes with Ghostly, the keyboard focus is in the question of which chat to open it in. Before, it went to the app's row behind that question, so Tab walked the page behind it and a screen reader did not read the question.
+
 ## 1.3.1
 
 ### Fixed
