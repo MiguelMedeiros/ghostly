@@ -1,6 +1,8 @@
 /**
  * @ghostlytools/sdk/fakes: the fake adapters the app itself tests with, usable at run time (no vitest):
- * in-memory regtest sats and test identities that hold nothing and reach nothing.
+ * in-memory regtest sats and test identities that hold nothing and reach nothing. `testProvidersEnabled` and
+ * `testIdentitiesEnabled` are the app's own switches, folded to false when this package is built: a plugin that
+ * wants the fakes in the app registers them itself.
  */
 export {
   FakeLightningProvider, FakeOnchainProvider, fakeInvoice, fakeAddress, fakeLightning, fakeOnchain, TEST_PROVIDERS_FLAG, testProvidersEnabled,
