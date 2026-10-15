@@ -104,7 +104,7 @@ export function chatOnly(method: string, params: Record<string, unknown>): boole
 const READS: ReadonlySet<string> = new Set([
   "status", "profile.get", "settings.get", "events.replay", "chat.list", "chat.get", "chat.history", "chat.details",
   "group.list", "group.get", "group.history", "file.list", "wallet.list", "wallet.history", "payment.list", "identity.list", "identity.providers",
-  "identity.contact", "service.list", "service.peer", "call.list", "app.served",
+  "identity.contact", "service.list", "service.peer", "call.list", "app.served", "x401.credential.list",
 ]);
 
 /** Whether a one-shot for this call opens the profile offline; test/readOnlyCommands.test.ts names every table command. */
@@ -117,11 +117,14 @@ export function readOnly(method: string, params: Record<string, unknown>): boole
 
 /**
  * Calls whose change stays on this device: a chat's name here, a chat removed (nothing goes to the contact), auto-answer
- * (calls.json), a proof dropped, a web app added (shared with no one yet). Opened online, each put the profile's
- * records on the relays and waited for them (6 PUT + 4 GET, 3.3 s with a relay that takes 1.5 s), and the contacts'
- * apps saw this device come online. `message delete` stays online: it settles a file offer already on the DHT.
+ * (calls.json), a proof dropped, a web app added (shared with no one yet), an x401 key or credential (WISP 3xx: never
+ * shared with a contact). Opened online, each put the profile's records on the relays and waited for them (6 PUT + 4
+ * GET, 3.3 s with a relay that takes 1.5 s), and the contacts' apps saw this device come online. `message delete` stays
+ * online: it settles a file offer already on the DHT.
  */
-const LOCAL_WRITES: ReadonlySet<string> = new Set(["chat.rename", "chat.remove", "call.auto", "identity.cancel", "service.add"]);
+const LOCAL_WRITES: ReadonlySet<string> = new Set([
+  "chat.rename", "chat.remove", "call.auto", "identity.cancel", "service.add", "x401.key.new", "x401.credential.add", "x401.credential.remove",
+]);
 
 /** Settings of this device only: no contact and no relay hears of them (nick, avatar and the relays' do). */
 export const LOCAL_SETTINGS: ReadonlySet<string> = new Set(["sendTyping", "autoDownloads", "serveFiles"]);
@@ -238,7 +241,7 @@ function helpRows(): { usage: string; summary: string; options?: Record<string, 
 function commandWords(usage: string): string[] {
   const words: string[] = [];
   for (const word of usage.split(" ")) {
-    if (!/^[a-z][a-z-]*$/.test(word)) break;
+    if (!/^[a-z][a-z0-9-]*$/.test(word)) break;
     words.push(word);
   }
   return words;
@@ -774,6 +777,11 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     else if (params.stdin) params.evidence = await readStdin();
     delete params.evidenceFile; delete params.stdin;
   }
+  if (command.method === "x401.credential.add") {
+    try { params.credential = params.file === "-" ? await readStdin() : readFileSync(params.file as string, "utf8"); }
+    catch (error) { throw new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
+    delete params.file;
+  }
   const secretWarning = await secretsFromStdin(command.method, params, readStdin, process.stdin.isTTY === true);
   if (secretWarning) process.stderr.write(`ghostly: ${secretWarning}\n`);
   const result = await withSession(g, async (s) => {
@@ -841,8 +849,9 @@ export async function main(input: string[]): Promise<number> {
     print({ version: VERSION });
     return 0;
   }
-  const [first, second] = argv;
+  const [first, second, third] = argv;
   const two = second && !second.startsWith("-") ? `${first} ${second}` : "";
+  const three = two && third && !third.startsWith("-") ? `${two} ${third}` : "";
   // A command is one its table lists itself: every object has `constructor` and `toString`, which are no commands.
   const text = (name: string) => Object.hasOwn(TEXT_COMMANDS, name), table = (name: string) => Object.hasOwn(COMMANDS, name);
   if (first === "profile" && !table(two)) { await profileCommand(second, argv.slice(2)); return 0; }
@@ -852,23 +861,30 @@ export async function main(input: string[]): Promise<number> {
   if (first === "settings") { await settingsCommand(second, argv.slice(2)); return 0; }
   if (two === "identity add") { await identityAddCommand(argv.slice(2)); return 0; }
   if (two === "call pipe") { await callPipeCommand(argv.slice(2)); return -1; }
+  if (three && table(three)) { await tableCommand(three, argv.slice(3)); return 0; }
   if (two && text(two)) { await textCommand(two, argv.slice(2)); return 0; }
   if (two && table(two)) { await tableCommand(two, argv.slice(2)); return 0; }
   if (text(first)) { await textCommand(first, argv.slice(1)); return 0; }
   if (table(first)) { await tableCommand(first, argv.slice(1)); return 0; }
-  throw unknownCommand(first, two ? second : undefined);
+  throw unknownCommand(first, two ? second : undefined, three ? third : undefined);
 }
 
 /**
- * A command line that names no command. The first word of a group (`ghostly chat`, `ghostly wallet frob`) is answered
- * with the group's commands, as `ghostly help chat` lists them; before, it was only "Unknown command: chat".
+ * A command line that names no command. The words of a group (`ghostly chat`, `ghostly wallet frob`, `ghostly x401
+ * credential`) are answered with the group's commands, as `ghostly help chat` lists them; before, it was only "Unknown
+ * command: chat". The longest group the words name answers: `x401 credential frob` lists add, list and remove.
  */
-export function unknownCommand(first: string | undefined, second?: string): CliError {
-  const asked = [first, second].filter(Boolean).join(" ");
-  const subs = [...new Set(helpRows().map((row) => commandWords(row.usage)).filter((words) => words[0] === first && words.length > 1).map((words) => words[1]))];
-  if (!subs.length) return new CliError("usage", `Unknown command: ${asked} (ghostly help)`);
-  const list = `${subs.slice(0, -1).join(", ")}${subs.length > 1 ? " or " : ""}${subs.at(-1)}`;
-  return new CliError("usage", second ? `Unknown command: ${asked}: ghostly ${first} takes ${list} (ghostly help ${first})` : `ghostly ${first} takes a command: ${list} (ghostly help ${first})`);
+export function unknownCommand(first: string | undefined, second?: string, third?: string): CliError {
+  const asked = [first, second, third].filter((word): word is string => !!word);
+  const all = helpRows().map((row) => commandWords(row.usage));
+  for (let depth = Math.min(asked.length, 2); depth >= 1; depth--) {
+    const group = asked.slice(0, depth), name = group.join(" "), extra = asked[depth];
+    const subs = [...new Set(all.filter((words) => words.length > depth && group.every((word, i) => words[i] === word)).map((words) => words[depth]))];
+    if (!subs.length) continue;
+    const list = `${subs.slice(0, -1).join(", ")}${subs.length > 1 ? " or " : ""}${subs.at(-1)}`;
+    return new CliError("usage", extra ? `Unknown command: ${name} ${extra}: ghostly ${name} takes ${list} (ghostly help ${name})` : `ghostly ${name} takes a command: ${list} (ghostly help ${name})`);
+  }
+  return new CliError("usage", `Unknown command: ${asked.slice(0, 2).join(" ")} (ghostly help)`);
 }
 
 /** Leaves once what was printed reached stdout (a pipe drains asynchronously). */

@@ -18,6 +18,7 @@ import { endTyping, keepOneShot, keepTyping, sayTyping } from "./typing";
 import { GROUP_ADMIN_METHODS } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
 import { IDENTITY_METHODS } from "./identities";
+import { X401_METHODS } from "./x401";
 import { SERVICE_METHODS } from "./services";
 import { BACKUP_METHODS } from "./backup";
 import { CALL_METHODS } from "./calls/api";
@@ -156,6 +157,7 @@ const METHODS: Record<string, Method> = {
   ...BUTTON_METHODS,
   ...GROUP_ADMIN_METHODS,
   ...IDENTITY_METHODS,
+  ...X401_METHODS,
   ...SERVICE_METHODS,
   ...BACKUP_METHODS,
   ...CALL_METHODS,

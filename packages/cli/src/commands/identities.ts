@@ -1,7 +1,7 @@
 import { CliError } from "../errors";
-import { type Command, here } from "./shared";
+import { type Command, here, secret } from "./shared";
 
-/** Identity proofs: one entry per command, in alphabetical order (test/commands.test.ts checks). */
+/** Identity proofs and x401 credentials: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
   "identity cancel": { method: "identity.cancel", usage: "identity cancel <draft>", summary: "Drop a proof not finished", args: ["draft"], params: (_, a) => ({ draft: a.draft }) },
   "identity complete": {
@@ -19,4 +19,15 @@ export const commands: Record<string, Command> = {
   "identity remove": { method: "identity.remove", usage: "identity remove <id>", summary: "Remove a proof: withdrawn from every chat, revoked", args: ["id"], params: (_, a) => ({ id: a.id }) },
   "identity share": { method: "identity.share", usage: "identity share <chat> <id>", summary: "Show a proof to a contact", args: ["chat", "id"], params: (_, a) => ({ chat: a.chat, id: a.id }) },
   "identity withdraw": { method: "identity.withdraw", usage: "identity withdraw <chat> <id>", summary: "Withdraw a proof from a contact", args: ["chat", "id"], params: (_, a) => ({ chat: a.chat, id: a.id }) },
+  "x401 credential add": {
+    method: "x401.credential.add", usage: "x401 credential add <file|-> [--label <name>]", summary: "Keep an issued SD-JWT VC bound to a key from x401 key new (a file, or - for stdin)",
+    args: ["file"], options: { label: { type: "string", description: "Your name for it (default: its type)" } },
+    params: ({ options }, a) => ({ file: a.file === "-" ? "-" : here(a.file), label: options.label }),
+  },
+  "x401 credential list": {
+    method: "x401.credential.list", usage: "x401 credential list [--show-secret]", summary: "This profile's x401 credentials: issuer, type, claim paths",
+    options: { "show-secret": { type: "boolean", description: "Print the claims' values too (a name, a document number...)" } }, params: ({ options }) => secret(options),
+  },
+  "x401 credential remove": { method: "x401.credential.remove", usage: "x401 credential remove <id>", summary: "Remove a credential and its holder key", args: ["id"], params: (_, a) => ({ id: a.id }) },
+  "x401 key new": { method: "x401.key.new", usage: "x401 key new", summary: "A fresh P-256 holder key: its public JWK goes to the issuer" },
 };

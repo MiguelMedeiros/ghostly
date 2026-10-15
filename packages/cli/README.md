@@ -167,6 +167,8 @@ The rows are in alphabetical order of their first command, and every command of 
 | `wallet list [--network n]` | Wallets and balances, and what `wallet create` can make on each network |
 | `wallet receive <sats>`, `wallet address <type>`, `wallet redeem [<token>]`, `wallet history` | Receive, and what came and went. `wallet redeem` reads the token from stdin when none is given, which keeps it out of `ps` and the shell's history |
 | `wallet remove <type> [--network n] [--card id] [--accept-loss]` | Refused while it holds money or waits for some, unless `--accept-loss` |
+| `x401 credential add <file\|-> [--label name]`, `x401 credential list [--show-secret]`, `x401 credential remove <id>` | x401 credentials ([WISP 3xx](../../docs/wisps/3xx-x401.md), a draft: test credentials only): keep an issued SD-JWT VC bound to a key from `x401 key new`, list them (claim paths; values only with `--show-secret`), remove one with its key. Never shared with contacts |
+| `x401 key new` | A fresh P-256 holder key, one per credential: give its public JWK to the issuer |
 
 Help: `ghostly help` lists every command; `ghostly help file` (or `ghostly file --help`) a group; `ghostly help file
 save` (or `ghostly file save --help`) one command, with its options. `-h` works too, except after `--`.
