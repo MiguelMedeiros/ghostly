@@ -138,6 +138,17 @@ test("voice messages: hold to record, the contact plays it", { tag: ["@feature:f
   const again = voices(bob).last();
   await expect(again).toHaveAttribute("data-played", "true", { timeout: 30_000 });
   expect(await shapes(again)).toBeGreaterThan(3);
+
+  // From the keyboard: Space plays it, and the button keeps the focus while its bytes load, so Space again pauses it
+  // (disabled while loading, it lost the focus to the page and Space scrolled the chat).
+  const play = again.getByTestId("voice-play");
+  await expect(play).toBeEnabled({ timeout: 30_000 });
+  await play.focus();
+  await bob.page.keyboard.press("Space");
+  await expect(again).toHaveAttribute("data-state", "playing");
+  await expect(play).toBeFocused();
+  await bob.page.keyboard.press("Space");
+  await expect(again).toHaveAttribute("data-state", "paused");
 });
 
 /** The chat's row holding the newest bubble of this kind (a voice message, a file). */
