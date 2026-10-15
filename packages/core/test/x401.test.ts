@@ -111,6 +111,15 @@ describe("x401 PROOF-REQUEST", () => {
     for (const [payload, detail] of cases) expect(requestFrom(payload)).toEqual({ ok: false, reason: "invalid", detail });
   });
 
+  it("takes a token endpoint only on https:, or http: to a loopback host", () => {
+    for (const endpoint of ["http://bank.example.com/token", "javascript:alert(1)", "file:///etc/passwd", "ftp://bank.example.com/token", "http://127.0.0.2/token"]) {
+      expect(requestFrom({ ...MINIMAL, oauth: { token_endpoint: endpoint } })).toEqual({ ok: false, reason: "invalid", detail: "oauth.token_endpoint" });
+    }
+    for (const endpoint of ["https://bank.example.com/token", "http://localhost:8080/token", "http://127.0.0.1/token", "http://[::1]/token"]) {
+      expect(requestFrom({ ...MINIMAL, oauth: { token_endpoint: endpoint } })?.ok).toBe(true);
+    }
+  });
+
   it("refuses a request with no OpenID4VP protocol of 0.2.0", () => {
     const payload = { ...MINIMAL, credential_requirements: { digital: { requests: [{ protocol: "org-iso-mdoc", data: {} }] } } };
     expect(requestFrom(payload)).toEqual({ ok: false, reason: "unsupported" });

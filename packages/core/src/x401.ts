@@ -137,6 +137,14 @@ function isUrl(value: unknown): value is string {
   try { new URL(value); return true; } catch { return false; }
 }
 
+/** A URL an agent may be sent to: `https:`, or `http:` to a loopback host for a local verifier (as the route called). */
+function isAgentUrl(value: unknown): value is string {
+  if (!isUrl(value)) return false;
+  const url = new URL(value);
+  const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
+  return url.protocol === "https:" || (url.protocol === "http:" && loopback);
+}
+
 /** RFC 3339 date-time, as `expires_at` carries it. */
 const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/i;
 const isTimestamp = (value: unknown): value is string => typeof value === "string" && RFC3339.test(value) && !Number.isNaN(Date.parse(value));
@@ -198,7 +206,7 @@ export function readX401ProofRequest(payload: JsonObject): X401Reading<X401Proof
   if (!requests.some((r: X401DigitalRequest) => isX401Protocol(r.protocol))) return refuse("unsupported");
   const { oauth, payment } = payload;
   if (oauth !== undefined) {
-    if (!isObject(oauth) || !isUrl(oauth.token_endpoint)) return refuse("invalid", "oauth.token_endpoint");
+    if (!isObject(oauth) || !isAgentUrl(oauth.token_endpoint)) return refuse("invalid", "oauth.token_endpoint");
     if (!optionalText(oauth.audience)) return refuse("invalid", "oauth.audience");
     if (!optionalText(oauth.resource)) return refuse("invalid", "oauth.resource");
   }
