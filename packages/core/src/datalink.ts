@@ -90,7 +90,7 @@ const ICE_GATHERING_TIMEOUT_MS = 5_000;
  * rather than 2 s (calls bug hunt, 2026-10-12).
  */
 export const OFFER_HOST_GATHER_MS = 2_000;
-/** The data link keeps collecting this long after the candidate it waited for came (a call keeps 400 ms). */
+/** The data link keeps collecting this long after the candidate it waited for came (a call too). */
 export const DATA_SETTLE_MS = 150;
 /**
  * A connection with no candidate at all by then has stalled: Chromium, rarely and under load, gathers none, and an
