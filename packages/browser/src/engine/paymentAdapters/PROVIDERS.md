@@ -26,7 +26,7 @@ Testnet) and on the platforms listed. "Experimental" is the descriptor's `experi
 | `core-lightning` | Lightning | [coreLightning.ts](providers/coreLightning.ts) | yes | testnet, signet, regtest | web, extension, desktop | not flagged |
 | `webln` | Lightning | [webln.ts](providers/webln.ts) | yes | testnet, signet, mutinynet, regtest | web | experimental |
 | `lnd` | Lightning | [lnd.ts](providers/lnd.ts) | yes | testnet, signet, regtest | web, extension, desktop | experimental |
-| `bitcoind` | On-chain | [bitcoind.ts](providers/bitcoind.ts) | yes | testnet, signet, regtest | desktop | experimental |
+| `bitcoind` | On-chain | [bitcoindProvider.ts](providers/bitcoindProvider.ts), [bitcoind.ts](providers/bitcoind.ts) | yes | testnet, signet, regtest | desktop | experimental |
 | `bdk` | On-chain | [bdk.ts](providers/bdk.ts) | no (no phrase backup or fee bump yet) | signet, mutinynet, regtest | web, extension, desktop | experimental |
 
 The ways of paying that are not sources (Cashu, Ark through Arkade or Bark, Spark, Fedimint ecash, USDT) are
