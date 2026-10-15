@@ -1875,6 +1875,17 @@ describe("a green pull request run that is not the pull request's own", () => {
     expect((await repo.run()).merged).toEqual([21]);
   });
 
+  it("does not count a green run from before GitHub changed its base, when its old base branch was deleted", async () => {
+    for (const event of ["automatic_base_change_succeeded", "automatic_base_change_failed"]) {
+      const repo = fakeRepo();
+      repo.add(21);
+      repo.runs.set("h21", prRunOf(repo, green, "fix-21", "2026-10-08T01:00:00Z"));
+      repo.events.get(21)!.push({ event, created_at: "2026-10-08T01:30:00Z" });
+      expect((await repo.run()).merged).toEqual([]);
+      expect(repo.comments.get(21)![0].body).toMatch(/Waiting: its green CI run on its last commit ran before its base was changed/);
+    }
+  });
+
   it("still lands on its own run: another pull request from its branch into the same base, a push's run", async () => {
     const repo = fakeRepo();
     repo.add(21);
