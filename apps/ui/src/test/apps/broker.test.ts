@@ -706,4 +706,28 @@ describe("linked files (WISP 1200 · Linked files)", () => {
     expect(await ask("files.list")).toMatchObject({ ok: true, value: [] });
     expect(await ask("files.forget", ["../x"])).toMatchObject({ ok: false, error: "bad-request" });
   });
+
+  // 50 forgets at once each took the Desktop's one writing lock on a thread of its own: another app's pick waited
+  // seconds (agents#1033). The host is asked for the next only once the one before answered.
+  it("forget: an app's forgets go to the host one at a time, in order", async () => {
+    const { ask, run, host, broker, posted } = setup({ permissions: ["files"] });
+    run();
+    host.nextPick = Array.from({ length: 5 }, (_, i) => ({ path: `${i}.mp4`, bytes: bytes(1) }));
+    const ids = ((await ask("files.pick")).value as { id: string }[]).map((e) => e.id);
+    let busy = 0, most = 0;
+    const order: string[] = [];
+    const forget = host.linkedFiles!.forget;
+    host.linkedFiles!.forget = async (ref, id) => {
+      most = Math.max(most, ++busy);
+      order.push(id);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      busy--;
+      return forget(ref, id);
+    };
+    ids.forEach((id, i) => broker.message({ id: 2_000 + i, type: "files.forget", args: [id] }));
+    await vi.waitFor(() => expect(posted.filter((p) => (p.message.id as number) >= 2_000)).toHaveLength(ids.length));
+    expect(posted.filter((p) => (p.message.id as number) >= 2_000).every((p) => p.message.ok === true)).toBe(true);
+    expect(most).toBe(1);
+    expect(order).toEqual(ids);
+  });
 });
