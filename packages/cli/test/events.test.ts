@@ -1,9 +1,9 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { EngineState, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
-import { EventHub, type GhostlyEvent } from "../src/events";
+import { EventHub, JOURNAL_KEEP_BYTES, JOURNAL_MAX_BYTES, type GhostlyEvent } from "../src/events";
 import { toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { openPersistentIndexedDb } from "../src/runtime/storage";
@@ -316,6 +316,37 @@ describe("the event stream", () => {
     expect(again.replay(2)[0]).toMatchObject({ from: 3, to: 4 });
     void h;
   });
+
+  it("a journal past the longest string still opens, replays and is cut to its bound in bytes", async () => {
+    const path = join(dir, "huge.jsonl");
+    // 600 MiB, more characters than a string can hold, mostly a hole on disk; then whole events.
+    truncateSync((writeFileSync(path, ""), path), 600 * 1024 * 1024);
+    appendFileSync(path, "\n" + [7, 8, 9].map((seq) => JSON.stringify({ seq, id: `x:${seq}`, type: "x", at: 1 })).join("\n") + "\n");
+    const h = new EventHub(path, () => 1000, "huge");
+    await h.open();
+    expect(h.lastSeq).toBe(9);
+    expect(statSync(path).size).toBeLessThanOrEqual(JOURNAL_KEEP_BYTES);
+    expect(h.replay(7).map((e) => e.seq)).toEqual([8, 9]);
+    const heard: number[] = [];
+    h.onEvent((e) => heard.push(e.seq));
+    h.emit("daemon.started", "daemon.started:1");
+    expect(heard).toEqual([10]);
+  }, 30_000);
+
+  it("keeps the journal within its bytes however long the events, and still replays its end", async () => {
+    const { h, events } = await hub("long.jsonl");
+    // Quotes take twice their length in JSON: each event is about 256 KiB of journal.
+    const text = '"'.repeat(128 * 1024);
+    for (let i = 0; i < 300; i++) {
+      h.emit("x", `x:${i}`, { text });
+      expect(statSync(join(dir, "long.jsonl")).size).toBeLessThanOrEqual(JOURNAL_MAX_BYTES);
+    }
+    expect(events).toHaveLength(300);
+    const replayed = h.replay(0);
+    expect(replayed[0].type).toBe("events.gap");
+    expect(replayed.at(-1)!.seq).toBe(300);
+    expect(replayed.slice(1).map((e) => e.seq)).toEqual(Array.from({ length: replayed.length - 1 }, (_, i) => 302 - replayed.length + i));
+  }, 60_000);
 
   it("a first run learns the history without reporting it; a later one reports what came meanwhile", async () => {
     const first = await hub("e.jsonl");

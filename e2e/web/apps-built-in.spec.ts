@@ -82,8 +82,13 @@ test("Chess is on the Apps page of a new profile; its first open asks what it ma
   // It runs in a chat, and this profile has none: the picker says so.
   const picker = ana.page.getByTestId("app-chat-picker");
   await expect(picker).toBeVisible();
+  // The focus is in the question, not on the new row behind it, and Escape gives it to that row's Open.
+  await expect.poll(() => picker.evaluate((el) => el.contains(document.activeElement))).toBe(true);
+  await ana.page.keyboard.press("Tab");
+  await expect.poll(() => picker.evaluate((el) => el.contains(document.activeElement))).toBe(true);
   await ana.page.keyboard.press("Escape");
   await expect(picker).toBeHidden();
+  await expect(ana.page.getByTestId("installed-app-open")).toBeFocused();
 
   // Uninstalled by the person: not offered again, on this page or after the app starts again.
   await expect(ana.page.getByTestId("installed-app-hint")).not.toContainText("Unknown publisher");

@@ -207,6 +207,10 @@ describe("requests", () => {
       [[new Array(1_000_000)], {}, "too-large"],
       [["x".repeat(64 * 1024 * 1024)], {}, "too-large"],
       [[wide], {}, "too-large"],
+      // A String object is no JSON: its 10 million index keys are not listed one by one (1.5 s), nor 30 million (threw).
+      [[new String("x".repeat(10_000_000))], {}, "bad-request"],
+      [[{ a: new String("x".repeat(30_000_000)) }], {}, "bad-request"],
+      [[], { extra: new String("x".repeat(30_000_000)) }, "bad-request"],
     ];
     try {
       requests.forEach(([args, extra], i) => broker.message({ id: 100 + i, type: "storage.get", args, ...extra }));

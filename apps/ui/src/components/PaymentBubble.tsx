@@ -1,4 +1,4 @@
-import { parsePaymentAmount, paymentUri } from "@ghostly/core";
+import { decodeBolt11, parsePaymentAmount, paymentUri, walletNetworkOf } from "@ghostly/core";
 import { PayExternally } from "./PayExternally";
 import type { PaymentReview as Review } from "@ghostly/core";
 import { PaymentReview } from "./PaymentReview";
@@ -135,12 +135,16 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   });
   /** What another wallet can pay: the request's invoice, or the address it carries. Ecash-only requests have nothing to show. */
   const externalUri = (() => {
+    // Only an invoice for exactly what the bubble shows (and, beside an address, of the address's network), like the
+    // text cards: one stored before the engine checked it is not handed to another wallet.
+    const decoded = payment.invoice ? decodeBolt11(payment.invoice) : null;
+    const invoice = decoded && decoded.amountSat === payment.amount && (payment.target?.method !== "bitcoin" || (decoded.network === "bitcoin") === (walletNetworkOf(payment.target.network) === "mainnet")) ? payment.invoice : undefined;
     try {
-      if (payment.target?.method === "bitcoin") return { uri: paymentUri({ kind: "bitcoin", address: payment.target.address, amountSat: payment.amount, lightning: payment.invoice }), value: payment.target.address };
+      if (payment.target?.method === "bitcoin") return { uri: paymentUri({ kind: "bitcoin", address: payment.target.address, amountSat: payment.amount, lightning: invoice }), value: payment.target.address };
       if (payment.target?.method === "arkade" || payment.target?.method === "bark") return { uri: paymentUri({ kind: "ark", address: payment.target.address, amountSat: payment.amount }), value: payment.target.address };
       // A Spark invoice has no URI scheme wallets agree on: the invoice itself is what another Spark wallet pastes.
       if (payment.target?.method === "spark") return { uri: payment.target.address, value: payment.target.address };
-      if ((!payment.target || payment.target.method === "fedimint") && payment.invoice) return { uri: paymentUri({ kind: "lightning", invoice: payment.invoice }), value: payment.invoice };
+      if ((!payment.target || payment.target.method === "fedimint") && invoice) return { uri: paymentUri({ kind: "lightning", invoice }), value: invoice };
     } catch { /* not something another wallet can open */ }
     return null;
   })();

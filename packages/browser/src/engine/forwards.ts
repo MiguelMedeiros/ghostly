@@ -45,8 +45,10 @@ export async function copyForForward(sourceId: string, target: { linkId: string;
   const source = await fileStore.get(sourceId);
   if (!source?.metadata) throw new Error("The file is not on this device any more");
   const size = storedSize(source);
-  // One arriving with files/3 is whole only once its digest checked out; any other is whole when all its bytes are here.
-  if (source.direction === "in" && source.wire3 && source.wire3.state !== "done" || await bytesHere(source) !== size)
+  // One arriving with files/3, or a group's, is whole only once its digest checked out (a group's desk says so once it
+  // did: a holder can leave bytes of the whole size that are not the author's); any other is whole when all its bytes are here.
+  const checked = source.wire3 ? source.wire3.state === "done" : !source.group || source.transfer?.state === "done";
+  if (source.direction === "in" && !checked || await bytesHere(source) !== size)
     throw new Error("The file has not arrived yet");
   const { file, linkId, wireId, timestamp } = target;
   const metadata = { name: file.name, size: file.size, mime: file.mime, timestamp, voice: file.voice, video: file.video, image: file.image };

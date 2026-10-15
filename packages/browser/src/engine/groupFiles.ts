@@ -167,6 +167,8 @@ interface Kept {
   holders: string[];
   /** A discard of what an earlier transfer stored, which the next one waits for. */
   idle?: Promise<void>;
+  /** Its transfer's write under way to storage, which a Leave waits for before it deletes the file (`drop`). */
+  writing?: Promise<unknown>;
   /** Bytes a transfer stored here that the next one goes on from, shown while it waits for a holder. */
   stored?: number;
   /** The transfer (its id on the edge) its person cancelled: what it stored is deleted, not kept for the next one. */
@@ -178,6 +180,11 @@ interface Kept {
    */
   fresh?: boolean;
   unclear?: boolean;
+  /**
+   * The holder every byte stored here came from, in this run (none once two holders' bytes are mixed): its tail failing
+   * the check is its own bytes failing, so it counts as damaged, however many transfers it split them into.
+   */
+  storedBy?: string;
   /**
    * Holders whose bytes failed the author's digest: not asked again for it, whatever the round, until its person asks
    * for it again (Download). Once every holder known is here, it is fetched no more (`DAMAGED`).
@@ -223,6 +230,8 @@ interface Edge {
   /** Message ids to say in the next `group-have`, and the frames of it that went lately (`haveFrames` in `haveWindowMs`). */
   have: Set<string>;
   haveSent: RateWindow;
+  /** Its member's `group-have` frames taken lately: no more than it may send (`haveFrames` in `haveWindowMs`); past that, dropped. */
+  haveTaken: RateWindow;
   /** Message ids its member asked for while this device served all it serves at once: said in a `group-have` once a slot frees. */
   busy: Set<string>;
   /** Message ids its member said it does not hold (`gone`): not asked of it again until it says it does, or the edge's session closes or opens. */
@@ -455,6 +464,8 @@ export class GroupFileDesk {
       this.byMessage.delete(`${groupId}\n${kept.message}`);
       this.wants.delete(kept.id);
       this.deps.transfers.delete(kept.id);
+      // A write under way goes first; after it, the file's transfer writes nothing more (`openTarget`).
+      await kept.writing?.catch(() => {});
       await this.deps.store.remove(kept.id).catch(() => {});
     }
     for (const [linkId, edge] of this.edgesById) if (edge.groupId === groupId) { edge.files.detach(); this.edgesById.delete(linkId); }
@@ -495,7 +506,8 @@ export class GroupFileDesk {
       if (no) this.refused(groupId, peer, linkId, no.id, no.why);
     } else if (frame.t === GROUP_HAVE_FRAME) {
       const ids = readGroupHave(frame, groupId);
-      if (ids) this.heard(groupId, peer, ids);
+      // Each one makes its member worth asking again: taken at the pace it may send them, not faster.
+      if (ids && this.edge(groupId, peer, linkId).haveTaken.take()) this.heard(groupId, peer, ids);
     }
   }
 
@@ -763,8 +775,10 @@ export class GroupFileDesk {
     this.letGo();
     const active = this.servingNow();
     if (active.length >= GROUP_FILE_LIMITS.serveAtOnce) { edge.busy.add(messageId); return "busy"; }
-    // One that has all its bytes waits only for the member's word that its check passed, which may come after this want.
-    if (active.some(a => a.peer === edge.peer && a.sending)) return "busy";
+    // One place per member, whatever it confirms. One that has all its bytes, lately, waits only for the member's word
+    // that its check passed, which may come after this want: that one alone is not its place.
+    const theirs = active.filter(a => a.peer === edge.peer);
+    if (theirs.length > 1 || theirs.some(a => a.sending || this.deps.now() - a.since >= GROUP_FILE_LIMITS.doneWaitMs)) return "busy";
     const today = Math.floor(this.deps.now() / 86_400_000);
     if (this.served.day !== today) this.served = { day: today, bytes: 0 };
     const reserved = active.reduce((sum, a) => sum + a.size, 0);
@@ -773,14 +787,15 @@ export class GroupFileDesk {
 
   /**
    * Transfers served now, all groups together: to whom, what each takes of the day (its size, or what it sent when that
-   * is more), and whether bytes are still to go.
+   * is more), whether bytes are still to go, and since when it has not gone further.
    */
-  private servingNow(): { peer: string; size: number; sending: boolean }[] {
-    const active: { peer: string; size: number; sending: boolean }[] = [];
+  private servingNow(): { peer: string; size: number; sending: boolean; since: number }[] {
+    const active: { peer: string; size: number; sending: boolean; since: number }[] = [];
     for (const edge of this.edgesById.values()) for (const wire of edge.serving.keys()) {
       const record = edge.files.get("out", wire);
       if (record && !transferEnded(record)) {
-        active.push({ peer: edge.peer, size: Math.max(record.file.size, edge.files.sent(wire)), sending: record.confirmed < record.file.size });
+        active.push({ peer: edge.peer, size: Math.max(record.file.size, edge.files.sent(wire)), sending: record.confirmed < record.file.size,
+          since: edge.servedMoved.get(wire)?.at ?? this.deps.now() });
       }
     }
     return active;
@@ -798,18 +813,24 @@ export class GroupFileDesk {
 
   /**
    * Served transfers that no longer count end, their places free for others (WISP 503 § Serving limits): the asker's
-   * session closed, it is not in the roster any more, or its bytes have not moved for `wantWaitMs` (the asker has moved
-   * on by then).
+   * session closed, it is not in the roster any more, its bytes have not gone further for `wantWaitMs` (the asker has
+   * moved on by then), or it has all its bytes and the member's next want has overtaken its word for `doneWaitMs`.
    */
   private letGo(): void {
     const now = this.deps.now();
+    const theirs = new Map<string, number>();
+    for (const a of this.servingNow()) theirs.set(a.peer, (theirs.get(a.peer) ?? 0) + 1);
     for (const edge of this.edgesById.values()) for (const wire of [...edge.serving.keys()]) {
       const record = edge.files.get("out", wire);
       if (!record || transferEnded(record)) continue;
       let moved = edge.servedMoved.get(wire);
-      if (!moved || moved.confirmed !== record.confirmed) edge.servedMoved.set(wire, (moved = { confirmed: record.confirmed, at: now }));
+      if (!moved) edge.servedMoved.set(wire, (moved = { confirmed: record.confirmed, at: now }));
       const gone = !edge.files.live || !this.deps.membership(edge.groupId)?.inRoster(edge.peer);
-      if (gone || now - moved.at >= GROUP_FILE_LIMITS.wantWaitMs) edge.files.cancel("out", wire);
+      const overtaken = record.confirmed === record.file.size && theirs.get(edge.peer)! > 1 && now - moved.at >= GROUP_FILE_LIMITS.doneWaitMs;
+      if (gone || overtaken || now - moved.at >= GROUP_FILE_LIMITS.wantWaitMs) {
+        edge.files.cancel("out", wire);
+        theirs.set(edge.peer, theirs.get(edge.peer)! - 1);
+      }
     }
   }
 
@@ -848,7 +869,8 @@ export class GroupFileDesk {
     const known = this.edgesById.get(linkId);
     if (known) return known;
     const edge: Edge = { linkId, groupId, peer, files: undefined as unknown as ChatFiles, serving: new Map(), servedMoved: new Map(), taking: new Map(), ended: [], have: new Set(),
-      haveSent: new RateWindow(GROUP_FILE_LIMITS.haveFrames, GROUP_FILE_LIMITS.haveWindowMs, () => this.deps.now()), busy: new Set(), gone: new Set() };
+      haveSent: new RateWindow(GROUP_FILE_LIMITS.haveFrames, GROUP_FILE_LIMITS.haveWindowMs, () => this.deps.now()),
+      haveTaken: new RateWindow(GROUP_FILE_LIMITS.haveFrames, GROUP_FILE_LIMITS.haveWindowMs, () => this.deps.now()), busy: new Set(), gone: new Set() };
     edge.files = new ChatFiles({
       // An offer names the group message it serves (`gm`), which a 1:1 chat never carries.
       send: frame => {
@@ -885,15 +907,24 @@ export class GroupFileDesk {
     const writer = await this.deps.store.write(kept.id, !kept.fresh);
     kept.fresh = false;
     const resumed = writer.offset > 0;
+    if (!resumed) kept.storedBy = edge.peer;
+    else if (kept.storedBy !== edge.peer) kept.storedBy = undefined;
     let damaged = false;
+    // Its group was left (`drop`): what the transfer still has to write (its checkpoint as the edge closes) is deleted,
+    // not stored as a file nothing knows of.
+    const gone = () => this.kept.get(kept.id) !== kept;
+    const write = async <T>(op: () => Promise<T>): Promise<T> => {
+      if (gone()) { await writer.discard(); throw new Error("No such file"); }
+      return await (kept.writing = op());
+    };
     return {
       offset: writer.offset,
-      append: bytes => writer.append(bytes),
-      flush: () => writer.flush(),
+      append: bytes => write(() => writer.append(bytes)),
+      flush: () => write(() => writer.flush()),
       // Against the author's digest, read back from storage, not the holder's word: a holder can withhold a file, never
       // serve another one.
       verify: async () => {
-        damaged = (await writer.digest()) !== kept.meta.d;
+        damaged = (await write(() => writer.digest())) !== kept.meta.d;
         const want = this.wants.get(kept.id);
         if (damaged && want) want.why = "damaged";
         return !damaged;
@@ -902,8 +933,12 @@ export class GroupFileDesk {
       // came is kept for the next holder.
       discard: () => {
         // Whole from this holder and damaged: its bytes are not the author's, and it is not asked for them again.
-        if (damaged) { kept.stored = 0; if (resumed) kept.fresh = kept.unclear = true; else kept.damaged.add(edge.peer); }
-        return (kept.idle = (damaged || kept.dropped === record.id ? writer.discard() : writer.close()).catch(() => {}));
+        if (damaged) {
+          kept.stored = 0;
+          if (resumed && kept.storedBy !== edge.peer) kept.fresh = kept.unclear = true; else kept.damaged.add(edge.peer);
+          kept.storedBy = undefined;
+        }
+        return (kept.idle = (damaged || kept.dropped === record.id || gone() ? writer.discard() : writer.close()).catch(() => {}));
       },
     };
   }
@@ -925,6 +960,9 @@ export class GroupFileDesk {
   private transferChanged(edge: Edge, record: FileTransferRecord, transferred: number): void {
     if (transferEnded(record)) this.transferOver(edge, record);
     if (record.direction === "out") {
+      // Only a byte confirmed for the first time is progress: one accepted back and forth stays where it was.
+      const moved = edge.servedMoved.get(record.id);
+      if (moved && record.confirmed > moved.confirmed) edge.servedMoved.set(record.id, { confirmed: record.confirmed, at: this.deps.now() });
       if (transferEnded(record) && edge.serving.has(record.id)) {
         // What was sent to a member counts toward the day's serving, done or not, and whatever it confirmed.
         const today = Math.floor(this.deps.now() / 86_400_000);

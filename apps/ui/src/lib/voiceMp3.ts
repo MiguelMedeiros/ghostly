@@ -4,10 +4,10 @@ import { decodeToMono } from "./voiceDecode";
 /**
  * A voice message converted to MP3, here, when asked: Web Audio decodes it on the page (it has no decoder in a
  * worker), and a worker encodes it, so a fifteen-minute note does not hold the page for the seconds it takes.
- * Throws when this device cannot decode the recording.
+ * Throws when this device cannot decode the recording (or it plays longer than `describedMs`, its description).
  */
-export async function voiceToMp3(recording: Blob): Promise<Blob> {
-  const samples = await decodeToMono(recording, MP3_SAMPLE_RATE);
+export async function voiceToMp3(recording: Blob, describedMs?: number): Promise<Blob> {
+  const samples = await decodeToMono(recording, MP3_SAMPLE_RATE, describedMs);
   if (!samples) throw new Error("This device cannot decode the recording");
   const worker = new Worker(new URL("./voiceMp3.worker.ts", import.meta.url), { type: "module" });
   try {

@@ -758,6 +758,22 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     expect(fetches).toEqual([]);
   });
 
+  it("Allow and open puts the focus in the question of which chat, and back on the app's Open once it is closed", async () => {
+    engineWith({ installed: false, removed: false });
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    await user.click(await screen.findByTestId("built-in-app-open"));
+    const screenOf = await screen.findByTestId("app-install");
+    await user.click(await within(screenOf).findByTestId("app-install-confirm"));
+    const picker = await screen.findByTestId("app-chat-picker");
+    await screen.findByTestId("installed-app");
+    // The row behind the question never takes the focus from it.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(picker).toContainElement(document.activeElement as HTMLElement);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByTestId("app-chat-picker")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("installed-app-open")).toHaveFocus());
+  });
+
   it("Cancel on its first open installs nothing, and it stays offered", async () => {
     engineWith({ installed: false, removed: false });
     const { user } = renderApp(<Apps />, { route: "/apps" });

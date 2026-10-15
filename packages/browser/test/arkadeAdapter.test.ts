@@ -257,7 +257,7 @@ describe("preparing an Ark payment (the review)", () => {
     await expect(adapter.prepare(target({ network: "mutinynet" }), 100, 10)).rejects.toThrow("does not match this wallet");
     await expect(adapter.prepare(target({ method: "bark" }), 100, 10)).rejects.toThrow("does not match this wallet");
     await expect(adapter.prepare(target({ address: bob(undefined, "tark", "c".repeat(64)) }), 100, 10)).rejects.toThrow("another provider or network");
-    await expect(adapter.prepare(target({ address: bob(undefined, "ark") }), 100, 10)).rejects.toThrow("another provider or network");
+    await expect(adapter.prepare(target({ address: bob(undefined, "ark") }), 100, 10)).rejects.toThrow("That is not an Ark address on signet");
     await expect(adapter.prepare(target(), 1.5, 10)).rejects.toThrow("whole amount");
     expect(server.submits).toEqual([]);
   });

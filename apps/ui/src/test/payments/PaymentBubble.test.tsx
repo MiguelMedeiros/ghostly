@@ -5,7 +5,7 @@ import type { LinkView, PaymentView, WalletView } from "@ghostly/browser/shared/
 import { PaymentBubble } from "../../components/PaymentBubble";
 import { fakeEngine, linkView, paymentView } from "../fakeEngine";
 import { renderApp } from "../render";
-import { lightningSource, MAINNET_INVOICE, mint, REAL_MINT, REGTEST_INVOICE, reviewOf, SIGNET_INVOICE, target, TEST_MINT, TESTNET_INVOICE } from "./fixtures";
+import { lightningSource, liveMainnetInvoice, MAINNET_INVOICE, mint, REAL_MINT, REGTEST_INVOICE, reviewOf, SIGNET_INVOICE, target, TEST_MINT, TESTNET_INVOICE } from "./fixtures";
 import { choose, listOf, readOption } from "../select";
 
 // covers: payments.chat.review, payments.chat.method-off, payments.cashu.request, payments.cashu.reclaim, payments.cashu.test-sats, payments.lightning.request, payments.bitcoin.send, payments.usdt.send, payments.external, payments.chat.networks
@@ -553,6 +553,21 @@ describe("paying with another wallet", () => {
     await user.click(screen.getByRole("button", { name: "Pay with another wallet" }));
     expect(screen.getByText("tb1qpayee")).toBeInTheDocument();
     expect(screen.getByText(/Paid from any Bitcoin wallet.*after one confirmation/)).toBeInTheDocument();
+  });
+
+  it("hands another wallet only an invoice for the amount shown, and beside an address only of its network", async () => {
+    // Kept from before the engine checked it: an invoice for another amount, or of real money beside a test address.
+    const onchain = target({ method: "bitcoin", network: "signet", provider: "onchain", address: "tb1qpayee" });
+    const { user, unmount } = show(incomingRequest({ amount: 1_000, target: onchain, invoice: liveMainnetInvoice(100_000) }));
+    await user.click(screen.getByRole("button", { name: "Pay with another wallet" }));
+    expect(screen.getByTestId("payment-external-link").getAttribute("href")).toBe("bitcoin:tb1qpayee?amount=0.00001");
+    unmount();
+    const same = show(incomingRequest({ amount: 1_000, target: onchain, invoice: liveMainnetInvoice(1_000) }));
+    await same.user.click(screen.getByRole("button", { name: "Pay with another wallet" }));
+    expect(screen.getByTestId("payment-external-link").getAttribute("href")).not.toContain("lightning=");
+    same.unmount();
+    show(incomingRequest({ amount: 1_000, invoice: liveMainnetInvoice(100_000) }));
+    expect(screen.queryByRole("button", { name: "Pay with another wallet" })).not.toBeInTheDocument();
   });
 
   it("has nothing to show for an ecash-only request", () => {

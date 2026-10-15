@@ -89,6 +89,9 @@ function parseCommit(raw: unknown): GroupCommit | null {
   return { v: 1, g: c.g, e: c.e as number, p: c.p, k: c.k as CommitKind, m, by: c.by, ...(c.s !== undefined ? { s: c.s as string } : {}), ts: c.ts as number, c: c.c, sig: c.sig };
 }
 
+/** Only shape, no signature or parent: a commit as kept, its fields alone (anything else it carried dropped); null when malformed. */
+export const parseGroupCommit = parseCommit;
+
 /** The roster a commit must carry, given the previous one; null when the change is not allowed. */
 export function expectedRoster(previous: Roster | null, kind: CommitKind, by: string, subject?: string): Roster | null {
   if (kind === "create") return previous === null && !subject ? [[by, "admin"]] : null;

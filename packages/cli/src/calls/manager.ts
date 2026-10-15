@@ -82,6 +82,13 @@ export const EARLY_ANSWER_MS = 30_000;
  */
 export const CALL_PACE_MS = 2_000;
 
+/**
+ * At most this many early answers are being made or held at once, and one being made per chat: a call that ends as
+ * its early answer is made closes it only once made (up to HOST_GATHER_MS later). Past either, the call rings without
+ * one, and its answer makes its own connection (or it gets one once the chat's is made).
+ */
+export const MAX_EARLY_ANSWERS = 4;
+
 interface Call {
   id: string;
   chat: string;
@@ -123,7 +130,7 @@ interface Call {
 }
 
 /** An early answer being made; `claimed` once the call's answer waits for it, which then takes it itself. */
-interface Making { done: Promise<EarlyAnswer | null>; claimed: boolean }
+interface Making { chat: string; done: Promise<EarlyAnswer | null>; claimed: boolean }
 
 /** Auto-answer, kept in the profile's `calls.json`: every chat, or the listed ones, at a rate. */
 export interface AutoAnswer { on: boolean; from: string[]; rate: CallRate }
@@ -138,6 +145,8 @@ export class CallManager {
   private readonly clearing = new Map<string, ReturnType<typeof setTimeout>>();
   /** Per chat: when this side's last call there ended before it was answered (`CALL_PACE_MS`). */
   private readonly unansweredAt = new Map<string, number>();
+  /** The early answers being made, those of ended calls too (MAX_EARLY_ANSWERS). */
+  private readonly makings = new Set<Making>();
   private auto: AutoAnswer;
   private readonly configPath: string;
   private stopping = false;
@@ -324,11 +333,16 @@ export class CallManager {
    */
   private prepare(call: Call): void {
     if (this.host.answers === false || call.ended || call.state !== "ringing") return;
+    this.stopEarly(call);
     call.earlyTimer = setTimeout(() => this.prepare(call), this.host.earlyAnswerMs ?? EARLY_ANSWER_MS);
     call.earlyTimer.unref?.();
     if (call.making) return;
+    // Bounded (MAX_EARLY_ANSWERS): a contact that rings and hangs up over and over makes one at a time.
+    const held = [...this.calls.values()].filter((c) => c !== call && c.early).length;
+    if (this.makings.size + held >= MAX_EARLY_ANSWERS || [...this.makings].some((m) => m.chat === call.chat)) return;
     const offer = call.offer!;
     const making: Making = {
+      chat: call.chat,
       done: this.stack().then((stack) => EarlyAnswer.open(stack, offer, {
         iceServers: this.host.engine.getState().settings?.iceServers ?? [],
         log: (line) => process.stderr.write(`ghostly: call ${call.id}: ${line}\n`),
@@ -341,13 +355,18 @@ export class CallManager {
       claimed: false,
     };
     call.making = making;
+    this.makings.add(making);
     void making.done.then((early) => {
+      this.makings.delete(making);
       if (call.making === making) call.making = null;
-      if (making.claimed || !early) return;
-      // The call ended, or was answered on the one made before, while this one was made.
-      if (call.ended || call.state !== "ringing") { early.close(); return; }
-      call.early?.close();
-      call.early = early;
+      if (!making.claimed && early) {
+        // The call ended, or was answered on the one made before, while this one was made.
+        if (call.ended || call.state !== "ringing") early.close();
+        else { call.early?.close(); call.early = early; }
+      }
+      // A newer call in this chat rang without one while this was made: its own is made now.
+      const next = this.byChat(making.chat);
+      if (next && next !== call && next.direction === "in" && !next.making && !next.early) this.prepare(next);
     });
   }
 
