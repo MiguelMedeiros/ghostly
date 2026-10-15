@@ -39,6 +39,8 @@ export interface X401SdJwtVc {
   claims: Record<string, unknown>;
   /** The claims a presentation may leave out: one path per disclosure. */
   disclosable: X401ClaimPath[];
+  /** The disclosure that reveals each of `disclosable`, at the same index. */
+  disclosedBy: string[];
 }
 
 export type X401CredentialReading = { ok: true; value: X401SdJwtVc } | { ok: false; reason: string };
@@ -107,6 +109,7 @@ export function readX401SdJwtVc(text: string): X401CredentialReading {
   for (const time of ["iat", "exp"] as const) if (payload[time] !== undefined && !Number.isSafeInteger(payload[time])) return refuse(`${time} is not a time`);
 
   const byDigest = new Map<string, unknown[]>();
+  const textOf = new Map<unknown[], string>();
   for (const disclosure of rest) {
     let entry: unknown;
     try { entry = json(disclosure); } catch { return refuse("a disclosure is not base64url JSON"); }
@@ -116,12 +119,14 @@ export function readX401SdJwtVc(text: string): X401CredentialReading {
     const digest = toBase64Url(sha256(utf8Encode(disclosure)));
     if (byDigest.has(digest)) return refuse("a disclosure is given twice");
     byDigest.set(digest, entry);
+    textOf.set(entry, disclosure);
   }
 
   // Each disclosure goes where its digest is: an object's `_sd`, or an array's `{"...": digest}`. Digests no
   // disclosure answers are decoys, and stay hidden.
   const used = new Set<string>();
-  const disclosable: X401ClaimPath[] = [];
+  const disclosable: { path: X401ClaimPath; by: string }[] = [];
+  const disclose = (path: X401ClaimPath, entry: unknown[]) => disclosable.push({ path, by: textOf.get(entry)! });
   let problem: string | undefined;
   const take = (digest: unknown): unknown[] | undefined => {
     if (typeof digest !== "string") { problem ??= "a digest is not a string"; return undefined; }
@@ -137,7 +142,7 @@ export function readX401SdJwtVc(text: string): X401CredentialReading {
       for (const item of node) {
         if (isObject(item) && Object.keys(item).length === 1 && "..." in item) {
           const entry = take(item["..."]);
-          if (entry?.length === 2) { disclosable.push([...path, out.length]); out.push(resolve(entry[1], [...path, out.length], depth + 1)); }
+          if (entry?.length === 2) { disclose([...path, out.length], entry); out.push(resolve(entry[1], [...path, out.length], depth + 1)); }
           else if (entry) problem ??= "an array element's disclosure has a name";
         } else out.push(resolve(item, [...path, out.length], depth + 1));
       }
@@ -153,7 +158,7 @@ export function readX401SdJwtVc(text: string): X401CredentialReading {
       if (entry.length !== 3) { problem ??= "an object member's disclosure has no name"; continue; }
       const name = entry[1] as string;
       if (Object.prototype.hasOwnProperty.call(out, name)) { problem ??= `${name} is given twice`; continue; }
-      disclosable.push([...path, name]);
+      disclose([...path, name], entry);
       out[name] = resolve(entry[2], [...path, name], depth + 1);
     }
     return out;
@@ -162,13 +167,14 @@ export function readX401SdJwtVc(text: string): X401CredentialReading {
   if (problem) return refuse(problem);
   if (used.size !== byDigest.size) return refuse("a disclosure is named by no digest of the credential");
   const claims = Object.fromEntries(Object.entries(all).filter(([key]) => !REGISTERED.has(key)));
+  const kept = disclosable.filter(({ path }) => typeof path[0] !== "string" || !REGISTERED.has(path[0]));
   return {
     ok: true,
     value: {
       format: "dc+sd-jwt", jwt, disclosures: rest, type: payload.vct, issuer: payload.iss, holder,
       ...(payload.iat !== undefined ? { issuedAt: payload.iat as number } : {}),
       ...(payload.exp !== undefined ? { expiresAt: payload.exp as number } : {}),
-      claims, disclosable: disclosable.filter((path) => typeof path[0] !== "string" || !REGISTERED.has(path[0])),
+      claims, disclosable: kept.map(({ path }) => path), disclosedBy: kept.map(({ by }) => by),
     },
   };
 }
