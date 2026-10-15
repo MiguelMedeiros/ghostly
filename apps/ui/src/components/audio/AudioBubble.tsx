@@ -227,9 +227,11 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
               type="button"
               data-testid="audio-play"
               aria-label={state === "playing" ? t("chat.audio.pause") : t("chat.audio.play")}
-              disabled={!canPlay || !!problem || state === "loading"}
-              onClick={() => (state === "playing" ? pause() : void play())}
-              className="w-9 h-9 flex items-center justify-center rounded-full bg-black/20 border-none text-text-primary/90 cursor-pointer disabled:opacity-40 disabled:cursor-default hover:bg-black/30"
+              // Not disabled while it loads: a focused button that is loses the focus to the page (as VoiceBubble).
+              disabled={!canPlay || !!problem}
+              aria-disabled={state === "loading" || undefined}
+              onClick={() => (state === "loading" ? undefined : state === "playing" ? pause() : void play())}
+              className="w-9 h-9 flex items-center justify-center rounded-full bg-black/20 border-none text-text-primary/90 cursor-pointer disabled:opacity-40 disabled:cursor-default aria-disabled:opacity-40 aria-disabled:cursor-default hover:bg-black/30"
             >
               {state === "playing" ? (
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
