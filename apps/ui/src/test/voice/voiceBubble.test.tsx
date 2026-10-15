@@ -184,6 +184,30 @@ describe("the voice bubble's layout", () => {
   });
 });
 
+describe("a voice message played from the keyboard", () => {
+  it("its play button keeps the focus while the recording loads", async () => {
+    // A focused button that turns disabled loses the focus to the page in a browser: Space then scrolled the chat.
+    let give: (blob: Blob) => void = () => {};
+    vi.mocked(servicesPlatform!.getFile).mockImplementation(() => new Promise((resolve) => { give = resolve; }));
+    show(voice());
+    const button = screen.getByTestId("voice-play");
+    button.focus();
+    fireEvent.click(button);
+    await flush();
+    expect(screen.getByTestId("voice-bubble")).toHaveAttribute("data-state", "loading");
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    // Pressed again meanwhile, it reads nothing more.
+    fireEvent.click(button);
+    expect(servicesPlatform!.getFile).toHaveBeenCalledTimes(1);
+    give(new Blob([recording("chromium.webm")], { type: "audio/webm" }));
+    for (let i = 0; i < 4; i++) await flush();
+    expect(screen.getByTestId("voice-bubble")).toHaveAttribute("data-state", "playing");
+    expect(button).not.toHaveAttribute("aria-disabled");
+    expect(button).toHaveFocus();
+  });
+});
+
 describe("a voice message right after a start", () => {
   it("does not play until the engine has put its transfers back, then shows where its own stands", async () => {
     const message = voice();
