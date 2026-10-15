@@ -208,6 +208,13 @@ describe("a voice message played from the keyboard", () => {
   });
 });
 
+describe("a voice message's position slider", () => {
+  it("says where it is in the app's language", () => {
+    renderApp(<MessageBubble message={voice()} peerPubKey="peer" />, { language: "pt" });
+    expect(screen.getByTestId("voice-waveform")).toHaveAttribute("aria-valuetext", "0:00 de 0:04");
+  });
+});
+
 describe("a voice message right after a start", () => {
   it("does not play until the engine has put its transfers back, then shows where its own stands", async () => {
     const message = voice();

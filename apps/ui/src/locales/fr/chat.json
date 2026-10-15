@@ -230,6 +230,7 @@
     "noRoom": "Espace insuffisant : {{size}} libres",
     "noRoomToPlay": "Pas assez d'espace disque libre pour le lire ici. Téléchargez-le.",
     "notYet": "La lecture est possible une fois l'envoi terminé.",
+    "positionOf": "{{position}} sur {{duration}}",
     "wantsToSend": "{{name}} veut l'envoyer · {{size}} libres"
   },
   "menu": {
@@ -440,6 +441,7 @@
     "record": "Enregistrer un message vocal",
     "recordHint": "Maintenez pour enregistrer, ou cliquez pour le mode mains libres",
     "recorded": "Enregistré {{time}}",
+    "recording": "Enregistrement en cours",
     "sent": "Message vocal envoyé",
     "slideCancel": "Glissez pour annuler",
     "speed": "Vitesse {{speed}}",
