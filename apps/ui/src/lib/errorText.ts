@@ -144,6 +144,9 @@ const RULES: readonly Rule[] = [
   { match: /^Could not read the file: [\s\S]+$/, key: "errors.files.unreadable", next: "errors.files.unreadableNext", detail: true },
   // A large file this device had no room to copy before sending it (platform/services.ts): nothing was kept to send again.
   exact("Not enough space on this device to send it", "errors.files.noRoomToSend", "errors.files.noRoomToSendNext"),
+  // A file forwarded that is still arriving here, or whose bytes are gone (engine/forwards.ts `copyForForward`).
+  exact("The file has not arrived yet", "errors.files.notArrived", "errors.files.notArrivedNext"),
+  exact("The file is not on this device any more", "errors.files.notHere", "errors.files.notHereNext"),
   exact("This device cannot decode the recording", "errors.files.cannotDecodeRecording"),
   exact("The video took too long", "errors.files.videoTooSlow"),
   { match: HOLD_FULL_ITEMS, key: "errors.hold.fullItems", next: "errors.hold.fullNext" },
