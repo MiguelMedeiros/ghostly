@@ -917,6 +917,37 @@ describe("DHT delivery: the relays' request budget", () => {
     await h.bob.stop();
   });
 
+  it("reads again when the budget frees a request after it held a read back, not a whole poll later", async () => {
+    // A chat in the background, not live: its contact's mailbox every 30 s, and the read at 30 s held back for 5 s.
+    const h = setup({ pollMs: null, mode: "stream", bobCredentials: pinned() }); await h.bob.start();
+    await vi.advanceTimersByTimeAsync(0);
+    const before = h.transport.resolve.mock.calls.length;
+    h.transport.resolve.mockRejectedValueOnce(held(5_000));
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(h.transport.resolve.mock.calls.length).toBe(before + 1);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(h.transport.resolve.mock.calls.length, "no read while the budget is known to be spent").toBe(before + 1);
+    // The contact may have chosen DHT only meanwhile: its envelope is read once the budget frees, not at 60 s.
+    await vi.advanceTimersByTimeAsync(1_100);
+    expect(h.transport.resolve.mock.calls.length).toBeGreaterThan(before + 1);
+    await h.bob.stop();
+  });
+
+  it("a read the budget answered from the packet read before goes again once it frees a request", async () => {
+    const h = setup({ pollMs: null, mode: "stream", bobCredentials: pinned() });
+    let heldFor: number | undefined;
+    Object.assign(h.transport, { readHeldBackFor: () => heldFor });
+    await h.bob.start(); await vi.advanceTimersByTimeAsync(0);
+    const before = h.transport.resolve.mock.calls.length;
+    h.transport.resolve.mockImplementationOnce(async () => { heldFor = 5_000; return null; });
+    await vi.advanceTimersByTimeAsync(30_000);
+    heldFor = undefined;
+    expect(h.transport.resolve.mock.calls.length).toBe(before + 1);
+    await vi.advanceTimersByTimeAsync(5_100);
+    expect(h.transport.resolve.mock.calls.length).toBeGreaterThan(before + 1);
+    await h.bob.stop();
+  });
+
   it("a receipt forces envelopes with a text's backoff, and none once the contact's newer envelope no longer carries the text", async () => {
     const h = setup(); await h.bob.start();
     // A text with its whole lifetime ahead: a sender that sends it anew keeps this deadline.

@@ -235,6 +235,12 @@ export class DhtDelivery {
   private unsealedOut: boolean;
   /** Until when the relays' request budget holds publications back: what is due then goes at once. */
   private budgetUntil = 0;
+  /**
+   * Until when it held this side's last read of the contact's mailbox back: the read goes again then, not at the next
+   * poll. A chat in the background reads every 30 s, and one held back while its link was redialling read the contact
+   * 60 s after its live link dropped, the chat "On DHT · retrying live" all along while the contact had chosen DHT only.
+   */
+  private readHeldUntil = 0;
   private errors: Partial<Record<"publish" | "read", string>> = {};
   /** When the device's network last came back (`networkBack`): a read or publication started before failed for want of it. */
   private networkBackAt = -Infinity;
@@ -848,7 +854,10 @@ export class DhtDelivery {
         if (!this.state.peerPinned && (!found || Date.now() - this.pinnedProbeAt < PINNED_PROBE_MS)) return;
         if (!this.state.peerPinned) this.pinnedProbeAt = Date.now();
       }
-      const packet = found = await this.options.transport.resolve(box === "pinned" ? pinned!.peerAddress : this.peerAddress, options);
+      const address = box === "pinned" ? pinned!.peerAddress : this.peerAddress;
+      let packet: SignedPacket | null;
+      try { packet = found = await this.options.transport.resolve(address, options); }
+      finally { this.readHeld(this.options.transport.readHeldBackFor?.(address)); }
       if (!this.running) return;
       const got = packet ? await this.receive(packet, box) : "none";
       if (got !== "none" && !(box === "invite" && !before && this.state.peerPinned)) return;
@@ -899,8 +908,9 @@ export class DhtDelivery {
       // which may pin the contact (the envelope is sealed to it) or take a text (it carries the receipt).
       if (!this.options.credentials.peerKey && !this.options.credentials.expectedPeerKey && !this.state.sequence) await this.publishOnTick();
       const readAt = Date.now();
+      this.readHeldUntil = 0;
       try { await this.read(background, signal); if (!this.running) return; delete this.errors.read; }
-      catch (error) { if (!isDiscoveryBudgetError(error) && readAt >= this.networkBackAt) this.errors.read = `Could not read DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
+      catch (error) { if (isDiscoveryBudgetError(error)) this.readHeld(error.retryInMs); else if (readAt >= this.networkBackAt) this.errors.read = `Could not read DHT delivery: ${error instanceof Error ? error.message : String(error)}`; }
       // The contact says it left DHT only: nothing waits on its mailbox any more.
       if (this.state.peerMode !== "dht") this.signalReads = 0;
       await this.publishOnTick();
@@ -910,6 +920,12 @@ export class DhtDelivery {
     if (!this.running) return;
     if (this.tickAgain) { void this.tick(); return; }
     this.schedule();
+  }
+  /** The budget held a read back for `ms` (`readHeldUntil`); the soonest of the reads of one tick wins. */
+  private readHeld(ms: number | undefined): void {
+    if (ms === undefined || !Number.isFinite(ms) || ms <= 0) return;
+    const at = Date.now() + ms;
+    this.readHeldUntil = this.readHeldUntil > Date.now() ? Math.min(this.readHeldUntil, at) : at;
   }
   private async publishOnTick(): Promise<void> {
     const publishAt = Date.now();
@@ -948,7 +964,9 @@ export class DhtDelivery {
     // So does the envelope sealed to a contact just pinned (`resealDue`), live too, where the next read is minutes away;
     // after a failed one, at the chat's pace, and never before the budget frees a request.
     const due = this.reactionsDue || (this.resealDue && !this.errors.publish) ? Math.max(0, this.lastPublish + 4_000 - Date.now(), held) : Infinity;
-    this.timer = setTimeout(() => void this.tick(), Math.min(held > 0 ? Math.min(this.pollMs, held) : this.pollMs, due));
+    // So does a read it held back, never sooner than a second after.
+    const readHeld = this.readHeldUntil > 0 ? Math.max(1_000, this.readHeldUntil - Date.now()) : Infinity;
+    this.timer = setTimeout(() => void this.tick(), Math.min(held > 0 ? Math.min(this.pollMs, held) : this.pollMs, due, readHeld));
   }
 }
 export const DHT_TEXT_REFUSED = "Your contact's app does not accept text over the DHT. It is sent when you are live.";
