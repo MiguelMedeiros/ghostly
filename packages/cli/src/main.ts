@@ -558,7 +558,11 @@ async function stopDaemon(g: Globals, client: DaemonClient, seconds: number): Pr
   const running = () => lockOwner(g.paths) === pid || processAlive(pid);
   const gone = async () => {
     const until = Date.now() + seconds * 1000;
-    while (running() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100));
+    while (running()) {
+      const left = until - Date.now();
+      if (left <= 0) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(100, left)));
+    }
     return !running();
   };
   if (await gone()) return pid;
@@ -595,20 +599,29 @@ async function startDetached(g: Globals, seconds: number) {
   const log = openSync(g.paths.log, "a", 0o600);
   const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "daemon", "--home", g.home, "--profile", g.profile], { detached: true, stdio: ["ignore", log, log] });
   child.unref();
+  const spawned = { error: null as Error | null };
+  // A spawn that fails outright (EAGAIN, EMFILE) sets `exitCode` to the errno before the "error" event, so the loop below
+  // ends on its own; the listener swallows the otherwise uncaught event and keeps the cause for the message.
+  child.once("error", (error) => { spawned.error = error; });
   const until = Date.now() + seconds * 1000;
   let client: DaemonClient | null = null;
-  while (!client && Date.now() < until) {
-    if (child.exitCode !== null) break;
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    client = await connectDaemon(g.paths.socket, 500);
+  // Try at once, then every 200 ms, never past `until`: a small `--timeout` gives up near-immediately instead of always
+  // waiting one 200 ms poll first (the first try finds no socket yet and returns at once). A child that exited or was
+  // killed (SIGABRT on a V8 out-of-memory, the OOM killer) ends the wait too, instead of polling to the deadline.
+  while (child.exitCode === null && child.signalCode === null && !spawned.error) {
+    const left = until - Date.now();
+    if (left <= 0) break;
+    client = await connectDaemon(g.paths.socket, Math.min(500, left));
+    if (client) break;
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(200, until - Date.now()))));
   }
   if (!client) {
     heldBy(g, child.pid); // another process took the profile between the check and the child's start
     // Alive still: it is starting (a large profile takes seconds), not failed, and the profile is its own now.
-    if (child.exitCode === null && child.pid !== undefined && processAlive(child.pid)) {
+    if (child.exitCode === null && child.signalCode === null && child.pid !== undefined && processAlive(child.pid)) {
       throw new CliError("timeout", `The daemon (process ${child.pid}) is still starting; ghostly daemon status shows when it is up`, { pid: child.pid, log: g.paths.log });
     }
-    throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`);
+    throw new CliError("engine", spawned.error ? `The daemon could not be spawned: ${spawned.error.message}` : `The daemon did not start; see ${g.paths.log}`);
   }
   client.close();
   return { daemon: "started", profile: g.profile, pid: child.pid, socket: g.paths.socket, log: g.paths.log };
