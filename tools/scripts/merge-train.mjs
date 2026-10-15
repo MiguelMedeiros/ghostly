@@ -7,7 +7,9 @@
 //   latest `labeled` event, so taking the label off and on again goes to the back), then by number. A draft, a fork, or a pull request with
 //   neither CI Success nor the draft's fast tier (CI Success (draft)) green on its last commit, or with CI Success red
 //   there, waits without losing its place. A green run of CI that skipped jobs the pull request's own files turn on
-//   (ci.yml planned it from other files: a run for another base) does not count; the run before it does.
+//   (ci.yml planned it from other files: a run for another base) does not count; the run before it does. Nor does a
+//   green pull request run that is not its own: from another branch, from before its base was changed, or while another
+//   pull request from its branch into another base holds the same head (that base's ci.yml ran it).
 // - One batch per base at a time: up to 12 pull requests from the front of the line, built on the base's tip with one
 //   squash commit per pull request, in order ("<title> (#n)"). One that conflicts drops out: `queue:conflict`, one
 //   comment, `queue` taken off (`queue:conflict` comes off once it has `queue` back, as does `queue:failed`). The
@@ -105,9 +107,20 @@ export function ciRun(runs, repo, sha) {
   return ciRuns(runs, repo, sha)[0] ?? null;
 }
 
-/** Every run of this repository's ci.yml on exactly that commit, newest (by id) first. */
+/**
+ * Every run of this repository's ci.yml on exactly that commit, newest (by id) first. A pull request from a fork runs
+ * the ci.yml of the base it targets, whatever that base is, so its runs are left out.
+ */
 export const ciRuns = (runs, repo, sha) =>
-  runs.filter((r) => r.path?.split("@")[0] === CI_WORKFLOW && r.repository?.full_name === repo && r.head_sha === sha).sort((a, b) => b.id - a.id);
+  runs
+    .filter((r) => r.path?.split("@")[0] === CI_WORKFLOW && r.repository?.full_name === repo && r.head_sha === sha && (!prRun(r) || r.head_repository?.full_name === repo))
+    .sort((a, b) => b.id - a.id);
+
+/**
+ * A run of a pull request event: it runs ci.yml (and the tests) from the pull request's merge with the base it targeted
+ * then, not from its own commit as a push does.
+ */
+export const prRun = (run) => !!run?.event?.startsWith("pull_request");
 
 /** The fast tier on one commit, from its draft gate (the newest by id): "success", "failure", "pending" or "none". */
 export function draftState(jobs) {
@@ -229,6 +242,8 @@ export function waiting(pr) {
   // The fast tier is enough to board: the batch's full CI is the gate.
   if (pr.ci === "success" || pr.fast === "success") return null;
   if (pr.fast === "failure") return "CI Success (draft) is red on its last commit and CI Success has not passed on it yet";
+  if (pr.shared?.length) return `another pull request from its branch (${pr.shared.map((o) => `#${o.number} into \`${o.base}\``).join(", ")}) ran CI on the same commit with that base's ci.yml; close it and push a new commit`;
+  if (pr.retargeted) return "its green CI run on its last commit ran before its base was changed; push a new commit, or close and reopen it, for a run against this base";
   if (pr.misplanned) return "the green CI run on its last commit skipped jobs that its changes need (a run planned for another base); run CI on it again";
   return "CI Success has not passed on its last commit yet";
 }
@@ -405,15 +420,45 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     if (p) p.misplanned = true;
     return false;
   };
+  // And a green run of a pull request event counts only if it is this pull request's own (a batch's too): its ci.yml
+  // and tests come from the merge with the base it ran for, so a second pull request from the same head into another
+  // base (an epic whose ci.yml or tests a writer changed), or this one before its base was changed, ran other checks
+  // under the same names, and nothing in its jobs can tell. Its branch must be this pull request's, the run newer than
+  // the last change of base, and no other pull request from that branch into another base may hold the same head
+  // (closed ones too: their runs stay). A run of another event runs the commit's own ci.yml. A red run is not asked.
+  const sharing = new Map();
+  const own = async (p, jobs, run) => {
+    if (!p || !prRun(run) || ciState(jobs) !== "success") return true;
+    let why = null;
+    if (run.head_branch !== p.branch) why = `it ran for \`${run.head_branch}\``;
+    else {
+      p.events ??= await gh.events(p.number);
+      const moved = p.events.filter((e) => e.event === "base_ref_changed").map((e) => Date.parse(e.created_at));
+      if (moved.length && !(Date.parse(run.created_at) > Math.max(...moved))) {
+        why = "it ran before the base was changed";
+        p.retargeted = true;
+      } else {
+        if (!sharing.has(p.number)) sharing.set(p.number, (await gh.headPulls(p.branch)).filter((o) => o.number !== p.number && o.base !== base && o.sha === p.sha));
+        p.shared = sharing.get(p.number);
+        if (p.shared.length) why = `${p.shared.map((o) => `#${o.number}`).join(", ")} from the same head into another base ran it too`;
+      }
+    }
+    if (why) say(`#${p.number}: a green CI run on ${p.sha.slice(0, 12)} is not its own (${why}), so it does not count.`);
+    return !why;
+  };
+  const counts = (p) => {
+    const plan = planned(p);
+    return async (jobs, run) => (await own(p, jobs, run)) && plan(jobs, run);
+  };
 
   const open = await gh.pulls(base);
   const batches = open.filter((p) => isBatch(p, base, login)).sort((a, b) => a.number - b.number);
   const queued = open.filter((p) => !isBatch(p, base, login) && (inLine(p.labels) || also.includes(p.number)));
   for (const p of queued) {
-    const events = await gh.events(p.number);
+    const events = (p.events = await gh.events(p.number));
     p.queuedAt = queuedAt(events, p.createdAt);
     p.priority = p.labels.includes(LABEL.priority);
-    p.ci = ciState(await gh.ciJobs(p.sha, planned(p)));
+    p.ci = ciState(await gh.ciJobs(p.sha, counts(p)));
     // The fast tier on the same head: read only when CI Success alone does not decide.
     if (p.ci !== "success" && p.ci !== "failure") p.fast = draftState(await gh.draftJobs(p.sha));
     p.sticky = (await gh.comments(p.number)).find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
@@ -609,7 +654,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const state = readState(batch.body);
     const members = state.prs.map((s) => (gone.has(s.number) ? undefined : byNumber.get(s.number)));
     const next = state.next.map((n) => byNumber.get(n)).filter((p) => p && !gone.has(p.number) && !waiting(p));
-    const ci = ciState(await gh.ciJobs(batch.sha, planned(batch)));
+    const ci = ciState(await gh.ciJobs(batch.sha, counts(batch)));
     const tip = await gh.branchSha(base);
     const baseCi = ci === "failure" ? ciState(await gh.ciJobs(state.baseSha, planned(null))) : null;
     const stay = { number: batch.number, members };
@@ -1082,6 +1127,8 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     /** Every `epic/*` branch: the bases a Mac serves besides `dev`. */
     epicBranches: async () => (await must("GET", "/git/matching-refs/heads/epic/")).map((r) => r.ref.replace("refs/heads/", "")),
     events: (n) => all(`/issues/${n}/events`),
+    /** Every pull request from this repository's branch `branch`, open or closed, into any base. */
+    headPulls: async (branch) => (await all(`/pulls?state=all&head=${encodeURIComponent(`${repo.split("/")[0]}:${branch}`)}`)).map(pull),
     /**
      * The jobs of CI's own run on a commit (its latest attempt; see `ciRun`), or none when CI has no run there. A token
      * that may not read Actions (a queue app without "Actions: read") gets the commit's check runs from GitHub Actions
