@@ -24,6 +24,8 @@ interface StoredX401 { keys: StoredHolderKey[]; credentials: StoredX401Credentia
 
 export interface X401CredentialView {
   id: string; label: string; format: "dc+sd-jwt"; type: string; issuer: string; addedAt: number; expiresAt: number | null;
+  /** From the credential's `nbf`: no verifier is shown it before then. */
+  notBefore: number | null;
   /** The paths of its claims, and of those a presentation may leave out. */
   claims: X401ClaimPath[]; disclosable: X401ClaimPath[];
   /** The claims' values: only when asked for. */
@@ -125,6 +127,7 @@ export class X401Credentials {
     const claims = read.ok ? read.value.claims : {};
     return {
       id: c.id, label: c.label, format: c.format, type: c.type, issuer: c.issuer, addedAt: c.addedAt, expiresAt: c.expiresAt ?? null,
+      notBefore: read.ok && read.value.notBefore !== undefined ? read.value.notBefore * 1000 : null,
       claims: paths(claims), disclosable: read.ok ? read.value.disclosable : [], ...(values ? { values: claims } : {}),
     };
   }

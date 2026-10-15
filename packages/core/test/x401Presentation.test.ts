@@ -18,6 +18,7 @@ function vcOf(text: string): X401SdJwtVc {
 const licence = vcOf(issueSdJwtVc({ holder }));
 const other = vcOf(issueSdJwtVc({ holder, payload: { vct: "https://issuer.example/membership" } }));
 const expired = vcOf(issueSdJwtVc({ holder, payload: { exp: 1_700_000_000 } }));
+const notYet = vcOf(issueSdJwtVc({ holder, payload: { nbf: 1_900_000_000 } }));
 
 function query(value: unknown): X401DcqlQuery {
   const r = readX401DcqlQuery(value);
@@ -67,6 +68,15 @@ describe("matching a DCQL query against kept credentials", () => {
     const r = matchX401Dcql(query(asked), [{ id: "c-other", vc: other }, { id: "c-old", vc: expired }], 1_800_000_000_000);
     expect(r).toEqual({ ok: false, asked: [{ query: "pid", format: "dc+sd-jwt", types: [LICENCE], claims: [["given_name"]] }] });
     expect(matchX401Dcql(query({ credentials: [{ ...sdJwt("pid"), format: "mso_mdoc" }] }), held).ok).toBe(false);
+  });
+
+  it("skips a credential before its nbf, and takes it from that second on", () => {
+    const asked = query({ credentials: [sdJwt("pid", [{ path: ["given_name"] }])] });
+    expect(matchX401Dcql(asked, [{ id: "c-soon", vc: notYet }], 1_899_999_999_000).ok).toBe(false);
+    expect(matchX401Dcql(asked, [{ id: "c-soon", vc: notYet }, { id: "c-licence", vc: licence }], 1_899_999_999_000))
+      .toEqual({ ok: true, matches: [{ query: "pid", credential: "c-licence", claims: [["given_name"]] }] });
+    expect(matchX401Dcql(asked, [{ id: "c-soon", vc: notYet }], 1_900_000_000_000))
+      .toEqual({ ok: true, matches: [{ query: "pid", credential: "c-soon", claims: [["given_name"]] }] });
   });
 
   it("asks a claim's value to be one of `values`, and `null` for every element of an array", () => {
