@@ -176,13 +176,13 @@ describe("a call's candidates", () => {
       };
       const host = "a=candidate:1 1 UDP 2122317823 192.168.1.20 50000 typ host", srflx = "a=candidate:2 1 UDP 1686109951 203.0.113.7 50000 typ srflx raddr 192.168.1.20 rport 50000";
 
-      // The STUN server answers: the reflexive candidate, and 400 ms for what comes with it.
+      // The STUN server answers: the reflexive candidate, and 150 ms for what comes with it (the signal keeps that one).
       const answered = waiting();
       answered.candidate(host);
       await vi.advanceTimersByTimeAsync(30);
       answered.candidate(srflx);
       await vi.advanceTimersByTimeAsync(5000);
-      expect(answered.ended()).toBe(430);
+      expect(answered.ended()).toBe(180);
 
       // It never answers: the host candidate goes after the bounded wait.
       const silent = waiting();

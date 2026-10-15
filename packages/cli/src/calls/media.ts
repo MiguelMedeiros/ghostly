@@ -96,7 +96,8 @@ let refuseAnswers = Number(process.env.GHOSTLY_CALL_REFUSE_ANSWERS) || 0;
 
 /** How long a description waits for its candidates: a server reflexive one and a little after it, or this long. */
 const GATHER_MS = 5000;
-const SETTLE_MS = 400;
+/** The signal keeps the first server reflexive candidate only: the apps' calls and the chats' data link settle as long. */
+const SETTLE_MS = 150;
 /**
  * With a candidate in (a host one comes in milliseconds), the server reflexive one is waited for this long at most,
  * not the whole of `GATHER_MS`: a STUN server that answers does in tens of milliseconds, and one that never does (UDP
