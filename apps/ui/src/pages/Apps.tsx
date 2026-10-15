@@ -222,15 +222,16 @@ export function Apps() {
   const [removing, setRemoving] = useState(false);
   const [picking, setPicking] = useState<{ app: InstalledAppView; options?: OpenAppOptions } | null>(null);
   // Installed from a listing or a pasted link: what had the focus is gone, so it goes to the app's row (its Open), not the page.
+  // A built-in app opened for the first time asks which chat next: the focus stays in that question until it is closed.
   const [justInstalled, setJustInstalled] = useState<string | null>(null);
   useEffect(() => {
-    if (!justInstalled || installing || first) return;
+    if (!justInstalled || installing || first || picking) return;
     const row = document.querySelector(`[data-testid=installed-app][data-ref="${CSS.escape(justInstalled)}"]`);
     const target = row?.querySelector<HTMLElement>("[data-testid=installed-app-open]") ?? row?.querySelector<HTMLElement>("button");
     if (!target) return;
     target.focus({ preventScroll: true });
     setJustInstalled(null);
-  }, [justInstalled, installing, first, installed]);
+  }, [justInstalled, installing, first, picking, installed]);
   // An app uninstalled or a store removed: the control that had the focus went with its row, so the focus goes to Add
   // rather than being lost on the page. Only once the row is gone and its screen closed, and only if nothing has it.
   const [gone, setGone] = useState<{ app: string } | { store: string } | null>(null);
