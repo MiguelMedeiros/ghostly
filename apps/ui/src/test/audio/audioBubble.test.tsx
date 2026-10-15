@@ -154,6 +154,15 @@ describe("an audio file in the chat", () => {
     expect(button).toHaveFocus();
   });
 
+  it("its seek bar says where it is in the app's language", async () => {
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    renderApp(<AudioBubble file={song()} sender="peer" peerName="Ana" />, { language: "pt" });
+    fireEvent.click(screen.getByTestId("audio-play"));
+    await flush();
+    loaded(225);
+    expect(screen.getByTestId("audio-seek")).toHaveAttribute("aria-valuetext", "0:00 de 3:45");
+  });
+
   it("has the speed voice messages share: the pill turns it, for voice messages too", async () => {
     show(song());
     fireEvent.click(screen.getByTestId("audio-play"));

@@ -326,6 +326,12 @@ describe("hands-free (locked) recording", () => {
     expect(audio.players.filter((player) => !player.paused)).toHaveLength(0);
   });
 
+  it("tells a screen reader it records in the app's language", async () => {
+    renderApp(<MessageInput onSend={onSend} onSendFile={onSendFile} />, { language: "pt" });
+    await press();
+    expect(document.querySelector(".sr-only[aria-live='polite']")).toHaveTextContent("Gravando");
+  });
+
   it("starts from the keyboard, since there is nothing to hold", async () => {
     composer();
     // A key press on a button is a click with no pointer before it.

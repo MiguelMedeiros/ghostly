@@ -230,6 +230,7 @@
     "noRoom": "Spazio insufficiente: {{size}} liberi",
     "noRoomToPlay": "Spazio libero su disco insufficiente per riprodurlo qui. Scaricalo.",
     "notYet": "Si riproduce dopo l'invio.",
+    "positionOf": "{{position}} di {{duration}}",
     "wantsToSend": "{{name}} vuole inviarlo · {{size}} liberi"
   },
   "menu": {
@@ -440,6 +441,7 @@
     "record": "Registra un messaggio vocale",
     "recordHint": "Tieni premuto per registrare, o clicca per le mani libere",
     "recorded": "Registrato {{time}}",
+    "recording": "Registrazione in corso",
     "sent": "Messaggio vocale inviato",
     "slideCancel": "Scorri per annullare",
     "speed": "Velocità {{speed}}",

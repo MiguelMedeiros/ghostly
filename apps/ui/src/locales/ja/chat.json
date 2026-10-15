@@ -230,6 +230,7 @@
     "noRoom": "容量が足りません: 空き {{size}}",
     "noRoomToPlay": "ここで再生するための空きディスク容量が足りません。ダウンロードしてください。",
     "notYet": "送信が終わると再生できます。",
+    "positionOf": "{{duration}} のうち {{position}}",
     "wantsToSend": "{{name}} が送ろうとしています · 空き {{size}}"
   },
   "menu": {
@@ -440,6 +441,7 @@
     "record": "ボイスメッセージを録音",
     "recordHint": "押し続けて録音、またはクリックでハンズフリー",
     "recorded": "録音 {{time}}",
+    "recording": "録音中",
     "sent": "ボイスメッセージを送信しました",
     "slideCancel": "スライドしてキャンセル",
     "speed": "再生速度 {{speed}}",
