@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildSdpFromSignal, heardCallSignal, parseCallSignal } from "@ghostly/core";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { AudioSocket, audioSocketPath } from "../src/calls/audioSocket";
-import { CALL_PACE_MS, CallManager, MAX_REDIALS, type CallEngine } from "../src/calls/manager";
+import { CALL_PACE_MS, CallManager, MAX_EARLY_ANSWERS, MAX_REDIALS, type CallEngine } from "../src/calls/manager";
 import { CallMedia, loadCallStack, type CallStack } from "../src/calls/media";
 import { dominantHz, level, tone } from "./support/tone";
 // covers: headless.calls
@@ -141,9 +141,9 @@ function deafStack(): (() => Promise<CallStack | string>) & { deaf: (on: boolean
   return Object.assign(stack, { deaf: (on: boolean) => { deaf = on; } });
 }
 
-/** The real media stack, counting the connections it made and the ones still open (not closed). */
-function countingStack(): (() => Promise<CallStack | string>) & { made: () => number; open: () => number } {
-  let made = 0;
+/** The real media stack, counting the connections it made and the ones still open (not closed), and the most open at once. */
+function countingStack(): (() => Promise<CallStack | string>) & { made: () => number; open: () => number; peak: () => number } {
+  let made = 0, peak = 0;
   const open = new Set<object>();
   const stack = async () => {
     const real = await loadCallStack();
@@ -153,13 +153,14 @@ function countingStack(): (() => Promise<CallStack | string>) & { made: () => nu
       const pc = new Real(...args);
       made++;
       open.add(pc);
+      peak = Math.max(peak, open.size);
       const close = pc.close.bind(pc);
       Object.defineProperty(pc, "close", { value: () => { open.delete(pc); close(); } });
       return pc;
     }
     return { ...real, ndc: { ...real.ndc, PeerConnection } as unknown as CallStack["ndc"] };
   };
-  return Object.assign(stack, { made: () => made, open: () => open.size });
+  return Object.assign(stack, { made: () => made, open: () => open.size, peak: () => peak });
 }
 
 /** Runs with these environment variables, then puts back what they were. */
@@ -552,6 +553,48 @@ describe("two call managers", { timeout: 60_000 }, () => {
       await a.calls.stopAll();
       await b.calls.stopAll();
     });
+  });
+
+  it("calls that ring and hang up over and over, from one chat or many, make one early answer at a time per chat and MAX_EARLY_ANSWERS in all", async () => {
+    // A STUN server that never answers: each early answer takes HOST_GATHER_MS to make, and outlives its call that long.
+    const silent = createSocket("udp4");
+    await new Promise<void>((bound) => silent.bind(0, "127.0.0.1", bound));
+    try {
+      await withEnv({ GHOSTLY_STUN: "0" }, async () => {
+        const counted = countingStack();
+        const { a, b } = pairOfManagers({ b: counted, iceServersB: [{ urls: `stun:127.0.0.1:${silent.address().port}` }] });
+        await a.calls.start("chat-ab", {});
+        await until(() => b.events.find((e) => e.type === "call.incoming"));
+        const offer = JSON.parse(signalsOf(a, "o")[0]!) as { ts: number };
+        let ts = offer.ts;
+        const ring = (chat: string) => b.calls.onSignal(chat, heardCallSignal(JSON.stringify({ ...offer, ts: ++ts }), Date.now()));
+        const hangUp = (chat: string) => b.calls.onSignal(chat, heardCallSignal(JSON.stringify({ t: "h", ts: ++ts }), Date.now()));
+
+        // One chat: 40 rings, each hung up at once, then one that keeps ringing.
+        for (let i = 0; i < 40; i++) { ring("chat-ba"); hangUp("chat-ba"); }
+        ring("chat-ba");
+        await new Promise((r) => setTimeout(r, 300));
+        expect(counted.peak(), "one early answer at a time for the chat").toBe(1);
+        // The call still ringing gets its own once the one being made is done.
+        await until(() => counted.made() >= 2 && counted.open() === 1 && b.calls.list().length === 1, 10_000);
+        hangUp("chat-ba");
+        await until(() => counted.open() === 0, 10_000);
+
+        // Ten chats at once, each ringing and hanging up 5 times, then ringing.
+        for (let i = 0; i < 5; i++) for (let c = 0; c < 10; c++) { ring(`chat-${c}`); hangUp(`chat-${c}`); }
+        for (let c = 0; c < 10; c++) ring(`chat-${c}`);
+        await new Promise((r) => setTimeout(r, 300));
+        expect(counted.peak()).toBeLessThanOrEqual(MAX_EARLY_ANSWERS);
+        await new Promise((r) => setTimeout(r, 2500));
+        expect(counted.peak()).toBeLessThanOrEqual(MAX_EARLY_ANSWERS);
+        expect(b.calls.list()).toHaveLength(10);
+        await b.calls.stopAll();
+        await a.calls.stopAll();
+        await until(() => counted.open() === 0, 10_000);
+      });
+    } finally {
+      silent.close();
+    }
   });
 
   // Reported 2026-10-01 (a contact whose clock runs two minutes fast): a signal more than two minutes from this clock

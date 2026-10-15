@@ -4,6 +4,9 @@ import { PaymentDesk, type DeskLightning } from "../src/engine/payments";
 import type { CashuWallet } from "../src/engine/wallet";
 import type { StoredMessage } from "../src/shared/types";
 import { resetDb } from "./fakes";
+import { invoiceFor } from "./helpers/invoice";
+
+const GROUP_INVOICE = invoiceFor(100);
 // covers: groups.payments.member, groups.payments.group-request
 
 vi.mock("../src/shared/idb", async () => (await import("./fakes")).idbModule);
@@ -66,7 +69,7 @@ class World {
       view: vi.fn(async () => ({ mints: [{ url: MINT }] })),
       inspect: vi.fn((token: string) => ({ kind: "token", mint: token.split("|")[1], amount: Number(token.split("|")[2]), unit: "sat", accepted: true })),
     };
-    const lightning = { createInvoice: vi.fn(async () => ({ invoice: `lnbc-${name}` })), quote: vi.fn(async () => ({ quote: "q", mint: MINT, amount: 100, feeReserve: 1 })), pay: vi.fn(async () => true) };
+    const lightning = { createInvoice: vi.fn(async () => ({ invoice: GROUP_INVOICE })), quote: vi.fn(async () => ({ quote: "q", mint: MINT, amount: 100, feeReserve: 1 })), pay: vi.fn(async () => true) };
     const messages: StoredMessage[] = [];
     const desk = new PaymentDesk(wallet as unknown as CashuWallet, {
       getLink: linkId => edges.has(linkId) ? link(linkId) as unknown as GhostLink : null,
@@ -185,7 +188,7 @@ describe("a request to the whole group", () => {
     const { world, members: [a, b, c] } = await group("A", "B", "C");
     const { paymentId } = await a.desk.requestFromGroup({ groupId: "g", amount: 100, timestamp: 1, rail: "lightning" });
     expect(a.lightning.createInvoice).toHaveBeenCalledTimes(1);
-    for (const s of a.sent) expect(s.frame.endpoints).toEqual([[ENDPOINT.bolt11, "lnbc-A"]]);
+    for (const s of a.sent) expect(s.frame.endpoints).toEqual([[ENDPOINT.bolt11, GROUP_INVOICE]]);
     await world.settle();
     await c.desk.payRequest({ linkId: "CA", paymentId, via: "lightning" });
     expect(view(c, paymentId)).toMatchObject({ state: "settled", paidHere: true });

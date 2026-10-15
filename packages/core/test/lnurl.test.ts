@@ -78,6 +78,22 @@ describe("the pay request (LUD-06)", () => {
     expect(() => parsePayParams({ ...PARAMS, metadata: JSON.stringify([["text/plain", "x"], ["text/identifier", "mallory@ln.example.com"]]) }, ALICE)).toThrow(/answered for mallory@ln.example.com/);
     expect(() => parsePayParams("nope", ALICE)).toThrow(/did not answer with a pay request/);
   });
+  it("takes a callback on another host only over HTTPS at a public address, like a redirect", async () => {
+    for (const callback of ["http://localhost:4941/admin?all=1", "http://127.0.0.1/x", "http://[::1]:8080/x", "http://abcdefghijklmnop.onion/cb"]) {
+      const { fetch, asked } = fakeFetch({ [ALICE.url]: { ...PARAMS, callback } });
+      await expect(resolveLightningDestination(ALICE.text, { fetch }), callback).rejects.toThrow(/HTTPS/);
+      expect(asked).toEqual([ALICE.url]);
+    }
+    for (const callback of ["https://192.168.1.1/cgi-bin/reboot", "https://localhost/cb", "https://10.0.0.2/cb", "https://[fd00::1]/cb"]) {
+      expect(() => parsePayParams({ ...PARAMS, callback }, ALICE), callback).toThrow(/ln.example.com asks for the invoice at a local address/);
+    }
+    expect(parsePayParams({ ...PARAMS, callback: "https://pay.example.org/cb" }, ALICE).callbackDomain).toBe("pay.example.org");
+    // A test server on this machine still works: the callback is on the host that was asked.
+    const local = parseLightningDestination("bob@127.0.0.1:45911")!;
+    const bob = JSON.stringify([["text/plain", "Pay bob"]]);
+    expect(parsePayParams({ ...PARAMS, metadata: bob, callback: "http://127.0.0.1:45911/cb" }, local).callbackDomain).toBe("127.0.0.1:45911");
+    expect(() => parsePayParams({ ...PARAMS, metadata: bob, callback: "http://127.0.0.1:4941/cb" }, local)).toThrow(/HTTPS/);
+  });
   it("builds the callback within the limits, with a comment only when one is taken", () => {
     const params = parsePayParams(PARAMS, ALICE);
     expect(invoiceCallbackUrl(params, 21)).toBe(`${PARAMS.callback}?amount=21000`);

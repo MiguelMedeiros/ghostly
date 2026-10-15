@@ -41,7 +41,11 @@ describe("what an older app shows, and what downloads by itself", () => {
   });
 
   it("voice always; other files up to 8 MiB while the group's automatic files stay within 256 MiB", () => {
-    expect(fetchesByItself(voice, 1e12)).toBe(true);
+    expect(fetchesByItself(voice, 0)).toBe(true);
+    // A voice message is a file like any other here: bounded by the same size, and counted in the group's total.
+    expect(fetchesByItself({ ...voice, size: 30 * 1024 * 1024 }, 0)).toBe(false);
+    expect(fetchesByItself({ ...voice, size: GROUP_FILE_LIMITS.autoBytes + 1 }, 0)).toBe(false);
+    expect(fetchesByItself(voice, GROUP_FILE_LIMITS.autoBytesPerGroup)).toBe(false);
     expect(fetchesByItself({ size: GROUP_FILE_LIMITS.autoBytes }, 0)).toBe(true);
     expect(fetchesByItself({ size: GROUP_FILE_LIMITS.autoBytes + 1 }, 0)).toBe(false);
     expect(fetchesByItself({ size: 1024 }, GROUP_FILE_LIMITS.autoBytesPerGroup - 1023)).toBe(false);

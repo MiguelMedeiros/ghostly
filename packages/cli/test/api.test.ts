@@ -6,6 +6,7 @@ import { chatOrGroup, findChatOrGroup } from "../src/apiKit";
 import { parseArgs } from "../src/args";
 import { COMMANDS } from "../src/commands";
 import type { GhostlyEvent } from "../src/events";
+import { allowlist } from "../src/listen";
 import { chatJson, isLive } from "../src/views";
 import { pageOf } from "./support/messagePage";
 // covers: headless.api, headless.engine-passthrough, headless.secret-guard, headless.typing, chat.order
@@ -108,6 +109,33 @@ describe("chats", () => {
     const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u";
     expect(refused([asName], KEY)).toMatchObject({ code: "not_found", message: `No chat with "${KEY}"` });
     expect(findChatOrGroup([asName], [room], "ggg")).toEqual({ group: room });
+  });
+
+  it("an id prefix (the contact may choose it) never takes a label this side gave, nor a group's name", async () => {
+    // Mallory's invite code was ground so that the chat this side made from it has an id that starts with Bob's label.
+    const bob = link("chatBobxxxxxxxxx", { label: "bob" }), mallory = link("bobpitcapjj8o1wf", { label: "mallory" });
+    expect(findChat([mallory, bob], "bob").id).toBe(bob.id);
+    expect(findChat([mallory, bob], "BOB").id).toBe(bob.id);
+    // A prefix still finds a chat no label names; one that fits a chat and another's own name is refused, with both.
+    expect(findChat([mallory, bob], "bobp").id).toBe(mallory.id);
+    const nick = link("chatNick", { peerNick: "bobp" });
+    expect(() => findChat([mallory, nick], "bobp")).toThrow(expect.objectContaining({ code: "bad_request", details: { matches: [mallory.id, nick.id] } }));
+    // A chat or a group (task send, file send...): a group's name beats a chat's prefix, which is refused with both ids.
+    const team = { ...group, id: "g".repeat(22), name: "team", status: "active" } as unknown as GroupView;
+    const teamChat = link("team9qmhjx8j1equ", { label: "mallory" });
+    expect(() => findChatOrGroup([teamChat], [team], "team")).toThrow(expect.objectContaining({ code: "bad_request", details: { chat: teamChat.id, groups: [team.id] } }));
+    expect(findChatOrGroup([teamChat, link("chatMine", { label: "team" })], [team], "team")).toEqual({ link: expect.objectContaining({ id: "chatMine" }) });
+    // A group's id is its creator's to choose: a name wins over a prefix, among groups this profile is in too.
+    const theirs = { ...team, id: "team" + "x".repeat(18), name: "Mallory's" } as unknown as GroupView;
+    expect(findGroup([theirs, team], "team").id).toBe(team.id);
+    expect(findGroup([theirs, team], "teamx").id).toBe(theirs.id);
+    // listen --from bob: the allowlist holds Bob's chat, never the one whose id starts with "bob".
+    const ctx = { runtime: { server: { node: { getState: () => ({ links: [mallory, bob], groups: [team, theirs] }) } } } } as unknown as ApiContext;
+    const list = await allowlist(["bob"], ["team"], (method, params) => callApi(ctx, method, params), async () => null);
+    const event = (chat: string) => ({ seq: 1, id: "e", type: "message.received", at: 1, chat, message: { id: "m", text: "hi", timestamp: 1 } }) as GhostlyEvent;
+    expect(await list.allows(event(bob.id))).toBe(true);
+    expect(await list.allows(event(mallory.id))).toBe(false);
+    expect(await list.allows({ seq: 2, id: "g", type: "group.message", at: 1, group: theirs.id } as GhostlyEvent)).toBe(false);
   });
 
   it("a command that takes a chat or a group names both when neither has the name", async () => {

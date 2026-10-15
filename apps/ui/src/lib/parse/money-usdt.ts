@@ -21,9 +21,12 @@ export interface UsdtRequest {
   network?: WalletNetwork;
   /** The token contract a `transfer` link names. */
   token?: string;
-  /** In the token's base units (USDT: 6 decimals), from a `transfer` link. */
+  /** In USDT's base units (6 decimals), from a `transfer` link of the chain's known USDT only. */
   amount?: bigint;
-  /** When it came in an `ethereum:` link: that link rebuilt from what was read here (no `value`, no second amount). */
+  /**
+   * When it came in an `ethereum:` link: that link rebuilt from what was read here (no `value`, no second amount).
+   * Absent for a `transfer` link on a chain whose USDT is not known: its contract can't be checked.
+   */
   uri?: string;
 }
 
@@ -79,13 +82,20 @@ export function findUsdtAddress(text: string): { request: UsdtRequest; rest: str
       const recipient = params.get("address") ?? "";
       if (!isEvmAddress(target) || !isEvmAddress(recipient)) continue;
       const token = target.toLowerCase();
-      // A transfer of a token that is not USDT here, with nothing saying it is: not this card's.
-      if (!mentioned && (chainId === undefined || KNOWN_USDT[chainId] !== token)) continue;
-      const raw = params.get("uint256");
-      const amount = raw === null ? null : eip681Number(trimUriEnd(raw));
-      const kept = amount && amount > 0n ? amount : undefined;
-      const rebuilt = `ethereum:${token}${chainId === undefined ? "" : `@${chainId}`}/transfer?address=${recipient}${kept ? `&uint256=${kept}` : ""}`;
-      request = { recipient, ...chainOf(chainId), token, ...(kept ? { amount: kept } : {}), uri: rebuilt };
+      const usdt = chainId === undefined ? undefined : KNOWN_USDT[chainId];
+      // Where this chain's USDT is known, another token is not this card's, whatever the message says. Elsewhere
+      // only USDT named makes it one, and the contract can't be checked: no amount read with USDT's decimals, and
+      // the QR is the recipient's address, never that contract's transfer.
+      if (usdt ? usdt !== token : !mentioned) continue;
+      if (!usdt) {
+        request = { recipient, ...chainOf(chainId), token };
+      } else {
+        const raw = params.get("uint256");
+        const amount = raw === null ? null : eip681Number(trimUriEnd(raw));
+        const kept = amount && amount > 0n ? amount : undefined;
+        const rebuilt = `ethereum:${token}@${chainId}/transfer?address=${recipient}${kept ? `&uint256=${kept}` : ""}`;
+        request = { recipient, ...chainOf(chainId), token, ...(kept ? { amount: kept } : {}), uri: rebuilt };
+      }
     } else if (!fn && mentioned && isEvmAddress(target)) {
       // A plain `ethereum:` link to an address, with USDT named: its `value` is ether, not USDT, so no amount.
       request = { recipient: target, ...chainOf(chainId), uri: `ethereum:${target}${chainId === undefined ? "" : `@${chainId}`}` };

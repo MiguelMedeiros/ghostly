@@ -298,6 +298,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
               aria-label={file.name}
               data-testid="video-player"
               className="w-full h-full object-contain block bg-black"
+              // The engine's own menu would copy, open or save the stream's address, a token meant for this window alone.
+              onContextMenu={(event) => event.preventDefault()}
               onPlay={() => claimPlayback(file.id)}
               onPause={() => releasePlayback(file.id)}
               onEnded={() => { resumeAt.current = 0; unload(); }}

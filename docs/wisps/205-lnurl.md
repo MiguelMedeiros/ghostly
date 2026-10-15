@@ -37,7 +37,8 @@ the person runs (or a custodian's); Ghostly does not provide one, and this draft
   public (Ghostly Desktop asks a redirecting service from Rust for this). A page's `fetch` cannot read where a
   redirect leads (the answer is opaque: no status, no `Location`), so the web app and the browser extension
   refuse a service that redirects.
-- **The `payRequest` is checked field by field**: `tag`, an acceptable `callback`, integer `minSendable ≤
+- **The `payRequest` is checked field by field**: `tag`, an acceptable `callback` (on another host than the
+  one asked, held to the redirect rule: HTTPS to a public address), integer `minSendable ≤
   maxSendable` in millisats (amounts below one whole sat are refused: the client pays whole sats), `metadata`
   that is a JSON array of `[type, value]` pairs with a `text/plain` entry, and, for an address, a
   `text/identifier`/`text/email` entry that names the same address when present. `commentAllowed`

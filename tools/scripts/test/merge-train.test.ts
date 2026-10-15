@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, isBatch, LABEL, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, isBatch, LABEL, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string; merged?: boolean; author?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -259,6 +259,15 @@ describe("the line", () => {
     expect(queuedAt([], "2026-10-01T00:00:00Z")).toBe("2026-10-01T00:00:00Z");
     // queue:priority alone puts a pull request in the line, so the time it was given counts too.
     expect(queuedAt([at("queue:priority", "2026-10-08T02:00:00Z"), at("bug", "2026-10-08T09:00:00Z")], "x")).toBe("2026-10-08T02:00:00Z");
+  });
+
+  it("takes the head as vouched for when queue was added; queue:priority's time only for one in line by it alone", () => {
+    const at = (name: string, created_at: string) => ({ event: "labeled", label: { name }, created_at });
+    const events = [at("queue", "2026-10-08T01:00:00Z"), at("queue:priority", "2026-10-08T03:00:00Z")];
+    expect(vouchedAt(events, ["queue", "queue:priority"], null)).toBe("2026-10-08T01:00:00Z");
+    expect(vouchedAt(events, ["queue:priority"], null)).toBe("2026-10-08T03:00:00Z");
+    expect(vouchedAt([at("queue:priority", "2026-10-08T03:00:00Z")], ["queue", "queue:priority"], null)).toBeNull();
+    expect(vouchedAt(events, [], null)).toBeNull();
   });
 
   it("lets only ready, green pull requests board, twelve at most", () => {
@@ -803,6 +812,33 @@ describe("a run of the train", () => {
     const r = await repo.run();
     expect(r.dropped).toEqual([11]);
     expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/h11c was pushed after `queue` was added/)]);
+  });
+
+  it("drops a pull request pushed to after it was queued when queue:priority is added later: only queue vouches", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { ci: red }); // waits in line, so its position comment records h11
+    await repo.run();
+    repo.comments.get(11)![0] = { ...repo.comments.get(11)![0], updated_at: "2026-10-08T00:00:30Z" } as never;
+    repo.pulls.get(11)!.sha = "h11b"; // pushed, not reviewed, CI green
+    repo.runs.set("h11b", green);
+    repo.pushed.set("h11b", "2026-10-08T00:05:00Z");
+    repo.pulls.get(11)!.labels = [LABEL.queue, LABEL.priority];
+    (await repo.gh.events(11)).push({ event: "labeled", label: { name: LABEL.priority }, created_at: "2026-10-08T00:10:00Z" });
+    const r = await repo.run();
+    expect(r.dropped).toEqual([11]);
+    expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/new commits after it was queued \(h11 → h11b\)/)]);
+    expect(repo.landed).toEqual([]);
+
+    // No position comment yet: the time check reads queue's time, not queue:priority's.
+    const fresh = fakeRepo();
+    fresh.add(21); // queue added at 2026-10-08T00:00:00Z
+    fresh.pulls.get(21)!.sha = "h21b";
+    fresh.runs.set("h21b", green);
+    fresh.pushed.set("h21b", "2026-10-08T00:05:00Z");
+    fresh.pulls.get(21)!.labels = [LABEL.queue, LABEL.priority];
+    (await fresh.gh.events(21)).push({ event: "labeled", label: { name: LABEL.priority }, created_at: "2026-10-08T00:10:00Z" });
+    expect((await fresh.run()).dropped).toEqual([21]);
+    expect(fresh.landed).toEqual([]);
   });
 
   it("keeps a pull request whose head is older than its queue label, as the auto-queue labels it after green CI", async () => {

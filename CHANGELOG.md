@@ -4,6 +4,27 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.3.2
+
+### Security
+
+- Chats: a received voice message is decoded for playback or MP3 only as long as its description says, and a video's preview picture only as large as a sender draws it, so a crafted message can no longer make the app run out of memory.
+- Chats: a payment link for another Ethereum token is no longer shown as a USDT card, and a USDT card's QR never hands out another token's transfer.
+- Desktop (Linux): right-clicking a playing video in a chat no longer opens the engine's own menu, which could copy the video's private stream address.
+- Payments: a request is always shown as the network of the address it carries, and one whose stated network does not match its address (Ark and Bark too) is refused, so "Pay with another wallet" never offers real money under a "Test money" label. That code and link carry a Lightning invoice only when it asks the amount the request shows.
+- Payments: ecash a contact sends that the app cannot read as a token is refused before it is redeemed, so a chat's per-network Cashu setting always applies. An LNURL pay request's callback on another host follows the same rule as a redirect (HTTPS, public address). Fedimint notes already received are not taken again under another payment id.
+- Private groups: a member answers an invitation to a group it is already in only over the chat its admin let it in on, and an invitation back into a group you were removed from can be replaced only by that group's admin. The chain pieces an invitee keeps before its welcome are only that group's commits, so an invitation can no longer make the app hold a lot of memory.
+- Group files: a file is forwarded only once it checked out against its author's digest; a member whose copy arrived damaged is not asked for it again; one member holds at most one of a device's serving places; a voice message comes by itself only within the automatic limits; and leaving a group while one of its files is arriving leaves none of it on the device.
+- Mini-apps: an app's `storage.keys()` calls no longer delay the profile's other writes, a write still queued when an app is uninstalled is refused, and the web broker refuses a request value that is not plain JSON before counting it.
+- CLI: a chat's label and a group's name are read before an id prefix, so a contact can no longer take a name you address someone else by; the event journal behind `listen --since` keeps at most 16 MiB and is read from its end; and a daemon that takes calls prepares at most one answer ahead per chat, and a few in all.
+- Releases: the npm publish workflow publishes only from `main` or a release tag, and builds the CLI's tarball in a job with no publish token. The merge train counts only a pull request's own CI run, takes a head as reviewed only from `queue`, and a push to `dev` counts as tested only by a green run of its own tree.
+
+### Fixed
+
+**Apps**
+
+- After Allow and open on an app that comes with Ghostly, the keyboard focus is in the question of which chat to open it in. Before, it went to the app's row behind that question, so Tab walked the page behind it and a screen reader did not read the question.
+
 ## 1.3.1
 
 ### Fixed

@@ -318,6 +318,38 @@ describe("Fedimint in a chat", () => {
     expect(fake.spent).toBe(1);
   });
 
+  it("notes sent again under new ids are answered from what is known: one line, one redeem; refused notes get no '⚡' line", async () => {
+    const payer = await funded(3_000);
+    const bobClient = await (await fake.sdk()()).join({ database: "ghostly-fedimint-bob3.db", mnemonic: "bob", invite: federation.invite, recover: false });
+    const redeems = vi.fn();
+    const bobWallet = { inspectNotes: async (n: string) => ({ federation: federation.id, amountMsats: (await bobClient.parseNotes(n)).amountMsats }),
+      redeemNotes: async (_f: string, n: string, g: string) => { redeems(); const op = await bobClient.redeem(n, g); return { operationId: op, state: await bobClient.redeemState(op, 0) }; },
+      redeemState: (_f: string, op: string) => bobClient.redeemState(op, 0), federation: () => ({ network: "regtest" }), requestFederations: () => [federation.id] } as unknown as FedimintWallet;
+    const { desk, sent, host } = chat(bobWallet);
+    const pay = (id: string, timestamp: number, notes: string) => desk.onPayment("l", { id, timestamp, amount: { value: "1200", asset: "sat" }, endpoint: [ENDPOINT.fedimint, notes] });
+    const lines = () => (host.storeMessage.mock.calls as unknown as [{ text: string }][]).map(([m]) => m.text);
+
+    const { notes } = await payer.spendNotes(federation.id, 1_200);
+    await pay("p0", 1, notes);
+    expect(desk.payment("p0")).toMatchObject({ state: "settled" });
+    for (let i = 1; i <= 20; i++) await pay(`p${i}`, 1 + i, ` ${notes}\n`);
+    expect(redeems).toHaveBeenCalledTimes(1);
+    expect(lines()).toEqual(["⚡ 1,200 test sats on Fedimint"]);
+    expect(desk.payment("p5"), "no record per frame").toBeUndefined();
+    expect(sent.filter((s) => s.kind === "res").map((s) => s.frame.ok)).toEqual([true, ...Array(20).fill(false)]);
+    expect(await bobClient.balance()).toBe(1_200_000);
+
+    // Notes someone else redeemed first: no '⚡' line, one refusal line, and the repeats are not redeemed again.
+    host.storeMessage.mockClear(); redeems.mockClear();
+    const { notes: taken } = await payer.spendNotes(federation.id, 500);
+    await (await (await fake.sdk()()).join({ database: "ghostly-fedimint-eve.db", mnemonic: "eve", invite: federation.invite, recover: false })).redeem(taken, "eve");
+    for (let i = 0; i < 5; i++) await pay(`t${i}`, 100 + i, taken);
+    expect(redeems).toHaveBeenCalledTimes(1);
+    expect(desk.payment("t0")).toMatchObject({ state: "failed" });
+    expect(lines()).toEqual(["Could not receive Fedimint ecash: These notes were already redeemed"]);
+    expect(sent.filter((s) => s.kind === "res" && String(s.frame.id).startsWith("t")).map((s) => s.frame.error)).toEqual(Array(5).fill("These notes were already redeemed"));
+  });
+
   it("notes the contact refuses come back, and the review closes as failed", async () => {
     const payer = await funded(2_000);
     const { desk, host } = chat(payer);

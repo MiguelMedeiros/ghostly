@@ -139,13 +139,13 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   const switchToDecoded = useCallback(async (audio: HTMLAudioElement): Promise<boolean> => {
     if (decodedRef.current || !blobRef.current) return false;
     decodedRef.current = true;
-    const wav = await decodeToWav(blobRef.current);
+    const wav = await decodeToWav(blobRef.current, file.voice.duration);
     if (!mountedRef.current) return false;
     if (!wav) { report("decode", new Error("Web Audio could not decode it either")); return false; }
     audio.src = objectUrl(wav);
     audio.load();
     return true;
-  }, [report]);
+  }, [report, file.voice.duration]);
 
   /** The player, made on first use: reading the bytes of every voice message on screen would be waste. */
   const load = useCallback((): Promise<HTMLAudioElement | null> => {

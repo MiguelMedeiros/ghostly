@@ -23,6 +23,7 @@ import {
   type PaymentResult,
 } from "@ghostly/core";
 import { STORES, store, wrap } from "../shared/idb";
+import { digestHex } from "./messageDetails";
 import { isWorthlessMint, mintNetwork } from "../shared/mints";
 import type { PaymentView, PendingMelt, PendingSwap, StoredMessage, StoredPayment, StoredQuote } from "../shared/types";
 import { SwapUnsettledError, assertAmount, type CashuWallet } from "./wallet";
@@ -721,6 +722,12 @@ export class PaymentDesk {
       // Only an invoice for exactly this amount, in sats: what is asked is what the invoice asks.
       try {target=validatePaymentTarget(JSON.parse(sparkPayload));const asked=target.method==="spark" ? sparkInvoiceDetails(target.address,target.network as SparkNetwork) : undefined;if(!asked || asked.token || asked.amount!==amount)return;} catch {return;}
     }
+    // A target's chain says its network; a request saying another is not what it carries (as a USDT request): dropped.
+    // Our own federation saying another is only that way left out.
+    if (target && request.network && request.network !== walletNetworkOf(target.network)) {
+      if (!federations) return;
+      federations = undefined; target = undefined;
+    }
     // The network that pays it: what the contact said, else what it carries (older apps say nothing).
     const network = request.network ?? paymentNetwork({ target, mints: parseCashuRequestPayload(findEndpoint(request.endpoints, ENDPOINT.cashu) ?? ""), invoice: findEndpoint(request.endpoints, ENDPOINT.bolt11) });
     // A way of paying this chat has off on that network is left out, like one off altogether.
@@ -731,8 +738,12 @@ export class PaymentDesk {
     // And only what is of that network: a Testnet request naming a real mint never has real ecash spent on it. A
     // test mint's invoice reads like a Bitcoin one, so only an invoice of a test chain is known to be test money.
     const bolt11 = allowed("lightning") ? findEndpoint(request.endpoints, ENDPOINT.bolt11) : undefined;
-    const chain = bolt11 ? decodeBolt11(bolt11)?.network : undefined;
-    const invoice = bolt11 && !(network === "mainnet" && chain && chain !== "bitcoin") ? bolt11 : undefined;
+    // An invoice for another amount than the request's, or (beside an on-chain or Ark target) of another network than
+    // the target's, is not this payment: it is never offered, here or to another wallet.
+    const decoded = bolt11 ? decodeBolt11(bolt11) : null;
+    const chain = decoded?.network;
+    const sameTarget = !(target?.method === "bitcoin" || target?.method === "arkade" || target?.method === "bark") || (chain === "bitcoin") === (walletNetworkOf(target.network) === "mainnet");
+    const invoice = bolt11 && decoded?.amountSat === amount && sameTarget && !(network === "mainnet" && chain && chain !== "bitcoin") ? bolt11 : undefined;
     const mints = allowed("cashu") ? parseCashuRequestPayload(findEndpoint(request.endpoints, ENDPOINT.cashu) ?? "").filter((mint) => mintNetwork(mint) === network) : [];
     if (!target && !invoice && !mints.length && !federations) return;
     await this.save({
@@ -802,6 +813,11 @@ export class PaymentDesk {
       return;
     }
     const inspected = await this.wallet.inspect?.(payment.endpoint[1]);
+    // Ecash the network check cannot read (a `cashu:` prefix, say) is refused unredeemed, never let through unchecked.
+    if (payment.endpoint[0] === ENDPOINT.cashu && inspected !== undefined && inspected?.kind !== "token") {
+      link.sendPaymentResult({ id: payment.id, ok: false, error: "That is not a valid ecash token" });
+      return;
+    }
     if (inspected?.kind === "token" && !this.accepts(linkId, "cashu", mintNetwork(inspected.mint))) {
       link.sendPaymentResult({ id: payment.id, ok: false, error: `${networkLabel(mintNetwork(inspected.mint))} Cashu is off in this chat` });
       return;
@@ -1324,7 +1340,7 @@ export class PaymentDesk {
   /**
    * Notes from the contact. Redeemed only when they are of a federation we joined and this chat allows Fedimint;
    * otherwise refused unredeemed, and the contact takes them back. Written down (with the notes) before redeeming:
-   * an interrupted redeem is finished from the journal, never lost.
+   * an interrupted redeem is finished from the journal, never lost. The chat says it once the federation answered.
    */
   private async receiveFedimint(linkId: string, payment: Payment): Promise<void> {
     const link = this.host.getLink(linkId);
@@ -1353,8 +1369,11 @@ export class PaymentDesk {
     if (amount < 1) { await refuse("These notes are worth less than a sat"); return; }
     const network = this.fedimintOf(found.federation)?.federation(found.federation)?.network;
     if (network && !this.accepts(linkId, "fedimint", walletNetworkOf(network))) { await refuse(`${networkLabel(walletNetworkOf(network))} Fedimint is off in this chat`); return; }
-    await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: payment.requestId, federation: found.federation, token: notes });
-    await this.host.storeMessage({ linkId, id: `peer_${payment.timestamp}`, text: `⚡ ${amount.toLocaleString()} ${network === "bitcoin" ? "sats" : "test sats"} on Fedimint`, sender: "peer", timestamp: payment.timestamp, via: "datalink", paymentId: payment.id });
+    // The same notes under another id: answered from what is known, with no new line and no new redeem.
+    const digest = digestHex(notes.trim());
+    const before = [...this.payments.values()].find((p) => p.notesDigest === digest && p.direction === "in" && p.kind === "payment");
+    if (before) { link.sendPaymentResult({ id: payment.id, ok: false, error: before.state === "failed" ? before.error ?? "These notes were already redeemed" : "These notes were already received" }); return; }
+    await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: payment.requestId, federation: found.federation, token: notes, notesDigest: digest });
     await this.finishRedeem(this.payments.get(payment.id)!);
   }
 
@@ -1388,7 +1407,13 @@ export class PaymentDesk {
     if (state === "failed") {
       await this.save({ ...this.current(payment), state: "failed", token: undefined, error: "These notes were already redeemed" });
       link?.sendPaymentResult({ id, ok: false, error: "These notes were already redeemed" });
+      try { await this.host.storeMessage({ linkId: payment.linkId, id: `peer_${payment.createdAt}_refused`, text: "Could not receive Fedimint ecash: These notes were already redeemed", sender: "peer", timestamp: payment.createdAt, via: "datalink" }); } catch { /* the contact was told */ }
       return;
+    }
+    // Written once the federation took the notes (as Cashu's once the mint took the ecash); the same id on a retry.
+    if (state) {
+      const test = fedimint.federation(payment.federation)?.network !== "bitcoin";
+      await this.host.storeMessage({ linkId: payment.linkId, id: `peer_${payment.createdAt}`, text: `⚡ ${payment.amount.toLocaleString()} ${test ? "test sats" : "sats"} on Fedimint`, sender: "peer", timestamp: payment.createdAt, via: "datalink", paymentId: id });
     }
     if (state !== "done") return;
     await this.save({ ...this.current(payment), state: "settled", token: undefined, error: undefined });
