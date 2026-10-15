@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, isBatch, LABEL, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt } from "../merge-train.mjs";
 
-type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; open: boolean; base: string; merged?: boolean; author?: string };
+type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; closedAt?: string; open: boolean; base: string; merged?: boolean; author?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
 const red = [{ name: "CI Success", status: "completed", conclusion: "failure", started_at: "2026-10-08T00:00:00Z", id: 1 }];
 const running = [{ name: "CI Success", status: "in_progress", conclusion: null, started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -1942,6 +1942,43 @@ describe("a green pull request run that is not the pull request's own", () => {
     expect(repo.landed).toEqual([]);
   });
 
+  it("nor when that pull request was moved to this base since, or closed at another head: it was open when the run was made", async () => {
+    // Moved to dev, then closed: its base reads dev now, and its events hold the change.
+    const moved = sharedHead(false);
+    Object.assign(moved.pulls.get(22)!, { base: "dev", closedAt: "2026-10-08T02:30:00Z" });
+    moved.events.set(22, [{ event: "base_ref_changed", created_at: "2026-10-08T02:20:00Z" }]);
+    const r = await moved.run();
+    expect(r.merged).toEqual([]);
+    expect(moved.landed).toEqual([]);
+    expect(moved.comments.get(21)![0].body).toMatch(/Waiting: CI Success is red on its last commit/);
+    moved.earlier.delete("h21");
+    await moved.run();
+    expect(moved.comments.get(21)![0].body).toMatch(/#22 into `dev`, its base changed/);
+    // Into the epic, closed after another push: its head reads another commit now.
+    const pushed = sharedHead(false);
+    Object.assign(pushed.pulls.get(22)!, { sha: "h21b", closedAt: "2026-10-08T02:30:00Z" });
+    expect((await pushed.run()).merged).toEqual([]);
+    expect(pushed.landed).toEqual([]);
+    // GitHub moved it when its epic was deleted: the same.
+    const auto = sharedHead(false);
+    Object.assign(auto.pulls.get(22)!, { base: "dev", closedAt: "2026-10-08T02:30:00Z" });
+    auto.events.set(22, [{ event: "automatic_base_change_succeeded", created_at: "2026-10-08T02:20:00Z" }]);
+    expect((await auto.run()).merged).toEqual([]);
+  });
+
+  it("lands on its own run made after that pull request was closed, or before it was opened", async () => {
+    const closed = sharedHead(false);
+    Object.assign(closed.pulls.get(22)!, { createdAt: "2026-10-08T00:00:00Z", closedAt: "2026-10-08T01:00:00Z" });
+    expect((await closed.run()).merged).toEqual([21]);
+    // Closed only minutes before the run was made: the run may still be its, so it holds.
+    const late = sharedHead(false);
+    Object.assign(late.pulls.get(22)!, { createdAt: "2026-10-08T00:00:00Z", closedAt: "2026-10-08T01:55:00Z" });
+    expect((await late.run()).merged).toEqual([]);
+    const later = sharedHead();
+    Object.assign(later.pulls.get(22)!, { createdAt: "2026-10-08T03:00:00Z" });
+    expect((await later.run()).merged).toEqual([21]);
+  });
+
   it("says why when no run of its own is left, so its author can start one", async () => {
     const repo = sharedHead();
     repo.earlier.delete("h21");
@@ -2009,7 +2046,7 @@ describe("a green pull request run that is not the pull request's own", () => {
       },
       "/actions/runs/5001/jobs?filter=latest&per_page=100&page=1": { jobs: red },
       "/actions/runs/5002/jobs?filter=latest&per_page=100&page=1": { jobs: green },
-      "/pulls?state=all&head=o%3Afix-21&per_page=100&page=1": [{ number: 22, title: "x", body: "", draft: false, head: { sha: "abc", ref: "fix-21", repo: { full_name: "o/r" } }, base: { ref: "epic/x" }, labels: [], created_at: "" }],
+      "/pulls?state=all&head=o%3Afix-21&per_page=100&page=1": [{ number: 22, title: "x", body: "", draft: false, head: { sha: "abc", ref: "fix-21", repo: { full_name: "o/r" } }, base: { ref: "epic/x" }, labels: [], created_at: "", state: "closed", closed_at: "2026-10-08T00:00:00Z" }],
     };
     const fetchImpl = async (url: string) => {
       const path = url.replace("https://api.github.com/repos/o/r", "");
@@ -2021,7 +2058,7 @@ describe("a green pull request run that is not the pull request's own", () => {
     expect(ciState(await gh.ciJobs("abc", (_jobs: object[], run: { id: number }) => (seen.push(run.id), true)))).toBe("failure");
     expect(seen).toEqual([5001]);
     expect(sent).not.toContain("/actions/runs/5002/jobs?filter=latest&per_page=100&page=1");
-    expect((await gh.headPulls("fix-21")).map((p: { number: number; base: string; sha: string }) => [p.number, p.base, p.sha])).toEqual([[22, "epic/x", "abc"]]);
+    expect((await gh.headPulls("fix-21")).map((p: { number: number; base: string; sha: string; open: boolean; closedAt: string }) => [p.number, p.base, p.sha, p.open, p.closedAt])).toEqual([[22, "epic/x", "abc", false, "2026-10-08T00:00:00Z"]]);
   });
 });
 

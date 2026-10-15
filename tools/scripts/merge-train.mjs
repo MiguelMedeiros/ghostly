@@ -203,6 +203,14 @@ export const PLAN_SOURCES = ["tools/scripts/ci-changes.mjs", ".github/workflows/
 /** How many of CI's runs on one commit are read, newest first, for one that counts. */
 export const CI_RUNS_READ = 5;
 
+/** A writer's base change, and GitHub's own when the old base branch was deleted (ci-changes.mjs's BASE_CHANGES). */
+const BASE_CHANGES = new Set(["base_ref_changed", "automatic_base_change_succeeded", "automatic_base_change_failed"]);
+/**
+ * How long after another pull request from the branch was closed a run may still be its own: GitHub makes a pull
+ * request's run a little after the event that starts it, so a run made just after the close may be that pull request's.
+ */
+export const CLOSED_GRACE_MS = 10 * 60_000;
+
 export const ordinal = (n) => {
   const v = n % 100;
   return `${n}${["th", "st", "nd", "rd"][(v - 20) % 10] ?? ["th", "st", "nd", "rd"][v] ?? "th"}`;
@@ -243,7 +251,7 @@ export function waiting(pr) {
   // The fast tier is enough to board: the batch's full CI is the gate.
   if (pr.ci === "success" || pr.fast === "success") return null;
   if (pr.fast === "failure") return "CI Success (draft) is red on its last commit and CI Success has not passed on it yet";
-  if (pr.shared?.length) return `another pull request from its branch (${pr.shared.map((o) => `#${o.number} into \`${o.base}\``).join(", ")}) ran CI on the same commit with that base's ci.yml; close it and push a new commit`;
+  if (pr.shared?.length) return `another pull request from its branch (${pr.shared.map((o) => `#${o.number} into \`${o.base}\`${o.moved ? ", its base changed" : ""}`).join(", ")}) ran CI on the same commit with that base's ci.yml; close it and, ten minutes later, push a new commit`;
   if (pr.retargeted) return "its green CI run on its last commit ran before its base was changed; push a new commit, or close and reopen it, for a run against this base";
   if (pr.misplanned) return "the green CI run on its last commit skipped jobs that its changes need (a run planned for another base); run CI on it again";
   return "CI Success has not passed on its last commit yet";
@@ -436,22 +444,34 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   // and tests come from the merge with the base it ran for, so a second pull request from the same head into another
   // base (an epic whose ci.yml or tests a writer changed), or this one before its base was changed, ran other checks
   // under the same names, and nothing in its jobs can tell. Its branch must be this pull request's, the run newer than
-  // the last change of base, and no other pull request from that branch into another base may hold the same head
-  // (closed ones too: their runs stay). A run of another event runs the commit's own ci.yml. A red run is not asked.
+  // the last change of base, and no other pull request from that branch that is (or ever was) into another base may
+  // have been open when the run was made (closed ones too: their runs stay). Their base and head as they are now do
+  // not tell: a pull request moved to this base, or closed at another head, keeps the run it made on another base's
+  // ci.yml. A run of another event runs the commit's own ci.yml. A red run is not asked.
   const sharing = new Map();
+  const siblings = async (p) => {
+    if (!sharing.has(p.number)) {
+      const others = (await gh.headPulls(p.branch)).filter((o) => o.number !== p.number);
+      for (const o of others) if (o.base === base) o.moved = (await gh.events(o.number)).some((e) => BASE_CHANGES.has(e.event));
+      sharing.set(p.number, others.filter((o) => o.base !== base || o.moved));
+    }
+    return sharing.get(p.number);
+  };
+  // Open when the run was made, or not known to be closed well before: a time that does not read counts as open.
+  const openAt = (o, made) => !(Date.parse(o.createdAt) > made) && (o.open !== false || !(Date.parse(o.closedAt) + CLOSED_GRACE_MS < made));
   const own = async (p, jobs, run) => {
     if (!p || !prRun(run) || ciState(jobs) !== "success") return true;
     let why = null;
     if (run.head_branch !== p.branch) why = `it ran for \`${run.head_branch}\``;
     else {
       p.events ??= await gh.events(p.number);
-      const moved = p.events.filter((e) => e.event === "base_ref_changed").map((e) => Date.parse(e.created_at));
+      const moved = p.events.filter((e) => BASE_CHANGES.has(e.event)).map((e) => Date.parse(e.created_at));
       if (moved.length && !(Date.parse(run.created_at) > Math.max(...moved))) {
         why = "it ran before the base was changed";
         p.retargeted = true;
       } else {
-        if (!sharing.has(p.number)) sharing.set(p.number, (await gh.headPulls(p.branch)).filter((o) => o.number !== p.number && o.base !== base && o.sha === p.sha));
-        p.shared = sharing.get(p.number);
+        const made = Date.parse(run.created_at);
+        p.shared = (await siblings(p)).filter((o) => openAt(o, made));
         if (p.shared.length) why = `${p.shared.map((o) => `#${o.number}`).join(", ")} from the same head into another base ran it too`;
       }
     }
@@ -1112,6 +1132,8 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     fork: p.head.repo?.full_name !== repo,
     labels: p.labels.map((l) => l.name),
     createdAt: p.created_at,
+    closedAt: p.closed_at,
+    open: p.state === "open",
     base: p.base.ref,
     author: p.user?.login,
   });
