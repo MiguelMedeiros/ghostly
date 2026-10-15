@@ -7,12 +7,15 @@ import { forgetPictures } from "../lib/pictureReads";
 import { fakeEngine, installFakeEngine } from "./fakeEngine";
 import type { Language } from "../lib/settings";
 import { loadLocale } from "../locales";
+import { loadIdentityProviders } from "@ghostly/browser/proofs/load";
 
 // Every language, as an app reading in it has loaded its own: a test renders in any of them at once. The list is
 // written out (test/i18n/locales.ts reads each of the settings' languages from here, so one missing fails there): importing lib/settings here would load lib/profiles
 // before a test file's mocks of what it imports are in place.
 const LANGUAGES: Language[] = ["en", "pt", "es", "fr", "it", "zh", "ja", "ar"];
 await Promise.all(LANGUAGES.map(loadLocale));
+// The identity proof providers, as an app that has drawn something about identities has loaded them.
+await loadIdentityProviders();
 
 // The web app's session sync (started by the sidebar) keeps localStorage and the peer in step on every state push:
 // it would call the fake engine behind the test's back for the rest of the file. A test about it can unmock it.

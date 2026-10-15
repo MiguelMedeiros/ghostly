@@ -3,7 +3,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { NostrPointer } from "@ghostly/browser/nostr/social";
 import { shortNpub } from "@ghostly/browser/nostr/social";
 import type { NostrLookupResult } from "@ghostly/browser/nostr/types";
-import { useEngineState } from "../../lib/identities";
+import { useEngineState } from "../../lib/engineState";
 import { ago } from "../../lib/nostr";
 import { ProviderMark } from "../identities/ProviderMark";
 import { EntityCardFrame, cardQuiet } from "./EntityCardFrame";

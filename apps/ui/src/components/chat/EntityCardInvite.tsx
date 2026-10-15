@@ -4,7 +4,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { groupLinkUrl, groupPath, groupStatusText } from "../../lib/groups";
-import { useEngineState } from "../../lib/identities";
+import { useEngineState } from "../../lib/engineState";
 import { showJoinNotice } from "../../lib/joinNotice";
 import { NO_ROOM_FOR_CHAT, ensureSession } from "../../lib/storage";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteShareText, readInvite, type JoinOutcome } from "../../lib/url";
