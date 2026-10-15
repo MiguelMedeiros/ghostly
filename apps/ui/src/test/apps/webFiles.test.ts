@@ -136,10 +136,12 @@ function fakeDir(name: string, tree: Record<string, string | Record<string, stri
 
 function memoryStore(): PickStore & { picks: Map<string, StoredPick> } {
   const picks = new Map<string, StoredPick>();
+  const forgotten = new Set<string>();
   return {
     picks,
-    all: async (ref) => [...picks.values()].filter((p) => p.ref === ref),
+    all: async (ref) => [...picks.values()].filter((p) => p.ref === ref).map((p) => ({ ...p, entries: p.entries.filter((e) => !forgotten.has(e.id)) })),
     put: async (pick) => { picks.set(`${pick.ref} ${pick.id}`, pick); },
+    forget: async (_ref, _id, entry) => { forgotten.add(entry); },
     remove: async (ref, id) => { picks.delete(`${ref} ${id}`); },
     clear: async (ref) => { for (const [k, p] of picks) if (p.ref === ref) picks.delete(k); },
   };
@@ -199,7 +201,7 @@ describe("a folder kept past the page (File System Access)", () => {
     const { store, entries } = await pickedOnce();
     const next = webLinkedFiles({ text: () => text, store });
     await next.forget(REF, entries[0]!.id);
-    expect([...store.picks.values()][0]!.entries.map((e) => e.path)).toEqual(["Films/Season/E01.mp4"]);
+    expect((await store.all(REF))[0]!.entries.map((e) => e.path)).toEqual(["Films/Season/E01.mp4"]);
     await next.forget(REF, entries[1]!.id);
     expect(store.picks.size).toBe(0);
     const again = await pickedOnce();
@@ -217,5 +219,46 @@ describe("a folder kept past the page (File System Access)", () => {
     expect(await store.all(REF)).toEqual([]);
     await store.clear("other/app");
     expect(await store.all("other/app")).toEqual([]);
+  });
+
+  it("a forget writes the entry alone, never the whole pick again, and holds on the next page", async () => {
+    const idb = idbPickStore(() => "ghostly-test-files-forget");
+    const written: number[] = [];
+    let forgets = 0;
+    const store: PickStore = { ...idb, put: async (pick) => { written.push(pick.entries.length); await idb.put(pick); }, forget: async (...args) => { forgets++; await idb.forget(...args); } };
+    const files = Array.from({ length: 1_000 }, (_, i) => ({ path: `Films/${i}.mp4`, file: file("x") }));
+    const host = webLinkedFiles({ text: () => text, store, ask: async () => ({ files, keep: { dir: { name: "Films" } as FileSystemDirectoryHandle } }) });
+    const entries = await host.pick(REF, "Cinema", { folder: true, accept: [] });
+    for (const entry of entries.slice(0, 10)) await host.forget(REF, entry.id);
+    // The pick was written once, at the pick: before, each forget wrote its other 999 entries again.
+    expect(written).toEqual([1_000]);
+    expect(forgets).toBe(10);
+    const next = webLinkedFiles({ text: () => text, store: idb, askAgain: async () => false });
+    const listed = await next.list(REF, "Cinema");
+    expect(listed).toHaveLength(990);
+    expect(listed.map((e) => e.id)).toEqual(entries.slice(10).map((e) => e.id));
+  });
+
+  it("the IndexedDB store drops a pick's forgotten entries with it, and reads a database from before them", async () => {
+    // A profile's database as the first version wrote it: picks only.
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open("ghostly-test-files-v1", 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore("picks", { keyPath: "key" }).put({ key: `${REF} p1`, ref: REF, id: "p1", keep: { files: [] }, entries: [{ id: "e1", path: "a.mp4", size: 1, modified: 1 }, { id: "e2", path: "b.mp4", size: 1, modified: 1 }] });
+      };
+      request.onsuccess = () => { request.result.close(); resolve(); };
+      request.onerror = () => reject(request.error);
+    });
+    const store = idbPickStore(() => "ghostly-test-files-v1");
+    await store.forget(REF, "p1", "e1");
+    expect((await store.all(REF))[0]!.entries.map((e) => e.id)).toEqual(["e2"]);
+    await store.remove(REF, "p1");
+    // A pick under the same id later does not inherit what the old one forgot.
+    await store.put({ ref: REF, id: "p1", keep: { files: [] }, entries: [{ id: "e1", path: "a.mp4", size: 1, modified: 1 }] });
+    expect((await store.all(REF))[0]!.entries.map((e) => e.id)).toEqual(["e1"]);
+    await store.forget(REF, "p1", "e1");
+    await store.clear(REF);
+    await store.put({ ref: REF, id: "p1", keep: { files: [] }, entries: [{ id: "e1", path: "a.mp4", size: 1, modified: 1 }] });
+    expect((await store.all(REF))[0]!.entries).toHaveLength(1);
   });
 });
