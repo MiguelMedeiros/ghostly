@@ -230,6 +230,7 @@
     "noRoom": "Not enough space: {{size}} free",
     "noRoomToPlay": "Not enough free disk space to play it here. Download it instead.",
     "notYet": "It plays once it has been sent.",
+    "positionOf": "{{position}} of {{duration}}",
     "wantsToSend": "{{name}} wants to send it · {{size}} free"
   },
   "menu": {
@@ -440,6 +441,7 @@
     "record": "Record a voice message",
     "recordHint": "Hold to record, or click for hands-free",
     "recorded": "Recorded {{time}}",
+    "recording": "Recording",
     "sent": "Voice message sent",
     "slideCancel": "Slide to cancel",
     "speed": "Playback speed {{speed}}",
