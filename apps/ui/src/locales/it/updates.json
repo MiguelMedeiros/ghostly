@@ -14,6 +14,7 @@
   "later": "Più tardi",
   "manualHint": "Scaricalo e sostituisci questa installazione.",
   "reload": "Ricarica",
+  "replaced": "Una nuova build di Ghostly {{version}} è disponibile",
   "restart": "Aggiorna e riavvia",
   "title": "Aggiornamenti",
   "upToDate": "Ghostly è aggiornato",

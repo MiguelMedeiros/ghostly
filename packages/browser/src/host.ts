@@ -27,6 +27,11 @@ export interface UpdateSource {
   check(): Promise<FoundUpdate | null>;
   /** Never called for `apply: "manual"`. `onProgress` is used where the platform reports it. */
   install(update: FoundUpdate, onProgress?: (fraction: number) => void): Promise<void>;
+  /**
+   * Calls `listener` when a file of this build is gone from the server (the web app's worker got a 404 for one), so
+   * the app checks at once. Returns what stops listening. Left out where the host cannot tell.
+   */
+  onBuildGone?(listener: () => void): () => void;
 }
 
 export interface BrowserHost {

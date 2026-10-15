@@ -457,7 +457,7 @@ export function Settings() {
       privacy: t("settings.privacyHint"),
       network: t("settings.networkHint"),
       storage: desktopUsed ? formatBytes(desktopUsed.total, t) : formatBytes(estimate?.used ?? storageInfo.used, t),
-      about: update.update ? t("updates.available", { version: update.update.version }) : `${t("settings.version")} ${appVersion}`,
+      about: update.update ? t(update.update.replaced ? "updates.replaced" : "updates.available", { version: update.update.version }) : `${t("settings.version")} ${appVersion}`,
     };
     return (
       <Page title={t("settings.title")} width="md" testId="settings-page" overlay={overlay}>
@@ -744,7 +744,7 @@ export function Settings() {
           <Row
             label={<span data-testid="update-status">
               {update.update
-                ? t("updates.available", { version: update.update.version })
+                ? t(update.update.replaced ? "updates.replaced" : "updates.available", { version: update.update.version })
                 : update.error
                   ? t("updates.failed")
                   : update.lastCheckedAt

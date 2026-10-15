@@ -71,18 +71,27 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
   const checking = useRef(false);
   // Read by the listeners below, which outlive the render that set it.
   const lastCheckedRef = useRef<number | null>(null);
+  // The platform said this build is gone while a check was in flight. That check asked before the file went, so it
+  // finds nothing; one more runs once it settles, or the word is lost until the next scheduled check, hours away.
+  const goneWhileChecking = useRef(false);
 
   const check = useCallback(async () => {
     if (!updatePlatform || checking.current) return;
     checking.current = true;
     setStage("checking");
-    setError(null);
     try {
-      setUpdate(await updatePlatform.check());
-      lastCheckedRef.current = Date.now();
-      setLastCheckedAt(lastCheckedRef.current);
-    } catch (e) {
-      setError(errorText(e, tRef.current));
+      // Once more when the platform said the build is gone while this one was out asking: that answer is from before.
+      do {
+        goneWhileChecking.current = false;
+        setError(null);
+        try {
+          setUpdate(await updatePlatform.check());
+          lastCheckedRef.current = Date.now();
+          setLastCheckedAt(lastCheckedRef.current);
+        } catch (e) {
+          setError(errorText(e, tRef.current));
+        }
+      } while (goneWhileChecking.current);
     } finally {
       checking.current = false;
       setStage("idle");
@@ -132,10 +141,22 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
       run();
     };
     document.addEventListener("visibilitychange", onVisible);
+    // The platform found a file of this build gone from the server: a deploy replaced it, and the wallet or the
+    // connection that asked for the file has already failed, so look at once, past the "checked recently" guard, and
+    // the banner offers Reload now instead of hours later. A check already in flight asked before the file went:
+    // `check` runs once more when it settles. Only while checks are allowed, like the rest: the setting is a promise
+    // that this device asks nobody on its own.
+    const onGone = () => {
+      if (checking.current) goneWhileChecking.current = true;
+      else run();
+    };
+    const stopBuildGone = updatePlatform?.onBuildGone?.(onGone);
     return () => {
       cancelled = true;
+      goneWhileChecking.current = false;
       clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisible);
+      stopBuildGone?.();
     };
   }, [allowed, check]);
 

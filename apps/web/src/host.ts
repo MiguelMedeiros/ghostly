@@ -1,6 +1,6 @@
 import { createInPageHost } from "@ghostly/browser/inPageHost";
 import { checkVersionFeed } from "@ghostly/browser/updateFeed";
-import { applyUpdate, prepareUpdate } from "./pwa/serviceWorker";
+import { applyUpdate, buildGone, onBuildGone, prepareUpdate } from "./pwa/serviceWorker";
 import { RELEASES_URL } from "../../ui/src/lib/settings";
 import { builtInAppOption } from "../../ui/src/lib/apps/builtIns";
 import { popupWindow } from "@ghostly/browser/proofs/oidc/popup";
@@ -66,7 +66,10 @@ export const webHost = createInPageHost({
    * Applying it is a reload, which ends the peer and every call it holds, so
    * it only ever happens because the user pressed the button. The app's files
    * come from the service worker's cache, so the reload first lets the new
-   * worker (fetched as soon as the deploy is found) take over.
+   * worker (fetched as soon as the deploy is found) take over. Once the worker
+   * found a file of this build gone from the server, the check runs at once
+   * and a redeploy of the same version counts: what runs cannot load its
+   * wallets any more.
    */
   updates: {
     downloadUrl: RELEASES_URL,
@@ -75,12 +78,14 @@ export const webHost = createInPageHost({
         url: new URL("version.json", document.baseURI).toString(),
         currentVersion: __APP_VERSION__,
         currentBuild: __APP_BUILD__,
+        buildGone: buildGone(),
         apply: "reload",
       });
       if (found) prepareUpdate();
       return found;
     },
     install: () => applyUpdate(),
+    onBuildGone,
   },
   requestLocalAccess: async () => false,
   // A popup on this origin; the provider returns to /oidc-callback.html.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_SHARED_FILES, MAX_SHARE_BYTES, SHARE_TARGET_PATH, classify, precacheList, pushScope, pushScopeProfile, readShare, readShareBody, wakeNotice } from "../../../../web/src/sw/policy";
+import { MAX_SHARED_FILES, MAX_SHARE_BYTES, SHARE_TARGET_PATH, assetAnswer, classify, precacheList, pushScope, pushScopeProfile, readShare, readShareBody, wakeNotice } from "../../../../web/src/sw/policy";
 
 // covers: app.pwa.offline, app.pwa.share-target, push.wake.notify, push.wake.mute, push.wake.group
 
@@ -25,6 +25,8 @@ describe("what the worker answers from its cache", () => {
     expect(route("/assets/main-abc.js")).toBe("precache");
     expect(route("/manifest.json")).toBe("precache");
     expect(route("/assets/bark_ffi_wasm_bg-xyz.wasm")).toBe("asset");
+    // A source map is the devtools', never the app's: not kept, and its 404 after a deploy is not the build gone.
+    expect(route("/assets/main-abc.js.map")).toBe("pass");
   });
 });
 
@@ -207,5 +209,20 @@ describe("what a wake-up shows", () => {
     expect(show({ path: "/chat/abc" }, true)).toBeNull();
     expect(show({ path: "https://evil.example/" })).toBeNull();
     expect(show({ path: "/settings" })).toBeNull();
+  });
+});
+
+describe("the worker's verdict on a build file the server answered", () => {
+  it("keeps a whole file of this origin", () => {
+    expect(assetAnswer({ status: 200, type: "basic" })).toBe("store");
+  });
+  it("reads a 404 of this origin as the build being gone", () => {
+    expect(assetAnswer({ status: 404, type: "basic" })).toBe("gone");
+  });
+  it("leaves a server error, a partial answer and a cross-origin answer alone", () => {
+    expect(assetAnswer({ status: 503, type: "basic" })).toBe("pass");
+    expect(assetAnswer({ status: 206, type: "basic" })).toBe("pass");
+    // An opaque answer says nothing, not even its status (always 0): whatever the other origin did.
+    expect(assetAnswer({ status: 0, type: "opaque" })).toBe("pass");
   });
 });
