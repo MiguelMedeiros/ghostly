@@ -204,6 +204,18 @@ describe("a chat as the contact drives it", () => {
     expect(view(paired.id).peerAck).toBe(0);
   });
 
+  it("a call's fast poll reads a legacy chat's record, never a paired one's: its signals go only over the session", async () => {
+    const legacy = row({ profile: undefined, participationSeed: undefined }), paired = row();
+    const { node, linkOf } = await started(legacy, paired);
+    for (const fast of [true, false]) {
+      node.setFastPoll({ linkId: legacy.id, fast });
+      node.setFastPoll({ linkId: paired.id, fast });
+    }
+    const polls = (id: string) => (linkOf(id) as never as { session: { setFastPoll: ReturnType<typeof vi.fn> } }).session.setFastPoll;
+    expect(polls(legacy.id).mock.calls).toEqual([[true], [false]]);
+    expect(polls(paired.id)).not.toHaveBeenCalled();
+  });
+
   it("an open data link replays pending payments; a closed one sends the waiting messages back to retry", async () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
