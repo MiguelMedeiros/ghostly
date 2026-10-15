@@ -372,9 +372,9 @@ describe("what waits for the chat to carry it (WISP 400, \"Sends when live\")", 
 });
 
 describe("a chat with many queued messages and the contact away", () => {
-  it("reads the chat's history once per check, not once per older message it looks at", async () => {
+  /** `n` queued DHT texts in a store that counts its reads of the whole chat, on fake timers; `ready`: whether the chat can carry text. */
+  async function many(n: number, ready: boolean) {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    const n = 60;
     const rows: StoredMessage[] = Array.from({ length: n }, (_, i) => {
       const wireId = `w${String(i).padStart(21, "0")}`;
       return { linkId: "many", id: `me_${wireId}`, wireId, text: `m${i}`, sender: "me", timestamp: i + 1, via: "pkarr", delivery: "queued" };
@@ -386,14 +386,32 @@ describe("a chat with many queued messages and the contact away", () => {
       if (row && row.delivery !== "delivered") Object.assign(row, extra, { delivery, deliveryError: error });
     } };
     const send = vi.fn(async () => null);
-    const box = new Outbox(store, send, 20_000, undefined, { resender: { ready: () => false } });
+    const box = new Outbox(store, send, 20_000, undefined, { resender: { ready: () => ready } });
     await box.recover();
+    return { rows, read, send, box };
+  }
+
+  it("reads the chat's history once per check, not once per older message it looks at", async () => {
+    const n = 60, { rows, read, send, box } = await many(n, false);
     read.mockClear();
     // Every queued message's first check comes due: each looks at the ones written before it.
     await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs[0]);
     expect(send).not.toHaveBeenCalled();
     expect(rows.every(r => r.delivery === "queued")).toBe(true);
     expect(read.mock.calls.length, "a whole-history read per check, not per message looked at").toBeLessThanOrEqual(n);
+    await box.stop();
+  });
+
+  it("a receipt for each of many messages sent on a link that came back does not read the history again", async () => {
+    const n = 60, { rows, read, send, box } = await many(n, true);
+    // The link comes back and every queued message goes on it.
+    await box.flush({ reopened: true });
+    expect(send).toHaveBeenCalledTimes(n);
+    read.mockClear();
+    // Each receipt arrives. Nothing is left to send, so none of them reads the chat's whole history again.
+    for (const row of rows) await box.received(row.wireId);
+    expect(rows.every(r => r.delivery === "delivered")).toBe(true);
+    expect(read.mock.calls.length, "a receipt must not read the chat's history once there is nothing left to send").toBe(0);
     await box.stop();
   });
 });

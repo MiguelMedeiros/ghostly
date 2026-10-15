@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Outbox, type Resender } from "../src/engine/outbox";
+import { Outbox, RESEND_POLICY, type Resender } from "../src/engine/outbox";
 import type { StoredMessage } from "../src/shared/types";
 // covers: chat.order, chat.paired.offline-send, chat.waiting
 
@@ -275,6 +275,28 @@ describe("a file that waits for the live link goes in its place among the texts"
     live.open = true;
     await vi.advanceTimersByTimeAsync(5_000);
     expect(c.said).toEqual(["f1", "m2"]);
+    await c.box.stop();
+  });
+
+  it("a link that closes under the look its own check asked for: the file is asked again by itself, not only by the next look", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const said: string[] = [];
+    let asked = 0, drops = 1;
+    // The file's check comes due first. The link says it is open a moment before it carries text, so the text before
+    // the file is passed by, then goes as the file is found able to go, and the link closes under that send.
+    const c = chat([file(2), row(1, "queued")], async m => { said.push(m.text); if (drops-- > 0) void c.box.disconnected(); return null; }, {
+      ready: m => !!m.file || asked++ > 0,
+      sendFile: async message => { said.push(message.text); delete c.rows.find(m => m.id === message.id)!.delivery; },
+    });
+    await c.box.recover();
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs[0]);
+    expect(said[0]).toBe("m1");
+    expect(c.rows[0].delivery).toBe("waiting");
+    // No look since reaches the file (the text's own check reads up to its timestamp): the file's own check sends it
+    // once the link is back, as the text's sends the text.
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs[1] * 2);
+    expect(said.filter(t => t.startsWith("f"))).toEqual(["f2"]);
+    expect(c.rows[0].delivery).toBeUndefined();
     await c.box.stop();
   });
 
