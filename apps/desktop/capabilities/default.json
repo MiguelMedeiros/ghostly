@@ -68,6 +68,7 @@
     "allow-native-microphone-meter",
     "allow-native-microphone-meter-close",
     "allow-native-notification-permission",
+    "allow-native-notification-tap",
     "allow-native-private-notification",
     "allow-native-speaker-test",
     "allow-native-unread-count",

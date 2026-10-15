@@ -98,6 +98,8 @@ const RULES: readonly Rule[] = [
   exact("Ghostly is starting…", "errors.app.starting"),
   exact("Ghostly is still starting. Try again in a moment.", "errors.app.stillStarting"),
   exact("Lost the Ghostly peer", "errors.app.lostPeer"),
+  // A call whose storage write the browser refused for want of space (engine/server.ts): a group made, a text sent.
+  { match: /^Not enough space on this device \(QuotaExceededError(?:: [\s\S]*)?\)$/, key: "errors.app.noRoom", next: "errors.app.noRoomNext", detail: true },
   // A call refused in limited mode (packages/browser/src/engine/node.ts LIMITED_MODE_ERROR): the banner's own words, and what to do.
   exact("Ghostly could not check which device is active yet. This works once it can.", "devices.limited.title", "errors.app.limitedNext"),
   exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress"),
@@ -215,6 +217,7 @@ const RULES: readonly Rule[] = [
 
   // A send or an edit a chat refused (engine/node.ts sendMessage, editMessage, replyRef; platform/useChat.ts).
   { match: /^Message exceeds (?<max>\d+) UTF-8 bytes\.$/, key: "errors.chat.tooLong", next: "errors.chat.tooLongNext" },
+  exact("Message too long once encoded. Shorten it or send it as a file.", "errors.chat.tooLong", "errors.chat.tooLongNext"),
   { match: /^This message was edited (?<max>\d+) times, the most one takes\.$/, key: "errors.chat.editTooMany", next: "errors.chat.editTooManyNext" },
   { match: /^That message (?:is not in this chat, or )?cannot be replied to$/, key: "errors.chat.replyGone", next: "errors.chat.replyGoneNext" },
   // A chat made or joined that the storage had no room for (lib/storage.ts ensureSession).

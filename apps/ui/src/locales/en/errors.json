@@ -4,6 +4,8 @@
     "limitedNext": "This works once the check does. Check your connection.",
     "localAddress": "Ghostly needs your permission to reach that local address",
     "lostPeer": "Lost the Ghostly peer",
+    "noRoom": "Not enough space on this device",
+    "noRoomNext": "Free some space, then try again.",
     "pickCard": "Pick a Lightning card first",
     "signerKey": "Your signer holds a different key than this identity. Nothing was published.",
     "starting": "Ghostly is starting…",

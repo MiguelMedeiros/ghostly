@@ -28,6 +28,7 @@ import type { OpenAppOptions } from "../../lib/apps/open";
  */
 const PERMISSIONS: Record<string, { label: TranslationKey; info?: TranslationKey }> = {
   chat: { label: "apps.install.perm.chat" },
+  files: { label: "apps.install.perm.files", info: "apps.install.perm.filesInfo" },
   internet: { label: "apps.install.perm.internet", info: "apps.install.perm.internetInfo" },
   name: { label: "apps.install.perm.name" },
 };

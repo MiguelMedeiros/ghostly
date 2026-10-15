@@ -22,7 +22,7 @@ Testnet) and on the platforms listed. "Experimental" is the descriptor's `experi
 | `cashu-mint` | Lightning | [cashuMint.ts](providers/cashuMint.ts) | yes | the test mints | web, extension, desktop | not flagged |
 | `fedimint` | Lightning | [fedimint.ts](providers/fedimint.ts) | yes | signet, testnet, regtest, mutinynet | web, extension, desktop | experimental |
 | `breez` | Lightning | [breez.ts](providers/breez.ts) | yes (Breez API key required) | regtest (Breez and Lightspark's, no API key) | web, extension, desktop | experimental |
-| `nwc` | Lightning | [nwc.ts](providers/nwc.ts) | yes | testnet, signet, mutinynet, regtest | web, extension, desktop | not flagged |
+| `nwc` | Lightning | [nwcProvider.ts](providers/nwcProvider.ts), [nwc.ts](providers/nwc.ts) | yes | testnet, signet, mutinynet, regtest | web, extension, desktop | not flagged |
 | `core-lightning` | Lightning | [coreLightning.ts](providers/coreLightning.ts) | yes | testnet, signet, regtest | web, extension, desktop | not flagged |
 | `webln` | Lightning | [webln.ts](providers/webln.ts) | yes | testnet, signet, mutinynet, regtest | web | experimental |
 | `lnd` | Lightning | [lnd.ts](providers/lnd.ts) | yes | testnet, signet, regtest | web, extension, desktop | experimental |
@@ -56,7 +56,7 @@ exports.
    descriptor:
 
    ```ts
-   // A shortened version of providers/nwc.ts.
+   // A shortened version of providers/nwcProvider.ts. The client loads in `create`, so it is not in the app's first load.
    export const nwc: LightningProviderDescriptor = {
      id: "nwc",                        // stable: it is stored with the profile
      label: "Nostr Wallet Connect",
@@ -67,7 +67,7 @@ exports.
      fields: [{ name: "uri", label: "Connection URI", kind: "secret", placeholder: "nostr+walletconnect://…" }],
      custodial: true,
      validate({ secrets }) { if (!secrets.uri.startsWith("nostr+walletconnect://")) throw new Error("That is not an NWC URI"); },
-     async create({ config, secrets }, host) { return NwcLightning.connect(secrets.uri, host.signal); },
+     async create({ config, secrets }, host) { const { NwcLightning } = await import("./nwc"); return NwcLightning.connect(secrets.uri, host.signal); },
    };
    ```
 

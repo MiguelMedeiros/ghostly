@@ -3,8 +3,9 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import * as nip04 from "nostr-tools/nip04";
 import * as nip44 from "nostr-tools/nip44";
 import { finalizeEvent, getPublicKey, verifyEvent, type Event } from "nostr-tools/pure";
-import type { InvoiceStatus, LightningCapabilities, LightningInfo, LightningInvoice, LightningPayResult, LightningPaymentRef, LightningPaymentStatus, LightningProvider, LightningProviderDescriptor } from "./lightning";
-import { NothingSpentError, PROVIDER_PLATFORMS, type ProviderNetwork } from "./types";
+import type { InvoiceStatus, LightningCapabilities, LightningInfo, LightningInvoice, LightningPayResult, LightningPaymentRef, LightningPaymentStatus, LightningProvider } from "./lightning";
+import { parseNwcUri, type NwcConnection } from "./nwcProvider";
+import { NothingSpentError, type ProviderNetwork } from "./types";
 
 /**
  * Lightning through a wallet reached over Nostr Wallet Connect (NIP-47): Alby Hub, a node's NWC service, a
@@ -24,8 +25,6 @@ const MAX_MESSAGE = 256 * 1024;
 const MAX_CONTENT = 64 * 1024;
 const MAX_INFO = 4096;
 const MAX_INVOICE = 7089;
-const MAX_URI = 2048;
-const MAX_RELAYS = 5;
 const CONNECT_MS = 10_000;
 const ACK_MS = 10_000;
 const REQUEST_MS = 20_000;
@@ -46,40 +45,6 @@ const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padSt
 const bytes = (text: string) => Uint8Array.from(text.match(/../g)!, (b) => parseInt(b, 16));
 const now = () => Math.floor(Date.now() / 1000);
 const isMsat = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
-
-// -- the connection URI --------------------------------------------------------------------------------
-
-export interface NwcConnection {
-  walletPubkey: string;
-  relays: string[];
-  /** The client key the wallet granted: a secret. */
-  secret: Uint8Array;
-}
-
-/** Only secure relays, except on this machine (a local test relay). */
-function checkRelay(address: string): string {
-  let relay: URL;
-  try { relay = new URL(address); } catch { throw new Error("The connection URI has a relay that is not a URL"); }
-  if (relay.username || relay.password || relay.hash) throw new Error("The connection URI has a relay with credentials in it");
-  const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(relay.hostname);
-  if (!(relay.protocol === "wss:" || (relay.protocol === "ws:" && loopback))) throw new Error("Use a wallet whose relay is secure (wss://)");
-  return relay.href;
-}
-
-/** Reads a `nostr+walletconnect://` URI. Its errors never repeat it: it holds a secret. */
-export function parseNwcUri(input: string): NwcConnection {
-  const text = (input ?? "").trim();
-  if (text.length > MAX_URI) throw new Error("That connection URI is too long");
-  const match = /^(?:nostr\+walletconnect|nostrwalletconnect):(?:\/\/)?([0-9a-fA-F]{64})\/?\?([^#]*)$/.exec(text);
-  if (!match) throw new Error("That is not a Nostr Wallet Connect URI (nostr+walletconnect://…)");
-  const params = new URLSearchParams(match[2]);
-  const secret = (params.get("secret") ?? "").toLowerCase();
-  if (!HEX64.test(secret) || /^0+$/.test(secret)) throw new Error("The connection URI has no valid secret");
-  const relays = [...new Set(params.getAll("relay").map(checkRelay))];
-  if (!relays.length) throw new Error("The connection URI names no relay");
-  if (relays.length > MAX_RELAYS) throw new Error("The connection URI names too many relays");
-  return { walletPubkey: match[1].toLowerCase(), relays, secret: bytes(secret) };
-}
 
 // -- one relay -----------------------------------------------------------------------------------------
 
@@ -519,18 +484,3 @@ export class NwcLightning implements LightningProvider {
     this.relay.close();
   }
 }
-
-export const nwc: LightningProviderDescriptor = {
-  id: "nwc",
-  label: "Nostr Wallet Connect",
-  kind: "lightning",
-  description: "A wallet you connect with its NWC URI (Alby Hub, a node's NWC service, a hosted wallet). That wallet holds the sats and sets its own fee limit: custodial or not depends on the wallet.",
-  networks: ["bitcoin", "testnet", "signet", "mutinynet", "regtest"],
-  platforms: PROVIDER_PLATFORMS,
-  fields: [{
-    name: "uri", label: "Connection URI", kind: "secret", placeholder: "nostr+walletconnect://…",
-    help: "From your wallet's app connections. Allow making, paying and looking up invoices, and reading the balance.",
-  }],
-  validate({ secrets }) { parseNwcUri(secrets.uri ?? ""); },
-  async create({ secrets }, host) { return NwcLightning.connect(secrets.uri, { signal: host.signal }); },
-};

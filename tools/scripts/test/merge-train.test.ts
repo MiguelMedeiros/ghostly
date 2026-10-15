@@ -691,6 +691,7 @@ describe("a run of the train", () => {
   it("blames nobody while the base itself is red, and goes on once it is green", async () => {
     const repo = fakeRepo();
     for (const n of [11, 12]) repo.add(n);
+    repo.add(13, { ci: [] }); // no CI yet: it stays in line behind the batch
     await repo.run();
     repo.runs.set("dev0", red);
     repo.settle([11, 12]);
@@ -698,9 +699,13 @@ describe("a run of the train", () => {
     expect(held.log.join("\n")).toMatch(/HOLD .*itself is red/);
     expect(held.failed).toEqual([]);
     expect(repo.members()).toEqual([11, 12]);
+    // Everyone in line is told why nothing moves, not "waiting for its CI" under a batch that is already red.
+    for (const n of [11, 12, 13]) expect(repo.comments.get(n)!.at(-1)!.body).toMatch(/on hold: CI Success on `dev` itself is red/);
+    expect(repo.comments.get(11)!.at(-1)!.body).not.toMatch(/waiting for its CI/);
     repo.runs.set("dev0", green);
     await repo.run();
     expect(repo.members()).toEqual([11]); // now it bisects
+    for (const n of [11, 12, 13]) expect(repo.comments.get(n)!.at(-1)!.body).not.toMatch(/on hold/);
   });
 
   it("tries a single red pull request once more before failing it (a flake lands)", async () => {
@@ -914,6 +919,34 @@ describe("a run of the train", () => {
     expect(repo.landed).toEqual([]);
     expect(r.log.join("\n")).toMatch(/\(dry run\) would merge #11 at h11 \(squash\) as "fix 11 \(#11\)"\n[^]*\(dry run\) would merge #12 at h12 \(squash\)[^]*\(dry run\) would close #9000/);
     expect(r.log.join("\n")).not.toMatch(/verified/i);
+  });
+
+  it("takes its drop label off a pull request queued again, and puts it back if it drops again", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n);
+    repo.conflicts.add(12);
+    await repo.run();
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.conflict]);
+
+    // Fixed and queued again as the comment says, with the drop label left on; and one that failed, queued again.
+    repo.conflicts.delete(12);
+    repo.pulls.get(12)!.labels.push(LABEL.queue);
+    repo.add(14);
+    repo.pulls.get(14)!.labels.push(LABEL.failed);
+    const dry = await repo.run({ dry: true });
+    expect(dry.log.join("\n")).toMatch(/\(dry run\) would unlabel #12 queue:conflict/);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.conflict, LABEL.queue]);
+    await repo.run();
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.queue]);
+    expect(repo.pulls.get(14)!.labels).toEqual([LABEL.queue]);
+    expect(repo.comments.get(12)!.at(-1)!.body).toMatch(/in line for `dev`: \*\*1st\*\*/);
+
+    // Conflicting again: dropped with the label, as the first time.
+    repo.conflicts.add(12);
+    repo.settle();
+    await repo.run();
+    await repo.run();
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.conflict]);
   });
 });
 
@@ -1330,6 +1363,11 @@ describe("one pull request alone", () => {
     expect(held.log.join("\n")).toMatch(/HOLD #11: .*itself is red/);
     expect(repo.pulls.get(11)!.sha).toBe(head);
     expect(repo.alone(11)!.retried).toBe(false);
+    // Its own CI Success is red: the comment says the train waits for `dev`, not for its CI.
+    const said = repo.comments.get(11)!.at(-1)!.body;
+    expect(said).toMatch(/on hold: CI Success on `dev` itself is red/);
+    expect(said).not.toMatch(/waiting for CI Success/);
+    expect(repo.alone(11)).toMatchObject({ sha: head });
   });
 
   it("rebases again when the base moves under it, and never lands green on an old tip", async () => {

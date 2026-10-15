@@ -68,6 +68,11 @@ class TagArgs {
 }
 
 @InvokeArg
+class KeepArgs {
+  var keep: List<String> = emptyList()
+}
+
+@InvokeArg
 class SaveArgs {
   lateinit var path: String
   lateinit var name: String
@@ -453,12 +458,16 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
     invoke.resolve()
   }
 
-  /** Takes away every message notification still there: the page that starts knows none an earlier one posted. */
+  /**
+   * Takes away every message notification still there but those posted as `keep`: the page that starts knows only
+   * those of an earlier one's, its chats' tags (they stay, and it replaces, takes away and opens them).
+   */
   @Command
   fun cancelNotifications(invoke: Invoke) {
+    val keep = invoke.parseArgs(KeepArgs::class.java).keep.toSet()
     val manager = activity.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     manager.activeNotifications
-      .filter { it.id == 1 && it.tag != null && it.notification.channelId == CHANNEL }
+      .filter { it.id == 1 && it.tag != null && it.tag !in keep && it.notification.channelId == CHANNEL }
       .forEach { manager.cancel(it.tag, it.id) }
     invoke.resolve()
   }

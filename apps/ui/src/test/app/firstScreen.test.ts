@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 /**
- * The first screen (the chat list) loads only what it draws: the profile's language, not all eight, and the pages of
- * the menu once one is opened.
+ * The first screen (the chat list) loads only what it draws: the profile's language, not all eight, the pages of the
+ * menu once one is opened, and Join's QR decoder once a scan or a picture read starts.
  */
 const { evaluated, page } = vi.hoisted(() => {
   const evaluated: string[] = [];
@@ -15,6 +15,7 @@ vi.mock("../../pages/Identities", page("Identities"));
 vi.mock("../../pages/Apps", page("Apps"));
 vi.mock("../../pages/Tasks", page("Tasks"));
 vi.mock("../../pages/Wallet", page("Wallet"));
+vi.mock("jsqr", () => { evaluated.push("jsqr"); return { default: () => null }; });
 
 describe("the first screen", () => {
   it("holds English only, and a language once it is loaded", async () => {
@@ -29,7 +30,7 @@ describe("the first screen", () => {
     expect(loadedLocale("ja")).toBeUndefined();
   });
 
-  it("does not load the menu's pages with the app", async () => {
+  it("does not load the menu's pages or the QR decoder with the app", async () => {
     vi.resetModules();
     await import("../../Root");
     expect(evaluated).toEqual([]);

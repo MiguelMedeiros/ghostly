@@ -63,6 +63,12 @@ export const START_TIMEOUT_MS = 15_000;
  */
 export const STOP_REQUESTS_PER_SECOND = 10 * MINI_APP_LIMITS.requestsPerSecond;
 
+/**
+ * How long after the person cancels a `files.pick` the app's next one is refused (`too-fast`): asking again at once
+ * would put the picker back in front of them each time they close it.
+ */
+export const PICK_AFTER_CANCEL_MS = 10_000;
+
 /** The deepest JSON a request may carry: a value deeper than this is refused rather than walked. */
 const MAX_DEPTH = 64;
 
@@ -243,6 +249,8 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
   const linkedFiles = () => (launch.permissions.includes("files") ? platform.linkedFiles ?? null : null);
   /** A pick waiting for the person: one at a time per app. */
   let picking = false;
+  /** When a pick may be asked again: `PICK_AFTER_CANCEL_MS` after the person cancelled one. */
+  let pickAgainAt = 0;
   let appId: string | null = null;
   let chatOpened = false;
   let peer: { version: string } | null = null;
@@ -364,10 +372,13 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         const files = linkedFiles();
         if (!files) return refuse("not-allowed");
         const options = pickOptions(args[0]);
-        if (picking) refuse("too-fast");
+        if (picking || now() < pickAgainAt) refuse("too-fast");
         picking = true;
         try {
           return { value: await files.pick(launch.ref, launch.title, options) as unknown as MiniAppJson };
+        } catch (error) {
+          if (refusalOf(error) === "cancelled") pickAgainAt = now() + PICK_AFTER_CANCEL_MS;
+          throw error;
         } finally {
           picking = false;
         }
