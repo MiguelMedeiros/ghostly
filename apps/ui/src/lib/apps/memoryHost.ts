@@ -108,7 +108,7 @@ export function memoryHost(runnerUrl = "/app-frame.html", netRunnerUrl: string |
           return entry;
         });
       },
-      list: async (ref) => { calls.push({ op: "files.list", ref }); return [...linksOf(ref).values()].map((l) => l.entry); },
+      list: async (ref, _title) => { calls.push({ op: "files.list", ref }); return [...linksOf(ref).values()].map((l) => l.entry); },
       read: async (ref, id, offset, length) => {
         calls.push({ op: "files.read", ref, key: id });
         const link = linksOf(ref).get(id);

@@ -387,7 +387,7 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         const files = linkedFiles();
         if (!files) return refuse("not-allowed");
         // Counted as file bytes: 100 000 links answered 15 MB, and 50 lists a second made the page copy 758 MB a second.
-        return { value: await counted(() => files.list(launch.ref), listBytes) as unknown as MiniAppJson };
+        return { value: await counted(() => files.list(launch.ref, launch.title), listBytes) as unknown as MiniAppJson };
       }
       case "files.read": {
         const files = linkedFiles();

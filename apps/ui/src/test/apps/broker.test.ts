@@ -555,7 +555,7 @@ describe("linked files (WISP 1200 · Linked files)", () => {
     expect(host.calls.find((c) => c.op === "files.pick")).toEqual({ op: "files.pick", ref: REF, key: "folder mp4,srt" });
     expect(await ask("files.list")).toMatchObject({ ok: true, value: [{ path: "Films/Up.mp4" }, { path: "Films/Up.srt" }] });
     // Another app keeps none of them.
-    expect(await host.linkedFiles!.list("other/app")).toEqual([]);
+    expect(await host.linkedFiles!.list("other/app", "Other")).toEqual([]);
   });
 
   it("pick: the person picked nothing is `cancelled`, and options other than the call's are refused", async () => {
