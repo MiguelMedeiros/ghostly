@@ -81,8 +81,11 @@ export interface StoredPick {
 
 /** Where picks outlive the page. */
 export interface PickStore {
+  /** The app's picks, without the entries forgotten since. */
   all(ref: string): Promise<StoredPick[]>;
   put(pick: StoredPick): Promise<void>;
+  /** One entry of a kept pick forgotten: a write of its own, whatever the size of the pick (up to `filesEntries`). */
+  forget(ref: string, id: string, entry: string): Promise<void>;
   remove(ref: string, id: string): Promise<void>;
   clear(ref: string): Promise<void>;
 }
@@ -186,22 +189,32 @@ export const browserPicker = (): BrowserPicker => (typeof (globalThis as Pickers
 /** The database a profile keeps its apps' picks in, beside its peer database, deleted with it (`deleteProfile`). */
 export const linkedFilesDatabase = (profileDatabase: string) => `${profileDatabase}-files`;
 
-/** Picks in IndexedDB, in the database `name()` names (the profile's own: it goes with the profile). */
+/** Keys of one app's records, or of one pick's ("<ref> <pick> <entry>"): a ref and a pick id hold no space. */
+const under = (...parts: string[]) => IDBKeyRange.bound(`${parts.join(" ")} `, `${parts.join(" ")} \uffff`);
+
+/**
+ * Picks in IndexedDB, in the database `name()` names (the profile's own: it goes with the profile). A pick is written
+ * whole once; each entry forgotten later is a small record of its own in `forgotten`, so a forget never writes the
+ * pick's 100,000 entries again.
+ */
 export function idbPickStore(name: () => string): PickStore {
   const open = () =>
     new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(name(), 1);
-      request.onupgradeneeded = () => { request.result.createObjectStore("picks", { keyPath: "key" }); };
+      const request = indexedDB.open(name(), 2);
+      request.onupgradeneeded = ({ oldVersion }) => {
+        if (oldVersion < 1) request.result.createObjectStore("picks", { keyPath: "key" });
+        request.result.createObjectStore("forgotten");
+      };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-  const run = async <T>(mode: IDBTransactionMode, act: (store: IDBObjectStore) => IDBRequest<T> | void): Promise<T | undefined> => {
+  const run = async <T>(mode: IDBTransactionMode, act: (picks: IDBObjectStore, forgotten: IDBObjectStore) => () => T): Promise<T> => {
     const db = await open();
     try {
-      return await new Promise<T | undefined>((resolve, reject) => {
-        const tx = db.transaction("picks", mode);
-        const request = act(tx.objectStore("picks"));
-        tx.oncomplete = () => resolve(request ? request.result : undefined);
+      return await new Promise<T>((resolve, reject) => {
+        const tx = db.transaction(["picks", "forgotten"], mode);
+        const result = act(tx.objectStore("picks"), tx.objectStore("forgotten"));
+        tx.oncomplete = () => resolve(result());
         tx.onerror = () => reject(tx.error);
       });
     } finally {
@@ -209,13 +222,20 @@ export function idbPickStore(name: () => string): PickStore {
     }
   };
   return {
-    all: async (ref) => ((await run("readonly", (s) => s.getAll())) as (StoredPick & { key: string })[] ?? []).filter((p) => p.ref === ref),
-    put: async (pick) => { await run("readwrite", (s) => { s.put({ ...pick, key: `${pick.ref} ${pick.id}` }); }); },
-    remove: async (ref, id) => { await run("readwrite", (s) => { s.delete(`${ref} ${id}`); }); },
-    clear: async (ref) => {
-      const picks = await run("readonly", (s) => s.getAll()) as (StoredPick & { key: string })[] | undefined;
-      await run("readwrite", (s) => { for (const p of picks ?? []) if (p.ref === ref) s.delete(p.key); });
-    },
+    all: (ref) => run("readonly", (picks, forgotten) => {
+      const kept = picks.getAll(under(ref));
+      const gone = forgotten.getAllKeys(under(ref));
+      return () => {
+        const ids = new Set((gone.result as string[]).map((key) => key.slice(key.lastIndexOf(" ") + 1)));
+        return (kept.result as (StoredPick & { key: string })[])
+          .filter((p) => p.ref === ref)
+          .map(({ key: _, ...pick }) => (ids.size ? { ...pick, entries: pick.entries.filter((e) => !ids.has(e.id)) } : pick));
+      };
+    }),
+    put: (pick) => run("readwrite", (picks) => { picks.put({ ...pick, key: `${pick.ref} ${pick.id}` }); return () => {}; }),
+    forget: (ref, id, entry) => run("readwrite", (_, forgotten) => { forgotten.put(1, `${ref} ${id} ${entry}`); return () => {}; }),
+    remove: (ref, id) => run("readwrite", (picks, forgotten) => { picks.delete(`${ref} ${id}`); forgotten.delete(under(ref, id)); return () => {}; }),
+    clear: (ref) => run("readwrite", (picks, forgotten) => { picks.delete(under(ref)); forgotten.delete(under(ref)); return () => {}; }),
   };
 }
 
@@ -292,8 +312,8 @@ export interface WebLinkedFilesOptions {
 
 export function webLinkedFiles({ text, picker = browserPicker(), store = null, ask, askAgain }: WebLinkedFilesOptions): LinkedFilesHost {
   const apps = new Map<string, Map<string, Link>>();
-  /** Each kept pick by id, with whether the browser lets it be read now. */
-  const picks = new Map<string, { stored: StoredPick; granted: boolean }>();
+  /** Each kept pick by id, with whether the browser lets it be read now and how many of its entries are not forgotten. */
+  const picks = new Map<string, { stored: StoredPick; granted: boolean; left: number }>();
   const loading = new Map<string, Promise<void>>();
   /** Apps whose kept picks the person was asked about on this page: never twice. */
   const askedAgain = new Set<string>();
@@ -335,7 +355,7 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
         const links = linksOf(ref);
         for (const stored of await store.all(ref).catch(() => [])) {
           const granted = await permitted(stored.keep);
-          picks.set(stored.id, { stored, granted });
+          picks.set(stored.id, { stored, granted, left: stored.entries.length });
           for (const { at, ...entry } of stored.entries) {
             if (!links.has(entry.id)) links.set(entry.id, { entry: { ...entry, available: granted }, pick: stored.id, ...(at !== undefined && { at }) });
           }
@@ -388,7 +408,7 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
       });
       if (pickId && picked.keep && store) {
         const stored: StoredPick = { ref, id: pickId, keep: picked.keep, entries: added.map(({ entry: { available: _, ...rest }, at }) => ({ ...rest, ...(at !== undefined && { at }) })) };
-        picks.set(pickId, { stored, granted: true });
+        picks.set(pickId, { stored, granted: true, left: stored.entries.length });
         // Kept for the next page; a store that fails leaves the links for this one.
         await store.put(stored).catch(() => {});
       }
@@ -439,8 +459,8 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
       linksOf(ref).delete(id);
       const kept = link?.pick ? picks.get(link.pick) : undefined;
       if (!kept) return;
-      kept.stored = { ...kept.stored, entries: kept.stored.entries.filter((e) => e.id !== id) };
-      if (kept.stored.entries.length) await store?.put(kept.stored).catch(() => {});
+      // The entry alone, not the pick again: one forget costs the same in a pick of 10 files or of 100,000.
+      if (--kept.left > 0) await store?.forget(ref, kept.stored.id, id).catch(() => {});
       else {
         picks.delete(kept.stored.id);
         await store?.remove(ref, kept.stored.id).catch(() => {});
