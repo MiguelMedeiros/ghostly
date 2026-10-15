@@ -50,7 +50,8 @@ const MAX_REQUEST_BYTES: usize = 64 * 1024;
 const MAX_REQUESTS_PER_SECOND: usize = 50;
 /// The largest id a request may carry: a safe integer in JavaScript.
 const MAX_ID: u64 = (1 << 53) - 1;
-/// How long a request waits for the Ghostly window's broker (a file read included).
+/// How long a request waits for the Ghostly window's broker (a file read included), a file pick excepted
+/// (`answer_to`).
 #[cfg(not(test))]
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(60);
 #[cfg(test)]
@@ -863,19 +864,31 @@ pub async fn app_broker<R: Runtime>(
         json!({ "label": label, "request": request }),
     );
     let answer = match sent {
-        Ok(()) => tokio::time::timeout(ANSWER_TIMEOUT, receiver).await.ok(),
+        Ok(()) => answer_to(&request, receiver).await,
         Err(_) => None,
     };
     state.with(&label, |window| window.pending.remove(&id));
-    let answer = match answer {
-        Some(Ok(answer)) => answer,
-        _ => return Err("No answer".into()),
+    let Some(answer) = answer else {
+        return Err("No answer".into());
     };
     match file_bytes(&app, &answer).await {
         Some(Ok(bytes)) => bytes_response(id, &bytes),
         Some(Err(_)) => json_response(&json!({ "id": id, "ok": false, "error": "failed" })),
         None => json_response(&answer),
     }
+}
+
+/// The broker's answer to `request`, or None when it never came. A file pick waits for the person however long
+/// they take, as on the web (WISP 1200: `cancelled` only when they pick nothing), until the window goes and drops
+/// the sender; anything else waits `ANSWER_TIMEOUT`.
+async fn answer_to(request: &Value, receiver: oneshot::Receiver<Value>) -> Option<Value> {
+    if request.get("type").and_then(Value::as_str) == Some("files.pick") {
+        return receiver.await.ok();
+    }
+    tokio::time::timeout(ANSWER_TIMEOUT, receiver)
+        .await
+        .ok()?
+        .ok()
 }
 
 /// A file's bytes for the app window, as base64 in the answer (`"bytes"`, which the runner decodes). Not raw: the
@@ -1800,6 +1813,35 @@ mod tests {
             first.try_recv(),
             Err(oneshot::error::TryRecvError::Closed)
         ));
+    }
+
+    /// A pick waits for the person, however long they take (as on the web, whose runner has no timer); it ends
+    /// when the window goes. Anything else gives up after `ANSWER_TIMEOUT` (1 s under test).
+    #[test]
+    fn a_pick_waits_for_the_person_past_the_answer_timeout() {
+        let late = |kind: &str, after: Duration| {
+            let (sender, receiver) = oneshot::channel();
+            std::thread::spawn(move || {
+                std::thread::sleep(after);
+                let _ = sender.send(json!({"id": 3, "ok": true, "value": []}));
+            });
+            let request = json!({"id": 3, "type": kind, "args": []});
+            tauri::async_runtime::block_on(answer_to(&request, receiver))
+        };
+        let slow = ANSWER_TIMEOUT + Duration::from_millis(500);
+        assert_eq!(
+            late("files.pick", slow),
+            Some(json!({"id": 3, "ok": true, "value": []}))
+        );
+        assert_eq!(late("storage.keys", slow), None);
+        // The window closed (its state and the waiting sender dropped): the pick ends at once.
+        let (sender, receiver) = oneshot::channel::<Value>();
+        drop(sender);
+        let request = json!({"id": 3, "type": "files.pick", "args": []});
+        assert_eq!(
+            tauri::async_runtime::block_on(answer_to(&request, receiver)),
+            None
+        );
     }
 
     #[test]
