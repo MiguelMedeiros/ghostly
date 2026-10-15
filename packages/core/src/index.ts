@@ -109,3 +109,4 @@ export * from "./appUpdates";
 export * from "./x401";
 export * from "./x401Credential";
 export * from "./x401Presentation";
+export * from "./x401Request";
