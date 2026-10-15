@@ -12,7 +12,7 @@ import { appErrorText, appErrorView, type AppErrorView } from "../../lib/apps/er
 import { refreshInstalledApps } from "../../lib/apps/installed";
 import { saveAppData } from "../../lib/apps/exportData";
 import { webKitAppLeak } from "../../lib/apps/flag";
-import type { OpenAppOptions } from "../../lib/apps/open";
+import { forgetLinkedFiles, type OpenAppOptions } from "../../lib/apps/open";
 
 /*
  * The install screen (WISP 1200 § Permissions, § Apps sent in a chat, § Takedowns): what the checked bundle says,
@@ -310,7 +310,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
         <div className="flex flex-wrap justify-end gap-2">
           <Button onClick={() => setRemoving(false)}>{t("common.cancel")}</Button>
           <Button data-testid="app-export" disabled={busy} loading={pending === "export"} onClick={() => void act(async () => saveAppData(app.ref, await engine.call("appDataExportText", { ref: app.ref })), false, "export")}>{t("apps.app.export")}</Button>
-          <Button variant="danger" data-testid="app-uninstall-confirm" disabled={busy} loading={pending === "uninstall"} onClick={() => void act(async () => { await engine.call("appUninstall", { ref: app.ref }); onUninstalled?.(); }, true, "uninstall")}>{t("apps.app.uninstall")}</Button>
+          <Button variant="danger" data-testid="app-uninstall-confirm" disabled={busy} loading={pending === "uninstall"} onClick={() => void act(async () => { await engine.call("appUninstall", { ref: app.ref }); await forgetLinkedFiles(app.ref); onUninstalled?.(); }, true, "uninstall")}>{t("apps.app.uninstall")}</Button>
         </div>
       </Shell>
     );

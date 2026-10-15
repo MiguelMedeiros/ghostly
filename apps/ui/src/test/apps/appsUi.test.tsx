@@ -15,7 +15,7 @@ import { AddAppDialog } from "../../components/apps/AddAppDialog";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { Settings } from "../../pages/Settings";
-import { setAppOpener } from "../../lib/apps/open";
+import { setAppOpener, setLinkedFiles } from "../../lib/apps/open";
 import { appsAvailable, forgetAppsAvailable, webKitAppLeak } from "../../lib/apps/flag";
 import { forgetInstalledApps } from "../../lib/apps/installed";
 import type { ChatMessage } from "../../lib/types";
@@ -575,8 +575,13 @@ describe("with the apps flag on", () => {
     expect(screen.getByTestId("app-store-line")).toHaveTextContent("In Ghostly");
     await user.click(screen.getByTestId("app-uninstall-open"));
     expect(screen.getByTestId("app-uninstall")).toHaveTextContent("Export the data first");
+    // The files people picked for it go with it; the files themselves are not touched.
+    const forgot: string[] = [];
+    setLinkedFiles({ pick: async () => [], list: async () => [], read: async () => new Uint8Array(0), forget: async (ref, id) => { forgot.push(`${ref} ${id}`); } });
     await user.click(screen.getByTestId("app-uninstall-confirm"));
     expect(fakeEngine.callsTo("appUninstall")).toEqual([{ ref: REF }]);
+    await waitFor(() => expect(forgot).toEqual([`${REF} all`]));
+    setLinkedFiles(null);
     expect(fetches).toEqual([]);
   });
 

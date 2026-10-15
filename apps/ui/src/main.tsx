@@ -18,7 +18,7 @@ import { setProfileBase } from "./lib/profiles";
 import { restartWhenRestored } from "./lib/restoredPage";
 import { openProfile } from "./lib/profileStart";
 import { listen } from "@tauri-apps/api/event";
-import { setAppOpener } from "./lib/apps/open";
+import { setAppOpener, setLinkedFiles } from "./lib/apps/open";
 import { desktopOpener } from "./lib/apps/desktopOpener";
 import { desktopLinkedFiles } from "./lib/apps/desktopFiles";
 import { pickSheetText } from "./lib/apps/webFiles";
@@ -82,6 +82,7 @@ async function boot() {
   // the host keeps per profile (apps/desktop/src/linked_files.rs).
   const pickTitle = (app: string, folder: boolean) => pickSheetText(translatorFor(loadSettings().language)).ask(app, folder);
   const linkedFiles = desktopLinkedFiles(invoke, fileSpace, pickTitle);
+  setLinkedFiles(linkedFiles);
   setAppOpener(desktopOpener({ apps: () => servicesPlatform?.apps, invoke, listen, nameIn: nameInChat, windowTitle, linkedFiles }));
   if (gate.full) startSessionSync();
   addEventListener("pagehide", () => host.announceDeparture());
