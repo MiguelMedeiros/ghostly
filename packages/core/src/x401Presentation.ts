@@ -205,9 +205,16 @@ export function presentX401SdJwtVc(vc: X401SdJwtVc, claims: X401ClaimPath[], bin
   return `${presented}${head}.${body}.${signature}`;
 }
 
-/** The `vp_token` of an OpenID4VP response: each presentation in a list under its credential query id. */
+/**
+ * The `vp_token` of an OpenID4VP response: each presentation in a list under its credential query id. The ids are the
+ * verifier's, and `constructor` or `__proto__` is one as good as `pid`: gathered in a Map, answered as own members.
+ */
 export function x401VpToken(presentations: { query: string; presentation: string }[]): Record<string, string[]> {
-  const token: Record<string, string[]> = {};
-  for (const { query, presentation } of presentations) (token[query] ??= []).push(presentation);
-  return token;
+  const token = new Map<string, string[]>();
+  for (const { query, presentation } of presentations) {
+    const list = token.get(query);
+    if (list) list.push(presentation);
+    else token.set(query, [presentation]);
+  }
+  return Object.fromEntries(token);
 }
