@@ -420,7 +420,7 @@ export function GroupChat() {
   const platform = useServicesPlatform();
   const sendFile = useCallback(async (source: File, voice?: VoiceMeta): Promise<string | null> => {
     if (!platform?.sendGroupFile) return null;
-    if (source.size > GROUP_FILE_LIMITS.maxBytes) return t("chat.fileTooLarge", { size: formatFileSize(GROUP_FILE_LIMITS.maxBytes) });
+    if (source.size > GROUP_FILE_LIMITS.maxBytes) return t("chat.fileTooLarge", { size: formatFileSize(GROUP_FILE_LIMITS.maxBytes, t) });
     const answering = replyingRef.current;
     try {
       // A video goes with its length, size and first frame, so members see it before they fetch it.

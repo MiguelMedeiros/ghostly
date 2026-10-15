@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { formatFileSize, formatVideoDuration, sanitizeFileName } from "@ghostly/core";
+import { formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { languageTag } from "../../lib/documentLanguage";
 import { downloadFile } from "../../lib/fileDownload";
+import { formatFileSize } from "../../lib/format";
 import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, stalledAction } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
@@ -258,7 +259,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
           <div className="flex items-center gap-1.5 h-[18px] text-[11px] text-text-primary/65" data-testid="audio-meta">
             {active && <SpeedPill rate={rate} locale={locale} onGone={() => playRef.current?.focus()} />}
             <span className="tabular-nums" data-testid="audio-time">
-              {known ? `${formatVideoDuration(position * 1000)} / ${formatVideoDuration(duration * 1000)}` : formatFileSize(file.size)}
+              {known ? `${formatVideoDuration(position * 1000)} / ${formatVideoDuration(duration * 1000)}` : formatFileSize(file.size, t)}
             </span>
             {status && <span data-testid="audio-status" className={`min-w-0 truncate ${failed ? "text-danger-ink" : ""}`}>· <bdi>{status}</bdi></span>}
             {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="audio-why" danger={!!reason} />}
@@ -278,13 +279,13 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
           <div className="flex items-center gap-2">
             <button type="button" data-testid="audio-accept" disabled={noRoom} onClick={() => act("accept")}
               className="text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none cursor-pointer disabled:opacity-50 disabled:cursor-default">
-              {t("chat.media.downloadSize", { size: formatFileSize(file.size) })}
+              {t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}
             </button>
             {!group && <button type="button" data-testid="audio-decline" onClick={() => act("decline")} className={pill}>{t("chat.file.decline")}</button>}
           </div>
           {typeof transfer.room === "number" && (
             <p className={`text-[11px] m-0 mt-1 ${noRoom ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="audio-room">
-              {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room) })}
+              {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room, t) })}
             </p>
           )}
         </div>

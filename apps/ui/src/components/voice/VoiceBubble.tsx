@@ -472,7 +472,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
         <div className="mt-1.5 px-1">
           <button type="button" data-testid="voice-download" onClick={() => run(() => platform!.fileAction!(file.id, "accept"))}
             className="text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none cursor-pointer">
-            {t("chat.media.downloadSize", { size: formatFileSize(file.size) })}
+            {t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}
           </button>
         </div>
       )}

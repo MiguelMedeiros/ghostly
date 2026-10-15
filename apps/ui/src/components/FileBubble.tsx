@@ -154,7 +154,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
 
   /** The picture is drawn, so it can open large. */
   const drawn = !!blobUrl && loaded?.url === blobUrl && loaded.ok;
-  const status = restoring ? t("chat.file.restoring", { size: formatFileSize(file.size) }) : fileStatus(file, transfer, named, missing, t);
+  const status = restoring ? t("chat.file.restoring", { size: formatFileSize(file.size, t) }) : fileStatus(file, transfer, named, missing, t);
   const moving = transfer?.state === "transferring";
   // A group's file (WISP 503) is downloaded or not: no Decline, no pause or cancel.
   const group = isGroupFile(file);
@@ -248,18 +248,18 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
       {offered && group && (
         <div className="px-2 pb-1.5" data-testid="file-offer">
           <button type="button" className="text-xs px-3 py-1 rounded-full bg-accent text-on-accent border-none cursor-pointer"
-            data-testid="file-accept" onClick={() => act("accept")}>{t("chat.media.downloadSize", { size: formatFileSize(file.size) })}</button>
+            data-testid="file-accept" onClick={() => act("accept")}>{t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}</button>
         </div>
       )}
       {offered && !group && (
         <div className="px-2 pb-1.5" data-testid="file-offer">
           {/* A name with nothing to break at (one long word) wraps anywhere, or it runs out of the bubble. */}
           <p className="text-[12px] m-0 mb-1 [overflow-wrap:anywhere]">
-            {t("chat.file.wantsToSend", { name: peerName, file: file.name, size: formatFileSize(file.size) })}
+            {t("chat.file.wantsToSend", { name: peerName, file: file.name, size: formatFileSize(file.size, t) })}
           </p>
           {typeof transfer.room === "number" && (
             <p className={`text-[11px] m-0 mb-1 ${transfer.room < file.size ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="file-room">
-              {transfer.room < file.size ? t("chat.file.noRoomDevice", { size: formatFileSize(transfer.room) }) : t("chat.file.roomDevice", { size: formatFileSize(transfer.room) })}
+              {transfer.room < file.size ? t("chat.file.noRoomDevice", { size: formatFileSize(transfer.room, t) }) : t("chat.file.roomDevice", { size: formatFileSize(transfer.room, t) })}
             </p>
           )}
           <div className="flex gap-2">

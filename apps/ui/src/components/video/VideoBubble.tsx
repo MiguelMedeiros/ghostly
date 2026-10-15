@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
-import { formatFileSize, formatVideoDuration, sanitizeFileName } from "@ghostly/core";
+import { formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
 import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
 import { downloadFile } from "../../lib/fileDownload";
+import { formatFileSize } from "../../lib/format";
 import { canRetryFile, failedReason, fileHeld, fileStatus, groupFileHint, isGroupFile, stalledAction } from "../../lib/fileStatus";
 import type { FileAction } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
@@ -279,7 +280,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
         ref={rootRef}
         tabIndex={phase === "playing" ? 0 : -1}
         role="group"
-        aria-label={t("chat.video.label", { length: durationMs ? formatVideoDuration(durationMs) : formatFileSize(file.size) })}
+        aria-label={t("chat.video.label", { length: durationMs ? formatVideoDuration(durationMs) : formatFileSize(file.size, t) })}
         onKeyDown={onKeyDown}
         className={`${theater ? "fixed inset-0 z-[2147483000] rounded-none" : "relative rounded-[4px] max-w-full"} overflow-hidden bg-black focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent`}
         style={theater ? { width: "100vw", height: "100vh" } : { width: box.width, aspectRatio: `${box.width} / ${box.height}` }}
@@ -341,7 +342,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
                     className="flex items-center gap-2 px-4 py-2 rounded-full bg-black/60 hover:bg-black/75 text-white text-[14px] font-medium border-none cursor-pointer disabled:opacity-50 disabled:cursor-default"
                   >
                     <DownloadIcon size={18} />
-                    {t("chat.media.downloadSize", { size: formatFileSize(file.size) })}
+                    {t("chat.media.downloadSize", { size: formatFileSize(file.size, t) })}
                   </button>
                   {/* A group's video (WISP 503) is downloaded or not: nothing to decline. */}
                   {!group && <button type="button" data-testid="video-decline" onClick={() => act("decline")} className="text-[12px] text-white/90 underline bg-transparent border-none cursor-pointer">{t("chat.file.decline")}</button>}
@@ -365,7 +366,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
             </div>
             <span className="absolute bottom-[5px] start-[6px] inline-flex items-center gap-1 bg-[rgba(11,20,26,0.6)] text-white/90 rounded-full px-[7px] py-[2px] text-[11px] tabular-nums" data-testid="video-duration">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4z" /></svg>
-              {durationMs ? formatVideoDuration(durationMs) : formatFileSize(file.size)}
+              {durationMs ? formatVideoDuration(durationMs) : formatFileSize(file.size, t)}
             </span>
             {ready && (
               <button
@@ -384,7 +385,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
       </div>
       {offered && typeof transfer.room === "number" && (
         <p className={`text-[11px] m-0 mt-1 px-1 ${noRoom ? "text-danger-ink" : "text-text-primary/65"}`} data-testid="video-room">
-          {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room) })}
+          {noRoom ? t("chat.media.noRoom", { size: formatFileSize(transfer.room, t) }) : t("chat.media.wantsToSend", { name: peerName, size: formatFileSize(transfer.room, t) })}
         </p>
       )}
       {(status || canRetry || stuck) && (!offered || reason) && (
