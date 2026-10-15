@@ -32,6 +32,15 @@ describe("reading an issued SD-JWT VC", () => {
     expect(new Set(r.value.disclosedBy)).toEqual(new Set(r.value.disclosures));
   });
 
+  it("reads nbf as notBefore, and has none when the issuer set none", () => {
+    const r = read(issueSdJwtVc({ holder, payload: { nbf: 1_900_000_000 } }));
+    if (!r.ok) throw new Error(r.reason);
+    expect(r.value.notBefore).toBe(1_900_000_000);
+    expect(r.value.claims).not.toHaveProperty("nbf");
+    const plain = read(issueSdJwtVc({ holder }));
+    expect(plain.ok && plain.value).not.toHaveProperty("notBefore");
+  });
+
   it("takes the older typ vc+sd-jwt", () => {
     expect(reason(issueSdJwtVc({ holder, header: { typ: "vc+sd-jwt" } }))).toBe("read");
   });
@@ -49,6 +58,7 @@ describe("reading an issued SD-JWT VC", () => {
     expect(reason(issueSdJwtVc({ holder, payload: { iss: undefined } }))).toMatch(/no iss/);
     expect(reason(issueSdJwtVc({ holder, payload: { vct: "" } }))).toMatch(/no vct/);
     expect(reason(issueSdJwtVc({ holder, payload: { exp: "soon" } }))).toMatch(/exp is not a time/);
+    expect(reason(issueSdJwtVc({ holder, payload: { nbf: 1.5 } }))).toMatch(/nbf is not a time/);
     expect(reason("x".repeat(X401_CREDENTIAL_LIMITS.chars + 1))).toMatch(/over 64 KiB/);
   });
 

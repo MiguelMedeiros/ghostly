@@ -34,6 +34,8 @@ export interface X401SdJwtVc {
   issuer: string;
   holder: X401HolderJwk;
   issuedAt?: number;
+  /** `nbf`: the credential is not valid before this second. */
+  notBefore?: number;
   expiresAt?: number;
   /** The claims with every disclosure in its place, without the JWT's own members (`iss`, `cnf`, `_sd`...). */
   claims: Record<string, unknown>;
@@ -113,7 +115,7 @@ export function readX401SdJwtVc(text: string): X401CredentialReading {
   if (typeof payload.vct !== "string" || !payload.vct) return refuse("no vct");
   const holder = holderOf(payload.cnf);
   if (!holder) return refuse("cnf names no P-256 key (cnf.jwk)");
-  for (const time of ["iat", "exp"] as const) if (payload[time] !== undefined && !Number.isSafeInteger(payload[time])) return refuse(`${time} is not a time`);
+  for (const time of ["iat", "nbf", "exp"] as const) if (payload[time] !== undefined && !Number.isSafeInteger(payload[time])) return refuse(`${time} is not a time`);
 
   const byDigest = new Map<string, unknown[]>();
   const textOf = new Map<unknown[], string>();
@@ -180,6 +182,7 @@ export function readX401SdJwtVc(text: string): X401CredentialReading {
     value: {
       format: "dc+sd-jwt", jwt, disclosures: rest, type: payload.vct, issuer: payload.iss, holder,
       ...(payload.iat !== undefined ? { issuedAt: payload.iat as number } : {}),
+      ...(payload.nbf !== undefined ? { notBefore: payload.nbf as number } : {}),
       ...(payload.exp !== undefined ? { expiresAt: payload.exp as number } : {}),
       claims, disclosable: kept.map(({ path }) => path), disclosedBy: kept.map(({ by }) => by),
     },

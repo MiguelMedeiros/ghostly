@@ -35,7 +35,7 @@ describe("ghostly x401 key and credential", { timeout: 120_000 }, () => {
     expect(Object.keys(jwk).sort()).toEqual(["crv", "kty", "x", "y"]);
 
     const added = ok(await run("x401", "credential", "add", file("licence.txt", issueSdJwtVc({ holder: jwk })), "--label", "work licence")).credential as Record<string, unknown>;
-    expect(added).toMatchObject({ label: "work licence", format: "dc+sd-jwt", type: "https://issuer.example/licence", issuer: "https://issuer.example", expiresAt: 4_102_444_800_000 });
+    expect(added).toMatchObject({ label: "work licence", format: "dc+sd-jwt", type: "https://issuer.example/licence", issuer: "https://issuer.example", notBefore: null, expiresAt: 4_102_444_800_000 });
     expect(added.disclosable).toContainEqual(["licence_number"]);
 
     const listed = await run("x401", "credential", "list");

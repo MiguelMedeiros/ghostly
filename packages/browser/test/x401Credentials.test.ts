@@ -48,6 +48,15 @@ describe("x401 credentials in the profile", { timeout: 60_000 }, () => {
     await expect(x401.add({ credential: issueSdJwtVc({ holder: newX401HolderKey().jwk }) })).rejects.toThrow(/x401 key new/);
   });
 
+  it("keeps a credential that is not valid yet, and lists when it becomes valid", async () => {
+    const x401 = new X401Credentials();
+    const soon = await x401.newKey(), now = await x401.newKey();
+    const added = await x401.add({ credential: issueSdJwtVc({ holder: soon.jwk, payload: { nbf: 4_000_000_000 } }) });
+    expect(added.notBefore).toBe(4_000_000_000_000);
+    await x401.add({ credential: issueSdJwtVc({ holder: now.jwk }) });
+    expect((await x401.list()).map((c) => c.notBefore)).toEqual([4_000_000_000_000, null]);
+  });
+
   it("goes into a backup, and \"Clear all data\" takes it", async () => {
     const x401 = new X401Credentials();
     const { jwk } = await x401.newKey();

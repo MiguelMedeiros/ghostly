@@ -1,0 +1,1 @@
+A kept credential's `nbf` is read like its `exp` (an integer, or the credential is refused): a credential not valid yet is kept and listed with its `notBefore`, and left out of matching until then, as an expired one is.

@@ -150,6 +150,7 @@ function matchOne(query: X401DcqlCredentialQuery, held: X401HeldCredential[], no
   for (const { id, vc } of held) {
     if (query.format !== vc.format || (types && !types.includes(vc.type))) continue;
     if (vc.expiresAt !== undefined && vc.expiresAt * 1000 <= now) continue;
+    if (vc.notBefore !== undefined && vc.notBefore * 1000 > now) continue;
     const claims = answer(vc, query);
     if (claims) return { query: query.id, credential: id, claims };
   }
@@ -157,8 +158,8 @@ function matchOne(query: X401DcqlCredentialQuery, held: X401HeldCredential[], no
 }
 
 /**
- * Matches a DCQL query against the credentials held, in their order: the first one of the asked format and type, not
- * expired, that holds every claim asked. With credential sets, each required set takes its first option the profile
+ * Matches a DCQL query against the credentials held, in their order: the first one of the asked format and type, valid
+ * now (past its `nbf`, before its `exp`), that holds every claim asked. With credential sets, each required set takes its first option the profile
  * can answer whole, and optional sets are left out (least disclosure); without them, every credential query must be
  * answered. One credential per query, even when the query allows `multiple`.
  */
