@@ -4796,8 +4796,15 @@ export class GhostlyNode implements EngineImplementation {
     else this.groups.setTyping(groupId, false);
   }
 
+  /**
+   * A call's signaling: read the contact's record fast, for its `_call`. A compatibility chat's only: a paired chat's
+   * signals go only over its live session (WISP 601), so a read finds nothing for the call, and its data link keeps
+   * its own fast reads (an offer's look would be cut short by a call's `fast: false`).
+   */
   setFastPoll({ linkId, fast }: { linkId: string; fast: boolean }): void {
-    this.links.get(linkId)?.link?.session.setFastPoll(fast);
+    const live = this.links.get(linkId);
+    if (live?.stored.profile) return;
+    live?.link?.session.setFastPoll(fast);
   }
 
   /** Used by the viewer: a request to a service some peer shares with us. */
