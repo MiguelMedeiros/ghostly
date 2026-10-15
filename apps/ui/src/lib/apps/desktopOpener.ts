@@ -17,7 +17,7 @@
 import { toBase64 } from "@ghostly/core";
 import { createBroker, runnerFor, START_TIMEOUT_MS, type AppStopReason, type AppView, type Broker } from "./broker";
 import { registerRunningApp, type AppOpener } from "./open";
-import type { AppsPlatform } from "../platform";
+import type { AppsPlatform, LinkedFilesHost } from "../platform";
 
 /** Rust's events to the Ghostly window (apps/desktop/src/app_sandbox.rs). */
 export const APP_REQUEST_EVENT = "ghostly-app-request";
@@ -37,6 +37,8 @@ export interface DesktopOpenerOptions {
   onStop?: (ref: string, reason: AppStopReason) => void;
   view?: AppView;
   startTimeoutMs?: number;
+  /** Files the person picks for an app granted `files` (`desktopFiles.ts`); none: `files.*` is `not-allowed`. */
+  linkedFiles?: LinkedFilesHost;
 }
 
 /** How long a request for a window the opener does not know yet is kept: the window's label comes back a moment
@@ -60,7 +62,7 @@ export function forIpc(message: unknown): unknown {
   return message;
 }
 
-export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (title) => title, onStop, view = defaultView, startTimeoutMs = START_TIMEOUT_MS }: DesktopOpenerOptions): AppOpener {
+export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (title) => title, onStop, view = defaultView, startTimeoutMs = START_TIMEOUT_MS, linkedFiles }: DesktopOpenerOptions): AppOpener {
   const brokers = new Map<string, Broker>();
   const early = new Map<string, { at: number; requests: unknown[] }>();
   void listen<{ label: string; request: unknown }>(APP_REQUEST_EVENT, ({ payload }) => {
@@ -85,8 +87,9 @@ export function desktopOpener({ apps, invoke, listen, nameIn, windowTitle = (tit
   }
 
   return async (ref, linkId, options) => {
-    const host = apps();
-    if (!host) throw new Error("Apps cannot run in this app");
+    const engine = apps();
+    if (!engine) throw new Error("Apps cannot run in this app");
+    const host: AppsPlatform = linkedFiles ? { ...engine, linkedFiles } : engine;
     // A version a store removed runs only with "Run anyway"; a revoked one never (the engine checks both again).
     const entry = await host.entry(ref, options?.runAnyway === true);
     // Throws where this client has no runner for what the person granted.
