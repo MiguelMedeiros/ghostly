@@ -596,8 +596,12 @@ export function sdpHasCandidates(sdp: string | undefined | null): boolean {
   return /^a=candidate:/m.test(sdp ?? "");
 }
 
-/** How long to keep collecting after the candidate we were waiting for showed up (a call's; a chat's data link sets its own). */
-const ICE_SETTLE_MS = 400;
+/**
+ * How long to keep collecting after the candidate we were waiting for showed up (a call's; a chat's data link sets its
+ * own, the same). The host candidates are in before it, and a call's signal keeps the first reflexive one only
+ * (`pickCallCandidates`): 400 ms held every call's offer, and its answer, back that long for nothing it carried.
+ */
+const ICE_SETTLE_MS = 150;
 
 /** IPv4 ranges that are not reachable from the internet: this network, private, shared (CGNAT), loopback, link-local, the documentation ones, benchmarking, multicast and up. */
 const NOT_GLOBAL_IPV4: readonly [number, number][] = [
