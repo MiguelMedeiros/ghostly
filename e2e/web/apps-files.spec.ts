@@ -9,7 +9,7 @@ import { STORE_URL, serveStore, testStore, type TestStore } from "../support/app
  * Linked files on the web (WISP 1200 · Linked files), on the e2e suite's build: an app granted `files` asks
  * `ghostly.files.pick`; the client, not the frame, asks with its own sheet, and the person's click there opens the
  * browser's picker. The app gets what the person picked, minus hidden files and what it did not ask for, and reads it
- * in ranges by the ids the client gave. Cancel answers `cancelled`.
+ * in ranges by the ids the client gave. Cancel answers `cancelled`, and a pick at once after it `too-fast`.
  *
  * It runs the path Safari and Firefox take, a hidden `<input type=file>`, by taking the File System Access pickers away.
  * Chromium's path (`showDirectoryPicker`, the folder's handle kept in IndexedDB and read again after a restart) is not
@@ -72,24 +72,29 @@ test("an app granted files reads a folder the person picks through the client's 
     await install(ana, store);
     await ana.page.getByTestId("installed-app").getByTestId("installed-app-open").click();
     await expect(ana.page.getByTestId("mini-app")).toBeVisible();
-    await expect.poll(() => appFrame(ana).locator("#pick").count()).toBe(1);
+    // The runner's frame attaches a moment after the panel shows: until then there is nothing to count, not an error.
+    await expect.poll(() => ana.page.frames().find((f) => f.url().includes("app-frame"))?.locator("#pick").count() ?? 0).toBe(1);
 
-    // Cancel first: the app hears `cancelled`.
-    await appFrame(ana).locator("#pick").click();
+    // The folder, through the browser's picker, which the sheet's button opens.
     const sheet = ana.page.getByTestId("app-files-sheet");
-    await expect(sheet).toContainText("Reader asks to read a folder");
-    await sheet.getByTestId("app-files-cancel").click();
-    await expect(sheet).toHaveCount(0);
-    await expect(appFrame(ana).locator("#out")).toHaveText("refused cancelled");
-
-    // Then the folder, through the browser's picker, which the sheet's button opens.
     await appFrame(ana).locator("#pick").click();
+    await expect(sheet).toContainText("Reader asks to read a folder");
     const chooser = ana.page.waitForEvent("filechooser");
     await sheet.getByTestId("app-files-choose").click();
     await (await chooser).setFiles(films);
     await expect(appFrame(ana).locator("#out")).toHaveText(JSON.stringify([["Films/a.txt", 11, true, 22]]));
     await appFrame(ana).locator("#read").click();
     await expect(appFrame(ana).locator("#out")).toHaveText("read world");
+
+    // Cancel: the app hears `cancelled`, and asking again at once is `too-fast`, so the picker does not come straight
+    // back in front of the person who closed it.
+    await appFrame(ana).locator("#pick").click();
+    await sheet.getByTestId("app-files-cancel").click();
+    await expect(sheet).toHaveCount(0);
+    await expect(appFrame(ana).locator("#out")).toHaveText("refused cancelled");
+    await appFrame(ana).locator("#pick").click();
+    await expect(appFrame(ana).locator("#out")).toHaveText("refused too-fast");
+    await expect(sheet).toHaveCount(0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
