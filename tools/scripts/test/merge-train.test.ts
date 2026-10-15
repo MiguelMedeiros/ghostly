@@ -27,13 +27,15 @@ const greenTested = [
 /** A fake repository: pull requests, labels, label events, comments, CI per commit, and the base's tip. */
 function fakeRepo() {
   const pulls = new Map<number | string, Pr>();
-  const events = new Map<number, { event: string; label: { name: string }; created_at: string }[]>();
+  const events = new Map<number, { event: string; label?: { name: string }; created_at: string }[]>();
   const comments = new Map<number | string, { id: number; body: string; user?: { login: string } }[]>();
   const runs = new Map<string, object[]>();
   /** CI's runs on a commit before the newest one (newest first), and the files each pull request changes (unset: one source file). */
   const earlier = new Map<string, object[][]>();
   /** What started the newest run on a commit, where it is not a push to dev. */
   const kinds = new Map<string, { event: string; head_branch: string }>();
+  /** The run a list of jobs comes from, where it is not what `kinds` (or a push to dev) says. */
+  const meta = new Map<object[], { event: string; head_branch: string; created_at?: string }>();
   const files = new Map<number, string[]>();
   /** The draft gate's jobs per commit (the fast tier), and CI's runs still going on each head, which the train may cancel. */
   const drafts = new Map<string, object[]>();
@@ -79,13 +81,15 @@ function fakeRepo() {
     pulls: async (base: string) => [...pulls.values()].filter((p) => p.open && p.base === base).map((p) => ({ ...p, labels: [...p.labels] })),
     mergedPulls: async (base: string) => [...pulls.values()].filter((p) => p.merged && p.base === base).map((p) => ({ ...p, labels: [...p.labels] })),
     events: async (n: number) => events.get(n) ?? [],
+    headPulls: async (branch: string) => [...pulls.values()].filter((p) => p.branch === branch).map((p) => ({ ...p, labels: [...p.labels] })),
     /**
      * The newest run on the commit, then the ones before it (`earlier`): the first the train counts. Each is a push to
-     * dev unless `kinds` says what the newest one was (a pull request's run on the same commit).
+     * dev unless `kinds` says what the newest one was (a pull request's run on the same commit), or `meta` what a run was.
      */
     ciJobs: async (sha: string, counts: (jobs: object[], run: { event: string; head_branch: string }) => boolean | Promise<boolean> = () => true) => {
       const push = { event: "push", head_branch: "dev" };
-      for (const [jobs, run] of [[runs.get(sha) ?? [], kinds.get(sha) ?? push], ...(earlier.get(sha) ?? []).map((jobs) => [jobs, push])] as [object[], typeof push][])
+      const newest = runs.get(sha) ?? [];
+      for (const [jobs, run] of [[newest, meta.get(newest) ?? kinds.get(sha) ?? push], ...(earlier.get(sha) ?? []).map((jobs) => [jobs, meta.get(jobs) ?? push])] as [object[], typeof push][])
         if (await counts(jobs, run)) return jobs;
       return [];
     },
@@ -239,7 +243,7 @@ function fakeRepo() {
   const flight = () => (batch() ? members() : [...pulls.values()].filter((p) => p.open && alone(p.number)?.sha === p.sha).map((p) => p.number));
   let stamp = 0;
   const run = (opts = {}) => tick({ gh, git, base: "dev", login: "train", stamp: String(stamp++), pause: async () => {}, ...opts });
-  return { gh, git, pulls, comments, runs, earlier, kinds, files, drafts, going, cancelled, cancelAccess, pushed, tips, landed, conflicts, unrebasable, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, add, settle, batch, members, alone, flight, run };
+  return { gh, git, pulls, events, comments, runs, earlier, kinds, meta, files, drafts, going, cancelled, cancelAccess, pushed, tips, landed, conflicts, unrebasable, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, add, settle, batch, members, alone, flight, run };
 }
 
 describe("the line", () => {
@@ -1870,7 +1874,7 @@ describe("a green CI run planned for other files", () => {
 
   it("is passed over over REST: the run before it is read, and the files are the pull request's, renames by both names", async () => {
     const sent: string[] = [];
-    const wf = (id: number, event: string) => ({ id, event, head_branch: "dev", path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" } });
+    const wf = (id: number, event: string) => ({ id, event, head_branch: "dev", path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, head_repository: { full_name: "o/r" } });
     const answers: Record<string, object> = {
       "/actions/workflows/ci.yml/runs?head_sha=abc&per_page=100": { workflow_runs: [wf(5001, "push"), wf(5002, "pull_request")] },
       "/actions/runs/5002/jobs?filter=latest&per_page=100&page=1": { jobs: greenForDocs },
@@ -1895,6 +1899,121 @@ describe("a green CI run planned for other files", () => {
     expect(ciState(await gh.ciJobs("abc", () => false))).toBe("none");
     // Each run's jobs are read once for the three questions.
     expect(sent.filter((p) => p.includes("/jobs"))).toEqual(["/actions/runs/5002/jobs?filter=latest&per_page=100&page=1", "/actions/runs/5001/jobs?filter=latest&per_page=100&page=1"]);
+  });
+});
+
+describe("a green pull request run that is not the pull request's own", () => {
+  /** A run of CI from a pull request event on `branch`, with these jobs (a fresh list, so it has a run of its own). */
+  const prRunOf = (repo: ReturnType<typeof fakeRepo>, jobs: object[], branch: string, created_at = "2026-10-08T01:00:00Z") => {
+    const list = [...jobs];
+    repo.meta.set(list, { event: "pull_request", head_branch: branch, created_at });
+    return list;
+  };
+  /** #21's own run is red; a writer opens a second pull request from its branch into an epic whose ci.yml passes it. */
+  const sharedHead = (open = true) => {
+    const repo = fakeRepo();
+    repo.add(21);
+    repo.runs.set("h21", prRunOf(repo, green, "fix-21", "2026-10-08T02:00:00Z"));
+    repo.earlier.set("h21", [prRunOf(repo, red, "fix-21")]);
+    repo.pulls.set(22, { ...repo.pulls.get(21)!, number: 22, base: "epic/x", labels: [], open });
+    return repo;
+  };
+
+  it("does not land a lone pull request on a run of a second pull request from its head into another base", async () => {
+    const repo = sharedHead();
+    const r = await repo.run();
+    expect(r.merged).toEqual([]);
+    expect(repo.landed).toEqual([]);
+    expect(r.log.join("\n")).toMatch(/#21: a green CI run on h21 is not its own \(#22 from the same head into another base ran it too\)/);
+    expect(repo.comments.get(21)![0].body).toMatch(/Waiting: CI Success is red on its last commit/);
+  });
+
+  it("nor when that pull request was closed: its run stays on the commit", async () => {
+    const repo = sharedHead(false);
+    expect((await repo.run()).merged).toEqual([]);
+    expect(repo.landed).toEqual([]);
+  });
+
+  it("says why when no run of its own is left, so its author can start one", async () => {
+    const repo = sharedHead();
+    repo.earlier.delete("h21");
+    expect((await repo.run()).merged).toEqual([]);
+    expect(repo.comments.get(21)![0].body).toMatch(/Waiting: another pull request from its branch \(#22 into `epic\/x`\) ran CI on the same commit/);
+  });
+
+  it("does not count a green pull request run from another branch on the same commit", async () => {
+    const repo = fakeRepo();
+    repo.add(21);
+    repo.runs.set("h21", prRunOf(repo, green, "other", "2026-10-08T02:00:00Z"));
+    repo.earlier.set("h21", [prRunOf(repo, red, "fix-21")]);
+    const r = await repo.run();
+    expect(r.merged).toEqual([]);
+    expect(r.log.join("\n")).toMatch(/not its own \(it ran for `other`\)/);
+  });
+
+  it("does not count a green run from before its base was changed, and counts the next one", async () => {
+    const repo = fakeRepo();
+    repo.add(21);
+    repo.runs.set("h21", prRunOf(repo, green, "fix-21", "2026-10-08T01:00:00Z"));
+    repo.events.get(21)!.push({ event: "base_ref_changed", created_at: "2026-10-08T01:30:00Z" });
+    expect((await repo.run()).merged).toEqual([]);
+    expect(repo.comments.get(21)![0].body).toMatch(/Waiting: its green CI run on its last commit ran before its base was changed/);
+    // Closed and reopened: a run against this base.
+    repo.earlier.set("h21", [repo.runs.get("h21")!]);
+    repo.runs.set("h21", prRunOf(repo, green, "fix-21", "2026-10-08T03:00:00Z"));
+    expect((await repo.run()).merged).toEqual([21]);
+  });
+
+  it("still lands on its own run: another pull request from its branch into the same base, a push's run", async () => {
+    const repo = fakeRepo();
+    repo.add(21);
+    repo.runs.set("h21", prRunOf(repo, green, "fix-21"));
+    repo.pulls.set(22, { ...repo.pulls.get(21)!, number: 22, labels: [] });
+    expect((await repo.run()).merged).toEqual([21]);
+    const push = fakeRepo();
+    push.add(31);
+    push.pulls.set(32, { ...push.pulls.get(31)!, number: 32, base: "epic/x", labels: [] });
+    expect((await push.run()).merged).toEqual([31]); // a run of no pull request event runs the commit's own ci.yml
+  });
+
+  it("does not land a batch on a run of a pull request from the batch's branch into another base", async () => {
+    const repo = fakeRepo();
+    repo.add(31);
+    repo.add(32);
+    await repo.run();
+    const b = repo.batch()!;
+    expect(repo.members()).toEqual([31, 32]);
+    repo.runs.set(b.sha, prRunOf(repo, green, b.branch, "2026-10-08T02:00:00Z"));
+    repo.earlier.set(b.sha, [prRunOf(repo, red, b.branch)]);
+    repo.pulls.set(23, { ...b, number: 23, base: "epic/x", body: "", labels: [] });
+    const r = await repo.run();
+    expect(repo.landed).toEqual([]);
+    expect(r.log.join("\n")).toMatch(new RegExp(`#${b.number}: a green CI run on .* is not its own \\(#23 from the same head`));
+    expect(r.log.join("\n")).toMatch(/BATCH #9000 \[#31 #32\] CI failure\nOPEN #9001 train: 1 into dev \(#31\)/);
+  });
+
+  it("is read over REST: a fork's pull request runs are left out, the run goes to `counts`, and the branch's pull requests are listed", async () => {
+    const sent: string[] = [];
+    const wf = (id: number, extra = {}) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, ...extra });
+    const answers: Record<string, object> = {
+      "/actions/workflows/ci.yml/runs?head_sha=abc&per_page=100": {
+        workflow_runs: [wf(5001, { event: "pull_request", head_repository: { full_name: "o/r" } }), wf(5002, { event: "pull_request", head_repository: { full_name: "fork/r" } })],
+      },
+      "/actions/runs/5001/jobs?filter=latest&per_page=100&page=1": { jobs: red },
+      "/actions/runs/5002/jobs?filter=latest&per_page=100&page=1": { jobs: green },
+      "/pulls?state=all&head=o%3Afix-21&per_page=100&page=1": [{ number: 22, title: "x", body: "", draft: false, head: { sha: "abc", ref: "fix-21", repo: { full_name: "o/r" } }, base: { ref: "epic/x" }, labels: [], created_at: "" }],
+    };
+    const fetchImpl = async (url: string) => {
+      const path = url.replace("https://api.github.com/repos/o/r", "");
+      sent.push(path);
+      return { status: 200, ok: true, headers: new Headers({ "x-ratelimit-remaining": "4000" }), text: async () => JSON.stringify(answers[path] ?? {}) };
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    const seen: number[] = [];
+    expect(ciState(await gh.ciJobs("abc", (_jobs: object[], run: { id: number }) => (seen.push(run.id), true)))).toBe("failure");
+    expect(seen).toEqual([5001]);
+    expect(sent).not.toContain("/actions/runs/5002/jobs?filter=latest&per_page=100&page=1");
+    expect((await gh.headPulls("fix-21")).map((p: { number: number; base: string; sha: string }) => [p.number, p.base, p.sha])).toEqual([[22, "epic/x", "abc"]]);
   });
 });
 
@@ -2123,7 +2242,7 @@ describe("GitHub over REST", () => {
   });
 
   it("reads the fast tier from the newest of CI's runs on a commit that has a draft gate", async () => {
-    const wf = (id: number, extra = {}) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", status: "completed", ...extra });
+    const wf = (id: number, extra = {}) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", head_repository: { full_name: "o/r" }, status: "completed", ...extra });
     const answers: Record<string, object> = {
       // 52: the full run leaving draft started; 51: the draft's run; 60: another workflow.
       "/actions/workflows/ci.yml/runs?head_sha=abc&per_page=100": { workflow_runs: [wf(51), wf(52, { status: "in_progress" }), wf(60, { path: ".github/workflows/forge.yml" })] },
@@ -2144,7 +2263,7 @@ describe("GitHub over REST", () => {
 
   it("reads CI's runs on a commit and each run's jobs once per run of the train, and the runs again only to cancel", async () => {
     const sent: string[] = [];
-    const wf = (id: number, extra = {}) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", status: "completed", ...extra });
+    const wf = (id: number, extra = {}) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", head_repository: { full_name: "o/r" }, status: "completed", ...extra });
     const answers: Record<string, object> = {
       // 52: the full run leaving draft started; 51: the draft's run.
       "/actions/workflows/ci.yml/runs?head_sha=abc&per_page=100": { workflow_runs: [wf(51), wf(52, { status: "in_progress" })] },
@@ -2193,7 +2312,7 @@ describe("GitHub over REST", () => {
 
   it("cancels only CI's pull request runs still going on the commit", async () => {
     const sent: string[] = [];
-    const wf = (id: number, extra = {}) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", status: "in_progress", ...extra });
+    const wf = (id: number, extra = {}) => ({ id, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", head_repository: { full_name: "o/r" }, status: "in_progress", ...extra });
     const runs = [wf(1, { status: "completed" }), wf(2), wf(3, { status: "queued" }), wf(4, { event: "push" }), wf(5, { path: ".github/workflows/e2e.yml" }), wf(6, { head_sha: "def" }), wf(7)];
     const fetchImpl = async (url: string, init: { method: string }) => {
       const path = url.replace("https://api.github.com/repos/o/r", "");
@@ -2208,7 +2327,7 @@ describe("GitHub over REST", () => {
 
   it("asks nothing more once the token may not cancel runs, and never throws for it", async () => {
     let calls = 0;
-    const wf = { id: 2, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", status: "in_progress" };
+    const wf = { id: 2, path: ".github/workflows/ci.yml", head_sha: "abc", repository: { full_name: "o/r" }, event: "pull_request", head_repository: { full_name: "o/r" }, status: "in_progress" };
     const fetchImpl = async (_url: string, init: { method: string }) => {
       calls++;
       return init.method === "POST" ? reply(403, { message: "Resource not accessible by integration" }) : reply(200, { workflow_runs: [wf] });
