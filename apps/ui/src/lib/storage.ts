@@ -24,8 +24,11 @@ export const GHOST_NAMES = [
 ];
 
 export function getRandomGhostName(): string {
-  const index = crypto.getRandomValues(new Uint32Array(1))[0]! % GHOST_NAMES.length;
-  return GHOST_NAMES[index];
+  // Draw again past the largest multiple of the list length, so every name is equally likely.
+  const limit = 2 ** 32 - (2 ** 32 % GHOST_NAMES.length);
+  const draw = new Uint32Array(1);
+  do crypto.getRandomValues(draw); while (draw[0]! >= limit);
+  return GHOST_NAMES[draw[0]! % GHOST_NAMES.length];
 }
 
 export function getGhostName(peerKey: string): string {
