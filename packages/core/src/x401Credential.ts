@@ -50,6 +50,13 @@ const B64URL = /^[A-Za-z0-9_-]+$/;
 /** Members of the JWT that say how to read the credential, not what it says. */
 const REGISTERED = new Set(["iss", "nbf", "exp", "iat", "cnf", "vct", "vct#integrity", "status", "_sd", "_sd_alg"]);
 
+/**
+ * Sets a member as JSON has it: `__proto__` (an own member after JSON.parse) stays a member. `out[key] = value` would
+ * make it the object's prototype instead, hiding a claim from the person that every presentation still carries.
+ */
+const put = (out: Record<string, unknown>, key: string, value: unknown) =>
+  Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
+
 function json(part: string): unknown {
   if (!B64URL.test(part)) throw new Error("not base64url");
   return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(fromBase64Url(part)));
@@ -150,7 +157,7 @@ export function readX401SdJwtVc(text: string): X401CredentialReading {
     }
     if (!isObject(node)) return node;
     const out: Record<string, unknown> = {};
-    for (const [key, item] of Object.entries(node)) if (key !== "_sd" && key !== "_sd_alg") out[key] = resolve(item, [...path, key], depth + 1);
+    for (const [key, item] of Object.entries(node)) if (key !== "_sd" && key !== "_sd_alg") put(out, key, resolve(item, [...path, key], depth + 1));
     if (node._sd !== undefined && !Array.isArray(node._sd)) problem ??= "_sd is not a list";
     for (const digest of Array.isArray(node._sd) ? node._sd : []) {
       const entry = take(digest);
@@ -159,7 +166,7 @@ export function readX401SdJwtVc(text: string): X401CredentialReading {
       const name = entry[1] as string;
       if (Object.prototype.hasOwnProperty.call(out, name)) { problem ??= `${name} is given twice`; continue; }
       disclose([...path, name], entry);
-      out[name] = resolve(entry[2], [...path, name], depth + 1);
+      put(out, name, resolve(entry[2], [...path, name], depth + 1));
     }
     return out;
   };

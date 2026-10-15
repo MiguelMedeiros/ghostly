@@ -68,6 +68,22 @@ describe("reading an issued SD-JWT VC", () => {
     expect(reason(issueSdJwtVc({ holder, payload: { _sd: [sd.digest] }, extra: [sd.text] }))).toMatch(/names _sd/);
   });
 
+  // `out[key] = value` made a member named __proto__ the claims' prototype: the person never saw it (the list, the
+  // approval), and every presentation carried it to the verifier, in the issuer's JWT.
+  it("keeps a claim named __proto__ as a claim, plain or disclosed, where the person and a query see it", () => {
+    const hidden = JSON.parse('{"__proto__": {"nationality": "XX"}}') as Record<string, unknown>;
+    const inner = disclosure("__proto__", { over_18: true });
+    const r = read(issueSdJwtVc({ holder, payload: { ...hidden, extras: { kind: "test", _sd: [inner.digest] } }, extra: [inner.text] }));
+    if (!r.ok) throw new Error(r.reason);
+    expect(Object.keys(r.value.claims)).toContain("__proto__");
+    expect(Object.getOwnPropertyDescriptor(r.value.claims, "__proto__")?.value).toEqual({ nationality: "XX" });
+    expect(Object.getPrototypeOf(r.value.claims)).toBe(Object.prototype);
+    const extras = r.value.claims.extras as Record<string, unknown>;
+    expect(Object.keys(extras)).toEqual(["kind", "__proto__"]);
+    expect(Object.getOwnPropertyDescriptor(extras, "__proto__")?.value).toEqual({ over_18: true });
+    expect(r.value.disclosable).toContainEqual(["extras", "__proto__"]);
+  });
+
   it("refuses a disclosed member the JWT also has, or a digest named twice", () => {
     const name = disclosure("family_name", "Other");
     expect(reason(issueSdJwtVc({ holder, payload: { _sd: [name.digest] }, extra: [name.text] }))).toMatch(/family_name is given twice/);
