@@ -644,7 +644,7 @@ describe("with the apps flag on", () => {
     const { user } = renderApp(<Apps />, { route: "/apps" });
     const row = await screen.findByTestId("installed-app");
     expect(within(row).getByText(title)).toHaveAttribute("dir", "auto");
-    expect(within(row).getByTestId("installed-app-hint")).toHaveAttribute("dir", "auto");
+    expect(within(within(row).getByTestId("installed-app-hint")).getByText("Play chess with a contact")).toHaveAttribute("dir", "auto");
     expect(screen.getByText(unread)).toHaveAttribute("dir", "auto");
     expect(screen.getByText("Ghostly")).toHaveAttribute("dir", "auto");
     expect(screen.getByText("Snake")).toHaveAttribute("dir", "auto");
@@ -814,6 +814,17 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     await waitFor(() => expect(screen.getByTestId("installed-app-open")).toHaveFocus());
   });
 
+  it("its row's line keeps Ghostly's words apart from the tagline, which reads in its own direction (an English tagline in Arabic)", async () => {
+    engineWith({ installed: false, removed: false });
+    renderApp(<Apps />, { route: "/apps", language: "ar" });
+    const hint = within(await screen.findByTestId("built-in-app")).getByTestId("built-in-app-hint");
+    const tagline = within(hint).getByText("Play chess with a contact");
+    expect(tagline).toHaveAttribute("dir", "auto");
+    expect(tagline).toHaveClass("truncate");
+    expect(tagline.textContent).toBe("Play chess with a contact");
+    expect(hint).toHaveTextContent("يأتي مع Ghostly · Play chess with a contact");
+  });
+
   it("Cancel on its first open installs nothing, and it stays offered", async () => {
     engineWith({ installed: false, removed: false });
     const { user } = renderApp(<Apps />, { route: "/apps" });
@@ -860,6 +871,8 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     const { user } = renderApp(<Apps />, { route: "/apps" });
     const row = await screen.findByTestId("installed-app");
     expect(within(row).getByTestId("installed-app-hint")).toHaveTextContent("Unknown publisher · Play chess with a contact");
+    // The tagline reads in its own direction, apart from Ghostly's words.
+    expect(within(row).getByText("Play chess with a contact")).toHaveAttribute("dir", "auto");
     await user.click(within(row).getByRole("button", { name: "Chess: details" }));
     const details = await screen.findByTestId("app-details");
     expect(within(details).getByTestId("app-publisher-name")).toHaveTextContent("Unknown publisher");
