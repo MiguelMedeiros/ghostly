@@ -1080,6 +1080,7 @@
     "packages/browser/src/engine/paymentAdapters/modeGate.ts": ["wallet.mode","wallet.ready","wallet.ark.*","wallet.bark.*","wallet.usdt.*","wallet.lightning.sources","wallet.onchain.sources"],
     "packages/browser/src/engine/paymentAdapters/persistence.ts": ["wallet.*","proofs.*"],
     "packages/browser/src/engine/paymentAdapters/providers/bitcoind.ts": ["wallet.onchain.bitcoind"],
+    "packages/browser/src/engine/paymentAdapters/providers/bitcoindProvider.ts": ["wallet.onchain.bitcoind"],
     "packages/browser/src/engine/paymentAdapters/providers/cashuMint.ts": ["wallet.lightning.*","wallet.cashu.*","payments.lightning.*","payments.external","payments.lnurl.card"],
     "packages/browser/src/engine/paymentAdapters/providers/contractSuite.ts": ["wallet.lightning.provider-contract","wallet.onchain.provider-contract","sdk.package"],
     "packages/browser/src/engine/paymentAdapters/providers/fedimint.ts": ["wallet.lightning.fedimint","payments.fedimint.lightning"],
