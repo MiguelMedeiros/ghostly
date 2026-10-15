@@ -154,4 +154,14 @@ describe("presenting an SD-JWT VC", () => {
   it("puts each presentation in the vp_token under its credential query id", () => {
     expect(x401VpToken([{ query: "pid", presentation: "p1" }, { query: "other", presentation: "p2" }])).toEqual({ pid: ["p1"], other: ["p2"] });
   });
+
+  it("the vp_token takes a query id that names a member of every object (valid DCQL) as any other", () => {
+    for (const id of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
+      expect(readX401DcqlQuery({ credentials: [{ id, format: "dc+sd-jwt" }] }).ok).toBe(true);
+      const token = x401VpToken([{ query: id, presentation: "p1" }, { query: id, presentation: "p2" }]);
+      expect(Object.keys(token)).toEqual([id]);
+      expect(Object.getPrototypeOf(token)).toBe(Object.prototype);
+      expect(JSON.parse(JSON.stringify(token))).toEqual(JSON.parse(`{${JSON.stringify(id)}:["p1","p2"]}`));
+    }
+  });
 });
