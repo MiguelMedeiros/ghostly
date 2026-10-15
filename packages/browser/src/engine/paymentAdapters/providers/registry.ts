@@ -1,5 +1,5 @@
 import { bdk } from "./bdk";
-import { bitcoindRpc } from "./bitcoind";
+import { bitcoindRpc } from "./bitcoindProvider";
 import { breez } from "./breez";
 import { cashuMint } from "./cashuMint";
 import { fedimint } from "./fedimint";
