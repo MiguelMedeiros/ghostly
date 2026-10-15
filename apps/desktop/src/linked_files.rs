@@ -10,6 +10,9 @@
 //! - Links live in `linked/<space>/<app>.json` in the app's data folder (`space` is the page's database name, `<app>`
 //!   the SHA-256 of the app's reference in hex), and go with the profile's files (`file_bytes_remove_where`). Each
 //!   file is read once and kept in memory, so a read costs the read and not the size of the library.
+//! - A forget is one line appended to `<app>.forgotten` beside it (the link's id), not the whole file written again:
+//!   with 100,000 links that was 27 MB a forget. The file is written whole again only once the forgotten lines are as
+//!   many as the links left (and at least `COMPACT_AFTER`), so forgetting costs a few hundred bytes a link on average.
 //!
 //! Refusals are `"<code>: words"`, the codes the broker passes to the app (`cancelled`, `changed`, `gone`, `too-large`).
 
@@ -38,6 +41,10 @@ pub const MAX_READ: u64 = 1024 * 1024;
 const MAX_ACCEPT: usize = 32;
 /// Apps whose links are kept in memory, at most: past it, one is let go and read from disk again when asked.
 const MAX_BOOKS: usize = 16;
+/// Forgotten lines an app's links file takes before it is written whole again without them, at least.
+const COMPACT_AFTER: usize = 1_000;
+/// A link's id: 16 random bytes in base64url (`random_id`).
+const ID_CHARS: usize = 22;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 struct Link {
@@ -61,11 +68,13 @@ pub struct Entry {
     pub available: bool,
 }
 
-/// One app's links, in the order they were picked, and where each id is among them.
-#[derive(Default)]
+/// One app's links, in the order they were picked, and where each id is among them. A forgotten link leaves a hole
+/// (`None`) until the file is written whole again (`LinkedFiles::compact`); `gone` counts the forgotten lines on disk.
+#[derive(Default, Clone)]
 struct Book {
-    links: Vec<Link>,
+    links: Vec<Option<Link>>,
     by_id: HashMap<String, usize>,
+    gone: usize,
 }
 
 impl Book {
@@ -75,12 +84,45 @@ impl Book {
             .enumerate()
             .map(|(at, link)| (link.id.clone(), at))
             .collect();
-        Self { links, by_id }
+        Self {
+            links: links.into_iter().map(Some).collect(),
+            by_id,
+            gone: 0,
+        }
     }
 
     fn get(&self, id: &str) -> Option<&Link> {
-        self.by_id.get(id).map(|&at| &self.links[at])
+        self.by_id.get(id).and_then(|&at| self.links[at].as_ref())
     }
+
+    fn live(&self) -> impl Iterator<Item = &Link> {
+        self.links.iter().flatten()
+    }
+
+    /// Takes a link out, leaving its hole. False when there is none with that id.
+    fn drop_link(&mut self, id: &str) -> bool {
+        let Some(at) = self.by_id.remove(id) else {
+            return false;
+        };
+        self.links[at] = None;
+        self.gone += 1;
+        true
+    }
+
+    /// Whether the forgotten lines are worth writing the file whole again for.
+    fn wants_compacting(&self) -> bool {
+        self.gone >= COMPACT_AFTER.max(self.by_id.len())
+    }
+}
+
+/// The ids a `.forgotten` file names: one a line; a line that is not a whole id (cut off by a crash) is not one.
+fn forgotten_ids(text: &str) -> impl Iterator<Item = &str> {
+    text.lines().filter(|line| {
+        line.len() == ID_CHARS
+            && line
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    })
 }
 
 /// Where the links are: set once the app knows its data folder.
@@ -235,8 +277,8 @@ impl LinkedFiles {
         Ok(self.base.join(space).join(format!("{name}.json")))
     }
 
-    /// The app's links: from memory, or from disk the first time. Read while the books are held, so a change written
-    /// meanwhile is never overtaken by what was on disk before it.
+    /// The app's links: from memory, or from disk the first time (the links file, less what its `.forgotten` names).
+    /// Read while the books are held, so a change written meanwhile is never overtaken by what was on disk before it.
     fn load(&self, space: &str, app: &str) -> Result<Arc<Book>, String> {
         let file = self.file(space, app)?;
         let mut books = locked(&self.books);
@@ -248,12 +290,23 @@ impl LinkedFiles {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(e) => return Err(e.to_string()),
         };
-        let book = Arc::new(Book::new(links));
+        let mut book = Book::new(links);
+        match fs::read_to_string(forgotten_file(&file)) {
+            Ok(text) => {
+                for id in forgotten_ids(&text) {
+                    book.drop_link(id);
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
+        }
+        let book = Arc::new(book);
         keep(&mut books, file, book.clone());
         Ok(book)
     }
 
-    /// Writes the app's links, then keeps them in memory. Called with `writing` held.
+    /// Writes the app's links whole, with nothing forgotten beside them, then keeps them in memory. Called with
+    /// `writing` held.
     fn store(&self, space: &str, app: &str, links: Vec<Link>) -> Result<(), String> {
         let file = self.file(space, app)?;
         self.write(&file, &links)?;
@@ -262,11 +315,17 @@ impl LinkedFiles {
     }
 
     fn write(&self, file: &Path, links: &[Link]) -> Result<(), String> {
+        // After the links file is in place: a crash between the two leaves forgotten lines that name nothing in it.
+        let forgotten = || match fs::remove_file(forgotten_file(file)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+            _ => Ok(()),
+        };
         if links.is_empty() {
-            return match fs::remove_file(file) {
-                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
-                _ => Ok(()),
-            };
+            match fs::remove_file(file) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.to_string()),
+                _ => {}
+            }
+            return forgotten();
         }
         let folder = file.parent().ok_or("No folder")?;
         fs::create_dir_all(folder).map_err(|e| e.to_string())?;
@@ -281,7 +340,8 @@ impl LinkedFiles {
             serde_json::to_vec(links).map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
-        fs::rename(&staged, file).map_err(|e| e.to_string())
+        fs::rename(&staged, file).map_err(|e| e.to_string())?;
+        forgotten()
     }
 
     /// Keeps links to what was picked, and answers them as the app sees them.
@@ -292,7 +352,7 @@ impl LinkedFiles {
         picked: Vec<(String, PathBuf)>,
     ) -> Result<Vec<Entry>, String> {
         let _writing = locked(&self.writing);
-        let mut links = self.load(space, app)?.links.clone();
+        let mut links: Vec<Link> = self.load(space, app)?.live().cloned().collect();
         if links.len() + picked.len() > MAX_ENTRIES {
             return Err("too-large: Too many files for one app".into());
         }
@@ -326,8 +386,7 @@ impl LinkedFiles {
     pub fn list(&self, space: &str, app: &str) -> Result<Vec<Entry>, String> {
         Ok(self
             .load(space, app)?
-            .links
-            .iter()
+            .live()
             .map(|link| {
                 let available = fs::metadata(&link.full)
                     .is_ok_and(|meta| stamp(&meta) == (link.size, link.modified));
@@ -371,20 +430,41 @@ impl LinkedFiles {
         Ok(bytes)
     }
 
-    /// Drops one link, or all of the app's with "all". The file itself is never touched.
+    /// Drops one link, or all of the app's with "all". The file itself is never touched. One link costs a line
+    /// appended to the app's `.forgotten`, whatever the size of its library (`COMPACT_AFTER`).
     pub fn forget(&self, space: &str, app: &str, id: &str) -> Result<(), String> {
         let _writing = locked(&self.writing);
-        let links = if id == "all" {
-            Vec::new()
-        } else {
-            let book = self.load(space, app)?;
-            if book.get(id).is_none() {
-                return Ok(());
-            }
-            let mut links = book.links.clone();
-            links.retain(|l| l.id != id);
-            links
+        if id == "all" {
+            return self.store(space, app, Vec::new());
+        }
+        if self.load(space, app)?.get(id).is_none() {
+            return Ok(());
+        }
+        let file = self.file(space, app)?;
+        {
+            use std::io::Write;
+            let mut journal = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(forgotten_file(&file))
+                .map_err(|e| e.to_string())?;
+            journal
+                .write_all(format!("{id}\n").as_bytes())
+                .map_err(|e| e.to_string())?;
+        }
+        let mut books = locked(&self.books);
+        let Some(book) = books.get_mut(&file) else {
+            // Let go meanwhile (another app's links came in): the next load reads the line just written.
+            return Ok(());
         };
+        // In place, unless a list holds the links right now: then it keeps its copy.
+        let book = Arc::make_mut(book);
+        book.drop_link(id);
+        if !book.wants_compacting() {
+            return Ok(());
+        }
+        let links: Vec<Link> = book.live().cloned().collect();
+        drop(books);
         self.store(space, app, links)
     }
 
@@ -401,6 +481,11 @@ impl LinkedFiles {
             _ => Ok(()),
         }
     }
+}
+
+/// The ids forgotten since an app's links file was last written whole: `<app>.forgotten` beside `<app>.json`.
+fn forgotten_file(file: &Path) -> PathBuf {
+    file.with_extension("forgotten")
 }
 
 /// Keeps an app's links in memory, letting another app's go past `MAX_BOOKS`.
@@ -654,8 +739,115 @@ mod tests {
         );
         assert_eq!(links.list("ghostly", APP).unwrap().len(), 2);
         links.forget("ghostly", APP, &added[0].id).unwrap();
+        assert_eq!(links.list("ghostly", APP).unwrap().len(), 1);
+        // A forget does not write the links file again: it is still what was put there.
+        assert_eq!(fs::read(&file).unwrap(), b"not json");
+    }
+
+    /// `n` links, all to one small file: what a library of `n` files costs here, without making them.
+    fn library(links: &LinkedFiles, n: usize) -> Vec<Entry> {
+        let file = folder().join("film.mp4");
+        fs::write(&file, b"0123456789").unwrap();
+        let picked = (0..n)
+            .map(|i| (format!("Films/{i:06}.mp4"), file.clone()))
+            .collect();
+        links.add("ghostly", APP, picked).unwrap()
+    }
+
+    // A forget wrote the app's whole links file again: 27 MB and 47 ms a forget with 100,000 links (agents#1033).
+    #[test]
+    fn a_forget_appends_one_line_whatever_the_size_of_the_library() {
+        let links = LinkedFiles::new(folder());
+        let added = library(&links, 3_000);
+        let file = links.file("ghostly", APP).unwrap();
+        let journal = forgotten_file(&file);
+        let before = fs::read(&file).unwrap();
+        links.forget("ghostly", APP, &added[7].id).unwrap();
+        links.forget("ghostly", APP, &added[7].id).unwrap();
+        links
+            .forget("ghostly", APP, "AAAAAAAAAAAAAAAAAAAAAA")
+            .unwrap();
+        assert_eq!(
+            fs::read(&file).unwrap(),
+            before,
+            "the links file is not written again"
+        );
+        assert_eq!(
+            fs::read_to_string(&journal).unwrap(),
+            format!("{}\n", added[7].id),
+            "one line, once"
+        );
+        assert_eq!(links.list("ghostly", APP).unwrap().len(), 2_999);
+        assert!(links
+            .read("ghostly", APP, &added[7].id, 0, 1)
+            .unwrap_err()
+            .starts_with("gone: "));
+        // A new start reads the links less what was forgotten.
         let again = LinkedFiles::new(links.base.clone());
-        assert_eq!(again.list("ghostly", APP).unwrap().len(), 1);
+        let listed = again.list("ghostly", APP).unwrap();
+        assert_eq!(listed.len(), 2_999);
+        assert!(listed.iter().all(|e| e.id != added[7].id));
+        assert_eq!(
+            again.read("ghostly", APP, &added[8].id, 0, 2).unwrap(),
+            b"01"
+        );
+    }
+
+    #[test]
+    fn once_as_many_are_forgotten_as_are_left_the_links_file_is_written_whole_again() {
+        let links = LinkedFiles::new(folder());
+        let added = library(&links, 3_000);
+        let file = links.file("ghostly", APP).unwrap();
+        let journal = forgotten_file(&file);
+        for entry in &added[..1_499] {
+            links.forget("ghostly", APP, &entry.id).unwrap();
+        }
+        assert_eq!(fs::read_to_string(&journal).unwrap().lines().count(), 1_499);
+        links.forget("ghostly", APP, &added[1_499].id).unwrap();
+        assert!(
+            !journal.exists(),
+            "written whole: nothing forgotten beside it"
+        );
+        let kept: Vec<Link> = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        assert_eq!(kept.len(), 1_500);
+        assert_eq!(kept[0].id, added[1_500].id);
+        let again = LinkedFiles::new(links.base.clone());
+        assert_eq!(again.list("ghostly", APP).unwrap().len(), 1_500);
+        // A pick writes the file whole too, the forgotten ones left out.
+        links.forget("ghostly", APP, &added[1_500].id).unwrap();
+        assert!(journal.exists());
+        library(&links, 1);
+        assert!(!journal.exists());
+        assert_eq!(
+            LinkedFiles::new(links.base.clone())
+                .list("ghostly", APP)
+                .unwrap()
+                .len(),
+            1_500
+        );
+        // Forgetting all removes both.
+        links.forget("ghostly", APP, &added[1_501].id).unwrap();
+        links.forget("ghostly", APP, "all").unwrap();
+        assert!(!file.exists() && !journal.exists());
+    }
+
+    #[test]
+    fn a_forgotten_line_cut_off_by_a_crash_names_nothing() {
+        let links = LinkedFiles::new(folder());
+        let added = library(&links, 3);
+        links.forget("ghostly", APP, &added[0].id).unwrap();
+        let journal = forgotten_file(&links.file("ghostly", APP).unwrap());
+        let mut text = fs::read_to_string(&journal).unwrap();
+        text.push_str(&added[1].id[..10]);
+        fs::write(&journal, text).unwrap();
+        let again = LinkedFiles::new(links.base.clone());
+        let ids: Vec<String> = again
+            .list("ghostly", APP)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(ids, [added[1].id.clone(), added[2].id.clone()]);
     }
 
     #[test]

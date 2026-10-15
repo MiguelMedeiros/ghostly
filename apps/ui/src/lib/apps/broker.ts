@@ -247,6 +247,11 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
   let servedBytes = 0;
   /** The `file` read in progress: reads go one at a time, so each is counted before the next one starts. */
   let reading: Promise<unknown> = Promise.resolve();
+  /**
+   * The app's forgets, one at a time: each is a write on the host, and 50 at once (the requests a second) each took
+   * the Desktop's one writing lock in turn on threads of their own, holding off every other app's pick for seconds.
+   */
+  let forgetting: Promise<unknown> = Promise.resolve();
   const scope = launch.chat?.linkId ?? "alone";
   const chatAllowed = !!launch.chat && launch.permissions.includes("chat");
   /** Linked files: only for an app granted `files`, in a client that keeps them. Not a version's: the outer platform's. */
@@ -412,7 +417,12 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         if (!files) return refuse("not-allowed");
         const id = args[0];
         if (typeof id !== "string" || (id !== "all" && !LINK_ID.test(id))) refuse("bad-request");
-        await files.forget(launch.ref, id as string);
+        const forget = forgetting.then(() => {
+          if (phase === "stopped") refuse("stopped");
+          return files.forget(launch.ref, id as string);
+        });
+        forgetting = forget.catch(() => {});
+        await forget;
         return {};
       }
       default:
