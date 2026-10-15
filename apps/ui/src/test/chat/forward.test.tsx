@@ -156,6 +156,30 @@ describe("the Forward to… picker", () => {
     expect(fakeEngine.callsTo("forwardMessages").map(c => (c as { to: string[] }).to)).toEqual([["link-ana", "link-bo"], ["link-bo"]]);
   });
 
+  // The engine's line for a copy that found no room on this device, however the storage said it (engine/forwards.ts
+  // forwardError): IndexedDB, the OPFS worker, Desktop's io error. Said in the app's language, never as sent.
+  it.each([
+    "Not enough space on this device (QuotaExceededError)",
+    "Not enough space on this device (QuotaExceededError: This device has no space left for the file)",
+    "Not enough space on this device (No space left on device (os error 28))",
+  ])("says a copy found no room in the app's language: %s", async (error) => {
+    fakeEngine.on("forwardMessages", ({ to }: { to: string[] }) => ({ results: to.map(t => ({ to: t, messageIds: [], error })) }));
+    const { user } = open([message({ text: "", file: PICTURE })], "link-bo", "pt");
+    await user.click(screen.getAllByTestId("forward-target")[0]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(screen.getByTestId("forward-error")).toHaveTextContent("Ana: Não há espaço suficiente neste dispositivo. Libere espaço e tente de novo.");
+    expect(screen.queryByTestId("where")).toBeNull();
+  });
+
+  it("never takes an empty error for a success", async () => {
+    fakeEngine.on("forwardMessages", ({ to }: { to: string[] }) => ({ results: to.map(t => ({ to: t, messageIds: [], error: "" })) }));
+    const { user } = open([message({ text: "", file: PICTURE })], "link-bo", "pt");
+    await user.click(screen.getAllByTestId("forward-target")[0]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(screen.getByTestId("forward-error")).toHaveTextContent("Ana: Algo deu errado");
+    expect(screen.queryByTestId("where")).toBeNull();
+  });
+
   it("asks before forwarding text that looks like a seed, as typing it would", async () => {
     expect(forwardSecret([message({ text: SEED })])).toMatchObject({ kind: "mnemonic" });
     fakeEngine.on("forwardMessages", ({ to }: { to: string[] }) => ({ results: to.map(t => ({ to: t, messageIds: [], error: null })) }));

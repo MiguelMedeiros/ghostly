@@ -2,7 +2,7 @@ import { parseCallSignal } from "@ghostly/core";
 import type { MessageChanges } from "../shared/messageChanges";
 import type { EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
 import type { StoredMessage } from "../shared/types";
-import { profileOpenFailure } from "../shared/idb";
+import { errorLine, profileOpenFailure } from "../shared/idb";
 import type { PeerServer } from "../devices/linkOnly";
 import { GhostlyNode, LIMITED_MODE_ERROR, LIMITED_MODE_METHODS, type NodeOptions } from "./node";
 
@@ -13,18 +13,6 @@ import { GhostlyNode, LIMITED_MODE_ERROR, LIMITED_MODE_METHODS, type NodeOptions
  */
 export interface EngineClientSink {
   post(message: EngineEvent | RpcResponse): void;
-}
-
-/**
- * A failed call as the client hears it: the error's message. Only the message travels, so a storage write the browser
- * refused for want of space (Chromium's QuotaExceededError has an empty message) says so, its name kept for the ⓘ.
- */
-function errorLine(error: unknown): string {
-  if ((error as { name?: unknown } | null)?.name === "QuotaExceededError") {
-    const message = error instanceof Error ? error.message.trim() : "";
-    return `Not enough space on this device (QuotaExceededError${message ? `: ${message}` : ""})`;
-  }
-  return error instanceof Error ? error.message : String(error);
 }
 
 export class EngineServer implements PeerServer {

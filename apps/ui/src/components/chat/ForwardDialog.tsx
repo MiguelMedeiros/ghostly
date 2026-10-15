@@ -65,10 +65,11 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
       return;
     }
     setBusy(false);
-    const failed = outcome.filter(o => o.error).map(o => ({ name: chosen.find(c => c.target === o.to)?.name ?? "", error: problemLine(o.error, t) }));
+    // Any error is a failure, an empty one too: a chat whose error says nothing still got nothing.
+    const failed = outcome.filter(o => o.error !== null).map(o => ({ name: chosen.find(c => c.target === o.to)?.name ?? "", error: problemLine(o.error, t) }));
     if (failed.length) {
       setProblems(failed);
-      const went = chosen.filter(c => outcome.some(o => o.to === c.target && !o.error));
+      const went = chosen.filter(c => outcome.some(o => o.to === c.target && o.error === null));
       setSentTo(now => [...now, ...went.map(c => c.name)]);
       setChosen(now => now.filter(c => !went.includes(c)));
       return;
