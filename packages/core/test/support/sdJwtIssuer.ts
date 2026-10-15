@@ -17,9 +17,10 @@ export function disclosure(...entry: unknown[]): { text: string; digest: string 
   return { text, digest: toBase64Url(sha256(utf8Encode(text))) };
 }
 
-export interface TestCredential { header?: Record<string, unknown>; payload?: Record<string, unknown>; extra?: string[]; holder: X401HolderJwk }
+/** `sd` adds digests to the top `_sd`, for disclosures given in `extra`. */
+export interface TestCredential { header?: Record<string, unknown>; payload?: Record<string, unknown>; extra?: string[]; sd?: string[]; holder: X401HolderJwk }
 
-export function issueSdJwtVc({ header = {}, payload = {}, extra = [], holder }: TestCredential): string {
+export function issueSdJwtVc({ header = {}, payload = {}, extra = [], sd = [], holder }: TestCredential): string {
   const given = disclosure("given_name", "Alice");
   const licence = disclosure("licence_number", "TEST-0001");
   const street = disclosure("street", "1 Test Road");
@@ -27,7 +28,7 @@ export function issueSdJwtVc({ header = {}, payload = {}, extra = [], holder }: 
   const claims = {
     iss: "https://issuer.example", vct: "https://issuer.example/licence", iat: 1_760_000_000, exp: 4_102_444_800,
     cnf: { jwk: holder }, _sd_alg: "sha-256", family_name: "Test",
-    _sd: [given.digest, licence.digest, toBase64Url(sha256(utf8Encode("a decoy")))],
+    _sd: [given.digest, licence.digest, toBase64Url(sha256(utf8Encode("a decoy"))), ...sd],
     address: { country: "XX", _sd: [street.digest] },
     nationalities: [{ "...": nationality.digest }, "YY"],
     ...payload,

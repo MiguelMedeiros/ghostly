@@ -28,6 +28,8 @@ describe("reading an issued SD-JWT VC", () => {
     expect(r.value.claims).toEqual({ family_name: "Test", given_name: "Alice", licence_number: "TEST-0001", address: { country: "XX", street: "1 Test Road" }, nationalities: ["XX", "YY"] });
     expect(r.value.disclosable).toEqual([["address", "street"], ["nationalities", 0], ["given_name"], ["licence_number"]]);
     expect(r.value.disclosures).toHaveLength(4);
+    expect(r.value.disclosedBy).toHaveLength(4);
+    expect(new Set(r.value.disclosedBy)).toEqual(new Set(r.value.disclosures));
   });
 
   it("takes the older typ vc+sd-jwt", () => {
