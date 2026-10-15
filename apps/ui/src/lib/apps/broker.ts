@@ -401,7 +401,10 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         const { offset, length } = readRange(args[1]);
         const bytes = await counted(() => files.read(launch.ref, id as string, offset, length), (read) => read.byteLength);
         if (bytes.byteLength > length) refuse("failed");
-        const buffer = bytes.slice().buffer as ArrayBuffer;
+        // The host's answer is the caller's (LinkedFilesHost.read): handed over as it is, as `file`'s is, where copying
+        // it again cost the page a third of the read.
+        const whole = bytes.byteOffset === 0 && bytes.buffer instanceof ArrayBuffer && bytes.byteLength === bytes.buffer.byteLength;
+        const buffer = whole ? bytes.buffer as ArrayBuffer : bytes.slice().buffer as ArrayBuffer;
         return { value: buffer, transfer: [buffer] };
       }
       case "files.forget": {
