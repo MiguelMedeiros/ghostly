@@ -21,6 +21,22 @@ describe("the certificate check of a signed x401 request", () => {
     expect(await reason([leaf.der, intermediate.der, root.der])).toBe("ok");
   });
 
+  it("ends the path at the first trusted root, past a cross-signed copy of it sent last", async () => {
+    // As servers send Google's and others' chains: the root again, signed by an older root the store no longer has.
+    const olderRoot = testCertificate({ subject: "Older Root", ca: true });
+    const crossSigned = testCertificate({ subject: "Test Root", ca: true, issuer: olderRoot, secret: root.secret });
+    expect(await reason([leaf.der, intermediate.der, crossSigned.der])).toBe("ok");
+    const expiredCross = testCertificate({ subject: "Test Root", ca: true, issuer: olderRoot, secret: root.secret, notAfter: now - 1000 });
+    expect(await reason([leaf.der, intermediate.der, expiredCross.der])).toBe("ok");
+    expect(await reason([leaf.der, intermediate.der, root.der, olderRoot.der])).toBe("ok");
+    // A cross-signed copy of a root nobody trusts stays untrusted.
+    const stranger = testCertificate({ subject: "Stranger Root", ca: true });
+    const strangerInter = testCertificate({ subject: "Stranger CA", ca: true, issuer: stranger });
+    const strangerLeaf = testCertificate({ subject: "verifier.example", dns: ["verifier.example"], issuer: strangerInter });
+    const strangerCross = testCertificate({ subject: "Stranger Root", ca: true, issuer: olderRoot, secret: stranger.secret });
+    expect(await reason([strangerLeaf.der, strangerInter.der, strangerCross.der])).toBe("the chain leads to no trusted root");
+  });
+
   it("refuses a leaf that does not name the host, even in its common name", async () => {
     expect(await reason([leaf.der, intermediate.der], "bank.example")).toBe("the leaf certificate does not name bank.example");
     const cnOnly = testCertificate({ subject: "verifier.example", issuer: intermediate });
