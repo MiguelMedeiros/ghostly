@@ -307,3 +307,33 @@ test("voice messages: hands-free with a click, pause and preview, Enter, Esc; th
   await expect(again.getByTestId("voice-speed")).toHaveText("2×");
   await expect.poll(() => audioRates(bob.page)).toEqual([{ rate: 2, preservesPitch: true }]);
 });
+
+test("voice messages: on a phone the recorder's hint stays on the screen in a longer language", { tag: ["@feature:files.voice.record", "@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }) => {
+  // On one line, "Demasiado corto. Mantén pulsado para grabar, suelta para enviar" ran 36 px past the left edge at 375 px.
+  const [alice, bob] = await Promise.all([peer("voice-hint-alice", { mobile: true, viewport: { width: 320, height: 700 } }), peer("voice-hint-bob")]);
+  await pair(alice, bob);
+  const page = alice.page;
+  await page.evaluate(() => {
+    const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "es" }));
+  });
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("lang", /^es/);
+
+  // A tap on the mic with a finger: the hint says how it works (on a loaded runner the tap can last long enough to be
+  // a hold too short to send, whose hint says it too).
+  const box = (await mic(page).boundingBox())!;
+  const finger = { pointerId: 7, pointerType: "touch", isPrimary: true, button: 0, buttons: 1, clientX: box.x + box.width / 2, clientY: box.y + box.height / 2 };
+  await mic(page).dispatchEvent("pointerdown", finger);
+  await mic(page).dispatchEvent("pointerup", { ...finger, buttons: 0 });
+  const hint = page.getByTestId("voice-hint");
+  await expect(hint).toHaveText(/Mantén pulsado para grabar, suelta para enviar$/);
+  // Its longest line, in the same box whichever came: a hold between 300 and 400 ms is too fine a timing to ask for.
+  const edges = await hint.evaluate((element) => {
+    element.textContent = "Demasiado corto. Mantén pulsado para grabar, suelta para enviar";
+    const box = element.getBoundingClientRect();
+    return { left: box.left, right: box.right, width: document.documentElement.clientWidth };
+  });
+  expect(edges.left).toBeGreaterThanOrEqual(0);
+  expect(edges.right).toBeLessThanOrEqual(edges.width);
+});
