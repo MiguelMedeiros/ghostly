@@ -36,7 +36,7 @@ All ${numbering.length} specifications have the document status Draft; each says
 | 00-99 | Foundations: process (00), Ghost Core (01), peer keys (02), capabilities (03), local profiles (04), profile backups (05) |
 | 100-199 | Transport negotiation (100), WebRTC (101), Iroh (102), HyperDHT (103) |
 | 200-299 | Payment negotiation (200), Cashu (201), Arkade (202), Lightning (203), Bark (204), Lightning addresses (205), Spark (206), Fedimint (207) |
-| 300-399 | Identity proofs (300; external proofs optional), Nostr (301), domain (304), OpenPGP (305), Bitcoin address (306), SSH (307), the Nostr social layer (309), the profile DID (did:dht, 310), DIDs (311), AT Protocol (Bluesky, 312); Pubky, Keet and OpenID Connect (3xx, numbers to be defined) |
+| 300-399 | Identity proofs (300; external proofs optional), Nostr (301), domain (304), OpenPGP (305), Bitcoin address (306), SSH (307), the Nostr social layer (309), the profile DID (did:dht, 310), DIDs (311), AT Protocol (Bluesky, 312); Pubky, Keet, OpenID Connect and x401 credentials for headless agents (3xx, numbers to be defined) |
 | 400-499 | Chat messaging (400), chat session (401), compatibility chat (402), DHT text (403), store-and-forward for an away contact (404), status cards (405), message buttons (406) |
 | 500-599 | File transfer (500), chat files (501), compatibility file frames (502) |
 | 600-699 | Voice and video (600), WebRTC media (601) |
