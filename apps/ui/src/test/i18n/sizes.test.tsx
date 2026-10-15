@@ -6,6 +6,9 @@ import { UpdateProvider } from "../../contexts/UpdateContext";
 import { Settings } from "../../pages/Settings";
 import { byteSize } from "../../lib/backupFile";
 import { formatBytes } from "../../lib/settings";
+import { fileStatus } from "../../lib/fileStatus";
+import { formatFileSize } from "../../lib/format";
+import type { ChatFile } from "../../lib/types";
 import { sizeText } from "../../lib/handoff";
 import { translateWith } from "../../locales/translate";
 import { LOCALES } from "./locales";
@@ -44,6 +47,17 @@ describe("sizes in the app's language", () => {
     expect(sizeText(1.2 * 1024 ** 3, inFr)).toBe("1,2 Go");
     expect(sizeText(480 * 1024 * 1024, inPt)).toBe("480 MB");
     expect(sizeText(144 * 1024, inAr)).toBe("144 ك.ب");
+  });
+
+  it("a file's size takes the language's decimal mark, beside a voice note's speed", () => {
+    expect(formatFileSize(512)).toBe("512 B");
+    expect(formatFileSize(4.2 * 1024 * 1024)).toBe("4.2 MB");
+    expect(formatFileSize(20 * 1024 * 1024)).toBe("20.0 MB");
+    expect(formatFileSize(4.2 * 1024 * 1024, inPt)).toBe("4,2 MB");
+    expect(formatFileSize(1.5 * 1024 ** 3, inFr)).toBe("1,5 Go");
+    expect(formatFileSize(144 * 1024, inAr)).toBe("144.0 ك.ب");
+    const file = { id: "f", name: "a.pdf", mime: "application/pdf", size: 4.2 * 1024 * 1024 } as ChatFile;
+    expect(fileStatus(file, null, undefined, false, inPt)).toBe("4,2 MB");
   });
 
   it("Settings says the storage used in the app's language", async () => {
