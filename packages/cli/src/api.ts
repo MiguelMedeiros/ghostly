@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, ownInviteRefusal, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
@@ -13,7 +13,7 @@ import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 import { STATUS_CARD_METHODS } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
-import { endTyping, keepTyping, sayTyping } from "./typing";
+import { endTyping, keepOneShot, keepTyping, sayTyping } from "./typing";
 import { GROUP_ADMIN_METHODS } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
 import { IDENTITY_METHODS } from "./identities";
@@ -70,6 +70,17 @@ export const SETTABLE: Record<string, "strings" | "string" | "boolean" | "ice"> 
   iceServers: "ice", publicProfiles: "boolean", online: "boolean", shareProfile: "boolean", sendTyping: "boolean", nick: "string",
   autoDownloads: "boolean", serveFiles: "boolean",
 };
+
+/**
+ * A relay address the engine refuses (node.ts `updateSettings`, irohWeb.ts, hyperdhtRelay.ts): the person's value, so
+ * `bad_request` named by its key, in a terminal's words ("give", not the app's "Enter"). Before, `engine` (exit 1). A
+ * wrong scheme ("Use an https:// relay address") too.
+ */
+function relayRefused(error: unknown, patch: Record<string, unknown>): unknown {
+  if (!(error instanceof Error) || !/^(?:Enter (?:at least one|a) relay address|Not a relay address|Use an? \S+ relay address)\b/.test(error.message)) return error;
+  const keys = ["relays", "irohRelays", "hyperdhtRelay"].filter((key) => Object.hasOwn(patch, key));
+  return new CliError("bad_request", `${keys.join(", ") || "relays"}: ${error.message.replace(/^Enter /, "give ").replace(/^(Not|Use) /, (word) => word.toLowerCase())}`);
+}
 
 // ---------- transports ----------
 
@@ -203,7 +214,7 @@ const METHODS: Record<string, Method> = {
       }
       patch[key] = value;
     }
-    await node(ctx).updateSettings({ settings: patch });
+    await node(ctx).updateSettings({ settings: patch }).catch((error: unknown) => { throw relayRefused(error, patch); });
     return { ...redactSettings(state(ctx).settings), ...(warning ? { warning } : {}) };
   },
 
@@ -230,8 +241,11 @@ const METHODS: Record<string, Method> = {
     try {
       ({ linkId } = await node(ctx).joinLink({ inviteCode: invite }));
     } catch (error) {
+      // This profile's own invite: the sentence alone, and the chat that owns it as its own field, not the engine's tag
+      // for its RPC clients ("own-invite <chat>: …").
+      const own = ownInviteRefusal(error);
+      if (own) throw new CliError("refused", "This is your own invite. Share it with a contact; they join with it.", own.linkId ? { chat: own.linkId } : undefined);
       const message = error instanceof Error ? error.message : String(error);
-      if (/own invite/i.test(message)) throw new CliError("refused", message);
       if (/does not look like/i.test(message)) throw new CliError("bad_request", message);
       throw error;
     }
@@ -246,15 +260,15 @@ const METHODS: Record<string, Method> = {
     return { chats: state(ctx).links.map((link) => chatJson(link, showSecret)).sort((a, b) => b.lastMessageAt - a.lastMessageAt || b.createdAt - a.createdAt) };
   },
   async "chat.get"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group show");
     return { ...chatDetailsJson(link, bool(params, "showSecret")), heldUntil: holdOf(ctx, link.id) };
   },
   async "chat.history"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group history");
     return historyOf(ctx, link.id, params, (m) => chatMessageJson(m, link));
   },
   async "chat.send"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group send", "[text...]");
     const text = str(params, "text", true);
     checkTextSize(text);
     if (!bool(params, "force")) {
@@ -280,7 +294,7 @@ const METHODS: Record<string, Method> = {
    * once the chat is live and both apps offer edit/1; `--wait confirmed` waits for the contact to confirm it.
    */
   async "chat.edit"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group edit", "<message> <text...>");
     const messageId = str(params, "message", true);
     const text = str(params, "text", true);
     if (!bool(params, "force")) {
@@ -299,10 +313,11 @@ const METHODS: Record<string, Method> = {
    * WISP 401 § Typing: said on the live session only, and a start only while `sendTyping` is on; it holds 6 s there.
    * `kind` (typing, recording, thinking) and `status` (a short line, e.g. "Transcribing your audio…") say what this
    * side is doing; a new one reaches the contact at once.
-   * `for`: kept that many seconds (a one-shot stays that long), until a message to the chat or a stop.
+   * `for`: kept that many seconds (a one-shot stays that long once the chat is live, and stops when it is not live
+   * within `ONE_SHOT_LIVE_GRACE_MS`), until a message to the chat or a stop.
    */
   async "chat.typing"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group typing");
     const typing = !bool(params, "stop");
     const { kind, status } = typingWord(params, typing);
     const word = { ...(kind !== "typing" ? { kind } : {}), ...(status ? { status } : {}) };
@@ -312,15 +327,16 @@ const METHODS: Record<string, Method> = {
     node(ctx).setTyping({ linkId: link.id, typing, ...word });
     const until = seconds ? Date.now() + seconds * 1000 : null;
     const kept = seconds ? keepTyping(ctx, { linkId: link.id }, seconds * 1000, word) : null;
-    if (kept && ctx.mode === "one-shot") await kept;
+    const open = (s: EngineState) => s.links.find((l) => l.id === link.id)?.dataLink === "open";
+    if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, { linkId: link.id }, kept, open);
     return {
       chat: link.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
-      live: link.dataLink === "open", sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
+      live: open(state(ctx)), sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
     };
   },
   /** WISP 400 § Reactions: one emoji per person per message, a new one replaces mine; `remove` takes mine back. */
   async "chat.react"(ctx, params) {
-    const link = notAGroup(ctx, params, () => chatOf(ctx, params), "group react", "<message> <emoji>");
+    const link = chatNotGroup(ctx, params, "group react", "<message> <emoji>");
     return { chat: link.id, ...(await react(ctx, link.id, params)) };
   },
   /**
@@ -376,7 +392,11 @@ const METHODS: Record<string, Method> = {
   async "chat.retry"(ctx, params) {
     const link = chatOf(ctx, params);
     const messageId = str(params, "message", true);
-    if (!(await node(ctx).getMessage(link.id, messageId))) throw new CliError("not_found", `No message ${messageId} in this chat`);
+    const message = await node(ctx).getMessage(link.id, messageId);
+    if (!message) throw new CliError("not_found", `No message ${messageId} in this chat`);
+    // Before, both answered done and nothing was sent: the engine sends again whatever id it is given.
+    if (message.sender !== "me") throw new CliError("not_found", `No message ${messageId} of yours in this chat: only your own messages are sent again`);
+    if (message.delivery === "delivered") throw new CliError("refused", "Nothing to send again: it was delivered");
     await node(ctx).retryMessage({ linkId: link.id, messageId });
     return { chat: link.id, messageId };
   },
@@ -394,12 +414,12 @@ const METHODS: Record<string, Method> = {
     return details;
   },
   async "chat.rename"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group rename", "<name...>");
     await node(ctx).renameLink({ linkId: link.id, label: str(params, "name") ?? "" });
     return chatJson(findChat(state(ctx).links, link.id));
   },
   async "chat.remove"(ctx, params) {
-    const link = chatOf(ctx, params);
+    const link = chatNotGroup(ctx, params, "group forget", "--yes");
     if (!bool(params, "yes")) throw new CliError("confirm", "Removing a chat deletes its keys and history on this device; pass yes (--yes) to go on");
     await node(ctx).removeLink({ linkId: link.id });
     return { removed: link.id };
@@ -566,16 +586,20 @@ const METHODS: Record<string, Method> = {
     sayTyping(ctx, target, typing, word);
     const until = seconds ? Date.now() + seconds * 1000 : null;
     const kept = seconds ? keepTyping(ctx, target, seconds * 1000, word) : null;
-    if (kept && ctx.mode === "one-shot") await kept;
+    const reached = (s: EngineState) => (s.groups.find((g) => g.id === group.id) ?? group).members.filter((m) => !m.me && m.online && !m.viaHub).length;
+    if (kept && ctx.mode === "one-shot") await keepOneShot(ctx, target, kept, (s) => reached(s) > 0);
     return {
       group: group.id, typing, ...(typing ? { kind } : {}), ...(status ? { status } : {}),
-      reached: group.members.filter((m) => !m.me && m.online && !m.viaHub).length, sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
+      reached: reached(state(ctx)), sendTyping: state(ctx).settings.sendTyping !== false, ...(until ? { until } : {}),
     };
   },
   async "group.leave"(ctx, params) {
     const group = groupOf(ctx, params);
-    await node(ctx).leaveGroup({ groupId: group.id });
-    return { left: group.id };
+    if (!bool(params, "yes")) throw new CliError("confirm", "Leaving a group deletes its history and files on this device; pass yes (--yes) to go on");
+    const { admin } = await node(ctx).leaveGroup({ groupId: group.id });
+    // The member who became the admin, named from the roster read before leaving: the group is gone from the state now.
+    const next = admin ? group.members.find((m) => m.key === admin) : undefined;
+    return { left: group.id, ...(admin ? { admin: { key: admin, name: next?.nick ?? null } } : {}) };
   },
   async "group.forget"(ctx, params) {
     const group = groupOf(ctx, params);
@@ -675,8 +699,13 @@ function notAGroup<T>(ctx: ApiContext, params: Params, chat: () => T, command: s
     let group: GroupView;
     try { group = findGroup(state(ctx).groups, ref); } catch { throw error; }
     const shown = /^[\w.:-]+$/.test(ref) ? ref : JSON.stringify(ref);
-    throw new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat: ghostly ${command} ${shown} ${rest}`, { group: group.id });
+    throw new CliError("not_found", `${JSON.stringify(ref)} is a group, not a chat: ghostly ${command} ${shown}${rest ? ` ${rest}` : ""}`, { group: group.id });
   }
+}
+
+/** The chat a chat command with a group twin names: a group's name says so, with `command`, the twin (see `notAGroup`). */
+function chatNotGroup(ctx: ApiContext, params: Params, command: string, rest = "") {
+  return notAGroup(ctx, params, () => chatOf(ctx, params), command, rest);
 }
 
 /**

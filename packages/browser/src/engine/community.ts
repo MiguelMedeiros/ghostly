@@ -553,22 +553,24 @@ export class Communities {
   /**
    * Leaves: the request goes to the hubs, which keep it and commit it (any member can), and the
    * group goes from this device at once. An admin hands the role to a member first. Something must
-   * be connected to carry the request.
+   * be connected to carry the request. Answers the member the role went to, when it went to one.
    */
-  async leave(groupId: string): Promise<void> {
+  async leave(groupId: string): Promise<string | undefined> {
     const live = this.live.get(groupId);
-    if (!live) return this.forget(groupId);
+    if (!live) { await this.forget(groupId); return; }
     const s = live.session;
-    if (s.status !== "active" || s.others.length === 0) return this.forget(groupId);
+    if (s.status !== "active" || s.others.length === 0) { await this.forget(groupId); return; }
     const edges = [...this.host.edges(groupId).entries()].filter(([, id]) => this.host.linkReady(id, 2));
     if (!edges.length) throw new Error("Nobody in the group is connected right now to take your leave. Try again in a moment.");
+    let next: string | undefined;
     if (s.isAdmin) {
       const connected = new Set(edges.map(([key]) => key));
-      const next = s.others.find(key => connected.has(key)) ?? s.others[0];
+      next = s.others.find(key => connected.has(key)) ?? s.others[0];
       await s.transferAdmin(next);
     }
     await s.leave();
     await this.forget(groupId);
+    return next;
   }
 
   /**
@@ -1723,7 +1725,7 @@ export class Communities {
     const live = this.live.get(groupId);
     if (!live || live.session.wasRemoved(peerKey)) return;
     if (live.hub && !this.peerIsHub(live, peerKey) && rosterHas(live.session.roster, peerKey)) live.members.set(peerKey, this.now());
-    this.sendTo(linkId, live.session.syncFrame());
+    this.sendTo(linkId, live.session.syncFrame(peerKey));
     this.host.emit();
   }
 

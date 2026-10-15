@@ -10,7 +10,7 @@ import { asCliError, CliError, EXIT } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import type { RuntimeOptions } from "./runtime/engine";
-import { allowlist, checkCursor, checkWebhook, eventHandler, Feed, readCursor } from "./listen";
+import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, readCursor } from "./listen";
 import { resolve } from "node:path";
 import { format } from "node:util";
 import { secretsFromStdin } from "./secretInput";
@@ -159,7 +159,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["daemon restart [--timeout s]", "Stop the profile's daemon and start it again in the background (after an upgrade: the new code)", { timeout: o("number", "Seconds to wait for each step") }],
   ["listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
     since: o("number", "Replay events after this seq first"), cursor: o("string", "A file that keeps the last seq handled (read at start, written after each event)"),
-    type: o("list", "Only events of this type, or starting with it (repeat for more)"),
+    type: o("list", "Only events of this type (message.received) or family (message, or group.typing.); repeat for more"),
     turns: o("boolean", "Only agent turns: each message received, and each group message that mentions you, as one agent.turn event"),
     from: o("list", "Only this chat's events (id, prefix, name or the contact's key; again for more)"),
     group: o("list", "Only this group's events (again for more); with --from or --group, nobody else's event gets through"),
@@ -518,6 +518,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   const types = (parsed.options.type as string[] | undefined) ?? [];
   const turns = parsed.options.turns === true;
   if (turns && types.length) throw new CliError("usage", "--turns takes the place of --type: a turn is a message received, or a group message that mentions you");
+  checkTypes(types, (line) => process.stderr.write(line + "\n"));
   const from = (parsed.options.from as string[] | undefined) ?? [], groups = (parsed.options.group as string[] | undefined) ?? [];
   const cursor = parsed.options.cursor as string | undefined;
   // Before the profile opens: a cursor that cannot be written is no per-event warning.

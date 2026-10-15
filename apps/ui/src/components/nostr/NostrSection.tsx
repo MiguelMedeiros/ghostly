@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { NostrDraftRequest, NostrOwnView } from "@ghostly/browser/nostr/types";
-import { useEngineState } from "../../lib/identities";
+import { useEngineState } from "../../lib/engineState";
 import { agoIn } from "../../lib/relativeTime";
 import { useI18n } from "../../contexts/I18nContext";
 import { Block, Button, Notice, Row, Section, Switch, input } from "../wallet/ui";

@@ -381,7 +381,10 @@ export const servicesPlatform: ServicesPlatform | null = {
     })().catch((error: unknown) => {
       const reason = error instanceof Error ? error.message : String(error);
       const full = /quota|space|full/i.test(reason) || (error as { name?: string })?.name === "QuotaExceededError";
-      preparing.set(file.id, { state: "failed", transferred: 0, size: file.size, error: staged ? reason : full ? "Not enough space on this device to send it" : `Could not prepare the file: ${reason}` });
+      // A copy that failed left nothing stored to send again: no Retry (`retry: false`), the file is picked again. Said
+      // as core says a copy it could not read (chatFiles.ts), so the app has words for it in every language.
+      preparing.set(file.id, staged ? { state: "failed", transferred: 0, size: file.size, error: reason }
+        : { state: "failed", transferred: 0, size: file.size, direction: "out", retry: false, error: full ? "Not enough space on this device to send it" : `Could not read the file: ${reason}` });
       preparingChanged(true);
     });
     return { timestamp, file };

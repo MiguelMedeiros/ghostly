@@ -52,7 +52,51 @@ fn this_id(identifier: &str, env: &dyn Fn(&str) -> Option<String>) -> Option<Str
     ))
 }
 
-/// Adds the plugin first, as it asks: a second launch exits in its setup, before any window or peer starts.
+/// The plugin's name and object path for an id, as it builds them (version 2, without its `semver` feature).
+fn bus_name(id: &str) -> String {
+    format!("{id}.SingleInstance")
+}
+
+fn object_path(name: &str) -> String {
+    format!("/{}", name.replace('.', "/").replace('-', "_"))
+}
+
+/// Calls the running instance of `id` on the bus, as the plugin's second instance does: true once it has answered.
+/// With no one holding the name the bus refuses the call at once.
+fn call_running(bus: &zbus::blocking::Connection, id: &str, argv: Vec<String>, cwd: &str) -> bool {
+    let name = bus_name(id);
+    bus.call_method(
+        Some(name.as_str()),
+        object_path(&name).as_str(),
+        Some("org.SingleInstance.DBus"),
+        "ExecuteCallback",
+        &(argv, cwd),
+    )
+    .is_ok()
+}
+
+/// A second launch on a profile that already runs: the running app is handed this launch's arguments and folder
+/// (its window comes forward) and the answer is true, for the app to leave before Tauri starts. The plugin's own
+/// second instance exits in its setup, when tao's X11 device thread has started: the destructors `exit` runs under
+/// that thread could crash the launch (SIGSEGV, SIGABRT) instead of handing over.
+pub fn hand_over(identifier: &str) -> bool {
+    let Some(id) = this_id(identifier, &|name| std::env::var(name).ok()) else {
+        return false;
+    };
+    let Ok(bus) = zbus::blocking::Connection::session() else {
+        return false;
+    };
+    let cwd = std::env::current_dir().unwrap_or_default();
+    call_running(
+        &bus,
+        &id,
+        std::env::args().collect(),
+        cwd.to_str().unwrap_or_default(),
+    )
+}
+
+/// Adds the plugin first, as it asks: it holds the profile's name for the first instance and answers the next
+/// launches' `hand_over`. Two launches at the very same moment still meet in its setup, where the second exits.
 pub fn register<R: Runtime>(builder: tauri::Builder<R>, identifier: &str) -> tauri::Builder<R> {
     let Some(id) = this_id(identifier, &|name| std::env::var(name).ok()) else {
         return builder;
@@ -153,6 +197,100 @@ mod tests {
             &env(&[bus, ("HOME", "/home/ana"), ("XDG_DATA_HOME", "data")]),
         );
         assert_eq!(relative, implicit);
+    }
+
+    /// A session bus of the test's own, gone with it.
+    struct Bus(std::process::Child, String);
+
+    impl Bus {
+        fn start() -> Self {
+            use std::io::{BufRead, BufReader};
+            let mut daemon = std::process::Command::new("dbus-daemon")
+                .args(["--session", "--nofork", "--print-address"])
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .expect("dbus-daemon");
+            let mut address = String::new();
+            BufReader::new(daemon.stdout.take().unwrap())
+                .read_line(&mut address)
+                .unwrap();
+            Bus(daemon, address.trim().to_string())
+        }
+
+        fn connect(&self) -> zbus::blocking::connection::Builder<'_> {
+            zbus::blocking::connection::Builder::address(self.1.as_str()).unwrap()
+        }
+    }
+
+    impl Drop for Bus {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    /// The running instance, as the plugin serves it: what each later launch handed it.
+    struct Running(std::sync::mpsc::Sender<(Vec<String>, String)>);
+
+    #[zbus::interface(name = "org.SingleInstance.DBus")]
+    impl Running {
+        fn execute_callback(&self, argv: Vec<String>, cwd: String) {
+            let _ = self.0.send((argv, cwd));
+        }
+    }
+
+    #[test]
+    fn the_name_and_path_are_the_plugins() {
+        let name = bus_name("app.ghostly.chat.p0123456789abcdef");
+        assert_eq!(name, "app.ghostly.chat.p0123456789abcdef.SingleInstance");
+        assert_eq!(
+            object_path(&name),
+            "/app/ghostly/chat/p0123456789abcdef/SingleInstance"
+        );
+        assert_eq!(object_path("a-b.c.SingleInstance"), "/a_b/c/SingleInstance");
+    }
+
+    /// The issue: the plugin's second instance exited from its setup while tao's X11 thread was opening the
+    /// display, and could crash. The launch now asks the bus first, before Tauri starts: handed over only when the
+    /// profile's running instance answers, with this launch's arguments and folder, as the plugin passes them.
+    #[test]
+    fn a_second_launch_hands_over_only_to_its_own_profiles_running_instance() {
+        let bus = Bus::start();
+        let launch = bus.connect().build().unwrap();
+        let ana = dbus_id(
+            "app.ghostly.chat",
+            Path::new("/home/ana/.local/share/app.ghostly.chat"),
+            "",
+        );
+        let work = dbus_id(
+            "app.ghostly.chat",
+            Path::new("/home/ana/.local/share/app.ghostly.chat"),
+            "work",
+        );
+        let argv = vec!["ghostly".to_string(), "--flag".to_string()];
+
+        // No one runs: the launch starts.
+        assert!(!call_running(&launch, &ana, argv.clone(), "/home/ana"));
+
+        let (handed, heard) = std::sync::mpsc::channel();
+        let name = bus_name(&ana);
+        let _first = bus
+            .connect()
+            .name(name.as_str())
+            .unwrap()
+            .serve_at(object_path(&name).as_str(), Running(handed))
+            .unwrap()
+            .build()
+            .unwrap();
+
+        assert!(call_running(&launch, &ana, argv.clone(), "/home/ana"));
+        assert_eq!(
+            heard.try_recv(),
+            Ok((argv.clone(), "/home/ana".to_string()))
+        );
+        // Another profile is not that instance: it starts.
+        assert!(!call_running(&launch, &work, argv, "/home/ana"));
+        assert!(heard.try_recv().is_err());
     }
 
     #[test]

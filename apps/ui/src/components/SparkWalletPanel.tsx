@@ -4,7 +4,7 @@ import type { WalletPlatform, WalletState } from "../lib/platform";
 import { PaymentReview } from "./PaymentReview";
 import { paymentStateLabel } from "./paymentWords";
 import { BackupRows } from "./wallet/BackupRows";
-import { Actions, Address, Amount, Block, Button, Notice, Row, Section, input, type Action } from "./wallet/ui";
+import { Actions, Address, Amount, Block, Button, Notice, Row, Section, Signed, input, type Action } from "./wallet/ui";
 import { useRun } from "./wallet/run";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { satsIn } from "./NetworkTag";
@@ -84,7 +84,7 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
    {!!spark.history?.length && <Section title={t("wallet.spark.history")}>
     <ul className="divide-y divide-border" data-testid="spark-history">
      {spark.history.map(entry => <li key={entry.id} className="flex items-center gap-3 py-2 text-sm" data-testid="spark-history-row">
-      <span className={entry.direction === "in" ? "text-green-500" : "text-text-primary"}>{entry.direction === "in" ? "+" : "−"}{formatAmount(entry.amount, t.language)} <span className="text-xs text-text-muted">{unit}</span></span>
+      <span className={entry.direction === "in" ? "text-green-500" : "text-text-primary"}><Signed sign={entry.direction === "in" ? "+" : "−"} amount={formatAmount(entry.amount, t.language)} /> <span className="text-xs text-text-muted">{unit}</span></span>
       <span className="flex-1 min-w-0 truncate text-text-muted text-xs">{[entry.via === "spark" ? "Spark" : entry.via === "lightning" ? "Lightning" : entry.via === "onchain" ? t("wallet.spark.via.onchain") : t("wallet.spark.via.other"), entry.memo, statusOf(t, entry.status), entry.fee ? t("wallet.spark.fee", { fee: formatAmount(entry.fee, t.language) }) : ""].filter(Boolean).join(" · ")}</span>
       <span className="text-text-muted text-xs tabular-nums">{formatAt(entry.at, WHEN, t.language)}</span>
      </li>)}

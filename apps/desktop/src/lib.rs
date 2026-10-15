@@ -198,6 +198,7 @@ macro_rules! commands {
             notifications::native_clear_notification,
             notifications::native_clear_notifications,
             notifications::native_notification_permission,
+            notifications::native_notification_tap,
             notifications::native_private_notification,
             notifications::open_notification_settings,
             oidc::oidc_loopback_cancel,
@@ -244,8 +245,13 @@ pub fn run() {
         eprintln!("tls: Android's certificate verifier is not ready: {error}");
     }
     let context = tauri::generate_context!();
+    // Launched again on the same profile, it brings the running window forward and leaves here, before Tauri and
+    // its threads start (an exit under tao's X11 thread could crash).
+    #[cfg(target_os = "linux")]
+    if single_instance::hand_over(&context.config().identifier) {
+        return;
+    }
     let builder = tauri::Builder::default();
-    // Launched again on the same profile, it brings the running window forward and exits here, before its peer.
     #[cfg(target_os = "linux")]
     let builder = single_instance::register(builder, &context.config().identifier);
 
@@ -281,10 +287,9 @@ pub fn run() {
                 viewer::forget_window(window.app_handle(), window.label());
                 app_sandbox::forget_window(window.app_handle(), window.label());
             }
-            // Closing the Ghostly window on a Mac hides it: the app runs on until Cmd+Q.
-            tauri::WindowEvent::CloseRequested { api, .. } => {
-                app_window::on_close_requested(window, api)
-            }
+            // Closing the Ghostly window on a Mac hides it: the app runs on until Cmd+Q. Elsewhere it ends the app,
+            // once the page has said goodbye.
+            tauri::WindowEvent::CloseRequested { api, .. } => on_close_requested(window, api),
             _ => {}
         })
         .on_menu_event(|app, event| {
@@ -296,7 +301,8 @@ pub fn run() {
     #[cfg(target_os = "android")]
     let builder = builder
         .plugin(android::init())
-        .manage(android::Incoming::default());
+        .manage(android::Incoming::default())
+        .manage(android::NotificationTap::default());
 
     builder
         // The Ghostly window stays on the app's own pages, whatever is dropped on it.
@@ -425,25 +431,56 @@ const DEPART_MS: u64 = 400;
 /// How long exiting waits, at most, for the native connections to close.
 const CLOSE_MS: u64 = 500;
 
+/// Set once the page has been told to say goodbye: the close or exit held for it goes on the next time it is asked.
+static DEPARTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Tells the Ghostly page to say goodbye on every live session (`ghostly-departing`, then `paired-bye`), once. False
+/// when it was told already, or there is no page left to tell: what asked goes on at once.
+fn depart<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
+    let Some(page) = app.get_webview_window("main") else {
+        return false;
+    };
+    if DEPARTING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return false;
+    }
+    let _ = page.eval("window.dispatchEvent(new Event('ghostly-departing'))");
+    true
+}
+
+/// A window asked to close. The Ghostly window on a Mac hides (`app_window`). On Linux and Windows its close ends the
+/// app, and the exit that follows comes after Tauri has dropped the window and its page: the close itself is held for
+/// `DEPART_MS` while the page says goodbye, then made again.
+#[cfg(desktop)]
+fn on_close_requested<R: tauri::Runtime>(window: &tauri::Window<R>, api: &tauri::CloseRequestApi) {
+    if app_window::hides_on_close(window.label()) {
+        app_window::on_close_requested(window, api);
+        return;
+    }
+    if window.label() != "main" || !depart(window.app_handle()) {
+        return;
+    }
+    api.prevent_close();
+    let window = window.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(DEPART_MS)).await;
+        let _ = window.close();
+    });
+}
+
 /// Leaving well: contacts hear this app go at once, and watch for it to come back (a restart is back
 /// in seconds), rather than noticing when their liveness gives up a minute later.
-/// - An exit the loop is asked for (the last window closed on Linux or Windows, `app.exit`): held for `DEPART_MS` while the
-///   page says goodbye on every live session (`paired-bye`), then let through.
-/// - Every exit, that one or a quit that nothing can hold (Cmd+Q and `quit` on macOS end the process
+/// - The Ghostly window closed on Linux or Windows: see `on_close_requested`.
+/// - Any other exit the loop is asked for (`app.exit`): held for `DEPART_MS` while the page says goodbye, then let
+///   through.
+/// - Every exit, those or a quit that nothing can hold (Cmd+Q and `quit` on macOS end the process
 ///   from `applicationWillTerminate`): the native connections close, so each contact sees its close.
 fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    static DEPARTING: AtomicBool = AtomicBool::new(false);
     match event {
         tauri::RunEvent::ExitRequested { code, api, .. } => {
-            if DEPARTING.swap(true, Ordering::SeqCst) {
+            if !depart(app) {
                 return;
             }
-            let Some(window) = app.get_webview_window("main") else {
-                return;
-            };
             api.prevent_exit();
-            let _ = window.eval("window.dispatchEvent(new Event('ghostly-departing'))");
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(DEPART_MS)).await;
@@ -907,5 +944,54 @@ mod tests {
         )
         .unwrap();
         assert_eq!(key.as_str().unwrap().len(), 43);
+    }
+
+    /// The Ghostly window closed on Linux or Windows ends the app. By the exit, Tauri has dropped the window and its
+    /// page, so the close itself waits while the page is told to say goodbye. (A Mac hides the window instead.)
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn closing_the_ghostly_window_lets_its_page_say_goodbye_before_the_app_exits() {
+        use std::sync::{Arc, Mutex};
+        use std::time::{Duration, Instant};
+        let app = mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("app");
+        let main = WebviewWindowBuilder::new(&app, "main", Default::default())
+            .build()
+            .unwrap();
+        let exit = Arc::new(Mutex::new(None));
+        let into = exit.clone();
+        let mut closed = None;
+        app.run(move |app, event| match event {
+            // As a window manager closes it, once the loop runs.
+            tauri::RunEvent::Ready => {
+                closed = Some(Instant::now());
+                main.close().unwrap();
+            }
+            // The mock runtime hands a window's close to the loop only, not to `on_window_event`.
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::CloseRequested { api, .. },
+                ..
+            } => on_close_requested(
+                &app.get_webview_window(&label).unwrap().as_ref().window(),
+                &api,
+            ),
+            tauri::RunEvent::ExitRequested { .. } => {
+                into.lock()
+                    .unwrap()
+                    .get_or_insert(closed.unwrap().elapsed());
+            }
+            _ => {}
+        });
+        let after = exit.lock().unwrap().expect("the app exits");
+        assert!(
+            DEPARTING.load(std::sync::atomic::Ordering::SeqCst),
+            "the page was told to say goodbye"
+        );
+        assert!(
+            after >= Duration::from_millis(DEPART_MS),
+            "the app exited {after:?} after the close"
+        );
     }
 }

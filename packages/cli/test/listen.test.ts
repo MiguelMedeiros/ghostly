@@ -3,11 +3,12 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { asCliError, CliError } from "../src/errors";
 import type { GhostlyEvent } from "../src/events";
 import { callApi, type ApiContext } from "../src/api";
-import { Allowlist, allowlist, checkCursor, eventHandler, Feed, hookEnv, MAX_BEHIND, toTurn } from "../src/listen";
+import { Allowlist, allowlist, checkCursor, checkTypes, EVENT_FAMILIES, EVENT_TYPES, eventHandler, Feed, hookEnv, matches, MAX_BEHIND, toTurn } from "../src/listen";
 import { turnRef } from "../src/turnRefs";
 import { ghostly } from "./support/cli";
 // covers: headless.hooks, headless.events
@@ -26,6 +27,76 @@ const received = (chat: string, id: string, text: string, fields: Record<string,
 const groupMessage = (group: string, id: string, text: string, fields: Record<string, unknown> = {}): GhostlyEvent =>
   ({ seq: ++seq, id: `group.message:${group}:${id}`, type: "group.message", at: 5, group, message: { id, chat: `group:${group}`, from: "peer", text, timestamp: 4, delivery: null, deliveryError: null, via: "group", nick: "Carol", member: KEY, ...fields } });
 const other = (type: string, fields: Record<string, unknown>): GhostlyEvent => ({ seq: ++seq, id: `${type}:${seq}`, type, at: 5, ...fields });
+
+describe("--type", () => {
+  it("a word with no dot is a family: message lets message.* through, never messages.x; a dotted type stays exact", () => {
+    const pass = (type: string, ...types: string[]) => matches(other(type, {}), types);
+    expect(pass("message.received", "message.received")).toBe(true);
+    expect(pass("message.received", "message")).toBe(true);
+    expect(pass("chat.created", "chat")).toBe(true);
+    expect(pass("daemon.started", "daemon")).toBe(true);
+    expect(pass("group.typing.started", "group")).toBe(true);
+    expect(pass("message.received", "message.sent", "message")).toBe(true);
+    // As before: a trailing "." or "*" is a family at any depth, and "*" is everything.
+    expect(pass("chat.created", "chat.")).toBe(true);
+    expect(pass("chat.created", "chat.*")).toBe(true);
+    expect(pass("group.typing.started", "group.typing.")).toBe(true);
+    expect(pass("call.ended", "*")).toBe(true);
+    // A family is whole words: `message` is not `messages.x`.
+    expect(pass("messages.x", "message")).toBe(false);
+    expect(pass("message.received", "group")).toBe(false);
+    // A dotted type is that type alone: a bot on group.message gets no edits it did not ask for.
+    expect(pass("group.message.edited", "group.message")).toBe(false);
+    expect(pass("group.mentioned", "group.message")).toBe(false);
+    expect(pass("message.received", "message.sent")).toBe(false);
+  });
+
+  it("every type the source emits is in EVENT_TYPES, and every one listed is emitted", () => {
+    const src = fileURLToPath(new URL("../src/", import.meta.url));
+    const emitted = new Set<string>();
+    for (const file of readdirSync(src, { recursive: true }) as string[]) {
+      if (!file.endsWith(".ts")) continue;
+      for (const line of readFileSync(join(src, file), "utf8").split("\n")) {
+        // An event's id starts with its type (`chat.held:${…}`); `type: "events.gap"` is written whole.
+        for (const m of line.matchAll(/`([a-z]+(?:\.[a-z]+)+):\$\{|type: "([a-z]+(?:\.[a-z]+)+)"/g)) emitted.add(m[1] ?? m[2]);
+        // A type chosen on the line that emits it, or held in a `type` first (`group.sent`, `message.received`).
+        if (/\.emit\(|const type = /.test(line)) for (const m of line.matchAll(/"([a-z]+(?:\.[a-z]+)+)"/g)) emitted.add(m[1]);
+      }
+    }
+    // `${kind}.pinned`, kind "chat" or "group" (events.ts `pinned`).
+    emitted.add("chat.pinned").add("group.pinned");
+    expect([...emitted].filter((type) => !EVENT_TYPES.includes(type))).toEqual([]);
+    expect(EVENT_TYPES.filter((type) => !emitted.has(type))).toEqual([]);
+    expect(EVENT_FAMILIES).toEqual(["agent", "app", "button", "call", "chat", "daemon", "events", "file", "group", "identity", "message", "payment", "typing"]);
+  });
+
+  it("a first word that is no family is a usage error naming them; a type no event has is said on stderr", () => {
+    const warned: string[] = [];
+    const check = (...types: string[]) => checkTypes(types, (line) => warned.push(line));
+    expect(() => check("message", "chat.", "group.typing.", "group.*", "*", "message.received", "agent.turn")).not.toThrow();
+    expect(warned).toEqual([]);
+    for (const type of ["bogus", "messages.received", "bogus.", "bogus*", ".message"]) {
+      const error = (() => { try { check(type); } catch (e) { return e; } })();
+      expect(error, type).toBeInstanceOf(CliError);
+      expect((error as CliError).code).toBe("usage");
+    }
+    expect(() => check("bogus")).toThrow("--type takes a type, or a family (agent, app, button, call, chat, daemon, events, file, group, identity, message, payment, typing)");
+    // A typo inside a family, or a dotted family name written with no trailing dot: kept, and said.
+    check("message.recieved", "group.typing");
+    expect(warned).toEqual([
+      "ghostly: no event is of type message.recieved; the message family has message.deleted, message.delivery, message.edited, message.reaction, message.received, message.sent",
+      expect.stringMatching(/^ghostly: no event is of type group\.typing; the group family has group\.created, .*group\.typing\.stopped$/),
+    ]);
+  });
+
+  it("listen --type bogus stops at once with a usage error, and opens no profile", async () => {
+    const home = mkdtempSync(join(tmpdir(), "ghostly-listen-"));
+    const result = await ghostly(["--home", home, "listen", "--type", "message", "--type", "bogus"]);
+    expect(result.code, result.stdout + result.stderr).toBe(2);
+    expect(result.json).toMatchObject({ error: { code: "usage", message: expect.stringContaining("No event is of type bogus") } });
+    expect(readdirSync(home)).toEqual([]);
+  });
+});
 
 describe("agent turns", () => {
   it("a contact's message is one turn: its seq, an id stable for the message, the words as untrusted data", () => {

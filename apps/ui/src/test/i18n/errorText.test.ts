@@ -38,6 +38,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Items waiting for this contact would exceed 64 MB. Wait until some are picked up.", `${BROWSER}/engine/hold.ts`, "Items waiting for this contact would exceed ${"],
   ["Message exceeds 16384 UTF-8 bytes.", "packages/browser/src/engine/node.ts", "Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes."],
   ["Message exceeds 4096 UTF-8 bytes.", "packages/browser/src/engine/groupEdits.ts", "Message exceeds ${GROUP_EDIT_TEXT_BYTES} UTF-8 bytes."],
+  ["Message too long once encoded. Shorten it or send it as a file.", `${CORE}/ghostlink.ts`],
   ["This message was edited 100 times, the most one takes.", "packages/browser/src/engine/node.ts", "This message was edited ${most} times, the most one takes."],
   ["That message is not in this chat, or cannot be replied to", "packages/browser/src/engine/node.ts"],
   ["That message cannot be replied to", "packages/browser/src/engine/node.ts"],
@@ -69,6 +70,15 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   // (libudx's own words, measured on a local HyperDHT testnet).
   ["connection reset by peer", "native/transports/hyperdht/endpoint.mjs", "if (stopped || channels.size >= 2) { socket.destroy();"],
   ["PEER_NOT_FOUND: Peer not found", "node_modules/hyperdht/lib/errors.js", "static PEER_NOT_FOUND(msg = 'Peer not found')"],
+  // A contact's app that is seen but does not answer (frozen, asleep): its record is fresh, the dial fails after ~4 s.
+  ["PEER_CONNECTION_FAILED: Could not connect to peer", "node_modules/hyperdht/lib/errors.js", "static PEER_CONNECTION_FAILED(msg = 'Could not connect to peer')"],
+  ["HOLEPUNCH_ABORTED: Holepunch aborted", "node_modules/hyperdht/lib/errors.js", "static HOLEPUNCH_ABORTED(msg = 'Holepunch aborted')"],
+  // The Desktop's own HyperDHT runtime (apps/desktop/src/hyperdht.rs): a dial while one runs, the runtime gone.
+  ["A native connection attempt is already running", "apps/desktop/src/hyperdht.rs"],
+  ["HyperDHT endpoint closed", "apps/desktop/src/hyperdht.rs"],
+  ["HyperDHT runtime stopped", "apps/desktop/src/hyperdht.rs"],
+  ["Native runtime stopped", "apps/desktop/src/hyperdht.rs"],
+  ["HyperDHT failed", "apps/desktop/src/hyperdht.rs"],
   ["It did not connect", `${BROWSER}/engine/node.ts`],
   ["The peer closed this connection. Check that both transport preferences allow a common transport, then reconnect.", `${CORE}/ghostlink.ts`],
   ["Your contact needs an updated app to negotiate a transport change.", `${CORE}/ghostlink.ts`],
@@ -121,6 +131,9 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["That recording cannot be sent as a voice message", `${BROWSER}/platform/services.ts`],
   ["This file cannot be retried", `${BROWSER}/platform/services.ts`],
   ["This file is no longer here", `${BROWSER}/platform/services.ts`],
+  // A large file whose copy into this device failed before it was sent: nothing stored, the file is picked again.
+  ["Could not read the file: The file changed while it was being copied", `${BROWSER}/platform/services.ts`, "`Could not read the file: ${reason}`"],
+  ["Not enough space on this device to send it", `${BROWSER}/platform/services.ts`],
   ["Held messages need S3 storage (Profile → Backups) and a contact that allows them.", `${BROWSER}/engine/node.ts`],
   ["Not enough space on your contact's device for this file (2.0 MB free).", `${BROWSER}/platform/services.ts`, "Not enough space on your contact's device for this file ("],
   ["That file is too large for your contact's app (max 64 MB). Larger files need an updated Ghostly on their side.", `${BROWSER}/platform/services.ts`, ". Larger files need an updated Ghostly on their side."],
@@ -475,6 +488,11 @@ describe("errors in the app's language", () => {
     // A file sent with + whose copy could not be read is not a paste, and is sent again.
     expect(knownErrorParts("Could not read the file: The file changed while it was being copied", english)).toEqual({
       title: "The file cannot be read", next: "Send it again, or pick the file again.", detail: "Could not read the file: The file changed while it was being copied" });
+    // A large file this device had no room to copy before sending it: what to free, and that it is picked again.
+    expect(knownErrorParts("Not enough space on this device to send it", english)).toEqual({
+      title: "Not enough space on this device", next: "Free some space, then pick the file again." });
+    expect(knownErrorParts("Not enough space on this device to send it", translators.pt)).toEqual({
+      title: "Não há espaço suficiente neste dispositivo", next: "Libere espaço e escolha o arquivo de novo." });
   });
 
   it("an action refused in limited mode says why and what to do, in the language", () => {

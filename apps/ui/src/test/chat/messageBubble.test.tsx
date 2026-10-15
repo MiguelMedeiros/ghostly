@@ -8,6 +8,7 @@ import { publicKeyLabel } from "../../lib/publicKeyLabel";
 import { servicesPlatform } from "../../lib/platform";
 import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
+import { REGTEST_INVOICE } from "../payments/fixtures";
 import { renderApp } from "../render";
 
 // covers: chat.paired.links, chat.paired.image-links, chat.paired.receipts, chat.paired.delete-message, chat.paired.message-details, chat.paired.join-notice, payments.lightning.invoice-card, payments.cashu.token-card, chat.waiting
@@ -218,6 +219,17 @@ describe("MessageBubble: money in a message", () => {
     const card = screen.getByTestId("invoice-bubble");
     expect(card).toHaveTextContent("Lightning invoice");
     expect(within(card).getByTestId("money-amount")).toHaveTextContent("2,100");
+  });
+
+  it("lays out an invoice's memo by its own direction, and keeps its amount and unit in one isolated run", () => {
+    // In Arabic the card's lines took the page's direction: "1 cup coffee" read "cup coffee 1", and "sats" was glued to
+    // the number. The memo is whoever made the invoice's text, in any script, as a message's text is.
+    bubble({ text: REGTEST_INVOICE });
+    const card = screen.getByTestId("invoice-bubble");
+    expect(within(card).getByText("1 cup coffee")).toHaveAttribute("dir", "auto");
+    const amount = within(card).getByTestId("money-amount");
+    expect(amount.parentElement!.tagName).toBe("BDI");
+    expect(amount.parentElement!.lastElementChild).toHaveTextContent(/sats/);
   });
 
   it("keeps the words around an invoice above its card", () => {

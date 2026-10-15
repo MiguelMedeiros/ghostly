@@ -1014,6 +1014,19 @@ describe("text in a chat", () => {
     expect(await db.getMessages(chat.id)).toHaveLength(1);
   });
 
+  it("a text within 16 KiB whose frame passes the contact's frame limit once encoded is refused before it is kept", async () => {
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    // 16,384 UTF-8 bytes of control characters: six characters each in the frame's JSON, past the 60 K a session takes.
+    const controls = `j1 ${"\u0001".repeat(16_381)}`;
+    expect(await node.sendMessage({ linkId: chat.id, text: controls, timestamp: 4 }))
+      .toEqual({ error: "Message too long once encoded. Shorten it or send it as a file.", refused: true });
+    expect(await db.getMessages(chat.id)).toEqual([]);
+    expect(linkOf(chat.id).sendMessage).not.toHaveBeenCalled();
+    // As many quotes (two characters each) fit, and go.
+    expect(await node.sendMessage({ linkId: chat.id, text: "\"".repeat(16_384), timestamp: 5 })).toEqual({ error: null, messageId: expect.stringMatching(/^me_/) });
+  });
+
   it("the receipt of a message I sent reads that message, not the chat's whole history", async () => {
     const chat = row();
     const { node, events: pages, linkOf } = await started(chat);
@@ -1216,7 +1229,13 @@ describe("what arrives from held storage", () => {
     expect(await host.receiveFile(chat.id, wire("a"), bytes("held"), "d")).toBe("duplicate file id");
     const [message] = await db.getMessages(chat.id);
     expect(message).toMatchObject({ id: "peer_a", via: "hold" });
-    expect(await fileStore.get(message.file!.id)).toMatchObject({ direction: "in", digest: "d" });
+    const stored = await fileStore.get(message.file!.id);
+    expect(stored).toMatchObject({ direction: "in", digest: "d" });
+    // In file storage as every other file, not a Blob in its record: the CLI keeps the files store in memory, and in
+    // its snapshot, so 60 held pictures took a daemon from 172 to 650 MB.
+    expect(stored!.blob).toBeUndefined();
+    expect(stored!.bytes).toBe("idb");
+    expect(await (await storedBlob(stored!, "text/plain"))!.text()).toBe("held");
   });
 });
 

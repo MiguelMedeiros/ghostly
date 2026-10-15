@@ -6,6 +6,7 @@ import {
   getInviteCode,
   hasAnnouncedJoin,
   loadSession,
+  loadShownSession,
   markJoinAnnounced,
   saveSession,
   sessionLinkParams,
@@ -15,6 +16,7 @@ import type { ChatMessage, ChatTechInfo, ConnectionStatus } from "../../../../ap
 import { engine } from "./engine";
 import { notifySessionsChanged, startSessionSync } from "./sync";
 
+const NO_MESSAGES: ChatMessage[] = [];
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const getState = () => engine.state;
 
@@ -62,7 +64,10 @@ export const useChat: typeof Desktop.useChat = (params) => {
   }, [sessionId, profile, deliveryMode, seedB64, peerPubKey, encKeyB64]);
 
   const reload = useCallback(() => {
-    if (sessionId) setMessages([...(loadSession(sessionId)?.messages ?? [])]);
+    // Read as the chat list and the sync read it: a chat that changed is parsed once for all of them. One that did not
+    // is the same list (the page's cache, never changed in place), so a change in another chat draws nothing here: a new
+    // copy on every `session-updated` drew the open chat and reran its whole-history work for each message elsewhere.
+    if (sessionId) setMessages(loadShownSession(sessionId)?.messages ?? NO_MESSAGES);
   }, [sessionId]);
 
   useEffect(() => setPending([]), [sessionId]);

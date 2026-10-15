@@ -21,6 +21,7 @@
   "dropFiles": "拖放到此处发送",
   "emoji": "表情",
   "emojiCategories": "表情类别",
+  "emojiNotLoading": "无法加载表情。",
   "expressions": "表情和 GIF",
   "gif": "GIF",
   "gifCategories": "GIF 类别",

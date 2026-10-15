@@ -138,6 +138,8 @@ const RULES: readonly Rule[] = [
   { match: /^Could not read the pasted file: [\s\S]+$/, key: "errors.files.pasteFileUnreadable", next: "errors.files.pasteFileUnreadableNext", detail: true },
   // A file being sent whose copy could not be read (packages/core chatFiles.ts): picked with + or dropped, not pasted.
   { match: /^Could not read the file: [\s\S]+$/, key: "errors.files.unreadable", next: "errors.files.unreadableNext", detail: true },
+  // A large file this device had no room to copy before sending it (platform/services.ts): nothing was kept to send again.
+  exact("Not enough space on this device to send it", "errors.files.noRoomToSend", "errors.files.noRoomToSendNext"),
   exact("This device cannot decode the recording", "errors.files.cannotDecodeRecording"),
   exact("The video took too long", "errors.files.videoTooSlow"),
   { match: HOLD_FULL_ITEMS, key: "errors.hold.fullItems", next: "errors.hold.fullNext" },
@@ -173,6 +175,12 @@ const RULES: readonly Rule[] = [
   { match: /^connection reset by peer$/, key: "errors.transport.dialRefused", next: "errors.transport.dialRefusedNext", detail: true },
   { match: /^Native channel closed$/, key: "errors.transport.dialClosed", next: "errors.transport.dialRefusedNext", detail: true },
   { match: /^PEER_NOT_FOUND: [\s\S]*$/, key: "errors.transport.peerNotFound", next: "errors.transport.peerNotFoundNext", detail: true },
+  // Seen but not answering (HyperDHT's own errors): a frozen or asleep app keeps its record fresh, and is still dialled.
+  { match: /^(?:PEER_CONNECTION_FAILED|BAD_HOLEPUNCH_REPLY|HOLEPUNCH_[A-Z_]+): [\s\S]*$/, key: "errors.transport.peerNotAnswering", next: "errors.transport.peerNotAnsweringNext", detail: true },
+  // The Desktop's HyperDHT runtime (apps/desktop/src/hyperdht.rs): a dial while its own redial runs, the runtime gone.
+  { match: /^A native connection attempt is already running$/, key: "errors.transport.dialInFlight", next: "errors.transport.dialInFlightNext", detail: true },
+  { match: /^(?:HyperDHT endpoint closed|HyperDHT runtime stopped|Native runtime stopped)$/, key: "errors.transport.runtimeStopped", next: "errors.transport.runtimeStoppedNext", detail: true },
+  { match: /^HyperDHT failed$/, key: "errors.transport.runtimeFailed", next: "errors.transport.switchRetryNext", detail: true },
   { match: /^Native channel did not reach the application$/, key: "errors.transport.notReachedApp", next: "errors.transport.switchRetryNext", detail: true },
   // What the engine stores when a switch failed with no reason (engine/node.ts, transportLog.ts).
   exact("It did not connect", "errors.transport.didNotConnect"),
@@ -205,6 +213,7 @@ const RULES: readonly Rule[] = [
 
   // A send or an edit a chat refused (engine/node.ts sendMessage, editMessage, replyRef; platform/useChat.ts).
   { match: /^Message exceeds (?<max>\d+) UTF-8 bytes\.$/, key: "errors.chat.tooLong", next: "errors.chat.tooLongNext" },
+  exact("Message too long once encoded. Shorten it or send it as a file.", "errors.chat.tooLong", "errors.chat.tooLongNext"),
   { match: /^This message was edited (?<max>\d+) times, the most one takes\.$/, key: "errors.chat.editTooMany", next: "errors.chat.editTooManyNext" },
   { match: /^That message (?:is not in this chat, or )?cannot be replied to$/, key: "errors.chat.replyGone", next: "errors.chat.replyGoneNext" },
   // A chat made or joined that the storage had no room for (lib/storage.ts ensureSession).

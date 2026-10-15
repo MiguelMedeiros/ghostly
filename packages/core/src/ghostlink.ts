@@ -18,7 +18,7 @@ import { randomBytes, toBase64Url, toZ32, utf8Encode } from "./bytes";
 import { fitSignedPairedSignal, fitSignedPairedSignalWith, verifyPairedSignal } from "./pairedSignal";
 import { deviceFrameCapability, signDeviceTransports, unsignedDeviceTransports, verifyDeviceTransports, type DeviceCapability, type DeviceFrame } from "./deviceLink";
 import { parseRtcSignal, type SignalSight } from "./signal";
-import { PairedSession, type PairingState, type PairingCredentials, type PaymentMethodName } from "./pairedSession";
+import { PairedSession, SESSION_FRAME_MAX, type PairingState, type PairingCredentials, type PaymentMethodName } from "./pairedSession";
 import { DataLink, type DataLinkState } from "./datalink";
 import type { DirectEvidence } from "./directPath";
 import {
@@ -253,11 +253,21 @@ function filesCap(channel: FrameChannel): number {
   return channel.sendBudget ? channel.sendBudget / 4 : LIMITS.sendHighWaterMark;
 }
 
+/** Files on a channel (`GhostLink.filesUsing`). */
+interface FilesUse { channel: FrameChannel; at: number; waiting: number; appAhead: number }
+
 /**
  * How long after files last wrote on a channel, or last waited for room on it, an app's data keeps its own quarter above
  * their line (WISP 1200 § In a chat): a file waiting for `pf-got` holds its share meanwhile.
  */
 const FILES_IN_USE_MS = 2_000;
+
+/**
+ * How far an app's data may get ahead of a file's bytes while the file waits for room on the channel (WISP 1200 § In a
+ * chat): a frame goes only while the app has sent less than this more than the file since. A small frame (a Chess move)
+ * still goes at once; one streaming at its limit gets about half the link, and the file the other half.
+ */
+const APP_AHEAD_OF_FILES = 16 * 1024;
 
 /** Largest `paired-message` frame sent with a preview: a session fails on a frame over 60 KiB (`PairedSession`). */
 export const MAX_PAIRED_MESSAGE_FRAME = 56 * 1024;
@@ -274,6 +284,18 @@ export function pairedMessageFrame(id: string, ts: number, m: string, preview?: 
   if (!preview) return plain;
   const withPreview = JSON.stringify({ t: "paired-message", id, ts, m, pv: preview, ...r });
   return withPreview.length <= MAX_PAIRED_MESSAGE_FRAME ? withPreview : plain;
+}
+
+/** A text whose `paired-message` frame would pass what a session takes: it never arrives, and is refused at send. */
+export const PAIRED_FRAME_TOO_LARGE = "Message too long once encoded. Shorten it or send it as a file.";
+
+/**
+ * The `paired-message` frame of this text fits a session (`SESSION_FRAME_MAX`, UTF-16 units of the JSON). Within 16 KiB
+ * of UTF-8 a text can still pass it: JSON writes each control character as six (`\u0001`). The preview is left out,
+ * as the frame drops one that does not fit.
+ */
+export function pairedMessageFits(ts: number, m: string, reply?: WireReply, forwarded?: number, card?: StatusCard): boolean {
+  return pairedMessageFrame("A".repeat(22), ts, m, undefined, reply, forwarded, card).length <= SESSION_FRAME_MAX;
 }
 
 /**
@@ -959,12 +981,17 @@ export class GhostLink {
         traceLink(this.myPubKeyZ32, "progress", { stage: progress.stage, attempt: progress.attempt, peerSeen: progress.peerSeen, reason: progress.reason, retryable: progress.retryable, transport: progress.transport });
         options.events?.onPairingProgress?.(progress);
       }) : null;
-    // This side's invite, nobody used yet: read less often the longer nobody does, once no longer awaited.
-    const invite = options.pairingProgress?.role === "inviter" && !!options.pairing && !options.pairing.credentials.peerKey;
+    // This side's invite, nobody used yet, or one this side joined whose inviter never came: read less often the longer
+    // nobody does, once no longer awaited (counted from the join). Joined chats whose inviter deleted its chat or is
+    // gone were read at the background pace for as long as the app ran: 15 of them, 30 reads a minute (bug hunt 1014-0136).
+    const invite = !!options.pairingProgress && !!options.pairing && !options.pairing.credentials.peerKey;
+    // A joined chat whose inviter never answered, pinned from the envelope it put out before anyone joined (`unanswered`).
+    let unanswered = options.dht?.state?.unanswered !== undefined;
+    const backsOff = invite || unanswered;
     this.dht = options.params.profile && options.pairing && options.dht ? new DhtDelivery({
       params: options.params, mode: this.deliveryMode, state: options.dht.state, credentials: options.pairing.credentials, transport: options.transport,
       save: options.dht.save, pollMs: options.dht.pollMs, firstControlAfterMs: options.dht.firstControlAfterMs,
-      ...(invite && { inviteMadeAt: options.madeAt ?? Date.now() }),
+      ...(backsOff && { inviteMadeAt: options.madeAt ?? Date.now() }),
       capsRev: options.dht.capsRev, peerCapsRev: options.dht.peerCapsRev, peerAcceptsText: options.dht.peerAcceptsText, peerAcceptsFile: options.dht.peerAcceptsFile,
       // Reactions ride on the envelopes off the live session (WISP 403 § Reactions).
       ...(options.reactionsSupport && {
@@ -999,6 +1026,10 @@ export class GhostLink {
       receipt: async id => { await options.events?.onMessageReceipt?.(id); },
       changed: view => {
         options.events?.onDhtDelivery?.(view);
+        // The inviter answered the join at last: its key is looked at now, not at the end of that wait.
+        const stillUnanswered = this.dht!.unanswered;
+        if (unanswered && !stillUnanswered) this.session.lookNow();
+        unanswered = stillUnanswered;
         // Someone else used the invite first (the contact's envelopes are sealed to them): the pairing says so, and
         // stops saying it if an envelope of the contact's reads here again.
         if (view.inviteTaken) this.tracker?.failed("taken", false, INVITE_TAKEN);
@@ -1032,7 +1063,7 @@ export class GhostLink {
       lastSeenTimestamp: options.lastSeenTimestamp,
       pollIntervals: options.pollIntervals,
       awaitingSince: options.madeAt,
-      ...(invite && { invite: () => !options.pairing!.credentials.peerKey }),
+      ...(backsOff && { invite: () => !options.pairing!.credentials.peerKey || !!this.dht?.unanswered }),
       getServices: options.getServices,
       // A joiner dials the moment it sees the inviter, and an app back after a restart (`resume`) the moment it reads its
       // contact: its offer goes in its first packet, not in a second one right behind its presence. A joiner with no WebRTC
@@ -2438,8 +2469,24 @@ export class GhostLink {
     if (!rest.length) return;
     this.offered = { epoch, at: made.at };
     this.afterRtc = { epoch, rest };
+    // The record lists no WebRTC (a Linux Desktop): nothing will answer the offer. It ends now, and what both run is
+    // dialled at once, as by a joiner with no WebRTC, rather than `RACE_DIRECT_MS` after it: the inviter's own dial was
+    // all a pairing waited for, and one that stalled had nothing racing it (0.5 to 4.6 s to live, DHT-direct lab, 2026-10-14).
+    if (!this.peerTransports.includes("webrtc/1")) {
+      traceLink(this.myPubKeyZ32, "offer-unanswerable", { transports: rest });
+      this.clearRace();
+      this.raceTimer = setTimeout(() => { this.raceTimer = null; this.endUnanswerableOffer(epoch); }, 0);
+      return;
+    }
     traceLink(this.myPubKeyZ32, "race-standing", { transports: rest });
     this.scheduleRace(epoch, made.at);
+  }
+  /** The offer ends (`raceStandingOffer`), and with it going idle what is ranked after WebRTC is dialled (`dialAfterRtc`). */
+  private endUnanswerableOffer(epoch: number): void {
+    if (epoch !== this.connectionEpoch || this.channel || this.stopped || !this.offerOut || this.afterRtc?.epoch !== epoch) return;
+    // Still inside the dial that made the offer: once it is over.
+    if (this.dialing) { this.raceTimer = setTimeout(() => { this.raceTimer = null; this.endUnanswerableOffer(epoch); }, RACE_RETRY_MS); return; }
+    this.dataLink.close();
   }
   /**
    * Back after an absence, this side answers an offer the contact made while it was away (it dials whatever its key):
@@ -2605,6 +2652,16 @@ export class GhostLink {
     this.rejectWaiters(new GhostlyHttpError("unreachable", "Could not connect to the peer"));
   }
 
+  /**
+   * This side does not dial on its own: the contact's app does (the lower key), and none of what makes this side dial
+   * anyway holds (a first pairing's role, a restart, WebRTC set aside). Its own dial, chosen by hand, is not retried.
+   */
+  private awaitsContactDial(): boolean {
+    const pairing = !!this.tracker && !this.tracker.done && this.tracker.progress.stage !== "on-dht";
+    const role = pairing ? this.options.pairingProgress?.role : undefined;
+    return !role && this.myPubKeyZ32 > this.options.params.peerPubKeyZ32 && !this.resuming && !this.dialsPastRtc();
+  }
+
   /** A transport of the attempt under way did not connect. */
   private attemptFailed(transport: PairedTransport, error: string): void {
     if (this.isDataLinkOpen) return;
@@ -2618,7 +2675,7 @@ export class GhostLink {
     this.attempt = null;
     if (!attempt || this.isDataLinkOpen || this.stopped || (!attempt.failed.length && !reason)) return;
     this.lastAttempt = { at: Date.now(), side: attempt.side, failed: attempt.failed, ...(!attempt.failed.length && reason ? { reason } : {}),
-      ...(attempt.side === "dialled" ? { retryAt: Math.max(Date.now(), this.lastAutoConnectAt + this.dialWait()) } : {}) };
+      ...(attempt.side === "dialled" && !this.awaitsContactDial() ? { retryAt: Math.max(Date.now(), this.lastAutoConnectAt + this.dialWait()) } : {}) };
     traceLink(this.myPubKeyZ32, "attempt-ended", { side: attempt.side, failed: attempt.failed.map(f => f.transport), reason: this.lastAttempt.reason });
     this.options.events?.onLiveAttempt?.(this.lastAttempt);
   }
@@ -2654,8 +2711,11 @@ export class GhostLink {
       if (this.pairedPending.size >= 128) this.pairedPending.delete(this.pairedPending.keys().next().value!);
       const id = stableId ?? toBase64Url(randomBytes(16));
       if (!/^[A-Za-z0-9_-]{22}$/.test(id)) return "Invalid message ID";
+      // Past the contact's frame limit its session would end on it, and again on each retry.
+      const frame = pairedMessageFrame(id, timestamp, trimmed, preview, reply, forwarded, card);
+      if (frame.length > SESSION_FRAME_MAX) return PAIRED_FRAME_TOO_LARGE;
       this.pairedPending.set(id, timestamp);
-      try { this.channel.send(pairedMessageFrame(id, timestamp, trimmed, preview, reply, forwarded, card)); return null; }
+      try { this.channel.send(frame); return null; }
       catch { this.pairedPending.delete(id); return "The connection closed before sending. Reconnect and retry."; }
     }
     if (this.channel && trimmed.length <= LIMITS.maxChatMessageBytes / 4) {
@@ -2826,7 +2886,7 @@ export class GhostLink {
     if (role === "inviter") {
       this.peerSeenAt ||= Date.now();
       if (Date.now() - this.peerSeenAt < INVITER_DIAL_GRACE_MS && !this.nothingToAwait()) { this.session.expectPeer(); return; }
-    } else if (role !== "joiner" && this.myPubKeyZ32 > this.options.params.peerPubKeyZ32 && !this.resuming && !this.dialsPastRtc()) {
+    } else if (this.awaitsContactDial()) {
       // Back after a restart (`resume`), this side dials once whatever its key: the contact may still hold the old
       // session, and would not dial. A WebRTC offer from it reaches that session as "the contact lost the connection"
       // (`DataLink.handleSignal`), and two offers crossing are settled by key there.
@@ -3242,19 +3302,26 @@ export class GhostLink {
    * kept to send later. While the channel already holds a quarter of what it may queue (its send budget, or the high
    * water mark of a WebRTC channel), the frame is refused with `too-fast`, so the chat's messages and pings never wait
    * behind an app's data on a link slower than it sends (WISP 1200 § In a chat). While a file goes, that quarter sits
-   * above what files may hold (`filesWritable`): files keep the channel at their own line for the whole transfer.
+   * above what files may hold (`filesWritable`): files keep the channel at their own line for the whole transfer. While
+   * the file waits for room, the app gets no further than `APP_AHEAD_OF_FILES` ahead of it, so it cannot refill the
+   * channel each time it drains to files' line and keep the file from moving.
    */
   sendAppData(app: string, data: unknown): AppSendError | null {
     if (!this.apps.open.has(app)) return "not-open";
     if (appDataBytes(data) > APP_DATA_MAX_BYTES) return "too-large";
     if (!this.channel || !this.isDataLinkOpen) return "offline";
     if (!this.supportsApps) return "peer-closed";
-    const files = this.filesUse?.channel === this.channel && (this.filesUse.waiting > 0 || Date.now() - this.filesUse.at < FILES_IN_USE_MS)
-      ? filesCap(this.channel) : 0;
-    if (this.channel.bufferedAmount >= files + (this.channel.sendBudget ?? LIMITS.sendHighWaterMark) / 4) return "too-fast";
+    const use = this.filesUse?.channel === this.channel ? this.filesUse : null;
+    const files = use && (use.waiting > 0 || Date.now() - use.at < FILES_IN_USE_MS) ? use : null;
+    if (use && !files) use.appAhead = 0;
+    if (this.channel.bufferedAmount >= (files ? filesCap(this.channel) : 0) + (this.channel.sendBudget ?? LIMITS.sendHighWaterMark) / 4) return "too-fast";
+    if (files && files.waiting > 0 && files.appAhead >= APP_AHEAD_OF_FILES) return "too-fast";
     const refused = this.apps.canSend(app, data);
     if (refused) return refused;
-    try { this.channel.send(JSON.stringify(appDataFrame(app, data))); return null; } catch { return "offline"; }
+    const frame = JSON.stringify(appDataFrame(app, data));
+    try { this.channel.send(frame); } catch { return "offline"; }
+    if (files) files.appAhead = Math.min(files.appAhead + frame.length, APP_AHEAD_OF_FILES + APP_DATA_MAX_BYTES);
+    return null;
   }
   /** What the contact had open is gone (`apps/1` is no longer agreed, or this link stopped): each app hears it now. */
   private appsEnded(): void {
@@ -3296,15 +3363,21 @@ export class GhostLink {
   sendFileData(id: string, offset: number, data: Uint8Array): boolean {
     if (!this.supportsLargeFiles || !this.channel) return false;
     try {
-      this.channel.send(this.supportsBinaryFiles ? encodeFileData(id, offset, data) : JSON.stringify({ t: "pf-data", id, offset, data: toBase64Url(data) }));
-      this.filesUsing(this.channel).at = Date.now();
+      const frame = this.supportsBinaryFiles ? encodeFileData(id, offset, data) : JSON.stringify({ t: "pf-data", id, offset, data: toBase64Url(data) });
+      this.channel.send(frame);
+      const use = this.filesUsing(this.channel);
+      use.at = Date.now();
+      use.appAhead = Math.max(0, use.appAhead - (typeof frame === "string" ? frame.length : frame.byteLength));
       return true;
     } catch { return false; }
   }
-  /** Files on a channel: when they last wrote on it, and how many wait for room. An app's data gets room above theirs. */
-  private filesUse: { channel: FrameChannel; at: number; waiting: number } | null = null;
-  private filesUsing(channel: FrameChannel): { channel: FrameChannel; at: number; waiting: number } {
-    if (this.filesUse?.channel !== channel) this.filesUse = { channel, at: 0, waiting: 0 };
+  /**
+   * Files on a channel: when they last wrote on it, how many wait for room, and how many bytes an app's data has sent
+   * on it beyond theirs since. An app's data gets room above theirs.
+   */
+  private filesUse: FilesUse | null = null;
+  private filesUsing(channel: FrameChannel): FilesUse {
+    if (this.filesUse?.channel !== channel) this.filesUse = { channel, at: 0, waiting: 0, appAhead: 0 };
     return this.filesUse;
   }
   /**

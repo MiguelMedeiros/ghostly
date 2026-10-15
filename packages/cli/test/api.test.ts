@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AWAITING_PEER_MS, type PairingProgress } from "@ghostly/core";
+import { AWAITING_PEER_MS, OwnInviteError, type PairingProgress } from "@ghostly/core";
 import type { EngineState, GroupView, LinkView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { callApi, findChat, findGroup, hideStateSecrets, mentionsFor, redactSettings, type ApiContext } from "../src/api";
 import { chatOrGroup, findChatOrGroup } from "../src/apiKit";
@@ -55,6 +55,16 @@ describe("chats", () => {
     expect(findChat(links, "bob").id).toBe("abc2");
     expect(() => findChat(links, "abc")).toThrow(/more than one/);
     expect(() => findChat(links, "zed")).toThrow(/No chat/);
+  });
+
+  // `invite join <your own invite>` said the engine's tag for its RPC clients: "own-invite <chat id>: This is your own…".
+  it("joining your own invite is refused in a sentence alone, with the chat that owns it as its own field", async () => {
+    const { ctx, node } = fake();
+    const said = "This is your own invite. Share it with a contact; they join with it.";
+    for (const thrown of [new OwnInviteError("chat-one"), new Error(new OwnInviteError("chat-one").message)]) {
+      Object.assign(node, { joinLink: vi.fn(async () => { throw thrown; }) });
+      await expect(callApi(ctx, "invite.join", { invite: "ghostly1abc" })).rejects.toMatchObject({ code: "refused", message: said, details: { chat: "chat-one" } });
+    }
   });
 
   it("a contact's own name never stands for someone else: a key finds only its chat, a label wins over a name", () => {
@@ -288,6 +298,34 @@ describe("chats", () => {
   it("remove needs a yes", async () => {
     const { ctx } = fake();
     await expect(callApi(ctx, "chat.remove", { chat: "chat-one" })).rejects.toMatchObject({ code: "confirm" });
+  });
+});
+
+describe("group leave", () => {
+  // Leave deletes the group's history and files here, as forget does: it asked for nothing (issue: no word of it).
+  it("needs a yes, as forget does, and the engine is not asked without one", async () => {
+    const { ctx, node } = fake();
+    const leaveGroup = vi.fn(async () => ({}));
+    Object.assign(node, { leaveGroup });
+    await expect(callApi(ctx, "group.leave", { group: "g1" })).rejects.toMatchObject({ code: "confirm", message: expect.stringMatching(/history and files on this device; pass yes \(--yes\)/) });
+    expect(leaveGroup).not.toHaveBeenCalled();
+    expect(await callApi(ctx, "group.leave", { group: "g1", yes: true })).toEqual({ left: "g1" });
+    expect(leaveGroup).toHaveBeenCalledWith({ groupId: "g1" });
+  });
+
+  // An admin's leave hands the role on: the engine says to whom, and the answer names that member from the roster.
+  it("an admin's leave names the member who became the admin", async () => {
+    const { ctx, node } = fake();
+    Object.assign(node, { leaveGroup: vi.fn(async () => ({ admin: "abce9999yy" })) });
+    expect(await callApi(ctx, "group.leave", { group: "g1", yes: true })).toEqual({ left: "g1", admin: { key: "abce9999yy", name: "Bo" } });
+  });
+
+  it("the command takes --yes and its help says what goes", () => {
+    const command = COMMANDS["group leave"]!;
+    expect(command.usage).toBe("group leave <group> --yes");
+    expect(command.summary).toMatch(/history and files/);
+    expect(command.params!(parseArgs(["g1", "--yes"], command.options ?? {}), { group: "g1" })).toEqual({ group: "g1", yes: true });
+    expect(command.params!(parseArgs(["g1"], command.options ?? {}), { group: "g1" })).toEqual({ group: "g1", yes: false });
   });
 });
 
@@ -596,6 +634,23 @@ describe("settings", () => {
     for (const server of [{}, { url: "stun:stun.example.org" }])
       await expect(callApi(ctx, "settings.set", { iceServers: [server] })).rejects.toMatchObject({ code: "bad_request", message: "iceServers: Each ICE server needs urls: one address, or several comma-separated (turn:host:port)" });
     await expect(callApi(ctx, "settings.set", { iceServers: [{ urls: "turn:t.example.org:3478" }] })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("username and credential") });
+  });
+
+  it("say a relay address the engine refuses as a wrong value, named by its key, in a terminal's words", async () => {
+    // Each was `engine` (exit 1), in the app's words ("Enter at least one relay address").
+    const { ctx, node } = fake();
+    const refusals: [Record<string, unknown>, string, string][] = [
+      [{ relays: ["notaurl"] }, "Enter at least one relay address (https://…)", "relays: give at least one relay address (https://…)"],
+      [{ irohRelays: ["x"] }, "Not a relay address: x", "irohRelays: not a relay address: x"],
+      [{ hyperdhtRelay: "nope" }, "Enter a relay address (wss://…)", "hyperdhtRelay: give a relay address (wss://…)"],
+      // A relay address with the wrong scheme (irohWeb.ts irohRelayProblem, hyperdhtRelay.ts hyperdhtRelayProblem).
+      [{ irohRelays: ["ftp://x"] }, "Use an https:// relay address: ftp://x", "irohRelays: use an https:// relay address: ftp://x"],
+      [{ hyperdhtRelay: "ftp://x" }, "Use a wss:// relay address", "hyperdhtRelay: use a wss:// relay address"],
+    ];
+    for (const [patch, engine, said] of refusals) {
+      node.updateSettings.mockRejectedValueOnce(new Error(engine));
+      await expect(callApi(ctx, "settings.set", patch)).rejects.toMatchObject({ code: "bad_request", message: said });
+    }
   });
 
   it("take TCP and TLS TURN servers for the apps, and say the CLI does not use them", async () => {

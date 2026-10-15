@@ -1,7 +1,8 @@
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { liftGlobals, parseArgs } from "../src/args";
 import { idSlot, positionals, COMMANDS, TEXT_COMMANDS } from "../src/commands";
-import { GhostlyHttpError } from "@ghostly/core";
+import { GhostlyHttpError, engineError } from "@ghostly/core";
 import { asCliError, CliError, EXIT } from "../src/errors";
 // covers: headless.cli
 
@@ -227,6 +228,9 @@ describe("the argument parser", () => {
       ["group link", ["g1", "--off", "--reset"], "--off turns the link off: not with --reset"],
       ["group hub", ["g1", "m1", "--pin", "--exclude"], "--pin, --exclude or --auto: one of them"],
       ["group hub", ["g1", "m1", "--exclude", "--auto"], "--pin, --exclude or --auto: one of them"],
+      ["file save", ["f1", "--dir", "d", "--path", "d/both.txt"], "--path names the file: not with --dir"],
+      ["file save", ["f1", "--timeout", "5"], "--timeout is how long --wait waits: not without --wait"],
+      ["identity complete", ["d1", "--evidence-file", "proof.txt", "--stdin"], "--evidence-file or --stdin, not both"],
     ];
     for (const [name, argv, message] of pairs) {
       let error: unknown;
@@ -246,6 +250,12 @@ describe("the argument parser", () => {
     expect(params("group link", ["g1", "--off"])).toEqual({ group: "g1", on: false, reset: false });
     for (const role of ["pin", "exclude", "auto"]) expect(params("group hub", ["g1", "m1", `--${role}`])).toMatchObject({ role });
     expect(params("group hub", ["g1", "m1"])).toMatchObject({ role: "auto" });
+    expect(params("file save", ["f1", "--dir", "d"])).toMatchObject({ dir: resolve("d"), path: undefined });
+    expect(params("file save", ["f1", "--path", "d/one.txt"])).toMatchObject({ dir: undefined, path: resolve("d/one.txt") });
+    expect(params("file save", ["f1"])).toMatchObject({ dir: resolve("."), path: undefined });
+    expect(params("file save", ["f1", "--wait", "--timeout", "5"])).toMatchObject({ wait: true, timeout: 5 });
+    expect(params("identity complete", ["d1", "--evidence-file", "proof.txt"])).toEqual({ draft: "d1", evidenceFile: resolve("proof.txt"), stdin: false });
+    expect(params("identity complete", ["d1", "--stdin"])).toEqual({ draft: "d1", evidenceFile: undefined, stdin: true });
   });
 });
 
@@ -257,6 +267,20 @@ describe("errors", () => {
     expect(asCliError({ code: "not_found", message: "x" }).code).toBe("not_found");
     // A code is one of the table's own: every object has `constructor`, which is none (and has no exit status).
     expect(asCliError({ code: "constructor", message: "x" }).code).toBe("engine");
+  });
+
+  // A host that does not answer was `engine` (exit 1), which a bot reads as the engine failing, and a Lightning
+  // address the CLI could not reach said the browser's words ("not allow web apps to read it (CORS)").
+  it("say the engine's known errors by what they are: a host not there, one too slow, a wrong value, a refusal", () => {
+    const host = { host: "nowhere.example" };
+    for (const code of ["mintUnreachable", "hostUnreachable", "networkUnreachable", "usdtRpcUnavailable"] as const)
+      expect(asCliError(engineError(code, host)).code, code).toBe("unavailable");
+    for (const code of ["hostTimedOut", "networkTimedOut"] as const) expect(asCliError(engineError(code, host)).code, code).toBe("timeout");
+    for (const code of ["invalidMintUrl", "mintNotHttps", "invalidMaxFee"] as const) expect(asCliError(engineError(code)).code, code).toBe("bad_request");
+    for (const code of ["notEnoughSats", "ecashAlreadySpent"] as const) expect(asCliError(engineError(code)).code, code).toBe("refused");
+    expect(asCliError(engineError("lnurlUnreachable", host)).toJSON()).toEqual({ code: "unavailable", message: "Could not reach nowhere.example" });
+    // One the table does not name stays the engine's, in its words.
+    expect(asCliError(engineError("outcomeUnknown")).toJSON()).toEqual({ code: "engine", message: "Outcome unknown. Check the existing payment; do not send another." });
   });
 
   it("say a local path could not be opened as the person's path, not as the engine refusing", async () => {

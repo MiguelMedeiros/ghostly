@@ -306,7 +306,8 @@ export function liveAttemptText(attempt: LiveAttempt | undefined, dialer: "you" 
   if (attempt.side === "answered") lines.push(tr("connection.attempt.answered", { contact }));
   for (const f of attempt.failed) lines.push(tr("connection.attempt.failure", { transport: name(f.transport), reason: shortReason(f.error, tr) }));
   if (!attempt.failed.length && attempt.reason) lines.push(tr("connection.attempt.reason", { reason: shortReason(attempt.reason, tr) }));
-  if (attempt.retryAt) lines.push(tr("connection.attempt.retryAt", { time: format(attempt.retryAt) }));
+  // One past is not coming: nothing dialled when it came.
+  if (attempt.retryAt && attempt.retryAt > Date.now()) lines.push(tr("connection.attempt.retryAt", { time: format(attempt.retryAt) }));
   return { label: tr("connection.attempt.label", { time: format(attempt.at) }), lines };
 }
 

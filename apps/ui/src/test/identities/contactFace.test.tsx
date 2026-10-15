@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes, useLocation } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { GroupMemberView, PublicProfileView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import { ContactIdentitiesPanel } from "../../components/identities/ContactIdentitiesPanel";
 import { IdentityStack } from "../../components/identities/ContactMarks";
@@ -294,5 +294,24 @@ describe("a group", () => {
     const { user } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
     await user.type(screen.getByRole("textbox"), "@");
     expect(within(screen.getByTestId("mention-picker")).getAllByRole("option").map(o => o.textContent)).toEqual(["Alice Liddell…" + ALICE.slice(-6), "Bob…" + BOB.slice(-6)]);
+  });
+
+  // Each state re-read every 1:1 chat's stored copy for the members' nicknames: 150 chats were 5.2 MB parsed per state.
+  it("reads no chat's stored copy again for an engine state while it is open, and a nickname still wins", async () => {
+    saveSession(chat({ label: "Mom" }));
+    for (let i = 0; i < 20; i++) saveSession(chat({ id: `other-${i}`, peerPubKeyB64: `${i}`.padEnd(52, "q"), messages: [{ id: "m", text: "x".repeat(200), sender: "peer", timestamp: 1 }] }));
+    choosePubky();
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined).on("loadPublicProfile", () => undefined);
+    fakeEngine.update({ groups: [group], links: withReceived([pubky()]).links });
+    const { user } = renderApp(<Routes><Route path="/group/:groupId" element={<GroupChat />} /></Routes>, { route: "/group/group-1" });
+    const parse = vi.spyOn(JSON, "parse");
+    try {
+      for (let i = 0; i < 5; i++) act(() => fakeEngine.update({ groups: [{ ...group, members: group.members.map(m => (m.key === BOB ? { ...m, online: i % 2 === 0 } : m)) }] }));
+      const chatsParsed = parse.mock.calls.filter(([text]) => typeof text === "string" && text.includes("\"mySeedB64\"")).length;
+      expect(chatsParsed).toBe(0);
+    } finally { parse.mockRestore(); }
+    // The nickname given here still keeps the chosen identity's name off the member.
+    await user.type(screen.getByRole("textbox"), "@");
+    expect(within(screen.getByTestId("mention-picker")).getAllByRole("option").map(o => o.textContent)).toEqual(["Ghost Bob…" + ALICE.slice(-6), "Bob…" + BOB.slice(-6)]);
   });
 });

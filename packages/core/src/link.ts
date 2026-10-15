@@ -210,7 +210,10 @@ export interface LinkSessionOptions {
    * sent at once) went out for a minute (2026-10-08).
    */
   awaitingSince?: number;
-  /** Whether this is an invite this side made that nobody used yet: once no longer awaited, read less often (`unusedInviteWait`). */
+  /**
+   * Whether this is an invite this side made that nobody used yet, or one it joined whose inviter never answered: once no
+   * longer awaited, read less often while nobody is there (`unusedInviteWait`).
+   */
   invite?: () => boolean;
 }
 
@@ -577,8 +580,9 @@ export class LinkSession {
     const stepping = this.fastStepsAfter ? Date.now() - this.fastStepsAfter : -1;
     if (pace === "fast" && stepping >= 0) return Math.min(OFFER_STEP_MAX * interval, Math.max(2 * interval, stepping));
     if (pace === "fast" || pace === "connected" || since < 0) return interval;
-    // An invite nobody used, no longer awaited: the older it is, the less often it is read.
-    if (pace === "background" && this.presence.lastPacketAt === 0 && this.invite()) return unusedInviteWait(Date.now() - this.awaitingSince, interval);
+    // An invite nobody used, or a joined one whose inviter never came, no longer awaited: the older it is, the less often
+    // it is read. Nobody there: an inviter gone may have left a packet, its goodbye, before the join.
+    if (pace === "background" && !this.presence.online && this.invite()) return unusedInviteWait(Date.now() - this.awaitingSince, interval);
     return Math.min(interval, Math.max(2 * this.intervals.fast, since));
   }
 

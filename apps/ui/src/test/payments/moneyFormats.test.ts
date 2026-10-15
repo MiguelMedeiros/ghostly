@@ -193,6 +193,16 @@ describe("BOLT 12 offers", () => {
     expect(decodeBolt12Offer(text)).toBeNull();
   });
 
+  // Its amount was read as millisats when the code could not be read: 1,000,000 units of a currency showed "1,000 sats".
+  it.each([
+    ["empty", new Uint8Array()],
+    ["not UTF-8", Uint8Array.of(0xff, 0x53, 0x44)],
+    ["not three letters", "US"],
+    ["not an ISO 4217 code's letters", "u$d"],
+  ])("refuses an offer whose offer_currency is %s, never reading its amount as sats", (_, currency) => {
+    expect(decodeBolt12Offer(bolt12Offer({ currency, amountMsat: 1_000_000, description: "Dinner" }))).toBeNull();
+  });
+
   it("finds an offer in a message, bare or with lightning:", () => {
     const offer = bolt12Offer({ chains: ["regtest"], description: "tip jar" });
     expect(findMoney(`my tip jar: lightning:${offer} thanks`)).toMatchObject({ type: "bolt12", offer: { offer, network: "testnet" }, rest: "my tip jar:  thanks" });
@@ -289,5 +299,14 @@ describe("the chat list's line", () => {
     expect(previewText(bolt12Offer({ chains: ["regtest"], amountMsat: 5_000_000 }))).toBe("⚡ Lightning offer · Test money · 5,000 test sats");
     expect(previewText(BARK_TESTNET)).toBe("Ark address · Test money");
     expect(previewText(`USDT: ${EVM}`)).toBe("USDT address");
+  });
+
+  // Before, a Lightning invoice said only "⚡ Lightning invoice · 250,000 sats", whatever its chain.
+  it("says whether a Lightning invoice is test or real money, as the other formats do", () => {
+    const words = bech32.decode(REGTEST_INVOICE as `${string}1${string}`, false).words;
+    expect(previewText(REGTEST_INVOICE)).toBe("⚡ Lightning invoice · Test money · 250,000 test sats");
+    expect(previewText(bech32.encode("lntbs2500u", words, false))).toBe("⚡ Lightning invoice · Test money · 250,000 test sats");
+    expect(previewText(bech32.encode("lnbcrt", words, false))).toBe("⚡ Lightning invoice · Test money");
+    expect(previewText(INVOICE)).toBe("⚡ Lightning invoice · Real money · 2,100 sats");
   });
 });

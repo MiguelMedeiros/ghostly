@@ -41,7 +41,8 @@ export interface Person {
   /** Leaves (closes the app or the page) and returns how to come back to the chat. */
   away(): Promise<() => Promise<void>>;
   /**
-   * The open chat's audio call button: whether it is off and why (its title), whether this client's page has
+   * The open chat's audio call button: whether it is off (`aria-disabled`: an off call button keeps its focus and
+   * its reason for a screen reader) and why (its title), whether this client's page has
    * WebRTC, and whether it can call at all (a Linux Desktop has no WebRTC and calls natively, in GStreamer).
    */
   callButton(): Promise<{ disabled: boolean; title: string | null; rtc: boolean; calls: boolean }>;
@@ -53,7 +54,7 @@ export interface Person {
 const CALL_BUTTON = `
   const button = document.querySelector('[data-testid="call-audio"]');
   const rtc = typeof RTCPeerConnection !== "undefined";
-  return { disabled: !button || button.disabled, title: button?.getAttribute("title") ?? null, rtc, calls: rtc || "__TAURI_INTERNALS__" in window };`;
+  return { disabled: !button || button.disabled || button.getAttribute("aria-disabled") === "true", title: button?.getAttribute("title") ?? null, rtc, calls: rtc || "__TAURI_INTERNALS__" in window };`;
 
 /* ---------- the browser clients ---------- */
 
@@ -126,7 +127,7 @@ export function webPerson(actor: Actor): Person {
     callButton: () => page().evaluate(() => {
       const button = document.querySelector<HTMLButtonElement>('[data-testid="call-audio"]');
       const rtc = typeof RTCPeerConnection !== "undefined";
-      return { disabled: !button || button.disabled, title: button?.getAttribute("title") ?? null, rtc, calls: rtc };
+      return { disabled: !button || button.disabled || button.getAttribute("aria-disabled") === "true", title: button?.getAttribute("title") ?? null, rtc, calls: rtc };
     }),
   };
   return person;

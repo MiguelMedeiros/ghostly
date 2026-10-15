@@ -31,7 +31,6 @@ import { InstallHint } from "./InstallApp";
 import { StorageKeeper } from "./StorageKeeper";
 import { UpdateBanner } from "./UpdateBanner";
 import {
-  listSessions,
   isSessionPinned,
   setSessionPinned,
   deleteSession,
@@ -39,7 +38,7 @@ import {
   markSessionAsRead,
   ensureSession,
   getInviteCode,
-  type SessionCache,
+  listShownSessions,
 } from "../lib/storage";
 import { createPairedChat } from "../lib/pairedChat";
 import { chatPath } from "../lib/url";
@@ -54,12 +53,6 @@ import { openJoinProfile } from "../lib/devices";
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 const engineSnapshot = () => engine.state;
-
-/**
- * The sessions as the list last read them: it reads them all on every `session-updated` and every 3 s, and a long chat's
- * session is parsed again only when what is stored for it changed. The list never changes one in place.
- */
-const listCache: SessionCache = new Map();
 
 const MIN_WIDTH = 280;
 const MAX_WIDTH = 600;
@@ -149,7 +142,8 @@ export function Sidebar() {
   const { syncingSessions } = useBackgroundPoller(activeSessionId);
 
   const refreshSessions = useCallback(() => {
-    const updated = listSessions(listCache);
+    // Read through the page's one cache: a long chat whose stored text changed is parsed once for every reader (`listShownSessions`).
+    const updated = listShownSessions();
 
     setSessions(updated);
     // A chat deleted elsewhere takes its pending "Delete?" with it.

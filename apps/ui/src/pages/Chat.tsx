@@ -435,11 +435,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   }, [sessionId]);
 
   useEffect(() => {
-    const peerMessages = [...messages].reverse().filter(m => 
-      m.sender === "peer" || (m.sender === "system" && m.id.startsWith("peer_"))
-    );
-    
-    for (const msg of peerMessages) {
+    // From the newest back, to the first that names the contact: a reversed copy of the whole history was made for it on
+    // every message that came.
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]!;
+      if (msg.sender !== "peer" && !(msg.sender === "system" && msg.id.startsWith("peer_"))) continue;
       if (msg.nick) {
         const nick = peerDisplayName(msg.nick);
         if (nick && nick !== peerNick) {
@@ -814,7 +814,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
             </button>
             <Menu testId="chat-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef} focusFirst>
               {phoneHeader && <>
-                <MenuItem testId="call-video" disabled={!!callBlocked || callBusy} title={callBlocked ?? undefined} onClick={() => { closeMenu(); startCall(true); }}
+                <MenuItem testId="call-video" disabled={!!callBlocked || callBusy} title={callBlocked ?? undefined} hint={callBlocked} onClick={() => { closeMenu(); startCall(true); }}
                   icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>}>
                   {t("calls.video")}
                 </MenuItem>

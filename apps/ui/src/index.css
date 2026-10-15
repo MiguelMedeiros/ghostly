@@ -485,8 +485,10 @@ html[data-standalone="true"] {
 .float-grip-se { bottom: 0; right: 0; cursor: nwse-resize; }
 .float-grip-se::after { bottom: 5px; right: 5px; border-bottom-width: 3px; border-right-width: 3px; border-bottom-right-radius: 4px; }
 
+/* A size container: its middle (the avatars and names) lays itself out for the window's own height (see below). */
 .call-mini {
   overflow: hidden;
+  container-type: size;
 }
 
 /* The whole-screen call's corner button (Small window / Back to chat): clear of the status bar an installed iPhone
@@ -646,7 +648,6 @@ html[data-standalone="true"] {
 
 .call-mini .call-peer {
   gap: 4px;
-  margin-top: -18px;
 }
 
 .call-mini .call-avatar {
@@ -675,8 +676,13 @@ html[data-standalone="true"] {
   font-size: 13px;
 }
 
-/* Your own side of a voice call, beside the contact: smaller, so it is never taken for them. */
+/* Your own side of a voice call, beside the contact: smaller, so it is never taken for them. The two sides sit in
+   the band between the state line (it ends 32 px down) and the buttons (they start 48 px from the bottom, four or
+   five of them), centred in it. */
 .call-mini .call-sides {
+  position: absolute;
+  inset: 32px 0 48px;
+  align-items: center;
   gap: 14px;
   padding: 0 10px;
 }
@@ -688,6 +694,48 @@ html[data-standalone="true"] {
 
 .call-mini .call-self .call-avatar span {
   font-size: 13px;
+}
+
+/* A low small window (a phone opens it 136 px high, a pulled corner stops at 128): the band is 48 to 56 px, and an
+   avatar over its name with the ring around it (44 + 4 + 20 px, the ring 7 px out) covered the state line and ran
+   into the buttons. Each side is a row instead, its avatar smaller, ring and all inside the band. Your own name goes
+   to screen readers only: the smaller avatar beside the contact's is yours. */
+@container (max-height: 170px) {
+  .call-mini .call-sides {
+    gap: 12px;
+  }
+
+  .call-mini .call-peer {
+    flex-direction: row;
+    gap: 6px;
+  }
+
+  .call-mini .call-avatar {
+    width: 32px;
+    height: 32px;
+  }
+
+  .call-mini .call-avatar span {
+    font-size: 14px;
+  }
+
+  .call-mini .call-self .call-avatar {
+    width: 24px;
+    height: 24px;
+  }
+
+  .call-mini .call-self .call-avatar span {
+    font-size: 11px;
+  }
+
+  .call-mini .call-self .call-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 }
 
 /* The header of a right-column page (components/layout/Page.tsx): one 3.5rem line, or two when its
@@ -923,6 +971,19 @@ html .toast-place.toast-place-page[data-at="top"] {
 
 .animate-pulse-dot {
   animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+/*
+ * A call ringing in: its avatar pulses a few times, then rests fully shown. A pulse for the whole ring redrew the
+ * window every frame (a core of the GPU process); the ring sound says it goes on.
+ */
+@keyframes ring-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.animate-ring-pulse {
+  animation: ring-pulse 1.5s ease-in-out 3;
 }
 
 ::-webkit-scrollbar {

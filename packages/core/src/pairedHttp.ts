@@ -16,6 +16,8 @@ export class PairedHttp {
       send: (data) => channel.send(JSON.stringify(typeof data === "string" ? { t: "ph", c: data } : { t: "ph", b: toBase64Url(data) })),
       get bufferedAmount() { return channel.bufferedAmount; },
       drained: () => channel.drained(),
+      // Its frames are counted on the session's channel, base64url and all, so a body keeps under that channel's budget.
+      get sendBudget() { return channel.sendBudget; },
       // The paired channel belongs to the session; closing is the session's business.
       close: () => {},
       onMessage: null,

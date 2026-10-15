@@ -69,6 +69,15 @@ describe("a group message names its author", () => {
     expect(groupMessageJson(message("f", { member: "gone" }), after).nick).toBeNull();
   });
 
+  it("a line of the group's own (created, joined, renamed…) is from system, not peer, even with my own key on it", () => {
+    for (const event of ["created", "joined", "renamed"] as const) {
+      const line = groupMessageJson(message(`event:1:${event}:1`, { event, member: "mekey" }), group);
+      expect(line).toMatchObject({ from: "system", event, member: "mekey", delivery: null });
+    }
+    expect(groupMessageJson(message("g", { member: "anakey" }), group).from).toBe("peer");
+    expect(groupMessageJson(message("h", { sender: "me", member: "mekey" }), group).from).toBe("me");
+  });
+
   it("in group history", async () => {
     const { ctx } = fake([message("a", { member: "anakey" }), message("b", { member: "bokey", timestamp: 2 })]);
     const page = await callApi(ctx, "group.history", { group: "Crew" }) as { messages: { id: string; nick: string | null; member: string }[] };

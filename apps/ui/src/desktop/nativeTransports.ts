@@ -134,6 +134,25 @@ export async function createNativeEndpoint(seedB64: string, kind: "iroh" | "hype
   const relays = kind === "iroh" && options.relays?.length ? { relays: options.relays.map((relay) => irohRelayUrl(relay)) } : {};
   const result = await invoke<{ id: number; descriptor: unknown }>(`paired_${kind}_start`, { seedB64, ...relays, events });
   endpointId = result.id;
+  // HyperDHT: Rust runs one dial per endpoint and refuses another while it is pending. One to the same contact (a
+  // transport chosen while the chat's own redial runs) joins it: the newest caller gets its connection or its failure,
+  // and the ones before it, let go for that one, an error, so a connection never goes to two holders.
+  let dialing: { key: unknown; owner: object; answer: Promise<number> } | undefined;
+  const dial = async (descriptor: unknown): Promise<number> => {
+    // Iroh takes a relay spelled another way for another relay, and the native one homes on names with the trailing dot; a browser's record has none.
+    const ask = () => invoke<number>(`paired_${kind}_connect`, { endpointId: result.id, descriptor: kind === "iroh" ? irohDescriptor(descriptor) : descriptor });
+    if (kind === "iroh") return ask();
+    const key = (descriptor as { publicKey?: unknown } | undefined)?.publicKey, turn = {};
+    let joined = typeof key === "string" && dialing?.key === key ? dialing : undefined;
+    if (joined) joined.owner = turn;
+    else {
+      const mine = joined = dialing = { key, owner: turn, answer: ask() };
+      mine.answer.finally(() => { if (dialing === mine) dialing = undefined; }).catch(() => {});
+    }
+    const id = await joined.answer;
+    if (joined.owner !== turn) throw new Error("A newer dial of this contact took the connection");
+    return id;
+  };
   let handler: NativeEndpoint["onConnection"] = null;
   const endpoint: NativeEndpoint = {
     transport: kind === "iroh" ? "iroh/1" : "hyperdht/1", descriptor: moved ?? result.descriptor, onDescriptor: null,
@@ -143,8 +162,7 @@ export async function createNativeEndpoint(seedB64: string, kind: "iroh" | "hype
     set onUnavailable(value) { unavailable = value; if (value && ended) queueMicrotask(gone); },
     async connect(descriptor) {
       if (stopped) throw new Error("Native endpoint is stopped");
-      // Iroh takes a relay spelled another way for another relay, and the native one homes on names with the trailing dot; a browser's record has none.
-      const id = await invoke<number>(`paired_${kind}_connect`, { endpointId: result.id, descriptor: kind === "iroh" ? irohDescriptor(descriptor) : descriptor });
+      const id = await dial(descriptor);
       // Tauri channels and command results can be dispatched in separate turns.
       for (let attempt = 0; attempt < 100; attempt++) {
         const bound = connections.get(id);

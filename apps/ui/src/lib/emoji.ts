@@ -1,4 +1,3 @@
-import data from "@emoji-mart/data";
 import { getPrefix } from "./storage";
 
 /**
@@ -24,6 +23,21 @@ interface Data {
   categories: { id: string; emojis: string[] }[];
   emojis: Record<string, { id: string; name: string; keywords?: string[]; emoticons?: string[]; skins: { native: string }[]; version: number }>;
 }
+
+let data: Data | null = null;
+let loading: Promise<void> | null = null;
+
+/**
+ * Loads the data set (about 420 KiB), the first time an emoji panel shows: the first screen does without it. Loaded
+ * once; a load that failed is tried again the next time.
+ */
+export function loadEmoji(): Promise<void> {
+  return (loading ??= import("@emoji-mart/data").then((module) => { data = module.default as unknown as Data; },
+    (cause: unknown) => { loading = null; throw cause; }));
+}
+
+/** Whether the data set is here (`loadEmoji`): until then there is no emoji to offer, find or name. */
+export const emojiLoaded = (): boolean => data !== null;
 
 /** The newest emoji of each Unicode emoji version: a device that draws it draws the rest of that version. */
 const VERSIONS: [number, string][] = [
@@ -60,10 +74,11 @@ function draws(emoji: string): boolean | undefined {
 
 let catalog: EmojiCategory[] | null = null;
 
-/** Every category with the emoji this device can draw (all of them where it cannot be checked, as in tests). */
+/** Every category with the emoji this device can draw (all of them where it cannot be checked, as in tests); none before `loadEmoji`. */
 export function emojiCategories(): EmojiCategory[] {
   if (catalog) return catalog;
-  const set = data as unknown as Data;
+  const set = data;
+  if (!set) return [];
   const latest = VERSIONS.find(([, emoji]) => draws(emoji) !== false)?.[0] ?? Infinity;
   const flags = draws("🇨🇦") !== false;
   catalog = set.categories.map(({ id, emojis }) => ({
@@ -104,6 +119,7 @@ let byNative: Map<string, Emoji> | null = null;
 
 /** The emoji a character is, in any tone. */
 export function emojiOf(native: string): Emoji | undefined {
+  if (!data) return undefined;
   if (!byNative) {
     byNative = new Map();
     for (const category of emojiCategories()) for (const emoji of category.emojis) for (const skin of emoji.skins) byNative.set(skin, emoji);

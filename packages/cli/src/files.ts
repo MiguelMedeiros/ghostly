@@ -231,10 +231,13 @@ export const FILE_METHODS: Record<string, Method> = {
     const fileId = str(params, "file", true);
     const { linkId, where } = fileChat(ctx, params, fileId);
     const action = oneOf(params, "action", ACTIONS, "accept");
+    // One all here has no transfer in the engine's state, only its record; the engine takes any action on it and does nothing.
+    const refuseAllHere = async () => {
+      if ((state(ctx).transfers[fileId] ?? (await fileStore.get(fileId).catch(() => undefined))?.transfer)?.state === "done") throw new CliError("refused", action === "accept" || action === "request" || action === "resume" ? "Nothing to ask for: the file is all here" : "Nothing to stop: the file is all here");
+    };
     if ("group" in where) {
       if (action === "resend") throw new CliError("bad_request", "A group's file is downloaded (file accept) or asked for again (file request)");
-      // One all here has no transfer in the engine's state, only its record.
-      if ((state(ctx).transfers[fileId] ?? (await fileStore.get(fileId).catch(() => undefined))?.transfer)?.state === "done") throw new CliError("refused", action === "accept" || action === "request" || action === "resume" ? "Nothing to ask for: the file is all here" : "Nothing to stop: the file is all here");
+      await refuseAllHere();
       try { await node(ctx).fileAction({ linkId, fileId, action }); } catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
       return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
     }
@@ -244,7 +247,7 @@ export const FILE_METHODS: Record<string, Method> = {
       const transfer = state(ctx).transfers[fileId];
       if (!transfer || transfer.state === "done") throw new CliError("refused", outgoing ? "Nothing to send again: it arrived whole" : "Nothing to ask for: the file is all here");
       if (transfer.state === "failed" && (!outgoing || !transfer.retry)) throw new CliError("refused", `It ended: ${transfer.error ?? "failed"}`);
-    }
+    } else await refuseAllHere();
     await node(ctx).fileAction({ linkId, fileId, action });
     return { ...where, file: fileId, action, transfer: state(ctx).transfers[fileId] ?? null };
   },
@@ -279,13 +282,17 @@ export const FILE_METHODS: Record<string, Method> = {
     const stored = await fileStore.get(fileId);
     if (!stored?.metadata) throw new CliError("not_found", `No file ${fileId}`);
     if (stored.leftOut) throw new CliError("not_found", "Not in this backup: the light backup this profile was restored from left the file out");
-    const transfer = state(ctx).transfers[fileId] ?? stored.transfer;
+    // A sent file's bytes were staged whole at send: its transfer is the contact's download, not bytes missing here.
+    const transfer = stored.direction === "out" ? undefined : state(ctx).transfers[fileId] ?? stored.transfer;
     if (transfer && transfer.state !== "done") throw new CliError("unavailable", `The file is not all here yet (${transfer.transferred} of ${transfer.size} bytes)`);
     const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.name));
     const flags = bool(params, "force") ? "w" : "wx";
     let out;
     try { out = await open(target, flags, 0o600); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new CliError("confirm", `${target} exists: pass force (--force) to replace it`);
+      const code = (error as NodeJS.ErrnoException).code;
+      // A folder there is no file to replace: before, it asked for --force, and the --force then failed "is a folder".
+      if ((code === "EEXIST" || code === "EISDIR") && (await stat(target).catch(() => undefined))?.isDirectory()) throw new CliError("bad_request", `${target} is a folder: name a file, or use dir (--dir ${target})`);
+      if (code === "EEXIST") throw new CliError("confirm", `${target} exists: pass force (--force) to replace it`);
       throw error;
     }
     let written = 0, complete = false;

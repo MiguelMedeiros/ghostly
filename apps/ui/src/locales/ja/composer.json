@@ -21,6 +21,7 @@
   "dropFiles": "ドロップして送信",
   "emoji": "絵文字",
   "emojiCategories": "絵文字のカテゴリ",
+  "emojiNotLoading": "絵文字を読み込めませんでした。",
   "expressions": "絵文字と GIF",
   "gif": "GIF",
   "gifCategories": "GIF のカテゴリ",

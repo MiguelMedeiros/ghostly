@@ -26,7 +26,7 @@ import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
 import { chatAppId, isAppRef, isAppVersion, publicKeyFromZ32, type AppFrameEvent, type AppSendError } from "@ghostly/core";
 import { GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, readGroupFileMeta } from "@ghostly/core";
 import { IdentityProofs } from './identities';
-import { setOwnDidSource } from '../proofs/providers/did';
+import { setOwnDidSource } from '../proofs/ownDid';
 import { ProfileDid } from './did';
 import { NostrSocial, effectiveNostrSettings } from './nostrSocial';
 import { PublicProfiles, type ProfileSubject } from './publicProfiles';
@@ -48,7 +48,7 @@ import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindo
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
 import { COMMUNITY_PIN_FRAME, PIN_LIMITS, mayPin, pinIsNewer, pinNumberHolds, readPin, type GroupPinFrame, type WirePin } from "@ghostly/core";
 import { CapsExchange, DHT_FILE_CAPABILITY, DHT_FILE_TOO_LARGE, DHT_TEXT_CAPABILITY, HOLD_CAPABILITY, dhtFileId, type DhtFileAnnouncement, type DhtPacketFacts, TRANSPORTS, automaticTransport, capsDescriptors, dialDescriptors, type CapsContent, type CapsRecord, type PairingCredentials } from "@ghostly/core";
-import { fileMessageText, parseLinkPreview, pairedMessageFrame, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
+import { fileMessageText, parseLinkPreview, pairedMessageFrame, pairedMessageFits, PAIRED_FRAME_TOO_LARGE, type WireReply, type LinkPreview, type PaymentRequest, type PaymentAsk, type Payment, type PaymentResult, HOLD_LIMITS, MAX_DHT_TEXT_BYTES, normalizeRelayUrl, sanitizeAvatar, PeerProofs, emptyProofLedger, emptyIdentityLedger, lastSharedWithMe, receivedIdentityStatus, type ProofChallenge, type ProofEvidence, type ProofAdapter, type ProofScope, type PaymentMethodName } from "@ghostly/core";
 import {
   presenceSeenAt,
   DEFAULT_RELAYS,
@@ -84,7 +84,6 @@ import {
   identityFromSeed,
   parseLocalTarget,
   randomBytes,
-  safeBlobType,
   serviceIdFromName,
   toBase64Url,
   webLocalFetch,
@@ -843,15 +842,17 @@ export class GhostlyNode implements EngineImplementation {
    * Every wallet twice, one per network (real money, test coins), both open at once. Nothing is parked: a payment
    * goes through the wallet of its own network, and a wallet of one network never pays for the other.
    */
-  private readonly usdtWallets = perNetwork((network) => new UsdtWallet(network, () => { void this.refreshWallet(); void this.desk.reconcileUsdtReceipts().catch(()=>{}); }));
-  private readonly arkWallets = perNetwork((network) => new ArkWallet(network, () => { void this.refreshWallet(); void this.desk.reconcileArkReceipts().catch(()=>{}); }));
-  private readonly barkWallets = perNetwork((network) => new BarkWallet(network, () => { void this.refreshWallet(); void this.desk.reconcileBarkReceipts().catch(()=>{}); }));
+  // A balance read that found nothing new (`viewChanged` false, every 8-10 s) checks the receipts still waiting, and
+  // leaves the wallet view as it is: making it again reads every review ever made.
+  private readonly usdtWallets = perNetwork((network) => new UsdtWallet(network, (viewChanged = true) => { if (viewChanged) void this.refreshWallet(); void this.desk.reconcileUsdtReceipts().catch(()=>{}); }));
+  private readonly arkWallets = perNetwork((network) => new ArkWallet(network, (viewChanged = true) => { if (viewChanged) void this.refreshWallet(); void this.desk.reconcileArkReceipts().catch(()=>{}); }));
+  private readonly barkWallets = perNetwork((network) => new BarkWallet(network, (viewChanged = true) => { if (viewChanged) void this.refreshWallet(); void this.desk.reconcileBarkReceipts().catch(()=>{}); }));
   private readonly fedimintWallets = perNetwork((network) => new FedimintWallet(network, {
     changed: () => void this.refreshWallet(),
     // An invoice of a chat request was paid into the federation: the request is paid.
     received: (paymentId) => void this.desk.onLightningPaid({ paymentId }),
   }, () => (this.options.fedimintSdk ?? loadFedimintSdk)()));
-  private readonly sparkWallets = perNetwork((network) => new SparkWallet(network, () => { void this.refreshWallet(); void this.desk.reconcileSparkReceipts().catch(()=>{}); }));
+  private readonly sparkWallets = perNetwork((network) => new SparkWallet(network, (viewChanged = true) => { if (viewChanged) void this.refreshWallet(); void this.desk.reconcileSparkReceipts().catch(()=>{}); }));
   /** What a call naming no network acts on (a caller from before wallets had their own): Mainnet. */
   private net(network?: WalletNetwork): WalletNetwork { return network === "testnet" ? "testnet" : "mainnet"; }
   /** The Fedimint wallet that joined this federation, whichever network it is on. */
@@ -1058,9 +1059,19 @@ export class GhostlyNode implements EngineImplementation {
       if (live.stored.deletedIds?.includes(`peer_${wire.wireId}`)) return null;
       live.files.wireIds.add(wire.wireId);
       live.files.receivedBytes += wire.size;
-      // The bytes first, then the message that shows them: a message never points at a file that is not there.
-      await fileStore.put({ id: file.id, linkId, blob: new Blob([bytes as BlobPart], { type: safeBlobType(file.mime) }), createdAt: Date.now(), direction: "in", wireId: wire.wireId, digest,
-        metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp, voice: wire.voice, video: wire.video, image: wire.image }, transfer: { state: "done", transferred: wire.size, size: wire.size } });
+      // The bytes first, then the message that shows them: a message never points at a file that is not there. In file
+      // storage, as a file that arrived live: a Blob in its record stayed in the CLI's memory and snapshot for good.
+      const storage = await fileBytes();
+      try {
+        await storage.stage(file.id, new Blob([bytes as BlobPart]));
+        await fileStore.put({ id: file.id, linkId, bytes: storage.kind, createdAt: Date.now(), direction: "in", wireId: wire.wireId, digest,
+          metadata: { name: wire.name, size: wire.size, mime: wire.mime, timestamp: wire.timestamp, voice: wire.voice, video: wire.video, image: wire.image }, transfer: { state: "done", transferred: wire.size, size: wire.size } });
+      } catch (error) {
+        await storage.remove(file.id).catch(() => {});
+        live.files.wireIds.delete(wire.wireId);
+        live.files.receivedBytes -= wire.size;
+        throw error;
+      }
       this.transfers.set(file.id, { state: "done", transferred: wire.size, size: wire.size });
       await this.storeMessage({ linkId, id: `peer_${wire.wireId}`, text: fileMessageText(file), sender: "peer", timestamp: wire.timestamp, via: "hold", file,
         ...(wire.reply && { replyTo: receivedPairedReply(wire.reply) }), ...(wire.forwarded && { forwarded: wire.forwarded }),
@@ -1562,8 +1573,9 @@ export class GhostlyNode implements EngineImplementation {
     const wallets = this.withHomes(walletInstances(networks));
     // The flat fields are Mainnet's, for a caller from before wallets had their own network; `networks` has both.
     const intents = (await intentRepository.list()).map((saved) => saved.review);
-    // A review written past the coordinator (a wallet's backup restores its own) reaches the poll from here.
+    // A review written past the coordinator (a wallet's backup restores its own) reaches the poll and the sweep from here.
     this.noteOpenReviews(intents);
+    this.paymentCoordinator.notePending(intents);
     this.walletView = { ...networks.mainnet, networks, wallets, offers: this.walletOffers(networks, wallets), intents, setup: this.walletSetup.view() };
     this.announcePaymentNetworks(wallets);
     for (const tx of everything) {
@@ -3077,6 +3089,8 @@ export class GhostlyNode implements EngineImplementation {
     this.chatInUse(live);
     const bytes = new TextEncoder().encode(trimmed).length;
     if (bytes > LIMITS.maxChatMessageBytes) return { error: `Message exceeds ${LIMITS.maxChatMessageBytes} UTF-8 bytes.`, refused: true };
+    // Within 16 KiB, but past the contact's frame limit once encoded (control characters): it would never arrive.
+    if (!pairedMessageFits(timestamp, trimmed, reply && pairedWireReply(reply), forwarded, card)) return { error: PAIRED_FRAME_TOO_LARGE, refused: true };
     const stop = this.chatStopped(live);
     if (stop) return { error: stop };
     // Someone else used the invite first: the contact reads nothing of this side's, so nothing waits to go either.
@@ -4748,7 +4762,8 @@ export class GhostlyNode implements EngineImplementation {
     const frame: GroupPinFrame = { t: "group-pin", g: groupId, id: pin.id, n: pin.n, k: pin.k, sig: pin.sig };
     try { this.links.get(edge)?.link?.sendGroupFrame(frame); } catch { /* said again when it opens */ }
   }
-  leaveGroup({ groupId }: { groupId: string }): Promise<void> { return this.groups.leave(groupId); }
+  /** `admin`: the member a leaving admin handed the role to. */
+  async leaveGroup({ groupId }: { groupId: string }): Promise<{ admin?: string }> { const admin = await this.groups.leave(groupId); return admin ? { admin } : {}; }
   removeGroupMember({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.remove(groupId, key); }
   makeGroupAdmin({ groupId, key }: { groupId: string; key: string }): Promise<void> { return this.groups.makeAdmin(groupId, key); }
   /** The admin of a private group pins a member as a hub, excludes one, or leaves it to the member's app (`role` null). */
@@ -7183,6 +7198,9 @@ export class GhostlyNode implements EngineImplementation {
       },
     });
     const link = live.link;
+    // The chat may be on screen already: a new chat's page opens it while the engine is still saving it, before this
+    // link exists, so `setActiveLink` found none to tell (the inviter read its contact every 30 s in the background).
+    if (linkId === this.activeLinkId) link.setChatActive(true);
     link.start(); this.emitState();
     if (resumed.resume) {
       const last = this.transportLogOf(live)?.liveAtLastRun;

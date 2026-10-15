@@ -155,9 +155,56 @@ function writeCursor(path: string, seq: number): void {
   renameSync(path + ".tmp", path);
 }
 
+/**
+ * `--type`: one type (`message.received`, exactly: `group.message` is not its `group.message.edited`), or a family, a
+ * word with no "." (`message`, `chat`) or one ending in "." or "*" (`group.typing.`). Before, a family needed its "." and
+ * `--type chat` let nothing through. A family is whole words: `message` is not `messages.x`.
+ */
 export function matches(event: GhostlyEvent, types: readonly string[]): boolean {
   if (!types.length) return true;
-  return types.some((type) => type.endsWith(".") || type.endsWith("*") ? event.type.startsWith(type.replace(/\*$/, "")) : event.type === type);
+  return types.some((type) => {
+    if (type === "*") return true;
+    const family = /[.*]$/.test(type) ? type.replace(/\.?\*$/, "").replace(/\.$/, "") : type.includes(".") ? null : type;
+    return event.type === type || (family !== null && event.type.startsWith(family + "."));
+  });
+}
+
+/**
+ * Every event type a daemon of this version emits (events.ts, appEvents.ts, holds.ts, identities.ts, calls/manager.ts,
+ * main.ts) and `--turns`' own. A test reads them back from the source: a type added there and not here fails it.
+ */
+export const EVENT_TYPES: readonly string[] = [
+  "agent.turn",
+  "app.closed", "app.message", "app.opened",
+  "button.pressed",
+  "call.connected", "call.ended", "call.incoming", "call.outgoing", "call.resumed", "call.stalled",
+  "chat.announced", "chat.connection", "chat.created", "chat.held", "chat.joined", "chat.pairing", "chat.pinned", "chat.released", "chat.removed", "chat.renamed",
+  "daemon.started",
+  "events.gap",
+  "file.done", "file.failed", "file.offered", "file.stage",
+  "group.created", "group.deleted", "group.event", "group.members", "group.mentioned", "group.message", "group.message.edited", "group.pinned", "group.reaction",
+  "group.removed", "group.sent", "group.status", "group.typing.started", "group.typing.stopped",
+  "identity.approval", "identity.progress", "identity.received", "identity.status",
+  "message.deleted", "message.delivery", "message.edited", "message.reaction", "message.received", "message.sent",
+  "payment.created", "payment.updated",
+  "typing.started", "typing.stopped",
+];
+
+/** The families, the first word of each type: what a `--type` must start with. */
+export const EVENT_FAMILIES: readonly string[] = [...new Set(EVENT_TYPES.map((type) => type.split(".")[0]))];
+
+/**
+ * Checks each `--type` before anything starts. Before, `--type bogus` (or a typo such as `message.recieved`) was taken
+ * and the listener stayed silent for good. A first word that is no family is a usage error naming them; a type, or a
+ * family below the first word, that no event has is said on stderr (`warn`) and kept: a newer daemon may emit it.
+ */
+export function checkTypes(types: readonly string[], warn: (line: string) => void): void {
+  for (const type of types) {
+    if (type === "*") continue;
+    const family = type.split(/[.*]/)[0];
+    if (!EVENT_FAMILIES.includes(family)) throw new CliError("usage", `No event is of type ${type}: --type takes a type, or a family (${EVENT_FAMILIES.join(", ")})`);
+    if (!EVENT_TYPES.some((known) => matches({ seq: 0, id: "", type: known, at: 0 }, [type]))) warn(`ghostly: no event is of type ${type}; the ${family} family has ${EVENT_TYPES.filter((known) => known.startsWith(family + ".")).join(", ")}`);
+  }
 }
 
 /** The environment a hook runs in: this one's, less the backup passphrase (a hook, and what it runs, never needs it). */

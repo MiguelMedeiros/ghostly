@@ -1391,8 +1391,13 @@ export class CommunitySession {
     return (f.s === this.myKey && this.resealedFrom.get(frameKey(f))) || communityMessageId(f.s, f.e, f.h, f.n);
   }
 
-  /** Where I am and what I have, for the member at the other end of an edge that just opened. */
-  syncFrame(): CommunitySyncFrame {
+  /**
+   * Where I am and what I have, for the member at the other end of an edge that just opened. `to`: that member, now
+   * asked: my answer to its own sync asks nothing more for a while. A second sync went, and its answer took the place of
+   * what was left of the first from its start: a member back after 256 messages was handed 288 (2026-10-14).
+   */
+  syncFrame(to?: string): CommunitySyncFrame {
+    if (to) this.asked.set(to, this.hooks.clock?.() ?? Date.now());
     const have: Record<string, Record<string, number>> = {};
     const recent = new Set(this.state.store.map(f => seenKey(f.e, f.h)));
     for (const [sender, byKey] of Object.entries(this.state.seen)) for (const [key, entry] of Object.entries(byKey)) {

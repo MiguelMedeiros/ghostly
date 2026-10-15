@@ -1,6 +1,5 @@
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from "react";
-import jsQR from "jsqr";
 import { decodeCommunityLink, decodeGroupEntryLink, readDeviceInvite } from "@ghostly/core";
 import { enrollErrorKey, failureKey, offerDeviceLink } from "../lib/devices";
 import { INVITE_REFUSAL_MESSAGE, classifyInvite, readInvite } from "../lib/url";
@@ -13,6 +12,13 @@ import { useI18n } from "../contexts/I18nContext";
 import type { SessionKeys } from "../lib/storage";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+
+/**
+ * The QR decoder (about 127 KiB), loaded when a scan or a picture read first needs it, not with the first screen.
+ * Loaded once; a load that failed is tried again the next time.
+ */
+let decoder: Promise<typeof import("jsqr").default> | null = null;
+const qrDecoder = () => (decoder ??= import("jsqr").then((module) => module.default, (cause: unknown) => { decoder = null; throw cause; }));
 
 /**
  * Scanned data is only parsed as an invite; never opened as a URL or executed. A picture pasted or dropped on the
@@ -125,6 +131,9 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     if (busyRef.current || joined.current || closed.current) return;
     stop(); busyRef.current = true; setError(null); setOwn(null); setStarting(true);
     const current = generation.current;
+    // The decoder loads while the camera starts.
+    const decoding = qrDecoder();
+    decoding.catch(() => {});
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("unsupported");
       const camera = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
@@ -132,6 +141,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       stream.current = camera; setScanning(true); setStarting(false);
       const element = video.current!;
       element.srcObject = camera; await element.play();
+      const jsQR = await decoding;
       if (current !== generation.current || closed.current) return;
       const canvas = document.createElement("canvas"), context = canvas.getContext("2d", { willReadFrequently: true })!;
       const tick = () => {
@@ -163,6 +173,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     busyRef.current = true; setBusy(true);
     const current = generation.current;
     try {
+      const jsQR = await qrDecoder();
       const bitmap = await createImageBitmap(file);
       try {
         const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));

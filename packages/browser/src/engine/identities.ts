@@ -6,7 +6,7 @@ import {
 import { STORES, store, transact, wrap } from "../shared/idb";
 import { newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./paymentAdapters/persistence";
 import type { IdentityProofProvider } from "../proofs/contract";
-import { identityProviders } from "../proofs/registry";
+import { loadedIdentityProviders, loadIdentityProviders } from "../proofs/load";
 import { boundedIdentityFetch, verifyIdentity } from "../proofs/verify";
 import type { IdentityProofView, LinkIdentitiesView, PublicProfileView } from "../shared/types";
 
@@ -79,16 +79,19 @@ export class IdentityProofs {
   private greeted = new Set<string>();
   private readonly fetch: ReturnType<typeof boundedIdentityFetch>;
 
-  constructor(private host: IdentityLinkHost, private providers: () => readonly IdentityProofProvider[] = identityProviders) {
+  constructor(private host: IdentityLinkHost, private providers: () => readonly IdentityProofProvider[] = loadedIdentityProviders) {
     this.fetch = boundedIdentityFetch({ online: host.online });
   }
 
+  /** The profile's proofs, and the providers that check and show them: loaded here, not with the app. */
   async load(): Promise<void> {
+    const providers = loadIdentityProviders();
     const settings = await store(STORES.settings, "readonly");
     [this.proofs, this.revocations] = await Promise.all([
       wrap<StoredIdentityProof[] | undefined>(settings.get(KEY)).then(v => v ?? []),
       wrap<Revocation[] | undefined>(settings.get(REVOCATIONS)).then(v => v ?? []),
     ]);
+    await providers;
   }
   /** Background work: republish revocations, look up the contacts' proofs for revocations. */
   start(): void {

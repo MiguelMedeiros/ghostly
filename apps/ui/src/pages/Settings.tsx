@@ -37,7 +37,7 @@ import { playSound } from "../lib/sounds";
 import { clearAllData } from "../lib/clearData";
 import { useAppsAvailable } from "../lib/apps/flag";
 import { lockPasswordMin, useDeviceSet } from "../lib/devices";
-import { useEngineState } from "../lib/identities";
+import { useEngineState } from "../lib/engineState";
 import { engine } from "@ghostly/browser/platform/engine";
 import {
   hashPassword,

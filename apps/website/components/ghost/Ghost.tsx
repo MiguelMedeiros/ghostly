@@ -51,6 +51,12 @@ type Props = {
   title?: string;
   /** Stagger for the idle loops so two ghosts never move in unison. */
   phase?: number;
+  /**
+   * A specimen, not a character on stage: no idle loop at all (hem, blink, talking mouth), the mood held in the face.
+   * A CSS transform on a shape inside an SVG is not composited: the blink's and the mouth's restyle and lay out the
+   * page at every frame too, keyframes that do not move included.
+   */
+  still?: boolean;
 };
 
 export { GHOST_PATH };
@@ -97,6 +103,7 @@ export const Ghost = memo(function Ghost({
   halo = false,
   title,
   phase = 0,
+  still = false,
 }: Props) {
   const reduce = useCalm();
   const id = useId().replace(/:/g, "");
@@ -140,15 +147,19 @@ export const Ghost = memo(function Ghost({
       {halo && <ellipse cx="40" cy="46" rx="56" ry="60" fill={`url(#halo-${id})`} />}
       <g className="ghost-lean" style={{ transform: `rotate(${tilt}deg)` }}>
         {/* A sleeping ghost's hem is still: a `d` morph lays out and repaints the whole page at every frame for as long
-            as the ghost is on screen, and the footer's sleeper is on screen at the end of every page. */}
+            as the ghost is on screen, and the footer's sleeper is on screen at the end of every page. So is a `still`
+            one's: /brand's row of 7 moods laid out the page 120 times a second (189 ms of main thread a second). An awake
+            one's stirs three times when it appears and rests on the still hem (the last frame): the first screen of
+            /, /roadmap and /developers/agents laid out 60 times a second for as long as the reader stayed there. */}
         {[fill, `url(#sheen-${id})`].map((paint, i) => (
           <path key={i} d={STILL} fill={paint}>
-            {!reduce && !closed && (
+            {!reduce && !closed && !still && (
               <animate
                 attributeName="d"
                 dur="3.2s"
                 begin={delay}
-                repeatCount="indefinite"
+                repeatCount="3"
+                fill="freeze"
                 values={[...FRAMES, FRAMES[0]].join(";")}
                 calcMode="spline"
                 keySplines={Array(FRAMES.length).fill("0.45 0 0.55 1").join(";")}
@@ -157,7 +168,7 @@ export const Ghost = memo(function Ghost({
           </path>
         ))}
 
-        <g className={`ghost-eyes ${closed ? "" : "ghost-eyes--blink"}`} style={{ animationDelay: delay }}>
+        <g className={`ghost-eyes ${closed || still ? "" : "ghost-eyes--blink"}`} style={{ animationDelay: delay }}>
           {closed ? (
             <>
               <path d="M23 37 Q29 41 35 37" stroke={INK} strokeWidth="3" fill="none" strokeLinecap="round" />
@@ -184,7 +195,7 @@ export const Ghost = memo(function Ghost({
         ) : mood === "excited" ? (
           <path d="M31 49 Q40 61 49 49 Z" fill={INK} />
         ) : mood === "talk" ? (
-          <ellipse cx="40" cy="52" rx="4.5" ry="4" fill={INK} className="ghost-mouth-talk" />
+          <ellipse cx="40" cy="52" rx="4.5" ry="4" fill={INK} className={still ? undefined : "ghost-mouth-talk"} />
         ) : mood === "surprised" ? (
           <ellipse cx="40" cy="54" rx="4.5" ry="6" fill={INK} />
         ) : mood === "curious" ? (
