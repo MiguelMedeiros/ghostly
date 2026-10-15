@@ -181,6 +181,7 @@
     "select": "Select",
     "selected": "{{count}} selected",
     "send": "Send",
+    "sentTo": "Sent to {{names}}",
     "title": "Forward to…"
   },
   "hold": {

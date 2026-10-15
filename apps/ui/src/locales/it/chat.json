@@ -181,6 +181,7 @@
     "select": "Seleziona",
     "selected": "{{count}} selezionati",
     "send": "Invia",
+    "sentTo": "Inviato a {{names}}",
     "title": "Inoltra a…"
   },
   "hold": {

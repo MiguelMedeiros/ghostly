@@ -33,6 +33,8 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   const [secret, setSecret] = useState<SecretFinding | null>(null);
   const [busy, setBusy] = useState(false);
   const [problems, setProblems] = useState<{ name: string; error: string }[]>([]);
+  /** The chats a send that others refused went to: out of the selection, so Send again does not send them it twice. */
+  const [sentTo, setSentTo] = useState<string[]>([]);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const element = dialog.current!;
@@ -64,10 +66,16 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
     }
     setBusy(false);
     const failed = outcome.filter(o => o.error).map(o => ({ name: chosen.find(c => c.target === o.to)?.name ?? "", error: problemLine(o.error, t) }));
-    if (failed.length) { setProblems(failed); return; }
+    if (failed.length) {
+      setProblems(failed);
+      const went = chosen.filter(c => outcome.some(o => o.to === c.target && !o.error));
+      setSentTo(now => [...now, ...went.map(c => c.name)]);
+      setChosen(now => now.filter(c => !went.includes(c)));
+      return;
+    }
     onSent?.();
     onClose();
-    if (chosen.length === 1) nav.conversation(chosen[0]!.path);
+    if (chosen.length === 1 && !sentTo.length) nav.conversation(chosen[0]!.path);
   };
 
   return createPortal(<dialog ref={dialog} data-testid="forward-dialog" aria-labelledby={`${id}-title`}
@@ -100,6 +108,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
         {problems.map((p, i) => <li key={i} className="text-xs text-danger">{p.name ? `${p.name}: ${p.error}` : p.error}</li>)}
       </ul>
     )}
+    {sentTo.length > 0 && <p className="m-0 mx-4 mt-1 text-xs text-text-muted" data-testid="forward-sent">{t("chat.forward.sentTo", { names: sentTo.join(", ") })}</p>}
     <div className="flex items-center gap-2 px-4 py-3">
       <p className="m-0 min-w-0 flex-1 truncate text-xs text-text-muted" data-testid="forward-chosen">
         {chosen.length ? chosen.map(c => c.name).join(", ") : t("chat.forward.pick", { count: String(FORWARD_MAX_TARGETS) })}

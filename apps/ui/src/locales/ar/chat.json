@@ -181,6 +181,7 @@
     "select": "تحديد",
     "selected": "تم تحديد {{count}}",
     "send": "إرسال",
+    "sentTo": "أُرسل إلى {{names}}",
     "title": "إعادة توجيه إلى…"
   },
   "hold": {

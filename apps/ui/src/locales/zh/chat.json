@@ -181,6 +181,7 @@
     "select": "选择",
     "selected": "已选择 {{count}} 条",
     "send": "发送",
+    "sentTo": "已发送给 {{names}}",
     "title": "转发到…"
   },
   "hold": {

@@ -181,6 +181,7 @@
     "select": "選択",
     "selected": "{{count}}件選択中",
     "send": "送信",
+    "sentTo": "{{names}} に送信しました",
     "title": "転送先…"
   },
   "hold": {
