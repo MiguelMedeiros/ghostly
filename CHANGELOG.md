@@ -4,6 +4,114 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.3.1
+
+### Fixed
+
+**Android**
+
+- Message notifications left from before the Android app was closed (swiped from Recents, ended by Android in the background, or updated) work as before it closed: tapping one opens its chat, the chat's next message replaces it, and reading the chat takes it away. Before, a chat could then show two notifications, reading it left the old one behind, and tapping the old one opened no chat.
+
+**Chat**
+
+- A message arriving in a long open chat no longer makes the screen reader announcement go over the chat's whole history: it reads only the new messages.
+- A Lightning offer (BOLT 12) whose currency code is empty or cannot be read no longer shows its amount as sats: an offer for 1,000,000 units of a currency read "1,000 sats". It is not shown as an offer at all, as BOLT 12 asks for one with a currency that is not a three-letter code.
+- A message or a call arriving in the web app, the extension or the desktop app no longer reads every chat's stored messages again to find which chat it belongs to (for the mute and the locked-app ring): with a long chat, each arrival did that on top of showing the message.
+- In the web app, the extension and the desktop app, a message arriving in a long chat has the chat list and the app icon's badge read that chat once between them, not once each.
+- `ghostly message retry` of a message that was already delivered, or of the contact's own message, is refused and says why (exit 1), instead of answering done and sending nothing.
+- A chat you joined whose inviter never comes back (they deleted the chat, their app is gone, or the code was dead) no longer reads the relays at the background pace for as long as the app runs. Ten minutes after the join, it is looked at less often the older it gets, at most every three minutes, the same as an invite nobody used: 15 such chats went from 60 reads a minute to about 10. If the inviter comes back, the chat still connects within three minutes.
+- A DID, a Pubky key or a chat invite shown as a card in a chat no longer reads every chat's stored messages again each time something changes in the app. With a few cards on screen and many chats, each change used to cost several milliseconds more, up to 20 times a second during a call or a file transfer.
+- On the Desktop, choosing HyperDHT or Automatic in a chat while the app was dialling that chat again on its own no longer fails at once with "A native connection attempt is already running". The choice now waits for that dial and goes live with it, or shows why it failed.
+- On a slow connection over HyperDHT (Desktop and the CLI), a message sent while a file was going waited behind the whole file: the app never saw how much the connection still held, so it handed over the file as fast as it could read it. It now waits for the connection as it does on the others, and a message goes through in a fraction of a second (7.3 s before, in a test with a contact that reads at about 4 MB/s).
+- A message arriving in a long chat open in the web app, the extension or the desktop app is added to the chat without reading the whole chat a second time.
+- A message arriving in a long chat open in the web app, the extension or the desktop app is now copied into the chat once instead of twice, and a change with nothing to copy writes nothing: each arrival in a 5,000-message chat took 2 to 3 times the work of a short chat's.
+- In the web app, the extension and the desktop app, a message arriving in a long open chat has that chat read once for the whole page (the chat, the chat list, the badge and what keeps the chat in step with the engine), not once by each of them.
+- In the web app, the extension and the desktop app, a chat you just made and have open now looks for its contact over the DHT every 10 seconds, as an open chat does. It looked only every 30 seconds, as for a chat in the background, so when the contact chose DHT only right after the chat went live, your side could keep saying "On DHT · retrying live" for a minute before it said "DHT only · chosen by your contact".
+- On the side whose contact's app connects to it, a chat that is not live no longer promises "Trying again at" a time after its own attempt failed, and no retry time that has passed is shown.
+- In the web app and the extension, a message arriving in another chat no longer draws the open chat again and goes over its whole history: a long open chat stays quiet while other chats are busy.
+- A Lightning invoice in a chat now says whether it is test or real money in the chat list and to a screen reader ("⚡ Lightning invoice · Test money · 250,000 test sats"), as a Bitcoin address or a Lightning offer already did. Before, a test invoice read only "250,000 sats".
+- A text within 16 KiB that takes more room once encoded than the contact's app accepts (control characters count six each) is refused when you send it, with "Message too long" and the next step, in the app and in `chat send` (code `refused`). Before, it was taken, never arrived, ended the live connection on every try until it failed after 8, and held the chat's other texts back meanwhile.
+- Joining from macOS or Windows an invite made on the Linux Desktop app goes live sooner. Your app now connects to the Linux one itself as soon as it sees that app has no WebRTC. Before, it waited for the Linux app to connect, which took up to 4.6 seconds.
+
+**Apps**
+
+- An app that sent as fast as apps may in a chat (a drawing board, a game that syncs its state) could stop a file you were sending there: the file stayed at the same percent while the app sent. Now the app and the file each get about half of the connection, and a Chess move still goes at once beside a file.
+- A shared service whose answer was larger than about 100 KB (a page, an image, a download) failed with "The local service dropped the response." when the chat was connected through Iroh or HyperDHT (the Desktop app, or the web app on Iroh). The answer now arrives whole at the connection's pace, as it already did over WebRTC.
+
+**Everywhere**
+
+- The app starts with about 90 KiB less JavaScript to load and parse: the Bitcoin Core wallet source and its transaction code are loaded when such a wallet first connects, not at every start.
+- Closing the Ghostly window on Linux or Windows now says goodbye to your contacts before the app quits. A call in progress now ends at once for the contact, instead of going on for about 16 seconds and ending as failed.
+- The app starts with about 400 KiB less JavaScript to load and build: the emoji list is loaded the first time an emoji panel opens (the composer's, or a reaction's +), not at every start. If it cannot be loaded, the panel says so with Try again.
+- When a contact's app is asleep or frozen, a failed HyperDHT connection says so in your language, with what to do (turn Fallback on, or try again once it's back), instead of a bare "Couldn't connect". The Desktop's own HyperDHT messages (an attempt already running, HyperDHT stopped) are said in your language too.
+- The app's first load has about 78 KiB less JavaScript: the identity proof providers (Nostr, Pubky, a domain, OpenPGP, Bitcoin, SSH, OpenID Connect, DID, AT Protocol) load on their own once the app has started, when the profile's proofs load or something about identities is first shown.
+- Opening the Linux Desktop app a second time on the same profile brings the running window forward and closes cleanly. The second launch could crash instead, leaving a crash report behind.
+- The app starts with about 42 KiB less JavaScript to load and parse: the Nostr bunker (NIP-46) signer is loaded when a proof or a post is first signed with a bunker, not at every start.
+- The app starts with about 28 KiB less JavaScript to load and parse: the Nostr Wallet Connect client is loaded when an NWC wallet first connects, not at every start.
+- The app starts with about 124 KiB less JavaScript to load and parse: the QR code reader is loaded when Join first scans a QR or reads a picture of one, not at every start.
+- A Pkarr relay that fails for a moment while the app starts is left alone for a minute, then asked again, instead of five minutes: the requests already sent to it when it failed no longer count as new failures.
+
+**Website**
+
+- The site's pages no longer download the brand page's data (219 KB) as soon as the footer comes into view: it loads when you point at, focus or touch its link, as the roadmap and the WISPs do.
+- The brand page no longer keeps a phone busy while you look at its ghost moods or its social post example. Each ghost there moved its hem, blinked and talked, and the page redrew itself about 120 times a second for as long as they were on screen: a fifth of a second of work every second on a phone, almost half of one on a slow phone. These ghosts are examples, so they now hold still.
+- The home page rests once nothing on screen moves. The ghosts drawn in the story's pictures kept moving their hems while out of view, and the page laid itself out 60 times a second at every scroll position: about an eighth of a second of work every second on a phone, almost half of one on a slow phone. They now rest with their picture and move again as it comes back into view.
+- The "page not found" page no longer keeps a phone busy while it is open. Its searching ghost, the beam, the blink, the ring around the 0 and the ghosts floating by were moved by script or redrawn the whole page about 60 times a second: up to half a second of work every second on a slow phone. They now play as smooth graphics animations that leave the page alone, and the floating ghosts drift by twice and then rest.
+- The first screen of the home page, the roadmap and the agents guide no longer keeps a phone busy while you read it. The ghosts there moved their hem for as long as they were on screen, and the page redrew itself about 60 times a second: a tenth of a second of work every second on a phone, over a third of one on a slow phone. Their hem now stirs a few times when they appear and then rests; they still blink and float.
+
+**Calls**
+
+- A contact who calls again within 2 seconds of a call you missed no longer rings: no card, ring or notification. The call is still kept as a missed call, and a call placed after a short pause rings as before. A contact calling and hanging up over and over rang for every call.
+- When a chat cannot start a call, its greyed call buttons can still be reached with the keyboard and a screen reader reads why calls are off; before, the reason was only a hover text, which a phone never shows. On a phone, the Video call row of the ⋮ menu shows the reason under its name.
+- A chat keeps its last 200 call lines ("Missed audio call", "Audio call ended"); older ones leave this device as a deleted message does. A contact who rang and hung up over and over left two lines a call that never left, so every later call and message in that chat took longer to save, and after a few thousand calls the app could no longer save the chat at all.
+- The command-line app waits 2 seconds before placing a new call in a chat where its last call went unanswered, and says how long is left. A program that called and hung up in a loop sent more than a thousand calls a minute, and each one left a missed call in the contact's chat.
+- While a call rings in, the ringing card no longer keeps the whole window redrawing: its picture pulses a few times, then rests, and the screen behind it is dimmed without a blur. In Chromium this took a full core of the graphics process for the whole ring.
+- On a phone, the small window of a voice call keeps its parts apart: the contact's avatar and its speaking ring no longer cover the line with the call's time, and the names no longer run into the buttons. In a window that low each side is a row, avatar and name, and your own name is read out to a screen reader instead of shown.
+
+**CLI**
+
+- `profile backup --out` naming a file that exists answers `refused` (exit 1), not `confirm` (exit 5), which says to pass a flag such as `--force` that backup does not take.
+- A call placed in the same millisecond as the hang-up before it now rings at the contact, and a hang-up sent in its offer's millisecond ends the contact's ring: each call signal the CLI sends in a chat is dated at least 1 ms after the one before it, so the contact no longer drops it as not newer. A bot that redialed at once lost about 1 call in 20 (it rang 60 s, ended unanswered and was busy for that minute).
+- `chat connect` and `chat pay` on a chat whose invite someone else used first now refuse at once with the sentence `send` gives ("Someone else joined with this invite first. Ask your contact for a new one.", code `refused`, exit 1). Before, `chat connect` dialed for 120 s and answered `timeout`, a code a bot retries.
+- The CLI answers the engine's known errors with the code a bot can act on: a mint, a Lightning address or the network that does not answer is `unavailable`, one too slow `timeout`, a wrong mint URL or maximum fee `bad_request`, not enough sats or spent ecash `refused`, instead of `engine` for all of them. A relay address `settings set` cannot take is `bad_request` naming its key, and a Lightning address it cannot reach no longer mentions a browser's CORS.
+- `ghostly file cancel|decline|pause|resume|accept` on a chat's file that is already all here is refused (exit 1) with "Nothing to stop: the file is all here" or "Nothing to ask for: the file is all here", as for a group's file, instead of answering exit 0 with the action as if it had done something.
+- `ghostly file save` with both `--dir` and `--path`, or with `--timeout` but no `--wait`, and `ghostly identity complete` with both `--evidence-file` and `--stdin`, are usage errors (exit 2) naming the options, instead of one option winning without a word or `--timeout` being ignored.
+- `ghostly file save --path <a folder>` says "<folder> is a folder: name a file, or use dir (--dir <folder>)" (`bad_request`), with or without `--force`, instead of asking for a `--force` that then failed. An empty `--path` or `--dir` is a usage error instead of the current folder.
+- A daemon holds less memory for the files it has sent and received. Each file's transfer state now lives in `rows.db` with the messages, instead of in memory for good: with 10,000 files the store held about 24 MB of heap and now holds about 13 MB. A profile moves the states there at its first start after the update. The file records themselves stay in memory, since a small file can be kept whole in its record.
+- An admin's `ghostly group leave` names the member who became the admin (`admin: {key, name}` in its answer), as the app's Leave dialog does: it handed the role on without saying to whom.
+- `ghostly group leave` asks for `--yes` (`confirm`, exit 5, without it), as `group forget` does: leaving deletes the group's history and files on this device, which its help now says, and it did so without a word.
+- `ghostly invite join` with your own invite says "This is your own invite. Share it with a contact; they join with it." with the chat that owns it as `details.chat`, instead of starting with the engine's internal "own-invite <chat id>:" tag.
+- `settings set irohRelays` or `hyperdhtRelay` with an address of the wrong kind (`ftp://`, or `http://` and `ws://` away from this machine) answers `bad_request` naming its key, "use an https:// relay address", instead of `engine`.
+- `ghostly file save` of a file you sent writes it, even before the contact has taken it or after a profile restore, instead of saying "The file is not all here yet (0 of N bytes)" though every byte is on this device.
+- On the command line, `wallet create` refuses a source or a field you left out, or one the wallet does not take, as `bad_request` naming the flag (`lightning needs --provider: one of …`, `nwc needs --value uri=<…>`, `fedimint needs --invite <fed11…>`), instead of the app's words as an engine failure. A `--provider` or `--value` given to a wallet without sources is refused instead of dropped, and `wallet list` no longer offers the browser wallet (WebLN), which only works in a browser.
+- A file sent to a CLI profile while it was away (held storage) is kept as a file in the profile's folder, like every other file, not in its store: 24 held pictures of 4 MiB made the store 100 MB, held in the daemon's memory and read back at every start and command. Files that already arrived this way stay where they are.
+- `ghostly listen --type chat` (or `message`, `daemon`, any family name) now lets that family's events through, as its help said. Before, a family only matched written with its dot (`chat.`), and `--type chat` stayed silent for good. A dotted type such as `group.message` is still that type alone.
+- `ghostly listen --type bogus` (a word that is no event family) now stops at once with a usage error naming the families, and a type no event has, such as the typo `message.recieved`, is said on stderr. Before, either was taken without a word and the listener stayed silent for good.
+- `ghostly typing <chat> --for N` (and `group typing --for N`) without a daemon no longer holds the terminal and the profile for N seconds when the chat is not live: it waits up to 15 seconds for the chat to come up, then stops and answers `live: false`. Once the chat is live it stays the whole time, as before.
+
+**Groups**
+
+- A chat command given a group's name (`send`, `edit`, `typing`, `chat history`, `chat show`, `chat rename`, `chat remove`) says it is a group and names the group command to use, as `react` already did, instead of only `No chat "team"`.
+- `ghostly group history` gives a group's own lines ("Group created…", "You joined…", "You renamed the group to …") `"from":"system"`, not `"peer"`, so a bot that reads others' words by `from` no longer takes them for a member's message.
+- A community member opening the app again after being away gets what it missed once. Its first sync to the hub was not counted as a question, so it asked a second time and the hub started its answer over: a member back after 256 messages was sent 288, about 12% more of the group's history on every return.
+- With a group open, the app no longer reads every chat's stored messages again each time something changes (a member comes or goes, someone types): with 150 chats that was 5 MB read and about 14 ms of work each time. A member's nickname is read from that contact's chat only, and only when it changed.
+
+**Files**
+
+- A large file (over 16 MiB) that could not be copied into the app before sending now says why in your language ("The file cannot be read", "Not enough space on this device") with what to do next behind the ⓘ, instead of an English line from the engine.
+- A large file (over 16 MiB) that could not be copied into the app before sending, because it changed on disk or the device ran out of room, no longer offers a Retry button that can only answer "This file cannot be retried". Nothing of it was kept to send again, so pick the file again instead.
+
+**Wallets**
+
+- In Arabic, a Lightning invoice's memo in a chat reads in its own order ("1 cup coffee", not "cup coffee 1"), and the amount keeps its space before "sats". The same goes for Lightning offers and ecash cards.
+- With a long history of reviewed payments, the check that runs every minute for reviews no Approve can send any more no longer reads every payment ever reviewed: it reads the ones still waiting for an Approve, usually none.
+- In Arabic, a wallet's history writes each movement's sign before its number ("−1,000", "+250") in the Cashu, Spark, Fedimint and on-chain Bitcoin histories. Before, the sign came after the number ("1,000−").
+- An open Ark, Bark, Spark or USDT wallet no longer makes the whole wallet view again every 8 to 10 seconds when its balance has not moved. Each time it read every payment ever reviewed. Payments still on their way in are checked as often as before.
+
+### For developers
+
+- A batch of several pull requests no longer pays a full CI run on dev for its first pushes: each push but the last holds the tree of one of the batch's own commits, and now counts as tested by the batch's green run, as the last push already did.
+
 ## 1.3.0
 
 ### For users
