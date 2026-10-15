@@ -13,8 +13,8 @@ describe("getRandomGhostName", () => {
 
   it("draws again past the last full multiple of the list length", () => {
     const draws = [2 ** 32 - 1, 0];
-    const spy = vi.spyOn(crypto, "getRandomValues").mockImplementation(<T extends ArrayBufferView | null>(array: T) => {
-      (array as unknown as Uint32Array)[0] = draws.shift()!;
+    const spy = vi.spyOn(crypto, "getRandomValues").mockImplementation((array) => {
+      (array as Uint32Array)[0] = draws.shift()!;
       return array;
     });
     expect(getRandomGhostName()).toBe("Casper");
