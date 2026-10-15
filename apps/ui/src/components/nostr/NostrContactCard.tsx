@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { NostrContactView, NostrDraftRequest } from "@ghostly/browser/nostr/types";
-import { useEngineState } from "../../lib/identities";
+import { useEngineState } from "../../lib/engineState";
 import { agoIn } from "../../lib/relativeTime";
 import { useI18n } from "../../contexts/I18nContext";
 import { Button, Notice } from "../wallet/ui";

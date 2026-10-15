@@ -26,7 +26,7 @@ import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
 import { chatAppId, isAppRef, isAppVersion, publicKeyFromZ32, type AppFrameEvent, type AppSendError } from "@ghostly/core";
 import { GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, readGroupFileMeta } from "@ghostly/core";
 import { IdentityProofs } from './identities';
-import { setOwnDidSource } from '../proofs/providers/did';
+import { setOwnDidSource } from '../proofs/ownDid';
 import { ProfileDid } from './did';
 import { NostrSocial, effectiveNostrSettings } from './nostrSocial';
 import { PublicProfiles, type ProfileSubject } from './publicProfiles';

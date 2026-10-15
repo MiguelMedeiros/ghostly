@@ -1128,7 +1128,7 @@
     "packages/browser/src/proofs/contractSuite.ts": ["proofs.contract","sdk.package"],
     "packages/browser/src/proofs/imported.ts": ["proofs.peer-proofs","proofs.keet"],
     "packages/browser/src/proofs/{bitcoinWallets,providers/bitcoin}.ts": ["proofs.bitcoin","proofs.share"],
-    "packages/browser/src/proofs/{contract,registry,verify,storage,testing}.ts": ["proofs.*","sdk.plugin.identity"],
+    "packages/browser/src/proofs/{contract,load,ownDid,registry,verify,storage,testing}.ts": ["proofs.*","sdk.plugin.identity"],
     "packages/browser/src/proofs/{domain,providers/domain}.ts": ["proofs.domain.*","proofs.share"],
     "packages/browser/src/proofs/{nostr,providers/nostr}.ts": ["proofs.nostr","proofs.share","nostr.*"],
     "packages/browser/src/proofs/{oidc/**/*,providers/oidc.ts}": ["proofs.oidc","proofs.oidc.*","proofs.share"],
