@@ -288,6 +288,15 @@
     "numberAssignment": "defined"
   },
   {
+    "oldId": "none",
+    "id": "313",
+    "oldFile": "3xx-x401.md",
+    "file": "3xx-x401.md",
+    "kind": "Adapter",
+    "displayNumber": "3xx",
+    "numberAssignment": "unassigned"
+  },
+  {
     "oldId": "13",
     "id": "400",
     "oldFile": "13-chat.md",

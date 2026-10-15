@@ -38,6 +38,7 @@ A WISP (Wire Interoperability Specification Proposal) is a design document for o
 | 310 | Identity | [Profile DID (did:dht)](310-did-dht.md) | Contract | Draft | Available |
 | 311 | Identity | [Decentralized identifiers (DIDs)](311-did.md) | Adapter | Draft | Available |
 | 312 | Identity | [AT Protocol identity (Bluesky)](312-atproto.md) | Adapter | Draft | Available |
+| 3xx | Identity | [x401 credentials for headless agents](3xx-x401.md) | Adapter | Draft | Planned |
 | 400 | Chat | [Chat Messaging](400-chat.md) | Contract | Draft | Available |
 | 401 | Chat | [Chat Session](401-paired-chat.md) | Profile | Draft | Available |
 | 402 | Chat | [Compatibility Chat (v0.4 Timestamp Profile)](402-legacy-chat.md) | Profile | Draft | Available |
