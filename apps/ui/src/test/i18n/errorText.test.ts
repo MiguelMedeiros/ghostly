@@ -154,6 +154,9 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Could not store the file: The stored copy is gone", `${CORE}/chatFiles.ts`, "Could not store the file: "],
   ["Your contact could not take this file", `${CORE}/chatFiles.ts`],
   ["That file is too large (max 64 MB).", `${BROWSER}/platform/services.ts`, "That file is too large (max "],
+  // A file forwarded that is still arriving here, or whose bytes are gone (a copy of mine that failed, "Not sent").
+  ["The file has not arrived yet", `${BROWSER}/engine/forwards.ts`],
+  ["The file is not on this device any more", `${BROWSER}/engine/forwards.ts`],
   ["That is not a valid mint URL", CODES],
   ["Mints must use https", CODES],
   ["Enter an amount in sats", `${BROWSER}/engine/wallet.ts`],
@@ -525,6 +528,14 @@ describe("errors in the app's language", () => {
     const damaged = "Every copy of this file arrived damaged and was deleted. Ask for it again later.";
     expect(knownErrorParts(damaged, translators.pt)).toEqual({ title: "O arquivo chegou danificado", next: "Peça de novo ao grupo mais tarde." });
     expect(knownErrorParts(damaged, english)).toEqual({ title: "The file arrived damaged", next: "Ask the group for it again later." });
+  });
+
+  it("a forward refused for a file still arriving or no longer here says why and what to do, in the language", () => {
+    const pt = translators.pt;
+    expect(knownErrorParts("The file has not arrived yet", pt)).toEqual({ title: "Ainda não recebido", next: "Espere ele chegar e encaminhe depois." });
+    expect(knownErrorParts("The file has not arrived yet", english)).toEqual({ title: "Not received yet", next: "Wait until it has arrived, then forward it." });
+    expect(knownErrorParts("The file is not on this device any more", pt)).toEqual({ title: "Este arquivo não está neste dispositivo", next: "Envie de onde você o tem." });
+    expect(knownErrorParts("The file is not on this device any more", english)).toEqual({ title: "This file is not on this device", next: "Send it from where you have it." });
   });
 
   it("an action refused in limited mode says why and what to do, in the language", () => {
