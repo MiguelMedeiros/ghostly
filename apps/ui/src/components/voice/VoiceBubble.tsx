@@ -436,7 +436,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
             aria-valuemin={0}
             aria-valuemax={Math.round(seconds)}
             aria-valuenow={Math.round(position)}
-            aria-valuetext={`${formatVoiceDuration(position * 1000)} of ${formatVoiceDuration(file.voice.duration)}`}
+            aria-valuetext={t("chat.media.positionOf", { position: formatVoiceDuration(position * 1000), duration: formatVoiceDuration(file.voice.duration) })}
             data-testid="voice-waveform"
             className={ready ? "cursor-pointer" : "opacity-50"}
             onPointerDown={onScrubStart}

@@ -230,6 +230,7 @@
     "noRoom": "Espaço insuficiente: {{size}} livres",
     "noRoomToPlay": "Sem espaço livre em disco para tocar aqui. Baixe o arquivo.",
     "notYet": "Toca depois de enviado.",
+    "positionOf": "{{position}} de {{duration}}",
     "wantsToSend": "{{name}} quer enviar · {{size}} livres"
   },
   "menu": {
@@ -440,6 +441,7 @@
     "record": "Gravar mensagem de voz",
     "recordHint": "Segure para gravar ou clique para gravar sem as mãos",
     "recorded": "Gravado {{time}}",
+    "recording": "Gravando",
     "sent": "Mensagem de voz enviada",
     "slideCancel": "Deslize para cancelar",
     "speed": "Velocidade {{speed}}",

@@ -248,7 +248,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
             type="range"
             data-testid="audio-seek"
             aria-label={t("chat.audio.position")}
-            aria-valuetext={`${formatVideoDuration(position * 1000)} of ${formatVideoDuration(duration * 1000)}`}
+            aria-valuetext={t("chat.media.positionOf", { position: formatVideoDuration(position * 1000), duration: formatVideoDuration(duration * 1000) })}
             min={0}
             max={known ? duration : 1}
             step="any"
