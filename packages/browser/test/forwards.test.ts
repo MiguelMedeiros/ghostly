@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatFiles, GhostLink, createIdentity, createLink, forwardedAgain, forwardedMany, identityFromSeedB64, readForwarded, type FileTransferRecord, type IncomingMessage, type IncomingTarget } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
-import { copyForForward, forwardKind } from "../src/engine/forwards";
+import { copyForForward, forwardError, forwardKind } from "../src/engine/forwards";
 import { fileStore } from "../src/shared/idb";
 import type { StoredMessage } from "../src/shared/types";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
@@ -245,5 +245,38 @@ describe("forwarding between chats", { timeout: 60_000 }, () => {
     expect(results[1]).toMatchObject({ to: t.b.id, error: null, messageIds: [expect.any(String)] });
     expect((await db.getMessages(t.c!.id)).filter(m => m.file)).toEqual([]);
     expect(await fileStore.listForLink(t.c!.id)).toEqual([]);
+  });
+
+  // Chromium refuses an IndexedDB write past its quota with a QuotaExceededError whose message is "": the result's error
+  // was "", which the dialog took for a success.
+  it("a copy that found no room on this device says so, never as an empty error", async () => {
+    const t = await setup();
+    t.a.offer("full-000001", 2048);
+    const received = await t.row(t.a, m => m.id === "peer_full-000001");
+    await vi.waitFor(() => expect(t.node.getState().transfers[received.file!.id]).toMatchObject({ state: "done" }), { timeout: 15_000 });
+    const put = fileStore.put.bind(fileStore);
+    const full = vi.spyOn(fileStore, "put").mockImplementation(async file => {
+      if (file.id.startsWith(`${t.b.id}-out-`)) throw new DOMException("", "QuotaExceededError");
+      return put(file);
+    });
+    const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: [received.id], to: [t.b.id] });
+    full.mockRestore();
+    expect(results).toEqual([{ to: t.b.id, messageIds: [], error: "Not enough space on this device (QuotaExceededError)" }]);
+    expect((await db.getMessages(t.b.id)).filter(m => m.file)).toEqual([]);
+    expect(await fileStore.listForLink(t.b.id)).toEqual([]);
+  });
+});
+
+describe("why a forward failed", () => {
+  it("says no room however the storage put it, and is never empty", () => {
+    expect(forwardError(new DOMException("", "QuotaExceededError"))).toBe("Not enough space on this device (QuotaExceededError)");
+    // The OPFS worker's (fileBytesOpfs.ts keeps its name) and Desktop's io error (the system's English, a string from Rust).
+    expect(forwardError(Object.assign(new Error("This device has no space left for the file"), { name: "QuotaExceededError" })))
+      .toBe("Not enough space on this device (QuotaExceededError: This device has no space left for the file)");
+    expect(forwardError("No space left on device (os error 28)")).toBe("Not enough space on this device (No space left on device (os error 28))");
+    expect(forwardError(new DOMException("", "UnknownError"))).toBe("UnknownError");
+    expect(forwardError(new Error(""))).toBe("Error");
+    expect(forwardError("")).toBe("Error");
+    expect(forwardError(new Error("The file has not arrived yet"))).toBe("The file has not arrived yet");
   });
 });

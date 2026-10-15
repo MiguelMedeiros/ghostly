@@ -1,6 +1,6 @@
 import { FileAppender, storedSize } from "../shared/storedFiles";
 import { SMALL_FILE_BYTES, fileBytes, fileBytesOf } from "../shared/fileBytes";
-import { fileStore, type StoredFile } from "../shared/idb";
+import { errorLine, fileStore, type StoredFile } from "../shared/idb";
 import type { MessageFile, StoredMessage } from "../shared/types";
 
 /*
@@ -28,6 +28,18 @@ export function forwardKind(message: StoredMessage): "text" | "file" | { refused
   if (message.event || message.groupPay) return { refused: "This line cannot be forwarded" };
   if (message.file) return "file";
   return message.text.trim() ? "text" : { refused: "This message cannot be forwarded" };
+}
+
+/**
+ * Why a chat did not get a forward, as its result says it: never "" (a result with an error is a failure, whatever it
+ * says). A copy that found no room says so in the words the app knows however the storage put it: IndexedDB's
+ * QuotaExceededError (an empty message in Chromium), the OPFS worker's (named so), Desktop's io error (the system's English).
+ */
+export function forwardError(error: unknown): string {
+  const message = (error instanceof Error ? error.message : String(error)).trim();
+  if (/^No space left on device\b/.test(message)) return `Not enough space on this device (${message})`;
+  const name = (error as { name?: unknown } | null)?.name;
+  return errorLine(error).trim() || (typeof name === "string" && name ? name : "Error");
 }
 
 /** How many bytes of a stored file are actually here: all of them once it arrived. */

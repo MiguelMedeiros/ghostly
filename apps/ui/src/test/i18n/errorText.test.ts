@@ -45,8 +45,9 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["That message cannot be replied to", "packages/browser/src/engine/node.ts"],
   ["There is no room left on this device for a new chat", "apps/ui/src/lib/storage.ts"],
   // Any engine call whose storage write the browser refused for want of space (engine/server.ts): Chromium's message is empty.
-  ["Not enough space on this device (QuotaExceededError)", `${BROWSER}/engine/server.ts`, "Not enough space on this device ("],
-  ["Not enough space on this device (QuotaExceededError: The quota has been exceeded.)", `${BROWSER}/engine/server.ts`, "Not enough space on this device ("],
+  ["Not enough space on this device (QuotaExceededError)", `${BROWSER}/shared/idb.ts`, "Not enough space on this device ("],
+  ["Not enough space on this device (QuotaExceededError: The quota has been exceeded.)", `${BROWSER}/shared/idb.ts`, "Not enough space on this device ("],
+  ["Not enough space on this device (No space left on device (os error 28))", `${BROWSER}/engine/forwards.ts`, "Not enough space on this device ("],
   ["Someone else joined with this invite first. Ask your contact for a new one.", "packages/core/src/ghostlink.ts"],
   ["Chat has been burned", "packages/browser/src/platform/useChat.ts"],
   ["No transport both apps allow is available yet", `${CORE}/ghostlink.ts`],
@@ -511,6 +512,12 @@ describe("errors in the app's language", () => {
     const raw = "Not enough space on this device (QuotaExceededError)";
     expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.app.noRoom"), next: t("errors.app.noRoomNext"), detail: raw });
     expect(problemText(new Error(raw), t).title).not.toBe(t("errors.generic"));
+  });
+
+  it.each(LANGUAGES)("a forward's copy Desktop's disk had no room for says so in %s, the system's English behind the ⓘ", (language) => {
+    const t = translators[language];
+    const raw = "Not enough space on this device (No space left on device (os error 28))";
+    expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.app.noRoom"), next: t("errors.app.noRoomNext"), detail: raw });
   });
 
   it("a storage that is full says the same with the browser's own message, and reads in English as a sentence and its next step", () => {

@@ -63,6 +63,19 @@ export function profileOpenFailure(error: unknown): ProfileOpenFailure {
   return { reason: "failed", supportedVersion: DB_VERSION, ...(detail ? { detail } : {}) };
 }
 
+/**
+ * A failed call as the client hears it (engine/server.ts): the error's message. Only the message travels, so a storage
+ * write the browser refused for want of space (Chromium's QuotaExceededError has an empty message) says so, its name
+ * kept for the ⓘ.
+ */
+export function errorLine(error: unknown): string {
+  if ((error as { name?: unknown } | null)?.name === "QuotaExceededError") {
+    const message = error instanceof Error ? error.message.trim() : "";
+    return `Not enough space on this device (QuotaExceededError${message ? `: ${message}` : ""})`;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** How long an open that another window blocks may wait for that window to let go before it is said to be blocked. */
 export const OPEN_TIMINGS = { blockedMs: 10_000 };
 
