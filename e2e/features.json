@@ -858,7 +858,6 @@
     "apps/ui/src/components/walletCardData.ts": ["wallet.*","payments.*","groups.payments.*","groups.community.payments.*"],
     "apps/ui/src/components/{ComposerSheet.tsx,composer-sheet.css}": ["payments.*","groups.payments.*","groups.community.payments.*","proofs.composer","proofs.picker","proofs.share","proofs.withdraw"],
     "apps/ui/src/components/{PaymentComposer.tsx,payment-composer.css}": ["payments.*","groups.payments.*","groups.community.payments.*"],
-    "apps/ui/src/components/{ProfileAvatar,IdentityMark}.tsx": ["proofs.peer-proofs","proofs.pubky","proofs.keet"],
     "apps/ui/src/components/{WalletCardDeck.tsx,walletCardTypes.ts}": ["wallet.*","payments.*","groups.payments.*","groups.community.payments.*","app.sidebar-resize"],
     "apps/ui/src/components/{WalletCards.tsx,wallet-cards.css}": ["wallet.*","payments.*","groups.payments.*","groups.community.payments.*"],
     "apps/ui/src/components/{WalletDeck.tsx,wallet-deck.css}": ["wallet.*","payments.*","groups.payments.*","groups.community.payments.*","app.sidebar-resize"],
