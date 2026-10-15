@@ -133,6 +133,10 @@ pub struct LinkedFiles {
     books: Arc<Mutex<HashMap<PathBuf, Arc<Book>>>>,
     /// Changes go one at a time (read, change, write), so two picks never lose each other's links.
     writing: Arc<Mutex<()>>,
+    /// How many times each app's links file and each profile's folder had all its links go (`forget` "all" on an
+    /// uninstall, `drop_space` on a deleted profile): a pick reads it before its dialog opens, and keeps nothing if it
+    /// moved meanwhile.
+    cleared: Arc<Mutex<HashMap<PathBuf, u64>>>,
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -264,6 +268,7 @@ impl LinkedFiles {
             base,
             books: Arc::default(),
             writing: Arc::default(),
+            cleared: Arc::default(),
         }
     }
 
@@ -344,14 +349,33 @@ impl LinkedFiles {
         forgotten()
     }
 
-    /// Keeps links to what was picked, and answers them as the app sees them.
+    /// Read when a pick begins, before its dialog opens, and given back to `add`.
+    pub fn begin(&self, space: &str, app: &str) -> Result<u64, String> {
+        let file = self.file(space, app)?;
+        let folder = file.parent().ok_or("No folder")?;
+        let cleared = locked(&self.cleared);
+        let times = |at: &Path| cleared.get(at).copied().unwrap_or(0);
+        Ok(times(&file) + times(folder))
+    }
+
+    /// Counted with `writing` held, so a pick's `add` sees it or comes before it.
+    fn clear(&self, at: PathBuf) {
+        *locked(&self.cleared).entry(at).or_default() += 1;
+    }
+
+    /// Keeps links to what was picked, and answers them as the app sees them: nothing if the app's links all went or
+    /// its profile did since the pick began (`begin`), so an app uninstalled while its dialog was open keeps none.
     pub fn add(
         &self,
         space: &str,
         app: &str,
+        begun: u64,
         picked: Vec<(String, PathBuf)>,
     ) -> Result<Vec<Entry>, String> {
         let _writing = locked(&self.writing);
+        if self.begin(space, app)? != begun {
+            return Err("cancelled: The app's files were let go while it picked".into());
+        }
         let mut links: Vec<Link> = self.load(space, app)?.live().cloned().collect();
         if links.len() + picked.len() > MAX_ENTRIES {
             return Err("too-large: Too many files for one app".into());
@@ -435,6 +459,7 @@ impl LinkedFiles {
     pub fn forget(&self, space: &str, app: &str, id: &str) -> Result<(), String> {
         let _writing = locked(&self.writing);
         if id == "all" {
+            self.clear(self.file(space, app)?);
             return self.store(space, app, Vec::new());
         }
         if self.load(space, app)?.get(id).is_none() {
@@ -473,6 +498,7 @@ impl LinkedFiles {
         check_space(space)?;
         let _writing = locked(&self.writing);
         let folder = self.base.join(space);
+        self.clear(folder.clone());
         let removed = fs::remove_dir_all(&folder);
         // After the files went: a read meanwhile finds them gone, not kept in memory.
         locked(&self.books).retain(|file, _| !file.starts_with(&folder));
@@ -520,9 +546,10 @@ pub async fn linked_files_pick<R: tauri::Runtime>(
     check_space(&space)?;
     check_app(&app_ref)?;
     check_accept(&accept)?;
+    let begun = links.begin(&space, &app_ref)?;
     #[cfg(target_os = "android")]
     {
-        let _ = (links, title, folder);
+        let _ = (links, begun, title, folder);
         Err("Apps cannot pick files on Android".into())
     }
     #[cfg(not(target_os = "android"))]
@@ -559,7 +586,7 @@ pub async fn linked_files_pick<R: tauri::Runtime>(
             } else {
                 picked_files(paths, &accept)
             };
-            links.add(&space, &app_ref, picked)
+            links.add(&space, &app_ref, begun, picked)
         })
         .await
         .map_err(|e| e.to_string())?
@@ -635,6 +662,11 @@ mod tests {
         dir
     }
 
+    /// A pick begun and landed at once.
+    fn pick(links: &LinkedFiles, picked: Vec<(String, PathBuf)>) -> Result<Vec<Entry>, String> {
+        links.add("ghostly", APP, links.begin("ghostly", APP)?, picked)
+    }
+
     fn films() -> PathBuf {
         let root = folder().join("Films");
         fs::create_dir_all(root.join("Season 1")).unwrap();
@@ -694,9 +726,7 @@ mod tests {
     fn links_are_kept_per_profile_and_app_and_read_in_ranges() {
         let links = LinkedFiles::new(folder());
         let root = films();
-        let added = links
-            .add("ghostly", APP, walk(&root, &["mp4".to_string()]).unwrap())
-            .unwrap();
+        let added = pick(&links, walk(&root, &["mp4".to_string()]).unwrap()).unwrap();
         assert_eq!(added.len(), 2);
         assert!(added.iter().all(|e| e.id.len() == 22 && e.available));
         let up = added.iter().find(|e| e.path == "Films/Up.mp4").unwrap();
@@ -726,9 +756,7 @@ mod tests {
     fn the_links_file_is_read_once_not_on_every_read() {
         let links = LinkedFiles::new(folder());
         let root = films();
-        let added = links
-            .add("ghostly", APP, walk(&root, &["mp4".to_string()]).unwrap())
-            .unwrap();
+        let added = pick(&links, walk(&root, &["mp4".to_string()]).unwrap()).unwrap();
         let file = links.file("ghostly", APP).unwrap();
         assert!(file.exists());
         // What is on disk is not read again: reads, the list and a forget go by what is kept in memory.
@@ -751,7 +779,7 @@ mod tests {
         let picked = (0..n)
             .map(|i| (format!("Films/{i:06}.mp4"), file.clone()))
             .collect();
-        links.add("ghostly", APP, picked).unwrap()
+        pick(links, picked).unwrap()
     }
 
     // A forget wrote the app's whole links file again: 27 MB and 47 ms a forget with 100,000 links (agents#1033).
@@ -857,11 +885,7 @@ mod tests {
         let picks: Vec<_> = (0..8)
             .map(|_| {
                 let (links, root) = (links.clone(), root.clone());
-                std::thread::spawn(move || {
-                    links
-                        .add("ghostly", APP, walk(&root, &[]).unwrap())
-                        .unwrap()
-                })
+                std::thread::spawn(move || pick(&links, walk(&root, &[]).unwrap()).unwrap())
             })
             .collect();
         let added: usize = picks.into_iter().map(|p| p.join().unwrap().len()).sum();
@@ -874,9 +898,7 @@ mod tests {
     fn a_file_that_changed_or_went_says_so() {
         let links = LinkedFiles::new(folder());
         let root = films();
-        let added = links
-            .add("ghostly", APP, walk(&root, &["mp4".to_string()]).unwrap())
-            .unwrap();
+        let added = pick(&links, walk(&root, &["mp4".to_string()]).unwrap()).unwrap();
         let (up, e01) = (&added[1], &added[0]);
         fs::write(root.join("Up.mp4"), b"01234567890").unwrap();
         assert!(links
@@ -899,20 +921,55 @@ mod tests {
     fn forget_drops_one_link_or_all_and_a_deleted_profile_drops_its_links() {
         let links = LinkedFiles::new(folder());
         let root = films();
-        let added = links
-            .add("ghostly", APP, walk(&root, &[]).unwrap())
-            .unwrap();
+        let added = pick(&links, walk(&root, &[]).unwrap()).unwrap();
         links.forget("ghostly", APP, &added[0].id).unwrap();
         assert_eq!(links.list("ghostly", APP).unwrap().len(), added.len() - 1);
         links.forget("ghostly", APP, "all").unwrap();
         assert!(links.list("ghostly", APP).unwrap().is_empty());
-        links
-            .add("ghostly", APP, walk(&root, &[]).unwrap())
-            .unwrap();
+        pick(&links, walk(&root, &[]).unwrap()).unwrap();
         links.drop_space("ghostly").unwrap();
         assert!(links.list("ghostly", APP).unwrap().is_empty());
         // The files themselves are never touched.
         assert!(root.join("Up.mp4").exists());
+    }
+
+    // A pick left open while the app was uninstalled or its profile deleted kept its links on disk.
+    #[test]
+    fn a_pick_that_began_before_an_uninstall_or_a_deleted_profile_keeps_nothing() {
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let other = APP.replace("/cinema", "/chess");
+        pick(&links, walk(&root, &[]).unwrap()).unwrap();
+        // The dialog is open, and the app is uninstalled: its links all go.
+        let begun = links.begin("ghostly", APP).unwrap();
+        let other_begun = links.begin("ghostly", &other).unwrap();
+        links.forget("ghostly", APP, "all").unwrap();
+        assert!(links
+            .add("ghostly", APP, begun, walk(&root, &[]).unwrap())
+            .unwrap_err()
+            .starts_with("cancelled: "));
+        assert!(links.list("ghostly", APP).unwrap().is_empty());
+        assert!(LinkedFiles::new(links.base.clone())
+            .list("ghostly", APP)
+            .unwrap()
+            .is_empty());
+        // Another app's pick keeps its links, and so does a pick begun after (a reinstall picking again).
+        assert_eq!(
+            links
+                .add("ghostly", &other, other_begun, walk(&root, &[]).unwrap())
+                .unwrap()
+                .len(),
+            4
+        );
+        assert_eq!(pick(&links, walk(&root, &[]).unwrap()).unwrap().len(), 4);
+        // The profile is deleted while a dialog is open: its folder is not made again.
+        let begun = links.begin("ghostly", APP).unwrap();
+        links.drop_space("ghostly").unwrap();
+        assert!(links
+            .add("ghostly", APP, begun, walk(&root, &[]).unwrap())
+            .unwrap_err()
+            .starts_with("cancelled: "));
+        assert!(!links.base.join("ghostly").exists());
     }
 
     #[test]
@@ -939,9 +996,6 @@ mod tests {
         let many: Vec<(String, PathBuf)> = (0..=MAX_ENTRIES)
             .map(|i| (format!("{i}.mp4"), PathBuf::from("/nowhere")))
             .collect();
-        assert!(links
-            .add("ghostly", APP, many)
-            .unwrap_err()
-            .starts_with("too-large: "));
+        assert!(pick(&links, many).unwrap_err().starts_with("too-large: "));
     }
 }
