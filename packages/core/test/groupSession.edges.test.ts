@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fromBase64Url, toBase64Url, utf8Encode } from "../src/bytes";
+import { fromBase64Url, isZ32Key, toBase64Url, utf8Encode } from "../src/bytes";
 import { confirmationTag, encryptText, epochKeys, newEpochSecret, sealSecret } from "../src/groupCrypto";
-import { MAX_GROUP_CHAIN, MAX_GROUP_MEMBERS, commitHash, commitUntaggedHash, signCommit, type GroupCommit, type Roster } from "../src/groupCommits";
+import { MAX_GROUP_CHAIN, MAX_GROUP_MEMBERS, commitHash, commitUntaggedHash, signCommit, sortRoster, type GroupCommit, type Roster } from "../src/groupCommits";
 import { createIdentity, identityFromSeedB64, sign } from "../src/identity";
 import {
   GROUP_LIMITS, GroupSession, type GroupCommitFrame, type GroupEdgeFrame, type GroupIncomingMessage, type GroupMessageFrame, type GroupState,
@@ -383,6 +383,38 @@ describe("receiving commits", () => {
     }
     expect(bob.state.chain).toEqual(before);
     expect(bob.status).toBe("active");
+  });
+
+  it("drops a message or a commit whose key is respelled in its last character, and does not reject", async () => {
+    const { net, alice, bob } = await trio();
+    // The same 32 bytes under another last character: not alice's key, and not a key at all (WISP 02).
+    const a = "ybndrfg8ejkmcpqxot1uwisza345h769", s = alice.myKey.slice(0, 51) + a[a.indexOf(alice.myKey[51]) ^ 1];
+    expect(isZ32Key(s)).toBe(false);
+    await expect(bob.handle(alice.myKey, { ...forgeMessage(alice.state, { n: 0 }), s })).resolves.toEqual([]);
+    const commit = forgeCommit(alice.state.chain[alice.state.chain.length - 1], alice.state.seedB64, "add", sortRoster([...bob.roster, [createIdentity().pubKeyZ32, "member"]]));
+    await expect(bob.handle(alice.myKey, { t: "group-commit", g: alice.id, commit: { ...commit, by: s } })).resolves.toEqual([]);
+    // Two epochs ahead too: a respelled key is refused at parse, so `publicKeyFromZ32` is never reached with one (it
+    // would throw from `verifyCommitSignature`, and the rejection would tear down the paired session the frame came over).
+    await expect(bob.handle(alice.myKey, { t: "group-commit", g: alice.id, commit: { ...commit, e: commit.e + 1, by: s } })).resolves.toEqual([]);
+    expect(bob.epoch).toBe(2);
+    expect(bob.status).toBe("active");
+    expect(net.texts(bob)).toEqual([]);
+  });
+
+  it("seals a fresh commit's secret to every member but one whose key an older build pinned respelled", async () => {
+    const { net, alice, bob, carol } = await trio();
+    // Carol as a build before `MEMBER_KEY` was canonical could have added her: under a respelled key, in the roster
+    // every member holds.
+    const a = "ybndrfg8ejkmcpqxot1uwisza345h769", s = carol.myKey.slice(0, 51) + a[a.indexOf(carol.myKey[51]) ^ 1];
+    for (const { state } of [alice, bob]) { const top = state.chain[state.chain.length - 1]; top.m = sortRoster(top.m.map(([k, r]) => [k === carol.myKey ? s : k, r])); }
+    const before = net.sent.length;
+    await expect(alice.admit(createIdentity().pubKeyZ32)).resolves.toHaveLength(1);
+    await net.settle();
+    const commits = net.sent.slice(before).filter(x => x.from === alice.myKey && x.frame.t === "group-commit");
+    expect(commits.filter(x => "secret" in x.frame).map(x => x.to)).toEqual([bob.myKey]);
+    expect(commits.map(x => x.to)).toContain(s);
+    // The others refuse the commit all the same: its roster still spells the key that way (`parseCommit`).
+    expect(bob.epoch).toBe(2);
   });
 
   it("accepts a replay of a commit it already has without forking", async () => {
