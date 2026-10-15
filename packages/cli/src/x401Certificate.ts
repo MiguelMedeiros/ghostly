@@ -4,9 +4,9 @@ import { fromBase64Url, type X401CertificateCheck } from "@ghostly/core";
 
 /**
  * The certificate check of a signed x401 request (WISP 3xx, step 3) on Node: the `x5c` chain, leaf first, leads to one
- * of the trusted roots (Node's default store: its bundled roots plus NODE_EXTRA_CA_CERTS), every certificate is valid
- * now, each one after the leaf is a CA and signed the one before it, and a DNS name in the leaf's subjectAltName is the
- * host called (never its subject's common name). The leaf's key must be P-256.
+ * of the trusted roots (Node's default store: its bundled roots plus NODE_EXTRA_CA_CERTS), every certificate up to that
+ * root is valid now, each one after the leaf is a CA and signed the one before it, and a DNS name in the leaf's
+ * subjectAltName is the host called (never its subject's common name). The leaf's key must be P-256.
  *
  * Node has no path validator outside a TLS handshake, so what else RFC 5280 asks of a path is read here from each
  * certificate's DER: a CA's path length and DNS name constraints (the root's too), the leaf's key usage
@@ -18,22 +18,28 @@ export function x401CertificateCheck(roots: readonly string[] = defaultRoots()):
     const refuse = (reason: string) => ({ ok: false as const, reason });
     let certs: X509Certificate[];
     try { certs = chain.map((der) => new X509Certificate(der)); } catch { return refuse("a certificate does not parse"); }
-    for (const cert of certs) {
-      if (Date.parse(cert.validFrom) > now || Date.parse(cert.validTo) < now) return refuse(`a certificate is not valid now (${cert.subject.replace(/\n/g, ", ")})`);
-    }
+    const invalid = (cert: X509Certificate) => Date.parse(cert.validFrom) > now || Date.parse(cert.validTo) < now;
     const [leaf] = certs;
+    if (invalid(leaf)) return refuse(`a certificate is not valid now (${leaf.subject.replace(/\n/g, ", ")})`);
     if (leaf.ca) return refuse("the leaf certificate is a CA");
     if (leaf.checkHost(host, { subject: "never" }) === undefined) return refuse(`the leaf certificate does not name ${host}`);
-    for (let i = 0; i + 1 < certs.length; i++) {
-      const child = certs[i], parent = certs[i + 1];
-      if (!parent.ca || !child.checkIssued(parent) || !child.verify(parent.publicKey)) return refuse("the chain does not link");
-    }
     trusted ??= roots.flatMap((pem) => { try { return [new X509Certificate(pem)]; } catch { return []; } });
-    const last = certs[certs.length - 1];
-    const anchor = trusted.find((root) => root.fingerprint256 === last.fingerprint256 ||
-      (root.ca && Date.parse(root.validTo) >= now && last.checkIssued(root) && last.verify(root.publicKey)));
-    if (!anchor) return refuse("the chain leads to no trusted root");
-    const problem = pathProblem(certs, anchor.fingerprint256 === last.fingerprint256 ? undefined : anchor, host);
+    const anchorOf = (cert: X509Certificate) => trusted!.find((root) => root.fingerprint256 === cert.fingerprint256 ||
+      (root.ca && Date.parse(root.validTo) >= now && cert.checkIssued(root) && cert.verify(root.publicKey)));
+    // The path ends at the first certificate that is a trusted root or that one issued, as a TLS client builds it: a
+    // root cross-signed by an older one, sent after it, is not needed and not checked.
+    let path: X509Certificate[] | undefined, anchor: X509Certificate | undefined;
+    for (let i = 0; i < certs.length && !anchor; i++) {
+      const cert = certs[i];
+      if (i > 0) {
+        if (invalid(cert)) return refuse(`a certificate is not valid now (${cert.subject.replace(/\n/g, ", ")})`);
+        if (!cert.ca || !certs[i - 1].checkIssued(cert) || !certs[i - 1].verify(cert.publicKey)) return refuse("the chain does not link");
+      }
+      anchor = anchorOf(cert);
+      if (anchor) path = certs.slice(0, i + 1);
+    }
+    if (!anchor || !path) return refuse("the chain leads to no trusted root");
+    const problem = pathProblem(path, anchor.fingerprint256 === path[path.length - 1].fingerprint256 ? undefined : anchor, host);
     if (problem) return refuse(problem);
     const key = leaf.publicKey;
     if (key.asymmetricKeyType !== "ec" || key.asymmetricKeyDetails?.namedCurve !== "prime256v1") return refuse("the leaf key is not P-256");
