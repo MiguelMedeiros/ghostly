@@ -32,7 +32,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@arkade-os/sdk": "0.4.78",
+    "@arkade-os/sdk": "0.4.79",
     "@atproto/jwk-webcrypto": "^0.3.4",
     "@atproto/oauth-client": "^0.8.9",
     "@bitcoindevkit/bdk-wallet-web": "0.3.0",
@@ -51,7 +51,7 @@
     "@scure/btc-signer": "2.4.1",
     "@secondts/bark": "0.25.0",
     "@serenity-kit/opaque": "1.1.0",
-    "@synonymdev/pubky": "0.14.0",
+    "@synonymdev/pubky": "0.16.0",
     "@tetherto/wdk-wallet-evm": "1.0.0-beta.20",
     "b4a": "1.9.0",
     "bittorrent-dht": "11.0.12",
@@ -70,9 +70,9 @@
     "@ghostly/browser": "*",
     "@ghostly/core": "*",
     "@ghostly/iroh-web": "*",
-    "@types/node": "^26.6.4",
+    "@types/node": "^26.6.5",
     "typescript": "^5.9.3",
-    "vite": "^8.3.3",
-    "vitest": "^5.0.3"
+    "vite": "^8.3.4",
+    "vitest": "^5.0.4"
   }
 }
