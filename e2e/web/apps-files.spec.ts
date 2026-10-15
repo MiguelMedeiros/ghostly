@@ -54,7 +54,7 @@ function appFrame(peer: Peer): Frame {
   return frame;
 }
 
-test("an app granted files reads a folder the person picks through the client's sheet", { tag: ["@feature:apps.files"] }, async ({ peer }) => {
+test("an app granted files reads a folder the person picks through the client's sheet", { tag: ["@feature:apps.linked-files"] }, async ({ peer }) => {
   const dir = mkdtempSync(join(tmpdir(), "ghostly-files-"));
   const films = join(dir, "Films");
   mkdirSync(join(films, ".hidden"), { recursive: true });

@@ -125,7 +125,7 @@ function askWithSheet(app: string, folder: boolean, accept: string[], text: Pick
     cancel.setAttribute("data-testid", "app-files-cancel");
     const choose = document.createElement("button");
     choose.type = "button";
-    choose.className = "rounded bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
+    choose.className = "rounded bg-accent px-3 py-1.5 text-sm font-medium text-on-accent hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
     choose.textContent = text.choose(folder);
     choose.setAttribute("data-testid", "app-files-choose");
     row.append(cancel, choose);
