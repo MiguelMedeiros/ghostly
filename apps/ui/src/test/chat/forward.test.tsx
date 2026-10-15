@@ -91,6 +91,31 @@ describe("the Forward to… picker", () => {
     expect(screen.getByTestId("forward-none")).toHaveTextContent("No chat by that name");
   });
 
+  it("does not read the chats again on an engine change while it is open, only when one changes", async () => {
+    open([message()]);
+    await screen.findByText("Ana");
+    const parse = JSON.parse;
+    let reads = 0;
+    const spy = vi.spyOn(JSON, "parse").mockImplementation((text: string, reviver?: Parameters<typeof JSON.parse>[1]) => {
+      if (typeof text === "string" && text.includes('"peerPubKeyB64"') && text.includes('"messages"')) reads++;
+      return parse(text, reviver);
+    });
+    try {
+      // The engine changes many times a second during a call or a file transfer: the picker must not re-read the chats.
+      for (let i = 0; i < 5; i++) act(() => fakeEngine.setState(engineState({
+        links: [linkView({ id: "link-ana", peerPubKeyZ32: "peer-ana" }), linkView({ id: "link-bo", peerPubKeyZ32: "peer-bo" })],
+        groups: [groupView({ id: "g1", name: "Friends", lastMessageAt: 2_000 + i }), groupView({ id: "g2", name: "Readers", canSend: false })],
+      })));
+      expect(reads).toBe(0);
+      // A chat changes (here its name): the list reads it once and shows the change.
+      act(() => { chat("chat-ana", "peer-ana", "Ana II", 3_000); window.dispatchEvent(new Event("session-updated")); });
+      await screen.findByText("Ana II");
+      expect(reads).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("offers the groups for a file too (WISP 503), and forwards it there", async () => {
     fakeEngine.on("forwardMessages", ({ to }: { to: string[] }) => ({ results: to.map(t => ({ to: t, messageIds: ["x"], error: null })) }));
     const { user } = open([message({ text: "", file: PICTURE })]);
