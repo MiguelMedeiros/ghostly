@@ -726,8 +726,7 @@ mod tests {
     fn links_are_kept_per_profile_and_app_and_read_in_ranges() {
         let links = LinkedFiles::new(folder());
         let root = films();
-        let added = pick(&links, walk(&root, &["mp4".to_string()]).unwrap())
-            .unwrap();
+        let added = pick(&links, walk(&root, &["mp4".to_string()]).unwrap()).unwrap();
         assert_eq!(added.len(), 2);
         assert!(added.iter().all(|e| e.id.len() == 22 && e.available));
         let up = added.iter().find(|e| e.path == "Films/Up.mp4").unwrap();
@@ -757,8 +756,7 @@ mod tests {
     fn the_links_file_is_read_once_not_on_every_read() {
         let links = LinkedFiles::new(folder());
         let root = films();
-        let added = pick(&links, walk(&root, &["mp4".to_string()]).unwrap())
-            .unwrap();
+        let added = pick(&links, walk(&root, &["mp4".to_string()]).unwrap()).unwrap();
         let file = links.file("ghostly", APP).unwrap();
         assert!(file.exists());
         // What is on disk is not read again: reads, the list and a forget go by what is kept in memory.
@@ -887,10 +885,7 @@ mod tests {
         let picks: Vec<_> = (0..8)
             .map(|_| {
                 let (links, root) = (links.clone(), root.clone());
-                std::thread::spawn(move || {
-                    pick(&links, walk(&root, &[]).unwrap())
-                        .unwrap()
-                })
+                std::thread::spawn(move || pick(&links, walk(&root, &[]).unwrap()).unwrap())
             })
             .collect();
         let added: usize = picks.into_iter().map(|p| p.join().unwrap().len()).sum();
@@ -903,8 +898,7 @@ mod tests {
     fn a_file_that_changed_or_went_says_so() {
         let links = LinkedFiles::new(folder());
         let root = films();
-        let added = pick(&links, walk(&root, &["mp4".to_string()]).unwrap())
-            .unwrap();
+        let added = pick(&links, walk(&root, &["mp4".to_string()]).unwrap()).unwrap();
         let (up, e01) = (&added[1], &added[0]);
         fs::write(root.join("Up.mp4"), b"01234567890").unwrap();
         assert!(links
@@ -927,14 +921,12 @@ mod tests {
     fn forget_drops_one_link_or_all_and_a_deleted_profile_drops_its_links() {
         let links = LinkedFiles::new(folder());
         let root = films();
-        let added = pick(&links, walk(&root, &[]).unwrap())
-            .unwrap();
+        let added = pick(&links, walk(&root, &[]).unwrap()).unwrap();
         links.forget("ghostly", APP, &added[0].id).unwrap();
         assert_eq!(links.list("ghostly", APP).unwrap().len(), added.len() - 1);
         links.forget("ghostly", APP, "all").unwrap();
         assert!(links.list("ghostly", APP).unwrap().is_empty());
-        pick(&links, walk(&root, &[]).unwrap())
-            .unwrap();
+        pick(&links, walk(&root, &[]).unwrap()).unwrap();
         links.drop_space("ghostly").unwrap();
         assert!(links.list("ghostly", APP).unwrap().is_empty());
         // The files themselves are never touched.
@@ -1004,8 +996,6 @@ mod tests {
         let many: Vec<(String, PathBuf)> = (0..=MAX_ENTRIES)
             .map(|i| (format!("{i}.mp4"), PathBuf::from("/nowhere")))
             .collect();
-        assert!(pick(&links, many)
-            .unwrap_err()
-            .starts_with("too-large: "));
+        assert!(pick(&links, many).unwrap_err().starts_with("too-large: "));
     }
 }
