@@ -1,5 +1,5 @@
 import type { UsdtWallet } from "./paymentAdapters/usdtWallet";
-import { RateWindow, WALLET_NETWORKS, assertTokenUnits, decodeBolt11, engineError, formatPaymentAmount, sparkInvoiceDetails, validatePaymentTarget, walletNetworkOf, type SparkNetwork, type PaymentMethodName, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
+import { RateWindow, WALLET_NETWORKS, assertTokenUnits, decodeBolt11, engineError, formatPaymentAmount, fromBase64Url, sparkInvoiceDetails, validatePaymentTarget, walletNetworkOf, type SparkNetwork, type PaymentMethodName, type PaymentReview, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { eachNetwork, perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
 import { assertConfirmedReal, crossNetwork, paymentNetwork } from "./paymentAdapters/walletInstances";
 import { paymentAlias, paymentWireId } from "../shared/paymentIds";
@@ -164,6 +164,14 @@ const METHOD_NAME: Record<PaymentMethodName, string> = { cashu: "Cashu", lightni
 const allows = (link: PaymentLink, method: AskMethod) => method === "arkade" ? link.supportsArkPayments : method === "bark" ? link.supportsBarkPayments : method === "bitcoin" ? link.supportsBitcoinPayments : method === "fedimint" ? link.supportsFedimintPayments : method === "spark" ? link.supportsSparkPayments : link.supportsUsdtPayments;
 /** Federation ecash is counted in msats; a chat counts whole sats. */
 const fedimintSats = (msats: number) => Math.floor(msats / 1000);
+/**
+ * Which notes these are, whatever the spelling: the Fedimint client drops whitespace anywhere and reads URL-safe or
+ * standard base64, so the digest is of the bytes. Text that is no base64 is digested without its whitespace.
+ */
+export function fedimintNotesDigest(notes: string): string {
+  const text = notes.replace(/\s+/g, "");
+  try { return digestHex(toBase64Url(fromBase64Url(text.replace(/=+$/, "")))); } catch { return digestHex(text); }
+}
 /** A wallet for both networks (tests, older callers), or one per network. */
 type Each<T extends object> = T | PerNetwork<T>;
 /** The distinct wallets of a per-network set (one object may stand for both). */
@@ -1370,8 +1378,10 @@ export class PaymentDesk {
     const network = this.fedimintOf(found.federation)?.federation(found.federation)?.network;
     if (network && !this.accepts(linkId, "fedimint", walletNetworkOf(network))) { await refuse(`${networkLabel(walletNetworkOf(network))} Fedimint is off in this chat`); return; }
     // The same notes under another id: answered from what is known, with no new line and no new redeem.
-    const digest = digestHex(notes.trim());
-    const before = [...this.payments.values()].find((p) => p.notesDigest === digest && p.direction === "in" && p.kind === "payment");
+    // Digested as the federation reads them (see fedimintNotesDigest); `spelled` finds what 1.3.2 wrote down.
+    const digest = fedimintNotesDigest(notes);
+    const spelled = digestHex(notes.trim());
+    const before = [...this.payments.values()].find((p) => (p.notesDigest === digest || p.notesDigest === spelled) && p.direction === "in" && p.kind === "payment");
     if (before) { link.sendPaymentResult({ id: payment.id, ok: false, error: before.state === "failed" ? before.error ?? "These notes were already redeemed" : "These notes were already received" }); return; }
     await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: payment.requestId, federation: found.federation, token: notes, notesDigest: digest });
     await this.finishRedeem(this.payments.get(payment.id)!);
