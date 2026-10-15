@@ -75,6 +75,13 @@
     "tooLarge": "大きすぎます。",
     "unlistedVersion": "このリンクには、このストアがまだ掲載していないバージョンがあります。"
   },
+  "files": {
+    "askFiles": "{{app}} がファイルの読み取りを求めています",
+    "askFolder": "{{app}} がフォルダの読み取りを求めています",
+    "chooseFiles": "ファイルを選ぶ",
+    "chooseFolder": "フォルダを選ぶ",
+    "note": "何もコピーされません。{{app}} はこの端末で選んだものを読み取ります。"
+  },
   "install": {
     "equivocation": "異なるバージョン {{sequence}} が二つあります。Ghostly はお持ちのものを残しました。",
     "fetching": "アプリを確認中…",
