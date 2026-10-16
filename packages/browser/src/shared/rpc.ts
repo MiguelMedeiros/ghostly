@@ -113,6 +113,18 @@ export interface EngineApi {
   clearProfileData(): void;
   /** Lists one of the profile's identities in its public DID document (`alsoKnownAs`), or takes it out. */
   setDidListed(params: { id: string; listed: boolean }): void;
+  /** A contact link for the profile (WISP 8xx): one link that names nobody. The link made before is turned off. */
+  createContactLink(): import("./types").ContactLinkView;
+  /** Turns the profile's contact link off, for good: whoever opens it is told so. */
+  turnOffContactLink(): void;
+  /** The contact link was shown or copied, or Requests opened: requests are looked for now, and often for ten minutes. */
+  contactLinkShown(): void;
+  /** Accepts a request the contact link took: its chat starts, with the requester's name and first message. */
+  acceptContactRequest(params: { id: string }): { linkId: string };
+  /** Declines a request: nothing is said back, and that requester is not read again on this link. */
+  declineContactRequest(params: { id: string }): void;
+  /** Sends a request through someone's contact link: the chat made for it, waiting for an answer. */
+  askContactLink(params: { code: string; name: string; text: string; label?: string }): { chatId: string };
   /** Nostr social layer, per contact: their profile (kind 0), follows (kind 3) or notes (kind 1), from the person's relays. Refused without a verified Nostr proof from that contact. */
   nostrLoadContact(params: { linkId: string; subject: string; what: "profile" | "follows" | "notes"; more?: boolean }): void;
   /** Forgets what was loaded about a contact's key. */
