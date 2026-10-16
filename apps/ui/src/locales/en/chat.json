@@ -176,6 +176,7 @@
     "messages": "{{count}} messages",
     "noChats": "No chats yet",
     "noMatch": "No chat by that name",
+    "partial": "{{sent}} of {{count}} sent",
     "pick": "Pick up to {{count}}",
     "search": "Search chats",
     "select": "Select",

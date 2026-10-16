@@ -156,6 +156,31 @@ describe("the Forward to… picker", () => {
     expect(fakeEngine.callsTo("forwardMessages").map(c => (c as { to: string[] }).to)).toEqual([["link-ana", "link-bo"], ["link-bo"]]);
   });
 
+  // Send again forwarded the part a chat got already a second time, and a group's 9th file on could never go: every
+  // Send again posted files 1-8 again and hit the pace at the 9th (agents#1082).
+  it("says how much of it a chat got, and Send again sends that chat only the rest", async () => {
+    const all = [message({ id: "a", text: "dinner at eight", timestamp: 1 }), message({ id: "b", text: "📎 pic.png", file: PICTURE, timestamp: 2 })];
+    let full = true;
+    fakeEngine.on("forwardMessages", ({ to, messageIds }: { to: string[]; messageIds: string[] }) => ({ results: to.map(t => {
+      const sent = t === "link-ana" && full ? messageIds.filter(id => id === "a") : messageIds;
+      return { to: t, messageIds: sent.map(id => `me_${id}`), sent, error: sent.length < messageIds.length ? "Not enough space on this device" : null };
+    }) }));
+    const { user } = open(all, "link-1");
+    const rows = screen.getAllByTestId("forward-target");
+    await user.click(rows[0]!);
+    await user.click(rows[2]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(screen.getByTestId("forward-error")).toHaveTextContent("Ana (1 of 2 sent): Not enough space on this device");
+    expect(screen.getByTestId("forward-chosen")).toHaveTextContent(/^Ana$/);
+    full = false;
+    await user.click(screen.getByTestId("forward-send"));
+    expect(fakeEngine.callsTo("forwardMessages")).toEqual([
+      { linkId: "link-1", messageIds: ["a", "b"], to: ["link-ana", "link-bo"] },
+      { linkId: "link-1", messageIds: ["b"], to: ["link-ana"] },
+    ]);
+    expect(screen.queryByTestId("forward-error")).toBeNull();
+  });
+
   // The engine's line for a copy that found no room on this device, however the storage said it (engine/forwards.ts
   // forwardError): IndexedDB, the OPFS worker, Desktop's io error. Said in the app's language, never as sent.
   it.each([
