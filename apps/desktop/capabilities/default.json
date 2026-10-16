@@ -47,6 +47,7 @@
     "allow-linked-files-forget",
     "allow-linked-files-list",
     "allow-linked-files-pick",
+    "allow-linked-files-pick-cancel",
     "allow-linked-files-read",
     "allow-lnd-request",
     "allow-local-fetch",

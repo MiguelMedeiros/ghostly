@@ -363,6 +363,15 @@ impl LinkedFiles {
         *locked(&self.cleared).entry(at).or_default() += 1;
     }
 
+    /// The app stopped with its dialog up: the system's dialog cannot be taken back, so what the person picks in it is
+    /// kept for nobody, as after an uninstall. The app's links stay.
+    pub fn let_go(&self, space: &str, app: &str) -> Result<(), String> {
+        let file = self.file(space, app)?;
+        let _writing = locked(&self.writing);
+        self.clear(file);
+        Ok(())
+    }
+
     /// Keeps links to what was picked, and answers them as the app sees them: nothing if the app's links all went or
     /// its profile did since the pick began (`begin`), so an app uninstalled while its dialog was open keeps none.
     pub fn add(
@@ -604,6 +613,19 @@ pub async fn linked_files_pick<R: tauri::Runtime>(
         .await
         .map_err(|e| e.to_string())?
     }
+}
+
+/// The app whose pick is in flight stopped: the pick keeps nothing when the person answers.
+#[tauri::command]
+pub async fn linked_files_pick_cancel<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    space: String,
+    app_ref: String,
+) -> Result<(), String> {
+    let links = state(&app)?;
+    tauri::async_runtime::spawn_blocking(move || links.let_go(&space, &app_ref))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -992,6 +1014,24 @@ mod tests {
             .unwrap_err()
             .starts_with("cancelled: "));
         assert!(!links.base.join("ghostly").exists());
+    }
+
+    // An app whose window closed with its dialog up got what the person then picked in it linked.
+    #[test]
+    fn a_pick_whose_app_stopped_keeps_nothing_and_the_app_keeps_its_links() {
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        assert_eq!(pick(&links, walk(&root, &[]).unwrap()).unwrap().len(), 4);
+        let begun = links.begin("ghostly", APP).unwrap();
+        links.let_go("ghostly", APP).unwrap();
+        assert!(links
+            .add("ghostly", APP, begun, walk(&root, &[]).unwrap())
+            .unwrap_err()
+            .starts_with("cancelled: "));
+        assert_eq!(links.list("ghostly", APP).unwrap().len(), 4);
+        // The app reopened picks again.
+        assert_eq!(pick(&links, walk(&root, &[]).unwrap()).unwrap().len(), 4);
+        assert!(links.let_go("ghostly", "cinema").is_err());
     }
 
     #[test]

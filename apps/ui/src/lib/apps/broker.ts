@@ -191,7 +191,7 @@ const refuse = (code: MiniAppErrorCode): never => { throw new Refusal(code); };
  * `full` (its storage in this scope holds 5 MiB), `no-file` (no such file in its bundle), `stopped` (a store removed
  * or its publisher revoked the version running, WISP 1200 § Takedowns), and the bounds the broker checks too. Any other failure is `failed`, without the words.
  */
-const ENGINE_REFUSALS: ReadonlySet<string> = new Set<MiniAppErrorCode>(["full", "no-file", "too-large", "bad-key", "stopped", "cancelled", "changed", "gone"]);
+const ENGINE_REFUSALS: ReadonlySet<string> = new Set<MiniAppErrorCode>(["full", "no-file", "too-large", "too-fast", "bad-key", "stopped", "cancelled", "changed", "gone"]);
 
 function refusalOf(error: unknown): MiniAppErrorCode {
   if (error instanceof Refusal) return error.message;
