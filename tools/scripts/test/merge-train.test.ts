@@ -44,6 +44,8 @@ function fakeRepo() {
   const cancelAccess = { denied: null as string | null };
   /** When each head was pushed (its first check suite); unset: long before anything was queued, null: no suite yet. */
   const pushed = new Map<string, string | null>();
+  /** When a branch was last pushed to a head (`<branch> <sha>`), from the repository's activity: the later time counts. */
+  const moves = new Map<string, string>();
   const tips: Record<string, string> = { dev: "dev0", "epic/x": "epic0" };
   const landed: string[] = [];
   /** The base tip each head sits on: a head holds the tip when it sits on exactly it. */
@@ -104,7 +106,11 @@ function fakeRepo() {
       cancelled.push(...ids);
       return { cancelled: ids };
     },
-    headPushedAt: async (sha: string) => (pushed.has(sha) ? pushed.get(sha) : "2026-10-01T00:00:00Z"),
+    headPushedAt: async (sha: string, branch: string) => {
+      const first = pushed.has(sha) ? pushed.get(sha)! : "2026-10-01T00:00:00Z";
+      const moved = moves.get(`${branch} ${sha}`);
+      return first && moved && moved > first ? moved : first;
+    },
     comments: async (n: number) => read(comments.get(n) ?? []),
     branchSha: async (base: string) => tips[base],
     behindBy: async (tip: string, head: string) => (sitsOn.get(head) === tip ? 0 : 3),
@@ -245,7 +251,7 @@ function fakeRepo() {
   const flight = () => (batch() ? members() : [...pulls.values()].filter((p) => p.open && alone(p.number)?.sha === p.sha).map((p) => p.number));
   let stamp = 0;
   const run = (opts = {}) => tick({ gh, git, base: "dev", login: "train", stamp: String(stamp++), pause: async () => {}, ...opts });
-  return { gh, git, pulls, events, comments, runs, earlier, kinds, meta, files, drafts, going, cancelled, cancelAccess, pushed, tips, landed, conflicts, unrebasable, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, add, settle, batch, members, alone, flight, run };
+  return { gh, git, pulls, events, comments, runs, earlier, kinds, meta, files, drafts, going, cancelled, cancelAccess, pushed, moves, tips, landed, conflicts, unrebasable, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, add, settle, batch, members, alone, flight, run };
 }
 
 describe("the line", () => {
@@ -862,6 +868,46 @@ describe("a run of the train", () => {
     const r = await repo.run();
     expect(r.dropped).toEqual([]);
     expect(repo.landed).toEqual(["#11"]); // alone, on dev's tip and green
+  });
+
+  it("drops a pull request whose branch was put back, after queue, to a head first pushed before it", async () => {
+    // h11 was the head before (its first suite long before the label), h11b was reviewed and queued, then h11 put back.
+    const repo = fakeRepo();
+    repo.add(11); // queue added at 2026-10-08T00:00:00Z, on h11b
+    repo.add(12);
+    repo.moves.set("fix-11 h11", "2026-10-08T00:05:00Z");
+    const r = await repo.run();
+    expect(r.dropped).toEqual([11]);
+    expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/h11 was pushed after `queue` was added/)]);
+    expect(repo.landed).toEqual(["#12"]);
+
+    // The activity unread (the fake's time is the suite's alone): the force push the pull request logged decides.
+    const forced = fakeRepo();
+    forced.add(11);
+    (await forced.gh.events(11)).push({ event: "head_ref_force_pushed", created_at: "2026-10-08T00:05:00Z" });
+    expect((await forced.run()).dropped).toEqual([11]);
+    expect(forced.landed).toEqual([]);
+  });
+
+  it("drops a pull request fast-forwarded, after queue, to a commit first pushed on another branch", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.pulls.get(11)!.sha = "elsewhere";
+    repo.runs.set("elsewhere", green);
+    repo.pushed.set("elsewhere", "2026-10-07T12:00:00Z"); // its first suite, on the other branch
+    repo.moves.set("fix-11 elsewhere", "2026-10-08T00:05:00Z");
+    expect((await repo.run()).dropped).toEqual([11]);
+    expect(repo.landed).toEqual([]);
+  });
+
+  it("keeps a pull request force-pushed and pushed to before it got queue", async () => {
+    const repo = fakeRepo();
+    repo.pushed.set("h11", "2026-10-07T23:40:00Z");
+    repo.moves.set("fix-11 h11", "2026-10-07T23:50:00Z");
+    repo.add(11); // queue at 2026-10-08T00:00:00Z
+    (await repo.gh.events(11)).unshift({ event: "head_ref_force_pushed", created_at: "2026-10-07T23:50:00Z" });
+    expect((await repo.run()).dropped).toEqual([]);
+    expect(repo.landed).toEqual(["#11"]);
   });
 
   it("records no head for a pull request with no CI on its head yet, and lets the time decide once it has", async () => {
@@ -1982,6 +2028,46 @@ describe("a green CI run planned for other files", () => {
     expect(ciState(await gh.ciJobs("abc", () => false))).toBe("none");
     // Each run's jobs are read once for the three questions.
     expect(sent.filter((p) => p.includes("/jobs"))).toEqual(["/actions/runs/5002/jobs?filter=latest&per_page=100&page=1", "/actions/runs/5001/jobs?filter=latest&per_page=100&page=1"]);
+  });
+});
+
+describe("when a branch became its head", () => {
+  const layer = (activity: { status: number; body: unknown }, suites: string[] = ["2026-10-07T12:00:00Z", "2026-10-07T11:00:00Z"]) => {
+    const sent: string[] = [];
+    const warned: string[] = [];
+    const fetchImpl = async (url: string) => {
+      const path = url.replace("https://api.github.com/repos/o/r", "");
+      sent.push(path);
+      const [status, body] = path.startsWith("/activity") ? [activity.status, activity.body] : [200, { check_suites: suites.map((created_at) => ({ created_at })) }];
+      return { status, ok: status < 300, headers: new Headers({ "x-ratelimit-remaining": "4000" }), text: async () => JSON.stringify(body) };
+    };
+    return { gh: restLayer("t", "o/r", { fetchImpl, wait: async () => {}, warn: (m: string) => void warned.push(m) }), sent, warned };
+  };
+  const push = (after: string, timestamp: string, activity_type = "force_push") => ({ after, timestamp, activity_type, ref: "refs/heads/fix/21" });
+
+  it("reads the branch's latest push to the head, not the commit's first suite, when that push came later", async () => {
+    const { gh, sent } = layer({ status: 200, body: [push("abc", "2026-10-08T00:05:00Z"), push("def", "2026-10-08T00:01:00Z", "push"), push("abc", "2026-10-07T11:00:00Z", "push")] });
+    expect(await gh.headPushedAt("abc", "fix/21")).toBe("2026-10-08T00:05:00Z");
+    expect(sent).toContain("/activity?ref=refs%2Fheads%2Ffix%2F21&per_page=100");
+  });
+
+  it("keeps the commit's first suite when it is the later, or the activity has no push to the head", async () => {
+    expect(await layer({ status: 200, body: [push("abc", "2026-10-07T10:00:00Z", "push")] }).gh.headPushedAt("abc", "fix/21")).toBe("2026-10-07T11:00:00Z");
+    expect(await layer({ status: 200, body: [push("def", "2026-10-08T00:05:00Z")] }).gh.headPushedAt("abc", "fix/21")).toBe("2026-10-07T11:00:00Z");
+  });
+
+  it("reads no activity for a head with no suite yet", async () => {
+    const { gh, sent } = layer({ status: 200, body: [push("abc", "2026-10-08T00:05:00Z")] }, []);
+    expect(await gh.headPushedAt("abc", "fix/21")).toBeNull();
+    expect(sent.some((p) => p.startsWith("/activity"))).toBe(false);
+  });
+
+  it("falls back on the first suite, warning once, when the token may not read the activity; fails on another error", async () => {
+    const { gh, warned } = layer({ status: 403, body: { message: "Resource not accessible by integration" } });
+    expect(await gh.headPushedAt("abc", "fix/21")).toBe("2026-10-07T11:00:00Z");
+    expect(await gh.headPushedAt("abc", "fix/21")).toBe("2026-10-07T11:00:00Z");
+    expect(warned).toEqual([expect.stringMatching(/may not read the repository's activity \(Resource not accessible by integration\)/)]);
+    await expect(layer({ status: 500, body: { message: "boom" } }).gh.headPushedAt("abc", "fix/21")).rejects.toThrow(/GET activity of fix\/21: HTTP 500/);
   });
 });
 
