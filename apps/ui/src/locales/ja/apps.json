@@ -78,6 +78,7 @@
   "files": {
     "allow": "許可",
     "askAgain": "{{app}} が「{{name}}」をもう一度読み取ることを求めています",
+    "askAgainMore": "{{app}} が「{{name}}」ほか {{count}} 件をもう一度読み取ることを求めています",
     "askFiles": "{{app}} がファイルの読み取りを求めています",
     "askFolder": "{{app}} がフォルダの読み取りを求めています",
     "chooseFiles": "ファイルを選ぶ",

@@ -78,6 +78,7 @@
   "files": {
     "allow": "Allow",
     "askAgain": "{{app}} asks to read “{{name}}” again",
+    "askAgainMore": "{{app}} asks to read “{{name}}” and {{count}} more again",
     "askFiles": "{{app}} asks to read files",
     "askFolder": "{{app}} asks to read a folder",
     "chooseFiles": "Choose files",

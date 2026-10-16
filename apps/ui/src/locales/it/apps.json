@@ -78,6 +78,7 @@
   "files": {
     "allow": "Consenti",
     "askAgain": "{{app}} chiede di leggere di nuovo «{{name}}»",
+    "askAgainMore": "{{app}} chiede di leggere di nuovo «{{name}}» e altri {{count}}",
     "askFiles": "{{app}} chiede di leggere dei file",
     "askFolder": "{{app}} chiede di leggere una cartella",
     "chooseFiles": "Scegli i file",

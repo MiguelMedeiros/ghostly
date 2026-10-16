@@ -29,8 +29,8 @@ export interface PickSheetText {
   /** "Nothing is copied: Cinema reads what you pick, on this device." */
   note(app: string): string;
   cancel: string;
-  /** "Cinema asks to read “Films” again", after a restart. */
-  askAgain(app: string, name: string): string;
+  /** "Cinema asks to read “Films” again" after a restart, or "“Films” and 3 more" when more was kept. */
+  askAgain(app: string, name: string, more: number): string;
   allow: string;
   notNow: string;
 }
@@ -42,7 +42,7 @@ export function pickSheetText(t: Translate): PickSheetText {
     choose: (folder) => t(folder ? "apps.files.chooseFolder" : "apps.files.chooseFiles"),
     note: (app) => t("apps.files.note", { app }),
     cancel: t("common.cancel"),
-    askAgain: (app, name) => t("apps.files.askAgain", { app, name }),
+    askAgain: (app, name, more) => (more ? t("apps.files.askAgainMore", { app, name, count: more }) : t("apps.files.askAgain", { app, name })),
     allow: t("apps.files.allow"),
     notNow: t("apps.files.notNow"),
   };
@@ -127,7 +127,8 @@ type PermissionHandle = FileSystemHandle & {
   requestPermission?(options: { mode: "read" }): Promise<PermissionState>;
 };
 const handleOf = (keep: Keep): PermissionHandle | undefined => ("dir" in keep ? keep.dir : keep.files[0]) as PermissionHandle | undefined;
-const keepName = (keep: Keep) => ("dir" in keep ? keep.dir.name : keep.files.map((f) => f.name).join(", "));
+/** What a pick kept, as the person picked it: the folder, or each of the files. */
+const keptNames = (keep: Keep) => ("dir" in keep ? [keep.dir.name] : keep.files.map((f) => f.name));
 
 /** The browser's picker as a hidden input, clicked from the sheet's button: nothing is kept past the page. */
 export const inputPicker: BrowserPicker = (folder, accept) =>
@@ -260,9 +261,10 @@ function sheet(parts: { title: string; note?: string; secondary: string; primary
     const box = document.createElement("div");
     box.setAttribute("role", "dialog");
     box.setAttribute("aria-modal", "true");
-    box.className = "w-full max-w-sm rounded-lg border border-border bg-sidebar-bg p-4 text-text-primary shadow-lg";
+    // No taller than the window, with its own scroll: its buttons are always within reach.
+    box.className = "max-h-[90dvh] w-full max-w-sm overflow-y-auto rounded-lg border border-border bg-sidebar-bg p-4 text-text-primary shadow-lg";
     const title = document.createElement("h2");
-    title.className = "m-0 text-base font-semibold";
+    title.className = "m-0 text-base font-semibold [overflow-wrap:anywhere]";
     title.dir = "auto";
     title.id = `app-files-${randomId()}`;
     title.textContent = parts.title;
@@ -319,7 +321,7 @@ export interface WebLinkedFilesOptions {
   /** Asks the person to pick; by default the sheet. Tests answer directly. */
   ask?: (app: string, folder: boolean, accept: string[]) => Promise<Picked | null>;
   /** Asks the person to let the browser read kept picks again (`grant` asks it); by default the sheet. */
-  askAgain?: (app: string, name: string, grant: () => Promise<boolean>) => Promise<boolean>;
+  askAgain?: (app: string, name: string, more: number, grant: () => Promise<boolean>) => Promise<boolean>;
 }
 
 export function webLinkedFiles({ text, picker = browserPicker(), store = null, ask, askAgain }: WebLinkedFilesOptions): LinkedFilesHost {
@@ -340,8 +342,8 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
     title: text().ask(app, folder), note: text().note(app), secondary: text().cancel, primary: text().choose(folder), testId: "app-files-sheet",
     act: () => picker(folder, accept),
   }) as Promise<Picked | null>);
-  const askPersonAgain = askAgain ?? ((app, name, grant) => sheet({
-    title: text().askAgain(app, name), note: text().note(app), secondary: text().notNow, primary: text().allow, testId: "app-files-again",
+  const askPersonAgain = askAgain ?? ((app, name, more, grant) => sheet({
+    title: text().askAgain(app, name, more), note: text().note(app), secondary: text().notNow, primary: text().allow, testId: "app-files-again",
     act: grant,
   }).then((granted) => granted === true));
 
@@ -442,8 +444,9 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
       const waiting = [...picks.values()].filter((p) => p.stored.ref === ref && !p.granted);
       if (waiting.length && !askedAgain.has(ref)) {
         askedAgain.add(ref);
-        const name = waiting.map((p) => keepName(p.stored.keep)).join(", ");
-        await askPersonAgain(title, name, async () => {
+        // The first of them by name and a count of the rest: a title of every name pushes the buttons off the window.
+        const names = waiting.flatMap((p) => keptNames(p.stored.keep));
+        await askPersonAgain(title, names[0] ?? "", Math.max(0, names.length - 1), async () => {
           let any = false;
           for (const p of waiting) {
             p.granted = await permitted(p.stored.keep, true);

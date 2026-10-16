@@ -78,6 +78,7 @@
   "files": {
     "allow": "Permitir",
     "askAgain": "{{app}} pede para ler “{{name}}” de novo",
+    "askAgainMore": "{{app}} pede para ler “{{name}}” e mais {{count}} de novo",
     "askFiles": "{{app}} pede para ler arquivos",
     "askFolder": "{{app}} pede para ler uma pasta",
     "chooseFiles": "Escolher arquivos",

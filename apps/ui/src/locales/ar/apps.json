@@ -78,6 +78,7 @@
   "files": {
     "allow": "السماح",
     "askAgain": "يطلب {{app}} قراءة «{{name}}» مرة أخرى",
+    "askAgainMore": "يطلب {{app}} قراءة «{{name}}» و{{count}} غيرها مرة أخرى",
     "askFiles": "يطلب {{app}} قراءة ملفات",
     "askFolder": "يطلب {{app}} قراءة مجلد",
     "chooseFiles": "اختر ملفات",
