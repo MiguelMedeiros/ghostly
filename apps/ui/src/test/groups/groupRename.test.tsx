@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { GroupMemberView, GroupView, StoredMessage } from "@ghostly/browser/shared/types";
 import { GroupMembersDialog } from "../../components/GroupMembersDialog";
 import { Sidebar } from "../../components/Sidebar";
@@ -100,6 +100,20 @@ describe("renaming a group in the app", () => {
     await user.keyboard("{Backspace}{Backspace}");
     await user.keyboard("🎉");
     expect(input).toHaveValue("Weeken🎉trip to the mountains with the whole family and friends!");
+  });
+
+  // agents#1154: a refused keystroke went in and was taken out by script, which empties the browser's undo history.
+  it("refuses a keystroke into a full name before it reaches the field, so the field is never rewritten", async () => {
+    const full = "Weekend trip to the mountains with the whole family and friends!";
+    fakeEngine.update({ groups: [admin({ name: full })] });
+    const { user } = renderApp(<GroupMembersDialog group={admin({ name: full })} onClose={() => {}} />);
+    await user.click(screen.getByTestId("group-rename"));
+    const input = screen.getByTestId("group-rename-input") as HTMLInputElement;
+    const inputs = vi.fn();
+    input.addEventListener("input", inputs);
+    await user.type(input, "B", { initialSelectionStart: 8, initialSelectionEnd: 8 });
+    expect(inputs).not.toHaveBeenCalled();
+    expect(input).toHaveValue(full);
   });
 
   // agents#1153: with one character left, the reading's first kana went in ("に"), not "日本" nor nothing.
