@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { PageLink } from "@/components/site/IntentLink";
+import { IntentLink } from "@/components/site/IntentLink";
 import { Ghost, GhostMark } from "@/components/ghost/Ghost";
 import { Brand } from "./Brand";
 import { RELEASES_URL } from "@/lib/release";
@@ -46,9 +45,9 @@ export function SiteFooter({ apps = false }: { apps?: boolean }) {
       <div className="wrap">
         <div className="footer-top">
           <div>
-            <Link href={"/"} className="brand">
+            <IntentLink href={"/"} className="brand">
               <Brand />
-            </Link>
+            </IntentLink>
             <p className="muted" style={{ marginTop: 14, maxWidth: 340, fontSize: 14, lineHeight: 1.6 }}>
               {t.tagline}
             </p>
@@ -59,7 +58,7 @@ export function SiteFooter({ apps = false }: { apps?: boolean }) {
               <ul>
                 {col.links.map((l) => (
                   <li key={l.label}>
-                    {l.href.startsWith("http") ? <a href={l.href}>{l.label}</a> : <PageLink href={l.href}>{l.label}</PageLink>}
+                    {l.href.startsWith("http") ? <a href={l.href}>{l.label}</a> : <IntentLink href={l.href}>{l.label}</IntentLink>}
                   </li>
                 ))}
               </ul>
