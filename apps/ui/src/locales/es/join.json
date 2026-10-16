@@ -21,6 +21,7 @@
   "paste": "Pegar del portapapeles",
   "pasteScreenshot": "O pega una captura de pantalla del código QR.",
   "placeholder": "Pega la invitación…",
+  "qrReaderNotLoaded": "El lector de QR no se cargó. Revisa tu conexión y vuelve a intentarlo.",
   "scan": "Escanear QR",
   "submit": "Unirse",
   "title": "Unirse a un chat",
