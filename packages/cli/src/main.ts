@@ -237,11 +237,15 @@ export function commandHelp(words: readonly string[]): string {
   if (words[0] === "help") return HELP_USAGE;
   const named = (list: readonly string[]) => helpRows().filter((row) => { const own = commandWords(row.usage); return list.every((word, i) => own[i] === word); });
   // Arguments after the command's words (`ghostly send bob hi --help`) are not part of its name.
+  const given = words;
   let rows = named(words);
   while (!rows.length && words.length > 1) rows = named(words = words.slice(0, -1));
   const asked = words.join(" ");
   if (!rows.length) throw new CliError("usage", `Unknown command: ${asked} (ghostly help)`);
   const exact = rows.filter((row) => commandWords(row.usage).join(" ") === asked);
+  // Words dropped down to a group, not a command (`help chat histroy`): a word the group does not take, as `chat histroy`
+  // says, not the group's list with exit 0.
+  if (!exact.length && words.length < given.length) throw unknownCommand(given[0], given[1], given[2]);
   const lines: string[] = [];
   // The command asked for first, also when others extend its words (`daemon`, then `daemon stop`…): before, `daemon`'s
   // own options were shown nowhere.
@@ -354,7 +358,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       return;
     }
     default:
-      throw new CliError("usage", "ghostly profile create|list|use|show|set|picture|backup|restore");
+      throw unknownCommand("profile", sub);
   }
 }
 
@@ -449,7 +453,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
     print({ restarted: true, stopped, before, version: VERSION, ...started });
     return;
   }
-  if (sub) throw new CliError("usage", "ghostly daemon [--detach] [--timeout s] | daemon status | daemon stop | daemon restart");
+  if (sub) throw unknownCommand("daemon", sub);
   const startFor = seconds(parsed, 60);
   if (!parsed.options.detach) { await runDaemon(g); return; }
   print(await startDetached(g, startFor));
@@ -666,7 +670,7 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
     printAnswer(await withSession(g, (s) => s.call("settings.set", { [key]: parsedValue })) as Record<string, unknown>);
     return;
   }
-  throw new CliError("usage", "ghostly settings get | settings set <key> <json-value>");
+  throw unknownCommand("settings", sub);
 }
 
 async function textCommand(name: string, argv: string[]): Promise<void> {
