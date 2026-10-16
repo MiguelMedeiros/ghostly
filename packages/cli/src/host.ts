@@ -203,6 +203,8 @@ function connection(ctx: ApiContext, socket: Socket): void {
     const id = typeof request.id === "number" || typeof request.id === "string" ? request.id : null;
     if (typeof request.method !== "string") { write({ id, error: new CliError("bad_request", "method is required").toJSON() }); return; }
     if (request.method === "events.subscribe") {
+      // One stream per connection: a second would get every event again, and its replay would pass the bound once more.
+      if (unsubscribes.length) { write({ id, error: new CliError("bad_request", "This connection is subscribed already: open another one for a new stream").toJSON() }); return; }
       const params = (request.params ?? {}) as { since?: unknown };
       const since = typeof params.since === "number" ? params.since : ctx.hub.lastSeq;
       // A journal that cannot be replayed is the answer, never a subscription that then says nothing.
