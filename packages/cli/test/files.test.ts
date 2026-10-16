@@ -86,7 +86,7 @@ describe("group administration", () => {
   });
 
   it("a member's whole key is that member, whatever another member calls itself", () => {
-    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u", OTHER = "o".repeat(52);
+    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o", OTHER = "o".repeat(52);
     const named = { name: "G", members: [{ key: "me", me: true }, { key: KEY, nick: "Bob", me: false }, { key: OTHER, nick: KEY, me: false }] } as unknown as GroupView;
     expect(findMember(named, KEY).key).toBe(KEY);
     expect(findMember(named, OTHER).key).toBe(OTHER);

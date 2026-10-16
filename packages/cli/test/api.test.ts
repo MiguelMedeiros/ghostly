@@ -86,7 +86,7 @@ describe("chats", () => {
   });
 
   it("a contact's own name never stands for someone else: a key finds only its chat, a label wins over a name", () => {
-    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u";
+    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
     const alice = link("chatAlice", { label: "Alice", peerNick: "Alice", peerPubKeyZ32: KEY });
     const mallory = link("chatMallory", { peerNick: KEY });
     const impostor = link("chatImpostor", { peerNick: "alice" });
@@ -123,8 +123,11 @@ describe("chats", () => {
     expect(refused([link("chatA", { label: "Twin" }), link("chatB", { label: "Twin" })], "twin")).toMatchObject({ code: "bad_request", message: expect.stringMatching(/more than one chat/) });
     expect(() => findChatOrGroup([], [room, { ...room, id: "h".repeat(22) } as unknown as GroupView], "team room")).toThrow(/more than one group/);
     expect(refused([asName], "group:zed")).toEqual({ code: "not_found", message: 'No group "zed"' });
-    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u";
+    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
     expect(refused([asName], KEY)).toMatchObject({ code: "not_found", message: `No chat with "${KEY}"` });
+    // The same bytes with the last character respelled: no key, and never a name (a contact calling itself that is not found by it).
+    const respelled = KEY.slice(0, 51) + "t";
+    expect(refused([link("chatMallory", { peerNick: respelled })], respelled)).toMatchObject({ code: "bad_request", message: expect.stringMatching(/not a contact key/) });
     expect(findChatOrGroup([asName], [room], "ggg")).toEqual({ group: room });
   });
 

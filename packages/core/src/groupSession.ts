@@ -1,4 +1,4 @@
-import { fromBase64Url, randomBytes, toBase64Url, utf8Encode } from "./bytes";
+import { fromBase64Url, isZ32Key, randomBytes, toBase64Url, utf8Encode } from "./bytes";
 import { identityFromSeedB64, publicKeyFromZ32, sign, verify } from "./identity";
 import { MAX_NICK_LENGTH, sanitizeNick } from "./text";
 import { EngineError, engineError } from "./engineErrors";
@@ -698,7 +698,7 @@ export class GroupSession {
   rewelcome(memberKey: string): Promise<(GroupChainFrame | GroupWelcomeFrame)[]> {
     return this.serialize(async () => {
       this.requireAdmin();
-      if (!rosterHas(this.roster, memberKey) || memberKey === this.myKey) throw new Error("Not a member");
+      if (!rosterHas(this.roster, memberKey) || memberKey === this.myKey || !isZ32Key(memberKey)) throw new Error("Not a member");
       const chain = this.state.chain;
       let admitted = chain.length - 1;
       while (admitted >= 0 && !(chain[admitted].k === "add" && chain[admitted].s === memberKey)) admitted--;
@@ -754,10 +754,12 @@ export class GroupSession {
     this.pruneRelay();
     this.state.seq = 0; this.state.seqEpoch = epoch;
     await this.persist();
-    // The old roster hears about it, the one removed included (without a secret).
+    // The old roster hears about it, the one removed included (without a secret). A key respelled in its last character
+    // could be pinned and added by a build before `MEMBER_KEY` was canonical, and the roster that holds it is in every
+    // member's chain: `sealSecret` would throw on it, past the persist above, so it gets no secret instead.
     for (const [key] of previous.m) {
       if (key === this.myKey) continue;
-      const member = rosterHas(roster, key);
+      const member = rosterHas(roster, key) && isZ32Key(key);
       this.hooks.send(key, { t: "group-commit", g: this.id, commit, ...(member ? { secret: sealSecret(key, secret, secretAad(this.id, epoch, key)) } : {}), ...(mark ? { left: mark } : {}) });
     }
     this.hooks.changed();
@@ -1518,7 +1520,8 @@ export class GroupSession {
   }
 
   private async receiveSync(from: string, frame: GroupSyncFrame): Promise<void> {
-    if (!rosterHas(this.roster, from) || !Number.isSafeInteger(frame.e) || frame.e < 0 || typeof frame.h !== "string") return;
+    // Nothing is sealed to a key that is not canonical (see `commit`).
+    if (!rosterHas(this.roster, from) || !isZ32Key(from) || !Number.isSafeInteger(frame.e) || frame.e < 0 || typeof frame.h !== "string") return;
     // Each answer may carry the chain, secrets and logs: a few a minute per member, however often it asks.
     let answered = this.syncsAnswered.get(from);
     if (!answered) this.syncsAnswered.set(from, answered = new RateWindow(GROUP_LIMITS.syncAnswers, GROUP_LIMITS.syncWindowMs, () => this.hooks.clock?.() ?? Date.now()));
