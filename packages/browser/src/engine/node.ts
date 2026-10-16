@@ -30,6 +30,7 @@ import { X401Credentials } from './x401';
 import { setOwnDidSource } from '../proofs/ownDid';
 import { ProfileDid } from './did';
 import { ContactLinks } from './contactLinks';
+import { ContactAsks } from './contactAsks';
 import { NostrSocial, effectiveNostrSettings } from './nostrSocial';
 import { PublicProfiles, type ProfileSubject } from './publicProfiles';
 import { PublicActivity } from './publicActivity';
@@ -1186,6 +1187,22 @@ export class GhostlyNode implements EngineImplementation {
     },
   });
 
+  /** Requests this profile sends through others' contact links (WISP 8xx). */
+  readonly contactAsks = new ContactAsks({
+    online: () => this.networkOn,
+    emit: () => this.emitState(),
+    publish: (identity, records) => this.transport.publish(identity, records, { background: true }),
+    resolve: async (pubKeyZ32) => (await this.transport.resolve(pubKeyZ32, { background: true }))?.records ?? null,
+    // The chat waits like an invite nobody joined yet; the text already went in the request, so it is never sent again.
+    createChat: async ({ label, text }) => {
+      const chat = await this.createLink();
+      if (label) this.renameLink({ linkId: chat.linkId, label });
+      await this.storeMessage({ linkId: chat.linkId, id: `me_contact_${crypto.randomUUID()}`, text, sender: "me", timestamp: Date.now(), via: "pkarr" });
+      return chat;
+    },
+    ownLink: (linkKeyZ32) => this.contactLinks.owns(linkKeyZ32),
+  });
+
   /** The Nostr social layer (profile, follows, notes, publication) on top of verified Nostr proofs. */
   private readonly nostrSocial = new NostrSocial({
     settings: () => this.settings.nostr,
@@ -1745,6 +1762,8 @@ export class GhostlyNode implements EngineImplementation {
     this.did.start();
     await this.contactLinks.load();
     this.contactLinks.start();
+    await this.contactAsks.load();
+    this.contactAsks.start();
     await this.nostrSocial.load();
     await this.publicProfiles.load();
     // Limited mode opens no wallet: they start when it is left (`leaveLimited`).
@@ -2233,6 +2252,7 @@ export class GhostlyNode implements EngineImplementation {
     this.identities.stop();
     this.did.stop();
     this.contactLinks.stop();
+    this.contactAsks.stop();
     this.nostrSocial.stop();
     this.publicProfiles.stop();
     this.publicActivity.clear();
@@ -2342,6 +2362,7 @@ export class GhostlyNode implements EngineImplementation {
       did: this.did.view(),
       contactLink: this.contactLinks.view(),
       contactRequests: this.contactLinks.requests(),
+      contactAsks: this.contactAsks.views(),
       nostr: this.nostrSocial.state(),
       edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(live => this.viewOf(live)), ...this.communityPayViews(groups)],
       groups: groups.map(group => ({ ...group, ...(this.groupAdminOff.has(group.id) && { adminOff: true as const }), ...(this.reactionNotes.has(`group:${group.id}`) && { lastReaction: this.reactionNotes.get(`group:${group.id}`) }), ...this.groupWakeView(group), members: group.members.map(member => {
@@ -2654,6 +2675,8 @@ export class GhostlyNode implements EngineImplementation {
   contactLinkShown(): void { this.contactLinks.shown(); }
   acceptContactRequest({ id }: { id: string }): Promise<{ linkId: string }> { return this.contactLinks.accept(id); }
   declineContactRequest({ id }: { id: string }): Promise<void> { return this.contactLinks.decline(id); }
+  /** Sends a request through someone's contact link; the chat made for it. */
+  askContactLink(params: { code: string; name: string; text: string; label?: string }): Promise<{ chatId: string }> { return this.contactAsks.ask(params); }
   lookupIdentityDisplay(params: { linkId: string; id: string }): Promise<void> {
     // A Nostr profile comes through the social layer, from the relays the person configured.
     const r = this.links.get(params.linkId)?.stored.identities?.received.find(x => x.id === params.id);
