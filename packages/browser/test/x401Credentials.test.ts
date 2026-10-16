@@ -48,6 +48,27 @@ describe("x401 credentials in the profile", { timeout: 60_000 }, () => {
     await expect(x401.add({ credential: issueSdJwtVc({ holder: newX401HolderKey().jwk }) })).rejects.toThrow(/x401 key new/);
   });
 
+  it("a credential on a key this profile made, but that waits no more, is refused with what became of the key", async () => {
+    const x401 = new X401Credentials();
+    // A second credential on a key that already holds one.
+    const used = await x401.newKey();
+    const first = await x401.add({ credential: issueSdJwtVc({ holder: used.jwk }), label: "Bank" });
+    await expect(x401.add({ credential: issueSdJwtVc({ holder: used.jwk, payload: { vct: "https://example.com/other" } }) }))
+      .rejects.toThrow(`This credential's key already holds credential ${first.id} (Bank): a key takes one credential`);
+    // A key pushed out by 8 newer ones: `key new` says it went.
+    const waiting = await x401.newKey();
+    const made: { id: string; dropped?: string }[] = [];
+    for (let i = 0; i < 8; i++) made.push(await x401.newKey());
+    expect(made.map((k) => k.dropped)).toEqual([undefined, undefined, undefined, undefined, undefined, undefined, undefined, waiting.id]);
+    await expect(x401.add({ credential: issueSdJwtVc({ holder: waiting.jwk }) })).rejects.toThrow("This credential's key was dropped: a profile keeps the 8 newest keys waiting for a credential");
+    // A key that went with its credential.
+    expect(await x401.remove({ id: first.id })).toBe(true);
+    await expect(x401.add({ credential: issueSdJwtVc({ holder: used.jwk }) })).rejects.toThrow(`This credential's key went with credential ${first.id} when it was removed`);
+    // Each says where a key that works comes from; one never made here says so as before.
+    await expect(x401.add({ credential: issueSdJwtVc({ holder: used.jwk }) })).rejects.toThrow(/x401 key new$/);
+    await expect(x401.add({ credential: issueSdJwtVc({ holder: newX401HolderKey().jwk }) })).rejects.toThrow(/did not make/);
+  });
+
   it("keeps a credential that is not valid yet, and lists when it becomes valid", async () => {
     const x401 = new X401Credentials();
     const soon = await x401.newKey(), now = await x401.newKey();
