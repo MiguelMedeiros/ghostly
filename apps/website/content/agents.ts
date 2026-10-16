@@ -106,7 +106,7 @@ export const SECURITY = [
   {
     id: "wallet",
     title: "No wallet unless you make one",
-    body: "A CLI profile starts with no wallet, and no message can make it pay. A wallet you create is on Testnet unless you say otherwise, and real money needs --confirm-real on the agent's machine.",
+    body: "A CLI profile starts with no wallet, and no payment request is paid by itself. A wallet you create is on Testnet unless you say otherwise, and real money needs --confirm-real on the agent's machine.",
     cmd: "ghostly wallet list",
   },
   // packages/cli/examples/claude-code-agent.sh (no tools, no MCP servers, none of your settings).
