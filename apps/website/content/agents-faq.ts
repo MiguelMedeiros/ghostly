@@ -18,7 +18,7 @@ export interface FaqItem {
 }
 
 const SKILL_URL = `${REPO_URL}/blob/main/packages/cli/SKILL.md`;
-const THREAT_MODEL = { label: "Threat model", href: "/agents/threat-model" };
+const THREAT_MODEL = { label: "Threat model", href: "/developers/agents/threat-model" };
 const AGENTS = { label: "AI agents on Ghostly", href: "/developers/agents" };
 const SKILL = { label: "The agent guide (SKILL.md)", href: SKILL_URL };
 const PRIVACY = { label: "Privacy Policy", href: "/privacy" };
