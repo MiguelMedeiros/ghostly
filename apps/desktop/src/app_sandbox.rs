@@ -659,6 +659,37 @@ pub fn forget_window<R: Runtime>(app: &AppHandle<R>, label: &str) {
     }
 }
 
+/// The Ghostly window's page was replaced (a profile switch, a reload, the WebView back after its process died): the
+/// brokers of the app windows it opened went with it. Those windows close, and their state goes with every request
+/// still waiting, so none keeps showing the page before's app or asking a broker that is not there. The test
+/// driver's windows have no broker and stay.
+pub fn page_started<R: Runtime>(app: &AppHandle<R>) {
+    let Some(state) = app.try_state::<AppSandboxState>() else {
+        return;
+    };
+    for label in forget_brokered(&state) {
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.close();
+        }
+    }
+}
+
+/// Drops the state of every window a page's broker answers, and names them.
+fn forget_brokered(state: &AppSandboxState) -> Vec<String> {
+    let Ok(mut windows) = state.windows.lock() else {
+        return Vec::new();
+    };
+    let labels: Vec<String> = windows
+        .iter()
+        .filter(|(_, window)| window.brokered)
+        .map(|(label, _)| label.clone())
+        .collect();
+    for label in &labels {
+        windows.remove(label);
+    }
+    labels
+}
+
 fn plain(status: StatusCode, message: &str) -> Response<Vec<u8>> {
     Response::builder()
         .status(status)
@@ -2071,6 +2102,57 @@ mod tests {
         assert_eq!(refused(app.handle(), &label), Some(Vec::new()));
         forget_window(app.handle(), &label);
         assert_eq!(refused(app.handle(), &label), None);
+    }
+
+    /// A profile switch or a reload replaces the page whose brokers answered the app windows: they must not stay
+    /// open with the page before's app, nor keep a request waiting for a broker that went.
+    #[test]
+    fn a_new_page_closes_the_app_windows_the_page_before_opened() {
+        let app = app();
+        let request = OpenRequest {
+            app: "ana/chess".into(),
+            title: "Chess with Ana".into(),
+            entry: "<p>chess</p>".into(),
+            internet: false,
+            view: AppView::Chat,
+        };
+        let opened = open(app.handle(), request).unwrap();
+        let driver = open_guarded(
+            app.handle(),
+            "spike/malicious".into(),
+            "<p>x</p>".into(),
+            Guard::FULL,
+            false,
+        )
+        .unwrap();
+        let state = app.state::<AppSandboxState>();
+        started(&state, &opened);
+        let Admitted::Relay(_, mut waiting) = admitted(
+            &state,
+            &opened,
+            json!({"id": 4, "type": "storage.keys", "args": []}),
+        )
+        .unwrap() else {
+            panic!("relayed")
+        };
+        page_started(app.handle());
+        assert!(state.with(&opened, |_| ()).is_none());
+        assert!(matches!(
+            waiting.try_recv(),
+            Err(oneshot::error::TryRecvError::Closed)
+        ));
+        assert_eq!(
+            admitted(
+                &state,
+                &opened,
+                json!({"id": 5, "type": "chat.send", "args": []})
+            )
+            .unwrap_err(),
+            "Not an app window"
+        );
+        assert!(post(app.handle(), &opened, json!({"event": "x", "data": 1})).is_err());
+        // The test driver's window has no broker in the page: it stays.
+        assert!(state.with(&driver, |_| ()).is_some());
     }
 
     #[test]
