@@ -87,7 +87,7 @@ One TXT record `_req`: `base64url(nonce(24) || XChaCha20-Poly1305(request seal k
 - `text`: the first message, 1 to 200 UTF-8 bytes. The requester's app measures the whole packet before sending and says "Shorten the message" when it does not fit; nothing is cut. (Measured with the core's packet encoder: the plaintext may reach 640 bytes; the array without name and text takes 260, so a 48-unit name of three-byte characters and a 200-byte text fit with 36 bytes to spare for JSON escapes.)
 - `issued`, `expires`: milliseconds; `expires` at most seven days after `issued`.
 
-An owner's app refuses a request whole when it does not open, the packet is not signed by *K*, the JSON does not hold, the invite does not read as version 1 or names a key the owner already knows as one of its own, the name or text breaks a bound, or `expires` is past.
+An owner's app refuses a request whole when it does not open, the packet is not signed by *K*, the JSON does not hold, the invite does not read as version 1 or is one the owner made or already joined (accepting it would name an existing chat as the request says and put its text there), the name or text breaks a bound, `expires` is past, or `issued` is more than ten minutes ahead of the owner's clock (a request dated later would wait past its seven days).
 
 ## Stamp
 
@@ -108,13 +108,13 @@ The stamp does not stop a determined flood: a machine makes a few thousand a day
 3. Publishes its request under *K*, and republishes it every hour while the app runs, until it is seen or expires.
 4. Knocks: reads its slot, keeps the other entries made today or yesterday (at most five, the newest), adds its own, publishes, and reads the slot back a second later (twice at most; a relay may still answer with the record from before). Then it reads its slot and the link record every 30 s for ten minutes and every ten minutes after, knocking again whenever its entry is gone, until its `seen` entry shows in the link record.
 5. Seen: it stops knocking and republishing. Its own chat list shows the request as a chat waiting for an answer, under the name the requester gave the link (by default "Contact link"), with the text it sent. Its invite waits like any invite nobody joined yet ([403](403-dht-text.md#first-contact)).
-6. Seven days after `issued` with no answer, the request ends: "No answer". The invite is dropped, and the asker key is kept, so asking again goes to the same place in the owner's list.
+6. Seven days after `issued` with no answer, the request ends: "No answer", seen or not. The invite is dropped, and the asker key is kept, so asking again goes to the same place: the owner's app dropped that request unanswered, so it reads the new one as any other.
 
 **Taking requests.** The owner's app reads the four slots every five minutes while it runs, and every 15 s for ten minutes after the link was shown or copied, or Requests opened. For each entry with a good stamp whose asker key is not already waiting, accepted or declined, within the [limits](#limits), it reads that key's `_req` once, checks it, stores it in **Requests** and adds its `seen` entry. A key whose `_req` was missing or refused is read again at most once an hour.
 
 **Accept.** The app joins the request's invite exactly as if it had been pasted in Join ([801](801-invitation-profiles.md)): first contact on the DHT and a stream in parallel ([403](403-dht-text.md#first-contact)). The chat appears in the chat list with the requester's name and first message, and from there it is an ordinary chat. The requester's waiting chat becomes the same chat when the owner's first envelope arrives. The owner is identified to the requester only now, by what any chat shows.
 
-**Decline.** The app deletes the request's name and text, keeps the asker key as declined for this link, and says nothing: no envelope, no record, no change in `seen`. Later knocks from that key are skipped without a read. Block does the same in 1.4. A request whose `expires` passed while it waited is dropped the same way, and its Accept is greyed meanwhile ("This request expired").
+**Decline.** The app deletes the request's name and text, keeps the asker key as declined for this link, and says nothing: no envelope, no record, no change in `seen`. Later knocks from that key are skipped without a read. Block does the same in 1.4. An accepted key is kept the same way. A request whose `expires` passed while it waited is dropped without keeping its key, so its asker may ask again; its Accept is refused meanwhile ("This request expired").
 
 ## Limits
 
@@ -125,7 +125,8 @@ The stamp does not stop a determined flood: a machine makes a few thousand a day
 | Reads of one asker key's `_req` | Once per hour | Skipped |
 | Knock slots read per poll | 4 | Never more, whatever the slots hold |
 | Entries per slot | 6, made today or yesterday | Oldest dropped by the next writer |
-| Request lifetime | 7 days | "No answer" for the requester, dropped for the owner |
+| Request lifetime | 7 days, dated at most ten minutes ahead | "No answer" for the requester, dropped for the owner |
+| Accepted and declined keys kept | The latest 4,096 | The oldest is forgotten, and may ask again |
 | Name, text | 48 UTF-16 units, 200 UTF-8 bytes | Refused before sending |
 | Stamp difficulty | 16 to 24 bits, 18 by default | A link record asking for more or less is not a link record |
 
