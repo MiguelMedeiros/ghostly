@@ -57,6 +57,14 @@ describe("GroupMembersDialog", () => {
     expect(screen.queryByTestId("group-link")).not.toBeInTheDocument();
   });
 
+  // On a hovered or focused row (surface-hover), danger's own red read at 3.0-3.8:1 in the dark themes (agents#1155).
+  it("draws Remove in danger's ink, which reads on a hovered or focused row", () => {
+    members_(groupView({ status: "active", isAdmin: true, members }));
+    const remove = within(row(BOB)).getByTestId("group-remove-member");
+    expect(remove).toHaveClass("text-danger-ink");
+    expect(remove).not.toHaveClass("text-danger");
+  });
+
   it("lets the admin promote or remove anyone but themselves", async () => {
     const { user, engine } = members_(groupView({ status: "active", isAdmin: true, members }));
     engine.on("makeGroupAdmin", () => undefined).on("removeGroupMember", () => undefined);

@@ -226,7 +226,7 @@ const MemberRow = memo(function MemberRow({ member: m, focused, viaHub, photo, m
       <button disabled={busy} onClick={() => onPromote(m)} data-testid="group-make-admin"
         className="rounded px-2 py-1 text-xs text-text-secondary hover:bg-surface-alt hover:text-text-primary disabled:opacity-40">{t("group.members.makeAdmin")}</button>
       <button disabled={busy} onClick={() => onRemove(m)} data-testid="group-remove-member"
-        className="rounded px-2 py-1 text-xs text-danger hover:bg-danger/10 disabled:opacity-40">{t("group.members.remove")}</button>
+        className="rounded px-2 py-1 text-xs text-danger-ink hover:bg-danger/10 disabled:opacity-40">{t("group.members.remove")}</button>
     </span>}
   </li>;
 }, sameRow);
