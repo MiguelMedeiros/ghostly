@@ -106,6 +106,7 @@ import {
   type PairedTransport,
   type GroupEntryLink,
   entryParams,
+  pacer,
 } from "@ghostly/core";
 import type { AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, type StoredFile } from "../shared/idb";
@@ -407,6 +408,8 @@ export const SPARE_INVITE_MIN_AGE_MS = 6_000;
  * first 11 s, and read nothing more for the rest of the minute, the others' answers included (bug hunt r7a, 2026-09-29).
  */
 export const STARTUP_QUIET_MS = 15_000;
+/** At start, how long links start in one task before the page gets the thread back (`startNow`). */
+const START_SLICE_MS = 10;
 const SPARE_INVITE_MAX_AGE_MS = 15 * 60_000;
 /** How far before this clock a warm packet is dated (`warmKey`): further than a contact's clock is ever behind. */
 export const WARM_DATED_BACK_MS = 24 * 60 * 60_000;
@@ -1724,12 +1727,20 @@ export class GhostlyNode implements EngineImplementation {
     }
     // With the chats loaded, profiles of identities no longer verified can be told apart and dropped.
     this.publicProfiles.start();
+    // Each link derives its keys and seals its capability record as it starts: 50 chats and 20 groups in one task held
+    // the page for 575-762 ms at 4x CPU, right as the chat list appeared. They start in slices that let the page go, in
+    // the same order; a chat not started yet reads as offline until its turn.
+    const pause = pacer(START_SLICE_MS);
     if (this.networkOn) for (const linkId of this.nativeStartOrder([...history.keys()])) {
+      // Gone offline or shut down while the page had the thread: the links left start with the network, if ever.
+      if (!this.networkOn || this.shuttingDown) break;
       const messages = history.get(linkId)!;
       if (!this.links.has(linkId)) continue;
       this.startLink(linkId, messages);
       if (!this.links.get(linkId)?.stored.group) void this.refreshPublicProfiles({ linkId }).catch(() => {});
+      await pause();
     }
+    if (this.shuttingDown) return;
     this.emitState();
     if (this.networkOn) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(STARTUP_QUIET_MS); }
     if (!this.limitedMode) this.openStartedWallets(fresh);
