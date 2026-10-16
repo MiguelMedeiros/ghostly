@@ -49,8 +49,8 @@ describe("ghostly x401 key and credential", { timeout: 120_000 }, () => {
     const shown = ok(await run("x401", "credential", "list", "--show-secret")).credentials as Record<string, unknown>[];
     expect(shown[0].values).toMatchObject({ given_name: "Alice", licence_number: "TEST-0001" });
 
-    // The key went with the credential it is bound to: the same credential again has no key to go to.
-    expect(error(await run("x401", "credential", "add", file("again.txt", issueSdJwtVc({ holder: jwk }))), "bad_request", 1).message).toMatch(/kept already|did not make/);
+    // The key went with the credential it is bound to: the same credential again has no key to go to, and says which holds it.
+    expect(error(await run("x401", "credential", "add", file("again.txt", issueSdJwtVc({ holder: jwk }))), "bad_request", 1).message).toMatch(/kept already|already holds credential/);
 
     expect(ok(await run("x401", "credential", "remove", added.id as string))).toEqual({ removed: added.id });
     expect(ok(await run("x401", "credential", "list")).credentials).toEqual([]);

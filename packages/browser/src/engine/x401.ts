@@ -19,8 +19,17 @@ interface StoredX401Credential {
   expiresAt?: number;
 }
 
-/** The `x401Credentials` record: credentials, and the keys made for one that no credential is bound to yet. */
-interface StoredX401 { keys: StoredHolderKey[]; credentials: StoredX401Credential[] }
+/**
+ * A key this profile made that waits no more, by its public JWK only: dropped for a newer one, or gone with the
+ * credential that held it. A credential bound to it is refused with that, not as a key the profile never made.
+ */
+interface RetiredHolderKey { jwk: X401HolderJwk; credential?: string }
+
+/**
+ * The `x401Credentials` record: credentials, the keys made for one that no credential is bound to yet, and the latest
+ * keys that wait no more (none in a record from before them).
+ */
+interface StoredX401 { keys: StoredHolderKey[]; credentials: StoredX401Credential[]; retired?: RetiredHolderKey[] }
 
 export interface X401CredentialView {
   id: string; label: string; format: "dc+sd-jwt"; type: string; issuer: string; addedAt: number; expiresAt: number | null;
@@ -36,6 +45,9 @@ export const X401_KEY = "x401Credentials";
 const MAX_CREDENTIALS = 32;
 /** Keys waiting for an issuer: the oldest goes when one more is made. */
 const MAX_WAITING_KEYS = 8;
+/** Keys that wait no more, remembered to say so: the oldest is forgotten past this. */
+const MAX_RETIRED_KEYS = 32;
+const ASK_FOR_A_NEW_KEY = "ask the issuer to bind it to a key from x401 key new";
 const LABEL_CHARS = 80;
 const newId = () => toBase64Url(crypto.getRandomValues(new Uint8Array(12)));
 
@@ -45,6 +57,19 @@ function paths(value: Record<string, unknown>, at: X401ClaimPath = []): X401Clai
     const path = [...at, key];
     return typeof item === "object" && item !== null && !Array.isArray(item) ? [path, ...paths(item as Record<string, unknown>, path)] : [path];
   });
+}
+
+/** The record's retired keys with `more` after them: the latest `MAX_RETIRED_KEYS`. */
+const retire = (stored: StoredX401, more: RetiredHolderKey[]): RetiredHolderKey[] => [...(stored.retired ?? []), ...more].slice(-MAX_RETIRED_KEYS);
+
+/** Why a credential's key is not one waiting for it: what became of it, when this profile made it. */
+function notWaiting(stored: StoredX401, holder: X401HolderJwk): string {
+  const held = stored.credentials.find((c) => sameX401HolderJwk(c.holderKey.jwk, holder));
+  if (held) return `This credential's key already holds credential ${held.id} (${held.label}): a key takes one credential`;
+  const retired = [...(stored.retired ?? [])].reverse().find((r) => sameX401HolderJwk(r.jwk, holder));
+  if (retired?.credential) return `This credential's key went with credential ${retired.credential} when it was removed`;
+  if (retired) return `This credential's key was dropped: a profile keeps the ${MAX_WAITING_KEYS} newest keys waiting for a credential`;
+  return "This credential is bound to a key this profile did not make";
 }
 
 /**
@@ -69,16 +94,21 @@ export class X401Credentials {
     await transact([STORES.settings], (stores) => { stores[STORES.settings].put(value, X401_KEY); });
   }
 
-  /** A fresh P-256 holder key, kept until a credential bound to it is added. Its public JWK goes to the issuer. */
-  async newKey(): Promise<{ id: string; jwk: X401HolderJwk }> {
+  /**
+   * A fresh P-256 holder key, kept until a credential bound to it is added. Its public JWK goes to the issuer. A profile
+   * keeps the 8 newest keys waiting: past them, the oldest is dropped, and `dropped` names it.
+   */
+  async newKey(): Promise<{ id: string; jwk: X401HolderJwk; dropped?: string }> {
     const { secret, jwk } = newX401HolderKey();
     const deviceKey = newDeviceKey();
     const key: StoredHolderKey = { id: newId(), jwk, secret: { sealed: await sealSeed(toBase64Url(secret), deviceKey), deviceKey }, createdAt: Date.now() };
     secret.fill(0);
     return this.serial(async () => {
       const stored = await this.load();
-      await this.save({ ...stored, keys: [...stored.keys, key].slice(-MAX_WAITING_KEYS) });
-      return { id: key.id, jwk };
+      const keys = [...stored.keys, key];
+      const dropped = keys.slice(0, -MAX_WAITING_KEYS);
+      await this.save({ ...stored, keys: keys.slice(-MAX_WAITING_KEYS), retired: retire(stored, dropped.map((k) => ({ jwk: k.jwk }))) });
+      return { id: key.id, jwk, ...(dropped.length ? { dropped: dropped[0]!.id } : {}) };
     });
   }
 
@@ -98,13 +128,13 @@ export class X401Credentials {
     const stored = await this.load();
     if (stored.credentials.some((c) => c.credential === credential)) throw new Error("This credential is kept already");
     const holderKey = stored.keys.find((k) => sameX401HolderJwk(k.jwk, vc.holder));
-    if (!holderKey) throw new Error("This credential is bound to a key this profile did not make: ask the issuer to bind it to a key from x401 key new");
+    if (!holderKey) throw new Error(`${notWaiting(stored, vc.holder)}: ${ASK_FOR_A_NEW_KEY}`);
     if (stored.credentials.length >= MAX_CREDENTIALS) throw new Error(`A profile keeps at most ${MAX_CREDENTIALS} credentials: remove one first`);
     const kept: StoredX401Credential = {
       id: newId(), label: (label?.trim() || vc.type).slice(0, LABEL_CHARS), format: vc.format, credential, type: vc.type, issuer: vc.issuer,
       holderKey, addedAt: Date.now(), ...(vc.expiresAt !== undefined ? { expiresAt: vc.expiresAt * 1000 } : {}),
     };
-    await this.save({ keys: stored.keys.filter((k) => k !== holderKey), credentials: [...stored.credentials, kept] });
+    await this.save({ ...stored, keys: stored.keys.filter((k) => k !== holderKey), credentials: [...stored.credentials, kept] });
     return this.viewOf(kept, false);
   }
 
@@ -116,8 +146,9 @@ export class X401Credentials {
   remove({ id }: { id: string }): Promise<boolean> {
     return this.serial(async () => {
       const stored = await this.load();
-      if (!stored.credentials.some((c) => c.id === id)) return false;
-      await this.save({ ...stored, credentials: stored.credentials.filter((c) => c.id !== id) });
+      const gone = stored.credentials.find((c) => c.id === id);
+      if (!gone) return false;
+      await this.save({ ...stored, credentials: stored.credentials.filter((c) => c !== gone), retired: retire(stored, [{ jwk: gone.holderKey.jwk, credential: id }]) });
       return true;
     });
   }
