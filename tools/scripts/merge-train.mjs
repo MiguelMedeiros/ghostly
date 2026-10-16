@@ -81,6 +81,8 @@ export const LABEL = { queue: "queue", priority: "queue:priority", conflict: "qu
 // 12, not 5: each pull request's own full CI no longer gates boarding (the batch's does), so one batch run covers more
 // of the line, and bisection still finds a culprit of 12 in four splits.
 export const MAX_BATCH = 12;
+/** The most pages of 100 the train reads of one list (comments, events, pull requests, jobs). */
+const PAGES_READ = 10;
 const POSITION = "<!-- merge-train:position -->";
 const HEAD = /<!-- merge-train:head (\w+) -->/;
 const STATE = /<!-- merge-train:batch (\{.*?\}) -->/g;
@@ -247,6 +249,8 @@ export function order(prs) {
 export function waiting(pr) {
   if (pr.draft) return "it is a draft";
   if (pr.fork) return "it comes from a fork";
+  if (pr.unread === "comments") return `it has more comments than the train reads (${PAGES_READ * 100}), so it cannot find its own record of the reviewed head; it moves on once a maintainer deletes some of them`;
+  if (pr.unread) return `it has more events than the train reads (${PAGES_READ * 100}), so it cannot tell when it was queued or whether its base changed; close it and open a new pull request from the same branch`;
   if (pr.ci === "failure") return "CI Success is red on its last commit; push a fix";
   // The fast tier is enough to board: the batch's full CI is the gate.
   if (pr.ci === "success" || pr.fast === "success") return null;
@@ -465,6 +469,10 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     if (run.head_branch !== p.branch) why = `it ran for \`${run.head_branch}\``;
     else {
       p.events ??= await gh.events(p.number);
+      if (p.events.truncated) {
+        say(`#${p.number}: it has more events than the train reads, so a base change may be missing; its green CI run on ${p.sha.slice(0, 12)} does not count.`);
+        return false;
+      }
       const moved = p.events.filter((e) => BASE_CHANGES.has(e.event)).map((e) => Date.parse(e.created_at));
       if (moved.length && !(Date.parse(run.created_at) > Math.max(...moved))) {
         why = "it ran before the base was changed";
@@ -493,7 +501,12 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     p.ci = ciState(await gh.ciJobs(p.sha, counts(p)));
     // The fast tier on the same head: read only when CI Success alone does not decide.
     if (p.ci !== "success" && p.ci !== "failure") p.fast = draftState(await gh.draftJobs(p.sha));
-    p.sticky = (await gh.comments(p.number)).find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
+    const said = await gh.comments(p.number);
+    p.sticky = said.find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
+    // GitHub lists both oldest first, and anyone may comment: past what the train reads, its own position comment (the
+    // reviewed head) or the latest `queue` may be missing. That is a doubt, not "none yet": it waits, and gets no new comment.
+    if (events.truncated) p.unread = "events";
+    else if (!p.sticky && said.truncated) p.unread = "comments";
     // Written before the latest `queue` (taken off and added again): it speaks for an earlier head, and the label
     // added since vouches for the one it was added on. It is rewritten (or deleted) like any position comment.
     const relabeled = vouchedAt(events, p.labels, null);
@@ -1004,6 +1017,11 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
           ? positionText(base, p, 0, inFlight.number, p.sha, null, held)
           : positionText(base, p, ++place, 0, p.sha, null, held);
     if (!p.sticky && p.pushedAt === null) continue; // no CI on its head yet: its comment would record a head of unknown age
+    if (p.unread) {
+      // A comment posted now would be past what the next run reads too: one more every run.
+      say(`::warning::#${p.number} waits: ${waiting(p)}.`);
+      continue;
+    }
     await setSticky(p, text);
     if (!aboard.has(p.number)) await cancelBehind(p);
   }
@@ -1096,14 +1114,16 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     if (!r.ok && !(method === "DELETE" && (r.status === 404 || r.status === 422))) throw new Error(`${method} ${path}: HTTP ${r.status} ${r.data?.message ?? ""}`);
     return r.data;
   };
+  /** Up to `PAGES_READ` pages of 100; a list that fills them all may go on, and says so (`truncated`). */
   const all = async (path) => {
     const out = [];
-    for (let page = 1; page <= 10; page++) {
+    for (let page = 1; page <= PAGES_READ; page++) {
       const data = await must("GET", `${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${page}`);
       const list = Array.isArray(data) ? data : (data.jobs ?? data.check_runs);
       out.push(...list);
-      if (list.length < 100) break;
+      if (list.length < 100) return out;
     }
+    out.truncated = true;
     return out;
   };
   // CI's runs on a commit and each run's jobs are read once per layer, so once per run of the train: `ciJobs` and
