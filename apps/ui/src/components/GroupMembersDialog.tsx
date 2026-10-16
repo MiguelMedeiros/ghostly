@@ -1,11 +1,11 @@
 import { memo, useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { COMMUNITY_LIMITS, GROUP_LIMITS, MAX_GROUP_MEMBERS, MAX_GROUP_NAME_LENGTH, MAX_GROUP_PICTURE_LENGTH, MESH_HUBS, groupName } from "@ghostly/core";
+import { COMMUNITY_LIMITS, GROUP_LIMITS, MAX_GROUP_MEMBERS, MAX_GROUP_PICTURE_LENGTH, MESH_HUBS, groupName } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
 import { useBackdropDismiss } from "../hooks/useDismiss";
 import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
-import { edgeDot, edgeLabel, groupStatusText, memberName, memberPhoto } from "../lib/groups";
+import { edgeDot, edgeLabel, fitGroupName, groupStatusText, memberName, memberPhoto } from "../lib/groups";
 import { agoIn } from "../lib/relativeTime";
 import { GroupLinkPanel } from "./GroupLinkPanel";
 import { RemoveMemberDialog } from "./RemoveMemberDialog";
@@ -108,8 +108,8 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
           {naming === null ? <h2 id={`${id}-title`} data-testid="group-members-name" className="truncate text-base font-semibold">{live.name}</h2>
             : <form className="flex items-center gap-2" onSubmit={e => { e.preventDefault(); void rename(); }}>
               <h2 id={`${id}-title`} className="sr-only">{live.name}</h2>
-              <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} value={naming} maxLength={MAX_GROUP_NAME_LENGTH} disabled={busy !== null}
-                onChange={e => setNaming(e.target.value)} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setNaming(null); } }}
+              <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} value={naming} disabled={busy !== null}
+                onChange={e => setNaming(fitGroupName(e.target.value))} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setNaming(null); } }}
                 className="min-w-0 flex-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-sm focus:border-accent focus:outline-none" />
               <button type="submit" data-testid="group-rename-save" disabled={busy !== null || !groupName(naming)}
                 className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{t("group.rename.save")}</button>
