@@ -727,6 +727,50 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     for (const p of others) expect(sha(t.got(p, id, messageId).bytes!)).toBe(meta.d);
   });
 
+  it.each([false, true])("a member served slowly leaves its holder for one that says it is free (slow upload: %s)", async slow => {
+    const t = new FilesWorld();
+    const { peers: [alice, ...others], id } = await t.mesh(["alice", "phone1", "phone2", "phone3", "fast1", "fast2", "fast3", "fast4"]);
+    const phones = others.slice(0, 3), fast = others.slice(3);
+    for (const p of others) t.files.get(p)!.settings.autoDownloads = false;
+    // A phone's slow upload: what its askers confirm to it (pf-accept, pf-got) goes once every 12 s, so it serves about
+    // 1/12 of what the others do; what it fetches is not slowed.
+    const held: { from: Peer; to: Peer; frame: Record<string, unknown> }[] = [];
+    let releasing = false;
+    const seen = t.world.drop!;
+    t.world.drop = (from, to, frame) => {
+      if (seen(from, to, frame)) return true;
+      if (!slow || releasing || !phones.includes(to) || (frame.t !== "pf-accept" && frame.t !== "pf-got")) return false;
+      held.push({ from, to, frame });
+      return true;
+    };
+    const release = () => {
+      releasing = true;
+      for (const { from, to, frame } of held.splice(0)) t.world.sendFiles(from, from.host.edges(id).get(t.key(to, id))!, frame);
+      releasing = false;
+    };
+    const settled = async () => { for (let i = 0; i < 40; i++) await t.world.settle(); };
+    const { messageId, meta } = await t.send(alice, id, pattern(4 * 1024 * 1024, 7));
+    await t.world.until(() => others.every(p => !!t.got(p, id, messageId).message?.file), 60_000);
+    const start = t.world.now;
+    // The phones ask first and take the author's three places; the fast four are turned away as busy, and hear of the
+    // phones as holders when they are done, as soon as of the author's places freeing.
+    for (const p of phones) await p.groups.downloadFile(t.got(p, id, messageId).message!.file!.id);
+    await t.world.run(1_000);
+    for (const p of fast) await p.groups.downloadFile(t.got(p, id, messageId).message!.file!.id);
+    let step = 0;
+    while (!fast.every(p => t.done(p, id, messageId)) && t.world.now - start < 10 * 60_000) {
+      await t.world.run(1_000);
+      // What each member's app has to say goes within the second: an edge moves a window of bytes a second.
+      await settled();
+      if (++step % 12 === 0) { release(); await settled(); }
+    }
+    // A transfer from the author takes 5-7 s: the phones, then three of the fast four. The fourth, turned away again,
+    // takes a phone, and leaves it once it is seen slow for one said free since (another phone, then the author or a
+    // fast member done). Before, it stayed with the first phone for the whole file (61 s).
+    expect((t.world.now - start) / 1000).toBeLessThan(30);
+    for (const p of others) expect(sha(t.got(p, id, messageId).bytes!)).toBe(meta.d);
+  });
+
   it("files a holder named wait on it only behind the author's edge: one it is slow to serve does not hold back the rest, which another member in reach serves", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob, carol, dave], id } = await t.mesh(["alice", "bob", "carol", "dave"]);

@@ -50,6 +50,12 @@ export const GROUP_FILE_LIMITS = {
    */
   wantWaitMs: 30_000,
   /**
+   * A holder that served a file this long, at a pace that leaves more than `wantWaitMs` to go, is left for another that
+   * said it holds the file since (its place free): the next one goes on from the bytes stored. A phone's slow upload
+   * then holds up no member that a free holder could serve.
+   */
+  slowAfterMs: 5_000,
+  /**
    * How long a served transfer with all its bytes confirmed waits for the member's word that its check passed once the
    * member's next want has overtaken it.
    */

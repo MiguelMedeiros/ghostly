@@ -209,6 +209,11 @@ interface Want {
   wire?: string;
   moved: number;
   movedAt: number;
+  /** When the holder offered, and the bytes stored here then: its pace is what moved since. */
+  offeredAt?: number;
+  offeredBytes?: number;
+  /** Holders that said they hold the file while another served it: one it may leave for, when that one is slow (`leaveSlow`). */
+  free?: Set<string>;
   /** What the last holder asked in this round answered, when it was not the file: shown while the want waits. */
   why?: "busy" | "damaged";
   /**
@@ -544,7 +549,9 @@ export class GroupFileDesk {
       want.wire = frame.id;
       want.why = undefined;
       want.moved = -1;
-      want.movedAt = this.deps.now();
+      want.movedAt = want.offeredAt = this.deps.now();
+      want.offeredBytes = kept.stored ?? 0;
+      want.free = undefined;
     }
     return edge.files.handle(frame);
   }
@@ -555,6 +562,7 @@ export class GroupFileDesk {
     for (const [id, want] of this.wants) {
       const kept = this.kept.get(id);
       if (!kept) { this.wants.delete(id); continue; }
+      if (this.leaveSlow(kept, want)) continue;
       if (now - (want.wire ? want.movedAt : want.at) < GROUP_FILE_LIMITS.wantWaitMs) continue;
       if (want.wire) {
         // A holder that stalls, or sends too little to count (`wantMoveBytes`), is left: the transfer ends here, and the
@@ -702,6 +710,32 @@ export class GroupFileDesk {
     return false;
   }
 
+  /**
+   * The holder serving this want is slow (served `slowAfterMs`, and at its pace more than `wantWaitMs` to go) and a holder
+   * that said it holds the file since is free to ask: the transfer ends here, what came stays, and the next holder is
+   * asked (`transferChanged`), so a phone's slow upload does not keep a member the author or a fast holder could serve.
+   */
+  private leaveSlow(kept: Kept, want: Want): boolean {
+    if (!want.wire || !want.free?.size || want.offeredAt === undefined) return false;
+    const edge = want.linkId ? this.edgesById.get(want.linkId) : undefined;
+    const record = edge?.files.get("in", want.wire);
+    if (!edge || !record || transferEnded(record) || record.state === "verifying") return false;
+    const elapsed = this.deps.now() - want.offeredAt;
+    if (elapsed < GROUP_FILE_LIMITS.slowAfterMs) return false;
+    const stored = Math.max(want.moved, kept.stored ?? 0, want.offeredBytes ?? 0), pace = (stored - (want.offeredBytes ?? 0)) / elapsed;
+    if (pace > 0 && (kept.meta.size - stored) / pace <= GROUP_FILE_LIMITS.wantWaitMs) return false;
+    const edges = this.deps.edges(kept.groupId);
+    const other = [...want.free].some(key => {
+      const linkId = edges.get(key);
+      return !!linkId && key !== want.holder && this.mayAsk(kept, want, key, linkId) && this.deps.ready(linkId)
+        && !!this.edgesById.get(linkId)?.files.live && !this.askedOf(linkId, want);
+    });
+    if (!other) return false;
+    want.free = undefined;
+    edge.files.cancel("in", want.wire);
+    return true;
+  }
+
   /** No holder serves the author's bytes: the want stops, and stays stopped after a restart, until Download. */
   private stopDamaged(kept: Kept): void {
     this.wants.delete(kept.id);
@@ -750,6 +784,7 @@ export class GroupFileDesk {
       if (!want) continue;
       want.tried.delete(from);
       want.busy?.delete(from);
+      if (want.wire && from !== want.holder) (want.free ??= new Set()).add(from);
       if (want.holder) continue;
       if (this.deps.transfers.get(kept.id)?.stage === "queued" && !this.freeFor(kept, want, free ??= this.freeEdges(groupId).filter(([key]) => key === from))) continue;
       this.ask(kept);
