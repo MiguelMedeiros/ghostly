@@ -50,6 +50,11 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Not enough space on this device (QuotaExceededError)", `${BROWSER}/shared/idb.ts`, "Not enough space on this device ("],
   ["Not enough space on this device (QuotaExceededError: The quota has been exceeded.)", `${BROWSER}/shared/idb.ts`, "Not enough space on this device ("],
   ["Not enough space on this device (No space left on device (os error 28))", `${BROWSER}/engine/forwards.ts`, "Not enough space on this device ("],
+  // A part that loads on demand whose file did not come (offline before the worker kept it, or a deploy replaced it under
+  // an open tab): the browser's own words, Chromium's, WebKit's and Firefox's. The part written there is the load.
+  ["Failed to fetch dynamically imported module: https://app.ghostly.tools/assets/index-AbC123.js", `${BROWSER}/engine/wallet.ts`, 'import("@cashu/cashu-ts")'],
+  ["Importing a module script failed.", `${BROWSER}/engine/paymentAdapters/providers/nwcProvider.ts`, 'await import("./nwc")'],
+  ["error loading dynamically imported module: https://app.ghostly.tools/assets/bitcoind-AbC123.js", `${BROWSER}/engine/paymentAdapters/providers/bitcoindProvider.ts`, 'await import("./bitcoind")'],
   ["Someone else joined with this invite first. Ask your contact for a new one.", "packages/core/src/ghostlink.ts"],
   ["Chat has been burned", "packages/browser/src/platform/useChat.ts"],
   ["No transport both apps allow is available yet", `${CORE}/ghostlink.ts`],
@@ -574,6 +579,14 @@ describe("errors in the app's language", () => {
     expect(knownErrorParts(away, translators.pt)).toEqual({ title: "Este contato está offline", next: "Convide quando ele estiver online." });
     const old = new Error("Their app does not take part in groups: they need an updated Ghostly first.");
     expect(knownErrorParts(old, english)).toEqual({ title: "Their app needs an update first", next: "Their app needs groups (an updated Ghostly)." });
+  });
+
+  it("a part of Ghostly that did not load is said in the language, not in the browser's English", () => {
+    const pt = translators.pt;
+    for (const raw of ["Failed to fetch dynamically imported module: https://app.ghostly.tools/assets/index-AbC123.js", "Importing a module script failed.", "error loading dynamically imported module: https://app.ghostly.tools/assets/x.js"]) {
+      expect(problemText(new TypeError(raw), pt)).toEqual({ tone: "error", title: "Uma parte do Ghostly não carregou.", next: "Verifique sua conexão e tente de novo. Se continuar falhando, recarregue o Ghostly.", detail: raw });
+    }
+    expect(errorText(new TypeError("Importing a module script failed."), english)).toBe("Part of Ghostly did not load. Check your connection, then try again. If it still fails, reload Ghostly.");
   });
 
   it("each rule has a sample, so none stops matching unseen", () => {
