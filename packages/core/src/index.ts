@@ -16,6 +16,7 @@ export * from "./invite";
 export * from "./deviceInvite";
 export * from "./contactLink";
 export * from "./contactRecords";
+export * from "./contactInbox";
 export * from "./enroll";
 export * from "./setUpdate";
 export * from "./handoff";
