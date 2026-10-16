@@ -27,7 +27,7 @@ import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMen
 import { groupChat } from "../lib/chatMute";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { GroupInvitationCard } from "../components/GroupInvitation";
-import { authorName, forgetGroupLocal, groupReadAt, groupStatusText, markGroupRead, memberName, memberPhoto } from "../lib/groups";
+import { authorName, forgetGroupLocal, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, memberName, memberPhoto } from "../lib/groups";
 import { clearChatNotification } from "../lib/notifications";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { authorsMemo, type MessageAuthor } from "../lib/senderRuns";
@@ -394,8 +394,10 @@ export function GroupChat() {
   // Read while the page shows; in a hidden window what comes stays unread (usePageShown).
   // Written only when something new was read, as a chat's is: every write wakes the other pages of the app (`storage`).
   const pageShown = usePageShown();
+  // Up to the newest of what the list calls unread: after a restart a message written before the mark but handed over
+  // later has lastMessageAt at its writing, lastPeerMessageAt and lastMentionAt at its arrival.
   const readGroupId = group?.id;
-  const readUpTo = group?.lastMessageAt;
+  const readUpTo = group && Math.max(group.lastMessageAt, groupUnreadAt(group), group.lastMentionAt ?? 0);
   useEffect(() => {
     if (!readGroupId || readUpTo === undefined || !pageShown || groupReadAt(readGroupId) >= readUpTo) return;
     markGroupRead(readGroupId, Math.max(readUpTo, Date.now()));
