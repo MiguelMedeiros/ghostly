@@ -642,6 +642,21 @@ async function startDetached(g: Globals, seconds: number) {
   return { daemon: "started", profile: g.profile, pid: child.pid, socket: g.paths.socket, log: g.paths.log };
 }
 
+/**
+ * Nobody reads `listen`'s output any more (`listen | head -n 1`, a `grep -m1` that found its line): it stops as on
+ * SIGTERM, exit 0. Through a daemon it died on an 'error' nobody handled; on its own profile it served on with nobody
+ * to tell, holding the profile until `daemon stop`. Any other failure of the output is still an error.
+ */
+function onReaderGone(stop: () => void): void {
+  let gone = false;
+  process.stdout.on("error", (error: NodeJS.ErrnoException) => {
+    if (gone) return;
+    if (error.code !== "EPIPE") throw error;
+    gone = true;
+    stop();
+  });
+}
+
 async function listenCommand(argv: string[]): Promise<void> {
   const parsed = parseArgs(argv, {
     since: { type: "number", description: "" }, cursor: { type: "string", description: "" }, type: { type: "list", description: "" },
@@ -716,9 +731,11 @@ async function listenCommand(argv: string[]): Promise<void> {
         reconnect(1000);
       });
     };
+    const stop = () => { current?.close(); process.exit(0); };
+    onReaderGone(stop);
     await follow(client);
-    process.on("SIGINT", () => { current?.close(); process.exit(0); });
-    process.on("SIGTERM", () => { current?.close(); process.exit(0); });
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
     return;
   }
   // No daemon: this process becomes it (the socket too, so hooks can answer with `ghostly send`).
@@ -731,6 +748,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   const stop = stopper(async () => { await served.close(); await host.close(); });
   host.ctx.stop = stop;
   onStopSignals(stop);
+  onReaderGone(stop);
   // The hub's listener comes off while the feed is paused, and back after a replay from the last event taken. What a
   // replay gave and the feed did not take yet waits for the resume: one read of the journal per catch-up, not one per
   // pause; the journal is read again only for what came meanwhile.
