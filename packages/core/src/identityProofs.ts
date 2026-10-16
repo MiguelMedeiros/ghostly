@@ -1,5 +1,5 @@
 import { sha256 } from "@noble/hashes/sha2.js";
-import { fromBase64Url, randomBytes, toBase64Url, utf8Encode } from "./bytes";
+import { fromBase64Url, isZ32Key, randomBytes, toBase64Url, utf8Encode } from "./bytes";
 import { identityFromSeed, publicKeyFromZ32, sign, verify } from "./identity";
 import { applyIdentityEvent, type IdentityTimelineEntry, type IdentityTimelineEvent } from "./identityTimeline";
 
@@ -37,7 +37,6 @@ const MAX_CHALLENGES = 8;
 export const IDENTITY_PROVIDER_ID = /^[a-z][a-z0-9-]{0,31}$/;
 /** Printable ASCII without spaces, so the statement can be built but never needs parsing. */
 export const IDENTITY_SUBJECT = /^[\x21-\x7e]{1,512}$/;
-const KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
 const BINDING_NONCE = /^[A-Za-z0-9_-]{22}$/;
 const CHALLENGE_NONCE = /^[A-Za-z0-9_-]{43}$/;
 const HEX64 = /^[a-f0-9]{64}$/;
@@ -113,7 +112,7 @@ export function isIdentityBinding(value: unknown): value is IdentityBinding {
     Object.keys(b).sort().join(",") === "expiresAt,issuedAt,key,nonce,provider,subject,v" && b.v === 1 &&
     typeof b.provider === "string" && IDENTITY_PROVIDER_ID.test(b.provider) &&
     typeof b.subject === "string" && IDENTITY_SUBJECT.test(b.subject) &&
-    typeof b.key === "string" && KEY.test(b.key) && typeof b.nonce === "string" && BINDING_NONCE.test(b.nonce) &&
+    isZ32Key(b.key) && typeof b.nonce === "string" && BINDING_NONCE.test(b.nonce) &&
     isInt(b.issuedAt) && isInt(b.expiresAt) && b.expiresAt > b.issuedAt && b.expiresAt - b.issuedAt <= IDENTITY_MAX_VALIDITY &&
     // ISO dates in the text need years 1970–9999.
     b.expiresAt < 253_402_300_800;
@@ -155,7 +154,7 @@ export function signIdentityPresentation(seed: Uint8Array, proofId: string, scop
 }
 
 export function verifyIdentityPresentation(key: string, sig: string, proofId: string, scope: IdentityScope, nonce: string, issuedAt: number): boolean {
-  if (typeof sig !== "string" || !SIG.test(sig) || !KEY.test(key)) return false;
+  if (typeof sig !== "string" || !SIG.test(sig) || !isZ32Key(key)) return false;
   return verify(fromBase64Url(sig), identityPresentationBytes(proofId, scope, nonce, issuedAt), publicKeyFromZ32(key));
 }
 

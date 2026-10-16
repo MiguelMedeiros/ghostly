@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createIdentity, identityFromSeedB64, sign } from "../src/identity";
-import { toBase64Url } from "../src/bytes";
+import { isZ32Key, toBase64Url } from "../src/bytes";
 import { confirmationTag, epochKeys, newEpochSecret } from "../src/groupCrypto";
 import {
 // covers: groups.protocol.community-commits, groups.community.join, groups.community.remove, groups.community.leave, groups.community.late-joiner
@@ -105,6 +105,8 @@ function addBranch(signer: Member, parent: CommunityCommit, parentRoster: Roster
   return out;
 }
 const commitFrame = (commit: CommunityCommit) => ({ t: "group-commit", v: 2, g: commit.g, commit: clone(commit) });
+/** The key with its last character swapped for the other one that decodes to the same bytes but is not canonical. */
+const respell = (key: string) => { const a = "ybndrfg8ejkmcpqxot1uwisza345h769"; return key.slice(0, 51) + a[a.indexOf(key[51]) ^ 1]; };
 
 async function say(net: Net, m: Member, text: string): Promise<void> {
   const result = await m.session.sendText(text, m.name);
@@ -256,6 +258,50 @@ describe("community sessions", { timeout: 60_000 }, () => {
     // An epoch bob does not know yet, and a signature that is not alice's.
     for (let n = 0; n < COMMUNITY_LIMITS.waiting + 4; n++) await bob.session.handle(alice.session.myKey, { ...frame, e: (frame.e as number) + 1, n, sig: toBase64Url(new Uint8Array(64)) });
     expect((bob.session as unknown as { waiting: unknown[] }).waiting).toHaveLength(0);
+  });
+
+  it("drops a message or a commit whose key is respelled in its last character, and does not reject", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    await net.meet(alice, bob);
+    const captured: CommunityFrame[] = [];
+    const quiet = new CommunitySession(clone(alice.saved), { save: async () => {}, broadcast: f => { captured.push(f); }, direct: () => {}, addressed: () => {}, message: () => {}, changed: () => {} });
+    await quiet.sendText("hi", "alice");
+    const frame = captured.find(f => (f as { t?: string }).t === "group-msg") as unknown as Record<string, unknown>;
+    // The same 32 bytes under another last character: not alice's key, and not a key at all (WISP 02).
+    const s = respell(alice.session.myKey);
+    expect(isZ32Key(s)).toBe(false);
+    // A respelled key is refused at parse, so `publicKeyFromZ32` is never reached with one (it would throw, and the
+    // rejection would tear down the paired session the frame came over).
+    await expect(bob.session.handle(alice.session.myKey, { ...frame, s })).resolves.toBe(false);
+    const top = bob.session.top, roster = bob.session.roster;
+    const commit = forge(alice, top, roster, { k: "add", s: createIdentity().pubKeyZ32 }).commit;
+    await expect(bob.session.handle(alice.session.myKey, commitFrame({ ...commit, by: s }))).resolves.toBe(false);
+    await expect(bob.session.handle(alice.session.myKey, commitFrame({ ...commit, e: commit.e + 1, by: s }))).resolves.toBe(false);
+    expect(bob.session.topHash).toBe(communityCommitHash(top));
+    expect(net.texts(bob)).toEqual([]);
+  });
+
+  it("seals a fresh commit's secret to every member but one whose key an older build pinned respelled", async () => {
+    const net = new Net();
+    const alice = net.create("alice");
+    const bob = await net.admit(alice, "bob");
+    const carol = await net.admit(alice, "carol");
+    // Carol as a build before `MEMBER_KEY` was canonical could have added her: under a respelled key, in the chain
+    // every member stored.
+    const s = respell(carol.session.myKey);
+    const stored = (m: Member) => { const saved = clone(m.saved); saved.chain.find(c => c.k === "add" && c.s === carol.session.myKey)!.s = s; return saved; };
+    const sealed: string[] = [], committed: CommunityFrame[] = [];
+    const quiet = (saved: CommunityState) => new CommunitySession(saved, { save: async () => {}, broadcast: f => committed.push(f), direct: () => {}, addressed: (to, f) => { if ((f as { t?: string }).t === "group-secret") sealed.push(to); }, message: () => {}, changed: () => {} });
+    const admin = quiet(stored(alice)), member = quiet(stored(bob));
+    expect(admin.roster.map(([k]) => k)).toContain(s);
+    await expect(admin.rotate()).resolves.toBeUndefined();
+    expect(sealed).toEqual([bob.session.myKey]);
+    expect(admin.canSend).toBe(true);
+    // The others take the commit: a community commit carries the roster's hash, not its keys.
+    await expect(member.handle(alice.session.myKey, clone(committed[0]))).resolves.toBe(true);
+    expect(member.topHash).toBe(admin.topHash);
   });
 
   it("a leave is committed by another member on the leaver's request, with a fresh secret", async () => {

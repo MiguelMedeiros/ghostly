@@ -1,5 +1,5 @@
 import { verifyEvent, type Event } from 'nostr-tools/pure';
-import type { ProofAdapter, ProofRecord } from '@ghostly/core';
+import { isZ32Key, type ProofAdapter, type ProofRecord } from '@ghostly/core';
 
 export interface PublicProfile {
   adapter: ProofAdapter; key: string; name?: string; avatar?: string;
@@ -244,7 +244,7 @@ export async function lookupPublicProfile(adapter: ProofAdapter,key: string): Pr
       const m=await readNostrProfile(key); if(!m)return empty;
       return {...empty,name:m.name,eventAt:m.eventAt,eventId:m.eventId,avatar:await cacheAvatar(m.picture),source:'nostr-signed'};
     }
-    if((adapter==='pubky-import' || adapter==='pubky-storage') && /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/.test(key)) {
+    if((adapter==='pubky-import' || adapter==='pubky-storage') && isZ32Key(key)) {
       const response=await fetch(`https://nexus.pubky.app/v0/user/${key}/details`,{signal:AbortSignal.timeout(5000),credentials:'omit',referrerPolicy:'no-referrer',redirect:'error',cache:'no-store'});
       const data=JSON.parse(new TextDecoder().decode(await boundedBytes(response,16384)));
       const m=pubkyMetadata(data,key); if(!m)return empty;

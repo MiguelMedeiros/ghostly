@@ -1,4 +1,4 @@
-import { isValidServiceId } from "@ghostly/core";
+import { isValidServiceId, isZ32Key } from "@ghostly/core";
 
 /**
  * Virtual origin of a remote service: `https://<service id>.<peer key>.invalid`.
@@ -13,7 +13,6 @@ import { isValidServiceId } from "@ghostly/core";
  */
 const VIEWER_SUFFIX = ".invalid";
 export const VIEWER_URL_PATTERN = `https://*${VIEWER_SUFFIX}/*`;
-const PEER_KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
 
 export function viewerUrl(peerPubKeyZ32: string, serviceId: string, path = "/"): string {
   return `https://${serviceId}.${peerPubKeyZ32}${VIEWER_SUFFIX}${path}`;
@@ -30,6 +29,6 @@ export function parseViewerUrl(input: string): { peerPubKeyZ32: string; serviceI
   const labels = url.hostname.slice(0, -VIEWER_SUFFIX.length).split(".");
   if (labels.length !== 2) return null;
   const [serviceId, peerPubKeyZ32] = labels;
-  if (!isValidServiceId(serviceId) || !PEER_KEY.test(peerPubKeyZ32)) return null;
+  if (!isValidServiceId(serviceId) || !isZ32Key(peerPubKeyZ32)) return null;
   return { peerPubKeyZ32, serviceId, path: `${url.pathname}${url.search}` };
 }

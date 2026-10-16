@@ -24,6 +24,8 @@ describe("the viewer's virtual origin", () => {
     ["no service", `https://${PEER}.invalid/`],
     ["a key with letters outside z-base-32", `https://atlas.${"l".repeat(52)}.invalid/`],
     ["a key of the wrong length", `https://atlas.${PEER}y.invalid/`],
+    // The same 32 bytes as PEER: `o` and `t` differ in a padding bit alone, and only `o` is the key (WISP 02).
+    ["a key respelled in its last character", `https://atlas.${PEER.slice(0, 51)}t.invalid/`],
     ["a service id starting with a dash", `https://-atlas.${PEER}.invalid/`],
     ["a service id too long", `https://${"a".repeat(33)}.${PEER}.invalid/`],
     ["a service id with an underscore", `https://at_las.${PEER}.invalid/`],
