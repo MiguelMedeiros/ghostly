@@ -97,6 +97,8 @@ export function findChat(links: readonly LinkView[], ref: string): LinkView {
 
 /** `findChat`, and whether only what the contact controls (`theirName`: a prefix of the id, its own name) found the chat. */
 function chatBy(links: readonly LinkView[], ref: string): { link: LinkView; theirName: boolean } {
+  // "" (an unset variable in a script) is a prefix of every id: it took the only chat.
+  if (!ref.trim()) throw new CliError("bad_request", `${JSON.stringify(ref)} names no chat`);
   const exact = links.find((link) => link.id === ref);
   if (exact) return { link: exact, theirName: false };
   if (CONTACT_KEY.test(ref)) {
@@ -124,6 +126,7 @@ const invitedOnly = (group: GroupView) => group.status === undefined && !!group.
  * where no group of this profile has it.
  */
 export function findGroup(groups: readonly GroupView[], ref: string): GroupView {
+  if (!ref.trim()) throw new CliError("bad_request", `${JSON.stringify(ref)} names no group`);
   const exact = groups.find((group) => group.id === ref);
   if (exact) return exact;
   const lower = ref.toLowerCase();
