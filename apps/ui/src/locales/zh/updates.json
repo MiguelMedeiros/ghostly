@@ -14,6 +14,7 @@
   "later": "稍后",
   "manualHint": "下载后替换当前安装。",
   "reload": "重新加载",
+  "replaced": "Ghostly {{version}} 的新构建已发布",
   "restart": "更新并重启",
   "title": "更新",
   "upToDate": "Ghostly 已是最新版本",

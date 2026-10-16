@@ -23,7 +23,7 @@ export function UpdateBanner() {
     >
       <div className="min-w-0 flex-1">
         <p className="text-text-primary text-xs font-semibold m-0 truncate">
-          {t("updates.available", { version: update.version })}
+          {t(update.replaced ? "updates.replaced" : "updates.available", { version: update.version })}
         </p>
         <p className="text-text-muted text-[11px] m-0 truncate">
           {installing
