@@ -6,6 +6,13 @@ export interface FoundUpdate {
    * one aside with it.
    */
   build?: string;
+  /**
+   * The same version, built again, found because this build's files are gone
+   * from the server. The banner says a new build instead of naming a version
+   * the client already runs. Never set for another version (a rollback found
+   * the same way is named by its version, like any update).
+   */
+  replaced?: boolean;
   /** Release notes, where the platform publishes them. */
   notes?: string;
   /**
@@ -34,6 +41,13 @@ export interface UpdatePlatform {
   check(): Promise<FoundUpdate | null>;
   /** Puts it in place. Never called for `apply: "manual"`. */
   install(update: FoundUpdate, onProgress?: (fraction: number) => void): Promise<void>;
+  /**
+   * Calls `listener` when the platform learns that a file of this build is gone
+   * from the server (the web app's worker got a 404 for one): a deploy replaced
+   * it, and the app checks at once. Returns what stops listening. Left out where
+   * a platform cannot tell.
+   */
+  onBuildGone?(listener: () => void): () => void;
 }
 
 /**

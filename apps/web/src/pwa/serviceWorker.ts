@@ -4,8 +4,9 @@ import type { FromWorker, ToWorker } from "../sw/messages";
 
 /*
  * The page's side of the service worker (`src/sw/sw.ts`): registering it, putting a new version in place when
- * the user presses Reload, and taking what another app shared. Everything here is behind feature detection: a
- * browser without service workers runs the app exactly as before, from the network.
+ * the user presses Reload, taking what another app shared, and hearing that a file of this build is gone. Everything
+ * here is behind feature detection: a browser without service workers runs the app exactly as before, from the
+ * network.
  */
 
 const SCRIPT = "/sw.js";
@@ -79,6 +80,32 @@ export async function applyUpdate({ timeoutMs = 60_000, reload = () => window.lo
   reload();
 }
 
+// ---------- a build gone from the server ----------
+
+let gone = false;
+const goneListeners = new Set<() => void>();
+
+/**
+ * Whether the worker found a file of this build gone from the server: a deploy replaced it, and a wallet or Iroh
+ * opened now fails for good. Stays true for the page's life (the files do not come back), so every later check
+ * offers the new build too, including a redeploy of the same version.
+ */
+export function buildGone(): boolean {
+  return gone;
+}
+
+/** Calls `listener` when the worker says a file of this build is gone, so the app checks at once. Returns what stops it. */
+export function onBuildGone(listener: () => void): () => void {
+  goneListeners.add(listener);
+  return () => { goneListeners.delete(listener); };
+}
+
+/** The worker said so. The check that follows fetches the new worker once it finds the deploy (`prepareUpdate`). */
+function noteBuildGone(): void {
+  gone = true;
+  for (const listener of goneListeners) listener();
+}
+
 // ---------- share target ----------
 
 /** Whether this page was opened for a share (the worker redirects there after the POST). */
@@ -87,8 +114,9 @@ export function openedForShare(): boolean {
 }
 
 /**
- * Shares the worker hands this page, now and later: a share made while this tab is the app arrives here from
- * another tab that opened for it. Each goes to the "Share to…" picker.
+ * What the worker tells this page, now and later. Shares: a share made while this tab is the app arrives here from
+ * another tab that opened for it, and each goes to the "Share to…" picker. A wake-up notification tapped: its chat.
+ * A file of this build gone from the server: the app's update check runs now (`onBuildGone`).
  */
 export function listenForShares(): void {
   const workers = container();
@@ -96,6 +124,7 @@ export function listenForShares(): void {
   workers.addEventListener("message", (event: MessageEvent<FromWorker>) => {
     const message = event.data;
     if (message?.type === "open-chat") { openChat(message.path, message.profile); return; }
+    if (message?.type === "build-gone") { noteBuildGone(); return; }
     if (message?.type !== "share" || !message.item) return;
     receiveShare(message.item as IncomingShare);
     if (!openedForShare()) window.location.hash = "#/shared";
