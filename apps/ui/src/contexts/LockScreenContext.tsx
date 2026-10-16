@@ -11,6 +11,7 @@ import { useSettings } from "./SettingsContext";
 import { hashPassword, needsRehash, verifyPassword } from "../lib/settings";
 import { activeProfileId } from "../lib/profiles";
 import { takeUnlockHandover } from "../lib/lockHandover";
+import { stopRunningApps } from "../lib/apps/open";
 
 interface LockScreenContextValue {
   isLocked: boolean;
@@ -100,6 +101,12 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
   const checkIdleRef = useRef<() => void>(() => {});
+
+  // The apps running (Desktop's windows of their own, the web's frames under the lock) stop when it locks: their
+  // brokers would go on answering behind it.
+  useEffect(() => {
+    if (isLocked) stopRunningApps();
+  }, [isLocked]);
 
   const lock = useCallback(() => {
     if (settings.lockScreen.enabled && settings.lockScreen.passwordHash) {

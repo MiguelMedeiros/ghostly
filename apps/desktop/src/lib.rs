@@ -416,8 +416,10 @@ fn on_page_load<R: tauri::Runtime>(
 }
 
 /// The native listeners of the page before this one: stopped, their eight places free (`TransportState::page_started`).
+/// The app windows it opened close (`app_sandbox::page_started`).
 #[cfg(desktop)]
 fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    app_sandbox::page_started(app);
     if let Some(transports) = app.try_state::<paired_transport::TransportState>() {
         transports.page_started();
     }
