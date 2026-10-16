@@ -2,7 +2,7 @@ import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH,
 import type { EngineState, GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
-import { ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
+import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
 import { CliError } from "./errors";
 import {
   bool, chatOf, chatOrGroup, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, waitForState,
@@ -663,6 +663,9 @@ const METHODS: Record<string, Method> = {
     if (args && "confirmedReal" in args && !bool(params, "confirmReal")) {
       throw new CliError("confirm", `${method} spends real money: pass --confirm-real (confirmReal: true over the socket) to confirm it`);
     }
+    const deletes = DESTRUCTIVE_CALLS.get(method);
+    if (deletes && !bool(params, "yes")) throw new CliError("confirm", `${method} ${deletes}; pass --yes (yes: true over the socket) to go on`);
+    if (method === "clearProfileData") return clearProfile(ctx);
     if (method === "getMessages") return node(ctx).getMessages(str(args ?? {}, "linkId", true));
     if (method === "getState") return state(ctx);
     // Someone chose the chat on screen: an invite's mark no longer clears it.
@@ -673,6 +676,20 @@ const METHODS: Record<string, Method> = {
     return (await target.call(node(ctx), args)) ?? null;
   },
 };
+
+/**
+ * "Clear all data": the engine withdraws what it can, stops and empties its stores; the app reloads its page after it.
+ * A daemon would go on serving the stopped engine's memory (chats and groups that are gone, new ones that are not
+ * kept): it stops once it has answered, and the next command starts on the emptied profile.
+ */
+async function clearProfile(ctx: ApiContext): Promise<{ cleared: { chats: number; groups: number }; stopped?: true }> {
+  const { links, groups } = state(ctx);
+  await node(ctx).clearProfileData();
+  const cleared = { chats: links.length, groups: groups.length };
+  if (ctx.mode !== "daemon" || !ctx.stop) return { cleared };
+  setTimeout(() => ctx.stop!(), 10);
+  return { cleared, stopped: true };
+}
 
 /** Reacts to a message of a chat or a group (`group:<id>`): `emoji`, or `remove` for "" (WISP 400 § Reactions). */
 async function react(ctx: ApiContext, linkId: string, params: Params): Promise<{ messageId: string; emoji: string | null; removed: boolean }> {
