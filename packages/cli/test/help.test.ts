@@ -70,6 +70,28 @@ describe("help", () => {
     expect((await ghostly(["help", "listen"])).stdout).toContain("[--print]");
   });
 
+  it("profile and settings name their commands as every group does, and help for a word a group does not take is unknown", async () => {
+    // `profile frob` said "ghostly profile create|list|use|show|set|picture|backup|restore", `settings frob` "ghostly
+    // settings get | settings set <key> <json-value>"; `help chat histroy` printed the chat group's list with exit 0.
+    const profile = "create, list, use, show, set, backup, restore or picture";
+    for (const [args, message] of [
+      [["profile"], `ghostly profile takes a command: ${profile} (ghostly help profile)`],
+      [["profile", "frob"], `Unknown command: profile frob: ghostly profile takes ${profile} (ghostly help profile)`],
+      [["settings"], "ghostly settings takes a command: get or set (ghostly help settings)"],
+      [["settings", "frob"], "Unknown command: settings frob: ghostly settings takes get or set (ghostly help settings)"],
+      [["help", "profile", "frob"], `Unknown command: profile frob: ghostly profile takes ${profile} (ghostly help profile)`],
+      [["help", "x401", "key", "frob"], "Unknown command: x401 key frob: ghostly x401 key takes new (ghostly help x401 key)"],
+      [["wallet", "frob", "--help"], expect.stringMatching(/^Unknown command: wallet frob: ghostly wallet takes .*\bfaucet\b.* \(ghostly help wallet\)$/)],
+    ] as const) {
+      const result = await ghostly([...args]);
+      expect(result.code, args.join(" ")).toBe(2);
+      expect(result.json, args.join(" ")).toEqual({ error: { code: "usage", message } });
+    }
+    const chat = await ghostly(["help", "chat", "histroy"]);
+    expect(chat.code).toBe(2);
+    expect((chat.json.error as { message: string }).message).toMatch(/^Unknown command: chat histroy: ghostly chat takes .*\bhistory\b.* \(ghostly help chat\)$/);
+  });
+
   it("--help=false is the command, and a global boolean's --no- form may come before the command", async () => {
     // `--no-pretty status` was "Unknown command: --no-pretty status"; `--help=true` ran the command (a `chat remove --yes` too).
     for (const args of [["--no-pretty", "version"], ["version", "--help=false"]]) {
