@@ -360,6 +360,8 @@ const WALLETS: Record<string, Method> = {
     const nets = params.networks === undefined ? undefined : (() => {
       const value = params.networks;
       if (!Array.isArray(value) || !value.every((v) => v === "mainnet" || v === "testnet")) throw new CliError("bad_request", "networks must list mainnet and/or testnet");
+      // An empty list names no network: the method would stay on while it is taken nowhere.
+      if (value.length === 0) throw new CliError("bad_request", "networks must list mainnet and/or testnet: to stop taking it, --off");
       return value as WalletNetwork[];
     })();
     await node(ctx).setChatPaymentMethods({ linkId: link.id, methods: { [method]: on }, ...(nets ? { networks: { [method]: nets } } : {}) });
