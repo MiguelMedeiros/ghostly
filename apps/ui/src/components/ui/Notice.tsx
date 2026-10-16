@@ -22,7 +22,7 @@ const COLOR: Record<NoticeTone, string> = {
  */
 export function Notice({ tone, title, next, details, problem, children, testId, className = "text-xs", ink = false }: {
   tone?: NoticeTone; title?: ReactNode; next?: ReactNode; details?: string; problem?: Problem | null; children?: ReactNode; testId?: string; className?: string;
-  /** On a chat bubble: the error's red that reads on the bubble's own colour (`text-danger-ink`). */
+  /** On a chat bubble or a surface-hover row: the error's red that reads on that colour (`text-danger-ink`). */
   ink?: boolean;
 }) {
   const id = useId();
