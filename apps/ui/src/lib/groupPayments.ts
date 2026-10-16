@@ -25,7 +25,9 @@ export function groupPayTitle(note: GroupPayNote, group: GroupView, t: Translate
 
 /** Where it stands: `data-state` and the words. */
 export function groupPayStatus(note: GroupPayNote, group: GroupView, t: Translate = english): { state: "open" | "sent" | "paid" | "closed"; text: string } {
-  if (note.state === "paid") return { state: "paid", text: note.by && note.from === "*" ? t("payments.group.status.paidBy", { name: who(group, note.by, t, false) }) : t("payments.group.status.paid") };
+  // A request to the group paid through an invoice names nobody: its payee cannot tell who paid (a note an older app
+  // kept may still carry a name).
+  if (note.state === "paid") return { state: "paid", text: note.by && note.from === "*" && note.rail !== "lightning" ? t("payments.group.status.paidBy", { name: who(group, note.by, t, false) }) : t("payments.group.status.paid") };
   if (note.state === "closed") return { state: "closed", text: t(note.kind === "payment" ? "payments.group.status.takenBack" : "payments.group.status.closed") };
   const claims = note.claims ?? [];
   if (note.kind === "request" && claims.length) {
