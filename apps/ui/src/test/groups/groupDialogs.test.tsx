@@ -7,6 +7,7 @@ import { GroupMembersDialog } from "../../components/GroupMembersDialog";
 import { NewGroupDialog } from "../../components/NewGroupDialog";
 import { fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { compose } from "../ime";
 import { publicKeyLabel } from "../../lib/publicKeyLabel";
 
 // covers: groups.create, groups.invite, groups.remove-member, groups.admin-change, groups.link.enable, groups.link.replace, groups.hubs
@@ -498,6 +499,22 @@ describe("NewGroupDialog", () => {
     input.setSelectionRange(0, 3);
     await user.paste("Their");
     expect(input).toHaveValue(`The ${full.slice(4)}`);
+  });
+
+  // A name with one character left took the reading's first kana and kept it: "に", not "日本" nor nothing (agents#1153).
+  it("leaves a word composed with an IME whole while it is composed, then takes it whole if it fits, else nothing", async () => {
+    const { user } = open();
+    const input = screen.getByTestId("new-group-name") as HTMLInputElement;
+    const seen: string[] = [];
+    await user.paste("x".repeat(MAX_GROUP_NAME_LENGTH - 1));
+    compose(input, ["に", "にほ", "日本"], value => seen.push(value.slice(MAX_GROUP_NAME_LENGTH - 1)));
+    expect(seen).toEqual(["に", "にほ", "日本"]);
+    expect(input).toHaveValue("x".repeat(MAX_GROUP_NAME_LENGTH - 1));
+    expect(input.selectionStart).toBe(MAX_GROUP_NAME_LENGTH - 1);
+    // Two left: the word goes in.
+    await user.keyboard("{Backspace}");
+    compose(input, ["に", "にほ", "日本"]);
+    expect(input).toHaveValue(`${"x".repeat(MAX_GROUP_NAME_LENGTH - 2)}日本`);
   });
 
   it("stops a name at the bytes the group takes too", async () => {
