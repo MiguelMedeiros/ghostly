@@ -1,5 +1,6 @@
 import { MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME_LENGTH, decodeCommunityLink, decodeGroupEntryLink, groupEntryUrl, type PairedTransport } from "@ghostly/core";
 import { getPrefix, setSessionDraft } from "./storage";
+import { decodePart } from "./url";
 import { setChatFolder } from "./chatFolders";
 import { forgetChatMute, groupChat } from "./chatMute";
 import type { GroupEdgeView, GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
@@ -127,7 +128,7 @@ export function groupPath(groupId: string): string {
 /** The group a `/group/…` address points at, or null. */
 export function groupRouteId(pathname: string): string | null {
   const match = pathname.match(/^\/group\/([^/]+)\/?$/);
-  return match ? decodeURIComponent(match[1]) : null;
+  return match ? decodePart(match[1]) : null;
 }
 
 /** When the group last had something unread come: another member's message (an engine without the field: any message). */
