@@ -606,6 +606,19 @@ describe("answering a call", () => {
     expect(missed.slice(1)).toEqual(burst.map((ts) => ["call_missed", false, undefined, ts]));
   });
 
+  it("a person's call placed again soon after they cancelled it rings: only a call that barely rang holds the next back", () => {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    // It rang 3 s, then the caller cancelled it and placed a video call 1.2 s later (voice to video, a slip of the finger).
+    act(() => { vi.advanceTimersByTime(3000); });
+    call.receive(remote.hangUp(Date.now()));
+    act(() => { vi.advanceTimersByTime(1200); });
+    call.receive(remote.offer(Date.now()));
+
+    expect(call.result.current.callState).toBe("incoming");
+    expect(lines(call)).toEqual(["call_received", "call_missed", "call_received"]);
+  });
+
   it("a call placed again once a person could have redialled rings", () => {
     const call = renderCall();
     call.receive(remote.offer(Date.now()));
@@ -618,7 +631,7 @@ describe("answering a call", () => {
     expect(lines(call)).toEqual(["call_received", "call_missed", "call_received"]);
   });
 
-  it("a call declined here does not hold the next ring back; one that rang out does", () => {
+  it("a call declined here does not hold the next ring back, nor does one that rang out", () => {
     const call = renderCall();
     call.receive(remote.offer(Date.now()));
     act(() => call.result.current.rejectCall());
@@ -629,10 +642,11 @@ describe("answering a call", () => {
     // The person said no to this call, not to every call: the next one rings.
     expect(call.result.current.callState).toBe("incoming");
 
+    // A call that rang its whole minute was a person's: calling again at once (as its caller's "No answer" lets them) rings.
     act(() => { vi.advanceTimersByTime(RING_MS); });
     act(() => { vi.advanceTimersByTime(50); });
     call.receive(remote.offer(Date.now()));
-    expect(call.result.current.callState).toBe("idle");
+    expect(call.result.current.callState).toBe("incoming");
   });
 
   it("an answered call is not missed when RING_MS passes", async () => {
