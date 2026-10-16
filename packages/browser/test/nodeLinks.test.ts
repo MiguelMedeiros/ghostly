@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { LIMITS, createIdentity, dhtFileId, type FileSink, type GhostLinkOptions } from "@ghostly/core";
 import { GROUP_IROH_WEB_SLOTS, GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS, type NodeOptions } from "../src/engine/node";
 import { db } from "../src/engine/db";
+import { setJoinTraceSink } from "../src/engine/joinTrace";
 import { EditQueue } from "../src/engine/edits";
 import { STORES, fileStore, transact } from "../src/shared/idb";
 import { storedBlob } from "../src/shared/storedFiles";
@@ -54,6 +55,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     start = vi.fn();
     stop = vi.fn(async () => {});
     wake = vi.fn();
+    expectPeer = vi.fn();
     depart = vi.fn();
     connect = vi.fn(async () => {});
     disconnect = vi.fn();
@@ -1535,6 +1537,86 @@ describe("private groups through the engine", () => {
       expect(iroh).toHaveBeenCalledTimes(2);
     });
 
+    // A member on a VPN, in a group, the VPN turned on with the edges live: every WebRTC connection closed and none came
+    // back. The edges this side offers on said so (`no-path`) and went native; one it answers on said nothing, and stayed
+    // on WebRTC, down, while the member's 1:1 chats went on over Iroh's relay (2026-10-16).
+    it("an open edge whose WebRTC died goes on over a native transport once this device's attempts say its network blocks direct connections", async () => {
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      const { node, iroh } = await nativeEngine();
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const offered: string[] = [];
+      for (let i = 0; i < 3; i++) offered.push(await openEdge(node, state, createIdentity().pubKeyZ32));
+      const answered = await openEdge(node, state, createIdentity().pubKeyZ32);
+      await node["nativeQueue"];
+      const quiet = edgeOf(answered);
+      for (const id of [...offered, answered]) edgeOf(id).options.events.onDirectEvidence("open");
+      // The VPN comes on: each connection ends.
+      for (const id of [...offered, answered]) { edgeOf(id).isDataLinkOpen = false; edgeOf(id).options.events.onDirectEvidence("closed"); }
+      await node["nativeQueue"];
+      expect(edgeOf(answered)).toBe(quiet);
+      // This side's offers on three edges are answered and connect nothing.
+      for (const id of offered) {
+        const first = edgeOf(id);
+        first.options.events.onDirectEvidence("no-path");
+        await vi.waitFor(() => expect(edgeOf(id)).not.toBe(first));
+      }
+      expect(node.getState().transport.directBlocked).toBe(true);
+      // The edge it answers on goes native too, with no goodbye.
+      await vi.waitFor(() => expect(edgeOf(answered)).not.toBe(quiet));
+      expect(quiet.stop).toHaveBeenCalledWith(false);
+      expect(edgeOf(answered).options.rtcAvailable).toBe(false);
+      await vi.waitFor(() => expect(edgeOf(answered).registerEndpoint).toHaveBeenCalledOnce());
+      expect(iroh).toHaveBeenCalledTimes(4);
+    });
+
+    // A member's packet that carries a WebRTC answer and its `_tr` can leave its `_svc` out for size, and reads as gone;
+    // the next one reads as back. Each such pair put the edge back on WebRTC, which died again on the VPN (2026-10-16).
+    it("an edge gone native does not go back to WebRTC on a return once WebRTC failed again after one, or once it went live natively", async () => {
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      const { node } = await nativeEngine();
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const presence = (online: boolean, at: number) => ({ online, lastPacketAt: at, services: online ? [] : null });
+      const flicker = async (link: ReturnType<typeof edgeOf>, at: number) => {
+        link.options.events.onPresence(presence(false, at));
+        link.options.events.onPresence(presence(true, at + 1));
+        await node["nativeQueue"];
+      };
+      const edgeId = await openEdge(node, state, createIdentity().pubKeyZ32);
+      const first = edgeOf(edgeId);
+      first.options.events.onDirectEvidence("no-path");
+      await vi.waitFor(() => expect(edgeOf(edgeId)).not.toBe(first));
+      // Gone and back once: WebRTC again, as before.
+      await flicker(edgeOf(edgeId), 1);
+      await vi.waitFor(() => expect(edgeOf(edgeId).options.rtcAvailable).toBe(true));
+      // It failed again: native, and there it stays, whatever the member's packets say.
+      edgeOf(edgeId).options.events.onDirectEvidence("no-path");
+      await vi.waitFor(() => expect(edgeOf(edgeId).options.rtcAvailable).toBe(false));
+      const held = edgeOf(edgeId);
+      await flicker(held, 3);
+      await flicker(held, 5);
+      expect(edgeOf(edgeId)).toBe(held);
+
+      // Another edge gone native whose session opened over Iroh: the member is reachable, WebRTC is not.
+      const liveId = await openEdge(node, state, createIdentity().pubKeyZ32);
+      const rtc = edgeOf(liveId);
+      rtc.options.events.onDirectEvidence("no-path");
+      await vi.waitFor(() => expect(edgeOf(liveId)).not.toBe(rtc));
+      const native = edgeOf(liveId);
+      native.options.events.onDataLinkState("open");
+      native.options.events.onDataLinkState("idle");
+      await flicker(native, 7);
+      expect(edgeOf(liveId)).toBe(native);
+      // The network changed: what failed on the old one says nothing of this one, and a return tries WebRTC again.
+      node.wake({ network: true });
+      await flicker(native, 9);
+      await vi.waitFor(() => expect(edgeOf(liveId)).not.toBe(native));
+      expect(edgeOf(liveId).options.rtcAvailable).toBe(true);
+    });
+
     // libdatachannel's race on a loaded core refused every answer to the edge's offers, through the pauses after them:
     // the next offer would wait minutes of backoff while the member is there (meshSignals on CI, 2026-10-11).
     it("an edge whose answers WebRTC here keeps refusing goes on over a native transport, as one whose WebRTC connected nothing", async () => {
@@ -1561,6 +1643,37 @@ describe("private groups through the engine", () => {
       first.options.events.onAnswersRefused();
       await node["nativeQueue"];
       expect(edgeOf(refused)).toBe(again);
+      expect(iroh).toHaveBeenCalledOnce();
+    });
+
+    // A joiner or an admin behind a VPN: the admin's packet was seen on the entry session, which never went live, and the
+    // join stayed at "Let in: getting the group's keys" until it was cancelled (2026-10-16).
+    it.each(["guest", "host"] as const)("an entry session (%s side) whose WebRTC connects nothing goes on over a native transport, as an edge does", async (role) => {
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      const { node, iroh } = await nativeEngine();
+      vi.spyOn(node["groups"], "tick").mockResolvedValue();
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const me = createIdentity(), other = createIdentity();
+      const entryId = await node["openEntry"]({ g: groupId, host: other.pubKeyZ32 }, role, me.seedB64, other.pubKeyZ32);
+      await node["nativeQueue"];
+      expect(iroh).not.toHaveBeenCalled();
+      const first = edgeOf(entryId);
+      expect(first.options.rtcAvailable).toBe(true);
+      // Said in the join's trace, which a CLI daemon writes to its log.
+      const traced: string[] = [];
+      setJoinTraceSink((line) => traced.push(JSON.parse(line).step));
+      onTestFinished(() => { setJoinTraceSink(null); });
+      first.options.events.onDirectEvidence("no-path");
+      await vi.waitFor(() => expect(edgeOf(entryId)).not.toBe(first));
+      expect(first.stop).toHaveBeenCalledWith(false);
+      const again = edgeOf(entryId);
+      expect(again.options.rtcAvailable).toBe(false);
+      // Still the one admission it carries, on the same pinned session.
+      expect(again.options).toMatchObject({ oneShot: true, paymentMethods: { cashu: false } });
+      expect(again.expectPeer).toHaveBeenCalled();
+      expect(traced).toContain("link.native");
+      await vi.waitFor(() => expect(again.registerEndpoint).toHaveBeenCalledOnce());
       expect(iroh).toHaveBeenCalledOnce();
     });
 

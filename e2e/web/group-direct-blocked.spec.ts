@@ -99,3 +99,33 @@ test("a member whose network blocks direct connections is reached by the whole g
   for (const member of [alice, bob, carol]) for (const text of ["from behind the VPN", "hello from carol"])
     await expect(wallpaper(member).getByText(text, { exact: true })).toBeVisible({ timeout: 120_000 });
 });
+
+// The entry session of a group's link ran WebRTC only: the admin's app answered the knock, its packet was seen, and the
+// join stayed at "Let in: getting the group's keys" until it was cancelled, whichever side was behind the block.
+for (const blocked of ["joiner", "admin"] as const) {
+  test(`joining a private group by its link goes through when the ${blocked}'s network blocks direct connections`, {
+    tag: ["@feature:groups.link.join", "@feature:groups.native-links", "@feature:transport.iroh-web"],
+  }, async ({ peer }) => {
+    test.setTimeout(8 * 60_000);
+    const relay = endpoints.irohRelay;
+    const [alice, bob] = await Promise.all([
+      peer("alice", { irohRelay: relay, ...(blocked === "admin" && { beforeOpen: noDirectPath }) }),
+      peer("bob", { irohRelay: relay, ...(blocked === "joiner" && { beforeOpen: noDirectPath }) }),
+    ]);
+    await Promise.all([setName(alice, "Alice"), setName(bob, "Bob")]);
+    await alice.page.getByTestId("sidebar-new-more").click();
+    await alice.page.getByTestId("new-group").click();
+    await alice.page.getByTestId("new-group-name").fill("Ghosts");
+    await alice.page.getByTestId("new-group-kind-mesh").click();
+    await alice.page.getByTestId("new-group-create").click();
+    const url = await alice.page.getByTestId("group-share-dialog").getByTestId("group-link-url").inputValue();
+    await alice.page.getByTestId("group-share-done").click();
+
+    await bob.page.goto(url);
+    await expect(groupChat(bob)).toHaveAttribute("data-status", "active", { timeout: 240_000 });
+    await expect(alice.page.getByTestId("group-event").filter({ hasText: "Bob joined" })).toBeVisible({ timeout: 60_000 });
+    for (const member of [alice, bob]) await expect(member.page.getByTestId("group-members")).toContainText("1 of 1 reachable", { timeout: 240_000 });
+    await say(bob, "in through the link");
+    await expect(wallpaper(alice).getByText("in through the link", { exact: true })).toBeVisible({ timeout: 120_000 });
+  });
+}
