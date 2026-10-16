@@ -21,6 +21,7 @@
   "paste": "クリップボードから貼り付け",
   "pasteScreenshot": "QRコードのスクリーンショットを貼り付けることもできます。",
   "placeholder": "招待を貼り付け…",
+  "qrReaderNotLoaded": "QRリーダーを読み込めませんでした。接続を確認してから、もう一度試してください。",
   "scan": "QRをスキャン",
   "submit": "参加",
   "title": "チャットに参加",

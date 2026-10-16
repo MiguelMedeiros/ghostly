@@ -21,6 +21,7 @@
   "paste": "Coller depuis le presse-papiers",
   "pasteScreenshot": "Ou collez une capture d’écran du code QR.",
   "placeholder": "Collez l'invitation…",
+  "qrReaderNotLoaded": "Le lecteur de QR ne s’est pas chargé. Vérifiez votre connexion, puis réessayez.",
   "scan": "Scanner QR",
   "submit": "Rejoindre",
   "title": "Rejoindre une discussion",
