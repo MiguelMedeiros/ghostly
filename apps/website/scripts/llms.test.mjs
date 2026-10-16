@@ -77,9 +77,9 @@ test("every ghostly command the agents' text names is a command of the CLI, with
   assert.equal(JSON.parse(read("packages/cli/package.json")).name, "@ghostlytools/cli");
 });
 
-// Pages that llms.txt links before they are published, each written in its own pull request. Take a path out once its
-// page is on dev (the test then says so).
-const PENDING_ROUTES = new Set(["/agents/threat-model", "/agents/faq"]);
+// Pages that llms.txt links before they are on dev, each written in its own pull request (the threat model in #3004).
+// One that is not there yet passes; once it is, it is checked like any other page. Take a path out once it is on dev.
+const PENDING_ROUTES = new Set(["/developers/agents/threat-model", "/agents/faq"]);
 
 /** The site's routes as patterns: app/<path>/page.tsx or route.ts, a [param] segment matching any one segment. */
 const siteRoutes = () => {
@@ -104,10 +104,7 @@ test("every link of llms.txt to the site lands on a page, a file or a WISP, and 
   assert.ok(site.length > 10);
   for (const url of site) {
     const path = new URL(url).pathname.replace(/\/$/, "") || "/";
-    if (PENDING_ROUTES.has(path)) {
-      assert.ok(!routes.includes(path), `${path} is published now: take it out of PENDING_ROUTES`);
-      continue;
-    }
+    if (PENDING_ROUTES.has(path) && !routes.includes(path)) continue;
     if (existsSync(resolve(root, "apps/website/public", `.${path}`)) && path !== "/") continue;
     const wisp = path.match(/^\/wisps\/([^/]+)$/);
     if (wisp) {

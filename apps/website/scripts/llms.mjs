@@ -86,8 +86,8 @@ ${[
 ## AI agents
 
 ${[
-  line("AI agents", `${SITE}/developers/agents`, "how an AI agent joins Ghostly through the CLI, what works now and what is planned"),
-  line("Threat model for agents", `${SITE}/agents/threat-model`, "who can reach a connected agent, what they can try, and the controls that stop them"),
+  line("AI agents", `${SITE}/developers/agents`, "how an AI agent joins Ghostly through the CLI, who can give it work, what works now and what is planned"),
+  line("Threat model for agents", `${SITE}/developers/agents/threat-model`, "who can reach a connected agent, what they can try, and the controls that stop them"),
   line("Agents FAQ", `${SITE}/agents/faq`, "short answers for someone deciding whether to connect an agent"),
   line("Agents guide", `${RAW}/docs/AI-AGENTS.md`, "the agent connector: allowlist, agent.turn events, safe setup and adapters"),
   line("Agent skill", `${RAW}/packages/cli/SKILL.md`, "a SKILL.md that takes an agent from install to answering in chats and groups"),
