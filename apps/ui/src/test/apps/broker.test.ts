@@ -587,13 +587,14 @@ describe("linked files (WISP 1200 · Linked files)", () => {
   });
 
   it("pick and list: the client's sheet is told when the app stops, so it goes with the app", async () => {
-    const { ask, run, host, broker } = setup({ permissions: ["files"] });
+    const { run, host, broker } = setup({ permissions: ["files"] });
     run();
     const signals: (AbortSignal | undefined)[] = [];
     host.linkedFiles!.pick = (_ref, _title, _options, signal) => { signals.push(signal); return new Promise(() => {}); };
     host.linkedFiles!.list = (_ref, _title, signal) => { signals.push(signal); return new Promise(() => {}); };
-    void ask("files.pick");
-    void ask("files.list");
+    // Asked, and left waiting on the person: neither is ever answered.
+    broker.message({ id: 1, type: "files.pick", args: [] });
+    broker.message({ id: 2, type: "files.list", args: [] });
     await vi.waitFor(() => expect(signals).toHaveLength(2));
     expect(signals.map((s) => s?.aborted)).toEqual([false, false]);
     broker.stop("closed");
