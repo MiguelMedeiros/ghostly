@@ -285,6 +285,11 @@ const MAX_DELETED_IDS = 500;
 const CARD_RESTORE_MOST = 50;
 const CARD_RESTORE_MS = 7 * 24 * 60 * 60_000;
 /**
+ * A look for those cards reads the chat's whole history, so a chat starts one at a time, at most once this often: a
+ * contact that says `edit/1` again and again on a session gets one look now and one more after the gap, whatever the count.
+ */
+const CARD_RESTORE_EVERY_MS = 30_000;
+/**
  * A round trip that moved is shown at once, and written to disk by itself (relaxed, no disk sync of its own) at most
  * this often: a 15 s sample on an internet path moves by 10 ms most of the time. A power cut loses at most this much
  * of the round trip's drift, never a row; any other change to the story writes the latest round trip with it.
@@ -795,6 +800,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly outboxes = new Map<string, Outbox>();
   /** My edits on their way, per 1:1 chat (WISP 400 § Edits). */
   private readonly editQueues = new Map<string, EditQueue>();
+  /** Per 1:1 chat, its look for cards to send again (`restoreCardsSoon`): when the last began, and what waits. */
+  private readonly cardRestores = new Map<string, { at: number; busy: boolean; again: boolean; timer?: ReturnType<typeof setTimeout> }>();
   /** The contacts' edits of messages not here yet. */
   private readonly editBuffer = new EditBuffer();
   /** Received status card updates, applied at most once a second per message (WISP 405 · Status Cards). */
@@ -2237,6 +2244,8 @@ export class GhostlyNode implements EngineImplementation {
     this.publicProfiles.stop();
     this.publicActivity.clear();
     for (const queue of this.editQueues.values()) queue.stop();
+    for (const restore of this.cardRestores.values()) clearTimeout(restore.timer);
+    this.cardRestores.clear();
     this.groupEdits.stop();
     this.reactions.stop();
     this.cardEdits.stop();
@@ -3037,6 +3046,8 @@ export class GhostlyNode implements EngineImplementation {
     this.outboxes.delete(linkId);
     this.editQueues.get(linkId)?.stop();
     this.editQueues.delete(linkId);
+    clearTimeout(this.cardRestores.get(linkId)?.timer);
+    this.cardRestores.delete(linkId);
     this.editBuffer.forget(linkId);
     live.carried?.stop();
     // Gone before its link stops: the link's closing events find no chat to make an outbox or files for again.
@@ -3442,6 +3453,30 @@ export class GhostlyNode implements EngineImplementation {
       if (patched?.edit?.pending) { changed.push(message.id); this.editsFor(linkId).edited(message.id); }
     }
     if (changed.length) await this.messagesChanged(linkId, changed);
+  }
+
+  /**
+   * `restoreCards`, then what waits goes. One look at a time per chat, at most once per `CARD_RESTORE_EVERY_MS`: asked
+   * again while one runs or within the gap, one more look goes once it is over, and what waits still goes at once (the
+   * edit queue reads the history once a session).
+   */
+  private restoreCardsSoon(linkId: string): void {
+    const flush = () => this.editsFor(linkId).flush().catch(() => {});
+    let state = this.cardRestores.get(linkId);
+    if (!state) this.cardRestores.set(linkId, state = { at: -Infinity, busy: false, again: false });
+    if (state.busy) { state.again = true; return; }
+    const wait = state.at + CARD_RESTORE_EVERY_MS - Date.now();
+    if (wait > 0) {
+      state.timer ??= setTimeout(() => { state.timer = undefined; if (this.cardRestores.get(linkId) === state) this.restoreCardsSoon(linkId); }, wait);
+      void flush();
+      return;
+    }
+    state.busy = true;
+    state.at = Date.now();
+    void this.restoreCards(linkId).catch(() => {}).then(flush).finally(() => {
+      state.busy = false;
+      if (state.again && this.cardRestores.get(linkId) === state) { state.again = false; this.restoreCardsSoon(linkId); }
+    });
   }
 
   /** My edits in one 1:1 chat on their way to the contact. */
@@ -7192,7 +7227,7 @@ export class GhostlyNode implements EngineImplementation {
         onEditReceipt: stored.profile && !stored.group ? (id, e) => this.editsFor(linkId).received(id, e) : undefined,
         // Edits agreed on a new session: questions whose buttons went on the floor or into a hold get them now, then what waits goes.
         onEditSupport: supported => {
-          if (supported && stored.profile && !stored.group) void this.restoreCards(linkId).catch(() => {}).then(() => this.editsFor(linkId).flush()).catch(() => {});
+          if (supported && stored.profile && !stored.group) this.restoreCardsSoon(linkId);
         },
         onWakeSupport: supported => { if (supported && stored.profile && !stored.group) void this.shareWake(linkId); },
         onPeerWake: target => {
