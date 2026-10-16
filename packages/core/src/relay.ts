@@ -673,14 +673,23 @@ export class RelayTransport implements PkarrTransport {
     };
     // Every relay left alone for failing: one of them is asked anyway, now and then (`allDownProbe`).
     const probe = this.breaker.allDownProbe(this.relays);
+    // Whether the first relay whose budget took the packet took it too: each `put` takes its request before it awaits.
+    let first: Promise<boolean> | undefined;
     const puts = this.relays.map(async (relay) => {
       const slot = `${relay} ${pubKeyZ32}`;
       const previous = this.lastPut.get(slot);
       this.lastPut.set(slot, timestamp);
 
+      // A chat's packet another relay is taking, while chats need the relays: a copy here now would take a request their
+      // reserve keeps (`spareHeldFor`). It comes later (`catchUpLater`), unless that relay does not take it. An app
+      // opened with 30 contacts online wrote each offer to both relays, and the chats whose contact's offer or answer
+      // came a few seconds later found both minutes spent: 11 of 30 were down past the first minute (2026-10-14).
+      if (first && isChat(asker(options, true)) && this.spareHeldFor(relay, Date.now()) > 0 && await first) {
+        throw new DiscoveryBudgetError(Math.max(CATCH_UP_MIN_MS, this.spareHeldFor(relay, Date.now())));
+      }
       // A relay refuses (428) to replace a packet whose DHT put is still in flight, unless told which
       // packet is being replaced. Links publish in bursts (a message, its ack, a signal), so say so.
-      let response = await this.put(relay, pubKeyZ32, payload, previous, asker(options, true), relay === probe);
+      let response = await this.put(relay, pubKeyZ32, payload, previous, asker(options, true), relay === probe, (ok) => { first ??= ok; });
       // 412: the relay never got `previous` (it was busy, or restarted). This client's packet is the one to replace, so insist.
       if (response.status === 412) response = await this.put(relay, pubKeyZ32, payload, undefined, asker(options, true));
       // 409: this relay holds a packet under the key dated at or after this one (`publishDated` reads it and dates past it).
@@ -1013,7 +1022,8 @@ export class RelayTransport implements PkarrTransport {
     if (this.catchUp.size) this.scheduleCatchUp(Math.max(CATCH_UP_MIN_MS, next === Infinity ? CATCH_UP_RETRY_MS : next));
   }
 
-  private async put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces: bigint | undefined, who: Asker, probe = false): Promise<Response> {
+  /** `sent`: told, once the budget took the request, whether the relay takes the packet (a 2xx). */
+  private async put(relay: string, pubKeyZ32: string, payload: Uint8Array, replaces: bigint | undefined, who: Asker, probe = false, sent?: (ok: Promise<boolean>) => void): Promise<Response> {
     if (!probe && this.networkCoolingDown(relay, "PUT")) throw new Error("Discovery relay is cooling down; retry shortly");
     const limited = this.rateLimitedFor(relay);
     if (limited > 0) throw new DiscoveryBudgetError(limited, "Discovery relay is cooling down after a 429; retry shortly");
@@ -1024,12 +1034,14 @@ export class RelayTransport implements PkarrTransport {
     }
     if (!this.take(relay, who, pubKeyZ32)) throw new DiscoveryBudgetError(this.heldFor(relay, who));
     if (probe) this.breaker.beginAllDown(relay); else this.breaker.begin(relay);
-    let response: Response;
-    try { response = await this.request(`${relay}/${pubKeyZ32}`, {
+    const request = this.request(`${relay}/${pubKeyZ32}`, {
       method: "PUT",
       body: payload as BodyInit,
       headers: replaces === undefined ? undefined : { "If-Match": replaces.toString() },
-    }); } catch (error) {
+    });
+    sent?.(request.then((r) => r.ok, () => false));
+    let response: Response;
+    try { response = await request; } catch (error) {
       this.networkCooldown.set(`PUT ${relay}`, Date.now() + NETWORK_ERROR_COOLDOWN_MS);
       this.answered(relay, { kind: "error", reason: "no answer" });
       throw error;
@@ -1271,6 +1283,18 @@ export class RelayTransport implements PkarrTransport {
       until = Math.max(until, need.urgentAt, need.refused.get(relay) ?? -Infinity);
     }
     return until + 60_000 - now;
+  }
+
+  /**
+   * How long a chat's packet another relay already took waits for this one: while chats need the relays, a copy takes
+   * none of the requests their reserve keeps (`chatReserveOf`), as a group's request does not. 0 when it goes now.
+   */
+  private spareHeldFor(relay: string, now: number): number {
+    const reserved = this.chatReservedFor(relay, now);
+    if (reserved <= 0) return 0;
+    const recent = (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000);
+    const keep = this.limitOf(relay) - this.chatReserveOf(relay, now);
+    return recent.length >= keep ? Math.min(reserved, recent[recent.length - keep] + 60_000 - now) : 0;
   }
 
   /** Requests allowed to this relay a minute: this client's budget, or the relay's own share (`RELAY_REQUESTS_PER_MINUTE`). */
