@@ -66,6 +66,9 @@ describe("hubs in a private group past 16 members", () => {
     expect(others[4].sent.frames - before).toBe(2);
     // Each exactly once, though two hubs passed it on.
     for (const p of peers) expect(world.texts(p, id).filter(t => t === "through the hubs")).toHaveLength(1);
+    // Its author's name came with it: here no edge says one, and most members hold none with the author anyway.
+    const author = keyOf(b, others[4]);
+    for (const p of peers.filter(p => p !== others[4])) expect(view(b, p).members.find(m => m.key === author)?.nick).toBe(others[4].name);
   }, 180_000);
 
   it("a reaction, signed by its member, reaches everyone through a hub; an older app never takes it as the hub's", async () => {
