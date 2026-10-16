@@ -1,5 +1,5 @@
 import { CliError } from "../errors";
-import { type Command, rate } from "./shared";
+import { type Command, rate, refs } from "./shared";
 
 /** Voice calls: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
@@ -14,6 +14,7 @@ export const commands: Record<string, Command> = {
       if (a.mode !== undefined && a.mode !== "on" && a.mode !== "off") throw new CliError("usage", "ghostly call auto [on|off] [--from <chat>]... [--rate n]");
       // Without `on` the chats and the rate would be dropped without a word.
       if (a.mode !== "on" && (options.from !== undefined || options.rate !== undefined)) throw new CliError("usage", "--from and --rate go with on: ghostly call auto on --from <chat>");
+      refs(options.from, "from", "chat");
       if (a.mode === undefined) return {};
       return a.mode === "on" ? { on: true, from: options.from, rate: options.rate } : { on: false };
     },
