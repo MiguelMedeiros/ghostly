@@ -99,7 +99,9 @@ if (lines > MAX_LINES) refuse(`${lines} changed lines outside lock files (max ${
 
 // Only versions may change in lock files: a new name is a new dependency someone should look at, and so is an existing
 // name that now comes from somewhere else (an npm alias to another package, another registry or a git repository, a
-// workspace link turned into a download, a crate off crates.io). Each name maps to every place it comes from.
+// workspace link turned into a download, a crate off crates.io). Each name maps to every place it comes from. An npm
+// download counts as that package only at its exact registry URL: npm resolves dot segments (also percent-encoded),
+// so a URL that merely starts with the package's path can fetch any other package.
 const npmSources = (text) => {
   const sources = new Map();
   for (const [path, entry] of Object.entries(JSON.parse(text).packages ?? {})) {
@@ -110,7 +112,7 @@ const npmSources = (text) => {
       ? `link:${entry.resolved}`
       : !entry.resolved
         ? `${real}, no source`
-        : entry.resolved.startsWith(`https://registry.npmjs.org/${real}/-/`)
+        : entry.resolved === `https://registry.npmjs.org/${real}/-/${real.split("/").pop()}-${entry.version}.tgz`
           ? `npm:${real}`
           : entry.resolved;
     sources.set(name, (sources.get(name) ?? new Set()).add(from));
