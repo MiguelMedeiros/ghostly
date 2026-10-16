@@ -70,3 +70,43 @@ for (const c of CASES) {
     expect(Math.abs((await titleTop()) - before)).toBeLessThanOrEqual(24);
   });
 }
+
+// The wallet's and the identities' decks: the server draws a place for each (a mouse's stack is shorter than a
+// finger's track), and each deck measures its width as it mounts, a render after the chapters change shape.
+for (const panel of ["#wallet-panel", "#identity-panel"]) {
+  test(`a reader who scrolled to ${panel} before hydration finds it where it was after`, async ({ page }) => {
+    const release = await holdScripts(page);
+    await page.goto("/", { waitUntil: "commit" });
+    await page.waitForFunction(() => performance.getEntriesByName("first-contentful-paint").length > 0 && !!document.getElementById("open"));
+    await expect(page.locator(".sp-deck-placeholder")).toHaveCount(2);
+
+    await page.evaluate((sel) => {
+      const r = document.querySelector(sel)!.getBoundingClientRect();
+      scrollTo({ top: scrollY + r.top + r.height / 2 - innerHeight / 2, behavior: "instant" });
+    }, panel);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    const top = () => page.evaluate((sel) => Math.round(document.querySelector(sel)!.getBoundingClientRect().top), panel);
+    const before = await top();
+
+    // Every frame from the release on, read once it is painted: where the panel is.
+    await page.evaluate((sel) => {
+      const w = window as unknown as { tops: number[] };
+      w.tops = [];
+      const frame = () =>
+        setTimeout(() => {
+          const el = document.querySelector(sel);
+          if (el) w.tops.push(Math.round(el.getBoundingClientRect().top));
+          if (w.tops.length < 240) requestAnimationFrame(frame);
+        });
+      requestAnimationFrame(frame);
+    }, panel);
+    release();
+    await expect(page.locator(".sp-deck .deck")).toHaveCount(2);
+    await page.waitForLoadState("load");
+    await page.waitForTimeout(1000);
+
+    const tops = await page.evaluate(() => (window as unknown as { tops: number[] }).tops);
+    const moved = Math.max(...tops.map((t) => Math.abs(t - before)));
+    expect(moved, `panel tops: ${[...new Set(tops)].join(" ")}`).toBeLessThanOrEqual(4);
+  });
+}
