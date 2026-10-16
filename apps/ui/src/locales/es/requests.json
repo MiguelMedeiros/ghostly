@@ -1,0 +1,11 @@
+{
+  "accept": "Aceptar",
+  "busy": "Hay demasiadas solicitudes esperando: las nuevas no se leen hasta que respondas algunas.",
+  "decline": "Rechazar",
+  "empty": "No hay solicitudes esperando. Quien abra tu enlace de contacto y te escriba aparece aquí.",
+  "missed": "{{count}} personas más intentaron contactarte mientras había demasiadas solicitudes esperando.",
+  "noLink": "No tienes enlace de contacto. Crea uno en Ajustes para que la gente pueda escribirte.",
+  "sidebarCount": "Solicitudes, {{count}} esperando",
+  "title": "Solicitudes",
+  "unverified": "Los nombres son lo que cada persona escribió: nadie los comprobó. Aceptar inicia un chat; Rechazar no envía nada de vuelta."
+}

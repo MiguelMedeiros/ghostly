@@ -1,0 +1,11 @@
+{
+  "accept": "Accetta",
+  "busy": "Ci sono troppe richieste in attesa: le nuove non vengono lette finché non rispondi ad alcune.",
+  "decline": "Rifiuta",
+  "empty": "Nessuna richiesta in attesa. Chi apre il tuo link di contatto e ti scrive compare qui.",
+  "missed": "Altre {{count}} persone hanno provato a contattarti mentre c’erano troppe richieste in attesa.",
+  "noLink": "Non hai un link di contatto. Creane uno nelle Impostazioni per permettere alle persone di scriverti.",
+  "sidebarCount": "Richieste, {{count}} in attesa",
+  "title": "Richieste",
+  "unverified": "I nomi sono quelli che ogni persona ha scritto: nessuno li ha controllati. Accetta avvia una chat; Rifiuta non invia nulla."
+}

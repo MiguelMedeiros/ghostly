@@ -43,6 +43,7 @@ const Profile = menuPage(() => import("./pages/Profile").then((m) => m.Profile))
 const Identities = menuPage(() => import("./pages/Identities").then((m) => m.Identities));
 const Apps = menuPage(() => import("./pages/Apps").then((m) => m.Apps));
 const Tasks = menuPage(() => import("./pages/Tasks").then((m) => m.Tasks));
+const Requests = menuPage(() => import("./pages/Requests").then((m) => m.Requests));
 const Wallet = menuPage(() => import("./pages/Wallet").then((m) => m.Wallet));
 
 /**
@@ -349,6 +350,8 @@ export function Root() {
                       {/* Mini-apps (WISP 1200): the page sends the person home where Apps does not show. */}
                       <Route path="/apps" element={<Apps />} />
                       <Route path="/tasks" element={<Tasks />} />
+                      {/* What the contact link took (WISP 8xx): apart from the chats until accepted. */}
+                      <Route path="/requests" element={<Requests />} />
                       <Route path="/share" element={<Navigate to="/services" replace />} />
                       {/* The installed web app: what another app shared, and the icon's shortcuts (manifest.json). */}
                       <Route path="/shared" element={<SharePicker />} />

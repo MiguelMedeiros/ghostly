@@ -1,0 +1,11 @@
+{
+  "accept": "Accepter",
+  "busy": "Trop de demandes attendent : les nouvelles ne sont pas lues tant que vous n’avez pas répondu à certaines.",
+  "decline": "Refuser",
+  "empty": "Aucune demande en attente. Les personnes qui ouvrent votre lien de contact et vous écrivent apparaissent ici.",
+  "missed": "{{count}} personnes de plus ont essayé de vous joindre pendant que trop de demandes attendaient.",
+  "noLink": "Vous n’avez pas de lien de contact. Créez-en un dans Réglages pour qu’on puisse vous écrire.",
+  "sidebarCount": "Demandes, {{count}} en attente",
+  "title": "Demandes",
+  "unverified": "Les noms sont ce que chaque personne a tapé : personne ne les a vérifiés. Accepter ouvre une discussion ; Refuser ne renvoie rien."
+}

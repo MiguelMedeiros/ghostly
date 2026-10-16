@@ -1,0 +1,11 @@
+{
+  "accept": "Accept",
+  "busy": "Too many requests are waiting: new ones are not read until you answer some.",
+  "decline": "Decline",
+  "empty": "No requests waiting. People who open your contact link and write to you show up here.",
+  "missed": "{{count}} more people tried to reach you while too many requests were waiting.",
+  "noLink": "You have no contact link. Make one in Settings to let people write to you.",
+  "sidebarCount": "Requests, {{count}} waiting",
+  "title": "Requests",
+  "unverified": "Names are what each person typed: nobody checked them. Accept starts a chat; Decline sends nothing back."
+}

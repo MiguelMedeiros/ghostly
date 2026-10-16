@@ -28,6 +28,7 @@ import profile from "./profile.json";
 import profilePeek from "./profilePeek.json";
 import profileSwitcher from "./profileSwitcher.json";
 import pwa from "./pwa.json";
+import requests from "./requests.json";
 import secretGuard from "./secretGuard.json";
 import services from "./services.json";
 import settings from "./settings.json";
@@ -65,6 +66,7 @@ export default {
   profilePeek,
   profileSwitcher,
   pwa,
+  requests,
   secretGuard,
   services,
   settings,
