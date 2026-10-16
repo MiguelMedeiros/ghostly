@@ -2,7 +2,7 @@ import { STATUS_CARD_LIMITS, cardLine, checkStatusCard, randomBytes, toBase64Url
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { bool, chatOrGroup, node, num, oneOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
-import { CliError } from "./errors";
+import { CliError, asCliError } from "./errors";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 
 /*
@@ -308,17 +308,32 @@ async function reportUsage(ctx: ApiContext, ref: string, fields: Record<string, 
   return { ...answer, updated: true };
 }
 
-/** `usage send`: one chat or group, or (`all`) every 1:1 chat with a contact; a chat that refuses is said, not fatal. */
+/**
+ * `usage send`: one chat or group, or (`all`) every 1:1 chat with a contact; a chat that refuses is said (its
+ * `{code, message}`), not fatal, unless every chat refused: then nothing was reported and the call fails.
+ */
 async function sendUsage(ctx: ApiContext, params: Params): Promise<Record<string, unknown>> {
   const fields = fieldsOf(params);
   if (!bool(params, "all")) return reportUsage(ctx, str(params, "chat", true), fields, params);
   if (str(params, "chat")) throw new CliError("bad_request", "Name a chat or --all, not both");
   checked({ updatedAt: Date.now(), ...fields, kind: "usage", id: typeof fields.id === "string" && fields.id ? fields.id : USAGE_CARD_ID });
+  // The person's mistake, said once: before, each chat refused it on its own and the call still answered.
+  oneOf(params, "wait", ["none", "sent"] as const, "none");
+  num(params, "timeout", 30, { min: 1, max: 3600 });
   const chats = state(ctx).links.filter((link) => link.profile && link.peerPubKeyZ32);
   const results: Record<string, unknown>[] = [];
+  const failed: { chat: string; error: CliError }[] = [];
   for (const link of chats) {
     try { results.push(await reportUsage(ctx, link.id, fields, params)); }
-    catch (error) { results.push({ chat: link.id, error: error instanceof Error ? error.message : String(error) }); }
+    catch (error) {
+      const refusal = { chat: link.id, error: asCliError(error) };
+      failed.push(refusal);
+      results.push({ chat: link.id, error: refusal.error.toJSON() });
+    }
+  }
+  if (failed.length && failed.length === chats.length) {
+    const codes = new Set(failed.map((f) => f.error.code));
+    throw new CliError(codes.size === 1 ? failed[0]!.error.code : "refused", `No chat took the usage card: ${failed.map((f) => `${f.chat}: ${f.error.message}`).join("; ")}`, { chats: results });
   }
   return { chats: results };
 }
