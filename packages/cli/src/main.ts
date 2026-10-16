@@ -7,7 +7,7 @@ import { connectDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
 import { here } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_READS, SECRET_RESULTS } from "./engineMethods";
-import { asCliError, CliError, EXIT } from "./errors";
+import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import type { RuntimeOptions } from "./runtime/engine";
@@ -245,7 +245,7 @@ export function commandHelp(words: readonly string[]): string {
   const exact = rows.filter((row) => commandWords(row.usage).join(" ") === asked);
   // Words dropped down to a group, not a command (`help chat histroy`): a word the group does not take, as `chat histroy`
   // says, not the group's list with exit 0.
-  if (!exact.length && words.length < given.length) throw unknownCommand(given[0], given[1], given[2]);
+  if (!exact.length && words.length < given.length) throw unknownCommand(given[0], given[1]);
   const lines: string[] = [];
   // The command asked for first, also when others extend its words (`daemon`, then `daemon stop`…): before, `daemon`'s
   // own options were shown nowhere.
