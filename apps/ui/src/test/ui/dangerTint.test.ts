@@ -82,6 +82,14 @@ describe("danger's words on danger's tint", () => {
     expect(failures).toEqual([]);
   });
 
+  it("read at WCAG AA (4.5:1) in danger's ink on a surface-hover row (a group member's cause line), in every theme", () => {
+    const failures = list
+      .map(({ name, vars }) => ({ name, ink: vars["theme-danger-ink"], ratio: contrast(rgb(vars["theme-danger-ink"]), rgb(vars["theme-surface-hover"])) }))
+      .filter(({ ratio }) => ratio < 4.5)
+      .map(({ name, ink, ratio }) => `${name}: ${ink} on surface-hover is ${ratio.toFixed(2)}:1`);
+    expect(failures).toEqual([]);
+  });
+
   it("are never danger's own red anywhere in apps/ui/src/: they take text-danger-ink", () => {
     const offenders = sources(SRC).flatMap((file) =>
       classLists(file)

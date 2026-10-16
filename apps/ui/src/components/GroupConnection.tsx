@@ -102,8 +102,9 @@ export function GroupConnection({ group }: { group: GroupView }) {
               </div>
               {/* Why, in a few words of the app's language; the engine's own English (relay addresses, codes) stays out of the list. */}
               {/* Why, in a few words of the app's language; the engine's own English (relay addresses, codes) only behind the ⓘ. */}
+              {/* In danger's ink: danger's own red read at 3.8:1 on the row's surface-hover in the default dark theme. */}
               {m.edge?.state === "error" && m.edge.error && <div data-testid="group-connection-member-why" data-cause={m.edge.cause ?? "other"} className="mt-0.5">
-                <Notice problem={memberProblem(m.edge, t)} testId="group-connection-member-problem" className="text-[11px] leading-4" />
+                <Notice problem={memberProblem(m.edge, t)} testId="group-connection-member-problem" className="text-[11px] leading-4" ink />
               </div>}
             </li>;
           })}
