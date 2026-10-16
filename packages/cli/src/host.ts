@@ -19,6 +19,14 @@ import { flushCardUpdates } from "./statusCards";
 export const MAX_LINE = 16 * 1024 * 1024;
 
 /**
+ * The most a connection may leave unread (answers and events the daemon wrote that its client has not taken): past
+ * it, the connection ends. A `listen` stopped with Ctrl+Z, or a client that stops reading, kept every later event in
+ * the daemon's memory until it read again (155 MB after 6,000 long texts); `listen` reconnects after the last seq it
+ * took, and the journal still has the rest. A replay is the journal's size at most and does not count against it.
+ */
+export const MAX_UNREAD = 8 * 1024 * 1024;
+
+/**
  * How many of a chat's newest messages the start reads to see whether the events are in step with its history: the
  * whole history of every chat and group, read at every start, took a daemon's start and its memory with every message
  * the profile ever stored (1 s and 70 MB at 100,000).
@@ -172,8 +180,17 @@ function ownerOnlyUmask(): (() => void) | null {
 
 function connection(ctx: ApiContext, socket: Socket): void {
   const unsubscribes: (() => void)[] = [];
-  const write = (value: unknown) => { if (!socket.destroyed) socket.write(JSON.stringify(value) + "\n"); };
-  socket.on("close", () => { for (const off of unsubscribes) off(); });
+  // A replay raises the limit by what it wrote; once the client has read everything, it is MAX_UNREAD again.
+  let limit = MAX_UNREAD;
+  const unsubscribe = () => { for (const off of unsubscribes.splice(0)) off(); };
+  // Ended, not destroyed: the client still reads whole lines up to the last one written, then the end.
+  const write = (value: unknown, replayed = false) => {
+    if (socket.destroyed || socket.writableEnded) return;
+    if (!replayed && socket.writableLength > limit) { unsubscribe(); socket.end(); return; }
+    socket.write(JSON.stringify(value) + "\n");
+  };
+  socket.on("drain", () => { limit = MAX_UNREAD; });
+  socket.on("close", unsubscribe);
   socket.on("error", () => {});
   const lines = createInterface({ input: socket, crlfDelay: Infinity });
   let buffered = 0;
@@ -197,7 +214,8 @@ function connection(ctx: ApiContext, socket: Socket): void {
       unsubscribes.push(ctx.hub.onEvent((event) => { if (replaying) queued.push(event); else write({ event }); }));
       write({ id, result: { subscribed: true, lastSeq: ctx.hub.lastSeq } });
       let last = since;
-      for (const event of replay) { write({ event }); last = event.seq; }
+      for (const event of replay) { write({ event }, true); last = event.seq; }
+      limit = Math.max(limit, socket.writableLength + MAX_UNREAD);
       replaying = false;
       for (const event of queued) if (event.seq > last) write({ event });
       return;
