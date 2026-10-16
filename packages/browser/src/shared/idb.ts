@@ -288,11 +288,12 @@ export const PROFILE_STORES = [STORES.links, STORES.messages, STORES.files, STOR
 /**
  * Records of the settings store that belong to the profile, not to a wallet: its DID and its key, its identity proofs
  * with their keys and revocations, its own Nostr data, the public profiles it read, the built-in mini-apps it removed
- * (`BUILT_IN_APPS_KEY` of `engine/apps.ts`), its x401 credentials and their keys (`engine/x401.ts`). A list of what goes
- * rather than of what stays, on purpose: every other record of that store is a wallet's (seeds, configuration, pending
- * operations), and a wallet record a newer version adds must never be deleted by mistake.
+ * (`BUILT_IN_APPS_KEY` of `engine/apps.ts`), its x401 credentials and their keys (`engine/x401.ts`), its contact links
+ * (`engine/contactLinks.ts`). A list of what goes rather than of what stays, on purpose: every other record of that
+ * store is a wallet's (seeds, configuration, pending operations), and a wallet record a newer version adds must never
+ * be deleted by mistake.
  */
-export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "nostrSocial", "publicProfiles", "appBuiltIns", "x401Credentials"] as const;
+export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "nostrSocial", "publicProfiles", "appBuiltIns", "x401Credentials", "contactLinks"] as const;
 
 /**
  * The fields of the peer's `settings` record that are a wallet's, kept by "Clear all data": the mint list, the first-run

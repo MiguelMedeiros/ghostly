@@ -29,6 +29,7 @@ import { IdentityProofs } from './identities';
 import { X401Credentials } from './x401';
 import { setOwnDidSource } from '../proofs/ownDid';
 import { ProfileDid } from './did';
+import { ContactLinks } from './contactLinks';
 import { NostrSocial, effectiveNostrSettings } from './nostrSocial';
 import { PublicProfiles, type ProfileSubject } from './publicProfiles';
 import { PublicActivity } from './publicActivity';
@@ -142,6 +143,7 @@ import { FileDesk } from "./fileDesk";
 import { groupFileId, storedGroupFiles } from "./groupFiles";
 import { DEFAULT_MINTS, TEST_MINT, mintNetwork } from "../shared/mints";
 import type {
+  ContactLinkView,
   EngineState,
   GroupEdgeView,
   FileTransferView,
@@ -1158,6 +1160,14 @@ export class GhostlyNode implements EngineImplementation {
     },
   });
 
+  /** The profile's contact link (WISP 8xx): one link that names nobody, its record kept on Pkarr while online. */
+  readonly contactLinks = new ContactLinks({
+    online: () => this.networkOn,
+    emit: () => this.emitState(),
+    // Background: the link record can wait for a chat's signaling.
+    publish: (identity, records) => this.transport.publish(identity, records, { background: true }),
+  });
+
   /** The Nostr social layer (profile, follows, notes, publication) on top of verified Nostr proofs. */
   private readonly nostrSocial = new NostrSocial({
     settings: () => this.settings.nostr,
@@ -1715,6 +1725,8 @@ export class GhostlyNode implements EngineImplementation {
     // The DID provider refuses this profile's own did:dht as an external identity.
     setOwnDidSource(() => this.did.id);
     this.did.start();
+    await this.contactLinks.load();
+    this.contactLinks.start();
     await this.nostrSocial.load();
     await this.publicProfiles.load();
     // Limited mode opens no wallet: they start when it is left (`leaveLimited`).
@@ -2202,6 +2214,7 @@ export class GhostlyNode implements EngineImplementation {
     this.restoreTimer = null;
     this.identities.stop();
     this.did.stop();
+    this.contactLinks.stop();
     this.nostrSocial.stop();
     this.publicProfiles.stop();
     this.publicActivity.clear();
@@ -2232,7 +2245,7 @@ export class GhostlyNode implements EngineImplementation {
    * and its database keeps only the wallets. The host starts a new peer afterwards (the page reloads).
    */
   async clearProfileData(): Promise<void> {
-    const withdraw = Promise.allSettled([this.hold.withdrawAll(), this.did.deactivate(), this.identities.revokeAll()]);
+    const withdraw = Promise.allSettled([this.hold.withdrawAll(), this.did.deactivate(), this.contactLinks.withdraw(), this.identities.revokeAll()]);
     await Promise.race([withdraw, new Promise((resolve) => setTimeout(resolve, CLEAR_WITHDRAW_MS))]);
     await this.shutdown();
     await clearProfileStores();
@@ -2309,6 +2322,7 @@ export class GhostlyNode implements EngineImplementation {
       payments: this.desk.views(),
       identityProofs: this.identities.views(),
       did: this.did.view(),
+      contactLink: this.contactLinks.view(),
       nostr: this.nostrSocial.state(),
       edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(live => this.viewOf(live)), ...this.communityPayViews(groups)],
       groups: groups.map(group => ({ ...group, ...(this.groupAdminOff.has(group.id) && { adminOff: true as const }), ...(this.reactionNotes.has(`group:${group.id}`) && { lastReaction: this.reactionNotes.get(`group:${group.id}`) }), ...this.groupWakeView(group), members: group.members.map(member => {
@@ -2614,6 +2628,9 @@ export class GhostlyNode implements EngineImplementation {
   x401Credentials(params: { values?: boolean } = {}) { return this.x401.list(params); }
   removeX401Credential(params: { id: string }): Promise<boolean> { return this.x401.remove(params); }
   setDidListed(params: { id: string; listed: boolean }): Promise<void> { return this.did.setListed(params); }
+  /** A new contact link for the profile; the one before is turned off. */
+  createContactLink(): Promise<ContactLinkView> { return this.contactLinks.create(); }
+  turnOffContactLink(): Promise<void> { return this.contactLinks.turnOff(); }
   lookupIdentityDisplay(params: { linkId: string; id: string }): Promise<void> {
     // A Nostr profile comes through the social layer, from the relays the person configured.
     const r = this.links.get(params.linkId)?.stored.identities?.received.find(x => x.id === params.id);
