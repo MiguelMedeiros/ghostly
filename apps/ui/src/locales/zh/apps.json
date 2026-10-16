@@ -78,6 +78,7 @@
   "files": {
     "allow": "允许",
     "askAgain": "{{app}} 请求再次读取“{{name}}”",
+    "askAgainMore": "{{app}} 请求再次读取“{{name}}”及其他 {{count}} 项",
     "askFiles": "{{app}} 请求读取文件",
     "askFolder": "{{app}} 请求读取一个文件夹",
     "chooseFiles": "选择文件",

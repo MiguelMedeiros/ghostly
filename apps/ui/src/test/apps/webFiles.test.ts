@@ -15,7 +15,7 @@ const text: PickSheetText = {
   choose: (folder) => (folder ? "Choose a folder" : "Choose files"),
   note: (app) => `Nothing is copied: ${app} reads what you pick.`,
   cancel: "Cancel",
-  askAgain: (app, name) => `${app} asks to read “${name}” again`,
+  askAgain: (app, name, more) => `${app} asks to read “${name}”${more ? ` and ${more} more` : ""} again`,
   allow: "Allow",
   notNow: "Not now",
 };
@@ -114,7 +114,9 @@ describe("the sheet's words", () => {
     expect(pt.choose(false)).toBe("Escolher arquivos");
     expect(pt.cancel).toBe("Cancelar");
     expect(pickSheetText(translatorFor("en")).note("Cinema")).toBe("Nothing is copied: Cinema reads what you pick, on this device.");
-    expect(pt.askAgain("Cinema", "Filmes")).toBe("Cinema pede para ler “Filmes” de novo");
+    expect(pt.askAgain("Cinema", "Filmes", 0)).toBe("Cinema pede para ler “Filmes” de novo");
+    expect(pt.askAgain("Cinema", "Filmes", 23)).toBe("Cinema pede para ler “Filmes” e mais 23 de novo");
+    expect(pickSheetText(translatorFor("en")).askAgain("Cinema", "Films", 1)).toBe("Cinema asks to read “Films” and 1 more again");
   });
 });
 
@@ -165,7 +167,7 @@ describe("a folder kept past the page (File System Access)", () => {
     // The next page: the browser asks again.
     state.permission = "prompt";
     let askedWith: [string, string] | null = null;
-    const next = webLinkedFiles({ text: () => text, store, askAgain: async (app, name, grant) => { askedWith = [app, name]; return grant(); } });
+    const next = webLinkedFiles({ text: () => text, store, askAgain: async (app, name, _more, grant) => { askedWith = [app, name]; return grant(); } });
     await expect(next.read(REF, entries[0]!.id, 0, 4)).rejects.toThrow(/^gone: /);
     const listed = await next.list(REF, "Cinema");
     expect(askedWith).toEqual(["Cinema", "Films"]);
@@ -186,6 +188,38 @@ describe("a folder kept past the page (File System Access)", () => {
     expect((await next.list(REF, "Cinema")).every((e) => !e.available)).toBe(true);
     await next.list(REF, "Cinema");
     expect(asked).toBe(1);
+  });
+
+  it("asking again names one kept item and how many more, never every name", async () => {
+    const state = { permission: "prompt" as PermissionState, asked: 0 };
+    const handle = (name: string) => ({ kind: "file", name, getFile: async () => new File(["x"], name, { lastModified: 9 }), queryPermission: async () => state.permission, requestPermission: async () => state.permission }) as unknown as FileSystemFileHandle;
+    const names = Array.from({ length: 24 }, (_, i) => `holiday-video-2026-10-${String(i + 1).padStart(2, "0")}-camera-backup.mp4`);
+    const store = memoryStore();
+    const entry = (path: string, at?: number) => ({ id: path, path, size: 1, modified: 9, ...(at !== undefined && { at }) });
+    await store.put({ ref: REF, id: "files", keep: { files: names.map(handle) }, entries: names.map((n, at) => entry(n, at)) });
+    let askedWith: [string, string, number] | null = null;
+    await webLinkedFiles({ text: () => text, store, askAgain: async (app, name, more) => { askedWith = [app, name, more]; return false; } }).list(REF, "Reader");
+    expect(askedWith).toEqual(["Reader", names[0], 23]);
+    // A folder is one item, whatever it holds.
+    await store.put({ ref: REF, id: "folder", keep: { dir: fakeDir("Films", {}, state) }, entries: [entry("Films/a.mp4"), entry("Films/b.mp4")] });
+    await webLinkedFiles({ text: () => text, store, askAgain: async (app, name, more) => { askedWith = [app, name, more]; return false; } }).list(REF, "Reader");
+    expect(askedWith).toEqual(["Reader", names[0], 24]);
+  });
+
+  it("the sheet asking again keeps its buttons in the window: a box no taller than it, with its own scroll", async () => {
+    const state = { permission: "prompt" as PermissionState, asked: 0 };
+    const store = memoryStore();
+    const long = `${"holiday-video-camera-backup-".repeat(12)}.mp4`;
+    await store.put({ ref: REF, id: "folder", keep: { dir: fakeDir(long, {}, state) }, entries: [{ id: "e", path: `${long}/a.mp4`, size: 1, modified: 9 }] });
+    const listed = webLinkedFiles({ text: () => text, store }).list(REF, "Reader");
+    const sheet = await shown("[data-testid=app-files-again]");
+    const box = sheet.querySelector<HTMLElement>("[role=dialog]")!;
+    expect(box.className).toMatch(/(^| )max-h-\[\d+dvh\]( |$)/);
+    expect(box.className).toMatch(/(^| )overflow-y-auto( |$)/);
+    // A name with no space breaks anywhere rather than running past the box.
+    expect(box.querySelector("h2")!.className).toContain("[overflow-wrap:anywhere]");
+    (sheet.querySelector("[data-testid=app-files-cancel]") as HTMLButtonElement).click();
+    await listed;
   });
 
   it("a file that changed since it was picked reads as changed, one that went as gone", async () => {

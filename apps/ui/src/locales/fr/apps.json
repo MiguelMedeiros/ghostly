@@ -78,6 +78,7 @@
   "files": {
     "allow": "Autoriser",
     "askAgain": "{{app}} demande à lire « {{name}} » à nouveau",
+    "askAgainMore": "{{app}} demande à lire « {{name}} » et {{count}} autres à nouveau",
     "askFiles": "{{app}} demande à lire des fichiers",
     "askFolder": "{{app}} demande à lire un dossier",
     "chooseFiles": "Choisir des fichiers",
