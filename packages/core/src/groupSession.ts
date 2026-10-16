@@ -1077,7 +1077,7 @@ export class GroupSession {
     return this.serialize(async () => {
       const clean = sanitizeNick(nick);
       // Said now on an edge: a message written before it no longer names the member (`heardName`).
-      this.nickAt.set(key, this.now());
+      this.nickAt.set(key, this.clock());
       if ((this.state.nicks[key] ?? undefined) === clean) return;
       if (clean) this.state.nicks[key] = clean; else delete this.state.nicks[key];
       // Another member's name comes over its edge as often as it likes: saved within the wait, as a message's change.
