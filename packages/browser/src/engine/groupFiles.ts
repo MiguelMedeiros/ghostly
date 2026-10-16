@@ -629,16 +629,16 @@ export class GroupFileDesk {
   }
 
   /**
-   * A known holder that answered busy, or the author whose edge another file of this device's is asked of, its edge up,
-   * serves when its place frees: the others are asked only when no known holder is worth waiting for (none in reach, or
-   * every one gone), as after a restart here. Only the author's edge holds them back while it is asked of: any member
-   * can say it holds files, and one that serves the file asked of it slowly would keep every other file it named here.
+   * The author, its edge up, that answered busy or whose edge another file of this device's is asked of, serves when its
+   * place frees: the others are asked only when it is not worth waiting for (out of reach), as after a restart here.
+   * Only the author holds them back: any member can say it holds files, and one that answers busy, or serves the file
+   * asked of it slowly, would keep every file it named here from coming while the author is away. Its busy only skips
+   * it for the round.
    */
   private waitForKnown(kept: Kept, want: Want, known: string[], edges: Map<string, string>): boolean {
-    return known.some(key => {
-      const linkId = edges.get(key) ?? "";
-      return this.deps.ready(linkId) && (want.busy?.has(key) || (key === kept.author && this.askedOf(linkId, want)));
-    });
+    if (!known.includes(kept.author)) return false;
+    const linkId = edges.get(kept.author) ?? "";
+    return this.deps.ready(linkId) && (!!want.busy?.has(kept.author) || this.askedOf(linkId, want));
   }
 
   /** The want may ask this member in this round: not asked yet, it did not serve it damaged, and did not say it is gone. */
