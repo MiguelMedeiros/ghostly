@@ -18,6 +18,7 @@ import {
   WATCH_PEER_MS,
   DEPARTED_READ_MS,
   UNUSED_INVITE_WAIT_MAX_MS,
+  countUnusedInvite,
   type LinkSessionEvents,
   type LinkSessionOptions,
 } from "../src/link";
@@ -642,6 +643,8 @@ describe("LinkSession poll pacing", () => {
 
   it("reads an invite nobody used less often once no longer awaited, and at the background pace once its contact shows", async () => {
     const { a, b } = pair({ invite: () => true }, { getServices: () => [{ id: "atlas", type: "http" }] });
+    // Among enough other unused invites of the app that their count asks for the longest wait.
+    for (let i = 0; i < 29; i++) countUnusedInvite(a.transport, {}, true);
     a.s.start();
     await settle();
     vi.setSystemTime(NOW + 3 * AWAITING_PEER_MS);
