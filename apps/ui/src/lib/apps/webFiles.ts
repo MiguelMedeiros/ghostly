@@ -16,6 +16,7 @@
  *
  * Links are per app (its reference), not per chat, and the app reads them only by the ids this module chose.
  */
+import { yieldThread } from "@ghostly/core";
 import { MINI_APP_LIMITS, type MiniAppLinkedFile } from "@ghostly/core/miniApp";
 import { keepTabInside } from "../../hooks/useDismiss";
 import type { Translate } from "../../locales/translate";
@@ -109,13 +110,36 @@ const RECENT_FILES = 4;
 /** Refusals cross to the broker as "<code>: words" (broker.ts reads the code). */
 const refusal = (code: "cancelled" | "changed" | "gone" | "too-large", words: string) => new Error(`${code}: ${words}`);
 
-function randomId(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const BASE64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+/** 16 bytes from `at` as unpadded base64url (22 characters). */
+function idOf(bytes: Uint8Array, at: number): string {
+  let id = "";
+  for (let i = at; i < at + 15; i += 3) {
+    const word = (bytes[i]! << 16) | (bytes[i + 1]! << 8) | bytes[i + 2]!;
+    id += BASE64URL[word >> 18]! + BASE64URL[(word >> 12) & 63]! + BASE64URL[(word >> 6) & 63]! + BASE64URL[word & 63]!;
+  }
+  const last = bytes[at + 15]!;
+  return id + BASE64URL[last >> 2]! + BASE64URL[(last & 3) << 4]!;
 }
 
+/** Random ids, 16 bytes each: 4096 of them (the most one `getRandomValues` gives) per draw, not a draw per id. */
+function randomIds(n: number): string[] {
+  const ids: string[] = [];
+  while (ids.length < n) {
+    const bytes = crypto.getRandomValues(new Uint8Array(16 * Math.min(n - ids.length, 4096)));
+    for (let at = 0; at < bytes.length; at += 16) ids.push(idOf(bytes, at));
+  }
+  return ids;
+}
+
+const randomId = () => randomIds(1)[0]!;
+
+/** How many picked files a pick turns into links per turn of the thread: a pick of 100,000 lets the page answer between. */
+const PICK_CHUNK = 4096;
+
 /** Whether a path names something hidden: any of its parts starts with a dot. */
-const hidden = (path: string) => path.split("/").some((part) => part.startsWith("."));
+const hidden = (path: string) => path.startsWith(".") || path.includes("/.");
 
 const extensionOf = (path: string) => {
   const name = path.slice(path.lastIndexOf("/") + 1);
@@ -433,18 +457,28 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
       await load(ref);
       const picked = await askPerson(title, folder, accept, signal);
       if (!picked) throw refusal("cancelled", "Nothing was picked");
-      const kept = picked.files.filter(({ path }) => !hidden(path) && (!accept.length || accept.includes(extensionOf(path))));
-      const links = linksOf(ref);
-      if (links.size + kept.length > MINI_APP_LIMITS.filesEntries) throw refusal("too-large", "Too many files for one app");
       // A pick its handles read again holds no file: each is got when the app reads it.
       const pickId = picked.keep ? randomId() : undefined;
-      const added = kept.map(({ path, file, at }) => {
-        const entry: MiniAppLinkedFile = { id: randomId(), path, size: file.size, modified: file.lastModified ?? 0, available: true };
-        links.set(entry.id, { entry, ...(pickId ? { pick: pickId } : { file: file as Blob }), ...(at !== undefined && { at }) });
-        return { entry, at };
-      });
+      const added: Link[] = [];
+      const entries: StoredPick["entries"] = [];
+      // In chunks, the thread let go between them: at 100,000 files the links took the page for half a second.
+      for (let from = 0; from < picked.files.length; from += PICK_CHUNK) {
+        if (from) await yieldThread();
+        const chunk = picked.files.slice(from, from + PICK_CHUNK).filter(({ path }) => !hidden(path) && (!accept.length || accept.includes(extensionOf(path))));
+        if (linksOf(ref).size + added.length + chunk.length > MINI_APP_LIMITS.filesEntries) throw refusal("too-large", "Too many files for one app");
+        const ids = randomIds(chunk.length);
+        chunk.forEach(({ path, file, at }, i) => {
+          const entry: MiniAppLinkedFile = { id: ids[i]!, path, size: file.size, modified: file.lastModified ?? 0, available: true };
+          added.push({ entry, ...(pickId ? { pick: pickId } : { file: file as Blob }), ...(at !== undefined && { at }) });
+          if (pickId) entries.push({ id: entry.id, path, size: entry.size, modified: entry.modified, ...(at !== undefined && { at }) });
+        });
+      }
+      const links = linksOf(ref);
+      // Again: another pick of the app's may have made its links between the chunks.
+      if (links.size + added.length > MINI_APP_LIMITS.filesEntries) throw refusal("too-large", "Too many files for one app");
+      for (const link of added) links.set(link.entry.id, link);
       if (pickId && picked.keep) {
-        const stored: StoredPick = { ref, id: pickId, keep: picked.keep, entries: added.map(({ entry: { available: _, ...rest }, at }) => ({ ...rest, ...(at !== undefined && { at }) })) };
+        const stored: StoredPick = { ref, id: pickId, keep: picked.keep, entries };
         picks.set(pickId, { stored, granted: true, left: stored.entries.length });
         // Kept for the next page; a store that fails leaves the links for this one.
         await store?.put(stored).catch(() => {});
