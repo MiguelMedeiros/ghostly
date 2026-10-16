@@ -203,6 +203,7 @@
     "adminOnly": "只有管理员可以这样做",
     "adminPicture": "只有管理员可以更换群组头像",
     "adminRename": "只有管理员可以重命名群组",
+    "adminRotate": "只有管理员可以更新群组的密钥",
     "adminShares": "只有管理员可以分享群组链接",
     "alreadyJoining": "你已在加入此群组",
     "alreadyMember": "此联系人已是成员",
