@@ -81,8 +81,9 @@ export function mergeGroupPay(current: GroupPayNote | undefined, frame: GroupPay
     next = claims.length ? { ...next, claims } : (({ claims: _, ...rest }) => rest)(next);
   } else if (RANK[frame.st] > RANK[next.state]) next = { ...next, state: frame.st };
   if (frame.st === "paid" && frame.by) next = { ...next, by: frame.by };
-  // An invoice does not say who paid it: when exactly one member says they did, that is who.
-  if (next.state === "paid" && !next.by && next.from === "*" && next.claims?.length === 1) next = { ...next, by: next.claims[0] };
+  // An invoice does not say who paid it, so nobody's word names who did: a member's claim stays a claim, and a payee
+  // that names someone (an older app took a lone claim for the payer) is not believed.
+  if (next.from === "*" && next.rail === "lightning" && next.by) next = (({ by: _, ...rest }) => rest)(next);
   if (next.state === "paid" && next.from !== "*" && !next.by) next = { ...next, by: next.from };
   return JSON.stringify(next) === JSON.stringify(current) ? undefined : next;
 }
@@ -104,11 +105,12 @@ export function authoredNote(p: PaymentView, at: Placement, all: readonly Paymen
   const base = { t: "group-pay" as const, g: at.groupId, id: paymentWireId(p.id), v: String(p.amount), u: p.unit, d: p.target?.method === "usdt" ? p.target.decimals ?? 6 : 0, r: railOf(p),
     ...(testOf(p) ? { x: 1 as const } : {}), ...(p.memo ? { m: p.memo.slice(0, 140) } : {}), ...(p.ask ? { a: 1 as const } : {}), ts: p.createdAt };
   if (p.kind === "request" && p.direction === "out") {
-    // Mine to be paid: open until paid, and who paid it when my wallet knows (ecash comes in on the payer's edge).
+    // Mine to be paid: open until paid, and who paid it when my wallet knows (ecash comes in on the payer's edge);
+    // never from a member's claim, which is only its word.
     const from = p.group ? "*" : at.peer;
     if (!from) return null;
     const payment = all.find(x => x.kind === "payment" && x.direction === "in" && x.requestId === p.id && x.state === "settled");
-    const by = !p.group ? from : payment ? memberOf(payment.linkId) : current?.claims?.length === 1 ? current.claims[0] : undefined;
+    const by = !p.group ? from : payment ? memberOf(payment.linkId) : undefined;
     const st = p.state === "settled" ? "paid" : p.state === "failed" || p.state === "reclaimed" ? "closed" : "open";
     return { ...base, k: "req", f: from, to: at.me, st, ...(st === "paid" && by ? { by } : {}) };
   }
@@ -162,8 +164,6 @@ export class GroupPayments {
       const notes = await this.load(groupId);
       const next = mergeGroupPay(notes.get(frame.id), frame, author, membership.members);
       if (next) await this.write(groupId, membership.me, next);
-      // A single claim may name who paid my request to the group.
-      await this.author();
     });
   }
 
