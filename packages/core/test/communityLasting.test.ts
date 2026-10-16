@@ -4,7 +4,7 @@ import {
   COMMUNITY_LIMITS, CommunitySession,
   type CommunityFrame, type CommunityIncomingApp, type CommunitySessionHooks, type CommunityState,
 } from "../src/groupCommunity";
-// covers: groups.pin, groups.catch-up
+// covers: groups.pins, groups.catch-up
 
 /*
  * A community's pin is one application frame, said once: a member away while more than the store keeps (256 frames)
