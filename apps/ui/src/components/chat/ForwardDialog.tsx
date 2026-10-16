@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
@@ -32,7 +32,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   const [chosen, setChosen] = useState<ChatTarget[]>([]);
   const [secret, setSecret] = useState<SecretFinding | null>(null);
   const [busy, setBusy] = useState(false);
-  const [problems, setProblems] = useState<{ name: string; error: string }[]>([]);
+  const [problems, setProblems] = useState<{ name: string; partial?: string; error: string }[]>([]);
   /** The chats a send that others refused went to: out of the selection, so Send again does not send them it twice. */
   const [sentTo, setSentTo] = useState<string[]>([]);
   /**
@@ -54,6 +54,8 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   }, [targets, query]);
   const isChosen = (target: ChatTarget) => chosen.some(c => c.target === target.target);
   const toggle = (target: ChatTarget) => setChosen(now => isChosen(target) ? now.filter(c => c.target !== target.target) : now.length >= FORWARD_MAX_TARGETS ? now : [...now, target]);
+
+  const [sentBefore, sentAfter = ""] = t("chat.forward.sentTo").split("{{names}}");
 
   const send = async (confirmed = false) => {
     if (!chosen.length || busy) return;
@@ -86,7 +88,7 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
     const failed = outcome.filter(o => o.error !== null).map(o => {
       const name = chosen.find(c => c.target === o.to)?.name ?? "", part = gotNow[o.to]?.length ?? 0;
       const error = problemLine(o.error, t);
-      return { name: part ? `${name} (${t("chat.forward.partial", { sent: String(part), count: String(messages.length) })})` : name, error };
+      return { name, partial: part ? ` (${t("chat.forward.partial", { sent: String(part), count: String(messages.length) })})` : "", error };
     });
     if (failed.length) {
       setProblems(failed);
@@ -127,13 +129,13 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
     </div>
     {problems.length > 0 && (
       <ul className="m-0 mx-4 mt-2 list-none space-y-1 p-0" role="alert" data-testid="forward-error">
-        {problems.map((p, i) => <li key={i} className="text-xs text-danger">{p.name ? `${p.name}: ${p.error}` : p.error}</li>)}
+        {problems.map((p, i) => <li key={i} className="text-xs text-danger">{p.name ? <><bdi>{p.name}</bdi>{p.partial}: {p.error}</> : p.error}</li>)}
       </ul>
     )}
-    {sentTo.length > 0 && <p className="m-0 mx-4 mt-1 text-xs text-text-muted" data-testid="forward-sent">{t("chat.forward.sentTo", { names: sentTo.join(", ") })}</p>}
+    {sentTo.length > 0 && <p className="m-0 mx-4 mt-1 text-xs text-text-muted" data-testid="forward-sent">{sentBefore}<Names names={sentTo} />{sentAfter}</p>}
     <div className="flex items-center gap-2 px-4 py-3">
       <p className="m-0 min-w-0 flex-1 truncate text-xs text-text-muted" data-testid="forward-chosen">
-        {chosen.length ? chosen.map(c => c.name).join(", ") : t("chat.forward.pick", { count: String(FORWARD_MAX_TARGETS) })}
+        {chosen.length ? <Names names={chosen.map(c => c.name)} /> : t("chat.forward.pick", { count: String(FORWARD_MAX_TARGETS) })}
       </p>
       <button type="button" data-testid="forward-cancel" onClick={onClose} disabled={busy}
         className="min-h-10 rounded-lg px-3 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent cursor-pointer">{t("common.cancel")}</button>
@@ -142,6 +144,15 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
         {t("chat.forward.send")}
       </button>
     </div>
-    {secret && <SecretGuardDialog finding={secret} recipient={chosen.map(c => c.name).join(", ")} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void send(true); }} />}
+    {/* The guard's title is a string: each name isolated there by FSI…PDI. */}
+    {secret && <SecretGuardDialog finding={secret} recipient={chosen.map(c => `⁨${c.name}⁩`).join(", ")} onCancel={() => setSecret(null)} onConfirm={() => { setSecret(null); void send(true); }} />}
   </dialog>, document.body);
+}
+
+/**
+ * Chats' names, each in its own direction as in the rows: in one Arabic string "Ana!" read "!Ana" and the names ran in
+ * English order.
+ */
+function Names({ names }: { names: readonly string[] }) {
+  return names.map((name, i) => <Fragment key={i}>{i > 0 && ", "}<bdi>{name}</bdi></Fragment>);
 }

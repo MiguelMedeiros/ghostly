@@ -76,7 +76,7 @@ describe("the Forward to… picker", () => {
   function Where() {
     return <p data-testid="where">{useLocation().pathname}</p>;
   }
-  const open = (messages: ChatMessage[], from = "link-bo", language?: "pt") => renderApp(<Routes>
+  const open = (messages: ChatMessage[], from = "link-bo", language?: "pt" | "ar") => renderApp(<Routes>
     <Route path="/here" element={<ForwardDialog from={from} messages={messages} onClose={() => {}} />} />
     <Route path="*" element={<Where />} />
   </Routes>, { route: "/here", language });
@@ -179,6 +179,31 @@ describe("the Forward to… picker", () => {
       { linkId: "link-1", messageIds: ["b"], to: ["link-ana"] },
     ]);
     expect(screen.queryByTestId("forward-error")).toBeNull();
+  });
+
+  // In one Arabic string a Latin name's end punctuation went to the line's side: "Ana!" read "!Ana", and the chosen names
+  // ran in English order. Each name is isolated, as in the rows above.
+  it("keeps each chat's name in its own direction in an Arabic line", async () => {
+    chat("chat-ana", "peer-ana", "Ana!", 3_000);
+    chat("chat-bo", "peer-bo", "Bo?", 1_000);
+    const all = [message({ id: "a", timestamp: 1 }), message({ id: "b", timestamp: 2 })];
+    fakeEngine.on("forwardMessages", ({ to, messageIds }: { to: string[]; messageIds: string[] }) => ({ results: to.map(t => {
+      const sent = t === "link-ana" ? ["a"] : t === "group:g1" ? messageIds : [];
+      return { to: t, messageIds: sent.map(id => `me_${id}`), sent, error: sent.length < messageIds.length ? "You are offline" : null };
+    }) }));
+    const { user } = open(all, "link-1", "ar");
+    const rows = screen.getAllByTestId("forward-target");
+    for (const row of rows) await user.click(row);
+    const isolated = (id: string) => [...screen.getByTestId(id).querySelectorAll("bdi")].map(b => b.textContent);
+    expect(isolated("forward-chosen")).toEqual(["Ana!", "Friends", "Bo?"]);
+    await user.click(screen.getByTestId("forward-send"));
+    const lines = within(screen.getByTestId("forward-error")).getAllByRole("listitem");
+    expect(lines.map(line => line.querySelector("bdi")?.textContent)).toEqual(["Ana!", "Bo?"]);
+    expect(lines[0]).toHaveTextContent("Ana! (أُرسل 1 من 2): ");
+    expect(isolated("forward-sent")).toEqual(["Friends"]);
+    expect(screen.getByTestId("forward-sent")).toHaveTextContent(/^أُرسل إلى Friends$/);
+    expect(isolated("forward-chosen")).toEqual(["Ana!", "Bo?"]);
+    expect(screen.getByTestId("forward-chosen")).toHaveTextContent(/^Ana!, Bo\?$/);
   });
 
   // The engine's line for a copy that found no room on this device, however the storage said it (engine/forwards.ts
