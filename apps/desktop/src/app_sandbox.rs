@@ -89,10 +89,19 @@ const RUNNER: &str = r#"<!doctype html>
   if (Object.getOwnPropertyNames(window).some((name) => /^(webkit)?RTC/.test(name))) return stop("webrtc");
 
   const invoke = internals.invoke.bind(internals);
-  const broker = (request) => invoke("app_broker", { request });
+  // Every answer and event comes as its JSON text, parsed here (`json_response`, `event_script`): evaluated as a
+  // JavaScript literal, a `__proto__` member would set the object's prototype instead of staying a key, as the web
+  // broker keeps it (jsonValueOf).
+  const parse = JSON.parse;
+  const jsonOf = (text) => {
+    if (typeof text !== "string") return undefined;
+    try { return parse(text); } catch (error) { return undefined; }
+  };
+  const broker = (request) => invoke("app_broker", { request }).then(jsonOf);
   const listeners = { message: new Set(), peer: new Set() };
   // The broker's events, `{event, data}`, which Rust evaluates into this window alone (`app_post`).
-  Object.defineProperty(window, "__ghostlyEvent", { value: (message) => {
+  Object.defineProperty(window, "__ghostlyEvent", { value: (text) => {
+    const message = jsonOf(text);
     if (!message || typeof message !== "object") return;
     const kind = message.event === "chat.message" ? "message" : message.event === "chat.peer" ? "peer" : null;
     if (kind) for (const listener of Array.from(listeners[kind])) { try { listener(message.data); } catch (error) { setTimeout(() => { throw error; }); } }
@@ -927,8 +936,12 @@ fn bytes_response(id: u64, bytes: &[u8]) -> Result<tauri::ipc::Response, String>
     json_response(&json!({ "id": id, "ok": true, "bytes": bytes }))
 }
 
+/// An answer for the app window: its JSON text, sent as a JSON string, which the runner parses (`jsonOf`). Not the
+/// JSON itself: Tauri evaluates an answer under 10 KiB into the window as a JavaScript literal, where a `__proto__`
+/// member sets the object's prototype instead of being a key.
 fn json_response(answer: &Value) -> Result<tauri::ipc::Response, String> {
     serde_json::to_string(answer)
+        .and_then(|text| serde_json::to_string(&text))
         .map(tauri::ipc::Response::new)
         .map_err(|e| e.to_string())
 }
@@ -963,9 +976,13 @@ pub fn post<R: Runtime>(app: &AppHandle<R>, label: &str, message: Value) -> Resu
         .map_err(|e| e.to_string())
 }
 
-/// The script that hands an event to the runner: the message as JSON, which is a JavaScript expression.
+/// The script that hands an event to the runner: the message's JSON text as a string literal (a JSON string is
+/// one), which the runner parses. The message itself as a literal would not be read as JSON: a `__proto__` member,
+/// which a contact's copy of the app may send, would set the object's prototype instead of being a key.
 fn event_script(message: &Value) -> Result<String, String> {
-    let json = serde_json::to_string(message).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string(message)
+        .and_then(|text| serde_json::to_string(&text))
+        .map_err(|e| e.to_string())?;
     Ok(format!("window.__ghostlyEvent({json})"))
 }
 
@@ -1419,7 +1436,8 @@ mod tests {
             tauri::ipc::InvokeResponseBody::Json(json) => json,
             tauri::ipc::InvokeResponseBody::Raw(_) => panic!("a raw answer, not JSON"),
         };
-        let answer: Value = serde_json::from_str(&json).unwrap();
+        let text: String = serde_json::from_str(&json).unwrap();
+        let answer: Value = serde_json::from_str(&text).unwrap();
         assert_eq!(answer["id"], 7);
         assert_eq!(answer["ok"], true);
         let sent = answer["bytes"].as_str().unwrap();
@@ -1433,6 +1451,25 @@ mod tests {
             r#"return typeof answer.bytes === "string" ? bytesOf(answer.bytes) : answer.value;"#
         ));
         assert!(!RUNNER.contains("new Uint8Array(answer)"));
+    }
+
+    /// Tauri evaluates an answer under 10 KiB into the app window as a JavaScript literal: the answer goes as its JSON
+    /// text, a JSON string, which the runner parses (`jsonOf`), so a `__proto__` member stays a key.
+    #[test]
+    fn an_answer_reaches_the_app_window_as_json_text() {
+        let answer =
+            json!({"id": 3, "ok": true, "value": {"board": "e4", "__proto__": {"admin": true}}});
+        let json = match tauri::ipc::IpcResponse::body(json_response(&answer).unwrap()).unwrap() {
+            tauri::ipc::InvokeResponseBody::Json(json) => json,
+            tauri::ipc::InvokeResponseBody::Raw(_) => panic!("a raw answer, not JSON"),
+        };
+        assert_eq!(
+            json,
+            r#""{\"id\":3,\"ok\":true,\"value\":{\"__proto__\":{\"admin\":true},\"board\":\"e4\"}}""#
+        );
+        let text: String = serde_json::from_str(&json).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), answer);
+        assert!(RUNNER.contains(r#"invoke("app_broker", { request }).then(jsonOf)"#));
     }
 
     fn window(app: &str, ready: bool, brokered: bool) -> AppWindow {
@@ -1843,14 +1880,30 @@ mod tests {
     }
 
     #[test]
-    fn an_event_is_handed_to_the_runners_receiver_as_json() {
+    fn an_event_is_handed_to_the_runners_receiver_as_json_text() {
         let script =
             event_script(&json!({"event": "chat.message", "data": {"m": "e4\u{2028}</script>"}}))
                 .unwrap();
         assert_eq!(
             script,
-            "window.__ghostlyEvent({\"data\":{\"m\":\"e4\u{2028}</script>\"},\"event\":\"chat.message\"})"
+            "window.__ghostlyEvent(\"{\\\"data\\\":{\\\"m\\\":\\\"e4\u{2028}</script>\\\"},\\\"event\\\":\\\"chat.message\\\"}\")"
         );
+        // A `__proto__` member a contact sent stays a key: the runner parses the text (apps/ui desktopRunner.test.ts
+        // evaluates this script), where a JavaScript object literal would take it as the object's prototype.
+        let message =
+            json!({"event": "chat.message", "data": {"move": "e4", "__proto__": {"admin": true}}});
+        let script = event_script(&message).unwrap();
+        assert_eq!(
+            script,
+            r#"window.__ghostlyEvent("{\"data\":{\"__proto__\":{\"admin\":true},\"move\":\"e4\"},\"event\":\"chat.message\"}")"#
+        );
+        let argument = script
+            .strip_prefix("window.__ghostlyEvent(")
+            .and_then(|rest| rest.strip_suffix(')'))
+            .unwrap();
+        let text: String = serde_json::from_str(argument).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), message);
+        assert!(RUNNER.contains("const message = jsonOf(text);"));
         assert!(RUNNER.contains("Object.defineProperty(window, \"__ghostlyEvent\""));
         // The receiver and `window.ghostly` are defined before the entry is written.
         let receiver = RUNNER.find("__ghostlyEvent").unwrap();
