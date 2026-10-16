@@ -156,6 +156,29 @@ it("a path that is wrong on this machine is named as the person typed it: a fold
   expect(existsSync(missing)).toBe(false);
 });
 
+// A passphrase file that was a folder named no path, one given as "" (an unset variable) said "No such file or folder: "
+// and an empty one "comes from --passphrase-file" to someone who gave it; `--out ""` was the current folder. A picture
+// that is a folder was not_found "No file" for a path that is there, and an evidence file that is a folder named no path.
+it("the files profile commands read are named as every other file: a folder, a path given as \"\", an empty passphrase file", async () => {
+  const dir = home("backup-read-paths");
+  ok(await ghostly(["--home", dir, "profile", "set", "--name", "Bot"]));
+  const folder = join(dir, "a-folder"), empty = join(dir, "empty-passphrase"), out = join(dir, "x.ghostly-backup");
+  mkdirSync(folder);
+  writeFileSync(empty, "\n");
+  const NAMES_NO_FILE = 'A path given as "" names no file';
+  for (const command of [["backup", "--out", out], ["restore", out, "copy"]]) {
+    const run = (...args: string[]) => ghostly(["--home", dir, "profile", ...command, ...args], { env: NO_PASS });
+    if (command[0] === "restore") ok(await ghostly(["--home", dir, "profile", "backup", "--out", out], { env: PASS }));
+    expect(error(await run("--passphrase-file", folder), "bad_request", 1).message).toBe(`${folder} is a folder: name a file`);
+    expect(error(await run("--passphrase-file", ""), "usage", 2).message).toBe(NAMES_NO_FILE);
+    expect(error(await run("--passphrase-file", empty), "bad_request", 1).message).toBe(`${empty} is empty: it holds the backup's passphrase`);
+  }
+  expect(readdirSync(join(dir, "profiles"))).toEqual(["default"]);
+  expect(error(await ghostly(["--home", dir, "profile", "backup", "--out", "", "--no-passphrase"], { env: NO_PASS }), "usage", 2).message).toBe(NAMES_NO_FILE);
+  expect(error(await ghostly(["--home", dir, "profile", "picture", folder]), "bad_request", 1).message).toBe(`${folder} is a folder: name a file`);
+  expect(error(await ghostly(["--home", dir, "identity", "complete", "draft", "--evidence-file", folder]), "bad_request", 1).message).toBe(`${folder} is a folder: name a file`);
+});
+
 // The folder took the profile's name before anything was in it: a restore stopped half way (Ctrl-C, a kill) left a
 // profile that was listed and opened, with the keys of the original and a file cut short.
 it("a restore stopped while it writes leaves no profile, and the next one is whole", { timeout: 120_000 }, async () => {

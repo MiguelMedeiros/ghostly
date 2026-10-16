@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { MAX_AVATAR_LENGTH, MAX_AVATAR_SIDE, MAX_GROUP_NAME_LENGTH, groupName, sanitizeAvatar } from "@ghostly/core";
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { bool, chatOf, groupOf, node, state, str, type ApiContext, type Method, type Params } from "./apiKit";
-import { CliError } from "./errors";
+import { CliError, localFileError } from "./errors";
 import { groupJson } from "./views";
 
 /**
@@ -30,7 +30,8 @@ export function findMember(group: GroupView, ref: string) {
  */
 export async function pictureFrom(path: string): Promise<string> {
   let bytes: Buffer;
-  try { bytes = await readFile(resolve(path)); } catch { throw new CliError("not_found", `No file ${path}`); }
+  // A folder or a file this user may not read is named as such, not "No file" for a path that is there.
+  try { bytes = await readFile(resolve(path)); } catch (error) { throw localFileError(error, path) ?? new CliError("not_found", `No file ${path}`); }
   const url = `data:image/jpeg;base64,${bytes.toString("base64")}`;
   const checked = sanitizeAvatar(url);
   if (!checked) throw new CliError("bad_request", `A picture is a JPEG of at most ${MAX_AVATAR_SIDE}×${MAX_AVATAR_SIDE} px and about ${Math.floor(MAX_AVATAR_LENGTH * 0.74 / 1000)} KB (128×128 is what the app sends): resize it first`);
