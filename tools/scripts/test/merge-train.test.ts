@@ -1676,7 +1676,9 @@ describe("a pull request with more comments or events than the train reads", () 
     repo.add(11);
     repo.events.get(11)!.push(...Array.from({ length: 999 }, () => ({ event: "mentioned", created_at: "2026-10-08T00:10:00Z" })));
     repo.events.get(11)!.push({ event: "base_ref_changed", created_at: "2026-10-08T00:20:00Z" }); // past the cap
-    repo.kinds.set("h11", { event: "pull_request", head_branch: "fix-11" });
+    const list = [...repo.runs.get("h11")!];
+    repo.meta.set(list, { event: "pull_request", head_branch: "fix-11", created_at: "2026-10-08T01:00:00Z" });
+    repo.runs.set("h11", list);
     const r = await repo.run();
     expect(r).toMatchObject({ merged: [], opened: [], dropped: [] });
     expect(r.log.join("\n")).toMatch(/#11: it has more events than the train reads, so a base change may be missing/);
