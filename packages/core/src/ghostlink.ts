@@ -2170,8 +2170,9 @@ export class GhostLink {
 
   /**
    * Ends the idle live session on this transport and lets its listener go, for a chat in use that found every one
-   * taken. The contact hears a goodbye, as when an app quits, rather than finding out when its pings go unanswered; the
-   * record then lists the transport undescribed, so it stops dialling here. The chat goes on over the DHT (or WebRTC),
+   * taken. The contact hears a goodbye that says so (`yield`, `peerYielded`), rather than finding out when its pings go
+   * unanswered, and does not watch for this app as for one that quit; the record then lists the transport undescribed,
+   * so it stops dialling here. The chat goes on over the DHT (or WebRTC),
    * and takes a listener again the same way once it is in use. False when the session may not end (see above).
    */
   async yieldEndpoint(transport: PairedTransport, idleMs: number): Promise<boolean> {
@@ -2181,7 +2182,8 @@ export class GhostLink {
     // is free to go once the goodbye is out.
     this.yielding = true;
     try {
-      try { this.channel?.send(JSON.stringify({ t: "paired-bye" })); } catch { /* closing already: its close says as much */ }
+      // `yield`: the app stays, so the contact does not watch for it to come back (older apps read a plain goodbye).
+      try { this.channel?.send(JSON.stringify({ t: "paired-bye", yield: true })); } catch { /* closing already: its close says as much */ }
       // Closed at once, a HyperDHT stream dropped the goodbye and the contact heard only the close (`peer-lost`).
       await new Promise(resolve => setTimeout(resolve, YIELD_BYE_MS));
       this.disconnect();
@@ -3889,7 +3891,10 @@ export class GhostLink {
             for (const waiter of this.handledWaiters.filter(w => w.ping <= answered)) waiter.done(true);
             return;
           }
-          if (frame?.t === "paired-bye") { if (paired.state.status === "ready") this.peerDeparted(channel); return; }
+          if (frame?.t === "paired-bye") {
+            if (paired.state.status === "ready") { if (frame.yield === true) this.peerYielded(channel); else this.peerDeparted(channel); }
+            return;
+          }
           if (!frame || typeof frame !== "object") return;
           if (paired.peerTransportSwitchSupport && this.switcher.handle(frame)) return;
           if (frame.t === "paired-rtc") {
@@ -4267,6 +4272,19 @@ export class GhostLink {
     this.departed = { packet: this.session.peerPresence.lastPacketAt, until: Date.now() + WATCH_PEER_MS };
     this.disconnect();
     this.peerLost("bye");
+  }
+
+  /**
+   * The contact gave this session's listener up to another chat (`yieldEndpoint`): its app is still there, and its
+   * record now lists the transport undescribed, so there is nothing to dial and no return to watch for. The session
+   * ends now, and the chat reads the contact at its own pace; the contact dials once it takes a listener back. Taken
+   * as a goodbye, it was watched as an app that quit: 89 reads of its key in the 2 minutes after a yield on the
+   * Desktop, against 6 at the background pace (bug hunt, 2026-10-15).
+   */
+  private peerYielded(channel: FrameChannel): void {
+    if (this.channel !== channel || this.stopped) return;
+    traceLink(this.myPubKeyZ32, "peer-yielded", {});
+    this.disconnect();
   }
 
   /**
