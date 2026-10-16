@@ -8,7 +8,7 @@ services:
     container_name: ghostly-hyperdht-relay
     restart: unless-stopped
     environment:
-      GHOSTLY_RELAY_TRUST_PROXY: "1"
+      GHOSTLY_RELAY_CLOUDFLARE: "1"
       GHOSTLY_RELAY_ORIGINS: ${GHOSTLY_RELAY_ORIGINS:-https://app.ghostly.tools,chrome-extension://nbedaagicniejlmfcncndfjcejaidbcf}
     ports: ["${HYPERDHT_RELAY_BIND:-127.0.0.1:49443}:49443"]
     # HyperDHT itself runs on UDP from inside the container (outgoing, holepunched): no UDP port to publish.

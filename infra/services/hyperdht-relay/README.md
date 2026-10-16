@@ -51,7 +51,11 @@ Other settings:
 
 - `GHOSTLY_RELAY_ORIGINS` lists the allowed `Origin` values. It keeps other websites from using the relay; it is
   no defence against other programs.
-- `GHOSTLY_RELAY_TRUST_PROXY=1` counts addresses from `CF-Connecting-IP` behind a tunnel.
+- `GHOSTLY_RELAY_CLOUDFLARE=1` counts each client by `CF-Connecting-IP`, behind Cloudflare (a tunnel).
+- `GHOSTLY_RELAY_PROXIES` is the number of reverse proxies in front of it (`1` for one nginx): each client then
+  counts by the `X-Forwarded-For` entry that many from the end, the ones before it being the client's to write.
+  Without either, the headers are ignored. A client that reaches the port past the proxy could write them itself,
+  so publish it only where the proxy is (`HYPERDHT_RELAY_BIND`, loopback by default).
 
 ## Running it
 
