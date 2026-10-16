@@ -403,17 +403,19 @@ export class IdentityExchange {
             { type: "result", side: "mine", proof: s.id, ok: frame.ok === true, error });
           return;
         }
-        case "idp-withdraw":
+        case "idp-withdraw": {
           if (!id) return;
-          await this.options.storage.update(l => {
-            const r = l.received.find(x => x.id === id);
-            const next = { ...l, received: l.received.map(x => x.id === id ? { ...x, status: "withdrawn" as const } : x) };
-            return r && r.status !== "withdrawn"
-              ? this.log(next, { type: "stopped", side: "theirs", proof: id, provider: r.binding.provider, subject: r.verified.subject, reason: "withdrawn" })
-              : next;
-          });
+          // A durable write only for a proof this side actually received and still holds: a withdraw naming an
+          // unknown (or already-withdrawn) id is only acknowledged, never written, so it cannot be repeated for a
+          // durable write each time. The ack is always sent (a share the contact refused is withdrawn this way too).
+          const r = this.options.storage.read().received.find(x => x.id === id);
+          if (r && r.status !== "withdrawn")
+            await this.options.storage.update(l => this.log(
+              { ...l, received: l.received.map(x => x.id === id ? { ...x, status: "withdrawn" as const } : x) },
+              { type: "stopped", side: "theirs", proof: id, provider: r.binding.provider, subject: r.verified.subject, reason: "withdrawn" }));
           this.send({ t: "idp-withdrawn", id });
           return;
+        }
         case "idp-withdrawn": {
           const s = id ? this.shared(id) : undefined;
           if (s?.status === "withdrawal-pending") await this.setShared({ ...s, status: "withdrawn", at: this.now() });
@@ -426,12 +428,10 @@ export class IdentityExchange {
   private async onRequest(id: string | undefined, provider: unknown) {
     if (!id) return;
     if (typeof provider !== "string" || !this.options.providers().includes(provider)) {
+      // A kind this app does not verify: told so at once (`idp-result`), no durable write. The provider is the
+      // contact's to choose, so a write here would let it fill the timeline (one entry per fresh id, the real
+      // verified line pushed out) and ring the identity cue, with no limit.
       const error = "Your contact's app cannot verify this kind of identity yet";
-      // Shown here too, as a share that failed: a kind this app does not know, named as the contact's app named it.
-      if (typeof provider === "string" && IDENTITY_PROVIDER_ID.test(provider)) {
-        await this.options.storage.update(l => this.log(this.log(l, { type: "shared", side: "theirs", proof: id, provider }),
-          { type: "result", side: "theirs", proof: id, provider, ok: false, error: "This app cannot verify this kind of identity yet" }));
-      }
       this.send({ t: "idp-result", id, ok: false, error });
       return;
     }
