@@ -15,6 +15,7 @@ export * from "./relayBreaker";
 export * from "./invite";
 export * from "./deviceInvite";
 export * from "./contactLink";
+export * from "./contactRecords";
 export * from "./enroll";
 export * from "./setUpdate";
 export * from "./handoff";
