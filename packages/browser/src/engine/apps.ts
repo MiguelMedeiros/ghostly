@@ -440,6 +440,10 @@ export class Apps {
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** Drops what `staged` holds past `STAGED.ms`, set while it holds anything: a closed install screen sends no call. */
   private sweep: ReturnType<typeof setTimeout> | null = null;
+  /** The store `previewStore` last read and checked, for Add to take within `STAGED.ms` without reading it again. */
+  private previewed: { url: string; index: AppStoreIndex; digest: string; at: number } | null = null;
+  /** Drops `previewed` past `STAGED.ms`: an index is up to 4 MiB, and a closed Add screen sends no call. */
+  private previewedSweep: ReturnType<typeof setTimeout> | null = null;
   private checking: Promise<AppCheckResult[]> | null = null;
   /** Runs the person started with Run anyway (`<ref> <digest>`), for this engine's life: a removal does not cut them off. */
   private readonly anyway = new Set<string>();
@@ -496,6 +500,7 @@ export class Apps {
     if (this.sweep) clearTimeout(this.sweep);
     this.sweep = null;
     this.staged.clear();
+    this.keepPreviewed(null);
     this.held.clear();
     this.heldStores = null;
     this.views = null;
@@ -925,12 +930,20 @@ export class Apps {
     return (typeof url === "string" && appPasteUrl(url, "ghostly-store.json")) || notReadable(url, "Stores are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS");
   }
 
-  /** Reads a store at a URL for the person to see before adding it. Nothing is kept. */
+  private keepPreviewed(previewed: Apps["previewed"]): void {
+    if (this.previewedSweep) clearTimeout(this.previewedSweep);
+    this.previewedSweep = previewed ? setTimeout(() => this.keepPreviewed(null), STAGED.ms) : null;
+    this.previewed = previewed;
+  }
+
+  /** Reads a store at a URL for the person to see before adding it. Nothing is stored: the checked index waits in memory for `addStore`. */
   async previewStore({ url }: { url: string }): Promise<AppStorePreview> {
     const at = this.storeUrl(url);
+    this.keepPreviewed(null);
     const read = await this.readStoreAt(at);
     if (!read.ok) fail(read.reason, "This is not a store Ghostly can read");
-    const { index } = read.store;
+    const { index, digest } = read.store;
+    this.keepPreviewed({ url: at, index, digest, at: this.now() });
     return {
       url: at, key: index.key, fingerprint: appFingerprint(index.key), name: index.name, kind: index.kind, sequence: index.sequence,
       expires: index.expires, expired: read.store.expired, apps: index.apps.length, ...(index.description !== undefined && { description: index.description }),
@@ -939,12 +952,17 @@ export class Apps {
 
   /**
    * Adds a store the person chose: read at its URL and pinned to its key (`key`, when given, is the key the person saw,
-   * and another one is refused). A store already added under that key takes the URL and the newer index.
+   * and another one is refused). A store already added under that key takes the URL and the newer index. The index the
+   * preview just read at that URL, under that key, is taken as it is (only its expiry again), not downloaded again.
    */
   async addStore({ url, key }: { url: string; key?: string }): Promise<AppStoreSummary> {
     if (key !== undefined && !isAppKey(key)) fail("store-key", "Not a store key");
     const at = this.storeUrl(url);
-    const read = await this.readStoreAt(at, key);
+    const kept = this.previewed;
+    this.keepPreviewed(null);
+    const read: AppStoreRead = kept && kept.url === at && (key === undefined || key === kept.index.key) && this.now() - kept.at <= STAGED.ms
+      ? { ok: true, store: { index: kept.index, digest: kept.digest, expired: kept.index.expires < this.nowS() } }
+      : await this.readStoreAt(at, key);
     if (!read.ok) fail(read.reason, "This is not a store Ghostly can read");
     const { index, digest } = read.store;
     const held = await this.storeRecord(index.key);
