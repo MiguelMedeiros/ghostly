@@ -9,6 +9,8 @@
 
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
+use std::sync::Mutex;
 use tauri::{Manager, Runtime};
 
 /// The D-Bus id for this data folder and profile: `<bundle id>.p<16 hex>` (the plugin adds `.SingleInstance`).
@@ -95,6 +97,47 @@ pub fn hand_over(identifier: &str) -> bool {
     )
 }
 
+/// A launch handed to this app while it was leaving: what it was launched with, and from where.
+static HELD: Mutex<Option<(Vec<String>, String)>> = Mutex::new(None);
+
+/// A later launch handed to this app while it leaves (its window closed, the page saying goodbye: `DEPARTING`) has
+/// no window to bring forward: it is held, to start once this app has gone (`relaunch`). True when it was held.
+fn held(departing: bool, argv: Vec<String>, cwd: String) -> bool {
+    if departing {
+        *HELD.lock().unwrap_or_else(|e| e.into_inner()) = Some((argv, cwd));
+    }
+    departing
+}
+
+fn take_held() -> Option<(Vec<String>, String)> {
+    HELD.lock().unwrap_or_else(|e| e.into_inner()).take()
+}
+
+/// Starts `exe` as that launch was: its own arguments, from its own folder.
+fn launch(exe: &Path, argv: &[String], cwd: &str) -> std::io::Result<std::process::Child> {
+    std::process::Command::new(exe)
+        .args(argv.iter().skip(1))
+        .current_dir(cwd)
+        .spawn()
+}
+
+/// The launch held while this app left, started now that it has gone (`RunEvent::Exit`: the plugin has let go of the
+/// profile's name, so it starts on its own instead of handing over again). From the AppImage, not its mount, which
+/// goes with this app.
+pub fn relaunch<R: Runtime>(app: &tauri::AppHandle<R>) {
+    let Some((argv, cwd)) = take_held() else {
+        return;
+    };
+    match tauri::process::current_binary(&app.env()) {
+        Ok(exe) => {
+            if let Err(error) = launch(&exe, &argv, &cwd) {
+                eprintln!("single instance: the launch held while leaving did not start: {error}");
+            }
+        }
+        Err(error) => eprintln!("single instance: no binary to start the held launch: {error}"),
+    }
+}
+
 /// Adds the plugin first, as it asks: it holds the profile's name for the first instance and answers the next
 /// launches' `hand_over`. Two launches at the very same moment still meet in its setup, where the second exits.
 pub fn register<R: Runtime>(builder: tauri::Builder<R>, identifier: &str) -> tauri::Builder<R> {
@@ -104,7 +147,10 @@ pub fn register<R: Runtime>(builder: tauri::Builder<R>, identifier: &str) -> tau
     builder.plugin(
         tauri_plugin_single_instance::Builder::new()
             .dbus_id(id)
-            .callback(|app, _argv, _cwd| {
+            .callback(|app, argv, cwd| {
+                if held(crate::DEPARTING.load(Ordering::SeqCst), argv, cwd) {
+                    return;
+                }
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.unminimize();
                     let _ = window.show();
@@ -291,6 +337,37 @@ mod tests {
         // Another profile is not that instance: it starts.
         assert!(!call_running(&launch, &work, argv, "/home/ana"));
         assert!(heard.try_recv().is_err());
+    }
+
+    /// The issue: a launch within DEPART_MS of the window's close was handed to this app, whose window was going,
+    /// and no window was left. Now it is held while this app leaves, and started once it has gone.
+    #[test]
+    fn a_launch_while_this_app_leaves_is_started_once_it_has_gone() {
+        let argv = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        assert!(!held(false, argv(&["ghostly"]), "/home/ana".into()));
+        assert_eq!(take_held(), None);
+        assert!(held(true, argv(&["ghostly", "--flag"]), "/home/ana".into()));
+        assert_eq!(
+            take_held(),
+            Some((argv(&["ghostly", "--flag"]), "/home/ana".to_string()))
+        );
+        assert_eq!(take_held(), None);
+
+        // Started as launched: its own arguments, from its own folder.
+        let dir = std::env::temp_dir().join(format!("ghostly-relaunch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut child = launch(
+            Path::new("/bin/sh"),
+            &argv(&["ghostly", "-c", "pwd > started"]),
+            dir.to_str().unwrap(),
+        )
+        .unwrap();
+        assert!(child.wait().unwrap().success());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("started")).unwrap().trim(),
+            dir.canonicalize().unwrap().to_str().unwrap()
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
