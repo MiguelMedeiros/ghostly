@@ -11,9 +11,9 @@ export const commands: Record<string, Command> = {
     method: "profile.picture", usage: "profile picture <jpeg> | --clear", summary: "The picture contacts see (a square JPEG, 128 px is what the app sends)", args: ["path...?"],
     options: { clear: { type: "boolean", description: "Remove the picture" } },
     params: ({ options }, a) => {
-      if (a.path === undefined && options.clear !== true) throw new CliError("usage", "Missing <jpeg>: ghostly profile picture <jpeg> | --clear");
-      if (a.path !== undefined && options.clear === true) throw new CliError("usage", "--clear removes the picture: not with a <jpeg>");
-      return { path: here(a.path), clear: options.clear === true };
+      if (!a.path && options.clear !== true) throw new CliError("usage", "Missing <jpeg>: ghostly profile picture <jpeg> | --clear");
+      if (a.path && options.clear === true) throw new CliError("usage", "--clear removes the picture: not with a <jpeg>");
+      return { path: here(a.path || undefined), clear: options.clear === true };
     },
   },
   "status": { method: "status", usage: "status", summary: "The profile, its chats and whether a daemon runs it" },

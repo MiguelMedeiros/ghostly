@@ -39,8 +39,12 @@ export const card: OptionSpec = { type: "string", description: "A Lightning card
 export const memo: OptionSpec = { type: "string", description: "What it is for (up to 140 characters)" };
 export const confirmReal: OptionSpec = { type: "boolean", description: "Confirm a Mainnet (real money) spend" };
 
-/** A path as this command's working directory means it: the daemon runs elsewhere. */
+/**
+ * A path as this command's working directory means it: the daemon runs elsewhere. "" (an unset variable in a script)
+ * names no file, never the current folder.
+ */
 export function here(path: unknown): string | undefined {
+  if (path === "") throw new CliError("usage", "A path given as \"\" names no file");
   return typeof path === "string" ? resolve(path) : undefined;
 }
 

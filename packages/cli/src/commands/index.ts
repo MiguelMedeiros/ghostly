@@ -78,10 +78,10 @@ export function idSlot(command: { args?: string[] }): (index: number) => boolean
 }
 
 /**
- * The positionals of a command, by name; missing required ones are a usage error. A leading `name?` is optional: it
- * is given only when every required one is there too (`file accept [<chat>] <file>`). A trailing `name...` takes the
- * rest and needs at least one word; `name...?` may take none (text from stdin, `chat rename`'s name back to the
- * contact's).
+ * The positionals of a command, by name; missing required ones are a usage error, and so are ones given as "" (an
+ * unset variable in a script), before the profile opens. A leading `name?` is optional: it is given only when every
+ * required one is there too (`file accept [<chat>] <file>`). A trailing `name...` takes the rest and needs at least
+ * one word that is not ""; `name...?` may take none (text from stdin, `chat rename`'s name back to the contact's).
  */
 export function positionals(command: { usage: string; args?: string[] }, values: readonly string[]): Record<string, string | undefined> {
   let names = command.args ?? [];
@@ -95,11 +95,11 @@ export function positionals(command: { usage: string; args?: string[] }, values:
     const name = names[i].replace(/\?$/, "");
     if (name.endsWith("...")) {
       const rest = values.slice(i);
-      if (!rest.length && !names[i].endsWith("?")) throw new CliError("usage", `Missing <${name.slice(0, -3)}>: ghostly ${command.usage}`);
+      if (rest.every((word) => word === "") && !names[i].endsWith("?")) throw new CliError("usage", `Missing <${name.slice(0, -3)}>: ghostly ${command.usage}`);
       out[name.slice(0, -3)] = rest.length ? rest.join(" ") : undefined;
       return out;
     }
-    if (values[i] === undefined) throw new CliError("usage", `Missing <${name}>: ghostly ${command.usage}`);
+    if (values[i] === undefined || values[i] === "") throw new CliError("usage", `Missing <${name}>: ghostly ${command.usage}`);
     out[name] = values[i];
   }
   noMoreThan(names.length, values, command.usage);
