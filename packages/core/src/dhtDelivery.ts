@@ -972,7 +972,7 @@ export class DhtDelivery {
   private takenInviteWait(): number | undefined {
     const now = Date.now(), madeAt = this.options.inviteMadeAt;
     if (!this.state.inviteTaken || this.options.credentials.peerKey || madeAt === undefined || this.active || now < this.fastUntil) return undefined;
-    return unusedInviteWait(now - Math.min(madeAt, this.startedAt), this.mode === "dht" ? DHT_POLL_MS : STREAM_POLL_MS);
+    return unusedInviteWait(now - Math.min(madeAt, this.startedAt), this.mode === "dht" ? DHT_POLL_MS : STREAM_POLL_MS, Infinity);
   }
   private schedule(): void {
     if (!this.running || this.ticking) return;
