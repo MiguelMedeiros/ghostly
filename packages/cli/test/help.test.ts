@@ -54,6 +54,9 @@ describe("help", () => {
     expect((await ghostly(["frobnicate", "--help"])).code).toBe(2);
     const whole = await ghostly(["help"]);
     expect(whole.stdout).toContain("Usage: ghostly <command>");
+    // Its last line sends the reader somewhere an npm install has: the docs page and the README beside this CLI.
+    expect(whole.stdout.trimEnd().split("\n").pop()).toContain("https://ghostly.tools/cli");
+    expect(whole.stdout).not.toContain("packages/cli/");
   });
 
   it("a group's first word alone, or with a word it does not take, names the group's commands", async () => {
