@@ -33,10 +33,28 @@ export class DaemonClient {
     socket.on("error", () => {});
   }
 
-  call(method: string, params: unknown = {}): Promise<unknown> {
+  /**
+   * `timeoutMs`: give up (code `timeout`, exit 4) when the daemon has not answered by then; without it the call waits
+   * for as long as the connection holds. A call that timed out closes the connection: its answer, if one ever comes,
+   * is of no use, and the process leaves once nothing else keeps it (not every caller reaches `exit`).
+   */
+  call(method: string, params: unknown = {}, { timeoutMs }: { timeoutMs?: number } = {}): Promise<unknown> {
+    if (this.socket.destroyed) return Promise.reject(new CliError("unavailable", "The daemon went away"));
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      if (timeoutMs !== undefined) {
+        timer = setTimeout(() => {
+          if (!this.pending.delete(id)) return;
+          reject(new CliError("timeout", `The daemon did not answer ${method} in ${timeoutMs / 1000} s: \`ghostly daemon restart\` starts a fresh one`, { method }));
+          this.destroy();
+        }, timeoutMs);
+        timer.unref?.();
+      }
+      this.pending.set(id, {
+        resolve: (value) => { if (timer) clearTimeout(timer); resolve(value); },
+        reject: (error) => { if (timer) clearTimeout(timer); reject(error); },
+      });
       this.socket.write(JSON.stringify({ id, method, params }) + "\n");
     });
   }

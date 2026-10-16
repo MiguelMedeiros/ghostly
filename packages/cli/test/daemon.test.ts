@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo, type Server } from "node:net";
 import { createInterface } from "node:readline";
@@ -67,6 +68,30 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
     const listed = await ghostly(["--home", dir, "chat", "list"], { env });
     expect(ok(listed)).toEqual({ chats: [] });
     expect(listed.stderr).toBe("");
+  });
+
+  it("daemon restart on a daemon that does not answer ends it, SIGTERM then SIGKILL, and starts a fresh one", async () => {
+    const wedged = home("wedged-restart");
+    ok(await ghostly(["--home", wedged, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    const paths = profilePaths(wedged, "default");
+    // A daemon whose event loop wedged: its socket accepts and never answers, and it holds the profile; one that
+    // ignores SIGTERM, as a loop that runs no handler does. The version probe ahead of the stop gets no answer either.
+    const stuck = spawn(process.execPath, ["-e", 'process.on("SIGTERM", () => {}); require("node:net").createServer(() => {}).listen(process.argv[1], () => process.stdout.write("ready\\n"))', paths.socket], { stdio: ["ignore", "pipe", "ignore"] });
+    try {
+      await new Promise<void>((resolve) => stuck.stdout!.once("data", () => resolve()));
+      writeFileSync(paths.lock, String(stuck.pid));
+      const ended = new Promise<string | null>((resolve) => stuck.once("exit", (_, signalName) => resolve(signalName)));
+      const restarted = await ghostly(["--home", wedged, "daemon", "restart", "--timeout", "1"], { env });
+      expect(ok(restarted)).toMatchObject({ restarted: true, stopped: stuck.pid, before: null, version: packageJson.version, daemon: "started" });
+      expect(restarted.json.pid).not.toBe(stuck.pid);
+      expect(restarted.stderr).toContain(`process ${stuck.pid}) did not answer daemon.stop in 1 s: stopping it with SIGTERM`);
+      expect(restarted.stderr).toContain("did not stop on SIGTERM in 1 s: killing it");
+      expect(await ended).toBe("SIGKILL");
+      expect(ok(await ghostly(["--home", wedged, "daemon", "status"], { env }))).toMatchObject({ running: true, pid: restarted.json.pid });
+    } finally {
+      stuck.kill("SIGKILL");
+      await ghostly(["--home", wedged, "daemon", "stop"], { env });
+    }
   });
 
   it("daemon status and daemon stop on a profile that does not exist say so; `default` is not made by asking", async () => {

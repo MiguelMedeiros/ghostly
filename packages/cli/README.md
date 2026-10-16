@@ -84,7 +84,10 @@ waits until the message went out. Bots should run the daemon: a one-shot is offl
 
 Every command prints one JSON object on stdout. A failure prints `{"error":{"code","message"}}` and exits with:
 `1` failed (the engine or the network refused), `2` usage, `3` not found, `4` timed out, `5` needs a confirmation
-(`--force`, `--yes`, `--confirm-real`). A `<chat>` is its id, a unique prefix of it, or its name; a `<group>` too.
+(`--force`, `--yes`, `--confirm-real`). A daemon that does not answer a read or `daemon status` within 15 seconds, or
+a command that waits (`chat wait`, `file wait`, `--wait`) within its `--timeout` plus 10, is a timeout too (`4`,
+`details.method`); `ghostly daemon restart` is the way out ([docs/CLI.md](../../docs/CLI.md#what-it-does)). A `<chat>` is
+its id, a unique prefix of it, or its name; a `<group>` too.
 
 The rows are in alphabetical order of their first command, and every command of `ghostly help` has one
 (`test/readme.test.ts` checks both).
@@ -113,7 +116,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `chat transport <chat> <auto\|dht\|webrtc\|iroh\|hyperdht>` | What carries the chat |
 | `chat verify <chat> --code <code>` | Mark the contact verified after comparing the codes out of band |
 | `chat wait <chat> [--until live\|text\|paired] [--timeout s]` | Wait for a chat to go live, carry text, or see its contact. Live means a session that exists now, in this run of the daemon: a chat that was live before a restart counts once its contact answers again |
-| `daemon [--detach] [--timeout s]`, `daemon status`, `daemon stop [--timeout s]`, `daemon restart [--timeout s]` | Keep the profile online; `status` names its version and its socket (`socket`, for the [socket API](#the-socket-api)); `restart` stops it and starts this release's code in the background ([After an upgrade](#after-an-upgrade)). Ctrl-C, SIGTERM and the terminal closing (SIGHUP) stop it cleanly |
+| `daemon [--detach] [--timeout s]`, `daemon status [--timeout s]`, `daemon stop [--timeout s]`, `daemon restart [--timeout s]` | Keep the profile online; `status` names its version and its socket (`socket`, for the [socket API](#the-socket-api)); `restart` stops it and starts this release's code in the background ([After an upgrade](#after-an-upgrade)). Ctrl-C, SIGTERM and the terminal closing (SIGHUP) stop it cleanly |
 | `edit <chat> <message> [text… \| --text <text> \| --stdin] [--force] [--wait none\|confirmed] [--timeout s]` | Replace the text of a message you sent (1:1 chats, `group edit` for a group; `<message>` is the `messageId` `send` gave, or its wire id). The contact sees it in place, marked edited; `--wait confirmed` waits for its app to confirm (the default without a daemon). At most 100 edits a message, no time limit; an older contact app gets it once it shows edits |
 | `engine <method> [json \| -] [--confirm-real] [--show-secret]`, `engine --list` | Any call of the app's engine |
 | `events [--since seq]` | What the event journal holds, without following |
