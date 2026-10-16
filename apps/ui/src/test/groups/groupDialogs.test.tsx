@@ -460,6 +460,29 @@ describe("NewGroupDialog", () => {
     expect(engine.callsTo("createGroup")).toEqual([{ name: "x".repeat(MAX_GROUP_NAME_LENGTH), profile: "community" }]);
   });
 
+  // Counted in characters as the engine counts them, not in UTF-16 units: 40 emoji stopped at 32 (agents#1048).
+  it("takes a name of emoji as long as the group does, and cuts a longer one between whole emoji", async () => {
+    const { user, engine } = open();
+    engine.on("createGroup", () => ({ groupId: "party" }));
+    const input = screen.getByTestId("new-group-name");
+    await user.paste("🎉".repeat(40));
+    expect(input).toHaveValue("🎉".repeat(40));
+    await user.clear(input);
+    // A family emoji is 7 characters: nine fit in 64, and a tenth is not cut into pieces.
+    const family = "👨‍👩‍👧‍👦";
+    await user.paste(family.repeat(10));
+    expect(input).toHaveValue(family.repeat(9));
+    await user.type(input, "{Enter}");
+    expect(engine.callsTo("createGroup")).toEqual([{ name: family.repeat(9), profile: "community" }]);
+  });
+
+  it("stops a name at the bytes the group takes too", async () => {
+    const { user } = open();
+    // 4 bytes each: 64 of them would be 256 bytes, then one more character is past either limit.
+    await user.paste("𝔸".repeat(70));
+    expect(screen.getByTestId("new-group-name")).toHaveValue("𝔸".repeat(64));
+  });
+
   it("makes a private group (up to 32, contacts or a link) when that kind is picked", async () => {
     const { user, engine, onCreated } = open();
     engine.on("createGroup", () => ({ groupId: "small" }));
