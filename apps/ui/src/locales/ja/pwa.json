@@ -25,6 +25,8 @@
   "shareNone": "共有されたものはないか、すでに受け取り済みです。",
   "shareOneFile": "1 個のファイル",
   "shareTitle": "共有先…",
+  "shareTooLarge": "大きすぎてここでは共有できません: {{names}}",
+  "shareTooLargeNext": "チャットを開いて + → 書類 から送ってください。",
   "shareWaiting": "共有された内容を受け取っています...",
   "stepsThen": "あとは新しいアイコンから Ghostly を開きます。",
   "storageFull": "ストレージがいっぱいです",

@@ -25,6 +25,8 @@
   "shareNone": "Rien n'a été partagé, ou c'est déjà récupéré.",
   "shareOneFile": "1 fichier",
   "shareTitle": "Partager vers…",
+  "shareTooLarge": "Trop volumineux pour être partagé ici : {{names}}",
+  "shareTooLargeNext": "Ouvrez une discussion et envoyez-le avec + → Document.",
   "shareWaiting": "Réception du partage...",
   "stepsThen": "Ouvrez ensuite Ghostly depuis sa nouvelle icône.",
   "storageFull": "Stockage plein",

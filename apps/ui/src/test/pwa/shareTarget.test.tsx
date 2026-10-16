@@ -241,6 +241,26 @@ describe("the Share to… picker", () => {
     expect(screen.getByTestId("where")).toHaveTextContent("/");
   });
 
+  it("names the files too large to share and how to send them; with nothing else, offers no chat", () => {
+    receiveShare(share({ files: [file("a.png")], leftOut: ["VID_1.mp4"] }));
+    const { unmount } = picker();
+    expect(screen.getByTestId("share-files")).toHaveTextContent("a.png");
+    expect(screen.getByTestId("share-left-out-title")).toHaveTextContent("Too large to share here: VID_1.mp4");
+    expect(screen.getByTestId("share-left-out-next")).toHaveTextContent("Open a chat and send it with + → Document.");
+    expect(screen.getByTestId("share-chat")).toHaveTextContent("Ana");
+    unmount();
+
+    // Only names, with no share waiting: said alone.
+    resetIncomingShare();
+    receiveShare(share({ leftOut: ["VID_1.mp4", "VID_2.mp4"] }));
+    picker();
+    expect(screen.queryByTestId("share-none")).toBeNull();
+    expect(screen.getByTestId("share-left-out-title")).toHaveTextContent("Too large to share here: VID_1.mp4, VID_2.mp4");
+    expect(screen.queryByTestId("share-summary")).toBeNull();
+    expect(screen.queryByTestId("share-chat")).toBeNull();
+    expect(screen.getByTestId("share-cancel")).toBeInTheDocument();
+  });
+
   it("with nothing shared, it says so once it has waited", () => {
     vi.useFakeTimers();
     try {
