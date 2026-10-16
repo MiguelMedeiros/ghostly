@@ -65,9 +65,11 @@ export function forgetFaceChoice(peerKey: string): void {
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
 
 const subscribeChoices = (listener: () => void) => {
+  // Only a choice's key: a list of contacts redraws for each, and another page writes other keys many times a second.
+  const stored = (event: StorageEvent) => { if (!event.key || event.key.startsWith(`${getPrefix()}face_`)) listener(); };
   window.addEventListener(FACE_EVENT, listener);
-  window.addEventListener("storage", listener);
-  return () => { window.removeEventListener(FACE_EVENT, listener); window.removeEventListener("storage", listener); };
+  window.addEventListener("storage", stored);
+  return () => { window.removeEventListener(FACE_EVENT, listener); window.removeEventListener("storage", stored); };
 };
 
 /** The stored choice for one contact, redrawn when it changes. */
