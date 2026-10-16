@@ -348,6 +348,35 @@ describe("the event stream", () => {
     expect(replayed.slice(1).map((e) => e.seq)).toEqual(Array.from({ length: replayed.length - 1 }, (_, i) => 302 - replayed.length + i));
   }, 60_000);
 
+  it("a message deleted, a chat removed or a group left takes its texts out of the journal, and the journal set aside", async () => {
+    const path = join(dir, "gone.jsonl");
+    writeFileSync(path + ".unreadable", JSON.stringify({ seq: 1, type: "message.received", message: { text: "SECRET-OLD" } }));
+    const { h } = await hub("gone.jsonl");
+    const group = { id: "g1", status: "active", members: [{ key: "ana" }] };
+    h.baseline(state([link("c1"), link("c2")], [group]), new Map());
+    const journal = () => readFileSync(path, "utf8") + JSON.stringify(h.replay(0));
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "m1", { text: "SECRET-ONE" }), message("c1", "m2", { text: "kept" })], deleted: [] });
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "m1", { text: "SECRET-ONE, edited", edit: { seq: 1, at: 2 } } as never)], deleted: [] });
+    h.sink.post({ kind: "message-changes", linkId: "c2", messages: [message("c2", "m3", { text: "SECRET-TWO" })], deleted: [] });
+    h.sink.post({ kind: "message-changes", linkId: "group:g1", messages: [message("group:g1", "m4", { text: "SECRET-THREE", member: "ana" })], deleted: [] });
+    expect(journal()).toContain("SECRET-ONE");
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m1"] });
+    expect(journal()).not.toContain("SECRET-ONE");
+    expect(journal()).not.toContain("SECRET-OLD");
+    expect(h.replay(0).map((e) => e.id)).toContain("message.deleted:c1:m1");
+    expect(journal()).toContain("kept");
+    h.sink.post({ kind: "state", state: state([link("c1")], [group]) });
+    expect(journal()).not.toContain("SECRET-TWO");
+    expect(h.replay(0).map((e) => e.id)).toContain("chat.removed:c2");
+    h.sink.post({ kind: "state", state: state([link("c1")]) });
+    expect(journal()).not.toContain("SECRET-THREE");
+    expect(h.replay(0).map((e) => e.id)).toContain("group.removed:g1");
+    expect(journal()).toContain("kept");
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    // The seq goes on from where it was.
+    expect(h.emit("x", "x:1").seq).toBe(h.replay(0).at(-2)!.seq + 1);
+  });
+
   it("a first run learns the history without reporting it; a later one reports what came meanwhile", async () => {
     const first = await hub("e.jsonl");
     first.h.baseline(state([link("c9")]), new Map([["c9", [message("c9", "a"), message("c9", "b")]]]));
