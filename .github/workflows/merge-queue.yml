@@ -7,7 +7,8 @@ run-name: >-
   github.event_name == 'push' && format('Merge queue: push to {0}', github.ref_name) || 'Merge queue' }}
 
 # Runs the merge train (tools/scripts/merge-train.mjs): pull requests labelled `queue` land on their base (dev or an
-# epic/* branch) in batches of up to 12, in the order they were queued (`queue:priority` first). Each run moves every
+# epic/* branch) in batches of up to 12, in the order they were queued (`queue:priority` first); a batch leaves with 3
+# that can board, or once the first has waited 15 minutes, or at once for `queue:priority`. Each run moves every
 # base's train one step: board a batch, merge a green one, split a red one, and update each queued pull request's
 # place in line. See docs/TESTING.md#the-merge-queue.
 #
@@ -23,7 +24,9 @@ run-name: >-
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    # Every 5 minutes (GitHub's shortest): a batch that waits for company leaves at a deadline (MAX_WAIT in the script)
+    # that no other event may come to wake.
+    - cron: "*/5 * * * *"
   push:
     branches: [dev, "epic/**"]
   workflow_run:
