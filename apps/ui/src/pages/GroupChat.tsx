@@ -27,7 +27,7 @@ import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMen
 import { groupChat } from "../lib/chatMute";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { GroupInvitationCard } from "../components/GroupInvitation";
-import { authorName, forgetGroupLocal, groupStatusText, markGroupRead, memberName, memberPhoto } from "../lib/groups";
+import { authorName, forgetGroupLocal, groupReadAt, groupStatusText, markGroupRead, memberName, memberPhoto } from "../lib/groups";
 import { clearChatNotification } from "../lib/notifications";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { authorsMemo, type MessageAuthor } from "../lib/senderRuns";
@@ -388,11 +388,14 @@ export function GroupChat() {
   const jump = useChatScroll({ rows: scrollRows, chat: groupId, window: rowWindow });
   const search = useChatSearch({ messages: shown, chat: groupId, active: !!group && !(group.invitation && (!group.invitation.viaLink || !group.status)), t, returnFocus: optionsRef });
   // Read while the page shows; in a hidden window what comes stays unread (usePageShown).
+  // Written only when something new was read, as a chat's is: every write wakes the other pages of the app (`storage`).
   const pageShown = usePageShown();
+  const readGroupId = group?.id;
+  const readUpTo = group?.lastMessageAt;
   useEffect(() => {
-    if (!group || !pageShown) return;
-    markGroupRead(group.id, Math.max(group.lastMessageAt, Date.now()));
-  }, [group?.id, group?.lastMessageAt, group, pageShown]);
+    if (!readGroupId || readUpTo === undefined || !pageShown || groupReadAt(readGroupId) >= readUpTo) return;
+    markGroupRead(readGroupId, Math.max(readUpTo, Date.now()));
+  }, [readGroupId, readUpTo, pageShown]);
   // Its notification goes once the window has the focus too, as a chat's does (Chat.tsx).
   const away = useWindowAway();
   useEffect(() => {
