@@ -43,14 +43,20 @@ describe("a chat with no WebRTC that gave its native listener up", () => {
     for (const desk of [yielder, contact]) desk.side.link.session.setActive(false);
     await run(60_000);
 
+    const readsOf = (desk: Desk) => pkarr.readsByKey.get(keyOf(desk)) ?? 0;
+    const atYield = readsOf(yielder), dialsAtYield = native.dials;
     const yielding = yielder.side.link.yieldEndpoint("hyperdht/1", 0);
     await run(2_000);
     expect(await yielding, "the listener is given up").toBe(true);
-    // The yielder's record now lists HyperDHT undescribed, and the contact reads it.
+    // The yielder's record now lists HyperDHT undescribed, and the contact reads it at its next look.
+    await run(18_000);
     contact.side.link.learnPeerTransports(["hyperdht/1"], {}, true);
-    await run(2 * 60_000);
+    await run(2 * 60_000 - 20_000);
+    // The yield is no app quitting: the contact used to watch for it to come back, fast for 30 s and at the active pace
+    // up to 2 min (89 reads). At the background pace: 6 reads, and a few for the record that changed.
+    expect(readsOf(yielder) - atYield, "the contact at the background pace from the yield on").toBeLessThanOrEqual(12);
+    expect(native.dials, "nothing dialled after the yield").toBe(dialsAtYield);
 
-    const readsOf = (desk: Desk) => pkarr.readsByKey.get(keyOf(desk)) ?? 0;
     const before = { yielder: readsOf(yielder), contact: readsOf(contact) };
     const dialsBefore = native.dials;
     await run(5 * 60_000);
