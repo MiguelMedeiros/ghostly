@@ -509,6 +509,27 @@ describe("NewGroupDialog", () => {
     expect(input).toHaveValue(`The ${full.slice(4)}`);
   });
 
+  // A refused keystroke was let into the field and then taken out by script, which empties the browser's undo history:
+  // Ctrl+Z then undid nothing (agents#1154). Refused before it goes in, the field is never written and keeps it.
+  it("refuses a keystroke into a full name before it reaches the field, so the field is never rewritten", async () => {
+    const { user } = open();
+    const input = screen.getByTestId("new-group-name") as HTMLInputElement;
+    await user.paste("x".repeat(MAX_GROUP_NAME_LENGTH - 1));
+    await user.keyboard("A");
+    const inputs = vi.fn(), refused: boolean[] = [];
+    input.addEventListener("input", inputs);
+    input.addEventListener("beforeinput", e => refused.push(e.defaultPrevented));
+    await user.type(input, "B", { initialSelectionStart: 10, initialSelectionEnd: 10 });
+    await user.keyboard("C");
+    expect(refused).toEqual([true, true]);
+    expect(inputs).not.toHaveBeenCalled();
+    expect(input).toHaveValue(`${"x".repeat(MAX_GROUP_NAME_LENGTH - 1)}A`);
+    expect(input.selectionStart).toBe(10);
+    // Room made, a keystroke goes in as before.
+    await user.keyboard("{Backspace}D");
+    expect(input).toHaveValue(`${"x".repeat(9)}D${"x".repeat(MAX_GROUP_NAME_LENGTH - 11)}A`);
+  });
+
   // A name with one character left took the reading's first kana and kept it: "に", not "日本" nor nothing (agents#1153).
   it("leaves a word composed with an IME whole while it is composed, then takes it whole if it fits, else nothing", async () => {
     const { user } = open();
