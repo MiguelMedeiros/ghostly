@@ -127,4 +127,30 @@ describe("paired-call frames", () => {
     calls.set("not json");
     expect(calls.hangUp()).toBeNull();
   });
+
+  it("an app going away declines the contact's call still ringing here, and not one that rang out or was hung up", () => {
+    let now = 10_000;
+    const calls = new PairedCalls(() => now);
+    expect(calls.heard(JSON.stringify({ t: "o", ts: now + 50 }))).toBe(true);
+    now += 1_500;
+    // The hang-up comes after the offer in the caller's clock too, so the caller takes it (and ends its call "rejected").
+    expect(JSON.parse(calls.hangUp()!.s)).toEqual({ t: "h", ts: now });
+    expect(calls.hangUp(), "said once").toBeNull();
+
+    // An offer whose ring ran out: nothing rings here any more.
+    expect(calls.heard(JSON.stringify({ t: "o", ts: now + 10 }))).toBe(true);
+    now += CALL_SIGNAL_MAX_AGE_MS + 1;
+    expect(calls.hangUp()).toBeNull();
+
+    // The caller hung up before this app went: nothing to decline.
+    expect(calls.heard(JSON.stringify({ t: "o", ts: now }))).toBe(true);
+    expect(calls.heard(JSON.stringify({ t: "h", ts: now + 1 }))).toBe(true);
+    expect(calls.hangUp()).toBeNull();
+
+    // An offer stamped ahead of this clock: the decline still comes after it.
+    const ahead = now + 5_000;
+    expect(calls.heard(JSON.stringify({ t: "o", ts: ahead }))).toBe(true);
+    now += 1;
+    expect(JSON.parse(calls.hangUp()!.s)).toEqual({ t: "h", ts: ahead + 1 });
+  });
 });

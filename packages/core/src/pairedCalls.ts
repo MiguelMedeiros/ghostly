@@ -84,15 +84,18 @@ export class PairedCalls {
 
   /**
    * This app is going away: a call it placed or answered is hung up, as its person would (its latest signal an
-   * offer, an answer, or a picture change, which only a call on sends). Returns the hang-up to send before the
-   * goodbye, or null when no call of ours is on. Read by its kind, not its age: a call outlasts its offer's freshness.
+   * offer, an answer, or a picture change, which only a call on sends), and the contact's call still ringing here is
+   * declined, so the caller stops ringing for nobody. Returns the hang-up to send before the goodbye, or null when no
+   * call is on. Our own call is read by its kind, not its age: a call outlasts its offer's freshness.
    */
   hangUp(): PairedCallFrame | null {
-    if (!this.latest) return null;
-    let said: { t?: unknown; ts?: unknown };
-    try { said = JSON.parse(this.latest.signal); } catch { return null; }
-    if (said.t !== "o" && said.t !== "a" && said.t !== "v" && said.t !== "r") return null;
-    const ts = Math.max(this.now(), typeof said.ts === "number" ? said.ts + 1 : 0);
+    let said: { t?: unknown; ts?: unknown } = {};
+    if (this.latest) try { said = JSON.parse(this.latest.signal); } catch { /* no signal of ours */ }
+    const ours = said.t === "o" || said.t === "a" || said.t === "v" || said.t === "r";
+    const peer = this.peer;
+    const ringing = peer?.kind === "o" && peer.at > this.saidAt && this.now() - peer.at <= CALL_SIGNAL_MAX_AGE_MS ? peer : null;
+    if (!ours && !ringing) return null;
+    const ts = Math.max(this.now(), typeof said.ts === "number" ? said.ts + 1 : 0, ringing ? ringing.ts + 1 : 0);
     return this.set(JSON.stringify({ t: "h", ts }));
   }
 
