@@ -215,7 +215,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
    * Only another app's `content://` streams are read (SharedStream): the app opens a stream as itself.
    * Only what the page takes is copied: each stream in turn while the share stays within [MAX_SHARED_BYTES]
    * (android.ts `withinPasteTotal`, keep the two alike); one that would go past it is left out, by its size before
-   * copying, or by its bytes when the app gives no size.
+   * copying, or by its bytes when the app gives no size (nor kept), and only named in `leftOut`, for the page to say
+   * so. A share with nothing else is still nothing for the turns: its names go with the share it lets go, or alone.
    */
   private fun shared(intent: Intent) {
     val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() ?: ""
@@ -236,18 +237,25 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       try {
         own.deleteRecursively()
         val files = JSONArray()
+        // Named for the page: what was too large to bring in. A copy stopped as a newer share came is not.
+        val leftOut = JSONArray()
         var left = MAX_SHARED_BYTES
         for ((index, uri) in streams.withIndex()) {
           if (!going()) break
           try {
-            if ((sizeOf(uri) ?: 0L) > left) continue
+            val name = SharedName.of(displayName(uri), index)
+            if ((sizeOf(uri) ?: 0L) > left) {
+              leftOut.put(name)
+              continue
+            }
             val folder = File(own, index.toString()).apply { mkdirs() }
-            val file = File(folder, SharedName.of(displayName(uri), index))
+            val file = File(folder, name)
             val copied =
               resolver.openInputStream(uri)?.use { input -> file.outputStream().use { copyAtMost(input, it, left, going) } }
                 ?: continue
             if (copied < 0) {
               folder.deleteRecursively()
+              if (going()) leftOut.put(name)
               continue
             }
             left -= copied
@@ -261,13 +269,23 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
         if (files.length() == 0) own.deleteRecursively()
         val share =
           if (SharedCopies.nothingIn(title, text, files.length())) null
-          else Handover(own, JSONObject().put("title", title).put("text", text).put("files", files).toString())
+          else Handover(own, JSONObject().put("title", title).put("text", text).put("files", files).put("leftOut", leftOut).toString())
         // Decided on the main thread, where shares arrive, so none comes between the turn and the handing over. With
         // nothing in it, an older share that waited for this one may go now; with something, this one goes, waits for
         // a newer share still copying, or is dropped.
         activity.runOnUiThread {
           val handed = if (share == null) shareTurns.nothing(number) else shareTurns.ready(number, share)
-          if (handed != null) received("share", handed.json)
+          // Nothing but files too large, and no newer share with something: the page names them all the same, with the
+          // older share this one let go (Rust keeps one share: two in a row would lose the first), or alone.
+          val json =
+            if (share != null || leftOut.length() == 0 || !going()) handed?.json
+            else {
+              val notice = handed?.let { JSONObject(it.json) } ?: JSONObject().put("title", "").put("text", "").put("files", JSONArray())
+              val names = notice.optJSONArray("leftOut") ?: JSONArray()
+              for (i in 0 until leftOut.length()) names.put(leftOut.getString(i))
+              notice.put("leftOut", names).toString()
+            }
+          if (json != null) received("share", json)
         }
       } catch (e: Throwable) {
         // Nothing uncaught here: Android ends the app (and a call in it) for an error in any thread. The share is

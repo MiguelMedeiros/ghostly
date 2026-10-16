@@ -25,6 +25,8 @@
   "shareNone": "Nada foi compartilhado, ou já foi recebido.",
   "shareOneFile": "1 arquivo",
   "shareTitle": "Compartilhar com…",
+  "shareTooLarge": "Grande demais para compartilhar aqui: {{names}}",
+  "shareTooLargeNext": "Abra uma conversa e envie com + → Documento.",
   "shareWaiting": "Buscando o que foi compartilhado...",
   "stepsThen": "Depois abra o Ghostly pelo novo ícone.",
   "storageFull": "Armazenamento cheio",

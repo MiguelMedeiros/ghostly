@@ -25,6 +25,8 @@
   "shareNone": "لم تتم مشاركة شيء، أو تم استلامه بالفعل.",
   "shareOneFile": "ملف واحد",
   "shareTitle": "مشاركة إلى…",
+  "shareTooLarge": "أكبر من أن يُشارك هنا: {{names}}",
+  "shareTooLargeNext": "افتح محادثة وأرسله عبر + ← مستند.",
   "shareWaiting": "جارٍ استلام ما تمت مشاركته...",
   "stepsThen": "ثم افتح Ghostly من أيقونته الجديدة.",
   "storageFull": "التخزين ممتلئ",

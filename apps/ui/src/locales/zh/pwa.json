@@ -25,6 +25,8 @@
   "shareNone": "没有分享任何内容，或已被接收。",
   "shareOneFile": "1 个文件",
   "shareTitle": "分享到…",
+  "shareTooLarge": "太大,无法在这里分享:{{names}}",
+  "shareTooLargeNext": "打开一个聊天,用 + → 文档 发送。",
   "shareWaiting": "正在接收分享的内容...",
   "stepsThen": "然后从新图标打开 Ghostly。",
   "storageFull": "存储空间已满",
