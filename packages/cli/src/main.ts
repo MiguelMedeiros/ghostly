@@ -687,11 +687,12 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   // `edit` names the message before the text.
   const [message, ...words] = spec.message ? rest : [undefined, ...rest];
   if (!target || (spec.message && !message)) throw new CliError("usage", `ghostly ${spec.usage}`);
+  // Stdin only when no text word was given at all: `send bob "$line"` with an empty line is no text, not the rest of stdin.
   let text = words.join(" ");
   if (parsed.options.text !== undefined) {
     if (text || parsed.options.stdin) throw new CliError("usage", "Give the text once: as arguments, --text or stdin");
     text = String(parsed.options.text);
-  } else if (parsed.options.stdin || (!text && !process.stdin.isTTY)) {
+  } else if (parsed.options.stdin || (words.length === 0 && !process.stdin.isTTY)) {
     if (text) throw new CliError("usage", "Give the text as arguments or on stdin, not both");
     text = (await readStdin()).replace(/\n$/, "");
   }
