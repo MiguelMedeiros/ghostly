@@ -1,0 +1,1 @@
+A redeem still stored, waiting on the mint's word, is finished only for the payment it was stored with. The same token sent again under another payment id, from the same chat or another, or pasted, is refused as ecash already being received; the first payment settles its request and is answered once the mint has spoken, and the history shows the token once.
