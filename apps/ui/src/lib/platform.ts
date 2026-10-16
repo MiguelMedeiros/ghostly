@@ -470,10 +470,13 @@ export interface AppsPlatform {
  * Its refusals are thrown as `"<code>: words"`: `cancelled`, `changed`, `gone`, `too-large`.
  */
 export interface LinkedFilesHost {
-  /** Asks the person with the client's own sheet and picker, then keeps links to what was picked. */
-  pick(ref: string, title: string, options: { folder: boolean; accept: string[] }): Promise<MiniAppLinkedFile[]>;
-  /** Every link the app keeps; where the browser must be asked again to read kept ones, the person is asked once. */
-  list(ref: string, title: string): Promise<MiniAppLinkedFile[]>;
+  /**
+   * Asks the person with the client's own sheet and picker, then keeps links to what was picked. `signal` aborts when
+   * the app stops: its sheet goes with it, and the pick is `cancelled`.
+   */
+  pick(ref: string, title: string, options: { folder: boolean; accept: string[] }, signal?: AbortSignal): Promise<MiniAppLinkedFile[]>;
+  /** Every link the app keeps; where the browser must be asked again to read kept ones, the person is asked once (a sheet that goes on `signal`, as pick's). */
+  list(ref: string, title: string, signal?: AbortSignal): Promise<MiniAppLinkedFile[]>;
   /** Bytes from `offset`, at most `length`: fewer at the end of the file. A copy the caller owns, which the broker hands to the app (transferred). */
   read(ref: string, id: string, offset: number, length: number): Promise<Uint8Array>;
   /** One link, or all of the app's with "all". */

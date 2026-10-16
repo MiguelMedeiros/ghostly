@@ -61,6 +61,38 @@ describe("picking", () => {
     await expect(pick).rejects.toThrow(/^cancelled: /);
   });
 
+  it("keeps Tab and Shift+Tab in the sheet, never on the app behind it", async () => {
+    const behind = document.body.appendChild(Object.assign(document.createElement("button"), { textContent: "Close" }));
+    const host = webLinkedFiles({ text: () => text, picker: async () => null });
+    void host.pick(REF, "Cinema", { folder: true, accept: [] }).catch(() => {});
+    const choose = await shown("[data-testid=app-files-choose]");
+    const cancel = document.querySelector<HTMLElement>("[data-testid=app-files-cancel]")!;
+    expect(document.activeElement).toBe(choose);
+    const tab = (shiftKey = false) => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true }));
+    // The browser's own Tab from the last button went to the app's Close and its frame, under the backdrop.
+    expect(tab()).toBe(false);
+    expect(document.activeElement).toBe(cancel);
+    expect(tab(true)).toBe(false);
+    expect(document.activeElement).toBe(choose);
+    expect(document.activeElement).not.toBe(behind);
+  });
+
+  it("goes with its app: a sheet whose app stops is taken down and answers cancelled, its button never opening the picker", async () => {
+    let opened = 0;
+    const host = webLinkedFiles({ text: () => text, picker: async () => { opened++; return null; } });
+    const app = new AbortController();
+    const pick = host.pick(REF, "Cinema", { folder: true, accept: [] }, app.signal);
+    const choose = await shown("[data-testid=app-files-choose]");
+    app.abort();
+    await expect(pick).rejects.toThrow(/^cancelled: /);
+    expect(document.querySelector("[data-testid=app-files-sheet]")).toBeNull();
+    choose.click();
+    expect(opened).toBe(0);
+    // Stopped before it asked: no sheet at all.
+    await expect(host.pick(REF, "Cinema", { folder: true, accept: [] }, app.signal)).rejects.toThrow(/^cancelled: /);
+    expect(document.querySelector("[data-testid=app-files-sheet]")).toBeNull();
+  });
+
   it("the picker closed without a pick is cancelled too", async () => {
     const host = webLinkedFiles({ text: () => text, picker: async () => null });
     const pick = host.pick(REF, "Cinema", { folder: true, accept: [] });
@@ -229,6 +261,20 @@ describe("a folder kept past the page (File System Access)", () => {
     expect(box.querySelector("h2")!.className).toContain("[overflow-wrap:anywhere]");
     (sheet.querySelector("[data-testid=app-files-cancel]") as HTMLButtonElement).click();
     await listed;
+  });
+
+  it("the read-again sheet goes with its app, and the app opened again asks again", async () => {
+    const { state, store } = await pickedOnce();
+    state.permission = "prompt";
+    let asked = 0;
+    const next = webLinkedFiles({ text: () => text, store, askAgain: (_app, _name, _more, _grant, signal) => { asked++; return new Promise((resolve) => signal?.addEventListener("abort", () => resolve(false))); } });
+    const app = new AbortController();
+    const listed = next.list(REF, "Cinema", app.signal);
+    await vi.waitFor(() => expect(asked).toBe(1));
+    app.abort();
+    expect((await listed).every((e) => !e.available)).toBe(true);
+    void next.list(REF, "Cinema", new AbortController().signal);
+    await vi.waitFor(() => expect(asked).toBe(2));
   });
 
   it("a file that changed since it was picked reads as changed, one that went as gone", async () => {
