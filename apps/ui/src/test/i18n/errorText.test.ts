@@ -520,6 +520,15 @@ describe("errors in the app's language", () => {
     expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.app.noRoom"), next: t("errors.app.noRoomNext"), detail: raw });
   });
 
+  it("Windows' full disk, as the Desktop's file store says it (file_store.rs io_text), reads as no room on a forward and on a file received", () => {
+    const pt = translators.pt;
+    const windows = "No space left on device: Não há espaço suficiente no disco. (os error 112)";
+    const forward = `Not enough space on this device (${windows})`;
+    expect(problemText(new Error(forward), pt)).toEqual({ tone: "error", title: pt("errors.app.noRoom"), next: pt("errors.app.noRoomNext"), detail: forward });
+    const received = `Could not store the file: ${windows}`;
+    expect(knownErrorParts(received, pt)).toMatchObject({ title: pt("errors.files.noRoomHere"), next: pt("errors.files.noRoomHereNext") });
+  });
+
   it("a storage that is full says the same with the browser's own message, and reads in English as a sentence and its next step", () => {
     const raw = "Not enough space on this device (QuotaExceededError: The quota has been exceeded.)";
     expect(problemText(new Error(raw), english)).toEqual({ tone: "error", title: "Not enough space on this device", next: "Free some space, then try again.", detail: raw });
