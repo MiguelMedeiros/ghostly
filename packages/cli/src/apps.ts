@@ -309,8 +309,8 @@ function collectFiles(dir: string, leaveOut: Set<string>): { files: { path: stri
  */
 const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----\r?\n[A-Za-z0-9+/=\r\n:,-]{40,}-----END [A-Z0-9 ]*PRIVATE KEY-----|^Ghostly (publisher|store) key \(WISP 1200\)/;
 
-/** Whether `path` is `dir` or anything under it. */
-const isInside = (dir: string, path: string) => { const rel = relative(dir, path); return !rel.startsWith("..") && !isAbsolute(rel); };
+/** Whether `path` is `dir` or anything under it (a name like `..k.key` is under it: only a `..` segment leaves). */
+const isInside = (dir: string, path: string) => { const rel = relative(dir, path); return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel); };
 
 /** Fields of `ghostly-app.json` the command writes itself. */
 const WRITTEN = ["publisher", "files"] as const;
