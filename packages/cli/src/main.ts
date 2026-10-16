@@ -153,6 +153,20 @@ async function withSession<T>(g: Globals, work: (s: Session) => Promise<T>, opti
   try { return await work(s); } finally { await s.close(); }
 }
 
+/**
+ * A one-shot join waits up to 60 s for the inviter. Its answer says whether the chat paired and at what stage it is; one
+ * not paired yet comes with the next step, since nothing pairs once the command has left.
+ */
+export async function oneShotJoinWait(s: Pick<Session, "call">, result: Record<string, unknown>, label?: string): Promise<{ answer: Record<string, unknown>; note?: string }> {
+  const view = await s.call("chat.wait", { chat: result.chat, until: "paired", timeout: 60 }).then((v) => ({ paired: true, chat: v }), () => null)
+    ?? await s.call("chat.get", { chat: result.chat }).then((v) => ({ paired: false, chat: v }), () => ({ paired: false, chat: null }));
+  const stage = (view.chat as { stage?: unknown } | null)?.stage ?? null;
+  const answer = { ...result, paired: view.paired, stage };
+  if (view.paired) return { answer };
+  const ref = label?.trim() && !/\s/.test(label.trim()) ? label.trim() : String(result.chat);
+  return { answer, note: `Not paired yet: the inviter's app is offline. It pairs when both are online: keep this profile running (ghostly daemon --detach), then ghostly chat wait ${ref} --until paired` };
+}
+
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
@@ -816,7 +830,9 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     const result = await s.call(command.method, params) as Record<string, unknown>;
     // A one-shot join leaves once the contact can be reached: its answer has to be out first.
     if (command.method === "invite.join" && s.mode === "one-shot") {
-      await s.call("chat.wait", { chat: result.chat, until: "paired", timeout: 60 }).catch(() => {});
+      const joined = await oneShotJoinWait(s, result, typeof params.label === "string" ? params.label : undefined);
+      if (joined.note) process.stderr.write(`ghostly: ${joined.note}\n`);
+      return joined.answer;
     }
     return result;
   }, { deferGroups: chatOnly(command.method, params), offline: offlineCall(command.method, params) });
