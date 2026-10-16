@@ -231,14 +231,36 @@ fn accepted(name: &str, accept: &[String]) -> bool {
     extension.is_some_and(|e| accept.contains(&e))
 }
 
+/// The name a picked folder goes by, first in its paths. A whole drive has none of its own: it goes by its letter (`D`
+/// for `D:\`), its share (`films` for `\\nas\films`) or `Disk` (`/`), never with a `:` or a `\` that would make a
+/// path look absolute.
+fn folder_name(root: &Path) -> Option<String> {
+    use std::path::{Component, Prefix};
+    match root.components().next_back()? {
+        Component::Normal(name) => name.to_str().map(str::to_string),
+        Component::RootDir | Component::Prefix(_) => {
+            let drive = root.components().find_map(|c| match c {
+                Component::Prefix(p) => match p.kind() {
+                    Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => {
+                        Some(char::from(letter).to_string())
+                    }
+                    Prefix::UNC(_, share) | Prefix::VerbatimUNC(_, share) => {
+                        share.to_str().map(str::to_string)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            });
+            Some(drive.unwrap_or_else(|| "Disk".to_string()))
+        }
+        _ => None,
+    }
+}
+
 /// Everything under a folder that `accept` names, its name first in each path: hidden entries, symbolic links and
 /// folders that cannot be read left out, at most one more than `MAX_ENTRIES` (so a folder past it is known to be).
 pub fn walk(root: &Path, accept: &[String]) -> Result<Vec<(String, PathBuf)>, String> {
-    let top = root
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or("A folder with no name")?
-        .to_string();
+    let top = folder_name(root).ok_or("A folder with no name")?;
     let mut found = Vec::new();
     let mut stack = vec![(top, root.to_path_buf())];
     while let Some((shown, dir)) = stack.pop() {
@@ -809,6 +831,24 @@ mod tests {
             .unwrap()
             .iter()
             .all(|(p, _)| !p.contains("elsewhere") && !p.contains("link.mp4")));
+    }
+
+    /// A whole drive has no name of its own (`/`, `D:\`): it is linked under one that keeps every path relative.
+    #[test]
+    fn a_whole_drive_is_named_too() {
+        assert_eq!(folder_name(&films()).as_deref(), Some("Films"));
+        #[cfg(unix)]
+        assert_eq!(folder_name(Path::new("/")).as_deref(), Some("Disk"));
+        #[cfg(windows)]
+        {
+            assert_eq!(folder_name(Path::new(r"D:\")).as_deref(), Some("D"));
+            assert_eq!(folder_name(Path::new(r"\\?\D:\")).as_deref(), Some("D"));
+            assert_eq!(
+                folder_name(Path::new(r"\\nas\films\")).as_deref(),
+                Some("films")
+            );
+        }
+        assert_eq!(folder_name(Path::new("Films/..")), None);
     }
 
     /// `lost+found` at the root of an ext4 drive, a folder of another user: the rest of the folder is still linked.
