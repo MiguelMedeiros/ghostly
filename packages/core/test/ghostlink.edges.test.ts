@@ -460,6 +460,32 @@ describe("what a paired peer says about itself", () => {
     expect(peerB.onPeerAvatar).toHaveBeenLastCalledWith(jpegAvatar);
   });
 
+  it("a name or picture changing without end is read a handful of times a minute, and the newest still counts", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
+    try {
+      const peer = { onPeerNick: vi.fn(), onPeerAvatar: vi.fn() };
+      const t = linkedPair([{}, { events: peer }]);
+      await t.ready();
+      peer.onPeerNick.mockClear(); peer.onPeerAvatar.mockClear();
+      for (let i = 0; i < 100; i++) {
+        t.toB({ t: "paired-nick", n: `Alice ${i}` });
+        t.toB({ t: "paired-avatar", a: i % 2 ? jpegAvatar : "" });
+      }
+      await t.settle("b");
+      // Each was said once as the session opened: five more get through, the rest wait as one.
+      expect(peer.onPeerNick).toHaveBeenCalledTimes(5);
+      expect(peer.onPeerAvatar).toHaveBeenCalledTimes(5);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(peer.onPeerNick).toHaveBeenCalledTimes(6);
+      expect(peer.onPeerNick).toHaveBeenLastCalledWith("Alice 99");
+      expect(peer.onPeerAvatar).toHaveBeenCalledTimes(6);
+      expect(peer.onPeerAvatar).toHaveBeenLastCalledWith(jpegAvatar);
+      expect(t.b.presence.nick).toBe("Alice 99");
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(peer.onPeerNick).toHaveBeenCalledTimes(6);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("takes a small JPEG avatar or its removal and ignores anything else", async () => {
     const onPeerAvatar = vi.fn();
     const t = linkedPair([{}, { events: { onPeerAvatar } }]);
