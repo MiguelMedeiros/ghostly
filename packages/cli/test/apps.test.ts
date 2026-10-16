@@ -205,6 +205,24 @@ describe("app publish", () => {
     writeFileSync(join(dotted, ".DS_Store"), "x");
     expect(ok(await ghostly(["app", "publish", dotted, "--key", key]))).toMatchObject({ files: ["index.html"], skipped: [".DS_Store"] });
   }, 60_000);
+
+  it("refuses a path option given as \"\" (an unset variable) as naming no file, never the current folder", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const keys = tmp();
+    const fresh = join(keys, "new.key");
+    expect(error(await ghostly(["app", "publish", dir, "--key", fresh, "--out", ""]), "usage", 2).message).toMatch(/^A path given as "" names no file/);
+    // Nothing was made: no key, no bundle.
+    expect(existsSync(fresh)).toBe(false);
+    expect(existsSync(join(dir, "app.ghostlyapp"))).toBe(false);
+    const key = vectorKey(keys, "publisher");
+    ok(await ghostly(["app", "publish", dir, "--key", key]));
+    expect(error(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "1", "--bundle", ""]), "usage", 2).message).toMatch(/^A path given as "" names no file/);
+    const index = join(tmp(), "index.json");
+    writeFileSync(index, "{}");
+    expect(error(await ghostly(["store", "sign", index, "--key", join(keys, "store.key"), "--out", ""]), "usage", 2).message).toMatch(/^A path given as "" names no file/);
+    expect(existsSync(join(keys, "store.key"))).toBe(false);
+  }, 60_000);
 });
 
 describe("app publish --sequence", () => {
