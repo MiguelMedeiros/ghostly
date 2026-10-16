@@ -741,11 +741,14 @@ function chatKeys(): ChatKeys[] {
   return all;
 }
 
-/** Of the chats that match, the one the list shows first (`listSessions` is read only when there are two). */
+/**
+ * Of the chats that match, the one the list shows first: with two, the list's order is read through the page's one
+ * cache (`listShownSessions`), so a chat's stored copy is parsed only when it changed, not per call.
+ */
 function firstOf(matches: ChatKeys[]): ChatKeys | undefined {
   if (matches.length < 2) return matches[0];
   const ids = new Set(matches.map((m) => m.id));
-  const id = listSessions().find((s) => ids.has(s.id))?.id;
+  const id = listShownSessions().find((s) => ids.has(s.id))?.id;
   return matches.find((m) => m.id === id);
 }
 
