@@ -111,7 +111,7 @@ export const commands: Record<string, Command> = {
     summary: "Sign a store index (WISP 1200 · Stores): writes ghostly-store.json, canonical, and ghostly-store.sig beside it or in --out",
     args: ["index"],
     options: {
-      key: { ...key, description: "The store key file (made, owner-only, when it is missing and the index names no key; keep it offline)" },
+      key: { ...key, description: "The store key file (made, owner-only, when it is missing, the index names no key and no signed index is in the output folder; keep it offline)" },
       out: { type: "string", description: "The folder to write ghostly-store.json and ghostly-store.sig in (default: the index's)" },
     },
     run: async ({ options }, a) => (await import("../apps")).signStore(a.index!, keyFile(options.key, "store sign <index> --key <file> [--out <dir>]"), here(options.out)),
