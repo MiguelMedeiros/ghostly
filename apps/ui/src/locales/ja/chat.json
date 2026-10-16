@@ -275,6 +275,11 @@
     "retry": "もう一度送信"
   },
   "noMessages": "メッセージはありません",
+  "nowPlaying": {
+    "close": "停止して閉じる",
+    "label": "再生中",
+    "open": "チャットで表示"
+  },
   "offline": "オフライン",
   "online": "オンライン",
   "options": "オプション",

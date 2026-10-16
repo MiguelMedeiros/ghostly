@@ -275,6 +275,11 @@
     "retry": "Enviar de novo"
   },
   "noMessages": "Nenhuma mensagem",
+  "nowPlaying": {
+    "close": "Parar e fechar",
+    "label": "Tocando agora",
+    "open": "Mostrar na conversa"
+  },
   "offline": "offline",
   "online": "online",
   "options": "Opções",
