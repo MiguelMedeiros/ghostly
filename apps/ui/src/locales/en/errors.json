@@ -6,6 +6,7 @@
     "lostPeer": "Lost the Ghostly peer",
     "noRoom": "Not enough space on this device",
     "noRoomNext": "Free some space, then try again.",
+    "partNotLoaded": "Part of Ghostly did not load.",
     "pickCard": "Pick a Lightning card first",
     "signerKey": "Your signer holds a different key than this identity. Nothing was published.",
     "starting": "Ghostly is starting…",

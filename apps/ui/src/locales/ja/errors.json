@@ -6,6 +6,7 @@
     "lostPeer": "Ghostly のピアとの接続が失われました",
     "noRoom": "この端末に十分な空き容量がありません",
     "noRoomNext": "空き容量を作ってから再試行してください。",
+    "partNotLoaded": "Ghostly の一部を読み込めませんでした。",
     "pickCard": "先に Lightning カードを選んでください",
     "signerKey": "署名ツールの鍵がこの ID の鍵と異なります。何も公開されていません。",
     "starting": "Ghostly を起動しています…",
