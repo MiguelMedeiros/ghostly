@@ -918,6 +918,11 @@ export class GhostLink {
    * then was `packet`; it is dialled again once a newer one shows it back, or after `until`.
    */
   private departed: { packet: number; until: number } | null = null;
+  /**
+   * The contact gave the session's listener up (`peerYielded`) when its packet was `packet`: that packet still describes
+   * the listener, so nothing is dialled before a newer one (which lists the transport undescribed), or `until`.
+   */
+  private yielded: { packet: number; until: number } | null = null;
   /** The contact's link packet last seen (its timestamp), to tell a new one from the same one read again. */
   private peerPacketSeen = 0;
   /** A live session ended without this side ending it (`peerLost`): until when the contact's next new packet is news. */
@@ -2095,7 +2100,8 @@ export class GhostLink {
       void this.attachCandidate(channel, binding, plan).catch(() => {}); return;
     }
     if (this.channel && Date.now() < this.switchAllowedUntil) { this.switchAllowedUntil = 0; this.disconnect(); }
-    if (this.stopped || this.leaving || !this.transportOffer().includes(binding.transport)) { channel.close(); return; }
+    // While yielding, the listener closes in a moment, and a session taken on it with it.
+    if (this.stopped || this.leaving || this.yielding || !this.transportOffer().includes(binding.transport)) { channel.close(); return; }
     if (this.channel) { this.attachReplacement(channel, binding); return; }
     if (this.dialing && this.myPubKeyZ32 < this.options.params.peerPubKeyZ32 && this.options.pairing?.credentials.peerKey) { this.parkCrossed(channel, binding); return; }
     this.attach(channel, binding);
@@ -2895,6 +2901,11 @@ export class GhostLink {
     if (this.departed) {
       if (presence.lastPacketAt === this.departed.packet && Date.now() < this.departed.until) return;
       this.departed = null;
+    }
+    // The contact let its listener go: its old packet describes a listener that is closing.
+    if (this.yielded) {
+      if (presence.lastPacketAt === this.yielded.packet && Date.now() < this.yielded.until) return;
+      this.yielded = null;
     }
     const pairing = !!this.tracker && !this.tracker.done && this.tracker.progress.stage !== "on-dht";
     const role = pairing ? this.options.pairingProgress?.role : undefined;
@@ -4279,11 +4290,14 @@ export class GhostLink {
    * record now lists the transport undescribed, so there is nothing to dial and no return to watch for. The session
    * ends now, and the chat reads the contact at its own pace; the contact dials once it takes a listener back. Taken
    * as a goodbye, it was watched as an app that quit: 89 reads of its key in the 2 minutes after a yield on the
-   * Desktop, against 6 at the background pace (bug hunt, 2026-10-15).
+   * Desktop, against 6 at the background pace (bug hunt, 2026-10-15). The side whose key dials waits for the contact's
+   * next packet: dialled at once, the listener being given up took the dial and closed it, a goodbye-less loss watched
+   * the same way (bug hunt, 2026-10-16).
    */
   private peerYielded(channel: FrameChannel): void {
     if (this.channel !== channel || this.stopped) return;
     traceLink(this.myPubKeyZ32, "peer-yielded", {});
+    this.yielded = { packet: this.session.peerPresence.lastPacketAt, until: Date.now() + WATCH_PEER_MS };
     this.disconnect();
   }
 
