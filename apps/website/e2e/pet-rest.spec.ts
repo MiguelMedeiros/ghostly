@@ -50,6 +50,36 @@ for (const rest of RESTS) {
   });
 }
 
+// Asleep, its float and z's looped forever: 8 style recalcs a second beside a still pointer, and at the top of every
+// page where it sleeps at its start spot (agents#1115). They play a few times and rest, as the footer's sleeper does.
+test("the sleeping pointer ghost floats and breathes its z's a few times, then rests", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/cli");
+  const pet = page.locator(".pet");
+  await expect(pet).toHaveCount(1);
+  await page.mouse.move(600, 400);
+  await page.clock.runFor(120_000);
+  await expect(pet).toHaveAttribute("data-mood", "sleeping");
+  const loops = () =>
+    pet.evaluate((el) =>
+      el.getAnimations({ subtree: true }).map((a) => ({
+        name: (a as CSSAnimation).animationName,
+        iterations: a.effect!.getComputedTiming().iterations,
+        end: a.effect!.getComputedTiming().endTime,
+      })),
+    );
+  const asleep = await loops();
+  expect(asleep.map((l) => l.name).sort(), "what moves while it sleeps").toEqual(["pet-doze", "zzz", "zzz", "zzz"]);
+  expect(asleep.filter((l) => l.iterations === Infinity), "loops that never end").toEqual([]);
+  // All of it over within a quarter of a minute.
+  expect(Math.max(...asleep.map((l) => Number(l.end)))).toBeLessThanOrEqual(15_000);
+  // Awake again, it floats as before.
+  await page.mouse.move(300, 200, { steps: 4 });
+  await page.clock.runFor(200);
+  await expect(pet).not.toHaveAttribute("data-mood", "sleeping");
+  expect((await loops()).find((l) => l.name === "pet-float")?.iterations).toBe(Infinity);
+});
+
 test("the pointer ghost settles soon after the pointer stops, and neither moves nor floats by a page layout", async ({ page }) => {
   await page.clock.install();
   await page.goto("/privacy");

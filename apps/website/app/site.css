@@ -1304,8 +1304,11 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
 .pet[data-mood="happy"] .pet-body {
   animation-duration: 3s;
 }
+/* Asleep, it floats twice more and rests, as the footer's sleeper does (#2809): looped, a sleeping ghost beside a
+   still pointer restyled the page 8 times a second for as long as the reader stayed (agents#1115). Its own name, so
+   the doze starts afresh each time it falls asleep, and ends where the float starts. */
 .pet[data-mood="sleeping"] .pet-body {
-  animation-duration: 6s;
+  animation: pet-doze 6s ease-in-out 2 both;
 }
 .pet-hide {
   position: absolute;
@@ -1330,9 +1333,15 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
 .pet-z {
   position: absolute;
   inset: 0;
-  animation: zzz 2s ease-in-out infinite;
+  /* A few breaths, resting on the bright frame; the z's mount afresh at each fall asleep, so they breathe again then. */
+  animation: zzz 2s ease-in-out 3 both;
 }
 @keyframes pet-float {
+  50% {
+    transform: translateY(-6px);
+  }
+}
+@keyframes pet-doze {
   50% {
     transform: translateY(-6px);
   }
