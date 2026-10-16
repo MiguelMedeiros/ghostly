@@ -29,12 +29,19 @@ export const INVISIBLE = /[\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\u
 /**
  * A link as a bubble shows it. Plain ASCII shows as typed. Anything else shows as the browser reads it: the host
  * in punycode (a look-alike "аpple.com" reads "xn--pple-43d.com") and other characters percent-encoded, so a
- * right-to-left override inside it cannot turn the address around. What no URL parser takes loses its invisible
+ * right-to-left override inside it cannot turn the address around. A user part ("www.paypal.com@evil.example")
+ * is left out, so what reads as the host is the one the link opens. What no URL parser takes loses its invisible
  * characters.
  */
 export function shownUrl(url: string): string {
-  if (/^[\x21-\x7e]*$/.test(url)) return url;
-  try { return new URL(url).href; } catch { return url.replace(INVISIBLE, ""); }
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { return url.replace(INVISIBLE, ""); }
+  if (parsed.username || parsed.password) {
+    parsed.username = "";
+    parsed.password = "";
+    return parsed.href;
+  }
+  return /^[\x21-\x7e]*$/.test(url) ? url : parsed.href;
 }
 
 /** Web addresses, over http(s) only: `javascript:` and `data:` never become links. */
