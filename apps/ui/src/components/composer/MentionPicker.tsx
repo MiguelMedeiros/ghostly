@@ -1,8 +1,8 @@
-import { useCallback, useId, useMemo, useState, type KeyboardEvent, type MutableRefObject, type RefObject } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type MutableRefObject, type RefObject } from "react";
 import { MENTION_EVERYONE, type GroupMention } from "@ghostly/core";
 import { useI18n } from "../../contexts/I18nContext";
 import {
-  composeMentions, filterCandidates, insertMention, mentionLabel, mentionQueryAt,
+  composeMentions, filterCandidates, insertMention, mentionLabel, mentionQueryAt, moveChosen,
   type ChosenMention, type MentionCandidate, type MentionQuery,
 } from "../../lib/parse/mentions";
 
@@ -27,6 +27,15 @@ export function useMentionPicker({ mentions, text, setText, textareaRef, caretRe
   const [query, setQuery] = useState<MentionQuery | null>(null);
   const [active, setActive] = useState(0);
   const [chosen, setChosen] = useState<ChosenMention[]>([]);
+  // Each choice keeps its place as the text changes around it: two members of one name are each named where picked.
+  const seen = useRef(text);
+  useEffect(() => {
+    if (seen.current === text) return;
+    const before = seen.current;
+    seen.current = text;
+    const caret = caretRef.current ?? textareaRef.current?.selectionStart ?? null;
+    setChosen(list => list.length ? moveChosen(list, before, text, caret) : list);
+  }, [text, caretRef, textareaRef]);
   // Escape closes the list for the "@" it was open for; the next "@" opens it again.
   const [dismissed, setDismissed] = useState<number | null>(null);
 
@@ -49,8 +58,10 @@ export function useMentionPicker({ mentions, text, setText, textareaRef, caretRe
     const label = candidate.key === MENTION_EVERYONE ? "everyone" : mentionLabel(candidate.name);
     const next = insertMention(text, query, label);
     caretRef.current = next.caret;
+    // The others moved by the insertion now, and this one placed in the new text, so the change is not moved again.
+    setChosen(list => [...moveChosen(list, text, next.text, next.caret), { key: candidate.key, label, at: query.start }]);
+    seen.current = next.text;
     setText(next.text);
-    setChosen(list => [...list, { key: candidate.key, label }]);
     setQuery(null);
     textareaRef.current?.focus({ preventScroll: true });
   };
