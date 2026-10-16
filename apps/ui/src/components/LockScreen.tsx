@@ -248,7 +248,7 @@ function RingingCard({ call, cardRef, profile }: { call: LockedCall; cardRef: Re
           <PeerAvatar peerPubKey={call.peerPubKey} label={call.name} named={call.named} photo={call.photo} testId="lock-call-avatar" />
         </div>
         <div className="min-w-0 max-w-full">
-          <p id={nameId} data-testid="lock-call-name" className="text-text-primary text-lg font-medium truncate">{call.name}</p>
+          <p id={nameId} data-testid="lock-call-name" dir="auto" className="text-text-primary text-lg font-medium truncate">{call.name}</p>
           <p id={kindId} data-testid="lock-call-kind" className="text-text-muted text-sm">
             {call.hasVideo ? t("calls.incomingVideo") : t("calls.incomingAudio")}
           </p>
