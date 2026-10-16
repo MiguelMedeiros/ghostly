@@ -214,6 +214,12 @@ describe("the argument parser", () => {
     usage("call auto", ["off", "--from", "bob", "--rate", "16000"], "--from and --rate go with on: ghostly call auto on --from <chat>");
     expect(params("call auto", ["on", "--from", "bob", "--rate", "16000"])).toEqual({ on: true, from: ["bob"], rate: 16000 });
     expect(params("call auto", ["off"])).toEqual({ on: false });
+    // "" (an unset variable in a script) names no chat: before, it was a prefix of every id and took the only chat.
+    usage("forward", ["bob", "m1", "--to", ""], "--to \"\" names no chat or group");
+    usage("forward", ["bob", "m1", "--to", "alice", "--to", "group:"], "--to \"group:\" names no chat or group");
+    usage("forward", ["bob", "m1", "--to", " "], "--to \" \" names no chat or group");
+    usage("call auto", ["on", "--from", ""], "--from \"\" names no chat");
+    expect(params("forward", ["bob", "m1", "--to", "group:g1"])).toMatchObject({ to: ["group:g1"] });
     // What may be left out still may: a picture cleared, a chat's own name back, a reaction taken back, the only call.
     expect(params("profile picture", ["--clear"])).toEqual({ path: undefined, clear: true });
     expect(params("group picture", ["g1", "--clear"])).toEqual({ group: "g1", path: undefined, clear: true });

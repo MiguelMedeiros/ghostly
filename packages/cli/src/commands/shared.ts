@@ -48,6 +48,17 @@ export function here(path: unknown): string | undefined {
   return typeof path === "string" ? resolve(path) : undefined;
 }
 
+/**
+ * A list option that names chats (`--to`, `--from`): "" or "group:" alone (an unset variable in a script) names
+ * nothing, and is a usage error before the profile opens; it was a prefix of every id and took the only chat or group.
+ */
+export function refs(values: unknown, flag: string, what: string): void {
+  if (!Array.isArray(values)) return;
+  for (const value of values) {
+    if (typeof value === "string" && !value.replace(/^group:/, "").trim()) throw new CliError("usage", `--${flag} ${JSON.stringify(value)} names no ${what}`);
+  }
+}
+
 /** A whole number of sats from the command line. */
 export function sats(value: string | undefined): number {
   const n = Number(value);
