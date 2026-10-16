@@ -76,6 +76,11 @@ export function versionWarning(daemon: unknown, cli: string): string | null {
   return `ghostly: the daemon runs ${daemon} and this command is ${cli}: \`ghostly daemon restart\` runs the new code`;
 }
 
+/**
+ * Never fails, and has no deadline of its own: a daemon that does not answer is the command's own call to find out,
+ * at the command's deadline, which closes the connection and ends this check with it. A deadline here ended every
+ * command on a wedged daemon at 15 s with `unavailable` ("The daemon went away"), whatever its own `--timeout` said.
+ */
 async function warnVersion(client: DaemonClient): Promise<void> {
   const status = await client.call("status").catch(() => null) as { version?: unknown } | null;
   const warning = versionWarning(status?.version, VERSION);
@@ -134,11 +139,43 @@ export function offlineCall(method: string, params: Record<string, unknown>): bo
   return readOnly(method, params) || LOCAL_WRITES.has(method);
 }
 
+/** How long a daemon gets to answer before a command gives up: a read is in memory (15 s); a call that waits for the
+ *  contact carries its own `--timeout` (or the daemon's default for it), plus a margin; anything else may take as long
+ *  as it takes. */
+const ANSWER_MS = 15_000;
+export function answerWithin(method: string, params: Record<string, unknown>): number | undefined {
+  // A `--timeout` outside the daemon's range (1 to 3600 s, 86 400 for `chat wait` and `file wait`) is refused by the
+  // daemon at once (bad_request); the deadline only has to be a timer Node takes (-10 s fired at once, 1e12 after 1 ms).
+  const waits = typeof params.timeout === "number" ? Math.min(Math.max(params.timeout, 1), 86_400) : waitsFor(method, params);
+  if (waits !== undefined) return (waits + 10) * 1000;
+  if (readOnly(method, params)) return ANSWER_MS;
+  return undefined;
+}
+
+/**
+ * The seconds a call without `--timeout` waits for the contact: the daemon's defaults (`num(params, "timeout", …)` in
+ * api.ts, files.ts, buttons.ts and statusCards.ts), so that a bot's `chat wait` or `send --wait sent` on a daemon that
+ * stopped answering ends when the wait would have. A call that does not wait is none.
+ */
+function waitsFor(method: string, params: Record<string, unknown>): number | undefined {
+  if (method === "chat.wait") return 60;
+  if (method === "file.wait" || (method === "file.save" && params.wait === true)) return 300;
+  // send, edit, forward, a button, a task or routine card: `--wait sent|confirmed|delivered`, 30 s each.
+  if (typeof params.wait === "string" && params.wait !== "none") return 30;
+  return undefined;
+}
+
 async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
   requireProfile(g);
   const client = await connectDaemon(g.paths.socket);
-  if (client) await warnVersion(client);
-  if (client) return { mode: "daemon", call: (m, p) => client.call(m, p), close: async () => client.close() };
+  if (client) {
+    // The version check goes on the same connection as the command, ahead of it, not before it, and with no deadline
+    // of its own: a daemon that does not answer costs the command its own deadline and nothing else (a read gave up
+    // after 30 s, not 15; then every command gave up at the check's 15 s, whatever its own). `close` waits for the
+    // check's answer: a daemon that answered the command answered the check sent before it.
+    const warned = warnVersion(client);
+    return { mode: "daemon", call: (m, p) => client.call(m, p, { timeoutMs: answerWithin(m, (p ?? {}) as Record<string, unknown>) }), close: async () => { await warned; client.close(); } };
+  }
   const [{ openHost }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
   const host = await openHost(g.paths, "one-shot", VERSION, options);
   return { mode: "one-shot", call: (m, p) => callApi(host.ctx, m, p ?? {}), close: () => host.close() };
@@ -173,7 +210,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["profile backup --out <file> [--passphrase-file f | --no-passphrase] [--light]", "A backup of the profile, encrypted with a passphrase (from a file or GHOSTLY_BACKUP_PASSPHRASE); --no-passphrase makes one anyone can read", { out: o("string", "The backup file to write"), "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), passphrase: { ...o("boolean", "Do not encrypt. The file then holds the profile's keys and wallet secrets in the clear"), negatedOnly: true }, light: o("boolean", "Leave out files over 1 MB (voice messages over 4 MB); their messages stay") }],
   ["profile restore <file> <new profile> [--passphrase-file f] [--use]", "A backup into a new profile (a backup made with --no-passphrase needs none)", { "passphrase-file": o("string", "The passphrase, from this file (else GHOSTLY_BACKUP_PASSPHRASE)"), use: o("boolean", "Make it the current profile") }],
   ["daemon [--detach] [--timeout s]", "Keep the profile online (foreground; --detach runs it in the background)", { detach: o("boolean", "Run in the background (log in the profile folder)"), timeout: o("number", "Seconds --detach waits for it to start (default 60)") }],
-  ["daemon status", "Whether a daemon runs the profile, its version, and its socket (for the socket API)"],
+  ["daemon status [--timeout s]", "Whether a daemon runs the profile, its version, and its socket (for the socket API)", { timeout: o("number", "Seconds to wait for its answer (default 15)") }],
   ["daemon stop [--timeout s]", "Stop the profile's daemon", { timeout: o("number", "Seconds to wait for it to stop (default 20)") }],
   ["daemon restart [--timeout s]", "Stop the profile's daemon and start it again in the background (after an upgrade: the new code)", { timeout: o("number", "Seconds to wait for each step") }],
   ["listen [--since seq] [--cursor file] [--type t]... [--turns] [--from <chat|key>]... [--group <group>]... [--exec cmd] [--webhook url] [--print]", "Stream events as JSON lines (starts the profile here if no daemon runs it)", {
@@ -452,14 +489,14 @@ async function daemonCommand(argv: string[]): Promise<void> {
   const parsed = parseArgs(sub ? argv.slice(1) : argv, { detach: { type: "boolean", description: "" }, timeout: { type: "number", description: "" } });
   const g = globals(parsed);
   pretty = g.pretty;
-  if (!sub || ["status", "stop", "restart"].includes(sub)) noMoreThan(0, parsed.positionals, sub === "status" ? "daemon status" : sub ? `daemon ${sub} [--timeout s]` : "daemon [--detach] [--timeout s]");
+  if (!sub || ["status", "stop", "restart"].includes(sub)) noMoreThan(0, parsed.positionals, sub ? `daemon ${sub} [--timeout s]` : "daemon [--detach] [--timeout s]");
   if (sub === "status") {
     knownProfile(g);
     const client = await connectDaemon(g.paths.socket);
     // The socket, running or not: a program on the socket API (examples/*.mjs) finds it here. It is in the profile's
     // folder, or in /tmp/ghostly-<hash>/ when that path is too long for a socket, so a program cannot guess it.
     if (!client) { print({ running: false, profile: g.profile, socket: g.paths.socket }); return; }
-    try { print({ running: true, ...(await client.call("status") as object), socket: g.paths.socket }); } finally { client.close(); }
+    try { print({ running: true, ...(await client.call("status", {}, { timeoutMs: seconds(parsed, 15) * 1000 }) as object), socket: g.paths.socket }); } finally { client.close(); }
     return;
   }
   if (sub === "stop") {
@@ -474,8 +511,12 @@ async function daemonCommand(argv: string[]): Promise<void> {
     // The running one stops (if one runs), and this command's own code starts in the background.
     const stopFor = seconds(parsed, 20), startFor = seconds(parsed, 60);
     const client = await connectDaemon(g.paths.socket);
-    const before = client ? (await client.call("status").catch(() => null) as { version?: string } | null)?.version ?? null : null;
+    // The version it ran is asked ahead of the stop, on the same connection, with no deadline of its own: cosmetic,
+    // and the stop's deadline ends it (a deadline here, 15 s, closed the connection under a longer stop, which then
+    // failed as `unavailable` and never reached the signals).
+    const probe = client ? client.call("status").catch(() => null) as Promise<{ version?: string } | null> : null;
     const stopped = client ? await stopDaemon(g, client, stopFor) : null;
+    const before = (await probe)?.version ?? null;
     const started = await startDetached(g, startFor);
     print({ restarted: true, stopped, before, version: VERSION, ...started });
     return;
@@ -496,22 +537,53 @@ function seconds(parsed: Parsed, fallback: number): number {
 
 /**
  * Asks the daemon to stop and waits until its process is gone, not only until it let go of the profile (it releases
- * the lock a moment before it exits); its pid.
+ * the lock a moment before it exits); its pid. One that does not answer the ask in `seconds` (its event loop wedged)
+ * is sent SIGTERM, and SIGKILL when that did not end it either in as long: `daemon restart` then starts a fresh one,
+ * as the timeout error promises. The pid is the profile lock's holder, which a daemon writes itself. On Windows
+ * `process.kill` with either name is TerminateProcess: the first signal ends it, there is no second.
  */
 async function stopDaemon(g: Globals, client: DaemonClient, seconds: number): Promise<number> {
-  const { pid } = await client.call("daemon.stop") as { pid: number };
+  let pid: number, answered = true;
+  try { ({ pid } = await client.call("daemon.stop", {}, { timeoutMs: seconds * 1000 }) as { pid: number }); }
+  catch (error) {
+    if (!(error instanceof CliError && error.code === "timeout")) throw error;
+    const holder = lockOwner(g.paths);
+    if (holder === null) throw error;
+    process.stderr.write(`ghostly: the daemon (process ${holder}) did not answer daemon.stop in ${seconds} s: stopping it with SIGTERM\n`);
+    pid = holder;
+    answered = false;
+    signal(pid, "SIGTERM");
+  }
   client.close();
-  const until = Date.now() + seconds * 1000;
   const running = () => lockOwner(g.paths) === pid || processAlive(pid);
-  while (running() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100));
-  if (running()) throw new CliError("timeout", `The daemon (process ${pid}) has not stopped yet`);
-  return pid;
+  const gone = async () => {
+    const until = Date.now() + seconds * 1000;
+    while (running()) {
+      const left = until - Date.now();
+      if (left <= 0) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(100, left)));
+    }
+    return !running();
+  };
+  if (await gone()) return pid;
+  // A wedged event loop runs no SIGTERM handler either.
+  if (!answered) {
+    process.stderr.write(`ghostly: the daemon (process ${pid}) did not stop on SIGTERM in ${seconds} s: killing it\n`);
+    signal(pid, "SIGKILL");
+    if (await gone()) return pid;
+  }
+  throw new CliError("timeout", `The daemon (process ${pid}) has not stopped yet`, { pid });
 }
 
 /** Throws busy, with its pid, when a process other than `except` holds the profile. */
 function heldBy(g: Globals, except?: number): void {
   const owner = lockOwner(g.paths);
   if (owner !== null && owner !== except) throw new CliError("busy", `Profile ${g.profile} is in use by process ${owner}`, { pid: owner });
+}
+
+/** Gone already, or not ours to signal: the wait that follows says so. */
+function signal(pid: number, name: "SIGTERM" | "SIGKILL"): void {
+  try { process.kill(pid, name); } catch { /* ESRCH, EPERM */ }
 }
 
 function processAlive(pid: number): boolean {
@@ -527,20 +599,29 @@ async function startDetached(g: Globals, seconds: number) {
   const log = openSync(g.paths.log, "a", 0o600);
   const child = spawn(process.execPath, [...process.execArgv, process.argv[1], "daemon", "--home", g.home, "--profile", g.profile], { detached: true, stdio: ["ignore", log, log] });
   child.unref();
+  const spawned = { error: null as Error | null };
+  // A spawn that fails outright (EAGAIN, EMFILE) sets `exitCode` to the errno before the "error" event, so the loop below
+  // ends on its own; the listener swallows the otherwise uncaught event and keeps the cause for the message.
+  child.once("error", (error) => { spawned.error = error; });
   const until = Date.now() + seconds * 1000;
   let client: DaemonClient | null = null;
-  while (!client && Date.now() < until) {
-    if (child.exitCode !== null) break;
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    client = await connectDaemon(g.paths.socket, 500);
+  // Try at once, then every 200 ms, never past `until`: a small `--timeout` gives up near-immediately instead of always
+  // waiting one 200 ms poll first (the first try finds no socket yet and returns at once). A child that exited or was
+  // killed (SIGABRT on a V8 out-of-memory, the OOM killer) ends the wait too, instead of polling to the deadline.
+  while (child.exitCode === null && child.signalCode === null && !spawned.error) {
+    const left = until - Date.now();
+    if (left <= 0) break;
+    client = await connectDaemon(g.paths.socket, Math.min(500, left));
+    if (client) break;
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(200, until - Date.now()))));
   }
   if (!client) {
     heldBy(g, child.pid); // another process took the profile between the check and the child's start
     // Alive still: it is starting (a large profile takes seconds), not failed, and the profile is its own now.
-    if (child.exitCode === null && child.pid !== undefined && processAlive(child.pid)) {
+    if (child.exitCode === null && child.signalCode === null && child.pid !== undefined && processAlive(child.pid)) {
       throw new CliError("timeout", `The daemon (process ${child.pid}) is still starting; ghostly daemon status shows when it is up`, { pid: child.pid, log: g.paths.log });
     }
-    throw new CliError("engine", `The daemon did not start; see ${g.paths.log}`);
+    throw new CliError("engine", spawned.error ? `The daemon could not be spawned: ${spawned.error.message}` : `The daemon did not start; see ${g.paths.log}`);
   }
   client.close();
   return { daemon: "started", profile: g.profile, pid: child.pid, socket: g.paths.socket, log: g.paths.log };
@@ -598,7 +679,7 @@ async function listenCommand(argv: string[]): Promise<void> {
     const handle = await start((m, p) => client.call(m, p), async (chat) => {
       const c = await connectDaemon(g.paths.socket, 1000);
       if (!c) return null;
-      try { return ((await c.call("chat.get", { chat })) as { peer?: string }).peer || null; } finally { c.close(); }
+      try { return ((await c.call("chat.get", { chat }, { timeoutMs: ANSWER_MS })) as { peer?: string }).peer || null; } finally { c.close(); }
     }).catch((error) => { client.close(); throw error; });
     // Followed until stopped; a daemon that restarts is picked up again after the last event seen, and so is the
     // subscription the feed closed while the output or the hooks fell behind.
@@ -834,7 +915,7 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   const client = await connectDaemon(g.paths.socket);
   if (!client) throw new CliError("unavailable", `No daemon runs profile ${g.profile}: calls need one (ghostly daemon --detach)`);
   let call: { call: string; audio: { socket: string; rate: number } | null };
-  try { call = await client.call("call.get", ref ? { call: ref } : {}) as typeof call; } finally { client.close(); }
+  try { call = await client.call("call.get", ref ? { call: ref } : {}, { timeoutMs: ANSWER_MS }) as typeof call; } finally { client.close(); }
   const audio = call.audio;
   if (!audio) throw new CliError("unavailable", "That call has no audio yet: answer it first");
   const socket = connect(audio.socket);
