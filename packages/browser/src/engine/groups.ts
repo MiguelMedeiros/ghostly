@@ -7,7 +7,7 @@ import {
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
 import { groupReply } from "../shared/replies";
-import { pinOfFormerMember, pinView } from "./pins";
+import { droppedPin, pinOfFormerMember, pinView } from "./pins";
 import { db } from "./db";
 import { traceJoin } from "./joinTrace";
 import { COMMUNITY_TIMINGS, Communities, dialedKey, metaLines, type CommunityTimings } from "./community";
@@ -2482,8 +2482,8 @@ export class Groups {
     }
     // A pin by someone no longer a member goes with them (WISP 902 · Group Mesh § Pinned message).
     const group = this.stored.get(groupId);
-    if (session.status === "active" && group && pinOfFormerMember(group.pin, key => rosterHas(after, key))) {
-      group.pin = undefined;
+    if (session.status === "active" && group?.pin && pinOfFormerMember(group.pin, key => rosterHas(after, key))) {
+      group.pin = droppedPin(group.pin, this.now());
       await this.store.putGroup(group);
     }
     this.reconcileEdges(groupId);
