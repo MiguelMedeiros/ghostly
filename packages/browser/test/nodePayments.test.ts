@@ -8,7 +8,7 @@ import { TEST_MINT } from "../src/shared/mints";
 import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import { cashuMint, CASHU_MINT_SOURCE } from "../src/engine/paymentAdapters/providers/cashuMint";
 import { FakeLightningProvider, FakeOnchainProvider, fakeAddress, fakeInvoice, fakeLightning, fakeOnchain } from "../src/engine/paymentAdapters/providers/testing";
-import type { StoredLink, StoredPayment } from "../src/shared/types";
+import type { StoredLink, StoredPayment, WalletTx } from "../src/shared/types";
 import { REAL_MONEY_UNCONFIRMED } from "../src/engine/paymentAdapters/walletInstances";
 import { CASHU_REQUEST_TIMEOUT_MS, NEVER_REACHED_MINT, SWAP_SETTLED_MS } from "../src/engine/paymentAdapters/cashu";
 import type { CashuPrepared } from "../src/engine/wallet";
@@ -599,6 +599,21 @@ describe("the Cashu wallet and Lightning", () => {
     history.push(tx("new", "https://real.example"), tx("test-in", TEST_MINT));
     await node["refreshWallet"]();
     expect(events.onAttention.mock.calls.map(([e]) => e.type)).toEqual(["coin", "coin"]);
+  });
+
+  it("plays the test-coins cue for Get test coins only, never for a contact's ecash whose memo reads like it", async () => {
+    const { node, view, events } = track(engine());
+    node["settings"].mints = [TEST_MINT];
+    const history: WalletTx[] = [];
+    view.mockImplementation(async (network) => ({ mints: [], balance: 0, history: network === "testnet" ? [...history] : [], feesPaid: 0 }) as never);
+    await node["refreshWallet"]();
+    const at = Date.now() + 1_000;
+    history.push(
+      { id: "faucet", mint: TEST_MINT, kind: "lightning-in", amount: 10_000, fee: 0, timestamp: at, note: "Test coins from the test mint" },
+      { id: "contact", mint: TEST_MINT, kind: "ecash-in", amount: 21, fee: 0, timestamp: at, note: "Test coins from the test mint" },
+    );
+    await node["refreshWallet"]();
+    expect(events.onAttention.mock.calls.map(([e]) => [e.id, e.cue])).toEqual([["coin:faucet", "testcoins"], ["coin:contact", undefined]]);
   });
 
   it("a wallet backup that does not restore connects nothing; one that does, connects", async () => {
