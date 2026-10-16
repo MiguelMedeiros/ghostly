@@ -2972,8 +2972,9 @@ export class GhostlyNode implements EngineImplementation {
     this.editQueues.delete(linkId);
     this.editBuffer.forget(linkId);
     live.carried?.stop();
-    void live.link?.stop(true); void live.caps?.stop();
+    // Gone before its link stops: the link's closing events find no chat to make an outbox or files for again.
     this.links.delete(linkId);
+    void live.link?.stop(true); void live.caps?.stop();
     this.identities.forget(linkId);
     this.nostrSocial.forgetLink(linkId);
     this.hold.forgetLink(linkId);
@@ -7103,6 +7104,8 @@ export class GhostlyNode implements EngineImplementation {
         // A pinned contact only, by the key that is the person: a group's edges and a contact's other chats are the same device again.
         onPeerClock: (packetAt, readBefore, readAt) => { const peer = live.stored.pairedPeerKey; if (peer && !live.stored.group) this.clock.peer(peer, packetAt, readBefore, readAt); },
         onDataLinkState: (state) => {
+          // A removed chat's link closes as it stops: nothing of the chat is made again for it.
+          if (this.links.get(linkId) !== live) return;
           const was = live.dataLink;
           live.dataLink = state;
           if (state === "open") {
@@ -7212,7 +7215,7 @@ export class GhostlyNode implements EngineImplementation {
         onFileComplete: (id, direction) =>
           this.fileSettled(this.localFileId(linkId, id, direction, { failed: false }), undefined, linkId),
         onFilesFrame: (frame) => this.fileDesk.handle(linkId, frame),
-        onFilesSession: (open) => { this.fileDesk.session(linkId, open); if (open) this.sayWithdrawnFiles(linkId); },
+        onFilesSession: (open) => { if (this.links.get(linkId) !== live) return; this.fileDesk.session(linkId, open); if (open) this.sayWithdrawnFiles(linkId); },
         onFileAnnounced: stored.profile && !stored.group ? (file, packet) => this.fileAnnounced(linkId, file, packet) : undefined,
         onFileFailed: (id, reason, direction) =>
           this.fileSettled(this.localFileId(linkId, id, direction, { failed: true }), reason, linkId),

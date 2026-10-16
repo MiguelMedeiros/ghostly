@@ -221,6 +221,22 @@ describe("a chat as the contact drives it", () => {
     expect(node.getState().links[0].pairing).toEqual({ status: "connecting" });
   });
 
+  it("a removed chat's link closing as it stops makes none of its outbox or files again", async () => {
+    // A bot that paired with new contacts and removed their chats kept both for every chat it ever removed.
+    const chat = row();
+    const { node, linkOf } = await started(chat);
+    const link = linkOf(chat.id);
+    node["outboxFor"](chat.id);
+    link.options.events.onFilesSession(true);
+    // As the real link does: stopping closes its data link and its files session.
+    link.stop.mockImplementation(async () => { await null; link.options.events.onDataLinkState("idle"); link.options.events.onFilesSession(false); });
+    node.removeLink({ linkId: chat.id });
+    expect(link.stop).toHaveBeenCalledOnce();
+    await link.stop.mock.results[0]!.value;
+    expect(node["outboxes"].has(chat.id)).toBe(false);
+    expect(node["fileDesk"]["chats"].has(chat.id)).toBe(false);
+  });
+
   it("a ready session remembers which ways of paying the contact chose, wallets aside, for requests held while it is away", async () => {
     const chat = row();
     const { node, linkOf } = await started(chat);
