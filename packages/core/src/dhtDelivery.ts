@@ -940,6 +940,8 @@ export class DhtDelivery {
   /** How long until the next read of the contact's mailbox (WISP 403, poll pace). */
   get pollMs(): number {
     if (this.options.pollMs) return this.options.pollMs;
+    const taken = this.takenInviteWait();
+    if (taken !== undefined) return taken;
     const now = Date.now();
     // An invite nobody used, no longer awaited: the older it is, the less often its mailbox is read, as far as their count needs.
     const unused = this.running ? this.unusedInviteAge(now) : undefined;
@@ -953,13 +955,24 @@ export class DhtDelivery {
   }
   /**
    * How long ago this side's invite was made (or joined), while nobody used it (or its inviter never answered,
-   * `unanswered`) and it is no longer awaited (`AWAITING_PEER_MS`, or at once once someone else took it, `inviteTaken`).
+   * `unanswered`) and it is no longer awaited (`AWAITING_PEER_MS`).
    */
   private unusedInviteAge(now: number): number | undefined {
     const madeAt = this.options.inviteMadeAt;
     if (madeAt === undefined || ((this.options.credentials.peerKey || this.state.peerSequence) && !this.unanswered)) return undefined;
     const age = now - Math.min(madeAt, this.startedAt);
-    return age >= AWAITING_PEER_MS || this.state.inviteTaken ? age : undefined;
+    return age >= AWAITING_PEER_MS ? age : undefined;
+  }
+  /**
+   * The wait between reads of the mailbox of a joined chat whose invite someone else used first (`inviteTaken`), before
+   * it pinned anyone: nothing is awaited from its inviter, so it is read as an unused invite of its age (counted from
+   * the join) from the notice on, however few other invites the app holds. One slow read stays, so a chat whose invite
+   * turns out not to be taken (`untaken`) still notices. Undefined for any other chat.
+   */
+  private takenInviteWait(): number | undefined {
+    const now = Date.now(), madeAt = this.options.inviteMadeAt;
+    if (!this.state.inviteTaken || this.options.credentials.peerKey || madeAt === undefined || this.active || now < this.fastUntil) return undefined;
+    return unusedInviteWait(now - Math.min(madeAt, this.startedAt), this.mode === "dht" ? DHT_POLL_MS : STREAM_POLL_MS);
   }
   private schedule(): void {
     if (!this.running || this.ticking) return;
