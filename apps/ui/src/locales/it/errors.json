@@ -42,6 +42,10 @@
   "chat": {
     "editTooMany": "Questo messaggio non si può più modificare",
     "editTooManyNext": "Un messaggio accetta al massimo {{max}} modifiche.",
+    "forwardNone": "Niente da inoltrare",
+    "forwardNoneNext": "Scegli di nuovo i messaggi, poi inoltrali.",
+    "messageGone": "Quel messaggio non è più in questa chat",
+    "messageGoneNext": "È stato eliminato. Torna alla chat e scegli di nuovo.",
     "noRoom": "Non c'è spazio per una nuova chat",
     "noRoomNext": "Libera spazio su questo dispositivo, ad esempio eliminando le chat vecchie, poi riprova.",
     "replyGone": "Non puoi rispondere a quel messaggio",

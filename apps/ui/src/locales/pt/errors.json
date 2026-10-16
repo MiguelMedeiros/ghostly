@@ -42,6 +42,10 @@
   "chat": {
     "editTooMany": "Esta mensagem não pode ser editada de novo",
     "editTooManyNext": "Uma mensagem aceita no máximo {{max}} edições.",
+    "forwardNone": "Nada para encaminhar",
+    "forwardNoneNext": "Escolha as mensagens de novo e encaminhe.",
+    "messageGone": "Essa mensagem não está mais nesta conversa",
+    "messageGoneNext": "Ela foi apagada. Volte à conversa e escolha de novo.",
     "noRoom": "Sem espaço para uma nova conversa",
     "noRoomNext": "Libere espaço neste dispositivo, por exemplo apagando conversas antigas, e tente de novo.",
     "replyGone": "Não dá para responder a essa mensagem",

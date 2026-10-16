@@ -42,6 +42,10 @@
   "chat": {
     "editTooMany": "This message can't be edited again",
     "editTooManyNext": "A message takes {{max}} edits at most.",
+    "forwardNone": "Nothing left to forward",
+    "forwardNoneNext": "Choose the messages again, then forward them.",
+    "messageGone": "That message is no longer in this chat",
+    "messageGoneNext": "It was deleted. Go back to the chat and choose again.",
     "noRoom": "No room for a new chat",
     "noRoomNext": "Free some space on this device, for example by deleting old chats, then try again.",
     "replyGone": "That message can't be replied to",
