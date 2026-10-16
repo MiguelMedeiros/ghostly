@@ -73,7 +73,8 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
         value = argv[++i];
       }
       if (option.type === "number") {
-        const number = Number(value);
+        // Number("") and Number(" ") are 0: an unset variable must not read as 0 and be acted on.
+        const number = value.trim() === "" ? NaN : Number(value);
         if (!Number.isFinite(number)) throw new CliError("usage", `--${name} takes a number, not ${JSON.stringify(value)}`);
         options[name] = number;
       } else if (option.type === "list") {
