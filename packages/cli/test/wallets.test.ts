@@ -82,6 +82,16 @@ describe("wallets", () => {
     expect(JSON.stringify(made)).not.toContain(asked.values.mnemonic);
   });
 
+  it("an empty type or network (an unset variable in a script) is refused before the engine, never read as the default", async () => {
+    const { ctx, node } = fake();
+    for (const method of ["wallet.create", "wallet.remove", "wallet.faucet", "wallet.address"]) {
+      await expect(callApi(ctx, method, { type: "" }), method).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/^type must be one of /) });
+    }
+    await expect(callApi(ctx, "wallet.list", { network: "" })).rejects.toMatchObject({ code: "bad_request", message: "network must be one of mainnet, testnet" });
+    expect(node.walletCreate).not.toHaveBeenCalled();
+    expect(node.walletRemove).not.toHaveBeenCalled();
+  });
+
   it("removal holding money needs the person's acceptLoss", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "wallet.remove", { type: "cashu" })).rejects.toMatchObject({ code: "confirm" });

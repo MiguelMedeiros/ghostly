@@ -224,6 +224,8 @@ describe("chats", () => {
     node.setTyping.mockClear();
     for (const [params, message] of [
       [{ kind: "dancing" }, "kind must be one of typing, recording, thinking"],
+      // Empty (an unset variable in a script) is no kind: never read as plain typing.
+      [{ kind: "" }, "kind must be one of typing, recording, thinking"],
       [{ status: "x".repeat(41) }, "status: at most 40 characters"],
       [{ status: "see https://x.example" }, "status: plain text, with no link or markup"],
       [{ status: "<b>hi</b>" }, "status: plain text, with no link or markup"],
