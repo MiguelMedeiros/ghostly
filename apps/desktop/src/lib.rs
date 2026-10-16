@@ -498,6 +498,9 @@ fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
             tauri::async_runtime::block_on(
                 transports.shutdown(std::time::Duration::from_millis(CLOSE_MS)),
             );
+            // Ghostly launched again while this app was leaving: that launch starts now, a window of its own.
+            #[cfg(target_os = "linux")]
+            single_instance::relaunch(app);
         }
         _ => {}
     }
