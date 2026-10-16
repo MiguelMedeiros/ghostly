@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { PageLink } from "@/components/site/IntentLink";
+import { IntentLink } from "@/components/site/IntentLink";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Brand } from "./Brand";
@@ -131,14 +131,14 @@ export function Nav({ apps = false }: { apps?: boolean }) {
   return (
     <header className="nav" data-scrolled={scrolled}>
       <div className="wrap nav-inner">
-        <Link href={"/"} className="brand" aria-label="Ghostly home">
+        <IntentLink href={"/"} className="brand" aria-label="Ghostly home">
           <Brand />
-        </Link>
+        </IntentLink>
         <nav className="nav-links" aria-label="Main">
           {links.map((l) => (
-            <PageLink key={l.href} href={l.href} aria-current={l.match?.test(pathname) ? "page" : undefined}>
+            <IntentLink key={l.href} href={l.href} aria-current={l.match?.test(pathname) ? "page" : undefined}>
               {l.label}
-            </PageLink>
+            </IntentLink>
           ))}
         </nav>
         <div className="nav-end">
@@ -184,9 +184,9 @@ export function Nav({ apps = false }: { apps?: boolean }) {
             </summary>
             <div className="nav-sheet" onClick={onSheetClick}>
               {links.map((l) => (
-                <PageLink key={l.href} href={l.href} aria-current={l.match?.test(pathname) ? "page" : undefined}>
+                <IntentLink key={l.href} href={l.href} aria-current={l.match?.test(pathname) ? "page" : undefined}>
                   {l.label}
-                </PageLink>
+                </IntentLink>
               ))}
               <span className="nav-sheet-rule" aria-hidden="true" />
               <a className="nav-sheet-way" href={APP_URL}>
