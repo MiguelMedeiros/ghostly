@@ -13,7 +13,7 @@ import type { Host } from "./host";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, readCursor } from "./listen";
 import { format } from "node:util";
-import { secretsFromStdin } from "./secretInput";
+import { secretsFromStdin, secretValuesWarning } from "./secretInput";
 import {
   checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
   type ProfilePaths,
@@ -905,9 +905,17 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     if (!params.credential) throw new CliError("bad_request", params.file === "-" ? "Nothing on stdin: give the SD-JWT VC the issuer sent" : `${params.file as string} is empty: it holds the SD-JWT VC the issuer sent`);
     delete params.file;
   }
+  // Before stdin adds its own: only the --value names came on the command line.
+  const lineValues = command.method === "wallet.create" ? Object.keys((params.values as Record<string, string> | undefined) ?? {}) : [];
   const secretWarning = await secretsFromStdin(command.method, params, readStdin, process.stdin.isTTY === true);
   if (secretWarning) process.stderr.write(`ghostly: ${secretWarning}\n`);
   const result = await withSession(g, async (s) => {
+    if (lineValues.length) {
+      // Which fields are secret is the source's form, in the engine.
+      const list = await s.call("wallet.list", { network: params.network ?? "testnet" }).catch(() => undefined);
+      const warning = secretValuesWarning(list, params.type, params.provider, lineValues);
+      if (warning) process.stderr.write(`ghostly: ${warning}\n`);
+    }
     const result = await s.call(command.method, params) as Record<string, unknown>;
     // A one-shot join leaves once the contact can be reached: its answer has to be out first.
     if (command.method === "invite.join" && s.mode === "one-shot") {

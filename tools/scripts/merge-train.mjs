@@ -81,6 +81,8 @@ export const LABEL = { queue: "queue", priority: "queue:priority", conflict: "qu
 // 12, not 5: each pull request's own full CI no longer gates boarding (the batch's does), so one batch run covers more
 // of the line, and bisection still finds a culprit of 12 in four splits.
 export const MAX_BATCH = 12;
+/** The most pages of 100 the train reads of one list (comments, events, pull requests, jobs). */
+const PAGES_READ = 10;
 const POSITION = "<!-- merge-train:position -->";
 const HEAD = /<!-- merge-train:head (\w+) -->/;
 const STATE = /<!-- merge-train:batch (\{.*?\}) -->/g;
@@ -203,6 +205,14 @@ export const PLAN_SOURCES = ["tools/scripts/ci-changes.mjs", ".github/workflows/
 /** How many of CI's runs on one commit are read, newest first, for one that counts. */
 export const CI_RUNS_READ = 5;
 
+/** A writer's base change, and GitHub's own when the old base branch was deleted (ci-changes.mjs's BASE_CHANGES). */
+const BASE_CHANGES = new Set(["base_ref_changed", "automatic_base_change_succeeded", "automatic_base_change_failed"]);
+/**
+ * How long after another pull request from the branch was closed a run may still be its own: GitHub makes a pull
+ * request's run a little after the event that starts it, so a run made just after the close may be that pull request's.
+ */
+export const CLOSED_GRACE_MS = 10 * 60_000;
+
 export const ordinal = (n) => {
   const v = n % 100;
   return `${n}${["th", "st", "nd", "rd"][(v - 20) % 10] ?? ["th", "st", "nd", "rd"][v] ?? "th"}`;
@@ -239,11 +249,13 @@ export function order(prs) {
 export function waiting(pr) {
   if (pr.draft) return "it is a draft";
   if (pr.fork) return "it comes from a fork";
+  if (pr.unread === "comments") return `it has more comments than the train reads (${PAGES_READ * 100}), so it cannot find its own record of the reviewed head; it moves on once a maintainer deletes some of them`;
+  if (pr.unread) return `it has more events than the train reads (${PAGES_READ * 100}), so it cannot tell when it was queued or whether its base changed; close it and open a new pull request from the same branch`;
   if (pr.ci === "failure") return "CI Success is red on its last commit; push a fix";
   // The fast tier is enough to board: the batch's full CI is the gate.
   if (pr.ci === "success" || pr.fast === "success") return null;
   if (pr.fast === "failure") return "CI Success (draft) is red on its last commit and CI Success has not passed on it yet";
-  if (pr.shared?.length) return `another pull request from its branch (${pr.shared.map((o) => `#${o.number} into \`${o.base}\``).join(", ")}) ran CI on the same commit with that base's ci.yml; close it and push a new commit`;
+  if (pr.shared?.length) return `another pull request from its branch (${pr.shared.map((o) => `#${o.number} into \`${o.base}\`${o.moved ? ", its base changed" : ""}`).join(", ")}) ran CI on the same commit with that base's ci.yml; close it and, ten minutes later, push a new commit`;
   if (pr.retargeted) return "its green CI run on its last commit ran before its base was changed; push a new commit, or close and reopen it, for a run against this base";
   if (pr.misplanned) return "the green CI run on its last commit skipped jobs that its changes need (a run planned for another base); run CI on it again";
   return "CI Success has not passed on its last commit yet";
@@ -436,22 +448,38 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   // and tests come from the merge with the base it ran for, so a second pull request from the same head into another
   // base (an epic whose ci.yml or tests a writer changed), or this one before its base was changed, ran other checks
   // under the same names, and nothing in its jobs can tell. Its branch must be this pull request's, the run newer than
-  // the last change of base, and no other pull request from that branch into another base may hold the same head
-  // (closed ones too: their runs stay). A run of another event runs the commit's own ci.yml. A red run is not asked.
+  // the last change of base, and no other pull request from that branch that is (or ever was) into another base may
+  // have been open when the run was made (closed ones too: their runs stay). Their base and head as they are now do
+  // not tell: a pull request moved to this base, or closed at another head, keeps the run it made on another base's
+  // ci.yml. A run of another event runs the commit's own ci.yml. A red run is not asked.
   const sharing = new Map();
+  const siblings = async (p) => {
+    if (!sharing.has(p.number)) {
+      const others = (await gh.headPulls(p.branch)).filter((o) => o.number !== p.number);
+      for (const o of others) if (o.base === base) o.moved = (await gh.events(o.number)).some((e) => BASE_CHANGES.has(e.event));
+      sharing.set(p.number, others.filter((o) => o.base !== base || o.moved));
+    }
+    return sharing.get(p.number);
+  };
+  // Open when the run was made, or not known to be closed well before: a time that does not read counts as open.
+  const openAt = (o, made) => !(Date.parse(o.createdAt) > made) && (o.open !== false || !(Date.parse(o.closedAt) + CLOSED_GRACE_MS < made));
   const own = async (p, jobs, run) => {
     if (!p || !prRun(run) || ciState(jobs) !== "success") return true;
     let why = null;
     if (run.head_branch !== p.branch) why = `it ran for \`${run.head_branch}\``;
     else {
       p.events ??= await gh.events(p.number);
-      const moved = p.events.filter((e) => e.event === "base_ref_changed").map((e) => Date.parse(e.created_at));
+      if (p.events.truncated) {
+        say(`#${p.number}: it has more events than the train reads, so a base change may be missing; its green CI run on ${p.sha.slice(0, 12)} does not count.`);
+        return false;
+      }
+      const moved = p.events.filter((e) => BASE_CHANGES.has(e.event)).map((e) => Date.parse(e.created_at));
       if (moved.length && !(Date.parse(run.created_at) > Math.max(...moved))) {
         why = "it ran before the base was changed";
         p.retargeted = true;
       } else {
-        if (!sharing.has(p.number)) sharing.set(p.number, (await gh.headPulls(p.branch)).filter((o) => o.number !== p.number && o.base !== base && o.sha === p.sha));
-        p.shared = sharing.get(p.number);
+        const made = Date.parse(run.created_at);
+        p.shared = (await siblings(p)).filter((o) => openAt(o, made));
         if (p.shared.length) why = `${p.shared.map((o) => `#${o.number}`).join(", ")} from the same head into another base ran it too`;
       }
     }
@@ -473,16 +501,24 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     p.ci = ciState(await gh.ciJobs(p.sha, counts(p)));
     // The fast tier on the same head: read only when CI Success alone does not decide.
     if (p.ci !== "success" && p.ci !== "failure") p.fast = draftState(await gh.draftJobs(p.sha));
-    p.sticky = (await gh.comments(p.number)).find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
+    const said = await gh.comments(p.number);
+    p.sticky = said.find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
+    // GitHub lists both oldest first, and anyone may comment: past what the train reads, its own position comment (the
+    // reviewed head) or the latest `queue` may be missing. That is a doubt, not "none yet": it waits, and gets no new comment.
+    if (events.truncated) p.unread = "events";
+    else if (!p.sticky && said.truncated) p.unread = "comments";
     // Written before the latest `queue` (taken off and added again): it speaks for an earlier head, and the label
     // added since vouches for the one it was added on. It is rewritten (or deleted) like any position comment.
     const relabeled = vouchedAt(events, p.labels, null);
     if (p.sticky && relabeled && Date.parse(p.sticky.updated_at ?? p.sticky.created_at) < Date.parse(relabeled)) [p.stale, p.sticky] = [p.sticky, undefined];
     p.alone = aloneMark(p.sticky);
-    // No position comment records the queued head yet: tell it by time, the head's first CI against the label.
+    // No position comment records the queued head yet: tell it by time, when the branch became this head against the
+    // label. A force push the pull request logged counts too, whatever head it left (one put back reads as old).
     if (!p.sticky && inLine(p.labels)) {
       p.labeledAt = vouchedAt(events, p.labels, null);
-      p.pushedAt = await gh.headPushedAt(p.sha);
+      p.pushedAt = await gh.headPushedAt(p.sha, p.branch);
+      const forced = events.filter((e) => e.event === "head_ref_force_pushed").map((e) => e.created_at).sort().at(-1);
+      if (p.pushedAt && forced && Date.parse(forced) > Date.parse(p.pushedAt)) p.pushedAt = forced;
     }
   }
   // Queued again after the train dropped it, as its comment says: the drop label no longer holds, and left on it would
@@ -984,6 +1020,11 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
           ? positionText(base, p, 0, inFlight.number, p.sha, null, held)
           : positionText(base, p, ++place, 0, p.sha, null, held);
     if (!p.sticky && p.pushedAt === null) continue; // no CI on its head yet: its comment would record a head of unknown age
+    if (p.unread) {
+      // A comment posted now would be past what the next run reads too: one more every run.
+      say(`::warning::#${p.number} waits: ${waiting(p)}.`);
+      continue;
+    }
     await setSticky(p, text);
     if (!aboard.has(p.number)) await cancelBehind(p);
   }
@@ -1033,6 +1074,7 @@ export class BudgetLow extends Error {}
  */
 export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promise((r) => setTimeout(r, ms)), fetchImpl = fetch, timeout = REQUEST_TIMEOUT, signal, warn = (m) => console.log(`::warning::${m}`) } = {}) {
   let warnedChecks = false;
+  let warnedActivity = false;
   let cancelDenied = null;
   const backoff = (attempt, after) => wait(Math.min(60, Number(after) || 2 ** attempt * 5) * 1000);
   const api = async (method, path, body) => {
@@ -1076,14 +1118,16 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     if (!r.ok && !(method === "DELETE" && (r.status === 404 || r.status === 422))) throw new Error(`${method} ${path}: HTTP ${r.status} ${r.data?.message ?? ""}`);
     return r.data;
   };
+  /** Up to `PAGES_READ` pages of 100; a list that fills them all may go on, and says so (`truncated`). */
   const all = async (path) => {
     const out = [];
-    for (let page = 1; page <= 10; page++) {
+    for (let page = 1; page <= PAGES_READ; page++) {
       const data = await must("GET", `${path}${path.includes("?") ? "&" : "?"}per_page=100&page=${page}`);
       const list = Array.isArray(data) ? data : (data.jobs ?? data.check_runs);
       out.push(...list);
-      if (list.length < 100) break;
+      if (list.length < 100) return out;
     }
+    out.truncated = true;
     return out;
   };
   // CI's runs on a commit and each run's jobs are read once per layer, so once per run of the train: `ciJobs` and
@@ -1112,6 +1156,8 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     fork: p.head.repo?.full_name !== repo,
     labels: p.labels.map((l) => l.name),
     createdAt: p.created_at,
+    closedAt: p.closed_at,
+    open: p.state === "open",
     base: p.base.ref,
     author: p.user?.login,
   });
@@ -1209,8 +1255,25 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
       }
       return { cancelled };
     },
-    /** When a commit was pushed: its earliest check suite (GitHub makes them on the push), or null before any. */
-    headPushedAt: async (sha) => (await must("GET", `/commits/${sha}/check-suites?per_page=100`)).check_suites.map((s) => s.created_at).sort()[0] ?? null,
+    /**
+     * When a branch became a commit: the later of the commit's earliest check suite (GitHub makes them on the push) and
+     * the branch's latest push to it in the repository's activity, or null before any suite. A suite belongs to the
+     * commit, not the branch: an earlier head put back, or a commit pushed on another branch first, has one from before.
+     * Activity this token may not read leaves the suite's time, with a warning once.
+     */
+    headPushedAt: async (sha, branch) => {
+      const first = (await must("GET", `/commits/${sha}/check-suites?per_page=100`)).check_suites.map((s) => s.created_at).sort()[0] ?? null;
+      if (!first || !branch) return first;
+      const r = await api("GET", `/activity?ref=${encodeURIComponent(`refs/heads/${branch}`)}&per_page=100`);
+      if (r.status === 403 || r.status === 404) {
+        if (!warnedActivity) warn(`This token may not read the repository's activity (${r.data?.message ?? `HTTP ${r.status}`}), so a head's push is read from its first check suite only. Give the queue app "Contents: read".`);
+        warnedActivity = true;
+        return first;
+      }
+      if (!r.ok) throw new Error(`GET activity of ${branch}: HTTP ${r.status} ${r.data?.message ?? ""}`);
+      const moved = (Array.isArray(r.data) ? r.data : []).filter((a) => a.after === sha).map((a) => a.timestamp).sort((a, b) => Date.parse(a) - Date.parse(b)).at(-1);
+      return moved && Date.parse(moved) > Date.parse(first) ? moved : first;
+    },
     comments: (n) => all(`/issues/${n}/comments`),
     branchSha: async (base) => (await must("GET", `/git/ref/heads/${base}`)).object.sha,
     comment: (n, body) => must("POST", `/issues/${n}/comments`, { body }),

@@ -4,6 +4,7 @@ import { FileBubble } from "../../components/FileBubble";
 import { servicesPlatform } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
+import { pngHead } from "../pngHead";
 import { renderApp } from "../render";
 
 // covers: files.paired.images
@@ -52,7 +53,7 @@ beforeEach(() => {
       if (answered) return;
       answered = true;
       inFlight--;
-      resolve(new Blob(["jpeg"], { type: "image/jpeg" }));
+      resolve(pngHead(1920, 1080, "image/jpeg"));
     } });
   }));
   fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });

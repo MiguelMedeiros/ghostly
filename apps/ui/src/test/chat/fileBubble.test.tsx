@@ -6,6 +6,7 @@ import { servicesPlatform, type FileTransferState } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 import { everythingOnScreen } from "../onScreen";
+import { pngHead } from "../pngHead";
 import { renderApp } from "../render";
 
 // covers: files.large.offer, files.large.resume, files.size-label, files.large.resend, files.large.request, backup.light
@@ -239,7 +240,7 @@ describe("FileBubble: files/3", () => {
     const { createObjectURL, revokeObjectURL } = URL;
     URL.createObjectURL = () => { const url = `blob:picture-${created.length}`; created.push(url); return url; };
     URL.revokeObjectURL = (url: string) => { revoked.push(url); };
-    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["png"], { type: "image/png" }));
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(pngHead(1920, 1080));
     try {
       const id = "chat1-out-pasted";
       const picture = { id, name: "Pasted image.png", size: 3, mime: "image/png" };
@@ -263,7 +264,7 @@ describe("FileBubble: files/3", () => {
   });
 
   it("a picture arriving here shows once it is all here, not from a part", async () => {
-    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(new Blob(["png"], { type: "image/png" }));
+    vi.mocked(servicesPlatform!.getFile).mockResolvedValue(pngHead(1920, 1080));
     const { createObjectURL } = URL;
     URL.createObjectURL = () => "blob:arrived";
     try {

@@ -12,6 +12,7 @@ import {
   parseVoiceMeta,
   toBase64Url,
   randomBytes,
+  viewerTag,
 } from "@ghostly/core";
 import type { ServicesPlatform, WalletPlatform } from "../../../../apps/ui/src/lib/platform";
 import type { WalletNetwork } from "@ghostly/core";
@@ -304,7 +305,11 @@ export const servicesPlatform: ServicesPlatform | null = {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (link) void engine.call("connect", { linkId: link.id }).catch(() => {});
   },
-  openService: (peerPubKeyZ32, serviceId) => getBrowserHost().openService(peerPubKeyZ32, serviceId),
+  async openService(peerPubKeyZ32, serviceId) {
+    const link = engine.linkByPeer(peerPubKeyZ32);
+    if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
+    await getBrowserHost().openService(peerPubKeyZ32, serviceId, viewerTag(link.myPubKeyZ32));
+  },
   openPaymentLink(uri) {
     const open = getBrowserHost().openPaymentLink;
     return open ? open(uri) : null;

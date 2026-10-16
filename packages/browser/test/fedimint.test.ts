@@ -339,6 +339,17 @@ describe("Fedimint in a chat", () => {
     expect(sent.filter((s) => s.kind === "res").map((s) => s.frame.ok)).toEqual([true, ...Array(20).fill(false)]);
     expect(await bobClient.balance()).toBe(1_200_000);
 
+    // Spelled otherwise (whitespace inside, standard base64): the same notes to the federation, so the same answer.
+    const half = notes.length / 2;
+    const spellings = [`${notes.slice(0, half)} ${notes.slice(half)}`, `${notes.slice(0, half)}\n${notes.slice(half)}`, `${notes.slice(0, half)}\r\n${notes.slice(half)}`,
+      `${notes.slice(0, half)}\t${notes.slice(half)}`, notes.replace(/-/g, "+").replace(/_/g, "/")];
+    expect(spellings.every((s) => s !== notes && fake.findNote(s)), "the federation reads each spelling").toBe(true);
+    for (const [i, spelled] of spellings.entries()) for (let j = 0; j < 4; j++) await pay(`s${i}-${j}`, 50 + i * 4 + j, spelled);
+    expect(redeems).toHaveBeenCalledTimes(1);
+    expect(lines()).toEqual(["⚡ 1,200 test sats on Fedimint"]);
+    expect(desk.payment("s0-0"), "no record per spelling").toBeUndefined();
+    expect(sent.filter((s) => s.kind === "res" && String(s.frame.id).startsWith("s")).map((s) => s.frame.error)).toEqual(Array(20).fill("These notes were already received"));
+
     // Notes someone else redeemed first: no '⚡' line, one refusal line, and the repeats are not redeemed again.
     host.storeMessage.mockClear(); redeems.mockClear();
     const { notes: taken } = await payer.spendNotes(federation.id, 500);

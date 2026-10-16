@@ -5,7 +5,10 @@ import { DEFAULT_LIMITS, startRelay } from './relay.mjs'
 //   GHOSTLY_HYPERDHT_BOOTSTRAP  "host:port,…" instead of the public bootstrap nodes
 //   GHOSTLY_HYPERDHT_TESTNET    size of an in-process HyperDHT network instead of any other (e2e)
 //   GHOSTLY_RELAY_ORIGINS       allowed Origin values, comma-separated (empty: any)
-//   GHOSTLY_RELAY_TRUST_PROXY   "1" behind a proxy that sets CF-Connecting-IP / X-Forwarded-For
+//   GHOSTLY_RELAY_CLOUDFLARE    "1" behind Cloudflare (a tunnel): each client counts by CF-Connecting-IP
+//   GHOSTLY_RELAY_PROXIES       reverse proxies in front of it (0): each client counts by the X-Forwarded-For entry
+//                               that many from the end. A client that reaches the port past them could write either
+//                               header itself: publish the port only where the proxy is.
 //   GHOSTLY_RELAY_<LIMIT>       any of the limits in relay.mjs, e.g. GHOSTLY_RELAY_CLIENTS=512
 const env = process.env
 const list = value => (value ?? '').split(',').map(item => item.trim()).filter(Boolean)
@@ -21,7 +24,8 @@ const relay = await startRelay({
   bootstrap: list(env.GHOSTLY_HYPERDHT_BOOTSTRAP),
   testnet: Number(env.GHOSTLY_HYPERDHT_TESTNET ?? 0) || undefined,
   origins: list(env.GHOSTLY_RELAY_ORIGINS),
-  trustProxy: env.GHOSTLY_RELAY_TRUST_PROXY === '1',
+  proxies: Math.max(0, Math.floor(Number(env.GHOSTLY_RELAY_PROXIES ?? 0)) || 0),
+  cloudflare: env.GHOSTLY_RELAY_CLOUDFLARE === '1',
   limits,
   // Counts and reasons only: never a key, an address or a byte of anyone's traffic.
   log: (...words) => console.log(new Date().toISOString(), ...words),

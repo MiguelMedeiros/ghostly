@@ -1,8 +1,13 @@
-import { randomBytes } from "@ghostly/core";
+import { randomBytes, toBase64Url } from "@ghostly/core";
 import type { FederationInfo, FedimintClient, FedimintOperation, FedimintSdk, PayOutcome, ReceiveState, RedeemState, SpendState } from "../../src/engine/paymentAdapters/fedimintSdk";
 import { fakeInvoice } from "../../src/engine/paymentAdapters/providers/testing";
 
 const toHex = (bytes: Uint8Array) => [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+/** Notes as the real client reads them (OOBNotes::from_str): whitespace anywhere dropped, URL-safe or standard base64. */
+const readNotes = (notes: string) => {
+  const text = notes.replace(/\s+/g, "");
+  return /^[A-Za-z0-9_-]*={0,2}$/.test(text) || /^[A-Za-z0-9+/]*={0,2}$/.test(text) ? text.replace(/\+/g, "-").replace(/\//g, "_") : undefined;
+};
 
 /**
  * Federations and their clients, in memory, shaped on the web SDK as fedimintSdk.ts narrows it (checked against
@@ -63,7 +68,7 @@ class FakeClient implements FedimintClient {
     if (this.balanceMsats < amountMsats) throw new Error(`Insufficient balance: requested ${amountMsats} msat but only ${this.balanceMsats} msat available`);
     this.balanceMsats -= amountMsats;
     const operation = this.op("mint", "spend_o_o_b", amountMsats, ghostly, "created");
-    const notes = `fakenotes${this.federation.id.slice(0, 8)}${toHex(randomBytes(16))}`;
+    const notes = `fakenotes${this.federation.id.slice(0, 5)}-_${toBase64Url(randomBytes(24))}`;
     this.federation.notes.set(notes, { federation: this.federation.id, amountMsats, spent: false, operation, owner: this });
     this.sdk.spent++;
     this.changed();
@@ -79,7 +84,7 @@ class FakeClient implements FedimintClient {
   async spendState(operationId: string): Promise<SpendState | undefined> { return this.ops.get(operationId)?.state as SpendState | undefined; }
   async redeem(notes: string, ghostly: string) {
     this.check();
-    const note = this.federation.notes.get(notes.trim());
+    const note = this.federation.notes.get(readNotes(notes) ?? "");
     const operation = this.op("mint", "reissuance", note?.amountMsats, ghostly, "created");
     const op = this.ops.get(operation)!;
     if (!note || note.spent) { op.state = "failed"; op.outcome = { Failed: "spent" }; }
@@ -151,7 +156,7 @@ export class FakeFedimintSdk {
     this.federations.set(f.invite, f);
     return f;
   }
-  findNote(notes: string) { for (const f of this.federations.values()) { const n = f.notes.get(notes.trim()); if (n) return n; } return undefined; }
+  findNote(notes: string) { for (const f of this.federations.values()) { const n = f.notes.get(readNotes(notes) ?? ""); if (n) return n; } return undefined; }
   backup(client: FakeClient) { client.federation.backups.set(client.mnemonic, client.balanceMsats); }
   /** A client of this federation opened by the wallet (the latest one). */
   client(federation: FakeFederation) { return [...this.clients].reverse().find((c) => c.federation === federation && !c.closed)!; }

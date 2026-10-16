@@ -19,6 +19,10 @@ export const GROUP_FILE_LIMITS = {
   serveBytesPerDay: 1024 * 1024 * 1024,
   /** Transfers a holder serves at once, all groups together. */
   serveAtOnce: 3,
+  /** Bytes a served transfer gets confirmed (or the rest of its file) for it to count as moving in `wantWaitMs`. */
+  serveMoveBytes: 16 * 1024,
+  /** How long a served transfer keeps its place while all are taken and another member asks: past it, the place is theirs. */
+  servePlaceMs: 5 * 60_000,
   /** File announcements a member sends to one group in a minute. */
   announcePerMinute: 8,
   /** File announcements of one member of a group fetched by themselves in `announceWindowMs`; past it, kept for a Download. */
@@ -50,6 +54,11 @@ export const GROUP_FILE_LIMITS = {
    * member's next want has overtaken it.
    */
   doneWaitMs: 5_000,
+  /**
+   * What a transfer must bring in `wantWaitMs` (or the rest of its file, when less) to count as moving: a holder that
+   * sends a few bytes at a time is left as one that stalls.
+   */
+  wantMoveBytes: 16 * 1024,
   /** A file session closes this long after its last transfer ends. */
   sessionIdleMs: 60_000,
   /** File sessions opening at once, and open at once, all groups together. */

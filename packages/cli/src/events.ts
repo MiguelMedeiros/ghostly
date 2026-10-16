@@ -1,4 +1,4 @@
-import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import type { AppFrameEvent } from "@ghostly/core";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
@@ -254,6 +254,31 @@ export class EventHub {
     this.journalBytes = bytes;
   }
 
+  /**
+   * What was removed here leaves the journal too: the journal is written again without the events that name it (a
+   * line that names it and cannot be read goes as well), and a journal set aside as unreadable, which cannot be sorted,
+   * is deleted. `ids`: what was removed (a message's id, a chat's or a group's); `gone`: whether an event is of it.
+   */
+  private forget(ids: readonly string[], gone: (event: GhostlyEvent) => boolean): void {
+    if (!ids.length) return;
+    try {
+      rmSync(this.journalPath + ".unreadable", { force: true });
+      if (!existsSync(this.journalPath)) return;
+      const lines = journalTail(this.journalPath).lines;
+      const kept = lines.filter((line) => {
+        if (!ids.some((id) => line.includes(JSON.stringify(id)))) return true;
+        try { return !gone(JSON.parse(line) as GhostlyEvent); } catch { return false; }
+      });
+      if (kept.length === lines.length) return;
+      writeFileSync(this.journalPath + ".tmp", kept.length ? kept.join("\n") + "\n" : "", { mode: 0o600 });
+      renameSync(this.journalPath + ".tmp", this.journalPath);
+      this.journalLines = kept.length;
+      this.journalBytes = kept.reduce((bytes, line) => bytes + Buffer.byteLength(line) + 1, 0);
+    } catch (error) {
+      process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
+    }
+  }
+
   private handle(message: EngineEvent | RpcResponse): void {
     switch (message.kind) {
       case "state": this.stateChanged(message.state); break;
@@ -305,11 +330,13 @@ export class EventHub {
         this.emit("typing.started", `typing.started:${id}:${this.now()}:${this.seq + 1}`, { chat: id, ...typingFields(shape) });
       }
     }
-    for (const id of [...this.chats.keys()]) {
-      if (links.has(id)) continue;
+    const removedChats = [...this.chats.keys()].filter((id) => !links.has(id));
+    for (const id of removedChats) {
       this.chats.delete(id);
       if (!quiet) this.emit("chat.removed", `chat.removed:${id}`, { chat: id });
     }
+    // A chat removed deletes its history here: its events go too, but for its removal.
+    this.forget(removedChats, (event) => removedChats.includes(event.chat as string) && event.type !== "chat.removed");
     const groups = new Map(state.groups.map((group) => [group.id, group]));
     for (const [id, group] of groups) {
       const shape = groupShape(group), before = this.groups.get(id);
@@ -331,11 +358,13 @@ export class EventHub {
         if (!shape.typing[member]) this.emit("group.typing.stopped", `group.typing.stopped:${id}:${member}:${this.now()}`, { group: id, member });
       }
     }
-    for (const id of [...this.groups.keys()]) {
-      if (groups.has(id)) continue;
+    const removedGroups = [...this.groups.keys()].filter((id) => !groups.has(id));
+    for (const id of removedGroups) {
       this.groups.delete(id);
       if (!quiet) this.emit("group.removed", `group.removed:${id}`, { group: id });
     }
+    // A group left or forgotten: the same.
+    this.forget(removedGroups, (event) => removedGroups.includes(event.group as string) && event.type !== "group.removed");
     for (const [id, payment] of Object.entries(state.payments ?? {})) {
       const shape = `${payment.state}|${payment.error ?? ""}|${payment.closed ? 1 : 0}`, before = this.payments.get(id);
       this.payments.set(id, shape);
@@ -513,13 +542,21 @@ export class EventHub {
           this.emit("message.delivery", `message.delivery:${chat}:${message.id}:${delivery}`, { chat, messageId: message.id, delivery, ...(message.deliveryError ? { error: message.deliveryError } : {}) });
       }
     }
+    const gone: string[] = [];
     for (const id of deleted ?? [...known.keys()]) {
       if (present.has(id) || !known.has(id)) continue;
       known.delete(id);
       changes.push([id, null]);
+      gone.push(id);
       if (!quiet) this.emit(group ? "group.deleted" : "message.deleted", `${group ? "group" : "message"}.deleted:${group ?? chat}:${id}`, group ? { group, messageId: id } : { chat, messageId: id });
     }
     if (changes.length) this.persist(chat, changes);
+    // A message deleted here leaves the journal with its texts, its edits, its reactions, its presses and its files:
+    // its deletion stays. A group's history gone whole (left, forgotten) takes every message event of the group.
+    const whole = !!group && !deleted && messages.length === 0 && gone.length > 0;
+    this.forget(whole ? [group] : gone, (event) => (group ? event.group === group : event.chat === chat) && !event.type.endsWith(".deleted") && (whole
+      ? "message" in event || "messageId" in event || "replyId" in event
+      : gone.includes(event.messageId as string) || gone.includes((event.message as { id?: string } | undefined)?.id as string) || gone.includes(event.replyId as string)));
     // After the message's own event: what waited for it goes now.
     for (const [fileId, messageId] of files) this.flushFile(fileId, messageId);
   }

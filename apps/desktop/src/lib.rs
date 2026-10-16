@@ -426,9 +426,10 @@ fn on_page_load<R: tauri::Runtime>(
 }
 
 /// The native listeners of the page before this one: stopped, their eight places free (`TransportState::page_started`);
-/// its apps' file dialogs: let go.
+/// its apps' file dialogs: let go. The app windows it opened close (`app_sandbox::page_started`).
 #[cfg(desktop)]
 fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    app_sandbox::page_started(app);
     if let Some(transports) = app.try_state::<paired_transport::TransportState>() {
         transports.page_started();
     }
@@ -684,6 +685,7 @@ mod tests {
         arguments["profile"] = serde_json::json!("x");
         arguments["record"] = serde_json::json!(null);
         arguments["count"] = serde_json::json!(0);
+        arguments["tag"] = serde_json::json!("x");
         arguments
     }
 
@@ -803,7 +805,8 @@ mod tests {
             serde_json::json!({"request": {"type": "start"}}),
         )
         .unwrap();
-        assert_eq!(entry, "<p>chess</p>");
+        // As its JSON text, which the runner parses (`app_sandbox::json_response`).
+        assert_eq!(entry, "\"<p>chess</p>\"");
         // Any other request goes to the Ghostly window's broker, under this window's label: here nobody
         // answers it.
         let error = invoke(
