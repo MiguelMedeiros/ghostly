@@ -460,10 +460,34 @@ fn on_close_requested<R: tauri::Runtime>(window: &tauri::Window<R>, api: &tauri:
         return;
     }
     api.prevent_close();
-    let window = window.clone();
+    hold_close(window.clone());
+}
+
+#[cfg(desktop)]
+/// The window a held close acts on: `tauri::Window`, and a recording one in the tests.
+trait Closing: Send + 'static {
+    fn hide(&self);
+    fn close(&self);
+}
+
+#[cfg(desktop)]
+impl<R: tauri::Runtime> Closing for tauri::Window<R> {
+    fn hide(&self) {
+        let _ = tauri::Window::hide(self);
+    }
+    fn close(&self) {
+        let _ = tauri::Window::close(self);
+    }
+}
+
+#[cfg(desktop)]
+/// The held close: the window leaves the screen at once, as a close does (its page, hidden, still says goodbye),
+/// and closes for good `DEPART_MS` later.
+fn hold_close(window: impl Closing) {
+    window.hide();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(DEPART_MS)).await;
-        let _ = window.close();
+        window.close();
     });
 }
 
@@ -996,5 +1020,31 @@ mod tests {
             after >= Duration::from_millis(DEPART_MS),
             "the app exited {after:?} after the close"
         );
+    }
+
+    #[test]
+    fn a_held_close_takes_the_window_off_the_screen_at_once_and_closes_it_after_the_goodbye() {
+        use std::sync::{Arc, Mutex};
+        use std::time::{Duration, Instant};
+        #[derive(Clone)]
+        struct Seen(Arc<Mutex<Vec<(&'static str, Duration)>>>, Instant);
+        impl Closing for Seen {
+            fn hide(&self) {
+                self.0.lock().unwrap().push(("hide", self.1.elapsed()));
+            }
+            fn close(&self) {
+                self.0.lock().unwrap().push(("close", self.1.elapsed()));
+            }
+        }
+        let seen = Seen(Arc::default(), Instant::now());
+        let what =
+            |seen: &Seen| -> Vec<_> { seen.0.lock().unwrap().iter().map(|(w, _)| *w).collect() };
+        hold_close(seen.clone());
+        // Before the goodbye's wait: the window is already gone from the screen, and not yet closed.
+        assert_eq!(what(&seen), ["hide"]);
+        std::thread::sleep(Duration::from_millis(DEPART_MS + 300));
+        assert_eq!(what(&seen), ["hide", "close"]);
+        let all = seen.0.lock().unwrap().clone();
+        assert!(all[1].1 >= Duration::from_millis(DEPART_MS), "{all:?}");
     }
 }
