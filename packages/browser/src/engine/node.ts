@@ -1148,7 +1148,8 @@ export class GhostlyNode implements EngineImplementation {
     emit: () => { this.emitState(); this.did.changed(); void this.publicProfiles.prune().catch(() => {}); this.publicActivity.prune(); },
     publicProfile: (provider, subject) => this.publicProfiles.view({ provider, subject }),
     publish: (seed, records) => this.transport.publish(identityFromSeed(seed), records),
-    resolve: async key => (await this.transport.resolve(key))?.records ?? null,
+    // Revocation lookups of the contacts' proofs are never what a chat waits on: they give way to the chats' reads.
+    resolve: async key => (await this.transport.resolve(key, { background: true }))?.records ?? null,
   });
 
   /** The profile's did:dht: a key of its own, public, never tied to a chat (WISP 310-did-dht). */

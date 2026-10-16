@@ -11,6 +11,7 @@ import type { BoundChannel, NativeBinding, NativeEndpoint } from "../src/pairedT
 import { signPairedSignal } from "../src/pairedSignal";
 import { createChannelPair } from "./helpers";
 import { SESSION_RECEIVE_PENDING } from "../src/pairedSession";
+import { IDENTITY_FRAME_LIMIT, IDENTITY_FRAME_WINDOW_MS } from "../src/identityProofs";
 
 // covers: chat.paired.session, chat.paired.send, chat.paired.receipts, chat.paired.reconnect, chat.paired.nickname-sync, chat.legacy.send, core.liveness, core.capabilities, transport.switch, payments.chat.frames
 
@@ -813,6 +814,21 @@ describe("paired proofs", () => {
     await t.ready();
     expect(() => t.a.sendIdentityProof({ t: "idp-x", pad: "x".repeat(32 * 1024) })).toThrow("Identity proof too large");
     expect(() => t.a.sendPeerProof({ t: "proof-x", pad: "x".repeat(8192) })).toThrow("Proof too large");
+  });
+
+  it("reads a bounded number of identity frames from the contact per window, dropping the rest", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const onIdentityProof = vi.fn(async () => {});
+    const t = linkedPair([{ events: { onIdentityProof: vi.fn(async () => {}) } }, { events: { onIdentityProof } }]);
+    await t.ready();
+    for (let i = 0; i < IDENTITY_FRAME_LIMIT + 25; i++) t.a.sendIdentityProof({ t: "idp-request", i });
+    await t.settle("b");
+    expect(onIdentityProof).toHaveBeenCalledTimes(IDENTITY_FRAME_LIMIT);
+    vi.setSystemTime(Date.now() + IDENTITY_FRAME_WINDOW_MS);
+    t.a.sendIdentityProof({ t: "idp-request", i: -1 });
+    await t.settle("b");
+    expect(onIdentityProof).toHaveBeenLastCalledWith({ t: "idp-request", i: -1 });
+    vi.useRealTimers();
   });
 
   it("keeps proof frames away from an app that did not offer proofs, and refuses to send them", async () => {
