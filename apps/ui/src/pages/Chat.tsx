@@ -304,7 +304,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       // The platform says it in English, as sendFile throws it: the same words in the app's language.
       const refused = platform.fileTooLarge?.(peerKey, source.size);
       const tooLarge = platform.fileTooLarge ? refused && problemLine(refused, t)
-        : source.size > platform.maxFileBytes ? t("chat.fileTooLarge", { size: formatFileSize(platform.maxFileBytes) }) : null;
+        : source.size > platform.maxFileBytes ? t("chat.fileTooLarge", { size: formatFileSize(platform.maxFileBytes, t) }) : null;
       if (tooLarge) return tooLarge;
       // A file answers as a text does: the engine keeps the reply and sends it with the file (files/2, files/3, held).
       const answering = paired ? replyingRef.current : null;

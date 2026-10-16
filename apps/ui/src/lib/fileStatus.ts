@@ -92,7 +92,7 @@ export async function fileHeld(platform: Pick<ServicesPlatform, "fileHeld" | "sa
  * this device (`left-out`: a light backup left them out).
  */
 export function fileStatus(file: ChatFile, transfer: FileTransferState | null, named: string | undefined, missing: boolean | "left-out", tr: Translate = englishT): string {
-  const size = formatFileSize(file.size);
+  const size = formatFileSize(file.size, tr);
   const peerName = named ?? tr("chat.file.yourContact");
   if (!transfer || transfer.state === "done") return missing === "left-out" ? tr("chat.file.notInBackup") : missing ? tr("chat.file.gone") : size;
   if (transfer.state === "failed") return failedStatus(file, transfer, tr);
@@ -121,7 +121,7 @@ export function fileStatus(file: ChatFile, transfer: FileTransferState | null, n
   if (transfer.stalled) return tr("chat.file.stalled", { progress: of });
   const parts = [of];
   if (transfer.rate && transfer.rate > 0) {
-    parts.push(`${formatFileSize(Math.round(transfer.rate))}/s`);
+    parts.push(`${formatFileSize(Math.round(transfer.rate), tr)}/s`);
     const left = timeLeft((transfer.size - transfer.transferred) / transfer.rate, tr);
     if (left) parts.push(left);
   }
