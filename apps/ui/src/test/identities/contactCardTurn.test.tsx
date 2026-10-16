@@ -6,7 +6,7 @@ import { linkView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { identitiesView, receivedView } from "./views";
 
-// covers: proofs.recheck
+// covers: proofs.recheck, nostr.social.profile
 
 /**
  * A Check again click that landed while the contact's card was still turning over reached nothing: the full E2E run
@@ -52,6 +52,22 @@ it("waits again when the card is turned back and over once more", async () => {
   await user.click(cards()[0]);
   expect(screen.getByTestId("chat-identity-recheck")).toBeDisabled();
   await waitFor(() => expect(screen.getByTestId("chat-identity-recheck")).toBeEnabled());
+});
+
+// The nightly round on dev 603a54f8c clicked Load profile on a Nostr card just turned over: nothing loaded, no error.
+it("keeps a Nostr card's Load buttons waiting while it turns over, then takes the first click", async () => {
+  const npub = "npub1example";
+  const view = renderApp(<ContactIdentitiesPanel peerKey="peer" name="Alice" onClose={() => {}} />);
+  const received = [receivedView({ id: "r1", provider: "nostr", subject: npub, verified: { subject: npub, source: "Nostr signature" } })];
+  act(() => view.engine.update({ links: [linkView({ pairing: { status: "ready" } as LinkView["pairing"], identities: identitiesView({ received }), nostr: [{ subject: npub } as NonNullable<LinkView["nostr"]>[number]] })] }));
+  view.engine.on("nostrLoadContact", () => undefined);
+  await view.user.click(within(screen.getByTestId("chat-identities-received")).getAllByTestId("chat-identity-received")[0]);
+  const loads = ["nostr-load-profile", "nostr-load-follows", "nostr-load-notes"].map(id => screen.getByTestId(id));
+  for (const load of loads) expect(load).toBeDisabled();
+  await waitFor(() => expect(loads[0]).toBeEnabled());
+  for (const load of loads) expect(load).toBeEnabled();
+  await view.user.click(loads[0]);
+  expect(view.engine.callsTo("nostrLoadContact")).toEqual([{ linkId: "link-1", subject: npub, what: "profile", more: false }]);
 });
 
 // With motion reduced there is no turn (the faces cross-fade where they are): nothing to wait for once it is flipped.
