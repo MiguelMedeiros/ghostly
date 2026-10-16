@@ -366,6 +366,8 @@ proof needs a person who holds the key: leave that to the owner.
 ## Anything else
 
 Every call of the app's engine is reachable: `ghostly engine --list`, then `ghostly engine <method> '<json params>'`.
+A call that deletes chats or groups (`clearProfileData`, `removeLink`, `leaveGroup`, `forgetGroup`, `deviceRemove`)
+needs `--yes`; `clearProfileData` stops a running daemon after it answers.
 Not on the CLI yet: Bark wallets, OpenID Connect proofs, and video in calls (voice only). More:
 [AI agents on Ghostly](https://ghostly.tools/developers/agents), the
 [CLI guide](https://github.com/MiguelMedeiros/ghostly/blob/main/docs/CLI.md), the

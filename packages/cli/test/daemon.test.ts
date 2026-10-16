@@ -190,4 +190,23 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
       dead.close();
     }
   });
+
+  it("engine clearProfileData asks for --yes, says what it removed, and a daemon stops instead of showing what is gone", async () => {
+    const cleared = home("clear-profile");
+    ok(await ghostly(["--home", cleared, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    ok(await ghostly(["--home", cleared, "invite", "create", "--label", "bob"], { env }));
+    ok(await ghostly(["--home", cleared, "group", "create", "team", "--mesh"], { env }));
+    const daemon = new Running(["--home", cleared, "daemon"], env);
+    try {
+      await daemon.waitFor((l) => l.daemon === "ready");
+      expect(error(await ghostly(["--home", cleared, "engine", "clearProfileData"], { env }), "confirm", 5).message).toContain("--yes");
+      expect(ok(await ghostly(["--home", cleared, "status"], { env }))).toMatchObject({ mode: "daemon", chats: 1, groups: 1 });
+      expect(ok(await ghostly(["--home", cleared, "engine", "clearProfileData", "--yes"], { env }))).toEqual({ cleared: { chats: 1, groups: 1 }, stopped: true });
+      expect(await daemon.exited(30_000)).toBe(0);
+      // The next command opens the emptied profile itself: nothing the daemon held in memory comes back.
+      expect(ok(await ghostly(["--home", cleared, "status"], { env }))).toMatchObject({ mode: "one-shot", chats: 0, groups: 0 });
+    } finally {
+      await daemon.stop();
+    }
+  });
 });
