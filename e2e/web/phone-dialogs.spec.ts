@@ -263,3 +263,22 @@ test("an iPhone on its side with the keyboard up: the floating card is never ove
   await expect(field).toBeFocused();
   await expect.poll(() => clear(SIDE.height), { timeout: 4_000 }).toBe("clear");
 });
+
+for (const phone of [{ width: 390, height: 844, keyboard: 336 }, { width: 375, height: 667, keyboard: 260 }]) {
+  test(`on an iPhone ${phone.width}×${phone.height}: Apps → Add stands on the keyboard, its link field and Check in view`, { tag: ["@feature:app.mobile-layout", "@feature:apps.page"] }, async ({ peer }) => {
+    // It stood on the page's bottom edge, which iOS keeps under the keyboard: the field typed into and Check were under it.
+    const visible = phone.height - phone.keyboard;
+    const { page } = await peer("add-app", { mobile: true, viewport: { width: phone.width, height: phone.height } });
+    await iosKeyboard(page);
+    await page.goto("/#/apps");
+    await page.getByTestId("apps-add").click();
+    await expect(page.getByTestId("apps-add-url")).toBeFocused();
+    await keyboard(page, phone.keyboard);
+    await within(page.getByTestId("apps-add-dialog"), visible);
+    await within(page.getByTestId("apps-add-url"), visible);
+    await within(page.getByTestId("apps-add-check"), visible);
+    // On the bottom edge again once the keyboard goes.
+    await keyboard(page, 0);
+    await expect.poll(async () => { const box = (await page.getByTestId("apps-add-dialog").boundingBox())!; return Math.round(box.y + box.height); }).toBe(phone.height);
+  });
+}
