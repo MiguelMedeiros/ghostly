@@ -507,7 +507,8 @@ fn hold_close(window: impl Closing) {
 /// - Any other exit the loop is asked for (`app.exit`): held for `DEPART_MS` while the page says goodbye, then let
 ///   through.
 /// - Every exit, those or a quit that nothing can hold (Cmd+Q and `quit` on macOS end the process
-///   from `applicationWillTerminate`): the native connections close, so each contact sees its close.
+///   from `applicationWillTerminate`): the native connections close, so each contact sees its close, and on Linux
+///   the app's notifications go from the desktop's list (`notifications::exit`).
 fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
     match event {
         tauri::RunEvent::ExitRequested { code, api, .. } => {
@@ -532,6 +533,7 @@ fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
             tauri::async_runtime::block_on(
                 transports.shutdown(std::time::Duration::from_millis(CLOSE_MS)),
             );
+            notifications::exit();
             // Ghostly launched again while this app was leaving: that launch starts now, a window of its own.
             #[cfg(target_os = "linux")]
             single_instance::relaunch(app);
