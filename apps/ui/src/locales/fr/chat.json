@@ -275,6 +275,11 @@
     "retry": "Renvoyer"
   },
   "noMessages": "Aucun message",
+  "nowPlaying": {
+    "close": "Arrêter et fermer",
+    "label": "En cours de lecture",
+    "open": "Afficher dans la discussion"
+  },
   "offline": "hors ligne",
   "online": "en ligne",
   "options": "Options",

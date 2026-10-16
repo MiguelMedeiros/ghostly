@@ -275,6 +275,11 @@
     "retry": "重新发送"
   },
   "noMessages": "没有消息",
+  "nowPlaying": {
+    "close": "停止并关闭",
+    "label": "正在播放",
+    "open": "在聊天中显示"
+  },
   "offline": "离线",
   "online": "在线",
   "options": "选项",
