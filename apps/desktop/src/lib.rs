@@ -789,7 +789,8 @@ mod tests {
             serde_json::json!({"request": {"type": "start"}}),
         )
         .unwrap();
-        assert_eq!(entry, "<p>chess</p>");
+        // As its JSON text, which the runner parses (`app_sandbox::json_response`).
+        assert_eq!(entry, "\"<p>chess</p>\"");
         // Any other request goes to the Ghostly window's broker, under this window's label: here nobody
         // answers it.
         let error = invoke(
