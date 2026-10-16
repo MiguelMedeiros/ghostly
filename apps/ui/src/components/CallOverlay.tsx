@@ -273,7 +273,7 @@ export function CallOverlay({
                 {initial(peerName)}
               </span>
             </div>
-            <p className="call-name max-w-full truncate text-text-primary text-lg font-medium">{peerName}</p>
+            <p dir="auto" className="call-name max-w-full truncate text-text-primary text-lg font-medium">{peerName}</p>
           </div>
           {showSelf && (
             <div className="call-peer call-self flex flex-col items-center gap-4">

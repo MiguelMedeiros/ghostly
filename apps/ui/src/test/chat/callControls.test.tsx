@@ -205,6 +205,18 @@ describe("sharing the screen from inside a call", () => {
   });
 });
 
+describe("the contact's name on the call screens", () => {
+  // In the Arabic app a chat named "Ana!" rang as "!Ana" and read "!Ana" in the call window: the name took the page's
+  // direction. It reads in its own, as the chat header's <bdi> does.
+  it("reads in its own direction on the ringing card and in the call window", () => {
+    const { unmount } = renderApp(<IncomingCallNotification peerName="Ana!" hasVideo={false} onAcceptAudio={vi.fn()} onAcceptVideo={vi.fn()} onReject={vi.fn()} />);
+    expect(screen.getByText("Ana!")).toHaveAttribute("dir", "auto");
+    unmount();
+    overlay({ peerName: "Ana!" });
+    expect(screen.getByText("Ana!")).toHaveAttribute("dir", "auto");
+  });
+});
+
 describe("a call for a screen reader and the keys", () => {
   it("rings as a dialog named for the caller: the focus in it, not on Accept, the keys kept in it, back where it was after", async () => {
     const before = document.createElement("textarea");
