@@ -433,6 +433,7 @@ const RULES: readonly Rule[] = [
   // A group's link pasted or opened while Ghostly is set offline (engine/node.ts joinGroupByLink).
   exact("Go online to join a group", "errors.group.offline", "errors.group.offlineNext"),
   exact("Only the admin can change the members of this group", "errors.group.adminMembers"),
+  exact("Only the admin can renew the group's secret", "errors.group.adminRotate"),
   exact("Only the admin can do that", "errors.group.adminOnly"),
   exact("Make someone else the admin before leaving", "errors.group.adminFirst"),
   exact("Only the admin can change the group's picture", "errors.group.adminPicture"),

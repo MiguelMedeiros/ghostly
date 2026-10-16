@@ -38,6 +38,10 @@ export function asCliError(error: unknown): CliError {
   const message = error instanceof Error ? error.message : String(error);
   if (/real money|confirmedReal|Mainnet/i.test(message) && /confirm/i.test(message)) return new CliError("confirm", message);
   if (/other network|cross-network|network does not match/i.test(message)) return new CliError("refused", message);
+  // A member asking for a group's admin-only change, an invitation already answered: not allowed, not the engine failing.
+  if (/^Only the admin |^No invitation to (accept|decline)$/.test(message)) return new CliError("refused", message);
+  // `group invite` into a community: it has no invitations, its link is how people join.
+  if (message === "Share the group's link with them: anyone who opens it joins") return new CliError("bad_request", message);
   return new CliError("engine", message);
 }
 
