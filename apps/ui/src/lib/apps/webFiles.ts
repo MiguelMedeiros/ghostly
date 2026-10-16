@@ -21,6 +21,7 @@ import { MINI_APP_LIMITS, type MiniAppLinkedFile } from "@ghostly/core/miniApp";
 import { keepTabInside } from "../../hooks/useDismiss";
 import type { Translate } from "../../locales/translate";
 import type { LinkedFilesHost } from "../platform";
+import { PICK_AFTER_CANCEL_MS } from "./broker";
 
 /** What the sheets say, in the person's language. */
 export interface PickSheetText {
@@ -108,7 +109,7 @@ interface Link {
 const RECENT_FILES = 4;
 
 /** Refusals cross to the broker as "<code>: words" (broker.ts reads the code). */
-const refusal = (code: "cancelled" | "changed" | "gone" | "too-large", words: string) => new Error(`${code}: ${words}`);
+const refusal = (code: "cancelled" | "changed" | "gone" | "too-large" | "too-fast", words: string) => new Error(`${code}: ${words}`);
 
 const BASE64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
@@ -359,9 +360,10 @@ export interface WebLinkedFilesOptions {
   ask?: (app: string, folder: boolean, accept: string[], signal?: AbortSignal) => Promise<Picked | null>;
   /** Asks the person to let the browser read kept picks again (`grant` asks it); by default the sheet, which goes on `signal`. */
   askAgain?: (app: string, name: string, more: number, grant: () => Promise<boolean>, signal?: AbortSignal) => Promise<boolean>;
+  now?: () => number;
 }
 
-export function webLinkedFiles({ text, picker = browserPicker(), store = null, ask, askAgain }: WebLinkedFilesOptions): LinkedFilesHost {
+export function webLinkedFiles({ text, picker = browserPicker(), store = null, ask, askAgain, now = Date.now }: WebLinkedFilesOptions): LinkedFilesHost {
   const apps = new Map<string, Map<string, Link>>();
   /** Each kept pick by id, with whether the browser lets it be read now and how many of its entries are not forgotten. */
   const picks = new Map<string, { stored: StoredPick; granted: boolean; left: number }>();
@@ -370,6 +372,12 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
   const askedAgain = new Set<string>();
   /** Files of kept picks got lately, the oldest first. */
   const recent = new Map<Link, Blob>();
+  /**
+   * The apps whose sheet is up, and when each may ask again after the person cancelled one: per app, not per broker, as
+   * an app open in several chats has a broker in each.
+   */
+  const picking = new Set<string>();
+  const pickAgainAt = new Map<string, number>();
   const linksOf = (ref: string) => {
     let links = apps.get(ref);
     if (!links) apps.set(ref, (links = new Map()));
@@ -454,9 +462,21 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
 
   return {
     async pick(ref, title, { folder, accept }, signal) {
-      await load(ref);
-      const picked = await askPerson(title, folder, accept, signal);
-      if (!picked) throw refusal("cancelled", "Nothing was picked");
+      if (signal?.aborted) throw refusal("cancelled", "The app stopped");
+      if (picking.has(ref) || now() < (pickAgainAt.get(ref) ?? 0)) throw refusal("too-fast", "The app's sheet is open, or was just cancelled");
+      picking.add(ref);
+      let picked: Picked | null;
+      try {
+        await load(ref);
+        picked = await askPerson(title, folder, accept, signal);
+      } finally {
+        picking.delete(ref);
+      }
+      if (!picked) {
+        // The person cancelled a running app's sheet; one taken down with its app is no app asking again.
+        if (!signal?.aborted) pickAgainAt.set(ref, now() + PICK_AFTER_CANCEL_MS);
+        throw refusal("cancelled", "Nothing was picked");
+      }
       // A pick its handles read again holds no file: each is got when the app reads it.
       const pickId = picked.keep ? randomId() : undefined;
       const added: Link[] = [];
