@@ -97,10 +97,11 @@ A remote app needs a real origin that is not the extension's. The Manifest V3 op
 | A service worker on a real web origin | Needs a Ghostly-operated website in the path |
 | **`chrome.debugger` Fetch domain on a virtual origin** | **Chosen** |
 
-Ghostly opens a tab, attaches the debugger to **that tab only**, and answers requests to `https://<service>.<peer key>.invalid/` with what the contact's app sent over the chat session:
+Ghostly opens a tab, attaches the debugger to **that tab only**, and answers requests to `https://<service>.<peer key>.<tag>.invalid/` with what the contact's app sent over the chat session. The tag (`viewerTag`, 16 z-base-32 characters) is a hash of the key this profile holds for the chat with that contact:
 
 - a normal, secure-context origin, isolated from the extension and from every other contact and app;
-- each contact is a site of its own (`.invalid` is a top-level domain to the browser);
+- each chat is a site of its own (`.invalid` is a top-level domain to the browser);
+- every profile shares the browser's storage, so the tag keeps what the app stores (cookies, storage, sessions) in one profile's chat: another profile, or the same one after "Clear all data" or made again after a delete, has another chat key and never finds it (WISP 04);
 - the tab serves only the app it was opened for;
 - `.invalid` never resolves, so a request that is not intercepted goes nowhere;
 - requests to other origins (CDNs, APIs) are not touched;
@@ -158,6 +159,6 @@ Ghostly Desktop runs the same peer in its WebView as a third host (`apps/ui/src/
 | Pkarr | `RelayTransport` (HTTP relays) | The Mainline DHT directly, plus writes to the relays (`apps/desktop/src/pkarr_network.rs`) |
 | Iroh, HyperDHT | Through relays | Native Iroh and a HyperDHT sidecar |
 | Local fetch | `fetch` with a host permission | `local_fetch` in Rust: loopback addresses the person allowed in a native dialog only (`local_access.rs`), never follows redirects, forwards cookies, no `Origin` header |
-| Viewer | `chrome.debugger` on a virtual origin | A window per app on a `ghostly-svc://<service>.<peer>` origin, with no access to Tauri commands |
+| Viewer | `chrome.debugger` on a virtual origin | A window per app on a `ghostly-svc://<service>.<peer>.<tag>` origin, with no access to Tauri commands |
 
 Profiles (`GHOSTLY_PROFILE`) get their own storage and peer, so two instances can run side by side.

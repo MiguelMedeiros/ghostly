@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fire, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, okResponse, resetEngine } from "./fakeEngine";
-import { OTHER_PEER, PEER, SERVICE, bodyText, bootExtension, engine, openViewer, pauseRequest, restartServiceWorker } from "./extension";
+import { OTHER_PEER, PEER, SERVICE, TAG, bodyText, bootExtension, engine, openViewer, pauseRequest, restartServiceWorker } from "./extension";
 
 // covers: extension.engine, services.open, app.updates.extension
 
@@ -28,7 +28,7 @@ describe("after the service worker restarts", () => {
     await restartServiceWorker(world);
 
     engineControl().respond = async () => okResponse("still here");
-    const answer = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.invalid/after-restart` });
+    const answer = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${PEER}.${TAG}.invalid/after-restart` });
     expect(answer.method).toBe("Fetch.fulfillRequest");
     expect(bodyText(answer.params)).toBe("still here");
     expect(engine().requests.map((r) => r.init.path)).toEqual(["/after-restart"]);
@@ -39,7 +39,7 @@ describe("after the service worker restarts", () => {
   it("still refuses another origin in that tab: the binding, not memory, decides", async () => {
     const tabId = await openViewer(world);
     await restartServiceWorker(world);
-    const answer = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${OTHER_PEER}.invalid/` });
+    const answer = await pauseRequest(world, tabId, { url: `https://${SERVICE}.${OTHER_PEER}.${TAG}.invalid/` });
     expect(answer.method).toBe("Fetch.failRequest");
     expect(engine().requests).toEqual([]);
   });

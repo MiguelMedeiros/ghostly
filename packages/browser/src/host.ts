@@ -76,7 +76,8 @@ export interface BrowserHost {
   requestLocalAccess(originPattern: string, origin: string): Promise<boolean>;
   /** The profile no longer shares any app at `origin` (desktop: off Rust's list of addresses it may reach). */
   forgetLocalAccess?(origin: string): Promise<void>;
-  openService(peerPubKeyZ32: string, serviceId: string): Promise<void>;
+  /** `tag` (`viewerTag` of this side's key for the chat) goes in the app's origin, so each profile's storage for it is its own. */
+  openService(peerPubKeyZ32: string, serviceId: string, tag: string): Promise<void>;
   /**
    * Opens a `lightning:` or `bitcoin:` link in a wallet on this device. Left out where a plain link
    * already does it (a web page); the desktop app and the extension have to hand it to the system.

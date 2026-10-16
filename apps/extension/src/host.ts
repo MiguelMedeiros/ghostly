@@ -44,12 +44,13 @@ export const extensionHost: BrowserHost = {
     if (!reply?.ok) throw new Error(reply?.error ?? "Could not open a wallet");
   },
 
-  async openService(peerPubKeyZ32, serviceId) {
+  async openService(peerPubKeyZ32, serviceId, tag) {
     const reply = await chrome.runtime.sendMessage({
       target: "background",
       type: "open-service",
       peerPubKeyZ32,
       serviceId,
+      tag,
     } satisfies RuntimeMessage);
     if (!reply?.ok) throw new Error(reply?.error ?? "Could not open the service");
   },
