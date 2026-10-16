@@ -65,6 +65,21 @@ describe("ghostly x401 key and credential", { timeout: 120_000 }, () => {
     ok(await run("x401", "credential", "remove", added.id as string));
   });
 
+  it("keeps a label on one line, and refuses one past 80 characters with the rule instead of cutting it", async () => {
+    const add = async (label: string) => {
+      const jwk = ok(await run("x401", "key", "new")).jwk as X401HolderJwk;
+      return run("x401", "credential", "add", file("label.txt", issueSdJwtVc({ holder: jwk })), "--label", label);
+    };
+    const folded = ok(await add("  two\nlines\r\n\tthree  ")).credential as Record<string, unknown>;
+    expect(folded.label).toBe("two lines three");
+    const longest = ok(await add("é".repeat(80))).credential as Record<string, unknown>;
+    expect(longest.label).toBe("é".repeat(80));
+    expect(error(await add("L".repeat(81)), "bad_request", 1).message).toBe("A credential's label is up to 80 characters on one line");
+    // The refused one is not kept.
+    expect((ok(await run("x401", "credential", "list")).credentials as unknown[])).toHaveLength(2);
+    for (const c of ok(await run("x401", "credential", "list")).credentials as { id: string }[]) ok(await run("x401", "credential", "remove", c.id));
+  });
+
   it("refuses a credential bound to a key this profile did not make, an expired one, and what is no SD-JWT VC", async () => {
     expect(error(await run("x401", "credential", "add", file("other.txt", issueSdJwtVc({ holder: newX401HolderKey().jwk }))), "bad_request", 1).message).toMatch(/x401 key new/);
     const jwk = ok(await run("x401", "key", "new")).jwk as X401HolderJwk;
@@ -82,6 +97,8 @@ describe("ghostly x401 key and credential", { timeout: 120_000 }, () => {
     expect(error(await run("x401", "credential"), "usage", 2).message).toBe("ghostly x401 credential takes a command: add, list or remove (ghostly help x401 credential)");
     expect(error(await run("x401", "credential", "frob"), "usage", 2).message).toBe("Unknown command: x401 credential frob: ghostly x401 credential takes add, list or remove (ghostly help x401 credential)");
     expect(error(await run("x401"), "usage", 2).message).toBe("ghostly x401 takes a command: credential or key (ghostly help x401)");
-    expect((await ghostly(["help", "x401", "credential", "add"])).stdout).toContain("Usage: ghostly x401 credential add <file|-> [--label <name>]");
+    const help = (await ghostly(["help", "x401", "credential", "add"])).stdout;
+    expect(help).toContain("Usage: ghostly x401 credential add <file|-> [--label <name>]");
+    expect(help).toContain("up to 80 characters on one line");
   });
 });
