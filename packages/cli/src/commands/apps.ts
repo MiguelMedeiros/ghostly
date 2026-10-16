@@ -56,7 +56,7 @@ export const commands: Record<string, Command> = {
       out: { type: "string", description: "Where the bundle goes (default <dir>/app.ghostlyapp); the bundle there is the version this one follows" },
       sequence: { type: "number", description: "This version's sequence, higher than the bundle at --out's (default: one more than it)" },
     },
-    run: async ({ options }, a) => (await import("../apps")).publishApp(a.dir!, keyFile(options.key, "app publish <dir> --key <file> [--out <file>] [--sequence n]"), options.out as string | undefined, options.sequence as number | undefined),
+    run: async ({ options }, a) => (await import("../apps")).publishApp(a.dir!, keyFile(options.key, "app publish <dir> --key <file> [--out <file>] [--sequence n]"), here(options.out), options.sequence as number | undefined),
   },
   "app revoke": {
     method: "app.revoke", usage: "app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>] [--bundle <file>]",
@@ -71,7 +71,7 @@ export const commands: Record<string, Command> = {
     },
     run: async ({ options }, a) => (await import("../apps")).revokeApp(a.dir!, keyFile(options.key, "app revoke <dir> --key <file> (--digest <digest>... | --up-to <sequence>) [--reason <text>]"), {
       digests: options.digest as string[] | undefined, upTo: options["up-to"] as number | undefined,
-      reason: options.reason as string | undefined, bundle: options.bundle as string | undefined,
+      reason: options.reason as string | undefined, bundle: here(options.bundle),
     }),
   },
   "app send": {
@@ -114,6 +114,6 @@ export const commands: Record<string, Command> = {
       key: { ...key, description: "The store key file (made, owner-only, when it is missing and the index names no key; keep it offline)" },
       out: { type: "string", description: "The folder to write ghostly-store.json and ghostly-store.sig in (default: the index's)" },
     },
-    run: async ({ options }, a) => (await import("../apps")).signStore(a.index!, keyFile(options.key, "store sign <index> --key <file> [--out <dir>]"), options.out as string | undefined),
+    run: async ({ options }, a) => (await import("../apps")).signStore(a.index!, keyFile(options.key, "store sign <index> --key <file> [--out <dir>]"), here(options.out)),
   },
 };
