@@ -19,6 +19,7 @@ import { fileStore } from "../shared/idb";
 import { SMALL_FILE_BYTES, blobDigest, fileBytes, fileBytesOf } from "../shared/fileBytes";
 import { removeStored, storedBlob, waitingGroupFile } from "../shared/storedFiles";
 import type { FileTransferState } from "../../../../apps/ui/src/lib/platform";
+import { getPrefix } from "../../../../apps/ui/src/lib/storage";
 import { DEFAULT_HYPERDHT_RELAY } from "../shared/hyperdhtRelay";
 import { TEST_MINT, TEST_MINTS } from "../shared/mints";
 import { getBrowserHost } from "../host";
@@ -30,6 +31,27 @@ import { engineApps } from "./apps";
  * how far the copy got. Gone once the peer has the file, or with the reason the copy failed.
  */
 const preparing = new Map<string, FileTransferState>();
+/**
+ * Large files sent from here whose copy into this device failed (`retry: false`), kept in this profile's localStorage:
+ * nothing of them reached the engine, so after a reload their row, the chat's own, showed as sent. The last few only.
+ */
+const UNSENT_MAX = 20;
+let unsent: { key: string; files: Record<string, FileTransferState> } | null = null;
+function unsentFiles(): Record<string, FileTransferState> {
+  const key = `${getPrefix()}unsent_files`;
+  if (unsent?.key === key) return unsent.files;
+  let files: Record<string, FileTransferState> = {};
+  try { files = JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, FileTransferState>; } catch { /* no storage here */ }
+  unsent = { key, files };
+  return files;
+}
+function keepUnsent(fileId: string, transfer: FileTransferState): void {
+  const files = { ...unsentFiles(), [fileId]: transfer };
+  const ids = Object.keys(files);
+  for (const id of ids.slice(0, Math.max(0, ids.length - UNSENT_MAX))) delete files[id];
+  unsent = { key: unsent!.key, files };
+  try { localStorage.setItem(unsent.key, JSON.stringify(files)); } catch { /* no room: it is said while this page lives */ }
+}
 /**
  * The last few files sent from this page, as they were handed over (a recording, a paste, a pick): their bubble shows
  * them at once from these bytes, without reading the stored copy back. Small files only; gone on a reload.
@@ -383,8 +405,10 @@ export const servicesPlatform: ServicesPlatform | null = {
       const full = /quota|space|full/i.test(reason) || (error as { name?: string })?.name === "QuotaExceededError";
       // A copy that failed left nothing stored to send again: no Retry (`retry: false`), the file is picked again. Said
       // as core says a copy it could not read (chatFiles.ts), so the app has words for it in every language.
-      preparing.set(file.id, staged ? { state: "failed", transferred: 0, size: file.size, error: reason }
-        : { state: "failed", transferred: 0, size: file.size, direction: "out", retry: false, error: full ? "Not enough space on this device to send it" : `Could not read the file: ${reason}` });
+      const failed: FileTransferState = staged ? { state: "failed", transferred: 0, size: file.size, error: reason }
+        : { state: "failed", transferred: 0, size: file.size, direction: "out", retry: false, error: full ? "Not enough space on this device to send it" : `Could not read the file: ${reason}` };
+      preparing.set(file.id, failed);
+      if (!staged) keepUnsent(file.id, failed);
       preparingChanged(true);
     });
     return { timestamp, file };
@@ -445,7 +469,7 @@ export const servicesPlatform: ServicesPlatform | null = {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (link) await engine.call("deleteMessage", { linkId: link.id, messageId });
   },
-  getTransfer: (fileId) => preparing.get(fileId) ?? engine.state?.transfers[fileId] ?? null,
+  getTransfer: (fileId) => preparing.get(fileId) ?? engine.state?.transfers[fileId] ?? unsentFiles()[fileId] ?? null,
   transfersRestored: () => engine.state?.transfersRestored ?? false,
   storedTransfer: async (fileId) => waitingGroupFile(await fileStore.get(fileId).catch(() => undefined)),
   async fileAction(fileId, action) {
