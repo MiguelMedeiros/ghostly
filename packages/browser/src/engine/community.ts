@@ -1097,12 +1097,14 @@ export class Communities {
   private async publishBeacon(groupId: string, live: Live, now: number, listed: boolean): Promise<void> {
     live.lastBeaconTry = now;
     const keys = beaconKeys(live.session.state.rv, groupId);
+    // A hub with no edge up (back from a restart): its entry, read and written, is its way back (`wayBack`).
+    const back = live.hub && this.wayBack(groupId, live);
     // Read this very tick already: what it said is what there is to merge with.
     let existing = live.beacon, head = live.head;
     if (live.lastBeaconRead !== now || live.beaconFailedAt === now) {
       // Read, merge, publish: without the read there is nothing to merge with, and publishing my entry alone would
       // erase every other hub's (each puts its own back only when it republishes, up to half a minute later).
-      const read = await this.host.resolve(keys.identity.pubKeyZ32, true, live.hub).catch(() => undefined);
+      const read = await this.host.resolve(keys.identity.pubKeyZ32, !back, live.hub && !back, back).catch(() => undefined);
       if (read === undefined && live.session.roster.length > 1) throw new Error("The beacon could not be read; not published");
       const records = read ?? [];
       existing = live.hubClocks.inMyTime(readBeacon(keys, records), now); head = readBeaconHead(keys, records);
@@ -1111,7 +1113,7 @@ export class Communities {
     const hubs = mergeBeacon(existing, live.session.myKey, listed ? { key: live.session.myKey, ts: now, load: this.beaconLoad(groupId, live, now), since: live.hubSince || now } : null, now, key => !this.gone(live, key));
     // Nor a newer head: several hubs write this record in turn.
     const newest = newerHead(head, this.newestFrame(live), now);
-    await this.host.publish(keys.identity, beaconRecords(keys, live.hubClocks.asWritten(hubs), newest), true, live.hub);
+    await this.host.publish(keys.identity, beaconRecords(keys, live.hubClocks.asWritten(hubs), newest), !back, live.hub && !back, back);
     live.beacon = hubs; live.head = newest;
     this.noteHubs(live, now);
     live.lastBeaconWrite = now; live.lastBeaconRead = live.beaconAt = now; live.beaconFailedAt = 0; live.beaconKnown = true;
@@ -1271,7 +1273,9 @@ export class Communities {
 
   private async pollLobby(groupId: string, live: Live, now: number): Promise<void> {
     const keys = lobbyKeys(live.session.state.rv, groupId, live.session.myKey);
-    const entries = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32, true, this.doorBusy(groupId, live, now)).catch(() => null)) ?? []);
+    // With no edge up, where my members ask is my way back (`wayBack`).
+    const back = this.wayBack(groupId, live);
+    const entries = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32, !back, !back && this.doorBusy(groupId, live, now), back).catch(() => null)) ?? []);
     for (const { key, ts } of entries) {
       // A member of the roster gets its edge. A key no commit names may be a member ahead of me on the roster, or one
       // whose admission lost a race, and needs an edge to find out: for a moment, and no member's (`wantAhead`).
@@ -1382,9 +1386,16 @@ export class Communities {
    * group edge's signaling: the edges of its 15 groups, all offering at once, spent that allowance in the first second,
    * and the beacons were read a minute later or not at all (bug hunt, 2026-10-14). Bounded: the reading is asked again
    * only when refused, and a hub that does not take me is given up after its wait (`hubWaitMs`).
+   *
+   * A hub with no edge up too (an app back from a restart steps up at once where it was one, before any edge is up): its
+   * beacon entry, read and written, and its reading of its lobby. As background looks, a daemon back as the hub of its 5
+   * communities while its 30 chats signaled got back into them one at a time, 4 to 10 minutes, one not at all in 16: its
+   * entry went unwritten, the other hubs took it for gone (`hubDead`) and its members asked them (bug hunt, 2026-10-14).
+   * Not a hub alone in the beacon: nobody carries the group without it, and its door's looks stay background ones.
    */
   private wayBack(groupId: string, live: Live): boolean {
-    return !live.hub && ![...this.host.edges(groupId).values()].some(id => this.host.linkReady(id, 2));
+    if (live.hub && !freshHubs(this.hubs(live), this.now()).some(h => h.key !== live.session.myKey)) return false;
+    return ![...this.host.edges(groupId).values()].some(id => this.host.linkReady(id, 2));
   }
 
   /**
