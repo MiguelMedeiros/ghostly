@@ -46,6 +46,7 @@ function objectStore(target: Map<string, Map<string, Row>>, name: string) {
 export const idbModule = {
   STORES: { links: "links", messages: "messages", services: "services", settings: "settings", files: "files", ...Object.fromEntries(Object.keys(KEYS).map((k) => [k, k])) },
   wrap: async <T>(value: T) => value,
+  committed: async <T>(value: T) => value,
   store: async (name: string) => objectStore(db, name),
   /** As the real one reads it from its index: the `count` newest movements of the mints wanted, newest first. */
   newestWalletTx: async (wanted: (mint: string) => boolean, count: number) =>

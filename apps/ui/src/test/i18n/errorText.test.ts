@@ -127,6 +127,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Not from Android's main thread", "apps/desktop/src/android.rs"],
   ["Ghostly is starting…", `${BROWSER}/platform/engine.ts`],
   ["Lost the Ghostly peer", `${BROWSER}/platform/engine.ts`],
+  ["This device has no room left to save this", `${BROWSER}/shared/idb.ts`],
   ["Ghostly is still starting. Try again in a moment.", `${BROWSER}/platform/services.ts`],
   ["Ghostly needs your permission to reach that local address", `${BROWSER}/platform/services.ts`],
   ["Pick a Lightning card first", `${BROWSER}/platform/services.ts`],
@@ -549,6 +550,12 @@ describe("errors in the app's language", () => {
     const refused = new Error("Ghostly could not check which device is active yet. This works once it can.");
     expect(knownErrorParts(refused, translators.pt)).toEqual({ title: "Não foi possível verificar qual dispositivo está ativo", next: "Isso volta a funcionar quando a verificação der certo. Confira sua conexão." });
     expect(knownErrorParts(refused, english)).toEqual({ title: "Can't check which device is active", next: "This works once the check does. Check your connection." });
+  });
+
+  it("a write the device had no room for says so and that nothing was saved, in the language, not an empty error", () => {
+    const full = Object.assign(new Error("This device has no room left to save this"), { name: "QuotaExceededError" });
+    expect(knownErrorParts(full, english)).toEqual({ title: "No room left on this device", next: "Nothing was saved. Free some space, then try again." });
+    expect(knownErrorParts(full, translators.pt)).toEqual({ title: "Não há mais espaço neste dispositivo", next: "Nada foi salvo. Libere espaço e tente de novo." });
   });
 
   it("an Invite or a Remove on a device where managing the group is off points at the group's Turn on, in the language", () => {

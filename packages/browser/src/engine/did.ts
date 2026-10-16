@@ -2,7 +2,7 @@ import {
   bytesEqual, createIdentity, didDhtDocument, didDhtFromPublicKey, encodeDidDhtDeactivated, encodeDidDhtPacket, fromBase64Url, identityFromSeed, PacketTooLargeError,
   signDidDhtPacket, toBase64Url, toZ32, type DidDhtDocument,
 } from "@ghostly/core";
-import { STORES, store, wrap } from "../shared/idb";
+import { STORES, store, wrap, committed } from "../shared/idb";
 import type { ProfileDidView } from "../shared/types";
 import { newDeviceKey, sealSeed, unsealSeed } from "./paymentAdapters/persistence";
 import type { SealedProofKey } from "./identities";
@@ -234,7 +234,7 @@ export class ProfileDid {
   }
 
   private async save(next: StoredProfileDid): Promise<void> {
-    await wrap((await store(STORES.settings, "readwrite")).put(next, KEY));
+    await committed((await store(STORES.settings, "readwrite")).put(next, KEY));
     this.stored = next;
   }
 }

@@ -337,10 +337,32 @@ export function deleteDatabase(name: string): Promise<void> {
   });
 }
 
+/** A read. A write goes through `committed`: its request's success does not mean the browser kept it. */
 export function wrap<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
+  });
+}
+
+/** What a write the device had no room for says (Chromium's own QuotaExceededError has no message). */
+export const NO_ROOM_TO_SAVE = "This device has no room left to save this";
+
+/**
+ * A write, settled when its transaction is: kept once it commits, refused when it aborts. On a device out of storage
+ * Chromium fires the request's success and then aborts the transaction with QuotaExceededError, so a write awaited on
+ * its request alone reads as saved and is gone. The last request of its transaction: the transaction ends before this
+ * settles. Several in one transaction settle together.
+ */
+export function committed<T>(request: IDBRequest<T>): Promise<T> {
+  const tx = request.transaction!;
+  return new Promise((resolve, reject) => {
+    tx.addEventListener("complete", () => resolve(request.result));
+    tx.addEventListener("abort", () => {
+      const error = tx.error ?? request.error;
+      reject(error?.name === "QuotaExceededError" ? Object.assign(new Error(NO_ROOM_TO_SAVE), { name: "QuotaExceededError", cause: error })
+        : error ?? new Error("The write was not saved"));
+    });
   });
 }
 
@@ -509,6 +531,6 @@ export const fileStore = {
     const tx = (await openDb()).transaction([STORES.files, STORES.fileState], "readwrite");
     const files = tx.objectStore(STORES.files), state = tx.objectStore(STORES.fileState);
     const keys = await wrap(files.index("byLink").getAllKeys(linkId));
-    await Promise.all(keys.flatMap((key) => [wrap(files.delete(key)), wrap(state.delete(key))]));
+    await Promise.all(keys.flatMap((key) => [committed(files.delete(key)), committed(state.delete(key))]));
   },
 };

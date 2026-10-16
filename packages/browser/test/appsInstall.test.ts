@@ -30,8 +30,12 @@ function privateBrowsing(): void {
   const put = IDBObjectStore.prototype.put;
   vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (this: IDBObjectStore, value: unknown, key?: IDBValidKey) {
     if (!((value as { data?: unknown })?.data instanceof Blob)) return put.call(this, value, key);
-    const request = { error: new DOMException("Error preparing Blob/File data to be stored in object store", "UnknownError") } as IDBRequest & { onerror: (() => void) | null };
-    setTimeout(() => request.onerror?.(), 0);
+    // Refused as WebKit does: the transaction aborts with the browser's error.
+    const refused = new DOMException("Error preparing Blob/File data to be stored in object store", "UnknownError");
+    const tx = this.transaction;
+    Object.defineProperty(tx, "error", { get: () => refused, set: () => {}, configurable: true });
+    const request = put.call(this, value, key);
+    tx.abort();
     return request;
   });
 }

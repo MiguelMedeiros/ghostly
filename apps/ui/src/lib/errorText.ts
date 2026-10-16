@@ -101,6 +101,8 @@ const RULES: readonly Rule[] = [
   // A call whose storage write the browser refused for want of space (engine/server.ts): a group made, a text sent. A
   // forward's copy that found no room (engine/forwards.ts forwardError) says Desktop's io error the same way.
   { match: /^Not enough space on this device \((?:QuotaExceededError(?:: [\s\S]*)?|No space left on device[\s\S]*)\)$/, key: "errors.app.noRoom", next: "errors.app.noRoomNext", detail: true },
+  // A write the browser threw away for want of room (packages/browser/src/shared/idb.ts `committed`).
+  exact("This device has no room left to save this", "errors.app.noRoomToSave", "errors.app.noRoomToSaveNext"),
   // A call refused in limited mode (packages/browser/src/engine/node.ts LIMITED_MODE_ERROR): the banner's own words, and what to do.
   exact("Ghostly could not check which device is active yet. This works once it can.", "devices.limited.title", "errors.app.limitedNext"),
   exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress"),
