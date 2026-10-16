@@ -154,7 +154,7 @@ describe("app publish", () => {
     const { manifest, files } = chess();
     const dir = appFolder(manifest, files);
     // A key the first run would make inside the folder: refused, and not made.
-    for (const inside of [join(dir, "publisher.key"), join(dir, "keys", "publisher.pem"), join(dir, ".publisher.key")]) {
+    for (const inside of [join(dir, "publisher.key"), join(dir, "keys", "publisher.pem"), join(dir, ".publisher.key"), join(dir, "..publisher.key"), join(dir, "..keys", "publisher.key")]) {
       const refusal = error(await ghostly(["app", "publish", dir, "--key", inside]), "refused", 1) as { message: string; details?: { reason?: string } };
       expect(refusal.details?.reason).toBe("private-key");
       expect(refusal.message).toContain("outside the app's folder");
