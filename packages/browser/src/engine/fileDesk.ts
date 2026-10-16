@@ -69,6 +69,8 @@ interface Chat {
   /** Writes to the database, in order. */
   saving: Promise<void>;
   lastSaved: Map<string, number>;
+  /** By local id: the newest progress the 2 s held back, and the write waiting for them to be up. */
+  unsaved: Map<string, { record: FileTransferRecord; timer: ReturnType<typeof setTimeout> }>;
 }
 
 interface Speed { bytes: number; at: number; rate: number }
@@ -105,7 +107,7 @@ export class FileDesk {
   private chat(linkId: string): Chat {
     let chat = this.chats.get(linkId);
     if (chat) return chat;
-    const made: Chat = { local: new Map(), places: new Map(), announced: new Map(), saving: Promise.resolve(), lastSaved: new Map(), files: undefined as unknown as ChatFiles };
+    const made: Chat = { local: new Map(), places: new Map(), announced: new Map(), saving: Promise.resolve(), lastSaved: new Map(), unsaved: new Map(), files: undefined as unknown as ChatFiles };
     made.files = new ChatFiles({
       send: (frame) => this.deps.send(linkId, frame),
       decide: (file, again) => this.decide(linkId, file, again),
@@ -147,6 +149,8 @@ export class FileDesk {
   session(linkId: string, open: boolean): void {
     const chat = this.chat(linkId);
     if (open) chat.files.attach(); else chat.files.detach();
+    // Cut: what was confirmed last is kept now, before a restart can come, not up to 2 s of it lost.
+    if (!open) for (const [id, { record }] of [...chat.unsaved]) this.save(chat, id, record);
     for (const record of chat.files.records()) this.show(linkId, chat, record, chat.files.transferred(record.direction, record.id));
     this.deps.changed();
   }
@@ -308,6 +312,8 @@ export class FileDesk {
     const wireId = out ? fileId.slice(`${linkId}-out-`.length) : [...chat.local].find(([, local]) => local === fileId)?.[0];
     if (!wireId) return;
     chat.files.forget(out ? "out" : "in", wireId);
+    clearTimeout(chat.unsaved.get(fileId)?.timer);
+    chat.unsaved.delete(fileId);
     if (!out) { chat.local.delete(wireId); chat.announced.delete(wireId); }
     this.speeds.delete(fileId);
     this.unwatch(fileId);
@@ -325,7 +331,9 @@ export class FileDesk {
 
   /** The chat went away: its transfers stop here. */
   drop(linkId: string): void {
-    this.chats.get(linkId)?.files.detach();
+    const chat = this.chats.get(linkId);
+    chat?.files.detach();
+    for (const { timer } of chat?.unsaved.values() ?? []) clearTimeout(timer);
     this.chats.delete(linkId);
     for (const id of [...this.moved.keys(), ...this.restored, ...this.stallChecks.keys()]) if (id.startsWith(`${linkId}-`)) this.unwatch(id);
   }
@@ -448,14 +456,31 @@ export class FileDesk {
     // as gone, and one that arrived within `changed`'s wait (250 ms behind another's progress) said "No longer available".
     if (offered) this.deps.flush?.();
     const id = record.direction === "out" ? outgoingFileId(linkId, record.id) : chat.local.get(record.id)!;
-    const now = Date.now();
-    if (!progress || now - (chat.lastSaved.get(id) ?? 0) >= SAVE_EVERY_MS) {
-      chat.lastSaved.set(id, now);
-      const transfer = this.deps.transfers.get(id);
-      chat.saving = chat.saving.then(() => fileStore.patch(id, { wire3: record, ...(transfer && { transfer: { state: transfer.state, transferred: transfer.transferred, size: transfer.size, error: transfer.error } }) })).catch(() => {});
+    const now = Date.now(), last = chat.lastSaved.get(id) ?? 0;
+    if (!progress || now - last >= SAVE_EVERY_MS) this.save(chat, id, record);
+    else {
+      // Held back: the newest is written once the 2 s are up. Only the first ack of each 2 s was, so a cut and a
+      // restart within them showed the progress of before (the whole stretch since a resume, on a fast link).
+      const held = chat.unsaved.get(id);
+      if (held) held.record = record;
+      else {
+        const timer = setTimeout(() => { const newest = chat.unsaved.get(id); if (newest) this.save(chat, id, newest.record); }, last + SAVE_EVERY_MS - now);
+        // A headless app (the CLI) is not kept running for it.
+        (timer as { unref?: () => void }).unref?.();
+        chat.unsaved.set(id, { record, timer });
+      }
     }
     if (record.state === "done" && record.direction === "in") this.deps.wireIds(linkId)?.add(record.id);
     this.deps.changed(progress ? 250 : 50);
+  }
+
+  /** Writes a transfer's record and the view of it, after the chat's writes before it; what was held back goes with it. */
+  private save(chat: Chat, id: string, record: FileTransferRecord): void {
+    const held = chat.unsaved.get(id);
+    if (held) { clearTimeout(held.timer); chat.unsaved.delete(id); }
+    chat.lastSaved.set(id, Date.now());
+    const transfer = this.deps.transfers.get(id);
+    chat.saving = chat.saving.then(() => fileStore.patch(id, { wire3: record, ...(transfer && { transfer: { state: transfer.state, transferred: transfer.transferred, size: transfer.size, error: transfer.error } }) })).catch(() => {});
   }
 
   private show(linkId: string, chat: Chat, record: FileTransferRecord, transferred: number, progress = false): void {
