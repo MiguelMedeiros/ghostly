@@ -218,10 +218,11 @@ test("a person video-calls a headless bot: the bot says it takes no picture, and
   }
 });
 
-test("the bot's first answer is refused as libdatachannel refuses one: the bot offers again and the page starts over", { tag: ["@feature:headless.calls", "@feature:headless.web-interop", "@feature:calls.paired"] }, async ({ peer, relay }) => {
+test("the bot's first two answers are refused as libdatachannel refuses one: the bot offers again and the page starts over each time", { tag: ["@feature:headless.calls", "@feature:headless.web-interop", "@feature:calls.paired"] }, async ({ peer, relay }) => {
   const url = await relay.listen();
-  // The bot refuses the first answer it gets, as libdatachannel 0.24.5 can (packages/cli/src/calls/manager.ts, `redial`).
-  const bot = new HeadlessBot({ GHOSTLY_CALL_REFUSE_ANSWERS: "1" });
+  // The bot refuses the first two answers it gets, as libdatachannel 0.24.5 can twice in a row (packages/cli/src/calls/manager.ts,
+  // `redial`): the page starts over on each new offer, not only the first (One's nightly run, 2026-10-16).
+  const bot = new HeadlessBot({ GHOSTLY_CALL_REFUSE_ANSWERS: "2" });
   try {
     await bot.start(url, "Voice bot");
     const person = await peer("callee");
@@ -235,10 +236,10 @@ test("the bot's first answer is refused as libdatachannel refuses one: the bot o
     const placed = await bot.run("call", "start", invite.chat as string, "--rate", "16000");
     await expect(person.page.getByText("Incoming audio call...")).toBeVisible();
     await person.page.getByTitle("Accept audio call").click();
-    // The page answered twice: once on the connection the bot refused, once on a new one for the bot's second offer.
+    // The page answered three times: on the two connections the bot refused, and on a new one for the bot's third offer.
     await bot.event((e) => e.type === "call.connected" && e.call === placed.call);
     expect(bot.events.filter((e) => e.type === "call.ended")).toEqual([]);
-    await expect.poll(() => person.page.evaluate(() => (window as unknown as { __connections: number }).__connections)).toBe(2);
+    await expect.poll(() => person.page.evaluate(() => (window as unknown as { __connections: number }).__connections)).toBe(3);
     await expect(person.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
 
     const program1 = await program((placed.audio as { socket: string }).socket);
