@@ -28,6 +28,13 @@ const shown = (selector: string) => vi.waitFor(() => {
   return element;
 });
 
+/** The sheet's first button, once it works (a moment after the sheet shows). */
+const armed = (selector = "[data-testid=app-files-choose]") => vi.waitFor(() => {
+  const button = document.querySelector<HTMLButtonElement>(selector);
+  if (!button || button.disabled) throw new Error(`${selector} not working yet`);
+  return button;
+});
+
 afterEach(() => { document.body.replaceChildren(); });
 
 describe("picking", () => {
@@ -39,7 +46,7 @@ describe("picking", () => {
     expect(sheet.textContent).toContain("Cinema asks to read a folder");
     expect(sheet.textContent).toContain("Nothing is copied: Cinema reads what you pick.");
     expect(asked).toEqual([]);
-    (document.querySelector("[data-testid=app-files-choose]") as HTMLButtonElement).click();
+    (await armed()).click();
     const [entry] = await pick;
     expect(asked).toEqual([[true, ["mp4"]]]);
     expect(entry).toMatchObject({ path: "Films/Up.mp4", size: 3, modified: 7, available: true });
@@ -65,10 +72,14 @@ describe("picking", () => {
     const behind = document.body.appendChild(Object.assign(document.createElement("button"), { textContent: "Close" }));
     const host = webLinkedFiles({ text: () => text, picker: async () => null });
     void host.pick(REF, "Cinema", { folder: true, accept: [] }).catch(() => {});
-    const choose = await shown("[data-testid=app-files-choose]");
+    const choose = await armed();
     const cancel = document.querySelector<HTMLElement>("[data-testid=app-files-cancel]")!;
-    expect(document.activeElement).toBe(choose);
+    expect(document.activeElement).toBe(document.querySelector("[role=dialog]"));
     const tab = (shiftKey = false) => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true }));
+    // From the box, Tab goes to its first button.
+    expect(tab()).toBe(false);
+    expect(document.activeElement).toBe(cancel);
+    choose.focus();
     // The browser's own Tab from the last button went to the app's Close and its frame, under the backdrop.
     expect(tab()).toBe(false);
     expect(document.activeElement).toBe(cancel);
@@ -96,8 +107,30 @@ describe("picking", () => {
   it("the picker closed without a pick is cancelled too", async () => {
     const host = webLinkedFiles({ text: () => text, picker: async () => null });
     const pick = host.pick(REF, "Cinema", { folder: true, accept: [] });
-    (await shown("[data-testid=app-files-choose]")).click();
+    (await armed()).click();
     await expect(pick).rejects.toThrow(/^cancelled: /);
+  });
+
+  it("opens with focus on its box, not its button, which answers no key or click of its first moment", async () => {
+    // The person types in the message box (or presses Enter again, or double-clicks) as an app asks.
+    const composer = document.body.appendChild(document.createElement("textarea"));
+    composer.focus();
+    let opened = 0;
+    const host = webLinkedFiles({ text: () => text, picker: async () => { opened++; return null; } });
+    const pick = host.pick(REF, "Cinema", { folder: true, accept: [] });
+    const choose = await shown("[data-testid=app-files-choose]") as HTMLButtonElement;
+    // A click that was meant for what was there before.
+    choose.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(opened).toBe(0);
+    expect(document.querySelector("[data-testid=app-files-sheet]")).not.toBeNull();
+    // A Space or Enter the person goes on typing lands on the box, which does nothing with it.
+    expect(document.activeElement).toBe(document.querySelector("[role=dialog]"));
+    expect(document.activeElement).not.toBe(choose);
+    // A moment later the button is the person's deliberate answer.
+    (await armed()).click();
+    await expect(pick).rejects.toThrow(/^cancelled: /);
+    expect(opened).toBe(1);
+    expect(document.activeElement).toBe(composer);
   });
 
   it("leaves out hidden files and folders, and what accept does not name", async () => {
