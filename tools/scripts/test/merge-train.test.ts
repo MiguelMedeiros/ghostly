@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, isBatch, LABEL, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, holdBatch, holdText, isBatch, LABEL, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; closedAt?: string; open: boolean; base: string; merged?: boolean; author?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -1046,6 +1046,92 @@ describe("a run of the train", () => {
   });
 });
 
+describe("a batch that waits for company", () => {
+  const at = (min: number) => Date.parse("2026-10-08T00:00:00Z") + min * 60_000;
+  const queued = (number: number, min = 0, more = {}) => ({ number, priority: false, queuedAt: new Date(at(min)).toISOString(), ...more });
+
+  it("leaves with MIN_BATCH (3), after MAX_WAIT (15 min) since the oldest could board, or at once for queue:priority", () => {
+    expect([MIN_BATCH, MAX_WAIT]).toEqual([3, 15 * 60_000]);
+    expect(holdBatch([queued(1), queued(2, 1)], at(5))).toEqual({ count: 2, waited: 5 * 60_000 });
+    expect(holdBatch([queued(1), queued(2), queued(3)], at(5))).toBeNull();
+    expect(holdBatch([queued(1), queued(2, 10)], at(16))).toBeNull();
+    expect(holdBatch([queued(1, 0, { priority: true })], at(0))).toBeNull();
+    expect(holdBatch([], at(0))).toBeNull();
+    // From when its CI turned green, when that came after `queue`.
+    expect(holdBatch([queued(1, 0, { boardableAt: new Date(at(10)).toISOString() })], at(16))).toEqual({ count: 1, waited: 6 * 60_000 });
+    expect(holdText({ count: 2, waited: 6.5 * 60_000 })).toBe("holding: 2 boardable, oldest waited 6 min; a batch leaves at 3 or at 15 min");
+  });
+
+  it("holds 2 boardable pull requests at 5 minutes, and says so", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    repo.add(12, { behind: true });
+    const r = await repo.run({ now: at(5) });
+    expect(r.opened).toEqual([]);
+    expect(r.inFlight).toBeNull();
+    expect(repo.pushes).toEqual([]);
+    expect(r.log.at(-1)).toBe("holding: 2 boardable, oldest waited 5 min; a batch leaves at 3 or at 15 min");
+    expect(repo.comments.get(11)![0].body).toContain("1st");
+  });
+
+  it("boards 3 boardable pull requests at once", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n, { behind: true });
+    const r = await repo.run({ now: at(1) });
+    expect(r.opened).toHaveLength(1);
+    expect(repo.members()).toEqual([11, 12, 13]);
+  });
+
+  it("boards 2 once the oldest has waited 15 minutes", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    repo.add(12, { behind: true });
+    expect((await repo.run({ now: at(14) })).opened).toEqual([]);
+    const r = await repo.run({ now: at(16) });
+    expect(r.opened).toHaveLength(1);
+    expect(repo.members()).toEqual([11, 12]);
+  });
+
+  it("sends one with queue:priority at once", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true, priorityOnly: true });
+    const r = await repo.run({ now: at(0) });
+    expect(r.inFlight).toBe(11);
+    expect(repo.alone(11)).toBeTruthy();
+  });
+
+  it("counts the wait from when CI turned green, when that came after queue", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true, ci: [{ ...green[0], completed_at: new Date(at(10)).toISOString() }] });
+    expect((await repo.run({ now: at(20) })).log.at(-1)).toBe("holding: 1 boardable, oldest waited 10 min; a batch leaves at 3 or at 15 min");
+    expect((await repo.run({ now: at(26) })).inFlight).toBe(11);
+  });
+
+  it("still lands the front at once when it needs no CI run (green, at the tip), and holds the rest", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12, { behind: true });
+    const r = await repo.run({ now: at(2) });
+    expect(r.merged).toEqual([11]);
+    expect(r.opened).toEqual([]);
+    expect(r.inFlight).toBeNull();
+    expect(r.log.at(-1)).toBe("holding: 1 boardable, oldest waited 1 min; a batch leaves at 3 or at 15 min");
+  });
+
+  it("never holds a red batch's halves or a green batch's next half", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13, 14]) repo.add(n, { behind: true });
+    await repo.run({ now: at(1) });
+    repo.settle([14]);
+    await repo.run({ now: at(1) });
+    expect(repo.members()).toEqual([11, 12]);
+    repo.settle([14]);
+    const r = await repo.run({ now: at(1) });
+    expect(r.merged).toEqual([11, 12]);
+    expect(repo.members()).toEqual([13, 14]);
+  });
+});
+
 describe("a green batch landing on dev", () => {
   /** A batch of `numbers`, built on dev's tip and green. `behind`: their heads do not sit on that tip (the usual case). */
   const greenBatch = async (numbers = [11, 12, 13], opts: { behind?: boolean } = {}) => {
@@ -1502,11 +1588,11 @@ describe("one pull request alone", () => {
   it("rebases again when CI never started on its commit", async () => {
     const repo = fakeRepo();
     repo.add(11, { behind: true });
-    await repo.run({ now: Date.parse("2026-10-08T00:00:00Z") });
+    await repo.run({ now: Date.parse("2026-10-08T00:00:00Z"), maxWait: 0 });
     const head = repo.pulls.get(11)!.sha;
-    await repo.run({ now: Date.parse("2026-10-08T00:10:00Z") });
+    await repo.run({ now: Date.parse("2026-10-08T00:10:00Z"), maxWait: 0 });
     expect(repo.pulls.get(11)!.sha).toBe(head);
-    await repo.run({ now: Date.parse("2026-10-08T00:30:00Z") });
+    await repo.run({ now: Date.parse("2026-10-08T00:30:00Z"), maxWait: 0 });
     expect(repo.pulls.get(11)!.sha).not.toBe(head);
   });
 
