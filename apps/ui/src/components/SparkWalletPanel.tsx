@@ -63,7 +63,7 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
  return <div className="space-y-6" data-testid="spark-wallet">
   {!ready ? <div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="spark-connecting"><p className="text-text-primary">{t("wallet.panel.connecting", { wallet: "Spark" })}</p>{spark?.error ? <Notice problem={problemText(spark.error, t)} tone="muted" /> : <Notice>{t("wallet.spark.connectingNote")}</Notice>}</div>
   : <div className="space-y-4">
-   <p className="text-text-primary" data-testid="spark-balance"><span className="text-4xl font-semibold tabular-nums">{formatAmount(spark.balance, t.language)}</span><span className="text-text-muted text-sm ms-2">{unit}</span>
+   <p className="text-text-primary" data-testid="spark-balance"><bdi className="text-4xl font-semibold tabular-nums">{formatAmount(spark.balance, t.language)}</bdi><span className="text-text-muted text-sm ms-2">{unit}</span>
     {mainnet ? <span className="block text-xs text-danger mt-1" data-testid="spark-mainnet-label">{t("wallet.spark.mainnetLabel")}</span> : <span className="block text-xs text-warn-ink mt-1">{t("wallet.spark.regtestLabel")}</span>}</p>
    <Actions value={action} onChange={setAction} />
    {action === "receive" && <div className="bg-surface rounded-xl p-4 space-y-4 animate-fade-in">

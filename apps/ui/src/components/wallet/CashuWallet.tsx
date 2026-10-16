@@ -130,7 +130,9 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
       <div className="space-y-4">
         {viaMint ? (
           <p className="text-text-primary" data-testid="wallet-balance">
-            <span className="text-4xl font-semibold tabular-nums">{formatAmount(testnet ? testShown : realShown, t.language)}</span>
+            {/* Only the number isolated, as an invoice's card does: in a right-to-left page the unit's Latin "sats" was one
+                run with it, glued to it ("100,000sats"). The unit stays in the line's direction. */}
+            <bdi className="text-4xl font-semibold tabular-nums">{formatAmount(testnet ? testShown : realShown, t.language)}</bdi>
             <span className="text-text-muted text-sm ms-2">{unit}</span>
             {/* A Testnet wallet's whole balance is test sats; a test mint's sats never count in a Mainnet one. */}
             {testMint && !testnet && <span className="block text-xs text-warn-ink mt-1" data-testid="wallet-test-balance">{t("wallet.cashu.testBalance", { amount: formatAmount(testShown, t.language) })}</span>}
@@ -157,7 +159,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
           </p>
         ) : (
           <p className="text-text-primary" data-testid="wallet-balance">
-            <span className="text-4xl font-semibold tabular-nums">{ln?.balance === undefined ? "—" : formatAmount(ln.balance, t.language)}</span>
+            <bdi className="text-4xl font-semibold tabular-nums">{ln?.balance === undefined ? "—" : formatAmount(ln.balance, t.language)}</bdi>
             <span className="text-text-muted text-sm ms-2">{t("wallet.lightning.balanceSource", { unit, source: sourceName ?? t("wallet.lightning.theSource") })}</span>
             {ln?.status !== "ready" && <span className="block text-xs text-warn-ink mt-1" data-testid="lightning-source-state">{ln?.error ? problemLine(ln.error, t) : t("wallet.lightning.connecting")}</span>}
           </p>
