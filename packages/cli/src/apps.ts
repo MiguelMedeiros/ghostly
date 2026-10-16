@@ -8,7 +8,7 @@ import {
   type AppManifest, type AppRevokeStatement, type AppStoreIndex, type AppStoreReading, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
 import { templateManifest, templatePage, templateReadme } from "./appTemplate";
-import { CliError } from "./errors";
+import { CliError, localFileError } from "./errors";
 
 /*
  * The publisher tools of WISP 1200 (Apps · Publishing): `app init` writes a folder to start from, `app publish` bundles
@@ -503,7 +503,7 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   let value: unknown;
   try { value = JSON.parse(readFileSync(indexPath, "utf8")); } catch (error) {
     if (error instanceof SyntaxError) throw new CliError("bad_request", `${indexPath} is not JSON: ${error.message}`);
-    throw error;
+    throw localFileError(error, indexPath) ?? error;
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new CliError("bad_request", `${indexPath} is not a JSON object`);
   const index = value as Record<string, unknown>;

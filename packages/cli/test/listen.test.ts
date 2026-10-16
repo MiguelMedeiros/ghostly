@@ -343,6 +343,13 @@ describe("listen with an allowlist and --turns", () => {
     expect(result.code, result.stdout + result.stderr).toBe(3);
     expect(result.json).toEqual({ error: { code: "not_found", message: `No such file or folder: ${join(dir, "nodir")}` } });
     expect(readdirSync(home)).toEqual([]);
+
+    // A cursor that is a folder is named, as every other file option is.
+    const folder = join(dir, "afolder");
+    mkdirSync(folder);
+    const named = await ghostly(["--home", home, "listen", "--cursor", folder]);
+    expect(named.code, named.stdout + named.stderr).toBe(1);
+    expect(named.json).toEqual({ error: { code: "bad_request", message: `${folder} is a folder: name a file` } });
   });
 
   it("an output that wants a drain holds the next event until it drains; the events wait as `behind`", async () => {
