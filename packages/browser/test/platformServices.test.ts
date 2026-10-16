@@ -277,6 +277,28 @@ describe("sending files", () => {
     }
   });
 
+  // Nothing of it reached the engine: the chat's row of it is the page's own, and its failure lived only in this page.
+  // After a reload the bubble read "No longer available" with the Sent mark, though the file never left.
+  it("a large file whose copy into this device failed for lack of room is still not sent after a reload", async () => {
+    const kept = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (key: string) => kept.get(key) ?? null, setItem: (key: string, value: string) => void kept.set(key, value), removeItem: (key: string) => void kept.delete(key) });
+    withLinks(chat({ id: "full-link" }));
+    const full = { kind: "native", stage: vi.fn(async () => { throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); }) } as unknown as FileBytes;
+    registerFileBytes("native", async () => full, true);
+    try {
+      const { file } = await services.sendFile("peer-1", new File([new Uint8Array(17 * 1024 * 1024)], "big.bin"));
+      await vi.waitFor(() => expect(services.getTransfer(file.id)?.state).toBe("failed"));
+      vi.resetModules();
+      const reloaded = (await import("../src/platform/services")).servicesPlatform!;
+      expect(reloaded.getTransfer(file.id)).toMatchObject({ state: "failed", direction: "out", retry: false, error: "Not enough space on this device to send it" });
+      await expect(reloaded.retryFile!(file.id)).rejects.toThrow("cannot be retried");
+    } finally {
+      registerFileBytes("native", async () => null);
+      resetFileBytes();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("serves a received file as opaque bytes unless it is a previewable image", async () => {
     await fileStore.put({ id: "page", linkId: "l", blob: new Blob(["<script>"], { type: "text/html" }), createdAt: 1 });
     await fileStore.put({ id: "pic", linkId: "l", blob: new Blob(["png"], { type: "image/png" }), createdAt: 1 });
