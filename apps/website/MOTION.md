@@ -149,8 +149,13 @@ watches:
   each finished frame and stops at the last one.
 - The picture follows one number, `--t` (seconds along all the steps, in
   `protocolTimeline.ts`); every shape reads it through the `sx-` rules in
-  `app/dev-steps.css`, and moves on `move` (packets travel a route at an even
-  speed, and a route draws behind its packet). Two labels that share a place
+  `app/dev-steps.css`. While a step plays, the clock writes `--t` only on the
+  shapes whose picture changes between two frames (each rule changes over a
+  short stretch of its own times, listed in `stepClock.ts`), and on the whole
+  explainer once it stops: written there at every frame, `--t` restyled all of
+  its 900 elements a frame (21 fps on a 4x slower CPU). Shapes move on `move`
+  (packets travel a route at an even speed, and a route draws behind its
+  packet). Two labels that share a place
   swap: the next arrives after the last has started to leave, never on top.
   The connecting line's dashes march on `--t` too, so they stop with the
   step; the ghosts float three times and blink twice, then rest.
