@@ -321,6 +321,18 @@ describe("links", () => {
     await vi.waitFor(async () => expect((await saved(chat.id))?.label).toBeUndefined());
   });
 
+  it("cuts a label by characters, never inside an emoji, and folds new lines and tabs to spaces", async () => {
+    const { node } = engine();
+    const chat = await addChat(node, stubLink());
+    node.renameLink({ linkId: chat.id, label: `${"x".repeat(47)}😀😀` });
+    expect(node.getState().links[0].label).toBe(`${"x".repeat(47)}😀`);
+    node.renameLink({ linkId: chat.id, label: "Alice\n\tSmith\r\nwork" });
+    expect(node.getState().links[0].label).toBe("Alice Smith work");
+    await vi.waitFor(async () => expect((await saved(chat.id))?.label).toBe("Alice Smith work"));
+    node.renameLink({ linkId: chat.id, label: "​\n⁦" });
+    expect(node.getState().links[0].label).toBeUndefined();
+  });
+
   it("removing a chat stops it and forgets its history; ecash still reclaimable stays", async () => {
     const { node } = engine();
     const link = stubLink();
