@@ -95,6 +95,7 @@
 
 **Files**
 
+- A large file whose copy into the app failed (the device ran out of room, or the file changed) has the red "Not sent" mark again, instead of a tick that said "Sent" though nothing left the device. The mark does not offer to send it again: pick the file again instead.
 - A large file's progress is kept as it was at a cut: the newest progress is written once its 2 s are up, and at once when the chat's connection goes. Before, only the first progress of each 2 s was written, so an app restarted soon after a cut showed the file where it stood before (a whole resumed stretch on a fast link).
 - A large file that could not be sent because this device had no room for its copy keeps its red "Not sent" mark and its "Not enough space on this device" line after you reload the app. Before, the reload showed it as sent and "No longer available", though it never left the device.
 
