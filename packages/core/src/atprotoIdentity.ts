@@ -1,4 +1,5 @@
 import { parseAtprotoVerificationKey, type AtprotoPublicKey, type CborValue } from "./atprotoRepo";
+import { isZ32Key } from "./bytes";
 import type { IdentityStatement } from "./identityProofs";
 
 /**
@@ -55,7 +56,7 @@ export function shortAtprotoDid(did: string): string {
 
 /** The record key of a proof: its proof key (z-base-32, already a valid record key), so removal finds it. */
 export function atprotoProofRkey(proofKey: string): string {
-  if (!/^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/.test(proofKey)) throw new Error("Invalid proof key");
+  if (!isZ32Key(proofKey)) throw new Error("Invalid proof key");
   return proofKey;
 }
 

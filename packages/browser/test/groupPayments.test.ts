@@ -8,7 +8,8 @@ import type { GroupPayFrame, GroupPayNote, PaymentView, StoredMessage } from "..
  * the member they are about, merged forward only, and said by each device about its own part.
  */
 
-const key = (c: string) => c.repeat(52);
+// A member key in its one canonical spelling: the last character carries four zero padding bits (WISP 02).
+const key = (c: string) => c.repeat(51) + "y";
 const A = key("a"), B = key("b"), C = key("c"), D = key("d"), X = key("x");
 const members = new Set([A, B, C, D]);
 const note = (patch: Partial<GroupPayFrame> = {}): GroupPayFrame => ({ t: "group-pay", g: "g1", id: "req-00001", k: "req", f: B, to: A, v: "100", u: "sat", d: 0, r: "cashu", ts: 1, st: "open", ...patch });

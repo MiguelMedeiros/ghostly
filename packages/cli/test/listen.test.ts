@@ -18,8 +18,8 @@ import { ghostly } from "./support/cli";
  * per message a contact sends (or group message that mentions this profile), the contact's words under `untrusted`.
  */
 
-const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u";
-const OTHER_KEY = "h769ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqx";
+const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
+const OTHER_KEY = "h769ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqy";
 
 let seq = 0;
 const received = (chat: string, id: string, text: string, fields: Record<string, unknown> = {}): GhostlyEvent =>
@@ -226,6 +226,9 @@ describe("the allowlist", () => {
     expect(call).not.toHaveBeenCalled();
     expect(await list.allows(received("chatAlice", "a", "hi"))).toBe(true);
     expect(await list.allows(received("chatMallory", "b", "hi"))).toBe(false);
+    // The key with its last character respelled is no key, and is not asked of the chats either (a contact may call itself that too).
+    await expect(allowlist([KEY.slice(0, 51) + "t"], [], call, async () => null)).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/not a contact key/) });
+    expect(call).not.toHaveBeenCalled();
   });
 });
 
