@@ -125,7 +125,11 @@ The opening is one timeline (`HERO` in `lib/motion.ts`, mirrored by the CSS in
    first character.
 5. 3.6: the "Follow Boo" arrow nudges twice and rests.
 
-Idle: Boo bobs 8 px with a 1.5% breath over 4.2 s and blinks every 5.3 s; the
+Idle: Boo bobs 8 px with a 1.5% breath over 4.2 s three times and blinks
+twice, then rests (so do every stage's actors, a talking mouth after eight
+beats, a waiting caret after four blinks, and the network's twinkles after
+three: looped, these CSS animations on SVG shapes laid the page out at every
+frame for as long as a stage was on screen); the
 network field behind the act drifts 12 px over 28 s and parallaxes with the
 scroll on its own composited layer; the grid holds still. Leaving: the copy
 fades and lifts 48 px over p 0.2 to 0.7 of the hero.
