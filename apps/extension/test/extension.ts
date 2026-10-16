@@ -7,6 +7,9 @@ import { engineControl, type FakeEngineServer } from "./fakeEngine";
 export const PEER = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
 export const OTHER_PEER = "h769ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqy";
 export const SERVICE = "atlas";
+/** This profile's chat with PEER (`viewerTag`), and another profile's chat with the same contact. */
+export const TAG = "ybndrfg8ejkmcpqx";
+export const OTHER_TAG = "ot1uwisza345h769";
 
 /**
  * The extension as Chrome runs it: the service worker loaded, and the offscreen
@@ -42,15 +45,16 @@ export function engine(): FakeEngineServer {
 }
 
 /** Opens a viewer tab for PEER's service from a page, and returns the tab id. */
-export async function openViewer(world: FakeWorld, peer = PEER, service = SERVICE): Promise<number> {
+export async function openViewer(world: FakeWorld, peer = PEER, service = SERVICE, tag = TAG): Promise<number> {
   const reply = (await world.chrome.runtime.sendMessage({
     target: "background",
     type: "open-service",
     peerPubKeyZ32: peer,
     serviceId: service,
+    tag,
   })) as { ok: boolean; error?: string };
   if (!reply.ok) throw new Error(reply.error);
-  const tab = [...world.tabs.values()].find((t) => t.url === `https://${service}.${peer}.invalid/`);
+  const tab = [...world.tabs.values()].find((t) => t.url === `https://${service}.${peer}.${tag}.invalid/`);
   if (!tab) throw new Error("no viewer tab");
   return tab.id;
 }

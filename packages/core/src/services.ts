@@ -3,6 +3,8 @@
  * are the services Ghostly always had; `http` exposes a local web application.
  * Unknown types are preserved so future services do not need a new protocol.
  */
+import { sha256 } from "@noble/hashes/sha2.js";
+import { toZ32, utf8Encode } from "./bytes";
 import { sanitizeDisplayText } from "./text";
 
 export type BuiltinServiceType = "chat" | "voice" | "video" | "http";
@@ -34,6 +36,22 @@ export const LEGACY_SERVICES: ServiceAd[] = [
 
 export function isValidServiceId(id: string): boolean {
   return SERVICE_ID_PATTERN.test(id);
+}
+
+const VIEWER_TAG_PATTERN = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{16}$/;
+
+/**
+ * The label that makes the origin a contact's app opens in this side's own (WISP 04): derived from the key this
+ * profile holds for the chat with that contact. Another profile on the device, a profile after "Clear all data", or
+ * one made again after a delete has another chat key, so another origin, and never finds the storage, cookies or
+ * session the app kept here. The contact already knows that key, so the label tells it nothing new.
+ */
+export function viewerTag(myPubKeyZ32: string): string {
+  return toZ32(sha256(utf8Encode(`ghostly-viewer/1\n${myPubKeyZ32}`)).subarray(0, 10));
+}
+
+export function isViewerTag(tag: string): boolean {
+  return VIEWER_TAG_PATTERN.test(tag);
 }
 
 export function serviceIdFromName(name: string, taken: Iterable<string> = []): string {

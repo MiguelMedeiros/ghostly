@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { LIMITS } from "@ghostly/core";
+import { LIMITS, isViewerTag, viewerTag } from "@ghostly/core";
 import { setBrowserHost, type BrowserHost } from "../src/host";
 import { registerFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
 import { fileStore } from "../src/shared/idb";
@@ -77,6 +77,27 @@ describe("sharing a local web app", () => {
     await expect(services.shareService("Creds", "http://user:pw@localhost:1")).rejects.toThrow("Credentials");
     expect(access).toEqual([]);
     expect(engine.calls).toEqual([]);
+  });
+});
+
+describe("opening a contact's app", () => {
+  // covers: services.open
+  const ME = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u";
+  const ME_ELSEWHERE = "h769ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqx";
+
+  it("opens it in an origin of this profile's chat with the contact, never one every profile shares", async () => {
+    withLinks(chat({ myPubKeyZ32: ME }));
+    await services.openService("peer-1", "atlas");
+    expect(host.openService).toHaveBeenCalledWith("peer-1", "atlas", viewerTag(ME));
+    expect(isViewerTag(viewerTag(ME))).toBe(true);
+    // Another profile's chat with the same contact, or this one after "Clear all data", has another key of its own.
+    expect(viewerTag(ME_ELSEWHERE)).not.toBe(viewerTag(ME));
+  });
+
+  it("opens nothing for a contact the peer does not know yet", async () => {
+    withLinks();
+    await expect(services.openService("peer-1", "atlas")).rejects.toThrow("Ghostly is still starting");
+    expect(host.openService).not.toHaveBeenCalled();
   });
 });
 

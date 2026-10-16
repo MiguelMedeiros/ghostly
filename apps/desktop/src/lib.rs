@@ -667,6 +667,7 @@ mod tests {
         arguments["profile"] = serde_json::json!("x");
         arguments["record"] = serde_json::json!(null);
         arguments["count"] = serde_json::json!(0);
+        arguments["tag"] = serde_json::json!("x");
         arguments
     }
 
