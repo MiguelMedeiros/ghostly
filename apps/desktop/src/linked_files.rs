@@ -14,9 +14,13 @@
 //!   with 100,000 links that was 27 MB a forget. The file is written whole again only once the forgotten lines are as
 //!   many as the links left (and at least `COMPACT_AFTER`), so forgetting costs a few hundred bytes a link on average.
 //!
-//! Refusals are `"<code>: words"`, the codes the broker passes to the app (`cancelled`, `changed`, `gone`, `too-large`).
+//! - One dialog at a time per app: kept here, so a reload of the page (a profile switch) with one up neither opens a
+//!   second nor links what is then picked in it (`page_started`).
+//!
+//! Refusals are `"<code>: words"`, the codes the broker passes to the app (`cancelled`, `changed`, `gone`, `too-fast`,
+//! `too-large`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -137,6 +141,23 @@ pub struct LinkedFiles {
     /// uninstall, `drop_space` on a deleted profile): a pick reads it before its dialog opens, and keeps nothing if it
     /// moved meanwhile.
     cleared: Arc<Mutex<HashMap<PathBuf, u64>>>,
+    /// The apps whose system dialog is up, by their links file (`start_pick`): kept here and not in the page, which a
+    /// reload (a profile switch) starts again while the dialog stays on screen.
+    picking: Arc<Mutex<HashSet<PathBuf>>>,
+}
+
+/// A pick whose dialog is up: its app gets no other until this one is answered and dropped.
+pub struct Picking {
+    links: LinkedFiles,
+    file: PathBuf,
+    /// As `begin` read it before the dialog opened, for `add`.
+    pub begun: u64,
+}
+
+impl Drop for Picking {
+    fn drop(&mut self) {
+        locked(&self.links.picking).remove(&self.file);
+    }
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -272,6 +293,7 @@ impl LinkedFiles {
             books: Arc::default(),
             writing: Arc::default(),
             cleared: Arc::default(),
+            picking: Arc::default(),
         }
     }
 
@@ -359,6 +381,32 @@ impl LinkedFiles {
         let cleared = locked(&self.cleared);
         let times = |at: &Path| cleared.get(at).copied().unwrap_or(0);
         Ok(times(&file) + times(folder))
+    }
+
+    /// A pick about to open its dialog: refused while the app's last one is up, whichever page asked for it.
+    pub fn start_pick(&self, space: &str, app: &str) -> Result<Picking, String> {
+        let file = self.file(space, app)?;
+        // Held while `begin` reads, so a `page_started` meanwhile either finds this pick or comes before it.
+        let mut picking = locked(&self.picking);
+        if picking.contains(&file) {
+            return Err("too-fast: The app's dialog is open".into());
+        }
+        let begun = self.begin(space, app)?;
+        picking.insert(file.clone());
+        Ok(Picking {
+            links: self.clone(),
+            file,
+            begun,
+        })
+    }
+
+    /// The Ghostly window's page starts again: the apps of the page before are gone, so every dialog they left up
+    /// keeps nothing when the person answers it (as `let_go`). It stays up, and its app still gets no other.
+    pub fn page_started(&self) {
+        let _writing = locked(&self.writing);
+        for file in locked(&self.picking).iter() {
+            self.clear(file.clone());
+        }
     }
 
     /// Counted with `writing` held, so a pick's `add` sees it or comes before it.
@@ -571,10 +619,11 @@ pub async fn linked_files_pick<R: tauri::Runtime>(
     check_space(&space)?;
     check_app(&app_ref)?;
     check_accept(&accept)?;
-    let begun = links.begin(&space, &app_ref)?;
+    // Held until what was picked is added (or not): the app's next dialog waits for this one, page reload or not.
+    let up = links.start_pick(&space, &app_ref)?;
     #[cfg(target_os = "android")]
     {
-        let _ = (links, begun, title, folder);
+        let _ = (links, up, title, folder);
         Err("Apps cannot pick files on Android".into())
     }
     #[cfg(not(target_os = "android"))]
@@ -611,7 +660,7 @@ pub async fn linked_files_pick<R: tauri::Runtime>(
             } else {
                 picked_files(paths, &accept)
             };
-            links.add(&space, &app_ref, begun, picked)
+            links.add(&space, &app_ref, up.begun, picked)
         })
         .await
         .map_err(|e| e.to_string())?
@@ -1061,6 +1110,51 @@ mod tests {
         // The app reopened picks again.
         assert_eq!(pick(&links, walk(&root, &[]).unwrap()).unwrap().len(), 4);
         assert!(links.let_go("ghostly", "cinema").is_err());
+    }
+
+    // The one-dialog guard and the cancel lived in the page: after a reload (a profile switch) with a dialog up, the
+    // reopened app got a second dialog, and what was picked in the first was linked for the profile left.
+    #[test]
+    fn a_dialog_up_across_a_page_reload_keeps_nothing_and_its_app_gets_no_other() {
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let other = APP.replace("/cinema", "/chess");
+        let up = links.start_pick("ghostly", APP).unwrap();
+        assert!(links
+            .start_pick("ghostly", APP)
+            .err()
+            .unwrap()
+            .starts_with("too-fast: "));
+        // Another app, or the same app in another profile, has a dialog of its own.
+        let other_up = links.start_pick("ghostly", &other).unwrap();
+        drop(links.start_pick("ghostly_b", APP).unwrap());
+        drop(other_up);
+        links.page_started();
+        // The page before is gone, its dialog still up: the app reopened gets no other.
+        assert!(links
+            .start_pick("ghostly", APP)
+            .err()
+            .unwrap()
+            .starts_with("too-fast: "));
+        // The person answers it: nothing is linked for an app that is no longer running.
+        assert!(links
+            .add("ghostly", APP, up.begun, walk(&root, &[]).unwrap())
+            .unwrap_err()
+            .starts_with("cancelled: "));
+        assert!(links.list("ghostly", APP).unwrap().is_empty());
+        drop(up);
+        // Answered, the app picks again; a dialog opened after the reload keeps what is picked.
+        let again = links.start_pick("ghostly", APP).unwrap();
+        links.page_started();
+        let later = links.start_pick("ghostly", &other).unwrap();
+        drop(again);
+        assert_eq!(
+            links
+                .add("ghostly", &other, later.begun, walk(&root, &[]).unwrap())
+                .unwrap()
+                .len(),
+            4
+        );
     }
 
     #[test]
