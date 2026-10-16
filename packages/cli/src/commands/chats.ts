@@ -86,7 +86,7 @@ export const commands: Record<string, Command> = {
     params: ({ options }) => ({ label: options.label }),
   },
   "invite join": {
-    method: "invite.join", usage: "invite join <invite-or-link> [--label <name>]", summary: "Join a chat from its invite",
+    method: "invite.join", usage: "invite join <invite-or-link> [--label <name>]", summary: "Join a chat from its invite (without a daemon it waits up to 60 s for the inviter)",
     args: ["invite"], options: { label: { type: "string", description: "A name for the chat on this side" } },
     params: ({ options }, { invite }) => ({ invite, label: options.label }),
   },
