@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
-import { idbPickStore, pickSheetText, webLinkedFiles, type PickSheetText, type PickStore, type PickedFile, type StoredPick } from "../../lib/apps/webFiles";
+import { handlePicker, idbPickStore, pickSheetText, webLinkedFiles, type PickSheetText, type PickStore, type PickedFile, type StoredPick } from "../../lib/apps/webFiles";
 import { translatorFor } from "../../locales";
 
 // covers: apps.linked-files
@@ -119,9 +119,9 @@ describe("the sheet's words", () => {
 });
 
 /** A folder as the File System Access API hands it over: names, files, and what the browser lets the page do now. */
-function fakeDir(name: string, tree: Record<string, string | Record<string, string>>, state: { permission: PermissionState; asked: number }): FileSystemDirectoryHandle {
+function fakeDir(name: string, tree: Record<string, string | Record<string, string>>, state: { permission: PermissionState; asked: number; gets?: string[] }): FileSystemDirectoryHandle {
   const node = (n: string, value: string | Record<string, string>): FileSystemHandle =>
-    typeof value === "string" ? ({ kind: "file", name: n, getFile: async () => new File([value], n, { lastModified: 9 }) } as unknown as FileSystemHandle) : fakeDir(n, value, state);
+    typeof value === "string" ? ({ kind: "file", name: n, getFile: async () => { state.gets?.push(n); return new File([value], n, { lastModified: 9 }); } } as unknown as FileSystemHandle) : fakeDir(n, value, state);
   const children = Object.entries(tree).map(([n, v]) => node(n, v));
   return {
     kind: "directory",
@@ -207,6 +207,30 @@ describe("a folder kept past the page (File System Access)", () => {
     const again = await pickedOnce();
     await webLinkedFiles({ text: () => text, store: again.store }).forget(REF, "all");
     expect(again.store.picks.size).toBe(0);
+  });
+
+  it("holds no file of a kept folder: the walk keeps each one's size and date, and a read gets it again by the handle", async () => {
+    const state = { permission: "granted" as PermissionState, asked: 0, gets: [] as string[] };
+    const names = Array.from({ length: 6 }, (_, i) => `${i}.mp4`);
+    const dir = fakeDir("Films", Object.fromEntries(names.map((n) => [n, n])), state);
+    vi.stubGlobal("showDirectoryPicker", async () => dir);
+    try {
+      const picked = (await handlePicker(true, []))!;
+      // A browser File per picked file held ~6 KB each in the browser process for the page's life (620 MiB for 100,000).
+      expect(picked.files.map(({ path, file }) => [path, file instanceof Blob, file.size, file.lastModified])).toEqual(names.map((n) => [`Films/${n}`, false, 5, 9]));
+      const host = webLinkedFiles({ text: () => text, store: memoryStore(), ask: async () => picked });
+      const entries = await host.pick(REF, "Cinema", { folder: true, accept: [] });
+      state.gets.length = 0;
+      expect(await host.read(REF, entries[0]!.id, 0, 1)).toEqual(new TextEncoder().encode("0"));
+      expect(await host.read(REF, entries[0]!.id, 1, 1)).toEqual(new TextEncoder().encode("."));
+      // A file being read is got once, not once a range; a few are kept, the oldest let go.
+      expect(state.gets).toEqual(["0.mp4"]);
+      for (const entry of entries.slice(1)) await host.read(REF, entry.id, 0, 1);
+      await host.read(REF, entries[0]!.id, 0, 1);
+      expect(state.gets).toEqual([...names, "0.mp4"]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("the IndexedDB store keeps picks per app", async () => {

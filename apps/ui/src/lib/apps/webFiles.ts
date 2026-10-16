@@ -48,10 +48,13 @@ export function pickSheetText(t: Translate): PickSheetText {
   };
 }
 
-/** A file the browser handed over: where it sits in what was picked, and its bytes, read in ranges. */
+/**
+ * A file the browser handed over: where it sits in what was picked, and its bytes, read in ranges. Where `keep` reads
+ * it again, only its size and date: a browser File held per picked file costs ~6 KB in the browser process.
+ */
 export interface PickedFile {
   path: string;
-  file: Blob & { lastModified?: number };
+  file: (Blob & { lastModified?: number }) | { size: number; lastModified: number };
   /** Its place in `keep.files`, when the files themselves were picked. */
   at?: number;
 }
@@ -95,9 +98,12 @@ interface Link {
   /** The pick it came from: its `keep` reads it again. */
   pick?: string;
   at?: number;
-  /** The browser's file, once resolved. */
+  /** The browser's file, for a pick nothing reads again (the hidden input). */
   file?: Blob;
 }
+
+/** How many files of kept picks are held once got, the latest read: a file read in ranges is got once, not per range. */
+const RECENT_FILES = 4;
 
 /** Refusals cross to the broker as "<code>: words" (broker.ts reads the code). */
 const refusal = (code: "cancelled" | "changed" | "gone" | "too-large", words: string) => new Error(`${code}: ${words}`);
@@ -148,6 +154,12 @@ export const inputPicker: BrowserPicker = (folder, accept) =>
     input.click();
   });
 
+/** A file's size and date, the File let go: the handle reads it again. */
+const factsOf = async (handle: FileSystemFileHandle) => {
+  const { size, lastModified } = await handle.getFile();
+  return { size, lastModified };
+};
+
 /** Everything under a folder, its name first in each path, hidden entries left out, at most `limit` files. */
 async function walk(dir: FileSystemDirectoryHandle, path: string, out: PickedFile[], limit: number): Promise<void> {
   for await (const handle of (dir as unknown as { values(): AsyncIterable<FileSystemHandle> }).values()) {
@@ -155,7 +167,7 @@ async function walk(dir: FileSystemDirectoryHandle, path: string, out: PickedFil
     if (handle.name.startsWith(".")) continue;
     const at = `${path}/${handle.name}`;
     if (handle.kind === "directory") await walk(handle as FileSystemDirectoryHandle, at, out, limit);
-    else out.push({ path: at, file: await (handle as FileSystemFileHandle).getFile() });
+    else out.push({ path: at, file: await factsOf(handle as FileSystemFileHandle) });
   }
 }
 
@@ -175,7 +187,7 @@ export const handlePicker: BrowserPicker = async (folder, accept) => {
       return { files, keep: { dir } };
     }
     const handles = await w.showOpenFilePicker!({ multiple: true, ...(accept.length && { types: [{ accept: { "application/octet-stream": accept.map((e) => `.${e}`) } }] }) });
-    const files = await Promise.all(handles.map(async (handle, at) => ({ path: handle.name, file: await handle.getFile(), at })));
+    const files = await Promise.all(handles.map(async (handle, at) => ({ path: handle.name, file: await factsOf(handle), at })));
     return { files, keep: { files: handles } };
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") return null;
@@ -317,6 +329,8 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
   const loading = new Map<string, Promise<void>>();
   /** Apps whose kept picks the person was asked about on this page: never twice. */
   const askedAgain = new Set<string>();
+  /** Files of kept picks got lately, the oldest first. */
+  const recent = new Map<Link, Blob>();
   const linksOf = (ref: string) => {
     let links = apps.get(ref);
     if (!links) apps.set(ref, (links = new Map()));
@@ -369,6 +383,12 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
   /** The browser's file for a kept link, checked against what was picked. */
   const resolve = async (link: Link): Promise<Blob> => {
     if (link.file) return link.file;
+    const held = recent.get(link);
+    if (held) {
+      recent.delete(link);
+      recent.set(link, held);
+      return held;
+    }
     const kept = link.pick ? picks.get(link.pick) : undefined;
     if (!kept?.granted) throw refusal("gone", "The browser does not let it be read now");
     let file: File;
@@ -388,7 +408,8 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
       throw error instanceof Error && error.name === "NotFoundError" ? refusal("gone", "The file is no longer there") : refusal("gone", "The file cannot be read");
     }
     if (file.size !== link.entry.size || file.lastModified !== link.entry.modified) throw refusal("changed", "The file changed since it was picked");
-    link.file = file;
+    recent.set(link, file);
+    if (recent.size > RECENT_FILES) recent.delete(recent.keys().next().value!);
     return file;
   };
 
@@ -400,17 +421,18 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
       const kept = picked.files.filter(({ path }) => !hidden(path) && (!accept.length || accept.includes(extensionOf(path))));
       const links = linksOf(ref);
       if (links.size + kept.length > MINI_APP_LIMITS.filesEntries) throw refusal("too-large", "Too many files for one app");
-      const pickId = picked.keep && store ? randomId() : undefined;
+      // A pick its handles read again holds no file: each is got when the app reads it.
+      const pickId = picked.keep ? randomId() : undefined;
       const added = kept.map(({ path, file, at }) => {
         const entry: MiniAppLinkedFile = { id: randomId(), path, size: file.size, modified: file.lastModified ?? 0, available: true };
-        links.set(entry.id, { entry, file, ...(pickId && { pick: pickId }), ...(at !== undefined && { at }) });
+        links.set(entry.id, { entry, ...(pickId ? { pick: pickId } : { file: file as Blob }), ...(at !== undefined && { at }) });
         return { entry, at };
       });
-      if (pickId && picked.keep && store) {
+      if (pickId && picked.keep) {
         const stored: StoredPick = { ref, id: pickId, keep: picked.keep, entries: added.map(({ entry: { available: _, ...rest }, at }) => ({ ...rest, ...(at !== undefined && { at }) })) };
         picks.set(pickId, { stored, granted: true, left: stored.entries.length });
         // Kept for the next page; a store that fails leaves the links for this one.
-        await store.put(stored).catch(() => {});
+        await store?.put(stored).catch(() => {});
       }
       return added.map(({ entry }) => entry);
     },
@@ -444,12 +466,14 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
       } catch (error) {
         // A browser refuses to read a picked file that changed on disk since (`NotReadableError`), or went (`NotFoundError`).
         const name = error instanceof Error ? error.name : "";
+        recent.delete(link);
         throw name === "NotFoundError" ? refusal("gone", "The file is no longer there") : refusal("changed", "The file changed since it was picked");
       }
     },
     async forget(ref, id) {
       await load(ref);
       if (id === "all") {
+        for (const link of linksOf(ref).values()) recent.delete(link);
         apps.delete(ref);
         for (const [pickId, p] of picks) if (p.stored.ref === ref) picks.delete(pickId);
         await store?.clear(ref).catch(() => {});
@@ -457,6 +481,7 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
       }
       const link = linksOf(ref).get(id);
       linksOf(ref).delete(id);
+      if (link) recent.delete(link);
       const kept = link?.pick ? picks.get(link.pick) : undefined;
       if (!kept) return;
       // The entry alone, not the pick again: one forget costs the same in a pick of 10 files or of 100,000.
