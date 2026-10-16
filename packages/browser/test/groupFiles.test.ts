@@ -750,6 +750,29 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     for (const s of sent) expect(sha(t.got(bob, id, s.messageId).bytes!)).toBe(s.meta.d);
   });
 
+  it.each([1, 6])("%i files a member named and then answers busy for, the author gone, come from another member in reach that holds them", async count => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol, mallory], id } = await t.mesh(["alice", "bob", "carol", "mallory"]);
+    t.files.get(bob)!.settings.autoDownloads = false;
+    // Carol's word that she holds them never reaches Bob (lost, or older than what she names).
+    t.hold = (from, to, frame) => from === carol && to === bob && frame.t === "group-have";
+    const sent = [];
+    for (let i = 0; i < count; i++) sent.push(await t.send(alice, id, pattern(16 * 1024, 80 + i), { name: `alice-${i}.bin` }));
+    await t.world.until(() => sent.every(s => t.done(carol, id, s.messageId) && t.done(mallory, id, s.messageId) && !!t.got(bob, id, s.messageId).message?.file), 5 * 60_000);
+    alice.online = false;
+    await t.world.run(2_000);
+    // Mallory says she holds them all, and answers every want busy (serving turned off).
+    t.files.get(mallory)!.settings.serveFiles = false;
+    t.say(mallory, bob, id, { t: "group-have", g: id, ids: sent.map(s => s.messageId) });
+    await t.world.run(1_000);
+    for (const s of sent) await bob.groups.downloadFile(t.got(bob, id, s.messageId).message!.file!.id);
+    // Before, a known holder's busy kept every other member from being asked: the files came one per round, or never.
+    await t.world.run(GROUP_FILE_LIMITS.wantWaitMs - 5_000);
+    expect(sent.filter(s => t.done(bob, id, s.messageId)).length).toBe(count);
+    for (const s of sent) expect(sha(t.got(bob, id, s.messageId).bytes!)).toBe(s.meta.d);
+    expect(t.seen.filter(s => s.to === "bob" && s.frame.t === "pf-offer").every(s => s.from === "carol")).toBe(true);
+  });
+
   it.each([2, 6])("%i files sent together reach a group of 16 as fast as its edges carry them, with no wait for the next group-have", async count => {
     const t = new FilesWorld();
     const { peers: [alice, ...others], id } = await t.mesh(Array.from({ length: 16 }, (_, i) => `m${i}`));
