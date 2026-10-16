@@ -35,7 +35,7 @@ export const agentsFaq = {
     {
       id: "safe",
       q: "Is it safe to connect my AI agent to Ghostly?",
-      a: "It can be, if you set it up as the agent guide says. Only the chats you name with `--from` can wake the agent, and a contact's words reach it as untrusted data, never as commands. Ghostly has no approval gate for tool use: the agent can ask you with buttons you tap, and real money needs `--confirm-real`, but approving a command is up to your agent's own runtime. A prompt cannot force a model to ignore what it reads, so an agent with a shell or other tools should hear only from you.",
+      a: "It can be, if you set it up as the agent guide says. Only the chats you allowlist with `--from` can wake the agent (without an allowlist, every chat does), and a contact's words reach it as untrusted data, never as commands. Ghostly has no approval gate for tool use: the agent can ask you with buttons you tap, and real money needs `--confirm-real`, but approving a command is up to your agent's own runtime. A prompt cannot force a model to ignore what it reads, so an agent with a shell or other tools should hear only from you.",
       links: [SKILL, THREAT_MODEL, AGENTS],
     },
     {
