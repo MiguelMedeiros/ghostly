@@ -285,7 +285,8 @@ Receiving on a Lightning address needs a server the person runs: not provided. S
 - Contract: `packages/browser/test/providerContract.test.ts` runs the shared contract suite against the
   fakes; run it against your provider too.
 - e2e: `localStorage["ghostly-test-providers"] = "1"` (`useFakeProviders(peer)` in `e2e/support/fixtures.ts`)
-  adds the fakes to the pickers, in Testnet only. `e2e/web/wallet-sources.spec.ts` drives the picker, the
+  adds the fakes to the pickers, in Testnet only and only in a dev or e2e build (`testBuild` in
+  `shared/features.ts`; a release build ignores the key). `e2e/web/wallet-sources.spec.ts` drives the picker, the
   Lightning card through a source and the Bitcoin card.
 - A provider that loads WebAssembly (BDK) cannot rely on Vite's ESM `.wasm` import: load the glue and
   instantiate the module yourself on first use (see `providers/bdkSdk.ts`), and read the same file from disk in
