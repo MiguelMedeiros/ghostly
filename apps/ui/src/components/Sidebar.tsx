@@ -96,6 +96,10 @@ export function Sidebar() {
   // Each contact's running tasks (WISP 405 § Showing a card): the working mark on its row.
   const workingByPeer = useWorkingByPeer();
   const groups = engineState?.groups ?? [];
+  // The chats are in the page's storage at once, the groups come with the engine's state after every chat's history
+  // is read: drawn alone, the chats were pushed down under the groups a second later, and a click aimed at a chat
+  // opened a group. The list waits for the groups, and draws everything at once.
+  const listReady = !!engineState?.groupsLoaded;
   const activeGroupId = groupRouteId(location.pathname);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
@@ -368,7 +372,8 @@ export function Sidebar() {
       <SidebarTasks active={location.pathname === "/tasks"} onOpen={() => (location.pathname === "/tasks" ? nav.home() : nav.place("/tasks"))} />
 
       {/* Chat List */}
-      <div className="flex-1 overflow-y-auto" data-testid="chat-list" data-drag-scroll="">
+      <div className="flex-1 overflow-y-auto" data-testid="chat-list" data-drag-scroll="" aria-busy={!listReady || undefined}>
+        {listReady && <>
         {shownFolders.map((folder, index) => {
           const itsGroups = shownGroups.filter(g => folderOfGroup(g) === folder.id);
           const itsChats = filtered.filter(s => folderOf(s.id) === folder.id);
@@ -431,6 +436,7 @@ export function Sidebar() {
             <p className="text-text-muted text-sm">{t("sidebar.noResults")}</p>
           </div>
         )}
+        </>}
       </div>
 
       {confirmDeleteId && <DeleteChatDialog
