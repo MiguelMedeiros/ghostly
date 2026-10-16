@@ -201,7 +201,7 @@ key), which every answer and event carries. What the CLI does when names meet:
 
 - Where a command takes a chat or a group (`forward --to`, `file send`, `task`, `routine`, `usage`, `pin`, `button`), a
   chat found only by a prefix of its id or the name its contact gave itself never takes what also names a group. The group's id is the
-  group; a prefix of it or the name of a group you are in is refused (exit 2, `details.chat` and `details.groups`):
+  group; a prefix of it or the name of a group you are in is refused (exit 1, `bad_request`, `details.chat` and `details.groups`):
   use the chat's id or `group:<id>`. A label you gave the chat still wins.
 - A label you gave a chat, or a group's name, wins over an id prefix: a contact can choose how a chat's id begins
   (yours is made from their invite code), and a group's creator its id. A prefix that fits one chat and the name a
