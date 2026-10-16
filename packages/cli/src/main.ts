@@ -5,13 +5,13 @@ import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
+import { here } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_READS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, readCursor } from "./listen";
-import { resolve } from "node:path";
 import { format } from "node:util";
 import { secretsFromStdin } from "./secretInput";
 import {
@@ -361,7 +361,8 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       if (unsealed && (parsed.options["passphrase-file"] !== undefined || process.env.GHOSTLY_BACKUP_PASSPHRASE)) throw new CliError("usage", "A passphrase is set (--passphrase-file or GHOSTLY_BACKUP_PASSPHRASE) and --no-passphrase was given: choose one");
       const light = parsed.options.light === true ? { light: true } : {};
       // The passphrase is read before the profile opens, and the backup only reads the store: offline.
-      const params = unsealed ? { path: resolve(out), noPassphrase: true, ...light } : { path: resolve(out), passphrase: backupPassphrase(parsed.options["passphrase-file"]), ...light };
+      const path = here(out) as string;
+      const params = unsealed ? { path, noPassphrase: true, ...light } : { path, passphrase: backupPassphrase(parsed.options["passphrase-file"]), ...light };
       const made = await withSession(g, (s) => s.call("profile.backup", params), { offline: true });
       if (unsealed) process.stderr.write("Not encrypted: this file holds the profile's keys, chats and wallet secrets in the clear. Anyone who gets it gets everything in it, including any money in its wallets.\n");
       print(made);
@@ -410,10 +411,20 @@ const BACKUP_PASSPHRASE = "The backup passphrase comes from --passphrase-file or
 /** Restore takes no --no-passphrase: a backup made without one says so itself. */
 const RESTORE_PASSPHRASE = "This backup is encrypted: its passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE";
 
-/** The backup passphrase: from a file or the environment, never the command line (it would sit in shell history). */
+/**
+ * The backup passphrase: from a file or the environment, never the command line (it would sit in shell history). The
+ * file is said as every other file the CLI reads: "" names none, a folder is named, and an empty one is called that,
+ * not "comes from --passphrase-file" to someone who gave it.
+ */
 function backupPassphrase(file: unknown, missing = BACKUP_PASSPHRASE): string {
-  const value = typeof file === "string" ? readFileSync(file, "utf8").replace(/\r?\n$/, "") : process.env.GHOSTLY_BACKUP_PASSPHRASE;
-  if (!value) throw new CliError("usage", missing);
+  if (typeof file !== "string") {
+    const value = process.env.GHOSTLY_BACKUP_PASSPHRASE;
+    if (!value) throw new CliError("usage", missing);
+    return value;
+  }
+  let value: string;
+  try { value = readFileSync(here(file) as string, "utf8").replace(/\r?\n$/, ""); } catch (error) { throw localFileError(error, file) ?? error; }
+  if (!value) throw new CliError("bad_request", `${file} is empty: it holds the backup's passphrase`);
   return value;
 }
 
@@ -781,7 +792,9 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
   for (const key of Object.keys(params)) if (params[key] === undefined) delete params[key];
   // Evidence is read here, where the file is: the daemon runs elsewhere.
   if (command.method === "identity.complete") {
-    if (params.evidenceFile) params.evidence = readFileSync(params.evidenceFile as string, "utf8");
+    if (params.evidenceFile) {
+      try { params.evidence = readFileSync(params.evidenceFile as string, "utf8"); } catch (error) { throw localFileError(error, params.evidenceFile as string) ?? error; }
+    }
     else if (params.stdin) params.evidence = await readStdin();
     delete params.evidenceFile; delete params.stdin;
   }
