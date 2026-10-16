@@ -15,6 +15,12 @@ describe("Notice: a few words, the rest behind the ⓘ", () => {
     expect(screen.getByTestId("n-copy")).toHaveTextContent("Copy");
   });
 
+  it("gives the Copy behind the ⓘ a 24 px tall tap target on a phone", async () => {
+    const { user } = renderApp(<Notice testId="n" problem={{ tone: "error", title: "Can't reach the relays", detail: "Error: 500" }} />);
+    await user.click(screen.getByTestId("n-info"));
+    expect(screen.getByTestId("n-copy").className.split(/\s+/)).toContain("min-h-6");
+  });
+
   it("is no alert while the app retries by itself, and has no ⓘ with nothing more to say", () => {
     renderApp(<Notice testId="n" problem={{ tone: "wait", title: "Waiting for the relays", next: "Retrying in 52 s" }} />);
     expect(screen.queryByRole("alert")).toBeNull();
