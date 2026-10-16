@@ -5,7 +5,7 @@
 | Number assignment | 8xx; planned, number to be defined |
 | Status | Draft |
 | Editors | Ghostly contributors; maintainer review pending |
-| Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [800](800-invite-join.md), [801](801-invitation-profiles.md), [403](403-dht-text.md) |
+| Dependencies | [01](01-ghost-core.md), [02](02-peer-keys.md), [06](06-devices.md), [800](800-invite-join.md), [801](801-invitation-profiles.md), [403](403-dht-text.md) |
 | Implementation | Not built; planned for 1.4 in the web app, the extension, Desktop and the CLI |
 | Summary | One link a person can post anywhere, naming nobody: whoever opens it sends a request, and a chat starts only when the owner accepts it. |
 | Availability | Planned |
@@ -36,18 +36,18 @@ Where does a request wait while the owner is away, and who pays for it?
 
 ## The link
 
-A contact link is a `ghostly1…` code of [801](801-invitation-profiles.md#exact-layout) with **version 2**, so every version-2 code starts `ghostly1z`:
+A contact link is a `ghostly1…` code of [801](801-invitation-profiles.md#exact-layout) with **version 3**, so every version-3 code starts `ghostly1r` (version 2 is a device's code, [06](06-devices.md)):
 
 | Part | Value |
 |---|---|
 | Human-readable part, separator | `ghostly`, `1` |
-| First data symbol | `z` (version 2) |
+| First data symbol | `r` (version 3) |
 | Payload | **32 bytes**: the link key, an Ed25519 public key made for this link and for nothing else |
 | Checksum | Six symbols, bech32m |
 
-Version 2 has exactly one payload length; any other is damaged, as for version 1. A code is **67 characters**, under bech32's own 90, and its link form is `https://ghostly.tools/#ghostly1z…`, read and kept out of logs and referrers exactly as an invite's ([801](801-invitation-profiles.md#exact-layout)). In capitals it fits a QR code's alphanumeric mode.
+Version 3 has exactly one payload length; any other is damaged, as for version 1. A code is **67 characters**, under bech32's own 90, and its link form is `https://ghostly.tools/#ghostly1r…`, read and kept out of logs and referrers exactly as an invite's ([801](801-invitation-profiles.md#exact-layout)). In capitals it fits a QR code's alphanumeric mode.
 
-An app from before this document reads version 2 as "This invite was made by a newer Ghostly. Update to join." ([801](801-invitation-profiles.md#reading-an-invite)) and stores nothing, which is right. An app that implements this document reads version 2 as a contact link and never as an invite: rule 2 of 801's table gains the row "Version 2, a 32-byte payload: a contact link (8xx)", and versions 3 to 31 keep the "Update" answer. The link key's seed stays on the owner's device; nothing in the link lets anyone sign for it.
+An app from before this document reads version 3 as "This invite was made by a newer Ghostly. Update to join." ([801](801-invitation-profiles.md#reading-an-invite); the reader in `invite.ts` answers so for every version above 2) and stores nothing, which is right. An app that implements this document reads version 3 as a contact link and never as an invite or a device's code: rule 2 of 801's table gains the rows "Version 2: a device's code (06)" and "Version 3, a 32-byte payload: a contact link (8xx)", and versions 4 to 31 keep the "Update" answer. The link key's seed stays on the owner's device; nothing in the link lets anyone sign for it.
 
 **A link opened in the app** is not an act of the person's, as for an invite (801): the app shows the request form with the field empty and sends nothing until the person taps Send. A link the app knows as its own profile's says "This is your contact link" and offers nothing else.
 
@@ -149,16 +149,16 @@ The link key's seed is part of the profile: profile backups ([05](05-backups.md)
 
 ## Compatibility
 
-Additive. An app from before refuses the link with "Update to join" and creates nothing; its chats are untouched, and a chat started by an accept is an ordinary chat that any app of revision 0.2 of [400](400-chat.md) carries. No capability is negotiated: the requester's invite is version 1, which every current app joins. The `ghostly.tools` page reads version 2 and hands it to the app as it does an invite, with "Opening the request" in place of "Opening the chat".
+Additive. An app from before refuses the link with "Update to join" and creates nothing; its chats are untouched, and a chat started by an accept is an ordinary chat that any app of revision 0.2 of [400](400-chat.md) carries. No capability is negotiated: the requester's invite is version 1, which every current app joins. The `ghostly.tools` page reads version 3 and hands it to the app as it does an invite, with "Opening the request" in place of "Opening the chat".
 
 ## Conformance
 
-Unit: the codec both ways with a vector, each refusal (wrong length, non-zero padding, version 2 read by a version-1-only reader as "Update"), the stamp at and below `bits` and for today, yesterday and two days ago, the knock merge (others kept, stale dropped, six at most, own entry last), the request seal (opens only with the right *K* and *L*, packet at most 992 bytes, every refusal), the link record (`seen` entry, `busy`, `off`), and the limits (the 13th request in an hour waits, the 33rd goes `busy`, a declined key is not read again). End to end: open the link, send a request, accept, and the chat carries text both ways; open, send, decline, and the requester sees "Delivered" and nothing else for seven days; the owner offline while a request is sent, then back, and the request is there; the link turned off, then opened, says so.
+Unit: the codec both ways with a vector, each refusal (wrong length, non-zero padding, version 3 read by a reader from before as "Update"), the stamp at and below `bits` and for today, yesterday and two days ago, the knock merge (others kept, stale dropped, six at most, own entry last), the request seal (opens only with the right *K* and *L*, packet at most 992 bytes, every refusal), the link record (`seen` entry, `busy`, `off`), and the limits (the 13th request in an hour waits, the 33rd goes `busy`, a declined key is not read again). End to end: open the link, send a request, accept, and the chat carries text both ways; open, send, decline, and the requester sees "Delivered" and nothing else for seven days; the owner offline while a request is sent, then back, and the request is there; the link turned off, then opened, says so.
 
-**Test vector** (a codec vector only: the bytes `00 01 … 1f` in place of a key, as in 801's). Version 2, 67 characters:
+**Test vector** (a codec vector only: the bytes `00 01 … 1f` in place of a key, as in 801's). Version 3, 67 characters:
 
 ```text
-ghostly1zqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0ssufxfz
+ghostly1rqqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0s0her5u
 ```
 
 ## Open decisions
