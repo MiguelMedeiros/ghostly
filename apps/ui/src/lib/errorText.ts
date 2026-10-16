@@ -98,6 +98,9 @@ const RULES: readonly Rule[] = [
   exact("Ghostly is starting…", "errors.app.starting"),
   exact("Ghostly is still starting. Try again in a moment.", "errors.app.stillStarting"),
   exact("Lost the Ghostly peer", "errors.app.lostPeer"),
+  // A part that loads on demand (a wallet's library, the identity providers) whose file did not come: offline before the
+  // worker kept it, or a deploy replaced it under an open tab. Each browser says it its own way (Chromium, WebKit, Firefox).
+  { match: /^(?:Failed to fetch dynamically imported module|error loading dynamically imported module)(?::[\s\S]*)?$|^Importing a module script failed\.?$/, key: "errors.app.partNotLoaded", next: "app.pageNotLoaded.hint", detail: true },
   // A call whose storage write the browser refused for want of space (engine/server.ts): a group made, a text sent. A
   // forward's copy that found no room (engine/forwards.ts forwardError) says Desktop's io error the same way.
   { match: /^Not enough space on this device \((?:QuotaExceededError(?:: [\s\S]*)?|No space left on device[\s\S]*)\)$/, key: "errors.app.noRoom", next: "errors.app.noRoomNext", detail: true },
