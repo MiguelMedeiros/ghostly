@@ -442,7 +442,9 @@ impl LinkedFiles {
         }
         let mut added = Vec::with_capacity(picked.len());
         for (path, full) in picked {
-            let Ok(meta) = fs::metadata(&full) else {
+            // Opened, not only looked at: a file that cannot be read (another user's) is left out, as `walk` leaves
+            // out a folder that cannot be, rather than listed as there and then `gone` on every read.
+            let Ok(meta) = fs::File::open(&full).and_then(|file| file.metadata()) else {
                 continue;
             };
             let (size, modified) = stamp(&meta);
@@ -833,6 +835,30 @@ mod tests {
         let picked = walk(&root, &[]);
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         assert!(picked.is_err());
+    }
+
+    /// Another user's file, root's after a `sudo cp`: left out of the pick, not listed as there and then `gone`.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_that_cannot_be_read_is_left_out_and_the_rest_is_linked() {
+        use std::os::unix::fs::PermissionsExt;
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let locked = root.join("Locked.mp4");
+        fs::write(&locked, b"x").unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        // As root every file can be read: nothing to prove.
+        let readable = fs::File::open(&locked).is_ok();
+        let added = pick(&links, walk(&root, &["mp4".to_string()]).unwrap());
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o600)).unwrap();
+        if readable {
+            return;
+        }
+        let added: Vec<String> = added.unwrap().into_iter().map(|e| e.path).collect();
+        assert_eq!(added, ["Films/Season 1/E01.mp4", "Films/Up.mp4"]);
+        let listed = links.list("ghostly", APP).unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(listed.iter().all(|e| e.available));
     }
 
     #[test]
