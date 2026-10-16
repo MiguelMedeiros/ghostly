@@ -68,6 +68,7 @@
     "removed": "A store you added removed this app.",
     "revoked": "Its publisher revoked this version.",
     "rollback": "The link holds an older version.",
+    "slow": "That took too long on this connection. Try again on a faster one.",
     "status": "Nothing found at that link.",
     "storage": "This browser can't keep apps here (private browsing?). Try a normal window.",
     "storageInfo": "Ghostly keeps each app's files on this device. Private windows, like Safari's Private Browsing, don't let it, and a full disk stops it too.",

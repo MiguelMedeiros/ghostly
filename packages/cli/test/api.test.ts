@@ -58,6 +58,23 @@ describe("chats", () => {
     expect(() => findChat(links, "zed")).toThrow(/No chat/);
   });
 
+  // A chat's name was taken whatever it held and cut by the engine at 48 UTF-16 units: half an emoji stayed as a lone
+  // surrogate, a newline was kept, and the invite was made before its name was cut.
+  it("a chat's name is what the engine keeps whole on one line, refused before anything is made", async () => {
+    const { ctx, node } = fake();
+    const calls = Object.assign(node, { renameLink: vi.fn(), createLink: vi.fn(), joinLink: vi.fn() });
+    const rule = { code: "bad_request", message: "A chat's name is up to 48 characters on one line (an emoji counts as two)" };
+    for (const name of ["y".repeat(49), `${"x".repeat(47)}👻`, "a\nb", "tab\there"]) {
+      await expect(callApi(ctx, "chat.rename", { chat: "chat-one", name }), JSON.stringify(name)).rejects.toMatchObject(rule);
+      await expect(callApi(ctx, "invite.create", { label: name }), JSON.stringify(name)).rejects.toMatchObject(rule);
+      await expect(callApi(ctx, "invite.join", { invite: "ghostly1abc", label: name }), JSON.stringify(name)).rejects.toMatchObject(rule);
+    }
+    for (const made of [calls.renameLink, calls.createLink, calls.joinLink]) expect(made).not.toHaveBeenCalled();
+    // What the engine keeps whole is taken: 46 characters and an emoji, spaces around trimmed by the engine.
+    await callApi(ctx, "chat.rename", { chat: "chat-one", name: ` ${"x".repeat(46)}👻 ` });
+    expect(calls.renameLink).toHaveBeenCalledWith({ linkId: "chat-one", label: ` ${"x".repeat(46)}👻 ` });
+  });
+
   // `invite join <your own invite>` said the engine's tag for its RPC clients: "own-invite <chat id>: This is your own…".
   it("joining your own invite is refused in a sentence alone, with the chat that owns it as its own field", async () => {
     const { ctx, node } = fake();
@@ -69,7 +86,7 @@ describe("chats", () => {
   });
 
   it("a contact's own name never stands for someone else: a key finds only its chat, a label wins over a name", () => {
-    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u";
+    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
     const alice = link("chatAlice", { label: "Alice", peerNick: "Alice", peerPubKeyZ32: KEY });
     const mallory = link("chatMallory", { peerNick: KEY });
     const impostor = link("chatImpostor", { peerNick: "alice" });
@@ -106,8 +123,11 @@ describe("chats", () => {
     expect(refused([link("chatA", { label: "Twin" }), link("chatB", { label: "Twin" })], "twin")).toMatchObject({ code: "bad_request", message: expect.stringMatching(/more than one chat/) });
     expect(() => findChatOrGroup([], [room, { ...room, id: "h".repeat(22) } as unknown as GroupView], "team room")).toThrow(/more than one group/);
     expect(refused([asName], "group:zed")).toEqual({ code: "not_found", message: 'No group "zed"' });
-    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u";
+    const KEY = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
     expect(refused([asName], KEY)).toMatchObject({ code: "not_found", message: `No chat with "${KEY}"` });
+    // The same bytes with the last character respelled: no key, and never a name (a contact calling itself that is not found by it).
+    const respelled = KEY.slice(0, 51) + "t";
+    expect(refused([link("chatMallory", { peerNick: respelled })], respelled)).toMatchObject({ code: "bad_request", message: expect.stringMatching(/not a contact key/) });
     expect(findChatOrGroup([asName], [room], "ggg")).toEqual({ group: room });
   });
 
@@ -136,6 +156,23 @@ describe("chats", () => {
     expect(await list.allows(event(bob.id))).toBe(true);
     expect(await list.allows(event(mallory.id))).toBe(false);
     expect(await list.allows({ seq: 2, id: "g", type: "group.message", at: 1, group: theirs.id } as GhostlyEvent)).toBe(false);
+  });
+
+  it("\"\" (and \"group:\" alone) names no chat and no group, even where it is a prefix of the only one's id", async () => {
+    const bob = link("c7aoaukc3e99dm9c", { peerNick: "Bob" });
+    const crew = { ...group, id: "aZT5wUR4UR5s9NsV4KUHZg", status: "active" } as unknown as GroupView;
+    for (const ref of ["", " "]) {
+      expect(() => findChat([bob], ref)).toThrow(expect.objectContaining({ code: "bad_request", message: `${JSON.stringify(ref)} names no chat` }));
+      expect(() => findGroup([crew], ref)).toThrow(expect.objectContaining({ code: "bad_request", message: `${JSON.stringify(ref)} names no group` }));
+      expect(() => findChatOrGroup([bob], [crew], ref)).toThrow(expect.objectContaining({ code: "bad_request" }));
+    }
+    expect(() => findChatOrGroup([bob], [crew], "group:")).toThrow(expect.objectContaining({ code: "bad_request", message: "\"\" names no group" }));
+    // What a daemon's caller (the API, not the command line) gets: forward never reaches the only chat or group.
+    const node = { getState: () => ({ links: [bob], groups: [crew] }), getMessage: vi.fn(async () => msg("m1", 1)), sendMessage: vi.fn(), sendGroupMessage: vi.fn() };
+    const ctx = { runtime: { server: { node } }, mode: "daemon" } as unknown as ApiContext;
+    for (const to of [[""], ["group:"]]) await expect(callApi(ctx, "chat.forward", { chat: bob.id, messages: ["m1"], to })).rejects.toMatchObject({ code: "bad_request" });
+    expect(node.sendMessage).not.toHaveBeenCalled();
+    expect(node.sendGroupMessage).not.toHaveBeenCalled();
   });
 
   it("a command that takes a chat or a group names both when neither has the name", async () => {
@@ -224,6 +261,8 @@ describe("chats", () => {
     node.setTyping.mockClear();
     for (const [params, message] of [
       [{ kind: "dancing" }, "kind must be one of typing, recording, thinking"],
+      // Empty (an unset variable in a script) is no kind: never read as plain typing.
+      [{ kind: "" }, "kind must be one of typing, recording, thinking"],
       [{ status: "x".repeat(41) }, "status: at most 40 characters"],
       [{ status: "see https://x.example" }, "status: plain text, with no link or markup"],
       [{ status: "<b>hi</b>" }, "status: plain text, with no link or markup"],
@@ -585,6 +624,8 @@ describe("groups", () => {
     expect(() => mentionsFor("hi", ["Ana"], group)).toThrow(/Write @Ana/);
     expect(() => mentionsFor("@abc hi", ["abc"], group)).toThrow(/more than one/);
     expect(() => mentionsFor("@x", ["nobody"], group)).toThrow(/No member/);
+    // This profile's own key was "No member" too.
+    expect(() => mentionsFor("@mekey hi", ["mekey"], group)).toThrow(expect.objectContaining({ code: "bad_request", message: '"mekey" is you: name another member of Crew' }));
   });
 
   it("send passes the mentions to the engine", async () => {

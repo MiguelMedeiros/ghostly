@@ -91,6 +91,19 @@ describe("the argument parser", () => {
     expect(() => parseArgs(["--limit", "ten"], { limit: { type: "number", description: "" } })).toThrow(/takes a number/);
   });
 
+  it("refuses a number option given as \"\" (an unset variable) as it refuses \"abc\", never reading it as 0", () => {
+    // Number("") is 0: `usage send --all --left ""` posted "0% left" to every chat, `listen --since ""` replayed the journal.
+    for (const [name, option] of [["usage send", "left"], ["task send", "progress"], ["events", "since"], ["chat disconnect", "hold"], ["typing", "for"]] as const) {
+      const command = COMMANDS[name] ?? TEXT_COMMANDS[name];
+      for (const argv of [[`--${option}`, ""], [`--${option}`, " "], [`--${option}=`]]) {
+        expect(() => parseArgs(["x", ...argv], command.options!, idSlot(command)), `${name} ${argv.join(" ")}`).toThrow(new CliError("usage", `--${option} takes a number, not ${JSON.stringify(argv[1] ?? "")}`));
+      }
+    }
+    // `listen` parses with its own spec in main.ts, through the same parser.
+    expect(() => parseArgs(["--since", ""], { since: { type: "number", description: "" } })).toThrow(/^--since takes a number, not ""$/);
+    expect(parseArgs(["--left", "0"], COMMANDS["usage send"].options!).options).toEqual({ left: 0 });
+  });
+
   it("moves global options given before the command after it", () => {
     expect(liftGlobals(["--home", "/h", "-p", "bot", "--pretty", "send", "c", "hi"])).toEqual(["send", "c", "hi", "--home", "/h", "-p", "bot", "--pretty"]);
     expect(liftGlobals(["--profile=bot", "chat", "list"])).toEqual(["chat", "list", "--profile=bot"]);
@@ -143,6 +156,57 @@ describe("the argument parser", () => {
     expect(() => positionals(COMMANDS["chat show"], ["a", "b"])).toThrow(/Too many/);
   });
 
+  it("a required positional given as \"\" is the usage error a missing one is, before the profile opens, in every command", () => {
+    expect(() => positionals(COMMANDS["chat show"], [""])).toThrow(/^Missing <chat>: ghostly chat show <chat>/);
+    expect(() => positionals(COMMANDS["file accept"], ["", "f"])).toThrow(/^Missing <chat>/);
+    expect(() => positionals(COMMANDS["group create"], ["", ""])).toThrow(/^Missing <name>/);
+    // `chat rename <chat> ""` gives the chat back the contact's name, by design.
+    expect(positionals(COMMANDS["chat rename"], ["abc", ""])).toEqual({ chat: "abc", name: "" });
+    // Before: 63 commands opened the profile, then answered bad_request "<param> is required" (exit 1).
+    const sweep = Object.entries({ ...COMMANDS, ...TEXT_COMMANDS }).flatMap(([name, command]) => {
+      // Every positional but a leading optional one (`[<chat>] <file>`) gets a word.
+      const given = (command.args ?? []).filter((arg) => !arg.endsWith("?") || arg.endsWith("...?"));
+      return given.flatMap((arg, at) => {
+        if (arg.endsWith("?")) return [];
+        const values = given.map((_, i) => (i === at ? "" : "x"));
+        try {
+          positionals(command, values);
+          return [`${name} <${arg}>`];
+        } catch (error) {
+          return error instanceof CliError && error.code === "usage" && /^Missing </.test(error.message) ? [] : [`${name} <${arg}>: ${String(error)}`];
+        }
+      });
+    });
+    expect(sweep).toEqual([]);
+
+    // The name in "Missing <x>" is the one the usage line shows: `chat pay bob` said <amount> for `<sats>`.
+    const unnamed = Object.entries({ ...COMMANDS, ...TEXT_COMMANDS }).flatMap(([name, command]) => {
+      const given = (command.args ?? []).filter((arg) => !arg.endsWith("?") || arg.endsWith("...?"));
+      return given.flatMap((arg, at) => {
+        if (arg.endsWith("?")) return [];
+        try {
+          positionals(command, given.map((_, i) => (i === at ? "" : "x")));
+          return [];
+        } catch (error) {
+          const shown = /^Missing <([^>]+)>: /.exec((error as Error).message)?.[1];
+          return shown !== undefined && (command.usage.includes(`<${shown}>`) || command.usage.includes(`<${shown}...>`)) ? [] : [`${name}: ${(error as Error).message}`];
+        }
+      });
+    });
+    expect(unnamed).toEqual([]);
+    expect(() => positionals(COMMANDS["chat pay"], ["bob"])).toThrow(/^Missing <sats>: ghostly chat pay <chat> <sats>/);
+    expect(() => positionals(COMMANDS["service add"], ["web", ""])).toThrow(/^Missing <http:\/\/127\.0\.0\.1:port>: /);
+    expect(() => positionals(COMMANDS["file accept"], [])).toThrow(/^Missing <file>: /);
+    expect(() => positionals(COMMANDS["file accept"], ["", "f"])).toThrow(/^Missing <chat>: /);
+
+    // A path given as "" read the current folder: `profile picture ""` said "No file <cwd>".
+    const params = (name: string, values: string[], options: Record<string, string | boolean> = {}) => COMMANDS[name].params!({ positionals: values, options }, positionals(COMMANDS[name], values));
+    expect(() => params("profile picture", [""])).toThrow(/^Missing <jpeg>/);
+    expect(() => params("group picture", ["g", ""])).toThrow(/^Missing <jpeg>/);
+    expect(params("profile picture", [""], { clear: true })).toEqual({ path: undefined, clear: true });
+    expect(() => params("identity complete", ["d"], { "evidence-file": "" })).toThrow(/^A path given as "" names no file/);
+  });
+
   it("says a required name, path or --to is missing as a usage error, before anything opens", () => {
     const params = (name: string, argv: string[]) => {
       const command = COMMANDS[name];
@@ -170,6 +234,12 @@ describe("the argument parser", () => {
     usage("call auto", ["off", "--from", "bob", "--rate", "16000"], "--from and --rate go with on: ghostly call auto on --from <chat>");
     expect(params("call auto", ["on", "--from", "bob", "--rate", "16000"])).toEqual({ on: true, from: ["bob"], rate: 16000 });
     expect(params("call auto", ["off"])).toEqual({ on: false });
+    // "" (an unset variable in a script) names no chat: before, it was a prefix of every id and took the only chat.
+    usage("forward", ["bob", "m1", "--to", ""], "--to \"\" names no chat or group");
+    usage("forward", ["bob", "m1", "--to", "alice", "--to", "group:"], "--to \"group:\" names no chat or group");
+    usage("forward", ["bob", "m1", "--to", " "], "--to \" \" names no chat or group");
+    usage("call auto", ["on", "--from", ""], "--from \"\" names no chat");
+    expect(params("forward", ["bob", "m1", "--to", "group:g1"])).toMatchObject({ to: ["group:g1"] });
     // What may be left out still may: a picture cleared, a chat's own name back, a reaction taken back, the only call.
     expect(params("profile picture", ["--clear"])).toEqual({ path: undefined, clear: true });
     expect(params("group picture", ["g1", "--clear"])).toEqual({ group: "g1", path: undefined, clear: true });

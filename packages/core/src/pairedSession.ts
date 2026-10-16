@@ -1,7 +1,7 @@
 import { PROOF_ADAPTERS, proofCapability, type ProofAdapter } from "./peerProofs";
 import { IDENTITY_PROOF_CAPABILITY } from "./identityProofs";
 import { HOLD_CAPABILITY } from "./storeForward";
-import { fromBase64Url, randomBytes, toBase64Url, toZ32, utf8Encode } from "./bytes";
+import { fromBase64Url, isZ32Key, randomBytes, toBase64Url, toZ32, utf8Encode } from "./bytes";
 import { identityFromSeedB64, publicKeyFromZ32, sign, verify } from "./identity";
 import type { FrameChannel } from "./frames";
 import { rankTransports, type PairedTransport, type NativeBinding } from "./pairedTransports";
@@ -118,7 +118,6 @@ export const SESSION_FRAME_MAX = 60 * 1024;
  * (64 frames of 60 KiB); the count only bounds a flood of tiny frames.
  */
 export const SESSION_RECEIVE_PENDING = { frames: 1024, bytes: 64 * SESSION_FRAME_MAX } as const;
-const KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
 const NONCE = /^[A-Za-z0-9_-]{43}$/;
 const SIG = /^[A-Za-z0-9_-]{86}$/;
 const FINGERPRINT = /^[a-f0-9]{64}$/;
@@ -128,7 +127,7 @@ const isList = (v: unknown, maximum = 8): v is string[] => Array.isArray(v) && v
 function parseOffer(v: Record<string, unknown>): Offer | null {
   if (!Array.isArray(v.versions) || v.versions.length === 0 || v.versions.length > 8 ||
     !v.versions.every(n => Number.isSafeInteger(n) && n > 0) || new Set(v.versions).size !== v.versions.length ||
-    !isList(v.transports) || !isList(v.capabilities, 32) || typeof v.key !== "string" || !KEY.test(v.key) ||
+    !isList(v.transports) || !isList(v.capabilities, 32) || !isZ32Key(v.key) ||
     typeof v.nonce !== "string" || !NONCE.test(v.nonce)) return null;
   // Optional and new: one this app cannot read counts as none said, rather than failing the offer.
   const extensions = isList(v.extensions, 32) ? v.extensions : undefined;
@@ -209,7 +208,7 @@ export class PairedSession {
       ? (binding.transport === "hyperdht/1" ? /^[a-f0-9]{128}$/.test(binding.context) : FINGERPRINT.test(binding.context)) && binding.identities.length === 2 && binding.identities.every(k => FINGERPRINT.test(k)) && binding.identities[0] !== binding.identities[1]
       : this.options.fingerprints?.length === 2 && this.options.fingerprints.every(f => FINGERPRINT.test(f));
     if (!validBinding || !this.offer.transports.includes(this.transport) ||
-      this.options.rendezvousKeys.some(k => !KEY.test(k))) return this.fail("Invalid connection binding or unavailable transport");
+      this.options.rendezvousKeys.some(k => !isZ32Key(k))) return this.fail("Invalid connection binding or unavailable transport");
     this.channel.onMessage = data => {
       if (this.stopped) return;
       const size = data.length;

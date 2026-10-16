@@ -222,7 +222,7 @@ A text is sent exactly as typed: nothing below changes the wire, and an app that
 | `# `, `## `, `### ` at the start of a line | A bold line, a little larger |
 | `[text](https://…)` | The text as a link |
 
-A link from `[text](…)` MUST be http or https; anything else stays text. The link's host SHOULD be shown on hover or long press. When the text names a host other than the link's (or one the link's host is not under), or holds an invisible or direction character, the receiver SHOULD show the address instead of the text, as the browser reads it (punycode for a non-ASCII host). A preview of a message on one line keeps a list's markers ("•" for any bullet, the author's numbers) and shows a link as its text.
+A link from `[text](…)` MUST be http or https; anything else stays text. The link's host SHOULD be shown on hover or long press. When the text names a host other than the link's (or one the link's host is not under), or holds an invisible or direction character, the receiver SHOULD show the address instead of the text, as the browser reads it (punycode for a non-ASCII host). An address shown, from `[text](…)` or typed in the text, SHOULD leave out a user part before its host (`https://name@host/` shows as `https://host/`), so the host it reads as is the one it opens. A preview of a message on one line keeps a list's markers ("•" for any bullet, the author's numbers) and shows a link as its text.
 
 ## Edits
 

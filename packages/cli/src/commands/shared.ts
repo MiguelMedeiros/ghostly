@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 // protocol (~100 ms to load), which a command a daemon answers never needs.
 import { ITEM_STATES, PR_CHECKS, PR_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, cardUrl } from "@ghostly/core/statusCards";
 import type { OptionSpec, Parsed } from "../args";
-import { CliError } from "../errors";
+import { CliError, localFileError } from "../errors";
 
 /**
  * The commands that are one API method each: how the command line becomes the method's parameters. Commands with
@@ -39,9 +39,24 @@ export const card: OptionSpec = { type: "string", description: "A Lightning card
 export const memo: OptionSpec = { type: "string", description: "What it is for (up to 140 characters)" };
 export const confirmReal: OptionSpec = { type: "boolean", description: "Confirm a Mainnet (real money) spend" };
 
-/** A path as this command's working directory means it: the daemon runs elsewhere. */
+/**
+ * A path as this command's working directory means it: the daemon runs elsewhere. "" (an unset variable in a script)
+ * names no file, never the current folder.
+ */
 export function here(path: unknown): string | undefined {
+  if (path === "") throw new CliError("usage", "A path given as \"\" names no file");
   return typeof path === "string" ? resolve(path) : undefined;
+}
+
+/**
+ * A list option that names chats (`--to`, `--from`): "" or "group:" alone (an unset variable in a script) names
+ * nothing, and is a usage error before the profile opens; it was a prefix of every id and took the only chat or group.
+ */
+export function refs(values: unknown, flag: string, what: string): void {
+  if (!Array.isArray(values)) return;
+  for (const value of values) {
+    if (typeof value === "string" && !value.replace(/^group:/, "").trim()) throw new CliError("usage", `--${flag} ${JSON.stringify(value)} names no ${what}`);
+  }
 }
 
 /** A whole number of sats from the command line. */
@@ -118,9 +133,12 @@ export function cursor(value: unknown, flag: string): string | number | undefine
 export function cardJson(value: unknown): Record<string, unknown> {
   if (value === undefined) return {};
   const text = String(value).trim();
+  // A file's path as here() reads it ("" names no file, not the current folder); a file not there or a folder is said
+  // with its path, as `x401 credential add` says it: before, Node's text, and a folder's named no path.
+  const file = text.startsWith("{") || text === "-" ? undefined : here(text)!;
   let raw: string;
-  try { raw = text.startsWith("{") ? text : readFileSync(text === "-" ? 0 : resolve(text), "utf8"); }
-  catch (error) { throw new CliError("usage", `--json takes a card as JSON, - for stdin, or a file: ${error instanceof Error ? error.message : String(error)}`); }
+  try { raw = text.startsWith("{") ? text : readFileSync(file ?? 0, "utf8"); }
+  catch (error) { throw (file !== undefined && localFileError(error, file)) || new CliError("usage", `--json takes a card as JSON, - for stdin, or a file: ${error instanceof Error ? error.message : String(error)}`); }
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch { throw new CliError("usage", "--json is not valid JSON"); }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new CliError("usage", "--json is a JSON object of the card's fields");

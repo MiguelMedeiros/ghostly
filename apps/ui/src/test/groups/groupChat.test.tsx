@@ -943,3 +943,36 @@ describe("GroupChat: the mark on a message of mine", () => {
     expect(screen.getByTestId("message-delivery-tip")).toHaveTextContent("Sent to the group. Groups have no receipts.");
   });
 });
+
+describe("GroupChat: the read mark", () => {
+  // Every write is a `storage` event in each other page of the app, and their chat lists redraw for it.
+  it("is written once on opening, not again for engine states where nothing new came", () => {
+    const at = 1_700_000_000_000;
+    const { engine } = openGroup(active({ lastMessageAt: at }));
+    const before = groupReadAt("group-1");
+    expect(before).toBeGreaterThanOrEqual(at);
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    for (let i = 0; i < 20; i++) {
+      act(() => engine.update({ groups: [active({ lastMessageAt: at, members: [members[0], { ...members[1], online: i % 2 === 0 }, members[2]] })] }));
+    }
+    expect(setItem.mock.calls.filter(([key]) => key.includes("group_read_"))).toEqual([]);
+    expect(groupReadAt("group-1")).toBe(before);
+  });
+
+  it("is written again when a new message comes, and once more when a hidden page shows what came meanwhile", () => {
+    let hidden = false;
+    vi.spyOn(document, "visibilityState", "get").mockImplementation(() => (hidden ? "hidden" : "visible"));
+    const at = Date.now() + 60_000; // a member's clock ahead of this one
+    const { engine } = openGroup(active({ lastMessageAt: at }));
+    expect(groupReadAt("group-1")).toBe(at);
+    act(() => engine.update({ groups: [active({ lastMessageAt: at + 1 })] }));
+    expect(groupReadAt("group-1")).toBe(at + 1);
+    hidden = true;
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    act(() => engine.update({ groups: [active({ lastMessageAt: at + 2 })] }));
+    expect(groupReadAt("group-1")).toBe(at + 1);
+    hidden = false;
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(groupReadAt("group-1")).toBe(at + 2);
+  });
+});

@@ -42,7 +42,7 @@ import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
-import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, traceLink } from "@ghostly/core";
+import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, parseEngineError, sanitizeDisplayText, traceLink } from "@ghostly/core";
 import { ClockWatch, DirectPathWatch, firstDeviceSetSecret } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
@@ -106,6 +106,7 @@ import {
   type PairedTransport,
   type GroupEntryLink,
   entryParams,
+  pacer,
 } from "@ghostly/core";
 import type { AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, type StoredFile } from "../shared/idb";
@@ -280,6 +281,11 @@ const MAX_DELETED_IDS = 500;
 const CARD_RESTORE_MOST = 50;
 const CARD_RESTORE_MS = 7 * 24 * 60 * 60_000;
 /**
+ * A look for those cards reads the chat's whole history, so a chat starts one at a time, at most once this often: a
+ * contact that says `edit/1` again and again on a session gets one look now and one more after the gap, whatever the count.
+ */
+const CARD_RESTORE_EVERY_MS = 30_000;
+/**
  * A round trip that moved is shown at once, and written to disk by itself (relaxed, no disk sync of its own) at most
  * this often: a 15 s sample on an internet path moves by 10 ms most of the time. A power cut loses at most this much
  * of the round trip's drift, never a row; any other change to the story writes the latest round trip with it.
@@ -407,6 +413,8 @@ export const SPARE_INVITE_MIN_AGE_MS = 6_000;
  * first 11 s, and read nothing more for the rest of the minute, the others' answers included (bug hunt r7a, 2026-09-29).
  */
 export const STARTUP_QUIET_MS = 15_000;
+/** At start, how long links start in one task before the page gets the thread back (`startNow`). */
+const START_SLICE_MS = 10;
 const SPARE_INVITE_MAX_AGE_MS = 15 * 60_000;
 /** How far before this clock a warm packet is dated (`warmKey`): further than a contact's clock is ever behind. */
 export const WARM_DATED_BACK_MS = 24 * 60 * 60_000;
@@ -684,16 +692,23 @@ export class GhostlyNode implements EngineImplementation {
   /** Other profiles of this device, looked at for new messages (WISP 04 § Checking other profiles). */
   private readonly profilePeek: ProfilePeek;
   /** Whether this device's WebRTC attempts say direct connections are blocked on its network (`directPath.ts`). */
-  private readonly directPath = new DirectPathWatch(() => { if (!this.shuttingDown) this.emitState(); });
+  private readonly directPath = new DirectPathWatch(blocked => {
+    if (this.shuttingDown) return;
+    this.emitState();
+    // Every group link still on WebRTC goes native: the ones this side answers on fail with no evidence of their own.
+    if (blocked) for (const [linkId, live] of this.links) if (live.stored.group && !live.link?.isDataLinkOpen) void this.edgeWithoutRtc(linkId);
+  });
   /** Whether this device's clock seems to be off, from what the relays' answers and several contacts' packets say (`clockWatch.ts`). */
   private readonly clock = new ClockWatch(() => { if (!this.shuttingDown) this.emitState(); });
   private clockOff: (() => void) | undefined;
   /**
    * Edges of groups whose WebRTC did not connect (`edgeWithoutRtc`): they go on as an app with no WebRTC does, over a
    * native transport, until the member is seen online again after a packet said it was gone (`away`, `edgeRtcPresence`).
-   * Not kept: the next start tries WebRTC first again.
+   * Not kept: the next start tries WebRTC first again. `held`: it stays native on a return too, until the network changes.
    */
-  private readonly edgeRtcOff = new Map<string, { away: boolean }>();
+  private readonly edgeRtcOff = new Map<string, { away: boolean; held: boolean }>();
+  /** Edges put back on WebRTC by a return (`edgeRtcPresence`) since the network last changed: failing again holds them native. */
+  private readonly edgeRtcRetried = new Set<string>();
   private readonly pollIntervals: PollIntervals;
   private readonly localFetch: LocalFetch;
   private readonly links = new Map<string, LiveLink>();
@@ -767,6 +782,8 @@ export class GhostlyNode implements EngineImplementation {
   private readonly outboxes = new Map<string, Outbox>();
   /** My edits on their way, per 1:1 chat (WISP 400 § Edits). */
   private readonly editQueues = new Map<string, EditQueue>();
+  /** Per 1:1 chat, its look for cards to send again (`restoreCardsSoon`): when the last began, and what waits. */
+  private readonly cardRestores = new Map<string, { at: number; busy: boolean; again: boolean; timer?: ReturnType<typeof setTimeout> }>();
   /** The contacts' edits of messages not here yet. */
   private readonly editBuffer = new EditBuffer();
   /** Received status card updates, applied at most once a second per message (WISP 405 · Status Cards). */
@@ -1110,7 +1127,8 @@ export class GhostlyNode implements EngineImplementation {
     emit: () => { this.emitState(); this.did.changed(); void this.publicProfiles.prune().catch(() => {}); this.publicActivity.prune(); },
     publicProfile: (provider, subject) => this.publicProfiles.view({ provider, subject }),
     publish: (seed, records) => this.transport.publish(identityFromSeed(seed), records),
-    resolve: async key => (await this.transport.resolve(key))?.records ?? null,
+    // Revocation lookups of the contacts' proofs are never what a chat waits on: they give way to the chats' reads.
+    resolve: async key => (await this.transport.resolve(key, { background: true }))?.records ?? null,
   });
 
   /** The profile's did:dht: a key of its own, public, never tied to a chat (WISP 310-did-dht). */
@@ -1582,7 +1600,8 @@ export class GhostlyNode implements EngineImplementation {
       const fresh = !this.walletFeedbackIds.has(tx.id);
       this.walletFeedbackIds.add(tx.id);
       if (this.walletFeedbackReady && fresh && tx.amount > 0 && tx.timestamp >= this.feedbackStartedAt) {
-        if (tx.kind === "lightning-in" || tx.kind === "ecash-in") this.feedback("coin", tx.id, undefined, false, tx.note === TEST_COINS_NOTE ? "testcoins" : undefined);
+        // Get test coins is a Lightning receipt: ecash in carries a contact's memo, which may read the same.
+        if (tx.kind === "lightning-in" || tx.kind === "ecash-in") this.feedback("coin", tx.id, undefined, false, tx.kind === "lightning-in" && tx.note === TEST_COINS_NOTE ? "testcoins" : undefined);
         if (tx.kind === "lightning-out") this.feedback("confirmed", tx.id);
       }
     }
@@ -1724,12 +1743,20 @@ export class GhostlyNode implements EngineImplementation {
     }
     // With the chats loaded, profiles of identities no longer verified can be told apart and dropped.
     this.publicProfiles.start();
+    // Each link derives its keys and seals its capability record as it starts: 50 chats and 20 groups in one task held
+    // the page for 575-762 ms at 4x CPU, right as the chat list appeared. They start in slices that let the page go, in
+    // the same order; a chat not started yet reads as offline until its turn.
+    const pause = pacer(START_SLICE_MS);
     if (this.networkOn) for (const linkId of this.nativeStartOrder([...history.keys()])) {
+      // Gone offline or shut down while the page had the thread: the links left start with the network, if ever.
+      if (!this.networkOn || this.shuttingDown) break;
       const messages = history.get(linkId)!;
       if (!this.links.has(linkId)) continue;
       this.startLink(linkId, messages);
       if (!this.links.get(linkId)?.stored.group) void this.refreshPublicProfiles({ linkId }).catch(() => {});
+      await pause();
     }
+    if (this.shuttingDown) return;
     this.emitState();
     if (this.networkOn) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(STARTUP_QUIET_MS); }
     if (!this.limitedMode) this.openStartedWallets(fresh);
@@ -2167,6 +2194,8 @@ export class GhostlyNode implements EngineImplementation {
     this.publicProfiles.stop();
     this.publicActivity.clear();
     for (const queue of this.editQueues.values()) queue.stop();
+    for (const restore of this.cardRestores.values()) clearTimeout(restore.timer);
+    this.cardRestores.clear();
     this.groupEdits.stop();
     this.reactions.stop();
     this.cardEdits.stop();
@@ -2952,10 +2981,13 @@ export class GhostlyNode implements EngineImplementation {
     this.outboxes.delete(linkId);
     this.editQueues.get(linkId)?.stop();
     this.editQueues.delete(linkId);
+    clearTimeout(this.cardRestores.get(linkId)?.timer);
+    this.cardRestores.delete(linkId);
     this.editBuffer.forget(linkId);
     live.carried?.stop();
-    void live.link?.stop(true); void live.caps?.stop();
+    // Gone before its link stops: the link's closing events find no chat to make an outbox or files for again.
     this.links.delete(linkId);
+    void live.link?.stop(true); void live.caps?.stop();
     this.identities.forget(linkId);
     this.nostrSocial.forgetLink(linkId);
     this.hold.forgetLink(linkId);
@@ -2973,7 +3005,9 @@ export class GhostlyNode implements EngineImplementation {
   renameLink({ linkId, label }: { linkId: string; label: string }): void {
     const live = this.links.get(linkId);
     if (!live) return;
-    live.stored = { ...live.stored, label: label.trim().slice(0, 48) || undefined };
+    // One line of 48 characters at most, cut between code points (never through an emoji), as `groupName` does.
+    const clean = sanitizeDisplayText(label.trim().replace(/\s+/gu, " "), 48)?.replace(/ {2,}/g, " ");
+    live.stored = { ...live.stored, label: clean };
     void db.patchLink(linkId, { label: live.stored.label });
     this.emitState();
   }
@@ -3005,6 +3039,8 @@ export class GhostlyNode implements EngineImplementation {
    */
   wake(params: { network?: boolean } = {}): void {
     if (params.network) { this.transport.networkChanged?.(); this.directPath.reset(); }
+    // An edge held native on the old network may try WebRTC again on its member's next return.
+    if (params.network) { for (const off of this.edgeRtcOff.values()) off.held = false; this.edgeRtcRetried.clear(); }
     // A group link whose native listener failed to start on the old network tries again at the next tick, its wait anew.
     if (params.network) for (const failed of this.nativeFailed.values()) { failed.at = 0; failed.wait = 0; }
     for (const live of this.links.values()) live.link?.wake({ network: params.network });
@@ -3352,6 +3388,30 @@ export class GhostlyNode implements EngineImplementation {
       if (patched?.edit?.pending) { changed.push(message.id); this.editsFor(linkId).edited(message.id); }
     }
     if (changed.length) await this.messagesChanged(linkId, changed);
+  }
+
+  /**
+   * `restoreCards`, then what waits goes. One look at a time per chat, at most once per `CARD_RESTORE_EVERY_MS`: asked
+   * again while one runs or within the gap, one more look goes once it is over, and what waits still goes at once (the
+   * edit queue reads the history once a session).
+   */
+  private restoreCardsSoon(linkId: string): void {
+    const flush = () => this.editsFor(linkId).flush().catch(() => {});
+    let state = this.cardRestores.get(linkId);
+    if (!state) this.cardRestores.set(linkId, state = { at: -Infinity, busy: false, again: false });
+    if (state.busy) { state.again = true; return; }
+    const wait = state.at + CARD_RESTORE_EVERY_MS - Date.now();
+    if (wait > 0) {
+      state.timer ??= setTimeout(() => { state.timer = undefined; if (this.cardRestores.get(linkId) === state) this.restoreCardsSoon(linkId); }, wait);
+      void flush();
+      return;
+    }
+    state.busy = true;
+    state.at = Date.now();
+    void this.restoreCards(linkId).catch(() => {}).then(flush).finally(() => {
+      state.busy = false;
+      if (state.again && this.cardRestores.get(linkId) === state) { state.again = false; this.restoreCardsSoon(linkId); }
+    });
   }
 
   /** My edits in one 1:1 chat on their way to the contact. */
@@ -4796,8 +4856,15 @@ export class GhostlyNode implements EngineImplementation {
     else this.groups.setTyping(groupId, false);
   }
 
+  /**
+   * A call's signaling: read the contact's record fast, for its `_call`. A compatibility chat's only: a paired chat's
+   * signals go only over its live session (WISP 601), so a read finds nothing for the call, and its data link keeps
+   * its own fast reads (an offer's look would be cut short by a call's `fast: false`).
+   */
   setFastPoll({ linkId, fast }: { linkId: string; fast: boolean }): void {
-    this.links.get(linkId)?.link?.session.setFastPoll(fast);
+    const live = this.links.get(linkId);
+    if (live?.stored.profile) return;
+    live?.link?.session.setFastPoll(fast);
   }
 
   /** Used by the viewer: a request to a service some peer shares with us. */
@@ -5041,7 +5108,11 @@ export class GhostlyNode implements EngineImplementation {
     const answered: string[] = [];
     let last: unknown;
     for (const url of defaults) {
-      try { answered.push((await this.wallet.checkMint(url)).url); } catch (error) { last = error; }
+      try { answered.push((await this.wallet.checkMint(url)).url); } catch (error) {
+        // The app chose this mint: nobody typed its address, so there is none to check. It did not answer, as any server.
+        const unreachable = error instanceof Error ? parseEngineError(error.message) : null;
+        last = unreachable?.code === "mintUnreachable" ? Object.assign(engineError("hostUnreachable", unreachable.values), { cause: error }) : error;
+      }
     }
     if (!answered.length) throw last instanceof Error ? last : new Error("No mint answered");
     // A mint of the other network stays where it is; these become this network's, the first one primary.
@@ -6533,6 +6604,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!live?.stored.group) return;
     this.links.delete(linkId);
     this.edgeRtcOff.delete(linkId);
+    this.edgeRtcRetried.delete(linkId);
     this.groupWakeReceived.delete(linkId);
     this.quietEdges.delete(linkId);
     // Its native slot, if it held one, is free: a group link waiting for one tries at the next tick.
@@ -6756,17 +6828,20 @@ export class GhostlyNode implements EngineImplementation {
         onPairingState: state => { live.pairing = state; this.emitState(); },
         onDirectEvidence: evidence => {
           this.directPath.note(peer, evidence);
-          if (!entry && evidence !== "open" && evidence !== "closed") void this.edgeWithoutRtc(linkId);
+          if (evidence !== "open" && evidence !== "closed") void this.edgeWithoutRtc(linkId);
         },
         // WebRTC here refused every answer to the edge's offers, through the pauses after them: the next offer would
         // wait minutes of backoff while the member is there. The edge goes on over a native transport for this run, as
         // one whose WebRTC connected nothing does.
-        onAnswersRefused: () => { if (!entry) void this.edgeWithoutRtc(linkId); },
+        onAnswersRefused: () => { void this.edgeWithoutRtc(linkId); },
         onDataLinkState: state => {
           traceJoin(group, `link.${state}`, { role });
           // The last moment the member was reachable on it: when it opens, and when it stops being open.
           if (state === "open" || live.dataLink === "open") live.lastSyncAt = Date.now();
           if (state === "open" && !entry) this.groups.edgeOpen(group, peer);
+          // Live over a native transport after WebRTC failed: the member is reachable and WebRTC is not. A return no
+          // longer says the failure was its app going (`edgeRtcPresence`).
+          if (state === "open") { const off = this.edgeRtcOff.get(linkId); if (off) off.held = true; }
           // Payments with this member that did not get through go again, never twice.
           if (state === "open" && !entry && member()) void this.desk.replay(linkId).catch(() => {});
           live.dataLink = state;
@@ -6804,13 +6879,17 @@ export class GhostlyNode implements EngineImplementation {
    * app with no WebRTC (WISP 902 § Transports): it runs its native endpoints and says so in its packet (`_tr`, with no
    * `webrtc/1`), the member's app starts its own for it as it does for a Linux Desktop, and the two meet over Iroh
    * through its relay. Until the member comes back (`edgeRtcPresence`), or for this run of the app.
+   * An entry session of a group's link too: there, the admin's packet was seen and the session never went live, and the
+   * join stayed at "Let in: getting the group's keys" for as long as the joiner waited (2026-10-16).
    */
   private async edgeWithoutRtc(linkId: string): Promise<void> {
     const live = this.links.get(linkId);
-    if (!live?.link || !live.stored.group || live.stored.groupEntry || this.shuttingDown || this.options.webrtcGroupLinks) return;
+    if (!live?.link || !live.stored.group || this.shuttingDown || this.options.webrtcGroupLinks) return;
     if (this.edgeRtcOff.has(linkId) || this.keepsGroupNative(live.stored) || !Object.keys(this.nativeFactories).length) return;
-    this.edgeRtcOff.set(linkId, { away: false });
+    // Failed again after a return put it back on WebRTC: it was the network, and the edge stays native.
+    this.edgeRtcOff.set(linkId, { away: false, held: this.edgeRtcRetried.has(linkId) });
     traceLink(live.myPubKeyZ32, "edge-rtc-off", {});
+    if (live.stored.groupEntry) traceJoin(live.stored.group, "link.native", { role: live.stored.groupEntry });
     await this.restartEdge(linkId);
   }
 
@@ -6820,15 +6899,19 @@ export class GhostlyNode implements EngineImplementation {
    * not a network that blocks direct connections. Held native for this whole run, the edge said so in its packet, the
    * member's app followed on its next starts, and past the group links' native slots members stayed unreachable for as
    * long as this app ran (2026-10-09). The edge tries WebRTC again, its `_tr` with `webrtc/1` again (WISP 902 §
-   * Transports); a network that really blocks it costs one more failed attempt per return.
+   * Transports). Not an edge held native (`held`: it failed again after a return, or went live natively), nor while
+   * this device's attempts say its network blocks direct connections: a member's packet that carries a WebRTC signal
+   * and its `_tr` can leave its `_svc` out for size and read as gone, and on a VPN each such return put the edge back on
+   * a WebRTC that died again (2026-10-16). A network that really blocks it costs one more failed attempt per network.
    */
   private edgeRtcPresence(linkId: string, presence: PeerPresence): void {
     const off = this.edgeRtcOff.get(linkId);
     if (!off) return;
     if (!presence.online) { off.away = true; return; }
-    if (!off.away) return;
+    if (!off.away || off.held || this.directPath.blocked) return;
     const live = this.links.get(linkId);
     this.edgeRtcOff.delete(linkId);
+    this.edgeRtcRetried.add(linkId);
     if (live) traceLink(live.myPubKeyZ32, "edge-rtc-back", {});
     // Its native slot, if it held one, is free: a group link waiting for one tries at the next tick.
     this.groupNativeWaiting.delete(linkId);
@@ -6846,6 +6929,8 @@ export class GhostlyNode implements EngineImplementation {
     await link.stop(false).catch(() => {});
     if (this.links.get(linkId) !== live || live.link || this.shuttingDown || !this.networkOn) return;
     this.startEdge(linkId);
+    // An entry session's other side is there now: its packet, with the transports it starts for this one, is looked for fast.
+    if (live.stored.groupEntry) this.links.get(linkId)?.link?.expectPeer();
   }
 
   private startLink(linkId: string, messages: StoredMessage[]): void {
@@ -7063,7 +7148,7 @@ export class GhostlyNode implements EngineImplementation {
         onEditReceipt: stored.profile && !stored.group ? (id, e) => this.editsFor(linkId).received(id, e) : undefined,
         // Edits agreed on a new session: questions whose buttons went on the floor or into a hold get them now, then what waits goes.
         onEditSupport: supported => {
-          if (supported && stored.profile && !stored.group) void this.restoreCards(linkId).catch(() => {}).then(() => this.editsFor(linkId).flush()).catch(() => {});
+          if (supported && stored.profile && !stored.group) this.restoreCardsSoon(linkId);
         },
         onWakeSupport: supported => { if (supported && stored.profile && !stored.group) void this.shareWake(linkId); },
         onPeerWake: target => {
@@ -7082,6 +7167,8 @@ export class GhostlyNode implements EngineImplementation {
         // A pinned contact only, by the key that is the person: a group's edges and a contact's other chats are the same device again.
         onPeerClock: (packetAt, readBefore, readAt) => { const peer = live.stored.pairedPeerKey; if (peer && !live.stored.group) this.clock.peer(peer, packetAt, readBefore, readAt); },
         onDataLinkState: (state) => {
+          // A removed chat's link closes as it stops: nothing of the chat is made again for it.
+          if (this.links.get(linkId) !== live) return;
           const was = live.dataLink;
           live.dataLink = state;
           if (state === "open") {
@@ -7191,7 +7278,7 @@ export class GhostlyNode implements EngineImplementation {
         onFileComplete: (id, direction) =>
           this.fileSettled(this.localFileId(linkId, id, direction, { failed: false }), undefined, linkId),
         onFilesFrame: (frame) => this.fileDesk.handle(linkId, frame),
-        onFilesSession: (open) => { this.fileDesk.session(linkId, open); if (open) this.sayWithdrawnFiles(linkId); },
+        onFilesSession: (open) => { if (this.links.get(linkId) !== live) return; this.fileDesk.session(linkId, open); if (open) this.sayWithdrawnFiles(linkId); },
         onFileAnnounced: stored.profile && !stored.group ? (file, packet) => this.fileAnnounced(linkId, file, packet) : undefined,
         onFileFailed: (id, reason, direction) =>
           this.fileSettled(this.localFileId(linkId, id, direction, { failed: true }), reason, linkId),

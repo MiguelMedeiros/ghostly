@@ -416,8 +416,10 @@ fn on_page_load<R: tauri::Runtime>(
 }
 
 /// The native listeners of the page before this one: stopped, their eight places free (`TransportState::page_started`).
+/// The app windows it opened close (`app_sandbox::page_started`).
 #[cfg(desktop)]
 fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    app_sandbox::page_started(app);
     if let Some(transports) = app.try_state::<paired_transport::TransportState>() {
         transports.page_started();
     }
@@ -460,10 +462,34 @@ fn on_close_requested<R: tauri::Runtime>(window: &tauri::Window<R>, api: &tauri:
         return;
     }
     api.prevent_close();
-    let window = window.clone();
+    hold_close(window.clone());
+}
+
+#[cfg(desktop)]
+/// The window a held close acts on: `tauri::Window`, and a recording one in the tests.
+trait Closing: Send + 'static {
+    fn hide(&self);
+    fn close(&self);
+}
+
+#[cfg(desktop)]
+impl<R: tauri::Runtime> Closing for tauri::Window<R> {
+    fn hide(&self) {
+        let _ = tauri::Window::hide(self);
+    }
+    fn close(&self) {
+        let _ = tauri::Window::close(self);
+    }
+}
+
+#[cfg(desktop)]
+/// The held close: the window leaves the screen at once, as a close does (its page, hidden, still says goodbye),
+/// and closes for good `DEPART_MS` later.
+fn hold_close(window: impl Closing) {
+    window.hide();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(DEPART_MS)).await;
-        let _ = window.close();
+        window.close();
     });
 }
 
@@ -498,6 +524,9 @@ fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
             tauri::async_runtime::block_on(
                 transports.shutdown(std::time::Duration::from_millis(CLOSE_MS)),
             );
+            // Ghostly launched again while this app was leaving: that launch starts now, a window of its own.
+            #[cfg(target_os = "linux")]
+            single_instance::relaunch(app);
         }
         _ => {}
     }
@@ -640,6 +669,7 @@ mod tests {
         arguments["profile"] = serde_json::json!("x");
         arguments["record"] = serde_json::json!(null);
         arguments["count"] = serde_json::json!(0);
+        arguments["tag"] = serde_json::json!("x");
         arguments
     }
 
@@ -759,7 +789,8 @@ mod tests {
             serde_json::json!({"request": {"type": "start"}}),
         )
         .unwrap();
-        assert_eq!(entry, "<p>chess</p>");
+        // As its JSON text, which the runner parses (`app_sandbox::json_response`).
+        assert_eq!(entry, "\"<p>chess</p>\"");
         // Any other request goes to the Ghostly window's broker, under this window's label: here nobody
         // answers it.
         let error = invoke(
@@ -993,5 +1024,31 @@ mod tests {
             after >= Duration::from_millis(DEPART_MS),
             "the app exited {after:?} after the close"
         );
+    }
+
+    #[test]
+    fn a_held_close_takes_the_window_off_the_screen_at_once_and_closes_it_after_the_goodbye() {
+        use std::sync::{Arc, Mutex};
+        use std::time::{Duration, Instant};
+        #[derive(Clone)]
+        struct Seen(Arc<Mutex<Vec<(&'static str, Duration)>>>, Instant);
+        impl Closing for Seen {
+            fn hide(&self) {
+                self.0.lock().unwrap().push(("hide", self.1.elapsed()));
+            }
+            fn close(&self) {
+                self.0.lock().unwrap().push(("close", self.1.elapsed()));
+            }
+        }
+        let seen = Seen(Arc::default(), Instant::now());
+        let what =
+            |seen: &Seen| -> Vec<_> { seen.0.lock().unwrap().iter().map(|(w, _)| *w).collect() };
+        hold_close(seen.clone());
+        // Before the goodbye's wait: the window is already gone from the screen, and not yet closed.
+        assert_eq!(what(&seen), ["hide"]);
+        std::thread::sleep(Duration::from_millis(DEPART_MS + 300));
+        assert_eq!(what(&seen), ["hide", "close"]);
+        let all = seen.0.lock().unwrap().clone();
+        assert!(all[1].1 >= Duration::from_millis(DEPART_MS), "{all:?}");
     }
 }

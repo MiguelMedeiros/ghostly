@@ -181,6 +181,7 @@
     "select": "选择",
     "selected": "已选择 {{count}} 条",
     "send": "发送",
+    "sentTo": "已发送给 {{names}}",
     "title": "转发到…"
   },
   "hold": {
@@ -230,6 +231,7 @@
     "noRoom": "空间不足：剩余 {{size}}",
     "noRoomToPlay": "磁盘可用空间不足，无法在此播放。请下载。",
     "notYet": "发送完成后即可播放。",
+    "positionOf": "{{position}}，共 {{duration}}",
     "wantsToSend": "{{name}} 想发送 · 剩余 {{size}}"
   },
   "menu": {
@@ -440,6 +442,7 @@
     "record": "录制语音消息",
     "recordHint": "按住录音，或点击免手持录音",
     "recorded": "已录制 {{time}}",
+    "recording": "正在录音",
     "sent": "语音消息已发送",
     "slideCancel": "滑动取消",
     "speed": "播放速度 {{speed}}",

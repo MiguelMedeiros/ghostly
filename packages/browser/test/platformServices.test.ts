@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { LIMITS } from "@ghostly/core";
+import { LIMITS, isViewerTag, viewerTag } from "@ghostly/core";
 import { setBrowserHost, type BrowserHost } from "../src/host";
 import { registerFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
 import { fileStore } from "../src/shared/idb";
@@ -77,6 +77,27 @@ describe("sharing a local web app", () => {
     await expect(services.shareService("Creds", "http://user:pw@localhost:1")).rejects.toThrow("Credentials");
     expect(access).toEqual([]);
     expect(engine.calls).toEqual([]);
+  });
+});
+
+describe("opening a contact's app", () => {
+  // covers: services.open
+  const ME = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u";
+  const ME_ELSEWHERE = "h769ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqx";
+
+  it("opens it in an origin of this profile's chat with the contact, never one every profile shares", async () => {
+    withLinks(chat({ myPubKeyZ32: ME }));
+    await services.openService("peer-1", "atlas");
+    expect(host.openService).toHaveBeenCalledWith("peer-1", "atlas", viewerTag(ME));
+    expect(isViewerTag(viewerTag(ME))).toBe(true);
+    // Another profile's chat with the same contact, or this one after "Clear all data", has another key of its own.
+    expect(viewerTag(ME_ELSEWHERE)).not.toBe(viewerTag(ME));
+  });
+
+  it("opens nothing for a contact the peer does not know yet", async () => {
+    withLinks();
+    await expect(services.openService("peer-1", "atlas")).rejects.toThrow("Ghostly is still starting");
+    expect(host.openService).not.toHaveBeenCalled();
   });
 });
 
@@ -257,6 +278,28 @@ describe("sending files", () => {
     } finally {
       registerFileBytes("native", async () => null);
       resetFileBytes();
+    }
+  });
+
+  // Nothing of it reached the engine: the chat's row of it is the page's own, and its failure lived only in this page.
+  // After a reload the bubble read "No longer available" with the Sent mark, though the file never left.
+  it("a large file whose copy into this device failed for lack of room is still not sent after a reload", async () => {
+    const kept = new Map<string, string>();
+    vi.stubGlobal("localStorage", { getItem: (key: string) => kept.get(key) ?? null, setItem: (key: string, value: string) => void kept.set(key, value), removeItem: (key: string) => void kept.delete(key) });
+    withLinks(chat({ id: "full-link" }));
+    const full = { kind: "native", stage: vi.fn(async () => { throw new DOMException("The quota has been exceeded.", "QuotaExceededError"); }) } as unknown as FileBytes;
+    registerFileBytes("native", async () => full, true);
+    try {
+      const { file } = await services.sendFile("peer-1", new File([new Uint8Array(17 * 1024 * 1024)], "big.bin"));
+      await vi.waitFor(() => expect(services.getTransfer(file.id)?.state).toBe("failed"));
+      vi.resetModules();
+      const reloaded = (await import("../src/platform/services")).servicesPlatform!;
+      expect(reloaded.getTransfer(file.id)).toMatchObject({ state: "failed", direction: "out", retry: false, error: "Not enough space on this device to send it" });
+      await expect(reloaded.retryFile!(file.id)).rejects.toThrow("cannot be retried");
+    } finally {
+      registerFileBytes("native", async () => null);
+      resetFileBytes();
+      vi.unstubAllGlobals();
     }
   });
 

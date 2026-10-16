@@ -5,15 +5,15 @@ import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
 import { connectDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
+import { here } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_READS, SECRET_RESULTS } from "./engineMethods";
-import { asCliError, CliError, EXIT } from "./errors";
+import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, readCursor } from "./listen";
-import { resolve } from "node:path";
 import { format } from "node:util";
-import { secretsFromStdin } from "./secretInput";
+import { secretsFromStdin, secretValuesWarning } from "./secretInput";
 import {
   checkProfileName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
   type ProfilePaths,
@@ -237,11 +237,15 @@ export function commandHelp(words: readonly string[]): string {
   if (words[0] === "help") return HELP_USAGE;
   const named = (list: readonly string[]) => helpRows().filter((row) => { const own = commandWords(row.usage); return list.every((word, i) => own[i] === word); });
   // Arguments after the command's words (`ghostly send bob hi --help`) are not part of its name.
+  const given = words;
   let rows = named(words);
   while (!rows.length && words.length > 1) rows = named(words = words.slice(0, -1));
   const asked = words.join(" ");
   if (!rows.length) throw new CliError("usage", `Unknown command: ${asked} (ghostly help)`);
   const exact = rows.filter((row) => commandWords(row.usage).join(" ") === asked);
+  // Words dropped down to a group, not a command (`help chat histroy`): a word the group does not take, as `chat histroy`
+  // says, not the group's list with exit 0.
+  if (!exact.length && words.length < given.length) throw unknownCommand(given[0], given[1]);
   const lines: string[] = [];
   // The command asked for first, also when others extend its words (`daemon`, then `daemon stop`…): before, `daemon`'s
   // own options were shown nowhere.
@@ -334,7 +338,8 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       if (unsealed && (parsed.options["passphrase-file"] !== undefined || process.env.GHOSTLY_BACKUP_PASSPHRASE)) throw new CliError("usage", "A passphrase is set (--passphrase-file or GHOSTLY_BACKUP_PASSPHRASE) and --no-passphrase was given: choose one");
       const light = parsed.options.light === true ? { light: true } : {};
       // The passphrase is read before the profile opens, and the backup only reads the store: offline.
-      const params = unsealed ? { path: resolve(out), noPassphrase: true, ...light } : { path: resolve(out), passphrase: backupPassphrase(parsed.options["passphrase-file"]), ...light };
+      const path = here(out) as string;
+      const params = unsealed ? { path, noPassphrase: true, ...light } : { path, passphrase: backupPassphrase(parsed.options["passphrase-file"]), ...light };
       const made = await withSession(g, (s) => s.call("profile.backup", params), { offline: true });
       if (unsealed) process.stderr.write("Not encrypted: this file holds the profile's keys, chats and wallet secrets in the clear. Anyone who gets it gets everything in it, including any money in its wallets.\n");
       print(made);
@@ -353,7 +358,7 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       return;
     }
     default:
-      throw new CliError("usage", "ghostly profile create|list|use|show|set|picture|backup|restore");
+      throw unknownCommand("profile", sub);
   }
 }
 
@@ -383,10 +388,20 @@ const BACKUP_PASSPHRASE = "The backup passphrase comes from --passphrase-file or
 /** Restore takes no --no-passphrase: a backup made without one says so itself. */
 const RESTORE_PASSPHRASE = "This backup is encrypted: its passphrase comes from --passphrase-file or GHOSTLY_BACKUP_PASSPHRASE";
 
-/** The backup passphrase: from a file or the environment, never the command line (it would sit in shell history). */
+/**
+ * The backup passphrase: from a file or the environment, never the command line (it would sit in shell history). The
+ * file is said as every other file the CLI reads: "" names none, a folder is named, and an empty one is called that,
+ * not "comes from --passphrase-file" to someone who gave it.
+ */
 function backupPassphrase(file: unknown, missing = BACKUP_PASSPHRASE): string {
-  const value = typeof file === "string" ? readFileSync(file, "utf8").replace(/\r?\n$/, "") : process.env.GHOSTLY_BACKUP_PASSPHRASE;
-  if (!value) throw new CliError("usage", missing);
+  if (typeof file !== "string") {
+    const value = process.env.GHOSTLY_BACKUP_PASSPHRASE;
+    if (!value) throw new CliError("usage", missing);
+    return value;
+  }
+  let value: string;
+  try { value = readFileSync(here(file) as string, "utf8").replace(/\r?\n$/, ""); } catch (error) { throw localFileError(error, file) ?? error; }
+  if (!value) throw new CliError("bad_request", `${file} is empty: it holds the backup's passphrase`);
   return value;
 }
 
@@ -438,7 +453,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
     print({ restarted: true, stopped, before, version: VERSION, ...started });
     return;
   }
-  if (sub) throw new CliError("usage", "ghostly daemon [--detach] [--timeout s] | daemon status | daemon stop | daemon restart");
+  if (sub) throw unknownCommand("daemon", sub);
   const startFor = seconds(parsed, 60);
   if (!parsed.options.detach) { await runDaemon(g); return; }
   print(await startDetached(g, startFor));
@@ -512,9 +527,16 @@ async function listenCommand(argv: string[]): Promise<void> {
   });
   // Before the profile opens: `listen bob` (meant as `--from bob`) streams nobody's events instead of everybody's.
   noMoreThan(0, parsed.positionals, SPECIAL.find(([usage]) => usage.startsWith("listen "))![0]);
+  // Before the profile opens: a unit file's `--webhook "$URL"` with URL unset ran a plain listen, no hook and no word.
+  const blank = (value: unknown) => typeof value === "string" && value.trim() === "";
+  if (blank(parsed.options.webhook)) throw new CliError("usage", "--webhook needs a URL");
+  if (blank(parsed.options.exec)) throw new CliError("usage", "--exec needs a command");
+  if (parsed.options.cursor === "") throw new CliError("usage", "--cursor needs a file");
+  if ((parsed.options.from as string[] | undefined)?.some(blank)) throw new CliError("usage", "--from needs a chat or a contact key");
+  if ((parsed.options.group as string[] | undefined)?.some(blank)) throw new CliError("usage", "--group needs a group");
   const g = globals(parsed);
   pretty = false; // one event per line
-  if (parsed.options.webhook) checkWebhook(String(parsed.options.webhook));
+  if (parsed.options.webhook !== undefined) checkWebhook(String(parsed.options.webhook));
   const types = (parsed.options.type as string[] | undefined) ?? [];
   const turns = parsed.options.turns === true;
   if (turns && types.length) throw new CliError("usage", "--turns takes the place of --type: a turn is a message received, or a group message that mentions you");
@@ -648,7 +670,7 @@ async function settingsCommand(sub: string | undefined, argv: string[]): Promise
     printAnswer(await withSession(g, (s) => s.call("settings.set", { [key]: parsedValue })) as Record<string, unknown>);
     return;
   }
-  throw new CliError("usage", "ghostly settings get | settings set <key> <json-value>");
+  throw unknownCommand("settings", sub);
 }
 
 async function textCommand(name: string, argv: string[]): Promise<void> {
@@ -660,11 +682,12 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
   // `edit` names the message before the text.
   const [message, ...words] = spec.message ? rest : [undefined, ...rest];
   if (!target || (spec.message && !message)) throw new CliError("usage", `ghostly ${spec.usage}`);
+  // Stdin only when no text word was given at all: `send bob "$line"` with an empty line is no text, not the rest of stdin.
   let text = words.join(" ");
   if (parsed.options.text !== undefined) {
     if (text || parsed.options.stdin) throw new CliError("usage", "Give the text once: as arguments, --text or stdin");
     text = String(parsed.options.text);
-  } else if (parsed.options.stdin || (!text && !process.stdin.isTTY)) {
+  } else if (parsed.options.stdin || (words.length === 0 && !process.stdin.isTTY)) {
     if (text) throw new CliError("usage", "Give the text as arguments or on stdin, not both");
     text = (await readStdin()).replace(/\n$/, "");
   }
@@ -746,13 +769,23 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
   for (const key of Object.keys(params)) if (params[key] === undefined) delete params[key];
   // Evidence is read here, where the file is: the daemon runs elsewhere.
   if (command.method === "identity.complete") {
-    if (params.evidenceFile) params.evidence = readFileSync(params.evidenceFile as string, "utf8");
+    if (params.evidenceFile) {
+      try { params.evidence = readFileSync(params.evidenceFile as string, "utf8"); } catch (error) { throw localFileError(error, params.evidenceFile as string) ?? error; }
+    }
     else if (params.stdin) params.evidence = await readStdin();
     delete params.evidenceFile; delete params.stdin;
   }
+  // Before stdin adds its own: only the --value names came on the command line.
+  const lineValues = command.method === "wallet.create" ? Object.keys((params.values as Record<string, string> | undefined) ?? {}) : [];
   const secretWarning = await secretsFromStdin(command.method, params, readStdin, process.stdin.isTTY === true);
   if (secretWarning) process.stderr.write(`ghostly: ${secretWarning}\n`);
   const result = await withSession(g, async (s) => {
+    if (lineValues.length) {
+      // Which fields are secret is the source's form, in the engine.
+      const list = await s.call("wallet.list", { network: params.network ?? "testnet" }).catch(() => undefined);
+      const warning = secretValuesWarning(list, params.type, params.provider, lineValues);
+      if (warning) process.stderr.write(`ghostly: ${warning}\n`);
+    }
     const result = await s.call(command.method, params) as Record<string, unknown>;
     // A one-shot join leaves once the contact can be reached: its answer has to be out first.
     if (command.method === "invite.join" && s.mode === "one-shot") {

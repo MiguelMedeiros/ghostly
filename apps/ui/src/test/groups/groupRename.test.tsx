@@ -70,6 +70,21 @@ describe("renaming a group in the app", () => {
     expect(engine.callsTo("renameGroup")).toEqual([]);
   });
 
+  // The field's maxLength counted UTF-16 units: a name of emoji stopped at 32 of them, though the group takes 64 (agents#1048).
+  it("takes a name as long as the group does, counted in characters, and cuts a longer one between whole emoji", async () => {
+    fakeEngine.update({ groups: [admin({ name: "Friends" })] });
+    const { user, engine } = renderApp(<GroupMembersDialog group={admin({ name: "Friends" })} onClose={() => {}} />);
+    engine.on("renameGroup", () => undefined);
+    await user.click(screen.getByTestId("group-rename"));
+    const input = screen.getByTestId("group-rename-input");
+    await user.clear(input);
+    await user.click(input);
+    await user.paste("🎉".repeat(40));
+    expect(input).toHaveValue("🎉".repeat(40));
+    await user.type(input, "{Enter}");
+    await waitFor(() => expect(engine.callsTo("renameGroup")).toEqual([{ groupId: "group-1", name: "🎉".repeat(40) }]));
+  });
+
   it("a member cannot rename it", () => {
     fakeEngine.update({ groups: [notAdmin()] });
     renderApp(<GroupMembersDialog group={notAdmin()} onClose={() => {}} />);

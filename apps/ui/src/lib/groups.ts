@@ -1,5 +1,6 @@
-import { decodeCommunityLink, decodeGroupEntryLink, groupEntryUrl, type PairedTransport } from "@ghostly/core";
+import { MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME_LENGTH, decodeCommunityLink, decodeGroupEntryLink, groupEntryUrl, type PairedTransport } from "@ghostly/core";
 import { getPrefix, setSessionDraft } from "./storage";
+import { decodePart } from "./url";
 import { setChatFolder } from "./chatFolders";
 import { forgetChatMute, groupChat } from "./chatMute";
 import type { GroupEdgeView, GroupMemberView, GroupView, LinkView } from "@ghostly/browser/shared/types";
@@ -11,6 +12,28 @@ import { relayCause } from "./problemText";
 import type { Translate } from "../contexts/I18nContext";
 
 /** How a member is named in a group: their announced name, or their key. `t`: the interface's words ("You"). */
+type Segmenter = { segment(text: string): Iterable<{ segment: string }> };
+const SegmenterCtor = (globalThis as { Intl?: { Segmenter?: new (locale?: string, options?: { granularity: string }) => Segmenter } }).Intl?.Segmenter;
+const graphemes = SegmenterCtor ? new SegmenterCtor(undefined, { granularity: "grapheme" }) : null;
+const utf8Bytes = (s: string) => new TextEncoder().encode(s).length;
+
+/**
+ * What a group's name field keeps of what was typed or pasted: as much as `groupName` takes, counted as it counts
+ * (characters, `MAX_GROUP_NAME_LENGTH`, and bytes, `MAX_GROUP_NAME_BYTES`), cut between whole emoji. An input's
+ * `maxLength` counts UTF-16 units: a name of emoji stopped at 32 of them, a family at 5 (agents#1048).
+ */
+export function fitGroupName(value: string): string {
+  if ([...value].length <= MAX_GROUP_NAME_LENGTH && utf8Bytes(value) <= MAX_GROUP_NAME_BYTES) return value;
+  const parts = graphemes ? Array.from(graphemes.segment(value), (s) => s.segment) : [...value];
+  let kept = "", chars = 0, bytes = 0;
+  for (const part of parts) {
+    const c = [...part].length, b = utf8Bytes(part);
+    if (chars + c > MAX_GROUP_NAME_LENGTH || bytes + b > MAX_GROUP_NAME_BYTES) break;
+    kept += part; chars += c; bytes += b;
+  }
+  return kept;
+}
+
 export const memberName = (m: { key: string; me: boolean; nick?: string }, t: Translate = english) =>
   m.me ? t("group.member.you") : m.nick || t("group.member.unnamed", { key: publicKeyLabel(m.key) });
 
@@ -105,7 +128,7 @@ export function groupPath(groupId: string): string {
 /** The group a `/group/…` address points at, or null. */
 export function groupRouteId(pathname: string): string | null {
   const match = pathname.match(/^\/group\/([^/]+)\/?$/);
-  return match ? decodeURIComponent(match[1]) : null;
+  return match ? decodePart(match[1]) : null;
 }
 
 /** When the group last had something unread come: another member's message (an engine without the field: any message). */

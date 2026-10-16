@@ -401,10 +401,11 @@ pub fn open_service_window<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     peer: String,
     service: String,
+    tag: String,
     title: String,
     unreachable: Option<String>,
 ) -> Result<(), String> {
-    viewer::open(&app, peer, service, title, unreachable)
+    viewer::open(&app, peer, service, tag, title, unreachable)
 }
 
 #[tauri::command]

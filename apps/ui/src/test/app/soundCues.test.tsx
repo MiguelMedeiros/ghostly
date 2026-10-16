@@ -3,6 +3,7 @@ import { Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AttentionEvent } from "@ghostly/browser/shared/rpc";
 import { AttentionFeedback } from "../../components/AttentionFeedback";
+import { feedbackClaimKey } from "../../lib/feedbackClaims";
 import { ConfirmRealMoney } from "../../components/ConfirmRealMoney";
 import { RichText } from "../../components/rich/RichText";
 import { useCardFlip } from "../../components/deck/useCardFlip";
@@ -157,6 +158,31 @@ describe("AttentionFeedback plays the engine's cues", () => {
     sound.playSound.mockClear();
     return heard;
   }
+
+  it("claims each event in a few dozen characters of storage, not the last 256 ids again, and leaves one another page claimed", async () => {
+    setup();
+    const written = vi.spyOn(localStorage, "setItem");
+    // A group message's id, as the engine makes it: ~114 characters.
+    const groupId = (i: number) => `message:group:${"g".repeat(43)}:${String(i).padStart(56, "m")}`;
+    await send(...Array.from({ length: 300 }, (_, i) => event({ id: groupId(i), type: "cue", cue: "knock", linkId: "link-a" })));
+    const claims = written.mock.calls.filter(([key]) => key.startsWith("ghostly_feedback_claim"));
+    // Before: one whole list per event, 29 K characters each once it held 256 ids (a 10,000-message fill wrote 293 M).
+    expect(claims.length).toBeGreaterThanOrEqual(300);
+    expect(Math.max(...claims.map(([key, value]) => key.length + value.length))).toBeLessThan(64);
+    written.mockRestore();
+    // Claims go once no event they stand for can be presented: 20 s later, the next claims drop them.
+    const kept = () => Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).filter((key) => key?.startsWith("ghostly_feedback_claim:")).length;
+    expect(kept()).toBeGreaterThanOrEqual(300);
+    const later = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 20_000);
+    await send(...Array.from({ length: 64 }, (_, i) => event({ id: groupId(1000 + i), type: "cue", cue: "knock", linkId: "link-a" })));
+    expect(kept()).toBeLessThanOrEqual(65);
+    later.mockRestore();
+
+    // Another page of the extension presented it already: this one stays quiet.
+    const elsewhere = event({ cue: "request", linkId: "link-a" });
+    localStorage.setItem(feedbackClaimKey(elsewhere.id), String(Date.now()));
+    expect(await send(elsewhere)).toEqual([]);
+  });
 
   it("plays a cue event once, even when it arrives twice", async () => {
     setup();

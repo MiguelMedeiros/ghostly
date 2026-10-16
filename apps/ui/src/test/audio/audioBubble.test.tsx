@@ -133,6 +133,36 @@ describe("an audio file in the chat", () => {
     expect(screen.getByTestId("audio-bubble")).toHaveAttribute("data-state", "paused");
   });
 
+  it("from the keyboard, its play button keeps the focus while the file loads", async () => {
+    // A focused button that turns disabled loses the focus to the page in a browser: Space then scrolled the chat.
+    let give: (blob: Blob) => void = () => {};
+    getFile.mockImplementation(() => new Promise((resolve) => { give = resolve; }));
+    show(song());
+    const button = screen.getByTestId("audio-play");
+    button.focus();
+    fireEvent.click(button);
+    await flush();
+    expect(screen.getByTestId("audio-bubble")).toHaveAttribute("data-state", "loading");
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(button);
+    expect(getFile).toHaveBeenCalledTimes(1);
+    give(new Blob(["mp3"], { type: "audio/mpeg" }));
+    await flush();
+    expect(screen.getByTestId("audio-bubble")).toHaveAttribute("data-state", "playing");
+    expect(button).not.toHaveAttribute("aria-disabled");
+    expect(button).toHaveFocus();
+  });
+
+  it("its seek bar says where it is in the app's language", async () => {
+    fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
+    renderApp(<AudioBubble file={song()} sender="peer" peerName="Ana" />, { language: "pt" });
+    fireEvent.click(screen.getByTestId("audio-play"));
+    await flush();
+    loaded(225);
+    expect(screen.getByTestId("audio-seek")).toHaveAttribute("aria-valuetext", "0:00 de 3:45");
+  });
+
   it("has the speed voice messages share: the pill turns it, for voice messages too", async () => {
     show(song());
     fireEvent.click(screen.getByTestId("audio-play"));

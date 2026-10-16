@@ -139,6 +139,23 @@ describe("the Forward to… picker", () => {
     expect(screen.getByTestId("forward-error")).not.toHaveTextContent("You are offline");
   });
 
+  it("after a chat refused, says where it went, and Send again goes only to the chats that refused", async () => {
+    let refuse = true;
+    fakeEngine.on("forwardMessages", ({ to }: { to: string[] }) => ({ results: to.map(t => ({ to: t, messageIds: t === "link-bo" && refuse ? [] : ["me_1"], error: t === "link-bo" && refuse ? "You are offline" : null })) }));
+    const { user } = open([message()], "link-1");
+    const rows = screen.getAllByTestId("forward-target");
+    await user.click(rows[0]!);
+    await user.click(rows[2]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(screen.getByTestId("forward-error")).toHaveTextContent("Bo: You are offline");
+    expect(screen.getByTestId("forward-sent")).toHaveTextContent("Sent to Ana");
+    expect(screen.getByTestId("forward-chosen")).toHaveTextContent(/^Bo$/);
+    expect(rows[0]).toHaveAttribute("aria-checked", "false");
+    refuse = false;
+    await user.click(screen.getByTestId("forward-send"));
+    expect(fakeEngine.callsTo("forwardMessages").map(c => (c as { to: string[] }).to)).toEqual([["link-ana", "link-bo"], ["link-bo"]]);
+  });
+
   it("asks before forwarding text that looks like a seed, as typing it would", async () => {
     expect(forwardSecret([message({ text: SEED })])).toMatchObject({ kind: "mnemonic" });
     fakeEngine.on("forwardMessages", ({ to }: { to: string[] }) => ({ results: to.map(t => ({ to: t, messageIds: [], error: null })) }));

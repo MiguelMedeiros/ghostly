@@ -5,8 +5,10 @@ import { useEffect } from "react";
 /**
  * Idle loops rest while they are off screen, page-wide: the ghosts' hem morph
  * (SMIL, which CSS cannot pause), their bob and blink, the network twinkles,
- * the rising particles and the footer's sleeping ghost. One observer watches
- * every outermost ghost, every stage, every particle field and the sleeper;
+ * the rising particles, the footer's sleeping ghost, the finale title's
+ * gradient words, Act I's field drift and the pointer ghost (left above when
+ * the page scrolls under a still pointer). One observer watches every
+ * outermost ghost, every stage, every particle field, the sleeper and those;
  * what is not on screen gets `data-offscreen` (CSS pauses its animations) and,
  * for an svg, its SMIL timeline paused, with those of the svgs inside it: a
  * ghost drawn in a stage has a clock of its own, which the stage's pause does
@@ -16,7 +18,12 @@ import { useEffect } from "react";
  * mutation observer. Nothing here changes what is drawn; it only stops the
  * clock on things nobody can see.
  */
-const LOOPS = "svg.ghost:not(svg svg), svg.stage, .particles, .footer-sleeper";
+/**
+ * The finale's gradient words are watched one by one: the section's `data-inview` holds while its download panel is
+ * on screen, a screen below the title, and their background-position loop then cost the end of the home 70 ms a
+ * second (agents#1056).
+ */
+const LOOPS = "svg.ghost:not(svg svg), svg.stage, .particles, .footer-sleeper, .text-gradient-animated, .act-field-drift, .pet";
 
 /** Pauses or resumes an svg's SMIL clock and those of the svgs inside it. */
 function smil(svg: SVGSVGElement, run: boolean) {

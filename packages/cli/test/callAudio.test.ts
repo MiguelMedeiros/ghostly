@@ -1,7 +1,7 @@
 import { createSocket } from "node:dgram";
 import { describe, expect, it, vi } from "vitest";
-import { CallAudio, type RtpTrack } from "../src/calls/audio";
-import { callIceServers, CallMedia, gathering, HOST_GATHER_MS, loadCallStack, type CallStack } from "../src/calls/media";
+import { CallAudio, type OpusCodec, type RtpTrack } from "../src/calls/audio";
+import { callIceServers, CallMedia, callUsesTurn, gathering, HOST_GATHER_MS, loadCallStack, type CallStack } from "../src/calls/media";
 import { bytesToMs, frameBytes, PARTIAL_WAIT_MS, PlaybackQueue, type CallRate } from "../src/calls/pcm";
 import { isRtcp, parseRtp, ReorderBuffer, RtpWriter, sequenceDelta, TICKS_PER_FRAME, type RtpPacket } from "../src/calls/rtp";
 import { dominantHz, level, tone } from "./support/tone";
@@ -176,13 +176,13 @@ describe("a call's candidates", () => {
       };
       const host = "a=candidate:1 1 UDP 2122317823 192.168.1.20 50000 typ host", srflx = "a=candidate:2 1 UDP 1686109951 203.0.113.7 50000 typ srflx raddr 192.168.1.20 rport 50000";
 
-      // The STUN server answers: the reflexive candidate, and 400 ms for what comes with it.
+      // The STUN server answers: the reflexive candidate, and 150 ms for what comes with it (the signal keeps that one).
       const answered = waiting();
       answered.candidate(host);
       await vi.advanceTimersByTimeAsync(30);
       answered.candidate(srflx);
       await vi.advanceTimersByTimeAsync(5000);
-      expect(answered.ended()).toBe(430);
+      expect(answered.ended()).toBe(180);
 
       // It never answers: the host candidate goes after the bounded wait.
       const silent = waiting();
@@ -207,6 +207,46 @@ describe("a call's candidates", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("with a TURN server, wait for the relay candidate, not the reflexive one: a far TURN server's comes after it", async () => {
+    vi.useFakeTimers();
+    try {
+      const waiting = (turn: boolean) => {
+        let candidate: (line: string) => void = () => {};
+        const started = Date.now();
+        let ended: number | null = null;
+        void gathering({ onLocalCandidate: (cb) => { candidate = cb as typeof candidate; }, onGatheringStateChange: () => {} }, { turn }).then(() => { ended = Date.now() - started; });
+        return { candidate: (line: string) => candidate(line), ended: () => ended };
+      };
+      const host = "a=candidate:1 1 UDP 2122317823 192.168.1.20 50000 typ host", srflx = "a=candidate:2 1 UDP 1686109951 203.0.113.7 50000 typ srflx raddr 192.168.1.20 rport 50000";
+      const relay = "a=candidate:3 1 UDP 16777215 198.51.100.9 60000 typ relay raddr 203.0.113.7 rport 50000";
+
+      // STUN at once, the TURN allocation (two round trips) 300 ms later: the relay goes in the description.
+      const far = waiting(true);
+      far.candidate(host);
+      far.candidate(srflx);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(far.ended()).toBeNull();
+      far.candidate(relay);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(far.ended()).toBe(450);
+
+      // A TURN server that never answers: what was gathered goes after the bounded wait.
+      const silent = waiting(true);
+      silent.candidate(host);
+      silent.candidate(srflx);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(silent.ended()).toBe(HOST_GATHER_MS);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("know a call's ICE servers have a TURN server", () => {
+    expect(callUsesTurn(callIceServers([], { GHOSTLY_STUN: "1" }))).toBe(false);
+    expect(callUsesTurn(callIceServers([{ urls: "stun:stun.example.org" }], { GHOSTLY_STUN: "1" }))).toBe(false);
+    expect(callUsesTurn(callIceServers([{ urls: "turn:turn.example.org", username: "u", credential: "p" }], { GHOSTLY_STUN: "0" }))).toBe(true);
   });
 });
 
@@ -248,6 +288,49 @@ function handLoop() {
     restore(): void { vi.unstubAllGlobals(); vi.restoreAllMocks(); },
   };
 }
+
+// A daemon in three calls or more at once: each call's encoder and decoder keep to their own memory. opusscript's PCM
+// views started at twice their block's address, over other codecs' blocks: once ended calls' blocks were taken again,
+// audio turned to noise and the module threw ("memory access out of bounds").
+describe("several calls' Opus codecs at once", () => {
+  it("each call's audio is what one codec alone makes, while calls end and new ones start beside it", async () => {
+    const stack = await loadCallStack();
+    if (typeof stack === "string") throw new Error(stack);
+    const rate = 48000, samples = rate / 50, length = 200;
+    const frames = Array.from({ length }, (_, i) => tone(300 + 7 * (i % 100), rate, 20));
+    // Now and then a packet is lost: the decoder conceals it (an empty packet), which writes far more than a frame.
+    const lost = (i: number) => i % 25 === 24;
+    const hear = (decoder: OpusCodec, packet: Buffer, i: number) => decoder.decode(lost(i) ? Buffer.alloc(0) : packet);
+    const lone = (() => {
+      const encoder = stack.opus(rate), decoder = stack.opus(rate);
+      const out = frames.map((frame, i) => { const packet = encoder.encode(frame, samples); return { packet, pcm: hear(decoder, packet, i) }; });
+      encoder.delete?.(); decoder.delete?.();
+      return out;
+    })();
+    let seed = 7;
+    const next = () => (seed = (seed * 1_103_515_245 + 12_345) % 2 ** 31);
+    const wrong: string[] = [];
+    const say = (where: string, error: unknown) => wrong.push(`${where}: ${error instanceof Error ? error.message : String(error)}`);
+    const start = () => ({ encoder: stack.opus(rate), decoder: stack.opus(rate), at: 0 });
+    const end = (call: ReturnType<typeof start>, where: string) => { try { call.encoder.delete?.(); call.decoder.delete?.(); } catch (error) { say(`${where} delete`, error); } };
+    const calls = Array.from({ length: 6 }, start);
+    for (let round = 0; round < 60 && wrong.length < 5; round++) {
+      // 20 ms ticks, interleaved as the calls' are.
+      for (let tick = 0; tick < 20; tick++) calls.forEach((call, n) => {
+        if (call.at === length) { end(call, `round ${round} call ${n}`); calls[n] = call = start(); }
+        const i = call.at++;
+        try {
+          const packet = call.encoder.encode(frames[i], samples);
+          if (!packet.equals(lone[i].packet) || !hear(call.decoder, packet, i).equals(lone[i].pcm)) wrong.push(`round ${round} call ${n} frame ${i}: differs`);
+        } catch (error) { say(`round ${round} call ${n} frame ${i}`, error); }
+      });
+      // One to three calls end, and as many start: they take the blocks just freed, in their own order.
+      for (let k = 1 + (next() % 3); k > 0; k--) { const n = next() % calls.length; end(calls[n], `round ${round} call ${n}`); calls[n] = start(); }
+    }
+    calls.forEach((call, n) => end(call, `last call ${n}`));
+    expect(wrong).toEqual([]);
+  });
+});
 
 describe("a call's audio through Opus", () => {
   for (const rate of [48000, 16000] as const) {

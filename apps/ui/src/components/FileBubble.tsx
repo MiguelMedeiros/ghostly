@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { PREVIEWABLE_IMAGE, readImageMeta, sanitizeFileName, type ImageMeta } from "@ghostly/core";
+import { PREVIEWABLE_IMAGE, previewable, readImageMeta, sanitizeFileName, type ImageMeta } from "@ghostly/core";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
@@ -108,10 +108,18 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
         setMissing(saveable ? false : held === "left-out" ? "left-out" : true);
         return;
       }
-      // Its sender said nothing of its size: read here from its first bytes, so the box is right before it shows.
-      const size = picture && !file.image && !knownPictureSize(file.id) ? await readImageMeta(shown.blob, file.mime) : undefined;
+      // A picture's size is read here from its own first bytes, every time: what its sender said only lays out the
+      // box. One its bytes say is too large to draw (a few kilobytes can say gigabytes once decoded), or whose bytes
+      // say no size at all, is not drawn: it offers Save only.
+      const size = picture ? await readImageMeta(shown.blob, file.mime) : undefined;
       if (cancelled) { shown.release(); return; }
-      if (size) { rememberPictureSize(file.id, size); setFound({ id: file.id, size }); }
+      if (picture && !previewable(size)) {
+        shown.release();
+        setMissing(false);
+        setSaveOnly(true);
+        return;
+      }
+      if (size && !file.image && !knownPictureSize(file.id)) { rememberPictureSize(file.id, size); setFound({ id: file.id, size }); }
       setPreview({ id: file.id, url: shown.url, release: shown.release });
       setMissing(false);
       setSaveOnly(false);

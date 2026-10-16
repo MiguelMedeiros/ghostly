@@ -61,6 +61,11 @@ export function appsRunning(): boolean {
   return running.size > 0;
 }
 
+/** Stops every running app and says nothing: the profile locked, and nothing of it answers an app behind the lock. */
+export function stopRunningApps(): void {
+  for (const entry of [...running]) entry.stop();
+}
+
 type RunOf = { status: string; by?: readonly { name: string }[] };
 
 /**

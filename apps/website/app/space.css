@@ -287,6 +287,12 @@
 .sp-deck-placeholder {
   height: calc(min(340px, (100cqw - 16px) * 0.62) / 1.586 + 63px);
 }
+/* A finger gets the track (deck/Deck.tsx): a card 76% of the deck's width, the track's padding and the arrows. */
+@media not ((hover: hover) and (pointer: fine)) {
+  .sp-deck-placeholder {
+    height: calc(min(100cqw, 960px) * 0.76 / 1.586 + 60px);
+  }
+}
 /* No text under 12px on the site: the card's status and kind, a size up from the app's. */
 .sp-deck .wallet-deck-card-status {
   font-size: 12px;

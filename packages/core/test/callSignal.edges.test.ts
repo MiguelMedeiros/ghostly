@@ -242,7 +242,7 @@ describe("waiting for ICE gathering", () => {
     expect(remove).toHaveBeenCalledTimes(2);
   });
 
-  it("settles shortly after the server-reflexive candidate without TURN, ignoring host ones", async () => {
+  it("settles 150 ms after the server-reflexive candidate without TURN, ignoring host ones", async () => {
     vi.useFakeTimers();
     const pc = new FakePeer();
     const done = await pending(waitForIceGathering(pc as unknown as RTCPeerConnection));
@@ -251,7 +251,8 @@ describe("waiting for ICE gathering", () => {
     await vi.advanceTimersByTimeAsync(1000); expect(done()).toBe(false);
     pc.candidate("candidate:2 1 udp 1 203.0.113.1 9 typ srflx raddr 0.0.0.0 rport 0");
     pc.candidate("candidate:3 1 udp 1 203.0.113.2 9 typ srflx raddr 0.0.0.0 rport 0");
-    await vi.advanceTimersByTimeAsync(399); expect(done()).toBe(false);
+    // A call's signal keeps the first reflexive candidate only (`pickCallCandidates`): 400 ms more held its ring back.
+    await vi.advanceTimersByTimeAsync(149); expect(done()).toBe(false);
     await vi.advanceTimersByTimeAsync(1); expect(done()).toBe(true);
   });
 
@@ -262,7 +263,8 @@ describe("waiting for ICE gathering", () => {
     pc.candidate("candidate:2 1 udp 1 203.0.113.1 9 typ srflx raddr 0.0.0.0 rport 0");
     await vi.advanceTimersByTimeAsync(1000); expect(done()).toBe(false);
     pc.candidate("candidate:4 1 udp 1 203.0.113.9 9 typ relay raddr 0.0.0.0 rport 0");
-    await vi.advanceTimersByTimeAsync(400); expect(done()).toBe(true);
+    await vi.advanceTimersByTimeAsync(149); expect(done()).toBe(false);
+    await vi.advanceTimersByTimeAsync(1); expect(done()).toBe(true);
   });
 
   it("gives up after the timeout, 10 s by default", async () => {
@@ -305,7 +307,7 @@ describe("waiting for ICE gathering", () => {
     const pc = new FakePeer();
     const done = await pending(waitForIceGathering(pc as unknown as RTCPeerConnection, 5_000, { stallMs: 3000 }));
     pc.candidate("candidate:1 1 udp 2122260223 8.8.8.8 50000 typ host generation 0");
-    await vi.advanceTimersByTimeAsync(399); expect(done()).toBe(false);
+    await vi.advanceTimersByTimeAsync(149); expect(done()).toBe(false);
     await vi.advanceTimersByTimeAsync(1); expect(done()).toBe(true);
   });
 

@@ -72,7 +72,7 @@ describe("the host the app page runs on", () => {
   it("says what went wrong when the worker refuses a payment link or a service", async () => {
     const { extensionHost } = await load();
     await expect(extensionHost.openPaymentLink!("https://evil.example")).rejects.toThrow("Not a payment link");
-    await expect(extensionHost.openService!("not-a-key", "atlas")).rejects.toThrow("Invalid service");
+    await expect(extensionHost.openService!("not-a-key", "atlas", "ybndrfg8ejkmcpqx")).rejects.toThrow("Invalid service");
     await extensionHost.openPaymentLink!("lightning:lnbc1");
     expect(world.callsTo("tabs.create")).toEqual([["lightning:lnbc1"]]);
   });

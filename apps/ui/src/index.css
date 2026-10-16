@@ -401,6 +401,14 @@ html[data-standalone="true"] {
     height: var(--app-height, 100dvh);
   }
 
+  /* A dialog too, as on a phone held upright (below): centred on the whole screen, an iPhone or iPad on its side
+     had New group's Create and Forward's Send under the keyboard. */
+  html[data-keyboard="true"] dialog:modal:not([data-testid="avatar-viewer"]) {
+    top: env(safe-area-inset-top);
+    bottom: calc(100% - var(--app-height, 100%));
+    max-height: calc(var(--app-height, 100dvh) - env(safe-area-inset-top) - 2rem);
+  }
+
   /* As on a phone held upright (below): a field under 16px makes iOS zoom into it on focus, and the page stayed
      zoomed and panned once the keyboard went, an iPhone on its side too (874px wide, two panes). */
   input,
@@ -875,7 +883,7 @@ html[data-standalone="true"] {
     box-shadow: none;
   }
 
-  .wallet-screen [data-testid="wallet-balance"] > span:first-child {
+  .wallet-screen [data-testid="wallet-balance"] > bdi:first-child {
     font-size: 2rem;
   }
 }
@@ -941,6 +949,17 @@ html[data-standalone="true"] {
 
   html[data-keyboard="true"] .toast-place.toast-place-page {
     bottom: 1.5rem;
+  }
+
+  /* A dialog that is not a <dialog> (Apps → Add, Add identity, New wallet): its layer over the whole window ends
+     where the keyboard starts, so the panel is centred in what is left and scrolls within it, instead of its field
+     and buttons sitting under the keyboard. */
+  html[data-keyboard="true"] .fixed.inset-0:has(> [aria-modal="true"]) {
+    bottom: calc(100% - var(--app-height, 100%));
+  }
+
+  html[data-keyboard="true"] .fixed.inset-0 > [aria-modal="true"] {
+    max-height: 100%;
   }
 }
 

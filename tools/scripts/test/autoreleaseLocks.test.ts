@@ -61,6 +61,22 @@ describe("the security autorelease gate's lock file check", () => {
     }
   });
 
+  // npm resolves dot segments, also percent-encoded, before it fetches: these all download another package.
+  it("refuses an npm dependency whose URL starts with its registry path but is not its tarball", () => {
+    for (const resolved of [
+      "https://registry.npmjs.org/lodash/-/../../not-lodash/-/not-lodash-1.0.0.tgz",
+      "https://registry.npmjs.org/lodash/-/%2e%2e/%2e%2e/not-lodash/-/not-lodash-1.0.0.tgz",
+      "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz?x=1",
+      "https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz#x",
+      "https://registry.npmjs.org/lodash/-/not-lodash-4.17.21.tgz",
+      "https://registry.npmjs.org/lodash/-/lodash-4.17.22.tgz",
+    ]) {
+      const run = runGate(npmBump({ "node_modules/lodash": registry("lodash", "4.17.20") }, { "node_modules/lodash": { version: "4.17.21", resolved, integrity: "sha512-x" } }), "deps");
+      expect(run.code, resolved).toBe(1);
+      expect(run.stderr).toContain("changes where dependencies come from: lodash");
+    }
+  });
+
   it("refuses a workspace link turned into a download", () => {
     const run = runGate(npmBump({}, { "node_modules/@ghostly/web": registry("@ghostly/web", "9.9.9") }), "deps");
     expect(run.code).toBe(1);

@@ -76,7 +76,7 @@ export const EARLY_ANSWER_MS = 30_000;
 /**
  * A call this side placed that ended before it was answered (hung up while it rang, or rang out) is followed by the
  * next one in the same chat no sooner than this: the contact's app keeps a call that comes this soon after a missed one
- * as missed and does not ring it (packages/react `QUICK_REDIAL_MS`, 2 s), so it would only add a line. A bot looping
+ * that barely rang as missed and does not ring it (packages/react `QUICK_REDIAL_MS`, 2 s), so a loop would only add lines. A bot looping
  * `call.start` / `call.hangup` placed 1,375 calls a minute (agents#974). `call.start` refuses sooner with `busy` and the
  * wait left (`retryAfterMs`); a person placing calls by hand never meets it.
  */
@@ -613,7 +613,8 @@ export class CallManager {
     // A call placed here that the contact never answered: the next one waits a moment (`CALL_PACE_MS`).
     if (call.direction === "out" && call.connectedAt === null && call.state === "ringing" && (reason === "hangup" || reason === "unanswered")) this.unansweredAt.set(call.chat, this.now);
     if (report) process.stderr.write(`ghostly: call ${call.id}: ended (${reason})${call.media ? `, ice ${call.media.ice.state}` : ""}\n`);
-    call.media?.close();
+    // Whatever the media's close throws, the rest of the end follows: the contact is told, the program reads EOF.
+    try { call.media?.close(); } catch (error) { process.stderr.write(`ghostly: call ${call.id}: closing its media failed: ${error instanceof Error ? error.message : String(error)}\n`); }
     // A call that ends ringing (declined, missed, stale) closes the answer it made ahead; one being made, once made.
     this.stopEarly(call);
     call.early?.close();

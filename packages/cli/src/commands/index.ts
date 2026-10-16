@@ -78,28 +78,47 @@ export function idSlot(command: { args?: string[] }): (index: number) => boolean
 }
 
 /**
- * The positionals of a command, by name; missing required ones are a usage error. A leading `name?` is optional: it
- * is given only when every required one is there too (`file accept [<chat>] <file>`). A trailing `name...` takes the
- * rest and needs at least one word; `name...?` may take none (text from stdin, `chat rename`'s name back to the
- * contact's).
+ * The placeholders a usage line shows for its positionals, in order: `chat pay <chat> <sats> [--memo t]` →
+ * ["chat", "sats"]. One that is not a plain `<x>` (`[text... | --text <text>]`) is undefined; the flags end them.
+ */
+function usageNames(usage: string): (string | undefined)[] {
+  const words = usage.split(/\s+/);
+  const first = words.findIndex((word) => word.startsWith("<") || word.startsWith("["));
+  const out: (string | undefined)[] = [];
+  for (const word of first === -1 ? [] : words.slice(first)) {
+    if (/^\[?-|^\|/.test(word)) break;
+    out.push(/^\[?<([^>]+?)(?:\.\.\.)?>(?:\.\.\.)?\]?$/.exec(word)?.[1]);
+  }
+  return out;
+}
+
+/**
+ * The positionals of a command, by name; missing required ones are a usage error, and so are ones given as "" (an
+ * unset variable in a script), before the profile opens. A leading `name?` is optional: it is given only when every
+ * required one is there too (`file accept [<chat>] <file>`). A trailing `name...` takes the rest and needs at least
+ * one word that is not ""; `name...?` may take none (text from stdin, `chat rename`'s name back to the contact's).
  */
 export function positionals(command: { usage: string; args?: string[] }, values: readonly string[]): Record<string, string | undefined> {
   let names = command.args ?? [];
   const optional = names.filter(leadingOptional);
+  let skip = 0;
   if (optional.length) {
-    const skip = Math.max(0, optional.length - Math.max(0, values.length - (names.length - optional.length)));
+    skip = Math.max(0, optional.length - Math.max(0, values.length - (names.length - optional.length)));
     names = [...optional.slice(skip).map((name) => name.slice(0, -1)), ...names.filter((name) => !leadingOptional(name))];
   }
+  // Named as the usage line shows it (`<sats>`, not the parameter's `amount`).
+  const shown = usageNames(command.usage);
+  const missing = (i: number, name: string) => new CliError("usage", `Missing <${shown[i + skip] ?? name}>: ghostly ${command.usage}`);
   const out: Record<string, string | undefined> = {};
   for (let i = 0; i < names.length; i++) {
     const name = names[i].replace(/\?$/, "");
     if (name.endsWith("...")) {
       const rest = values.slice(i);
-      if (!rest.length && !names[i].endsWith("?")) throw new CliError("usage", `Missing <${name.slice(0, -3)}>: ghostly ${command.usage}`);
+      if (rest.every((word) => word === "") && !names[i].endsWith("?")) throw missing(i, name.slice(0, -3));
       out[name.slice(0, -3)] = rest.length ? rest.join(" ") : undefined;
       return out;
     }
-    if (values[i] === undefined) throw new CliError("usage", `Missing <${name}>: ghostly ${command.usage}`);
+    if (values[i] === undefined || values[i] === "") throw missing(i, name);
     out[name] = values[i];
   }
   noMoreThan(names.length, values, command.usage);

@@ -1,7 +1,7 @@
 import { bech32, bech32m } from "@scure/base";
 import { generateEncryptionKey } from "./crypto";
 import { createIdentity, identityFromSeedB64 } from "./identity";
-import { fromBase64Url, fromZ32, toBase64Url, toZ32 } from "./bytes";
+import { fromBase64Url, fromZ32, isZ32Key, toBase64Url, toZ32 } from "./bytes";
 import { trimEndOf } from "./text";
 
 /**
@@ -136,7 +136,6 @@ function readGhostly(code: string): InviteReading {
 }
 
 const B64_KEY = /^[A-Za-z0-9_-]{43}$/;
-const Z32_KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
 
 function readSlashForm(code: string): InviteReading {
   const dht = code.startsWith("pair2d/");
@@ -147,7 +146,7 @@ function readSlashForm(code: string): InviteReading {
     return profile ? { ok: false, reason: "damaged", detail: "Three fields expected" } : { ok: false, reason: "not-ghostly" };
   }
   const [seedB64, peerPubKeyZ32, encKeyB64] = parts;
-  const bad = !B64_KEY.test(seedB64) ? "The seed" : !Z32_KEY.test(peerPubKeyZ32) ? "The contact's key" : !B64_KEY.test(encKeyB64) ? "The shared key" : null;
+  const bad = !B64_KEY.test(seedB64) ? "The seed" : !isZ32Key(peerPubKeyZ32) ? "The contact's key" : !B64_KEY.test(encKeyB64) ? "The shared key" : null;
   if (bad) return { ok: false, reason: "damaged", detail: `${bad} is malformed` };
   return {
     ok: true,

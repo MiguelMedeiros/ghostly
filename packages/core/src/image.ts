@@ -17,7 +17,24 @@ export const IMAGE_LIMITS = {
   maxEdge: 65_535,
   /** How much of a file is read for its size: past a JPEG's EXIF, thumbnails and colour profile. */
   headBytes: 256 * 1024,
+  /**
+   * The most pixels a picture drawn in a chat may have: a 50-megapixel phone photo (8160 × 6120), about 200 MB once
+   * decoded. A few kilobytes can say far more (a PNG of 23000 × 23000 is 64 KB and 2 GB decoded): past this a picture
+   * is kept and saved, not drawn.
+   */
+  previewPixels: 50_000_000,
+  /** The longest side a picture drawn in a chat may have: a wide panorama. */
+  previewEdge: 16_384,
 } as const;
+
+/**
+ * Whether a picture of this size, read from its own bytes (never from what its sender said), may be drawn: undefined
+ * (its bytes do not say) may not either, as what draws it would find its size only by decoding it.
+ */
+export function previewable(size: ImageMeta | undefined): boolean {
+  return !!size && size.width <= IMAGE_LIMITS.previewEdge && size.height <= IMAGE_LIMITS.previewEdge
+    && size.width * size.height <= IMAGE_LIMITS.previewPixels;
+}
 
 /** Whether a file is a picture, by its type. */
 export function isImageMime(mime: string): boolean {

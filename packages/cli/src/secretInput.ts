@@ -6,6 +6,11 @@ import { CliError } from "./errors";
  * a warning. Fills `params` in place; the warning to print on stderr, if any. `tty`: stdin is a terminal, where a
  * read would wait on the keyboard without a word.
  */
+const JOINS: Record<string, { param: string; arg: string; command: string; what: string }> = {
+  "group.join": { param: "link", arg: "<link>", command: "group join", what: "A group's link" },
+  "invite.join": { param: "invite", arg: "<invite-or-link>", command: "invite join", what: "An invite" },
+};
+
 export async function secretsFromStdin(method: string, params: Record<string, unknown>, read: () => Promise<string>, tty = false): Promise<string | undefined> {
   const warning = (what: string) => `${what} on the command line shows in ps and the shell's history: give it on stdin instead`;
   if (method === "wallet.redeem") {
@@ -17,8 +22,20 @@ export async function secretsFromStdin(method: string, params: Record<string, un
     params.token = token;
     return undefined;
   }
+  // A group's link and a chat's invite are secrets everywhere else (hidden in `group show`, in no event): the same here.
+  const join = JOINS[method];
+  if (join) {
+    if (params[join.param] !== undefined && params[join.param] !== "-") return warning(join.what);
+    const missing = () => new CliError("usage", `Missing ${join.arg}: give it on stdin (… | ghostly ${join.command}) or as an argument`);
+    if (tty) throw missing();
+    const value = (await read()).trim();
+    if (!value) throw missing();
+    params[join.param] = value;
+    return undefined;
+  }
   if (method === "wallet.create") {
-    // A form's fields are often plain (a network, a script type): only the API key is warned about.
+    // A form's fields are often plain (a network, a script type): the API key here, the secret fields by
+    // `secretValuesWarning` once the source's form is known.
     const onLine = params.apiKey !== undefined;
     if (params.stdin === true) {
       const values = { ...(params.values as Record<string, string> | undefined) };
@@ -36,4 +53,18 @@ export async function secretsFromStdin(method: string, params: Record<string, un
     return onLine ? warning("An API key") : undefined;
   }
   return undefined;
+}
+
+/**
+ * `wallet create --value`: the names given on the command line that the chosen source's form marks `kind: "secret"`
+ * (an NWC URI, a macaroon, a rune, an RPC password), as a warning. `list`: a `wallet.list` answer, where the forms are.
+ */
+export function secretValuesWarning(list: unknown, type: unknown, provider: unknown, names: string[]): string | undefined {
+  if (!names.length) return undefined;
+  const id = provider ?? (type === "bitcoin" ? "bdk" : undefined);
+  const offers = (list as { offers?: { type?: string; providers?: { id: string; fields?: { name: string; kind?: string }[] }[] }[] } | undefined)?.offers ?? [];
+  const fields = offers.find((o) => o.type === type && o.providers)?.providers?.find((p) => p.id === id)?.fields ?? [];
+  const secret = names.filter((name) => fields.some((f) => f.name === name && f.kind === "secret"));
+  if (!secret.length) return undefined;
+  return `${secret.map((name) => `--value ${name}`).join(", ")} on the command line shows in ps and the shell's history: give ${secret.length > 1 ? "them" : "it"} on stdin instead (--stdin, name=value lines)`;
 }

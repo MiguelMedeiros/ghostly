@@ -56,6 +56,7 @@ function fake() {
     walletReceiveToken: vi.fn(async (_: unknown) => ({ amount: 1 })),
     bitcoinReceiveAddress: vi.fn(async (_: unknown) => "tb1q"),
     connect: vi.fn(async (_: unknown) => undefined),
+    setChatPaymentMethods: vi.fn(async (_: unknown) => undefined),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {} }, mode: "daemon", version: "t" } as unknown as ApiContext;
   return { ctx, node };
@@ -80,6 +81,28 @@ describe("wallets", () => {
     expect(asked.providerId).toBe("bdk");
     expect(validateMnemonic(asked.values.mnemonic, wordlist)).toBe(true);
     expect(JSON.stringify(made)).not.toContain(asked.values.mnemonic);
+  });
+
+  it("an empty type or network (an unset variable in a script) is refused before the engine, never read as the default", async () => {
+    const { ctx, node } = fake();
+    for (const method of ["wallet.create", "wallet.remove", "wallet.faucet", "wallet.address"]) {
+      await expect(callApi(ctx, method, { type: "" }), method).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/^type must be one of /) });
+    }
+    await expect(callApi(ctx, "wallet.list", { network: "" })).rejects.toMatchObject({ code: "bad_request", message: "network must be one of mainnet, testnet" });
+    expect(node.walletCreate).not.toHaveBeenCalled();
+    expect(node.walletRemove).not.toHaveBeenCalled();
+  });
+
+  it("chat.accept refuses networks that name no network, as it refuses a bogus one, before the engine", async () => {
+    // Found in a bug hunt: `chat accept bob cashu --networks ""` exited 0 and left cashu on no network while methods still said it was on.
+    const { ctx, node } = fake();
+    for (const networks of [[], ["bogus"]]) {
+      await expect(callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", on: true, networks }), JSON.stringify(networks)).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/^networks must list mainnet and\/or testnet/) });
+    }
+    await expect(callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", on: true, networks: [] })).rejects.toThrow(/--off/);
+    expect(node.setChatPaymentMethods).not.toHaveBeenCalled();
+    await callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", on: true, networks: ["testnet"] });
+    expect(node.setChatPaymentMethods.mock.calls.at(-1)![0]).toEqual({ linkId: "chat-one", methods: { cashu: true }, networks: { cashu: ["testnet"] } });
   });
 
   it("removal holding money needs the person's acceptLoss", async () => {

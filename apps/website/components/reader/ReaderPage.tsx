@@ -3,7 +3,7 @@ import path from "node:path";
 import Link from "next/link";
 import GithubSlugger from "github-slugger";
 import { Shell } from "@/components/site/Shell";
-import { IntentLink, PageLink } from "@/components/site/IntentLink";
+import { IntentLink } from "@/components/site/IntentLink";
 import { LevelBadge } from "@/components/site/Level";
 import { reader } from "@/content/reader";
 import { catalog } from "@/content/catalog";
@@ -77,18 +77,18 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
     <Shell>
       <div className="wrap reader">
         <nav className="reader-crumbs" aria-label="Breadcrumb">
-          <Link href={"/developers"}>{t.developers}</Link>
+          <IntentLink href={"/developers"}>{t.developers}</IntentLink>
           <span aria-hidden="true">/</span>
-          <Link href={"/wisps"}>{t.catalog}</Link>
+          <IntentLink href={"/wisps"}>{t.catalog}</IntentLink>
           <span aria-hidden="true">/</span>
           <span aria-current="page">{w ? `WISP ${w.number}` : t.reference}</span>
         </nav>
 
         <div className="reader-layout">
           <aside className="reader-side">
-            <Link className="reader-glossary" href={`/wisps#glossary`}>
+            <IntentLink className="reader-glossary" href={`/wisps#glossary`}>
               {t.glossary} →
-            </Link>
+            </IntentLink>
             {/* Without scripts the groups cannot be opened, so every one of them is shown. */}
             <noscript>
               <style>{".reader-group-panel{grid-template-rows:1fr!important;visibility:visible!important}.reader-all-toggle,.reader-group-chevron{display:none!important}"}</style>
@@ -149,7 +149,7 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
                     <div>
                       <dt>{t.inApp}</dt>
                       <dd>
-                        <PageLink href={w.feature.href}>{w.feature.label} →</PageLink>
+                        <IntentLink href={w.feature.href}>{w.feature.label} →</IntentLink>
                       </dd>
                     </div>
                   )}
@@ -258,9 +258,9 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
                   </Link>
                 )}
               </nav>
-              <Link className="link-arrow" href={"/wisps"}>
+              <IntentLink className="link-arrow" href={"/wisps"}>
                 {t.back}
-              </Link>
+              </IntentLink>
             </footer>
           </article>
         </div>

@@ -159,7 +159,9 @@
   background: var(--color-surface);
   color: var(--color-text-primary);
   font-size: 13px;
-  white-space: nowrap;
+  /* One line while it fits; on a phone a longer language wraps rather than running off the screen's start edge. */
+  width: max-content;
+  max-width: calc(100vw - 16px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   animation: fade-in 120ms ease-out;
 }

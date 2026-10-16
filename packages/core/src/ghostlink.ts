@@ -3,7 +3,7 @@ import type { DhtFileAnnouncement, DhtFileOffer } from "./dhtFiles";
 import { PairedFiles } from "./pairedFiles";
 import { TransportSwitch, allowedTransports, type SwitchPlan } from "./transportSwitch";
 import { proofHash, type ProofAdapter, type ProofScope } from "./peerProofs";
-import { IDENTITY_MAX_FRAME, type IdentityScope } from "./identityProofs";
+import { IDENTITY_FRAME_LIMIT, IDENTITY_FRAME_WINDOW_MS, IDENTITY_MAX_FRAME, type IdentityScope } from "./identityProofs";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { identityFromSeedB64, publicKeyFromZ32 } from "./identity";
 import { TRANSPORTS, irohRelayUrl, checkedDescriptors, rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type NativeTransport, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
@@ -818,6 +818,16 @@ export class GhostLink {
   /** Edit frames the contact may send per window; the rest go unconfirmed and come again. */
   private readonly editsReceived = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS);
   private readonly wakeReceived = new RateWindow(6, 60_000);
+  /**
+   * The contact's name and picture, each saved when it changes: said once a session and when changed, so a handful a
+   * minute each. Past that only the newest waits, read once the window has room again.
+   */
+  private readonly peerSaid = {
+    "paired-nick": { window: new RateWindow(6, 60_000), read: null as (() => void) | null, timer: null as ReturnType<typeof setTimeout> | null },
+    "paired-avatar": { window: new RateWindow(6, 60_000), read: null as (() => void) | null, timer: null as ReturnType<typeof setTimeout> | null },
+  };
+  /** Identity-proof frames the contact may send per window; the rest are dropped before they are read. */
+  private readonly identityReceived = new RateWindow(IDENTITY_FRAME_LIMIT, IDENTITY_FRAME_WINDOW_MS);
   private livenessTimer: ReturnType<typeof setInterval> | null = null;
   private peerAnswersPings = false;
   /** When the ping awaiting its pong went, and the round trip last measured on this session. */
@@ -2157,8 +2167,9 @@ export class GhostLink {
 
   /**
    * Ends the idle live session on this transport and lets its listener go, for a chat in use that found every one
-   * taken. The contact hears a goodbye, as when an app quits, rather than finding out when its pings go unanswered; the
-   * record then lists the transport undescribed, so it stops dialling here. The chat goes on over the DHT (or WebRTC),
+   * taken. The contact hears a goodbye that says so (`yield`, `peerYielded`), rather than finding out when its pings go
+   * unanswered, and does not watch for this app as for one that quit; the record then lists the transport undescribed,
+   * so it stops dialling here. The chat goes on over the DHT (or WebRTC),
    * and takes a listener again the same way once it is in use. False when the session may not end (see above).
    */
   async yieldEndpoint(transport: PairedTransport, idleMs: number): Promise<boolean> {
@@ -2168,7 +2179,8 @@ export class GhostLink {
     // is free to go once the goodbye is out.
     this.yielding = true;
     try {
-      try { this.channel?.send(JSON.stringify({ t: "paired-bye" })); } catch { /* closing already: its close says as much */ }
+      // `yield`: the app stays, so the contact does not watch for it to come back (older apps read a plain goodbye).
+      try { this.channel?.send(JSON.stringify({ t: "paired-bye", yield: true })); } catch { /* closing already: its close says as much */ }
       // Closed at once, a HyperDHT stream dropped the goodbye and the contact heard only the close (`peer-lost`).
       await new Promise(resolve => setTimeout(resolve, YIELD_BYE_MS));
       this.disconnect();
@@ -3856,7 +3868,10 @@ export class GhostLink {
             for (const waiter of this.handledWaiters.filter(w => w.ping <= answered)) waiter.done(true);
             return;
           }
-          if (frame?.t === "paired-bye") { if (paired.state.status === "ready") this.peerDeparted(channel); return; }
+          if (frame?.t === "paired-bye") {
+            if (paired.state.status === "ready") { if (frame.yield === true) this.peerYielded(channel); else this.peerDeparted(channel); }
+            return;
+          }
           if (!frame || typeof frame !== "object") return;
           if (paired.peerTransportSwitchSupport && this.switcher.handle(frame)) return;
           if (frame.t === "paired-rtc") {
@@ -3888,23 +3903,14 @@ export class GhostLink {
             return;
           }
           if (typeof frame?.t === "string" && frame.t.startsWith("idp-") && this.identitySupport) {
-            await this.options.events?.onIdentityProof?.(frame); return;
+            if (this.identityReceived.take()) await this.options.events?.onIdentityProof?.(frame);
+            return;
           }
           if (typeof frame?.t === "string" && frame.t.startsWith("proof-") && this.peerProofSupport) {
             await this.options.events?.onPeerProof?.(frame); return;
           }
-          if (frame?.t === "paired-avatar") {
-            const avatar = sanitizeAvatar(frame.a);
-            if (avatar !== undefined) this.options.events?.onPeerAvatar?.(avatar);
-            return;
-          }
-          if (frame?.t === "paired-nick") {
-            const nick = sanitizeNick(frame.n);
-            if (typeof frame.n === "string") this.options.events?.onPeerNick?.(nick ?? null);
-            if (nick !== this.peerNickOverride) {
-              this.peerNickOverride = nick ?? null;
-              this.options.events?.onPresence?.(this.presence);
-            }
+          if (frame?.t === "paired-avatar" || frame?.t === "paired-nick") {
+            this.peerSays(channel, frame.t, frame);
             return;
           }
           if (frame?.t === SESSION_CAPABILITIES_FRAME) {
@@ -4237,6 +4243,19 @@ export class GhostLink {
   }
 
   /**
+   * The contact gave this session's listener up to another chat (`yieldEndpoint`): its app is still there, and its
+   * record now lists the transport undescribed, so there is nothing to dial and no return to watch for. The session
+   * ends now, and the chat reads the contact at its own pace; the contact dials once it takes a listener back. Taken
+   * as a goodbye, it was watched as an app that quit: 89 reads of its key in the 2 minutes after a yield on the
+   * Desktop, against 6 at the background pace (bug hunt, 2026-10-15).
+   */
+  private peerYielded(channel: FrameChannel): void {
+    if (this.channel !== channel || this.stopped) return;
+    traceLink(this.myPubKeyZ32, "peer-yielded", {});
+    this.disconnect();
+  }
+
+  /**
    * A packet of the contact's not seen before, fresh, while nothing is live, soon after a live session ended: it is back
    * (its app restarted), so the wait that the attempts since built up is over, and the next dial goes now. Once per
    * loss: a contact that is there but unreachable publishes often, and the wait between attempts is what spares the
@@ -4341,6 +4360,49 @@ export class GhostLink {
     if (!this.dialing) setTimeout(() => this.maybeKnockEarly(offered.epoch), 0);
   }
 
+  /**
+   * A name or picture the contact said, once it is one (reading it costs little; saving it is what counts): past the
+   * window the newest waits for room on this session, so the last word still counts.
+   */
+  private peerSays(channel: FrameChannel, kind: "paired-nick" | "paired-avatar", frame: Record<string, unknown>): void {
+    let read: () => void;
+    if (kind === "paired-avatar") {
+      const avatar = sanitizeAvatar(frame.a);
+      if (avatar === undefined) return;
+      read = () => this.options.events?.onPeerAvatar?.(avatar);
+    } else {
+      // Something that is not text clears what is shown, and is not said as a removal.
+      const nick = sanitizeNick(frame.n) ?? null, said = typeof frame.n === "string";
+      read = () => {
+        if (said) this.options.events?.onPeerNick?.(nick);
+        if (nick !== this.peerNickOverride) {
+          this.peerNickOverride = nick;
+          this.options.events?.onPresence?.(this.presence);
+        }
+      };
+    }
+    const held = this.peerSaid[kind];
+    if (!held.timer && held.window.take()) { read(); return; }
+    held.read = read;
+    if (held.timer) return;
+    const due = () => {
+      held.timer = null;
+      if (this.channel !== channel || !held.read) { held.read = null; return; }
+      if (!held.window.take()) { held.timer = setTimeout(due, held.window.wait()); return; }
+      const next = held.read;
+      held.read = null;
+      next();
+    };
+    held.timer = setTimeout(due, held.window.wait());
+  }
+  /** What the contact said of itself and was still waiting goes with the session: the next one says it again. */
+  private dropPeerSaid(): void {
+    for (const said of Object.values(this.peerSaid)) {
+      if (said.timer) clearTimeout(said.timer);
+      said.timer = null; said.read = null;
+    }
+  }
+
   /** A ping on the session right after a wake, with `PONG_WAIT_MS` for its answer: none, and the session is dead. */
   private probeAfterWake(channel: FrameChannel): void {
     if (!this.peerAnswersPings || this.paired?.state.status !== "ready") return;
@@ -4378,6 +4440,7 @@ export class GhostLink {
     this.channel = this.httpHost = this.httpClient = this.files = null;
     this.peerServicesOverride = null;
     this.peerNickOverride = null;
+    this.dropPeerSaid();
     this.sessionCapabilities.reset();
     this.typingSender.reset(); this.typingReceiver.clear();
     this.appsSuspended();

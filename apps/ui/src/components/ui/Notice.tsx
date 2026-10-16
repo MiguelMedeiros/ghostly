@@ -22,7 +22,7 @@ const COLOR: Record<NoticeTone, string> = {
  */
 export function Notice({ tone, title, next, details, problem, children, testId, className = "text-xs", ink = false }: {
   tone?: NoticeTone; title?: ReactNode; next?: ReactNode; details?: string; problem?: Problem | null; children?: ReactNode; testId?: string; className?: string;
-  /** On a chat bubble: the error's red that reads on the bubble's own colour (`text-danger-ink`). */
+  /** On a chat bubble or a surface-hover row: the error's red that reads on that colour (`text-danger-ink`). */
   ink?: boolean;
 }) {
   const id = useId();
@@ -44,7 +44,7 @@ export function Notice({ tone, title, next, details, problem, children, testId, 
       {more && open && <div id={id} data-testid={testId ? `${testId}-details` : undefined} className="mt-1 flex items-start gap-2 border-s-2 border-border ps-2 text-text-secondary">
         <p dir="ltr" lang="en" className="m-0 min-w-0 flex-1 break-words font-mono text-[11px] leading-4">{more}</p>
         <button type="button" onClick={copy} data-testid={testId ? `${testId}-copy` : undefined}
-          className="shrink-0 rounded-md px-1.5 text-[11px] text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+          className="min-h-6 shrink-0 rounded-md px-1.5 text-[11px] text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           {copied ? i18n?.t("common.copied") ?? "Copied!" : i18n?.t("common.copy") ?? "Copy"}
         </button>
       </div>}

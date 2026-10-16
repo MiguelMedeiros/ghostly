@@ -2,7 +2,7 @@ import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deferred, FakePeerConnection, installWebRTCFakes, remote, type FakeMediaDevices } from "./fakes";
 import { renderCall, settle } from "./harness";
-import { MEDIA_PROBLEM_SHOWN_MS, NO_ANSWER_SHOWN_MS, QUICK_REDIAL_MS, RESTART_GRACE_MS, RING_MS, mediaProblem } from "../src/useWebRTC";
+import { MAX_RESTARTS, MEDIA_PROBLEM_SHOWN_MS, NO_ANSWER_SHOWN_MS, QUICK_REDIAL_MS, RESTART_GRACE_MS, RING_MS, mediaProblem } from "../src/useWebRTC";
 
 // covers: calls.audio, calls.video, calls.cancel, calls.decline, calls.end-and-answer, calls.media-blocked, calls.screen-share, calls.upgrade
 
@@ -606,6 +606,60 @@ describe("answering a call", () => {
     expect(missed.slice(1)).toEqual(burst.map((ts) => ["call_missed", false, undefined, ts]));
   });
 
+  it("a person's call placed again soon after they cancelled it rings: only a call that barely rang holds the next back", () => {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    // It rang 3 s, then the caller cancelled it and placed a video call 1.2 s later (voice to video, a slip of the finger).
+    act(() => { vi.advanceTimersByTime(3000); });
+    call.receive(remote.hangUp(Date.now()));
+    act(() => { vi.advanceTimersByTime(1200); });
+    call.receive(remote.offer(Date.now()));
+
+    expect(call.result.current.callState).toBe("incoming");
+    expect(lines(call)).toEqual(["call_received", "call_missed", "call_received"]);
+  });
+
+  it("calling back while the contact's held-back call still rings there rings that call, not a second one crossing it", async () => {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    call.receive(remote.hangUp(Date.now() + 1));
+    act(() => { vi.advanceTimersByTime(500); });
+    const held = Date.now();
+    call.receive(remote.offer(held));
+    expect(call.result.current.callState).toBe("idle");
+    const results = call.addCallEventMessage.mock.results;
+    const missedLine = results[results.length - 1]!.value;
+
+    // The person sees the missed call and calls back while it still rings the contact's side. A call of ours would
+    // cross it: the contact's earlier offer wins the glare there, and this side already spent it, so neither rang.
+    act(() => { vi.advanceTimersByTime(5000); });
+    act(() => { void call.result.current.startCall(false); });
+    expect(call.result.current.callState).toBe("incoming");
+    expect(call.publishedKinds()).toEqual([null]);
+    // Its line says it rang here, not that it was missed.
+    expect(call.removeCallEventMessage).toHaveBeenCalledExactlyOnceWith(missedLine);
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_received", false, undefined, held);
+
+    act(() => { void call.result.current.acceptCall(false); });
+    devices.userMedia[0].grant();
+    await settle();
+    expect(call.publishedKinds()).toEqual([null, "a"]);
+    expect(call.result.current.callState).toBe("connecting");
+  });
+
+  it("calling back once the held-back call stopped ringing places a call of its own", async () => {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    call.receive(remote.hangUp(Date.now() + 1));
+    act(() => { vi.advanceTimersByTime(500); });
+    call.receive(remote.offer(Date.now()));
+    call.receive(remote.hangUp(Date.now() + 1));
+
+    act(() => { void call.result.current.startCall(false); });
+    expect(call.result.current.callState).toBe("offering");
+    expect(call.removeCallEventMessage).not.toHaveBeenCalled();
+  });
+
   it("a call placed again once a person could have redialled rings", () => {
     const call = renderCall();
     call.receive(remote.offer(Date.now()));
@@ -618,7 +672,7 @@ describe("answering a call", () => {
     expect(lines(call)).toEqual(["call_received", "call_missed", "call_received"]);
   });
 
-  it("a call declined here does not hold the next ring back; one that rang out does", () => {
+  it("a call declined here does not hold the next ring back, nor does one that rang out", () => {
     const call = renderCall();
     call.receive(remote.offer(Date.now()));
     act(() => call.result.current.rejectCall());
@@ -629,10 +683,11 @@ describe("answering a call", () => {
     // The person said no to this call, not to every call: the next one rings.
     expect(call.result.current.callState).toBe("incoming");
 
+    // A call that rang its whole minute was a person's: calling again at once (as its caller's "No answer" lets them) rings.
     act(() => { vi.advanceTimersByTime(RING_MS); });
     act(() => { vi.advanceTimersByTime(50); });
     call.receive(remote.offer(Date.now()));
-    expect(call.result.current.callState).toBe("idle");
+    expect(call.result.current.callState).toBe("incoming");
   });
 
   it("an answered call is not missed when RING_MS passes", async () => {
@@ -760,18 +815,44 @@ describe("a headless caller starting over on a second offer", () => {
     expect(call.fastPoll()).toBe(false);
   });
 
-  it("a failure after starting over is final", async () => {
+  it("starts over as many times as the caller offers again: a refusal on the new connection too is not the end", async () => {
     const call = renderCall();
     const { pc: first } = await answered(call);
+    // The caller's libdatachannel refuses our answer on its first two connections (the same race, twice in a row).
     act(() => first.setIceState("failed"));
     call.receive(remote.offer(Date.now() + 1));
     await settle();
-
     act(() => FakePeerConnection.instances[1].setIceState("failed"));
+    expect(call.result.current.callState).toBe("connecting");
+    expect(call.publishedKinds()).toEqual(["a", "a"]);
+
+    call.receive(remote.offer(Date.now() + 2));
+    await settle();
+    const third = FakePeerConnection.instances[2];
+    act(() => { third.setIceState("connected"); third.setConnectionState("connected"); });
+    act(() => { vi.advanceTimersByTime(RESTART_GRACE_MS); });
+    expect(call.result.current.callState).toBe("connected");
+    expect(call.publishedKinds()).toEqual(["a", "a", "a"]);
+    expect(devices.getUserMedia).toHaveBeenCalledOnce();
+    expect(call.addCallEventMessage.mock.calls.filter(([type]) => type === "call_connected")).toHaveLength(1);
+  });
+
+  it("a failure after the caller's last start-over (MAX_RESTARTS) is final", async () => {
+    const call = renderCall();
+    const { pc: first } = await answered(call);
+    act(() => first.setIceState("failed"));
+    for (let i = 1; i <= MAX_RESTARTS; i++) {
+      call.receive(remote.offer(Date.now() + i));
+      await settle();
+      if (i < MAX_RESTARTS) act(() => FakePeerConnection.instances[i].setIceState("failed"));
+    }
+    expect(call.result.current.callState).toBe("connecting");
+
+    act(() => FakePeerConnection.instances[MAX_RESTARTS].setIceState("failed"));
 
     expect(call.result.current.callState).toBe("idle");
     act(() => { vi.advanceTimersByTime(5000); });
-    expect(call.publishedKinds()).toEqual(["a", "a", "h", null]);
+    expect(call.publishedKinds()).toEqual([...Array<string>(MAX_RESTARTS + 1).fill("a"), "h", null]);
   });
 
   it("hanging up while it waits ends the call, and the wait does nothing later", async () => {

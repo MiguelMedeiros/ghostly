@@ -125,7 +125,11 @@ The opening is one timeline (`HERO` in `lib/motion.ts`, mirrored by the CSS in
    first character.
 5. 3.6: the "Follow Boo" arrow nudges twice and rests.
 
-Idle: Boo bobs 8 px with a 1.5% breath over 4.2 s and blinks every 5.3 s; the
+Idle: Boo bobs 8 px with a 1.5% breath over 4.2 s three times and blinks
+twice, then rests (so do every stage's actors, a talking mouth after eight
+beats, a waiting caret after four blinks, and the network's twinkles after
+three: looped, these CSS animations on SVG shapes laid the page out at every
+frame for as long as a stage was on screen); the
 network field behind the act drifts 12 px over 28 s and parallaxes with the
 scroll on its own composited layer; the grid holds still. Leaving: the copy
 fades and lifts 48 px over p 0.2 to 0.7 of the hero.
@@ -145,9 +149,16 @@ watches:
   each finished frame and stops at the last one.
 - The picture follows one number, `--t` (seconds along all the steps, in
   `protocolTimeline.ts`); every shape reads it through the `sx-` rules in
-  `app/dev-steps.css`, and moves on `move` (packets travel a route at an even
-  speed, and a route draws behind its packet). Two labels that share a place
+  `app/dev-steps.css`. While a step plays, the clock writes `--t` only on the
+  shapes whose picture changes between two frames (each rule changes over a
+  short stretch of its own times, listed in `stepClock.ts`), and on the whole
+  explainer once it stops: written there at every frame, `--t` restyled all of
+  its 900 elements a frame (21 fps on a 4x slower CPU). Shapes move on `move`
+  (packets travel a route at an even speed, and a route draws behind its
+  packet). Two labels that share a place
   swap: the next arrives after the last has started to leave, never on top.
+  The connecting line's dashes march on `--t` too, so they stop with the
+  step; the ghosts float three times and blink twice, then rest.
 - The copy card changes first (out `fast`, in `base` after it), then the
   picture answers. All cards share one grid cell, so the panel never changes
   height and nothing below it moves.
@@ -251,6 +262,10 @@ pointer with a time-based ease (about 2 s to close most of the distance, 4 s
 tired, 8 s asleep), sleeps when you stop and ducks when you reach for it; it
 writes its position straight to the DOM as a transform and stops its clock
 once it has settled (under 3 px a second), waking only for its next mood.
+The ghost asleep in the footer itself breathes its z's three times when the
+footer shows (2 s each, 0.3 s apart), then they rest, bright: looped, they
+restyled the page on the main thread for as long as the reader stayed at the
+end of it.
 
 ### Micro-interactions
 

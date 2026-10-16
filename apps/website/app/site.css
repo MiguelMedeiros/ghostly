@@ -73,8 +73,10 @@ html {
   overflow-x: clip;
   scroll-padding-top: calc(var(--nav-h) + 16px);
 }
+/* Only once the reader has touched the page (layout.tsx, js-flag): a link that names a section opens there, the
+   browser's jump to it on load and LandOnHash's re-landing are not a flight through the page. */
 @media (prefers-reduced-motion: no-preference) {
-  html {
+  html.landed {
     scroll-behavior: smooth;
   }
 }
@@ -616,14 +618,17 @@ body {
 .ghost--halo {
   filter: none;
 }
+/* The idle loops of a ghost or a stage play a few times and rest (fill both), as on /developers: a CSS animation on
+   an SVG element lays the page out at every frame, so looped they kept every stage on screen busy 15 to 52 times a
+   second for as long as the reader looked. Off screen they wait paused (IdleLoops), so each plays when first seen. */
 .ghost--float {
-  animation: ghost-bob 4.2s ease-in-out infinite;
+  animation: ghost-bob 4.2s ease-in-out 3 both;
 }
-/* The app's blink (pairing-scene.css): every 5 s, shut at 97%. */
+/* The app's blink (pairing-scene.css): every 5 s, shut at 97%; twice, then the eyes stay open. */
 .ghost-eyes--blink {
   transform-box: fill-box;
   transform-origin: center;
-  animation: ghost-blink 5s infinite;
+  animation: ghost-blink 5s 2 both;
 }
 .ghost-pupils {
   transition: transform var(--dur-slow) var(--ease-enter);
@@ -631,7 +636,8 @@ body {
 .ghost-mouth-talk {
   transform-box: fill-box;
   transform-origin: center;
-  animation: ghost-talk 0.42s ease-in-out infinite alternate;
+  /* Eight beats (3.4 s), ending nearly shut. */
+  animation: ghost-talk 0.42s ease-in-out 8 alternate both;
 }
 @keyframes ghost-bob {
   50% {
@@ -769,7 +775,8 @@ body {
   animation-play-state: paused !important;
 }
 .act-caret {
-  animation: caret 1s steps(1) infinite;
+  /* A line stopped halfway (the story waits for the scroll) keeps its caret, which blinks four times and stays. */
+  animation: caret 1s steps(1) 4 both;
 }
 @keyframes caret {
   50% {
@@ -1221,9 +1228,11 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
   font-family: var(--font-jetbrains), ui-monospace, monospace;
   color: var(--cyan);
 }
+/* The z's rise a few times when the footer shows and rest on the bright frame: looped, they restyled the page 15
+   times a second on the main thread for as long as the reader stayed at the end of it. */
 .footer-sleeper .zzz span {
   display: inline-block;
-  animation: zzz 2s ease-in-out infinite;
+  animation: zzz 2s ease-in-out 3 both;
 }
 .footer-sleeper .zzz span:nth-child(2) {
   animation-delay: 0.3s;
@@ -1236,12 +1245,12 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
 @keyframes zzz {
   0%,
   100% {
-    opacity: 0.3;
-    transform: translateY(0);
-  }
-  50% {
     opacity: 1;
     transform: translateY(-4px);
+  }
+  50% {
+    opacity: 0.3;
+    transform: translateY(0);
   }
 }
 @media (max-width: 860px) {
@@ -1302,8 +1311,11 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
 .pet[data-mood="happy"] .pet-body {
   animation-duration: 3s;
 }
+/* Asleep, it floats twice more and rests, as the footer's sleeper does (#2809): looped, a sleeping ghost beside a
+   still pointer restyled the page 8 times a second for as long as the reader stayed (agents#1115). Its own name, so
+   the doze starts afresh each time it falls asleep, and ends where the float starts. */
 .pet[data-mood="sleeping"] .pet-body {
-  animation-duration: 6s;
+  animation: pet-doze 6s ease-in-out 2 both;
 }
 .pet-hide {
   position: absolute;
@@ -1328,9 +1340,15 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
 .pet-z {
   position: absolute;
   inset: 0;
-  animation: zzz 2s ease-in-out infinite;
+  /* A few breaths, resting on the bright frame; the z's mount afresh at each fall asleep, so they breathe again then. */
+  animation: zzz 2s ease-in-out 3 both;
 }
 @keyframes pet-float {
+  50% {
+    transform: translateY(-6px);
+  }
+}
+@keyframes pet-doze {
   50% {
     transform: translateY(-6px);
   }
@@ -1352,10 +1370,11 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
 .stage-bob {
   transform-box: fill-box;
   transform-origin: 50% 100%;
-  animation: stage-bob 4.2s ease-in-out infinite;
+  animation: stage-bob 4.2s ease-in-out 3 both;
 }
+/* Each node twinkles a few times from its own offset in the cycle, then settles lit. */
 .dht-node {
-  animation: twinkle 4s ease-in-out infinite;
+  animation: twinkle 4s ease-in-out 3 both;
 }
 @keyframes twinkle {
   50% {

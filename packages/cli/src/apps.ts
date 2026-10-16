@@ -2,10 +2,10 @@ import { createHash, createPrivateKey, generateKeyPairSync } from "node:crypto";
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
-  APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
+  APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appRevocationFor, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
   APP_STATEMENT_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppUrl, readAppBundle,
   readAppRevocations, readAppStore, seedSigner, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
-  type AppManifest, type AppRevokeStatement, type AppStoreIndex, type SignedAppRevocation, type Signer,
+  type AppManifest, type AppRevokeStatement, type AppStoreIndex, type AppStoreReading, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
 import { templateManifest, templatePage, templateReadme } from "./appTemplate";
 import { CliError } from "./errors";
@@ -178,12 +178,45 @@ export async function verifyApp(source: string): Promise<Record<string, unknown>
   return { valid: true, ...described(bundle, bytes), manifest: bundle.manifest };
 }
 
-/** A bundle from a file or an https URL, with every check of `app verify`; `url` when it came from one. */
+/**
+ * The `ghostly-revoke.json` beside a bundle, as a client reads it beside each bundle URL: beside the URL (without its
+ * query), or beside the file. None there, one that does not answer, or one a client would not read, revokes nothing.
+ */
+async function revocationsBeside(source: string, isUrl: boolean): Promise<{ file: string; revocations: SignedAppRevocation[] }> {
+  let file: string;
+  let bytes: Uint8Array;
+  try {
+    if (isUrl) {
+      const at = new URL(source);
+      at.search = "";
+      at.hash = "";
+      file = new URL(APP_REVOKE_FILE, at).href;
+      bytes = await fetchBundle(file);
+    } else {
+      file = join(dirname(resolve(source)), APP_REVOKE_FILE);
+      if (!existsSync(file)) return { file, revocations: [] };
+      bytes = readBundleFile(file);
+    }
+  } catch { return { file: source, revocations: [] }; }
+  const read = readAppRevocations(bytes);
+  return { file, revocations: read.ok ? read.revocations : [] };
+}
+
+/**
+ * A bundle from a file or an https URL, with every check of `app verify`; `url` when it came from one. A version its
+ * publisher revoked in the `ghostly-revoke.json` beside it is refused: a client stops it, with no "Run anyway".
+ */
 export async function checkedBundle(source: string): Promise<{ bundle: AppBundle; bytes: Uint8Array; url?: string }> {
   const isUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(source);
   const bytes = isUrl ? await fetchBundle(source) : readBundleFile(resolve(source));
   const read = readAppBundle(bytes);
   if (!read.ok) throw refused(`${source} is not a valid bundle`, read);
+  const m = read.bundle.manifest;
+  const { file, revocations } = await revocationsBeside(source, isUrl);
+  const revocation = appRevocationFor({ ref: appRef(m.publisher, m.name), sequence: m.sequence, digest: read.bundle.digest }, revocations);
+  if (revocation) {
+    throw refused(`${source} is a version its publisher revoked in ${file}: a client stops it`, { reason: "revoked", ...(revocation.statement.reason !== undefined && { detail: revocation.statement.reason }) }, { file });
+  }
   return { bundle: read.bundle, bytes, ...(isUrl && { url: source }) };
 }
 
@@ -369,6 +402,14 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   // Read back as a client would (the icon's header, the bundle's size): what is written is never a bundle it refuses.
   const read = readAppBundle(bundle);
   if (!read.ok) throw refused("The bundle made is not valid", read);
+  // Nor one the folder's own revocations already stop: every client that reads them would refuse it, for good.
+  const ref = appRef(key.key, checked.manifest.name);
+  const revocations = existsSync(join(dir, APP_REVOKE_FILE)) ? readAppRevocations(new Uint8Array(readFileSync(join(dir, APP_REVOKE_FILE)))) : null;
+  const held = revocations?.ok ? revocations.revocations : [];
+  if (appRevocationFor({ ref, sequence, digest: read.bundle.digest }, held)) {
+    const clear = Math.max(sequence, ...held.map((r) => r.statement.app === ref && "upTo" in r.statement ? r.statement.upTo : 0)) + 1;
+    throw refused(`${join(dir, APP_REVOKE_FILE)} already revokes version ${sequence} of ${ref}, and every client that reads it would stop it: give --sequence ${clear}`, { reason: "revoked" }, { sequence: clear });
+  }
   mkdirSync(dirname(out), { recursive: true });
   writeWhole(out, bundle);
 
@@ -391,7 +432,7 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
  * (or `--bundle`), signed by that app's publisher key and added to `<dir>/ghostly-revoke.json`, which stays canonical.
  * The key is never made here: only the key that signed the app may revoke its versions.
  */
-export async function revokeApp(dirArg: string, keyArg: string, what: { digests?: string[]; upTo?: number; reason?: string; bundle?: string }): Promise<Record<string, unknown>> {
+export async function revokeApp(dirArg: string, keyArg: string, what: { digests?: string[]; upTo?: number; reason?: string; bundle?: string; force?: boolean }): Promise<Record<string, unknown>> {
   const dir = resolve(dirArg);
   const bundlePath = resolve(what.bundle ?? join(dir, APP_BUNDLE_FILE));
   const listPath = join(dir, APP_REVOKE_FILE);
@@ -405,6 +446,10 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
   if (!read.ok) throw refused(`${bundlePath} is not a valid bundle`, read);
   const manifest = read.bundle.manifest;
   const ref = appRef(manifest.publisher, manifest.name);
+  // Clients keep a revocation for good: past the newest version (a typo, 30 for 3), it stops versions not made yet.
+  if (what.upTo !== undefined && what.upTo > manifest.sequence && !what.force) {
+    throw new CliError("usage", `--up-to ${what.upTo} is past ${bundlePath}'s version, ${manifest.sequence}: it would also stop versions ${manifest.sequence + 1} to ${what.upTo} before they exist, for good. Give --up-to ${manifest.sequence}, or --force if versions up to ${what.upTo} were published from elsewhere`);
+  }
 
   const keyPath = resolve(keyArg);
   if (!existsSync(keyPath)) throw new CliError("not_found", `No key file ${keyPath}: only the key that signed ${ref} (${appFingerprint(manifest.publisher)}) revokes its versions`);
@@ -448,7 +493,8 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
  * `store sign <index> --key <file> [--out <dir>]`: a store index written by hand (any JSON layout; `key` may be left
  * out and is then the signing key's) becomes `ghostly-store.json`, canonical, and `ghostly-store.sig`, in `--out` or
  * beside the index. It is read back as a client reads it (`expires` at most 90 days ahead), and refused when the index
- * already there, signed by the same key, has a higher `sequence`, or the same one with other content.
+ * already there has a higher `sequence`, or the same one with other content, or is signed by another key (another
+ * store is another `--out`). The key is made only when no signed index is there.
  */
 export async function signStore(indexArg: string, keyArg: string, outArg?: string, now = Math.floor(Date.now() / 1000)): Promise<Record<string, unknown>> {
   const indexPath = resolve(indexArg);
@@ -462,12 +508,24 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new CliError("bad_request", `${indexPath} is not a JSON object`);
   const index = value as Record<string, unknown>;
 
+  // The index this one follows, when the folder holds a signed one: a store is its key, so only that key signs over it.
+  const indexOut = join(outDir, STORE_INDEX_FILE), sigOut = join(outDir, STORE_SIG_FILE);
+  let held: AppStoreReading | null = null;
+  if (existsSync(indexOut) && existsSync(sigOut)) {
+    const read = readAppStore(new Uint8Array(readFileSync(indexOut)), new Uint8Array(readFileSync(sigOut)), now);
+    if (read.ok) held = read.store;
+  }
+
   let key: LoadedKey;
   if (existsSync(keyPath)) key = readKey(keyPath, "store");
   else if (index.key !== undefined) throw new CliError("not_found", `No key file ${keyPath}: the index names the store key ${typeof index.key === "string" ? appFingerprint(index.key) : JSON.stringify(index.key)}`);
+  else if (held) throw new CliError("not_found", `No key file ${keyPath}: ${indexOut} is signed by ${appFingerprint(held.index.key)}, and only that key signs its next index`);
   else key = makeKey(keyPath, "store");
   if (index.key !== undefined && index.key !== key.key) {
     throw refused(`${indexPath} names another store key than ${keyPath}'s (${appFingerprint(key.key)})`, { reason: "store-key" });
+  }
+  if (held && held.index.key !== key.key) {
+    throw refused(`${indexOut} is signed by another store key (${appFingerprint(held.index.key)}) than ${keyPath}'s (${appFingerprint(key.key)}): a store is its key; sign with that key, or give another --out for another store`, { reason: "store-key" }, { held: held.index.key });
   }
   index.key = key.key;
 
@@ -478,20 +536,15 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   if (!read.ok) throw refused(`${indexPath} would be refused by a client`, read);
   const store = read.store;
 
-  // The index this one follows, when the folder holds one this key signed.
-  const indexOut = join(outDir, STORE_INDEX_FILE), sigOut = join(outDir, STORE_SIG_FILE);
   let previous: number | null = null;
-  if (existsSync(indexOut) && existsSync(sigOut)) {
-    const held = readAppStore(new Uint8Array(readFileSync(indexOut)), new Uint8Array(readFileSync(sigOut)), now);
-    if (held.ok && held.store.index.key === key.key) {
-      previous = held.store.index.sequence;
-      const decision = appStoreDecision(
-        { key: key.key, sequence: held.store.index.sequence, digest: held.store.digest },
-        { key: key.key, sequence: store.index.sequence, digest: store.digest },
-      );
-      if (decision === "rollback" || decision === "equivocation") {
-        throw refused(`${indexOut} already holds sequence ${held.store.index.sequence} of this store: ${decision === "rollback" ? "a lower one is refused by every client" : "the same one with other content is refused as equivocation"}; raise sequence`, { reason: decision }, { held: held.store.index.sequence });
-      }
+  if (held) {
+    previous = held.index.sequence;
+    const decision = appStoreDecision(
+      { key: key.key, sequence: held.index.sequence, digest: held.digest },
+      { key: key.key, sequence: store.index.sequence, digest: store.digest },
+    );
+    if (decision === "rollback" || decision === "equivocation") {
+      throw refused(`${indexOut} already holds sequence ${held.index.sequence} of this store: ${decision === "rollback" ? "a lower one is refused by every client" : "the same one with other content is refused as equivocation"}; raise sequence`, { reason: decision }, { held: held.index.sequence });
     }
   }
 

@@ -198,7 +198,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       return;
     }
     if (recorderRef.current !== recorder) return;
-    setAnnounce("Recording");
+    setAnnounce(t("chat.voice.recording"));
     if (pendingSendRef.current) { pendingSendRef.current = false; void send(); return; }
     setPhase("recording");
   }, [disabled, unavailable, onError, reset, showHint, send, t]);

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { appRevocationFor, readAppBundle, readAppRevocations, type AppManifest } from "@ghostly/core";
 import { verifyApp } from "../src/apps";
 import { CliError } from "../src/errors";
-import { error, ghostly, ok } from "./support/cli";
+import { error, ghostly, home, ok } from "./support/cli";
 // covers: apps.bundle, apps.store
 
 /*
@@ -205,6 +205,24 @@ describe("app publish", () => {
     writeFileSync(join(dotted, ".DS_Store"), "x");
     expect(ok(await ghostly(["app", "publish", dotted, "--key", key]))).toMatchObject({ files: ["index.html"], skipped: [".DS_Store"] });
   }, 60_000);
+
+  it("refuses a path option given as \"\" (an unset variable) as naming no file, never the current folder", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const keys = tmp();
+    const fresh = join(keys, "new.key");
+    expect(error(await ghostly(["app", "publish", dir, "--key", fresh, "--out", ""]), "usage", 2).message).toMatch(/^A path given as "" names no file/);
+    // Nothing was made: no key, no bundle.
+    expect(existsSync(fresh)).toBe(false);
+    expect(existsSync(join(dir, "app.ghostlyapp"))).toBe(false);
+    const key = vectorKey(keys, "publisher");
+    ok(await ghostly(["app", "publish", dir, "--key", key]));
+    expect(error(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "1", "--bundle", ""]), "usage", 2).message).toMatch(/^A path given as "" names no file/);
+    const index = join(tmp(), "index.json");
+    writeFileSync(index, "{}");
+    expect(error(await ghostly(["store", "sign", index, "--key", join(keys, "store.key"), "--out", ""]), "usage", 2).message).toMatch(/^A path given as "" names no file/);
+    expect(existsSync(join(keys, "store.key"))).toBe(false);
+  }, 60_000);
 });
 
 describe("app publish --sequence", () => {
@@ -249,6 +267,49 @@ describe("app revoke", () => {
     expect((error(await ghostly(["app", "revoke", dir, "--key", key, "--digest", "not-a-digest"]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("bad-revocation");
     expect(readAppRevocations(new Uint8Array(readFileSync(join(dir, "ghostly-revoke.json"))))).toMatchObject({ ok: true, revocations: { length: 2 } });
   }, 60_000);
+
+  it("refuses --up-to past the newest version unless --force, and publish never makes a version the list already stops", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const key = vectorKey(tmp(), "publisher");
+    for (let i = 0; i < 3; i++) ok(await ghostly(["app", "publish", dir, "--key", key]));
+    // A typo, 30 for 3: clients keep a revocation for good, so versions 4 to 30 would be stopped before they exist.
+    const typo = error(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "30"]), "usage", 2);
+    expect(typo.message).toContain("--up-to 3");
+    expect(existsSync(join(dir, "ghostly-revoke.json"))).toBe(false);
+    // Meant (versions published from another folder went past this bundle): --force writes it.
+    expect(ok(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "30", "--force"]))).toMatchObject({ upTo: 30, current: true, added: true });
+    // The next version, 4, is one the list stops: refused, naming the sequence that clears it, and nothing written.
+    const before = readFileSync(join(dir, "app.ghostlyapp"));
+    const stopped = error(await ghostly(["app", "publish", dir, "--key", key]), "refused", 1) as { message: string; details?: { reason?: string; sequence?: number } };
+    expect(stopped.details).toMatchObject({ reason: "revoked", sequence: 31 });
+    expect(stopped.message).toContain("--sequence 31");
+    error(await ghostly(["app", "publish", dir, "--key", key, "--sequence", "30"]), "refused", 1);
+    expect(readFileSync(join(dir, "app.ghostlyapp")).equals(before)).toBe(true);
+    expect(ok(await ghostly(["app", "publish", dir, "--key", key, "--sequence", "31"]))).toMatchObject({ sequence: 31, previous: 3 });
+    // Up to the bundle's own sequence needs no --force.
+    expect(ok(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "31"]))).toMatchObject({ upTo: 31, current: true });
+  });
+
+  it("is read by app verify and app serve from the ghostly-revoke.json beside the bundle, as a client reads it", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const key = vectorKey(tmp(), "publisher");
+    const bundle = join(dir, "app.ghostlyapp");
+    const first = ok(await ghostly(["app", "publish", dir, "--key", key]));
+    expect(ok(await ghostly(["app", "verify", bundle]))).toMatchObject({ valid: true, digest: first.digest });
+    ok(await ghostly(["app", "revoke", dir, "--key", key, "--digest", first.digest as string, "--reason", "Leaked a test move list"]));
+
+    const refusal = error(await ghostly(["app", "verify", bundle]), "refused", 1) as { message: string; details?: { reason?: string; detail?: string } };
+    expect(refusal.details).toMatchObject({ reason: "revoked", detail: "Leaked a test move list" });
+    expect(refusal.message).toContain("revoked");
+    const served = error(await ghostly(["--home", home("revoked"), "app", "serve", bundle, "--grant", "chat"]), "refused", 1) as { details?: { reason?: string } };
+    expect(served.details?.reason).toBe("revoked");
+
+    // A version the list does not cover is valid.
+    expect(ok(await ghostly(["app", "publish", dir, "--key", key]))).toMatchObject({ sequence: 2 });
+    expect(ok(await ghostly(["app", "verify", bundle]))).toMatchObject({ valid: true, sequence: 2 });
+  }, 60_000);
 });
 
 describe("app verify", () => {
@@ -284,6 +345,7 @@ describe("app verify <url>", () => {
   it("reads a bundle over https, following a redirect held to the same rule", async () => {
     const seen: string[] = [];
     vi.stubGlobal("fetch", async (url: string) => {
+      if (url.endsWith("/ghostly-revoke.json")) return new Response("no", { status: 404 });
       seen.push(url);
       if (url.includes("@")) return new Response(stream([bundle]), { status: 200 });
       return new Response(null, { status: 302, headers: { location: "https://cdn.jsdelivr.net/gh/ana/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp" } });
@@ -309,6 +371,25 @@ describe("app verify <url>", () => {
     await expect(verifyApp("https://example.com/a.ghostlyapp")).rejects.toMatchObject({ code: "refused", details: { reason: "too-large" } });
     expect(pulled).toBeLessThan(20);
   });
+
+  it("refuses a version its publisher revoked in the ghostly-revoke.json beside the URL; none there is no error", async () => {
+    const dir = tmp();
+    writeFileSync(join(dir, "app.ghostlyapp"), bundle);
+    ok(await ghostly(["app", "revoke", dir, "--key", vectorKey(tmp(), "publisher"), "--up-to", "1", "--reason", "Leaked a test move list"]));
+    const list = readFileSync(join(dir, "ghostly-revoke.json"));
+    const seen: string[] = [];
+    let revoked = true;
+    vi.stubGlobal("fetch", async (url: string) => {
+      seen.push(url);
+      if (url.includes("/app.ghostlyapp")) return new Response(stream([bundle]), { status: 200 });
+      return revoked ? new Response(stream([new Uint8Array(list)]), { status: 200 }) : new Response("no", { status: 404 });
+    });
+    const url = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp?x=1";
+    await expect(verifyApp(url)).rejects.toMatchObject({ code: "refused", details: { reason: "revoked", detail: "Leaked a test move list" } });
+    expect(seen).toEqual([url, "https://raw.githubusercontent.com/ana/chess/HEAD/ghostly-revoke.json"]);
+    revoked = false;
+    expect(await verifyApp(url)).toMatchObject({ valid: true, digest: vector.read.digest });
+  }, 60_000);
 
   it("says not found for a 404", async () => {
     vi.stubGlobal("fetch", async () => new Response("no", { status: 404 }));
@@ -363,5 +444,30 @@ describe("store sign", () => {
     expect((error(await ghostly(["store", "sign", join(dir, "far.json"), "--key", key, "--out", tmp()]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("expires-too-far");
     writeFileSync(join(dir, "unknown.json"), JSON.stringify({ ...index, extra: 1 }));
     expect((error(await ghostly(["store", "sign", join(dir, "unknown.json"), "--key", key, "--out", tmp()]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("unknown-key");
+  }, 60_000);
+
+  it("never makes a key or signs over an index there that another store key signed", async () => {
+    const dir = tmp();
+    const keys = tmp();
+    const key = vectorKey(keys, "store");
+    const { key: _key, ...index } = JSON.parse(vector.index) as Record<string, unknown> & { sequence: number };
+    writeFileSync(join(dir, "index.json"), JSON.stringify(index));
+    const first = ok(await ghostly(["store", "sign", join(dir, "index.json"), "--key", key]));
+    const held = readFileSync(join(dir, "ghostly-store.json"), "utf8");
+    const heldSig = readFileSync(join(dir, "ghostly-store.sig"), "utf8");
+    writeFileSync(join(dir, "index.json"), JSON.stringify({ ...index, sequence: index.sequence + 1 }));
+    // A mistyped --key path: no new key, the held index stays.
+    const typo = join(keys, "stor.pem");
+    expect(error(await ghostly(["store", "sign", join(dir, "index.json"), "--key", typo]), "not_found", 3).message).toContain(String(first.fingerprint));
+    expect(existsSync(typo)).toBe(false);
+    // Another store key that is there: refused, naming both.
+    const other = vectorKey(keys, "other store");
+    const refusal = error(await ghostly(["store", "sign", join(dir, "index.json"), "--key", other]), "refused", 1) as { message: string; details?: { reason?: string } };
+    expect(refusal.details?.reason).toBe("store-key");
+    expect(refusal.message).toContain(String(first.fingerprint));
+    expect(readFileSync(join(dir, "ghostly-store.json"), "utf8")).toBe(held);
+    expect(readFileSync(join(dir, "ghostly-store.sig"), "utf8")).toBe(heldSig);
+    // Another store is another --out.
+    expect(ok(await ghostly(["store", "sign", join(dir, "index.json"), "--key", other, "--out", tmp()]))).toMatchObject({ previous: null, keyCreated: false });
   }, 60_000);
 });

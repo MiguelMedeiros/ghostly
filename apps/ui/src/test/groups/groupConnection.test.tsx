@@ -150,6 +150,17 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     expect(within(why[3]).getByTestId("group-connection-member-problem-details")).toHaveTextContent(phone);
   });
 
+  it("draws a member's red cause in danger's ink, which reads on the member's row in a dark theme (danger's own red was 3.8:1 there)", async () => {
+    await open(active([me, alice({ state: "error", error: "ICE failed", cause: "other" }), bob({ state: "error", error: "Session receive queue full", cause: "session" })]));
+    const [failed, waiting] = screen.getAllByTestId("group-connection-member-problem");
+    expect(failed).toHaveAttribute("data-tone", "error");
+    expect(failed).toHaveClass("text-danger-ink");
+    expect(failed).not.toHaveClass("text-danger");
+    // A wait stays grey: never red, in either ink.
+    expect(waiting).toHaveAttribute("data-tone", "wait");
+    expect(waiting).not.toHaveClass("text-danger-ink");
+  });
+
   it("follows the group it is handed: a member coming back turns reachable, one going away turns the header partial", async () => {
     const view = await open(active([me, alice(), bob({ state: "waiting", lastSeenAt: 0 })]));
     expect(header().kind).toBe("partial");

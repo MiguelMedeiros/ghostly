@@ -1,5 +1,5 @@
 import { CliError } from "../errors";
-import { type Command, force, groupWait, cursor, needs, prLinked, quota, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, typingFor, usageFields, usageOptions, wait } from "./shared";
+import { type Command, force, groupWait, cursor, needs, prLinked, quota, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, typingFor, usageFields, usageOptions, wait } from "./shared";
 
 const BUTTON_UPDATE = "button update <chat|group> <message> [--chosen <button>] [--close] [--text <text>] [--force] [--wait none|confirmed|sent] [--timeout s]";
 
@@ -76,6 +76,7 @@ export const commands: Record<string, Command> = {
     },
     params: ({ options }, a) => {
       if (!Array.isArray(options.to) || !options.to.length) throw new CliError("usage", "Missing --to: ghostly forward <chat|group> <message>... --to <chat|group>... [--force] [--wait none|sent] [--timeout s]");
+      refs(options.to, "to", "chat or group");
       return { chat: a.chat, messages: (a.message ?? "").split(" ").filter(Boolean), to: options.to, force: options.force === true, wait: options.wait, timeout: options.timeout };
     },
   },
@@ -85,8 +86,8 @@ export const commands: Record<string, Command> = {
     params: ({ options }) => ({ label: options.label }),
   },
   "invite join": {
-    method: "invite.join", usage: "invite join <invite-or-link> [--label <name>]", summary: "Join a chat from its invite",
-    args: ["invite"], options: { label: { type: "string", description: "A name for the chat on this side" } },
+    method: "invite.join", usage: "invite join [<invite-or-link> | -] [--label <name>]", summary: "Join a chat from its invite; the invite on stdin keeps it out of ps",
+    args: ["invite?"], options: { label: { type: "string", description: "A name for the chat on this side" } },
     params: ({ options }, { invite }) => ({ invite, label: options.label }),
   },
   "message delete": { method: "chat.delete", usage: "message delete <chat> <message>", summary: "Forget a message on this device (the contact keeps theirs)", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },

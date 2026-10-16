@@ -401,10 +401,10 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     // answer per profile: `local_fetch` reaches only an address allowed there. The dialog is in the page's language.
     requestLocalAccess: (_pattern, origin) => invoke<boolean>("local_service_allow", { space: fileSpace(), origin, lang: dialogLanguage() }),
     forgetLocalAccess: (origin) => invoke<void>("local_service_forget", { space: fileSpace(), origin }),
-    async openService(peerPubKeyZ32, serviceId) {
+    async openService(peerPubKeyZ32, serviceId, tag) {
       const service = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId);
       // Rust says `unreachable` itself for a request this page never answered: the sentence goes with the window.
-      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, title: service?.name ?? serviceId, unreachable: profileT()("services.window.unreachable") });
+      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, tag, title: service?.name ?? serviceId, unreachable: profileT()("services.window.unreachable") });
     },
   });
   const connect = host.connect;

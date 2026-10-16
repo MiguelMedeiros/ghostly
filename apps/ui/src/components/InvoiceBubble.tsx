@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { QRCodeSVG } from "qrcode.react";
 import type { Bolt11Invoice, LightningDestination } from "@ghostly/core";
 import { LightningAddressPay } from "./wallet/LightningAddressPay";
@@ -31,6 +32,13 @@ function isSettled(id: string): boolean {
   } catch {
     return false;
   }
+}
+/**
+ * The mark's key: a digest of the whole invoice or token, so it belongs to that money only. A part of it (a token's
+ * tail, an invoice's payment hash) is shared by other money a contact can write, which would then read as settled.
+ */
+function settledMoneyId(text: string): string {
+  return Array.from(sha256(new TextEncoder().encode(text.trim())), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 function markSettled(id: string) {
   try {
@@ -128,7 +136,7 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
   // No Lightning wallet of that network (the profile's wallets are known): said in words, nothing here pays it.
   const known = all?.getState()?.wallets;
   const noWallet = !!known && !known.some((w) => w.type === "lightning" && w.network === network);
-  const id = invoice.paymentHash ?? invoice.invoice.slice(-32);
+  const id = settledMoneyId(invoice.invoice.toLowerCase());
   const [paid, setPaid] = useState(() => isSettled(id));
   // Handed to the mint, which has not settled it yet: paying again could pay twice.
   const [pending, setPending] = useState(false);
@@ -256,7 +264,7 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
   const { t } = useI18n();
   const wallet = useServicesPlatform()?.wallet;
   const [inspection, setInspection] = useState<CashuInspection | null | undefined>(undefined);
-  const id = value.slice(-40);
+  const id = settledMoneyId(value);
   const [redeemed, setRedeemed] = useState(() => isSettled(id));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
