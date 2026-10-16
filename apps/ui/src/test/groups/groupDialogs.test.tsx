@@ -476,6 +476,30 @@ describe("NewGroupDialog", () => {
     expect(engine.callsTo("createGroup")).toEqual([{ name: family.repeat(9), profile: "community" }]);
   });
 
+  // Cutting the new value's end dropped the name's last character, threw the caret to the end and cut the rest of what
+  // was typed there (agents#1097). A full name takes nothing more at the caret, and keeps its end and the caret.
+  it("typing into the middle of a full name adds nothing there and keeps its end and the caret; a paste keeps what fits", async () => {
+    const { user } = open();
+    const input = screen.getByTestId("new-group-name") as HTMLInputElement;
+    const full = "Weekend trip to the mountains with the whole family and friends!";
+    expect([...full]).toHaveLength(MAX_GROUP_NAME_LENGTH);
+    await user.paste(full);
+    await user.type(input, "long ", { initialSelectionStart: 8, initialSelectionEnd: 8 });
+    expect(input).toHaveValue(full);
+    expect(input.selectionStart).toBe(8);
+    // Room for four: a paste of more keeps its first four, at the caret.
+    await user.clear(input);
+    await user.paste(full.slice(4));
+    input.setSelectionRange(0, 0);
+    await user.paste("Our wonderful ");
+    expect(input).toHaveValue(`Our ${full.slice(4)}`);
+    expect(input.selectionStart).toBe(4);
+    // Over a selection, what fits takes its place.
+    input.setSelectionRange(0, 3);
+    await user.paste("Their");
+    expect(input).toHaveValue(`The ${full.slice(4)}`);
+  });
+
   it("stops a name at the bytes the group takes too", async () => {
     const { user } = open();
     // 4 bytes each: 64 of them would be 256 bytes, then one more character is past either limit.
