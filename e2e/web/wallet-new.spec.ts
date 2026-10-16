@@ -166,7 +166,8 @@ test("on a phone: a kind that could not be made says why on its own card, not on
   await expect(cashu).toHaveAttribute("data-state", "error", { timeout: 60_000 });
   // The whole message is under the eight kinds, below the bottom of the screen; the card says why in a line.
   const reason = sheet.getByTestId("new-wallet-type-cashu-reason");
-  await expect(reason).toHaveText("Can't reach testnut.cashu.space");
+  // The app chose this mint: it says it did not answer, with no address to check.
+  await expect(reason).toHaveText("Could not reach testnut.cashu.space");
   const box = (await reason.boundingBox())!;
   expect(box.y + box.height).toBeLessThanOrEqual(phone.height);
 });
