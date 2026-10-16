@@ -166,6 +166,26 @@ describe("the argument parser", () => {
     });
     expect(sweep).toEqual([]);
 
+    // The name in "Missing <x>" is the one the usage line shows: `chat pay bob` said <amount> for `<sats>`.
+    const unnamed = Object.entries({ ...COMMANDS, ...TEXT_COMMANDS }).flatMap(([name, command]) => {
+      const given = (command.args ?? []).filter((arg) => !arg.endsWith("?") || arg.endsWith("...?"));
+      return given.flatMap((arg, at) => {
+        if (arg.endsWith("?")) return [];
+        try {
+          positionals(command, given.map((_, i) => (i === at ? "" : "x")));
+          return [];
+        } catch (error) {
+          const shown = /^Missing <([^>]+)>: /.exec((error as Error).message)?.[1];
+          return shown !== undefined && (command.usage.includes(`<${shown}>`) || command.usage.includes(`<${shown}...>`)) ? [] : [`${name}: ${(error as Error).message}`];
+        }
+      });
+    });
+    expect(unnamed).toEqual([]);
+    expect(() => positionals(COMMANDS["chat pay"], ["bob"])).toThrow(/^Missing <sats>: ghostly chat pay <chat> <sats>/);
+    expect(() => positionals(COMMANDS["service add"], ["web", ""])).toThrow(/^Missing <http:\/\/127\.0\.0\.1:port>: /);
+    expect(() => positionals(COMMANDS["file accept"], [])).toThrow(/^Missing <file>: /);
+    expect(() => positionals(COMMANDS["file accept"], ["", "f"])).toThrow(/^Missing <chat>: /);
+
     // A path given as "" read the current folder: `profile picture ""` said "No file <cwd>".
     const params = (name: string, values: string[], options: Record<string, string | boolean> = {}) => COMMANDS[name].params!({ positionals: values, options }, positionals(COMMANDS[name], values));
     expect(() => params("profile picture", [""])).toThrow(/^Missing <jpeg>/);
