@@ -82,6 +82,15 @@ describe("the argument parser", () => {
     expect(() => parseArgs(["group", "--nope"], {}, (i) => i === 0)).toThrow(/Unknown option --nope/);
   });
 
+  it("says to put -- before a two-character word that starts with a dash, as it does for a longer one", () => {
+    const send = TEXT_COMMANDS.send;
+    for (const word of ["-1", "-5", "-ph"]) {
+      expect(() => parseArgs(["bob", word, "degrees"], send.options, idSlot(send)), word)
+        .toThrow(new CliError("usage", `Unknown option ${word} (put -- before text that starts with a dash)`));
+    }
+    expect(parseArgs(["bob", "--", "-1"], send.options, idSlot(send)).positionals).toEqual(["bob", "-1"]);
+  });
+
   it("knows booleans, --no-, short options, lists and global options anywhere", () => {
     const spec = { force: { type: "boolean" as const, description: "" }, mention: { type: "list" as const, description: "" } };
     expect(parseArgs(["-p", "bot", "g", "--mention", "a", "--no-force", "--mention", "b", "--pretty"], spec).options).toEqual({ profile: "bot", mention: ["a", "b"], force: false, pretty: true });
