@@ -1778,10 +1778,22 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.limitedMode) await this.startWallets();
 
     const history = new Map<string, StoredMessage[]>();
-    for (const stored of await db.getLinks()) {
-      if (!stored.group) await this.settleHistory(stored.id);
-      const messages = stored.group ? [] : await db.getMessages(stored.id);
-      const storedFiles = stored.group ? [] : await fileStore.listForLink(stored.id);
+    const links = await db.getLinks();
+    // Links start in the order they are stored (`nativeStartOrder` ranks the chats among them).
+    for (const stored of links) history.set(stored.id, []);
+    // The chat list waits for the groups, and the groups need none of the chats' histories: only their edges, which
+    // have none. 50 chats of 1000 messages read first held the list blank 1.3 s at every start (2.8 s at 4x CPU).
+    for (const stored of links) if (stored.group) this.links.set(stored.id, newLiveLink(stored, 0, linkFilesFrom(stored.id, [], [])));
+    for (const group of await db.getGroups()) await this.settleHistory(`group:${group.id}`);
+    // Groups know their edges from the links above, and may add or drop some before anything dials.
+    await this.groups.load(this.limitedMode);
+    this.groupsLoaded = true;
+    this.emitState();
+    for (const stored of links) {
+      if (stored.group) continue;
+      await this.settleHistory(stored.id);
+      const messages = await db.getMessages(stored.id);
+      const storedFiles = await fileStore.listForLink(stored.id);
       // A file whose message still waits for the chat to be live never started: it goes then (`sendWaiting`), as it
       // would have without the restart, and shows no transfer until it does.
       const waiting = new Set(messages.flatMap(m => m.sender === "me" && m.delivery === "waiting" && m.file ? [m.file.id] : []));
@@ -1789,23 +1801,19 @@ export class GhostlyNode implements EngineImplementation {
       for (const file of storedFiles) if (file.transfer && file.transfer.state !== "done" && !file.wire3 && !waiting.has(file.id)) this.transfers.set(file.id,
         file.transfer.state === "transferring" ? { ...file.transfer, state: "failed", error: "Transfer interrupted. Retry when connected." } : file.transfer);
       // files/3 transfers go on where they stopped, once the chat is live again.
-      if (!stored.group) this.fileDesk.restore(stored.id, storedFiles);
+      this.fileDesk.restore(stored.id, storedFiles);
       const files = linkFilesFrom(stored.id, storedFiles, messages);
       this.links.set(stored.id, newLiveLink(stored, messages[messages.length - 1]?.timestamp ?? 0, files));
       // What waits for the live link is known from this read: a session that opens reads no history for it (`sendWaiting`).
-      if (!stored.group) this.links.get(stored.id)!.waitingSends = Promise.resolve(new Set(messages.filter(waitsForLive).map(m => m.id)));
+      this.links.get(stored.id)!.waitingSends = Promise.resolve(new Set(messages.filter(waitsForLive).map(m => m.id)));
       history.set(stored.id, messages);
       // What the contact's clock was when the chat was last live: its first message of this run is read by it.
       for (const message of messages.slice(-4 * CLOCK_SAMPLES)) this.clockSample(message);
       const note = latestReaction(messages);
       if (note) this.reactionNotes.set(stored.id, note);
-      if (stored.profile && !stored.group) await this.outboxFor(stored.id).recover();
+      if (stored.profile) await this.outboxFor(stored.id).recover();
     }
     this.transfersRestored = true;
-    for (const group of await db.getGroups()) await this.settleHistory(`group:${group.id}`);
-    // Groups know their edges from the links above, and may add or drop some before anything dials.
-    await this.groups.load(this.limitedMode);
-    this.groupsLoaded = true;
     for (const group of this.groups.views()) {
       const note = latestReaction(await db.getMessages(`group:${group.id}`));
       if (note) this.reactionNotes.set(`group:${group.id}`, note);
