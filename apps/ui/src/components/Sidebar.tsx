@@ -41,7 +41,7 @@ import {
   listShownSessions,
 } from "../lib/storage";
 import { createPairedChat } from "../lib/pairedChat";
-import { chatPath } from "../lib/url";
+import { chatPath, decodePart } from "../lib/url";
 import type { ChatSession } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useRowReorder } from "../hooks/useRowReorder";
@@ -138,7 +138,7 @@ export function Sidebar() {
 
   const activeSessionId = (() => {
     if (!currentChatPath) return null;
-    const id = decodeURIComponent(currentChatPath.replace("/chat/", ""));
+    const id = decodePart(currentChatPath.replace("/chat/", ""));
     return id && !id.includes("/") ? id : null;
   })();
 
