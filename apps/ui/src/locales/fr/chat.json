@@ -176,6 +176,7 @@
     "messages": "{{count}} messages",
     "noChats": "Aucune discussion pour l’instant",
     "noMatch": "Aucune discussion de ce nom",
+    "partial": "{{sent}} sur {{count}} envoyés",
     "pick": "Choisissez-en jusqu’à {{count}}",
     "search": "Rechercher des discussions",
     "select": "Sélectionner",

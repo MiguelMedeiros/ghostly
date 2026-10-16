@@ -15,7 +15,12 @@ export const FORWARD_TARGETS = 5;
 export const FORWARD_MESSAGES = 30;
 
 /** What each chat forwarded to got: the new messages' ids, in order, and the first problem, if any. */
-export interface ForwardResult { to: string; messageIds: string[]; error: string | null }
+/**
+ * What one chat or group got of a forward: the new messages (`messageIds`), the forwarded ones they came from
+ * (`sent`, their ids in the chat forwarded from) and the first problem. A chat that got part of it is sent only the
+ * rest the next time (agents#1082).
+ */
+export interface ForwardResult { to: string; messageIds: string[]; sent: string[]; error: string | null }
 
 /**
  * Whether a message can be forwarded, and as what. Payments and payment requests (a bearer token or a request is for

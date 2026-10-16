@@ -209,7 +209,7 @@ export interface EngineApi {
    * Forwards messages of a chat (or `group:<id>`) to up to 5 chats and groups (WISP 400 § Forwards): new messages of
    * mine with a hop count, files from the bytes here. Each target says which messages it got and its first problem.
    */
-  forwardMessages(params: { linkId: string; messageIds: string[]; to: string[] }): { results: { to: string; messageIds: string[]; error: string | null }[] };
+  forwardMessages(params: { linkId: string; messageIds: string[]; to: string[] }): { results: { to: string; messageIds: string[]; sent?: string[]; error: string | null }[] };
   /**
    * files/3: answers an offer (`accept`, `decline`), or pauses, resumes or cancels a transfer, either way. A group's file
    * (`linkId` `group:<id>`) takes `accept` and `request`: it is asked for (Download), or asked for again.

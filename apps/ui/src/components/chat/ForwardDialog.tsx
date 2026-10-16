@@ -35,6 +35,11 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
   const [problems, setProblems] = useState<{ name: string; error: string }[]>([]);
   /** The chats a send that others refused went to: out of the selection, so Send again does not send them it twice. */
   const [sentTo, setSentTo] = useState<string[]>([]);
+  /**
+   * What each chat that refused part of a forward got of it (the forwarded messages' ids): Send again sends it only the
+   * rest, where it sent all of it again, and a group's 9th file on could never go (agents#1082).
+   */
+  const [got, setGot] = useState<Record<string, string[]>>({});
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const element = dialog.current!;
@@ -56,17 +61,33 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
     if (found) { setSecret(found); return; }
     setBusy(true);
     setProblems([]);
+    // Each chat what it did not get yet: the chats that are owed the same messages go in one call.
+    const owed = new Map<string, { ids: string[]; to: string[] }>();
+    for (const c of chosen) {
+      const ids = messages.map(m => m.id).filter(id => !got[c.target!]?.includes(id));
+      const key = ids.join("\n");
+      const call = owed.get(key) ?? owed.set(key, { ids, to: [] }).get(key)!;
+      call.to.push(c.target!);
+    }
     let outcome: ForwardOutcome[];
     try {
-      outcome = await forwardMessages(from, messages.map(m => m.id), chosen.map(c => c.target!));
+      outcome = (await Promise.all([...owed.values()].map(call => forwardMessages(from, call.ids, call.to)))).flat();
     } catch (error) {
       setProblems([{ name: "", error: problemLine(error, t) }]);
       setBusy(false);
       return;
     }
     setBusy(false);
-    // Any error is a failure, an empty one too: a chat whose error says nothing still got nothing.
-    const failed = outcome.filter(o => o.error !== null).map(o => ({ name: chosen.find(c => c.target === o.to)?.name ?? "", error: problemLine(o.error, t) }));
+    const gotNow = { ...got };
+    for (const o of outcome) gotNow[o.to] = [...(gotNow[o.to] ?? []), ...(o.sent ?? [])];
+    setGot(gotNow);
+    // Any error is a failure, an empty one too: a chat whose error says nothing still got nothing. One that got part of
+    // it says how much.
+    const failed = outcome.filter(o => o.error !== null).map(o => {
+      const name = chosen.find(c => c.target === o.to)?.name ?? "", part = gotNow[o.to]?.length ?? 0;
+      const error = problemLine(o.error, t);
+      return { name: part ? `${name} (${t("chat.forward.partial", { sent: String(part), count: String(messages.length) })})` : name, error };
+    });
     if (failed.length) {
       setProblems(failed);
       const went = chosen.filter(c => outcome.some(o => o.to === c.target && o.error === null));
