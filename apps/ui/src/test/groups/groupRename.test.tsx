@@ -8,6 +8,7 @@ import { UpdateProvider } from "../../contexts/UpdateContext";
 import { GroupChat } from "../../pages/GroupChat";
 import { fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { compose } from "../ime";
 
 // covers: groups.rename
 
@@ -99,6 +100,21 @@ describe("renaming a group in the app", () => {
     await user.keyboard("{Backspace}{Backspace}");
     await user.keyboard("🎉");
     expect(input).toHaveValue("Weeken🎉trip to the mountains with the whole family and friends!");
+  });
+
+  // agents#1153: with one character left, the reading's first kana went in ("に"), not "日本" nor nothing.
+  it("a word composed with an IME at the end of a name with one character left goes in whole or not at all", async () => {
+    const name = "x".repeat(63);
+    fakeEngine.update({ groups: [admin({ name })] });
+    const { user } = renderApp(<GroupMembersDialog group={admin({ name })} onClose={() => {}} />);
+    await user.click(screen.getByTestId("group-rename"));
+    const input = screen.getByTestId("group-rename-input") as HTMLInputElement;
+    input.setSelectionRange(63, 63);
+    compose(input, ["に", "にほ", "日本"]);
+    expect(input).toHaveValue(name);
+    expect(input.selectionStart).toBe(63);
+    compose(input, ["ね"]);
+    expect(input).toHaveValue(`${name}ね`);
   });
 
   it("a member cannot rename it", () => {
