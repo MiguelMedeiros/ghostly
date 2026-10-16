@@ -658,6 +658,8 @@ export interface WalletTx {
   amount: number;
   fee: number;
   note?: string;
+  /** `lightning-in`: the mint quote of the invoice paid, so the invoice on screen knows it is the one. Absent on older records. */
+  quote?: string;
 }
 
 /** The kinds of wallet a profile can have: each is one card of the deck, on one network. */
