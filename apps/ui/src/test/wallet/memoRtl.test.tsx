@@ -9,7 +9,7 @@ import { fakeEngine, walletView } from "../fakeEngine";
 import { mint, TEST_MINT } from "../payments/fixtures";
 import { renderApp } from "../render";
 
-// covers: wallet.cashu.pay-invoice, wallet.lightning.address, app.i18n
+// covers: wallet.cashu.pay-invoice, wallet.lightning.card, app.i18n
 
 /**
  * A memo is text someone else wrote, in any script: in the wallet too it is laid out in its own direction, as the
