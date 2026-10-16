@@ -68,6 +68,7 @@
     "removed": "Uno store che hai aggiunto ha rimosso questa app.",
     "revoked": "Il suo editore ha revocato questa versione.",
     "rollback": "Il link contiene una versione più vecchia.",
+    "slow": "Ci è voluto troppo con questa connessione. Riprova con una più veloce.",
     "status": "Niente a quel link.",
     "storage": "Questo browser non può tenere app qui (navigazione privata?). Prova una finestra normale.",
     "storageInfo": "Ghostly tiene i file di ogni app su questo dispositivo. Le finestre private, come la Navigazione privata di Safari, non lo permettono, e anche un disco pieno lo impedisce.",

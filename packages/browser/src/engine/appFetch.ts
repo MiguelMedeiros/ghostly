@@ -20,7 +20,12 @@ export const APP_FETCH_LIMITS = {
   sigBytes: 1024,
   /** `ghostly-revoke.json`: at most 4096 signed revocations. */
   revocationsBytes: 16 * 1024 * 1024,
+  /** How long the host has to answer (the response's headers). */
   timeoutMs: 30_000,
+  /** How long the body may go without a byte: a read still arriving is never cut by the clock alone. */
+  idleMs: 30_000,
+  /** A whole read at most: the 16 MiB cap at about 224 kbit/s. */
+  totalMs: 10 * 60_000,
 } as const;
 
 /** A URL this client may read an app, a store or a revocation list from. */
@@ -30,7 +35,8 @@ export function isAppFetchUrl(value: unknown): value is string {
   return url.port === "" && (APP_FETCH_HOSTS as readonly string[]).includes(url.hostname.toLowerCase());
 }
 
-export type AppFetchErrorCode = "host" | "offline" | "status" | "too-large" | "network";
+/** `slow`: the host did not answer in time, went silent, or the read ran past its whole budget. */
+export type AppFetchErrorCode = "host" | "offline" | "status" | "too-large" | "network" | "slow";
 
 export class AppFetchError extends Error {
   constructor(readonly code: AppFetchErrorCode, message: string, readonly status?: number) {
@@ -46,53 +52,76 @@ export class AppFetchError extends Error {
  */
 export type AppFetcher = (url: string, options: { maxBytes: number; peek?: boolean }) => Promise<Uint8Array>;
 
-export function boundedAppFetch(options: { fetcher?: typeof fetch; online?: () => boolean; timeoutMs?: number } = {}): AppFetcher {
+export function boundedAppFetch(options: { fetcher?: typeof fetch; online?: () => boolean; timeoutMs?: number; idleMs?: number; totalMs?: number } = {}): AppFetcher {
   return async (url, { maxBytes, peek = false }) => {
     if (!isAppFetchUrl(url)) throw new AppFetchError("host", "Apps are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS");
     if (options.online && !options.online()) throw new AppFetchError("offline", "Offline");
     const fetcher = options.fetcher ?? globalThis.fetch.bind(globalThis);
+    // One signal for the request and its body: the host has `timeoutMs` to answer, then the body `idleMs` between two
+    // bytes, the whole read `totalMs`. A read still arriving goes on; one cut by the clock is `slow`, not `network`.
+    const controller = new AbortController();
+    const cut = () => { controller.abort(new DOMException("The read took too long", "TimeoutError")); };
+    const total = setTimeout(cut, options.totalMs ?? APP_FETCH_LIMITS.totalMs);
+    let idle = setTimeout(cut, options.timeoutMs ?? APP_FETCH_LIMITS.timeoutMs);
+    const heard = () => { clearTimeout(idle); idle = setTimeout(cut, options.idleMs ?? APP_FETCH_LIMITS.idleMs); };
+    const failure = (error: unknown) => controller.signal.aborted
+      ? new AppFetchError("slow", "That took too long on this connection")
+      : new AppFetchError("network", error instanceof Error ? error.message : String(error));
+    const { signal } = controller;
     let response: Response;
     try {
       response = await fetcher(url, {
-        signal: AbortSignal.timeout(options.timeoutMs ?? APP_FETCH_LIMITS.timeoutMs),
+        signal,
         credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store", redirect: "error",
         ...(peek && { headers: { range: `bytes=0-${maxBytes - 1}` } }),
       });
     } catch (error) {
-      throw new AppFetchError("network", error instanceof Error ? error.message : String(error));
+      clearTimeout(total); clearTimeout(idle);
+      throw failure(error);
     }
-    // A redirect a fetcher followed after all (one that ignores `redirect`) still lands only on a host of the list.
-    if (response.url && response.url !== url && !isAppFetchUrl(response.url)) throw new AppFetchError("host", "The host sent the request elsewhere");
-    if (!response.ok) {
-      await response.body?.cancel().catch(() => {});
-      throw new AppFetchError("status", `The host answered ${response.status}`, response.status);
-    }
-    if (!peek && Number(response.headers.get("content-length")) > maxBytes) {
-      await response.body?.cancel().catch(() => {});
-      throw new AppFetchError("too-large", "Too large");
-    }
+    heard();
     const parts: Uint8Array[] = [];
     let length = 0;
-    const reader = response.body?.getReader();
-    if (reader) {
-      try {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (length + value.length > maxBytes) {
-            if (!peek) throw new AppFetchError("too-large", "Too large");
-            parts.push(value.subarray(0, maxBytes - length));
-            length = maxBytes;
-            break;
+    try {
+      // A redirect a fetcher followed after all (one that ignores `redirect`) still lands only on a host of the list.
+      if (response.url && response.url !== url && !isAppFetchUrl(response.url)) throw new AppFetchError("host", "The host sent the request elsewhere");
+      if (!response.ok) {
+        await response.body?.cancel().catch(() => {});
+        throw new AppFetchError("status", `The host answered ${response.status}`, response.status);
+      }
+      if (!peek && Number(response.headers.get("content-length")) > maxBytes) {
+        await response.body?.cancel().catch(() => {});
+        throw new AppFetchError("too-large", "Too large");
+      }
+      const reader = response.body?.getReader();
+      if (reader) {
+        // A body the signal does not reach (a fetcher of its own) is let go all the same: its pending read ends.
+        const stop = () => { reader.cancel().catch(() => {}); };
+        signal.addEventListener("abort", stop);
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (signal.aborted) throw failure(signal.reason);
+            if (done) break;
+            heard();
+            if (length + value.length > maxBytes) {
+              if (!peek) throw new AppFetchError("too-large", "Too large");
+              parts.push(value.subarray(0, maxBytes - length));
+              length = maxBytes;
+              break;
+            }
+            parts.push(value);
+            length += value.length;
           }
-          parts.push(value);
-          length += value.length;
+        } catch (error) {
+          if (error instanceof AppFetchError) throw error;
+          throw failure(error);
+        } finally {
+          signal.removeEventListener("abort", stop);
+          await reader.cancel().catch(() => {});
         }
-      } catch (error) {
-        if (error instanceof AppFetchError) throw error;
-        throw new AppFetchError("network", error instanceof Error ? error.message : String(error));
-      } finally { await reader.cancel().catch(() => {}); }
-    }
+      }
+    } finally { clearTimeout(total); clearTimeout(idle); }
     const bytes = new Uint8Array(length);
     let at = 0;
     for (const part of parts) { bytes.set(part, at); at += part.length; }
