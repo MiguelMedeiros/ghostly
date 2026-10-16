@@ -111,6 +111,37 @@ describe("the composer's @", () => {
     expect(engine.callsTo("sendGroupMessage")).toEqual([{ groupId: "group-1", text: "@Bob hi", mentions: [{ k: BOB2, o: 0, l: 4 }] }]);
   });
 
+  // The second Bob picked was bound to the first: never named, no sound, no notification (agents#1046).
+  it("names each of two members of one name where they were picked, whatever is typed around them", async () => {
+    const { user, engine } = openGroup(active({ members: [...members, member({ key: BOB2, nick: "Bob" })] }));
+    await user.type(composer(), "@bob");
+    await user.keyboard("{Enter}");
+    await user.type(composer(), "and @bob");
+    await user.keyboard("{ArrowDown}{Enter}");
+    // Words typed before both of them move them along.
+    await user.type(composer(), "dinner?");
+    await user.keyboard("{Home}");
+    await user.type(composer(), "Hi ", { initialSelectionStart: 0, initialSelectionEnd: 0 });
+    await user.keyboard("{End}{Enter}");
+    expect(engine.callsTo("sendGroupMessage")).toEqual([{ groupId: "group-1", text: "Hi @Bob and @Bob dinner?", mentions: [{ k: BOB, o: 3, l: 4 }, { k: BOB2, o: 12, l: 4 }] }]);
+  });
+
+  // Editing, the other Bob picked took every "@Bob" of the message, the one it already named too (agents#1046).
+  it("while editing, names the member picked at the place picked only", async () => {
+    const mine = stored({ id: `${ME}:1:3`, sender: "me", member: ME, text: "@Bob hi", mentions: [{ k: BOB, o: 0, l: 4 }] });
+    const { user, engine } = openGroup(active({ members: [...members, member({ key: BOB2, nick: "Bob" })] }), [mine]);
+    fakeEngine.on("editMessage", () => ({ error: null }));
+    await screen.findByText("hi", { exact: false });
+    await user.click(composer());
+    await user.keyboard("{ArrowUp}");
+    await waitFor(() => expect(composer()).toHaveValue("@Bob hi"));
+    await user.type(composer(), " @bob");
+    await user.keyboard("{ArrowDown}{Enter}");
+    await user.keyboard("{Enter}");
+    // Only the new place is added; the engine carries the first one, still bound to the first Bob (carryMentions).
+    expect(engine.callsTo("editMessage")).toEqual([{ linkId: "group:group-1", messageId: `${ME}:1:3`, text: "@Bob hi @Bob ", mentions: [{ k: BOB2, o: 8, l: 4 }] }]);
+  });
+
   it("offers @everyone to a private group's admin only, never in a community", async () => {
     const first = openGroup(active({ isAdmin: true }));
     await first.user.type(composer(), "@ev");

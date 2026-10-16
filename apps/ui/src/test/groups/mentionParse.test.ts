@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { validMentions } from "@ghostly/core";
 import { parseMessage, plainText } from "../../lib/parse";
 import {
-  composeMentions, filterCandidates, insertMention, markMentions, mentionLabel, mentionQueryAt, mentionViews, PICKER_ROWS,
+  composeMentions, filterCandidates, insertMention, markMentions, mentionLabel, mentionQueryAt, mentionViews, moveChosen, PICKER_ROWS,
 } from "../../lib/parse/mentions";
 
 // covers: groups.mentions
@@ -91,6 +91,40 @@ describe("the mentions of a text about to be sent", () => {
   });
   it("sends at most sixteen", () => {
     expect(composeMentions("@Bob ".repeat(20), [bob])).toHaveLength(16);
+  });
+  // Both places went to the Bob picked first: the other was never named (agents#1046).
+  it("names each of two members of one name where they were picked", () => {
+    const bob2 = { key: K("k"), label: "Bob" };
+    expect(composeMentions("@Bob and @Bob, look", [{ ...bob, at: 0 }, { ...bob2, at: 9 }]))
+      .toEqual([{ k: K("b"), o: 0, l: 4 }, { k: K("k"), o: 9, l: 4 }]);
+    expect(composeMentions("@Bob and @Bob, look", [{ ...bob2, at: 0 }, { ...bob, at: 9 }]))
+      .toEqual([{ k: K("k"), o: 0, l: 4 }, { k: K("b"), o: 9, l: 4 }]);
+    // Places in the field, the text sent trimmed.
+    expect(composeMentions("  @Bob @Bob ", [{ ...bob, at: 2 }, { ...bob2, at: 7 }]))
+      .toEqual([{ k: K("b"), o: 0, l: 4 }, { k: K("k"), o: 5, l: 4 }]);
+    // One edited away at its place is no mention, even with the same words elsewhere.
+    expect(composeMentions("@Bob and @Bo", [{ ...bob, at: 0 }, { ...bob2, at: 9 }])).toEqual([{ k: K("b"), o: 0, l: 4 }]);
+  });
+});
+
+describe("a chosen mention's place as the field changes", () => {
+  const bob = { key: K("b"), label: "Bob" };
+  const two = [{ ...bob, at: 0 }, { key: K("k"), label: "Bob", at: 9 }];
+  it("moves with what is typed or deleted before it, and stays with what is after", () => {
+    expect(moveChosen(two, "@Bob and @Bob ", "Hi @Bob and @Bob ", 3)).toEqual([{ ...bob, at: 3 }, { key: K("k"), label: "Bob", at: 12 }]);
+    expect(moveChosen(two, "@Bob and @Bob ", "@Bob & @Bob ", 6)).toEqual([{ ...bob, at: 0 }, { key: K("k"), label: "Bob", at: 7 }]);
+    expect(moveChosen(two, "@Bob and @Bob ", "@Bob and @Bob dinner?", 21)).toEqual(two);
+  });
+  it("drops one whose words the change touched", () => {
+    expect(moveChosen(two, "@Bob and @Bob ", "@Bo and @Bob ", 3)).toEqual([{ key: K("k"), label: "Bob", at: 8 }]);
+  });
+  it("tells by the caret which of the same words went", () => {
+    // "@Bob @Bob " losing its first "@Bob ": without the caret, the second would look deleted.
+    const same = [{ ...bob, at: 0 }, { key: K("k"), label: "Bob", at: 5 }];
+    expect(moveChosen(same, "@Bob @Bob ", "@Bob ", 0)).toEqual([{ key: K("k"), label: "Bob", at: 0 }]);
+    expect(moveChosen(same, "@Bob @Bob ", "@Bob ", 5)).toEqual([{ ...bob, at: 0 }]);
+    // A caret that does not fit the change is no help, and is not used.
+    expect(moveChosen(same, "@Bob @Bob ", "@Bob ", 9)).toEqual([{ ...bob, at: 0 }]);
   });
 });
 
