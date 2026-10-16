@@ -4404,7 +4404,7 @@ export class GhostlyNode implements EngineImplementation {
    * as a new message of mine, in the order they were written, carrying one more hop than it had and nothing of who wrote
    * it or where. A text goes as written; a file from the bytes on this device (a copy per chat, nothing fetched again),
    * through the chat's own path, so a large one still waits for the contact's consent. A group takes texts only. What one
-   * chat refuses does not stop the others: each says what it got.
+   * chat refuses does not stop the others, nor the rest of its own: each says what it got, and which of them (`sent`).
    */
   async forwardMessages(params: { linkId: string; messageIds: string[]; to: string[] }): Promise<{ results: ForwardResult[] }> {
     const { linkId } = params;
@@ -4430,7 +4430,7 @@ export class GhostlyNode implements EngineImplementation {
     const now = () => (last = Math.max(Date.now(), last + 1));
     const results: ForwardResult[] = [];
     for (const to of targets) {
-      const result: ForwardResult = { to, messageIds: [], error: null };
+      const result: ForwardResult = { to, messageIds: [], sent: [], error: null };
       results.push(result);
       const note = (error: string) => { result.error ??= error; };
       const groupId = to.startsWith("group:") ? to.slice("group:".length) : undefined;
@@ -4444,16 +4444,24 @@ export class GhostlyNode implements EngineImplementation {
               : !live!.link ? { error: "You are offline" }
               : live!.stored.profile ? await this.sendChatText(live!, message.text.trim(), now(), message.preview, undefined, hops)
               : await this.sendMessage({ linkId: to, text: message.text, timestamp: now() });
-            if (sent.error) note(sent.error); else if (sent.messageId) result.messageIds.push(sent.messageId);
+            if (sent.error) { note(sent.error); continue; }
+            if (sent.messageId) result.messageIds.push(sent.messageId);
+            result.sent.push(message.id);
             continue;
           }
           if (groupId) {
+            // Past the group's pace (8 files a minute) the file is refused before its bytes are copied: the rest waits
+            // for Send again, which sends only what did not go (agents#1082).
+            const check = this.groups.fileCheck(groupId);
+            if (check.error) { note(check.error); continue; }
             // A new announcement by me (WISP 503 § Forwards), my own copy its first holder.
             const original = message.file!, file: MessageFile = { id: groupFileId(groupId, "out"), name: original.name, size: original.size, mime: original.mime,
               ...(original.voice && { voice: original.voice }), ...(original.video && { video: original.video }), ...(original.image && { image: original.image }) };
             await copyForForward(original.id, { linkId: to, wireId: file.id.slice(`group-${groupId}-out-`.length), timestamp: now(), file });
             const sent = await this.sendGroupFile({ groupId, file, forwarded: hops });
-            if (sent.error) { await removeStored(file.id).catch(() => {}); note(sent.error); } else if (sent.messageId) result.messageIds.push(sent.messageId);
+            if (sent.error) { await removeStored(file.id).catch(() => {}); note(sent.error); continue; }
+            if (sent.messageId) result.messageIds.push(sent.messageId);
+            result.sent.push(message.id);
             continue;
           }
           if (!live!.link) { note("You are offline"); continue; }
@@ -4471,6 +4479,7 @@ export class GhostlyNode implements EngineImplementation {
             throw error;
           }
           result.messageIds.push(`me_${timestamp}`);
+          result.sent.push(message.id);
         } catch (error) {
           note(forwardError(error));
         }

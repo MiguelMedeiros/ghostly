@@ -159,7 +159,7 @@ describe("forwarding between chats", { timeout: 60_000 }, () => {
     expect(await t.a.link.sendMessage("**lunch** at [noon](https://example.com)?")).toBeNull();
     const original = await t.row(t.a, m => m.sender === "peer");
     const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: [original.id], to: [t.b.id] });
-    expect(results).toEqual([{ to: t.b.id, messageIds: [expect.stringMatching(/^me_/)], error: null }]);
+    expect(results).toEqual([{ to: t.b.id, messageIds: [expect.stringMatching(/^me_/)], sent: [original.id], error: null }]);
     await vi.waitFor(() => expect(t.b.got).toHaveLength(1));
     // The Markdown source goes as it was written; the contact reads a forwarded message, and nothing of Alice.
     expect(t.b.got[0]).toMatchObject({ text: "**lunch** at [noon](https://example.com)?", forwarded: 1 });
@@ -219,8 +219,9 @@ describe("forwarding between chats", { timeout: 60_000 }, () => {
     await fileStore.put({ id: `${t.a.id}-in-half`, linkId: t.a.id, blob: new Blob([new Uint8Array(4)]), createdAt: 6, direction: "in", metadata: { name: "half.png", size: 10, mime: "image/png", timestamp: 6 } });
     await db.addMessage({ linkId: t.a.id, id: "peer_note", text: "a note", sender: "peer", timestamp: 7, via: "datalink" });
     const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: ["peer_half", "peer_note"], to: ["group:nope", t.b.id] });
-    expect(results[0]).toEqual({ to: "group:nope", messageIds: [], error: "You are not in this group" });
-    expect(results[1]).toMatchObject({ to: t.b.id, error: "The file has not arrived yet", messageIds: [expect.any(String)] });
+    expect(results[0]).toEqual({ to: "group:nope", messageIds: [], sent: [], error: "You are not in this group" });
+    // The note went, the file did not: which one is said, so Send again sends only the file (agents#1082).
+    expect(results[1]).toMatchObject({ to: t.b.id, error: "The file has not arrived yet", messageIds: [expect.any(String)], sent: ["peer_note"] });
     await vi.waitFor(() => expect(t.b.got.map(m => m.text)).toEqual(["a note"]));
     await expect(t.node.forwardMessages({ linkId: t.a.id, messageIds: ["peer_note"], to: ["a", "b", "c", "d", "e", "f"] })).rejects.toThrow(/at most 5/);
   });
@@ -242,7 +243,8 @@ describe("forwarding between chats", { timeout: 60_000 }, () => {
     await vi.waitFor(() => expect(t.node.getState().transfers[received.file!.id]).toMatchObject({ state: "done" }), { timeout: 15_000 });
     const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: [received.id], to: [t.c!.id, t.b.id] });
     expect(results[0]).toMatchObject({ to: t.c!.id, messageIds: [], error: expect.stringMatching(/files/) });
-    expect(results[1]).toMatchObject({ to: t.b.id, error: null, messageIds: [expect.any(String)] });
+    expect(results[1]).toMatchObject({ to: t.b.id, error: null, messageIds: [expect.any(String)], sent: [received.id] });
+    expect(results[0]!.sent).toEqual([]);
     expect((await db.getMessages(t.c!.id)).filter(m => m.file)).toEqual([]);
     expect(await fileStore.listForLink(t.c!.id)).toEqual([]);
   });
@@ -261,9 +263,38 @@ describe("forwarding between chats", { timeout: 60_000 }, () => {
     });
     const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: [received.id], to: [t.b.id] });
     full.mockRestore();
-    expect(results).toEqual([{ to: t.b.id, messageIds: [], error: "Not enough space on this device (QuotaExceededError)" }]);
+    expect(results).toEqual([{ to: t.b.id, messageIds: [], sent: [], error: "Not enough space on this device (QuotaExceededError)" }]);
     expect((await db.getMessages(t.b.id)).filter(m => m.file)).toEqual([]);
     expect(await fileStore.listForLink(t.b.id)).toEqual([]);
+  });
+});
+
+describe("a forward a group took part of", { timeout: 60_000 }, () => {
+  // A group takes 8 of my files a minute: a forward of 10 posted 1-8, the 9th hit the pace, and the copy of the 10th was
+  // made and thrown away; each Send again posted 1-8 again (agents#1082). Past the pace the rest is refused before its
+  // copy, and the result says which went.
+  it("stops at the group's pace before copying, and says which messages went", async () => {
+    const t = await setup();
+    const files = Array.from({ length: 10 }, (_, i) => `doc-${String(i).padStart(6, "0")}`);
+    for (const name of files) t.a.offer(name, 512);
+    const received = await Promise.all(files.map(name => t.row(t.a, m => m.id === `peer_${name}`)));
+    await vi.waitFor(() => expect(received.every(r => t.node.getState().transfers[r.file!.id]?.state === "done")).toBe(true), { timeout: 30_000 });
+    const node = t.node as unknown as {
+      membership(groupId: string): unknown;
+      groups: { fileCheck(groupId: string): { error: string | null } };
+      sendGroupFile(params: { groupId: string }): Promise<{ error: string | null; messageId?: string }>;
+    };
+    let announced = 0;
+    vi.spyOn(node, "membership").mockReturnValue({ me: "me", members: new Set() });
+    vi.spyOn(node.groups, "fileCheck").mockImplementation(() => ({ error: announced >= 8 ? "You sent many files to this group just now. Wait a minute." : null }));
+    const posted = vi.spyOn(node, "sendGroupFile").mockImplementation(async () => ({ error: null, messageId: `g-${++announced}` }));
+    const copied = vi.spyOn(fileStore, "put");
+    const ids = received.map(r => r.id);
+    const { results } = await t.node.forwardMessages({ linkId: t.a.id, messageIds: ids, to: ["group:g1"] });
+    expect(posted).toHaveBeenCalledTimes(8);
+    // No copy made for the two the pace refused.
+    expect(copied.mock.calls.filter(([file]) => file.linkId === "group:g1")).toHaveLength(8);
+    expect(results).toEqual([{ to: "group:g1", messageIds: Array.from({ length: 8 }, (_, i) => `g-${i + 1}`), sent: ids.slice(0, 8), error: "You sent many files to this group just now. Wait a minute." }]);
   });
 });
 

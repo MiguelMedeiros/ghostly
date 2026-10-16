@@ -176,6 +176,7 @@
     "messages": "{{count}} 条消息",
     "noChats": "还没有聊天",
     "noMatch": "没有这个名字的聊天",
+    "partial": "已发送 {{sent}}/{{count}}",
     "pick": "最多选择 {{count}} 个",
     "search": "搜索聊天",
     "select": "选择",
