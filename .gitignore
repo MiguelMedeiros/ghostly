@@ -1,5 +1,7 @@
 node_modules
 dist
+# Builds kept beside dist (dista/distb for an A/B, dist-old, ...): never committed (tools/scripts/test/trackedBuildOutput.test.ts)
+dist*/
 *.local
 .DS_Store
 target
