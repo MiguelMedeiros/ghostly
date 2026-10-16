@@ -224,6 +224,9 @@ const RULES: readonly Rule[] = [
   exact("Message too long once encoded. Shorten it or send it as a file.", "errors.chat.tooLong", "errors.chat.tooLongNext"),
   { match: /^This message was edited (?<max>\d+) times, the most one takes\.$/, key: "errors.chat.editTooMany", next: "errors.chat.editTooManyNext" },
   { match: /^That message (?:is not in this chat, or )?cannot be replied to$/, key: "errors.chat.replyGone", next: "errors.chat.replyGoneNext" },
+  // A forward of a message deleted meanwhile, or of none (engine/node.ts forwardMessages).
+  exact("That message is not in this chat", "errors.chat.messageGone", "errors.chat.messageGoneNext"),
+  exact("No message to forward", "errors.chat.forwardNone", "errors.chat.forwardNoneNext"),
   // A chat made or joined that the storage had no room for (lib/storage.ts ensureSession).
   exact("There is no room left on this device for a new chat", "errors.chat.noRoom", "errors.chat.noRoomNext"),
   exact("Someone else joined with this invite first. Ask your contact for a new one.", "pairing.reason.taken"),

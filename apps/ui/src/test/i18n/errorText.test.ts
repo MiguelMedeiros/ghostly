@@ -43,6 +43,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This message was edited 100 times, the most one takes.", "packages/browser/src/engine/node.ts", "This message was edited ${most} times, the most one takes."],
   ["That message is not in this chat, or cannot be replied to", "packages/browser/src/engine/node.ts"],
   ["That message cannot be replied to", "packages/browser/src/engine/node.ts"],
+  ["That message is not in this chat", "packages/browser/src/engine/node.ts"],
+  ["No message to forward", "packages/browser/src/engine/node.ts"],
   ["There is no room left on this device for a new chat", "apps/ui/src/lib/storage.ts"],
   // Any engine call whose storage write the browser refused for want of space (engine/server.ts): Chromium's message is empty.
   ["Not enough space on this device (QuotaExceededError)", `${BROWSER}/shared/idb.ts`, "Not enough space on this device ("],

@@ -42,6 +42,10 @@
   "chat": {
     "editTooMany": "Ce message ne peut plus être modifié",
     "editTooManyNext": "Un message accepte {{max}} modifications au plus.",
+    "forwardNone": "Rien à transférer",
+    "forwardNoneNext": "Choisissez à nouveau les messages, puis transférez-les.",
+    "messageGone": "Ce message n’est plus dans cette discussion",
+    "messageGoneNext": "Il a été supprimé. Revenez à la discussion et choisissez à nouveau.",
     "noRoom": "Pas de place pour une nouvelle discussion",
     "noRoomNext": "Libérez de l'espace sur cet appareil, par exemple en supprimant d'anciennes discussions, puis réessayez.",
     "replyGone": "Impossible de répondre à ce message",
