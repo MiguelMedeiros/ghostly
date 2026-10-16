@@ -143,6 +143,37 @@ describe("the argument parser", () => {
     expect(() => positionals(COMMANDS["chat show"], ["a", "b"])).toThrow(/Too many/);
   });
 
+  it("a required positional given as \"\" is the usage error a missing one is, before the profile opens, in every command", () => {
+    expect(() => positionals(COMMANDS["chat show"], [""])).toThrow(/^Missing <chat>: ghostly chat show <chat>/);
+    expect(() => positionals(COMMANDS["file accept"], ["", "f"])).toThrow(/^Missing <chat>/);
+    expect(() => positionals(COMMANDS["group create"], ["", ""])).toThrow(/^Missing <name>/);
+    // `chat rename <chat> ""` gives the chat back the contact's name, by design.
+    expect(positionals(COMMANDS["chat rename"], ["abc", ""])).toEqual({ chat: "abc", name: "" });
+    // Before: 63 commands opened the profile, then answered bad_request "<param> is required" (exit 1).
+    const sweep = Object.entries({ ...COMMANDS, ...TEXT_COMMANDS }).flatMap(([name, command]) => {
+      // Every positional but a leading optional one (`[<chat>] <file>`) gets a word.
+      const given = (command.args ?? []).filter((arg) => !arg.endsWith("?") || arg.endsWith("...?"));
+      return given.flatMap((arg, at) => {
+        if (arg.endsWith("?")) return [];
+        const values = given.map((_, i) => (i === at ? "" : "x"));
+        try {
+          positionals(command, values);
+          return [`${name} <${arg}>`];
+        } catch (error) {
+          return error instanceof CliError && error.code === "usage" && /^Missing </.test(error.message) ? [] : [`${name} <${arg}>: ${String(error)}`];
+        }
+      });
+    });
+    expect(sweep).toEqual([]);
+
+    // A path given as "" read the current folder: `profile picture ""` said "No file <cwd>".
+    const params = (name: string, values: string[], options: Record<string, string | boolean> = {}) => COMMANDS[name].params!({ positionals: values, options }, positionals(COMMANDS[name], values));
+    expect(() => params("profile picture", [""])).toThrow(/^Missing <jpeg>/);
+    expect(() => params("group picture", ["g", ""])).toThrow(/^Missing <jpeg>/);
+    expect(params("profile picture", [""], { clear: true })).toEqual({ path: undefined, clear: true });
+    expect(() => params("identity complete", ["d"], { "evidence-file": "" })).toThrow(/^A path given as "" names no file/);
+  });
+
   it("says a required name, path or --to is missing as a usage error, before anything opens", () => {
     const params = (name: string, argv: string[]) => {
       const command = COMMANDS[name];
