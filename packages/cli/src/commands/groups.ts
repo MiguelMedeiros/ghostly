@@ -55,9 +55,9 @@ export const commands: Record<string, Command> = {
     method: "group.picture", usage: "group picture <group> <jpeg> | --clear", summary: "Set or clear the group's picture (admin; a square JPEG)", args: ["group", "path...?"],
     options: { clear: { type: "boolean", description: "Remove the picture" } },
     params: ({ options }, a) => {
-      if (a.path === undefined && options.clear !== true) throw new CliError("usage", "Missing <jpeg>: ghostly group picture <group> <jpeg> | --clear");
-      if (a.path !== undefined && options.clear === true) throw new CliError("usage", "--clear removes the picture: not with a <jpeg>");
-      return { group: a.group, path: here(a.path), clear: options.clear === true };
+      if (!a.path && options.clear !== true) throw new CliError("usage", "Missing <jpeg>: ghostly group picture <group> <jpeg> | --clear");
+      if (a.path && options.clear === true) throw new CliError("usage", "--clear removes the picture: not with a <jpeg>");
+      return { group: a.group, path: here(a.path || undefined), clear: options.clear === true };
     },
   },
   "group react": {
