@@ -1221,9 +1221,11 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
   font-family: var(--font-jetbrains), ui-monospace, monospace;
   color: var(--cyan);
 }
+/* The z's rise a few times when the footer shows and rest on the bright frame: looped, they restyled the page 15
+   times a second on the main thread for as long as the reader stayed at the end of it. */
 .footer-sleeper .zzz span {
   display: inline-block;
-  animation: zzz 2s ease-in-out infinite;
+  animation: zzz 2s ease-in-out 3 both;
 }
 .footer-sleeper .zzz span:nth-child(2) {
   animation-delay: 0.3s;
@@ -1236,12 +1238,12 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
 @keyframes zzz {
   0%,
   100% {
-    opacity: 0.3;
-    transform: translateY(0);
-  }
-  50% {
     opacity: 1;
     transform: translateY(-4px);
+  }
+  50% {
+    opacity: 0.3;
+    transform: translateY(0);
   }
 }
 @media (max-width: 860px) {
