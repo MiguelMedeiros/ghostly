@@ -277,6 +277,9 @@ export function idbPickStore(name: () => string): PickStore {
   };
 }
 
+/** How long a sheet's first button stays off after the sheet shows: longer than a double click or a key typed next. */
+const SHEET_SETTLE_MS = 500;
+
 /**
  * A sheet of the client's own: a title, a note, a second button and a first one whose click does `act`. Modal: Tab
  * and Shift+Tab go round its buttons, never to the app under it. It goes, answering null, when `signal` aborts (its
@@ -324,11 +327,16 @@ function sheet(parts: { title: string; note?: string; secondary: string; primary
     back.append(box);
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     let done = false;
+    // A key or click the person was already making (a second Enter, a double click, typing in the message box) is not
+    // an answer: the sheet opens with focus on its box, and its button works only a moment after it shows.
+    primary.disabled = true;
+    const armed = setTimeout(() => { primary.disabled = false; }, SHEET_SETTLE_MS);
     const tab = (e: KeyboardEvent) => keepTabInside(e, box);
     const stopped = () => finish(null);
     const finish = (value: unknown) => {
       if (done) return;
       done = true;
+      clearTimeout(armed);
       document.removeEventListener("keydown", tab);
       parts.signal?.removeEventListener("abort", stopped);
       back.remove();
@@ -345,8 +353,10 @@ function sheet(parts: { title: string; note?: string; secondary: string; primary
       primary.disabled = true;
       parts.act().then(finish, () => finish(null));
     });
+    box.tabIndex = -1;
+    box.classList.add("outline-none");
     document.body.appendChild(back);
-    primary.focus({ preventScroll: true });
+    box.focus({ preventScroll: true });
   });
 }
 
