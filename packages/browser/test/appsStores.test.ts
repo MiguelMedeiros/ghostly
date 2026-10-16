@@ -114,6 +114,77 @@ describe("the hosts", () => {
   });
 });
 
+describe("a slow link", () => {
+  const KiB = 1024;
+  /**
+   * A body sent `chunk` bytes every `everyMs`, `total` in all; `stallAfter` bytes in, it goes silent. Like a browser's,
+   * it errors when the request's signal aborts.
+   */
+  const paced = (total: number, chunk: number, everyMs: number, stallAfter = Infinity) => (signal: AbortSignal) => {
+    let sent = 0;
+    return new ReadableStream<Uint8Array>({
+      start(controller) { signal.addEventListener("abort", () => controller.error(signal.reason)); },
+      async pull(controller) {
+        if (sent >= stallAfter) return new Promise<void>(() => {});
+        await new Promise((resolve) => setTimeout(resolve, everyMs));
+        const n = Math.min(chunk, total - sent);
+        controller.enqueue(new Uint8Array(n));
+        sent += n;
+        if (sent >= total) controller.close();
+      },
+    });
+  };
+  /** A fetcher that, like a browser's, aborts the request when its signal does. */
+  const answering = (body: ((signal: AbortSignal) => ReadableStream<Uint8Array>) | null) => vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+    const signal = init!.signal!;
+    signal.addEventListener("abort", () => reject(signal.reason));
+    if (body) resolve(new Response(body(signal)));
+  })) as unknown as typeof fetch;
+  /** Fake timeouts, `AbortSignal.timeout` among them (the platform's own timer is not one vitest fakes). */
+  let timeout: { mockRestore(): void } | undefined;
+  const slowClock = () => {
+    clock();
+    timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError")), ms);
+      return controller.signal;
+    });
+  };
+  afterEach(() => { timeout?.mockRestore(); timeout = undefined; });
+  /** Runs `read` to its end under fake timeouts, `ms` at most. */
+  async function settle<T>(read: Promise<T>, ms: number): Promise<{ ok: T } | { error: unknown }> {
+    let out: { ok: T } | { error: unknown } | undefined;
+    void read.then((ok) => { out = { ok }; }, (error: unknown) => { out = { error }; });
+    for (let t = 0; t < ms && !out; t += 1000) await vi.advanceTimersByTimeAsync(1000);
+    return out ?? { error: new Error("still reading") };
+  }
+
+  it("a read that keeps arriving finishes, however long it takes: 4 MiB at 100 KiB/s", async () => {
+    slowClock();
+    const read = boundedAppFetch({ fetcher: answering(paced(4 * 1024 * KiB, 100 * KiB, 1000)) });
+    const out = await settle(read(BUNDLE_URL, { maxBytes: 16 * 1024 * KiB }), 120_000);
+    expect("ok" in out && out.ok.length).toBe(4 * 1024 * KiB);
+  });
+
+  it("a host that goes silent, or never answers, is a read that took too long, not one that could not reach it", async () => {
+    slowClock();
+    const stalled = boundedAppFetch({ fetcher: answering(paced(4 * 1024 * KiB, 100 * KiB, 1000, 200 * KiB)) });
+    const silent = await settle(stalled(BUNDLE_URL, { maxBytes: 16 * 1024 * KiB }), 120_000);
+    expect("error" in silent && silent.error).toMatchObject({ code: "slow" });
+    const mute = boundedAppFetch({ fetcher: answering(null) });
+    const none = await settle(mute(BUNDLE_URL, { maxBytes: 10 }), 120_000);
+    expect("error" in none && none.error).toMatchObject({ code: "slow" });
+  });
+
+  it("a read that never ends is still cut: a total budget sized for the largest file at a slow pace", async () => {
+    slowClock();
+    // 1 KiB every 20 s: never silent long enough, never done.
+    const read = boundedAppFetch({ fetcher: answering(paced(16 * 1024 * KiB, KiB, 20_000)) });
+    const out = await settle(read(BUNDLE_URL, { maxBytes: 16 * 1024 * KiB }), APP_FETCH_LIMITS.totalMs + 60_000);
+    expect("error" in out && out.error).toMatchObject({ code: "slow" });
+  });
+});
+
 describe("no request with nothing installed", () => {
   it("start, then days of update checks, with no app and no store: not one request", async () => {
     clock();
