@@ -17,6 +17,7 @@
  * Links are per app (its reference), not per chat, and the app reads them only by the ids this module chose.
  */
 import { MINI_APP_LIMITS, type MiniAppLinkedFile } from "@ghostly/core/miniApp";
+import { keepTabInside } from "../../hooks/useDismiss";
 import type { Translate } from "../../locales/translate";
 import type { LinkedFilesHost } from "../platform";
 
@@ -252,9 +253,14 @@ export function idbPickStore(name: () => string): PickStore {
   };
 }
 
-/** A sheet of the client's own: a title, a note, a second button and a first one whose click does `act`. */
-function sheet(parts: { title: string; note?: string; secondary: string; primary: string; testId: string; act: () => Promise<unknown> }): Promise<unknown> {
+/**
+ * A sheet of the client's own: a title, a note, a second button and a first one whose click does `act`. Modal: Tab
+ * and Shift+Tab go round its buttons, never to the app under it. It goes, answering null, when `signal` aborts (its
+ * app stopped), or at once when it already has.
+ */
+function sheet(parts: { title: string; note?: string; secondary: string; primary: string; testId: string; act: () => Promise<unknown>; signal?: AbortSignal }): Promise<unknown> {
   return new Promise((resolve) => {
+    if (parts.signal?.aborted) return resolve(null);
     const back = document.createElement("div");
     back.className = "fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4";
     back.setAttribute("data-testid", parts.testId);
@@ -294,17 +300,24 @@ function sheet(parts: { title: string; note?: string; secondary: string; primary
     back.append(box);
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     let done = false;
+    const tab = (e: KeyboardEvent) => keepTabInside(e, box);
+    const stopped = () => finish(null);
     const finish = (value: unknown) => {
       if (done) return;
       done = true;
+      document.removeEventListener("keydown", tab);
+      parts.signal?.removeEventListener("abort", stopped);
       back.remove();
       before?.focus({ preventScroll: true });
       resolve(value);
     };
+    document.addEventListener("keydown", tab);
+    parts.signal?.addEventListener("abort", stopped);
     secondary.addEventListener("click", () => finish(null));
     back.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); finish(null); } });
     // The person's click: the browser is asked within it. The sheet stays until it answers.
     primary.addEventListener("click", () => {
+      if (done) return;
       primary.disabled = true;
       parts.act().then(finish, () => finish(null));
     });
@@ -318,10 +331,10 @@ export interface WebLinkedFilesOptions {
   picker?: BrowserPicker;
   /** Where picks that can be kept are kept; none: links last for the page. */
   store?: PickStore | null;
-  /** Asks the person to pick; by default the sheet. Tests answer directly. */
-  ask?: (app: string, folder: boolean, accept: string[]) => Promise<Picked | null>;
-  /** Asks the person to let the browser read kept picks again (`grant` asks it); by default the sheet. */
-  askAgain?: (app: string, name: string, more: number, grant: () => Promise<boolean>) => Promise<boolean>;
+  /** Asks the person to pick; by default the sheet, which goes on `signal`. Tests answer directly. */
+  ask?: (app: string, folder: boolean, accept: string[], signal?: AbortSignal) => Promise<Picked | null>;
+  /** Asks the person to let the browser read kept picks again (`grant` asks it); by default the sheet, which goes on `signal`. */
+  askAgain?: (app: string, name: string, more: number, grant: () => Promise<boolean>, signal?: AbortSignal) => Promise<boolean>;
 }
 
 export function webLinkedFiles({ text, picker = browserPicker(), store = null, ask, askAgain }: WebLinkedFilesOptions): LinkedFilesHost {
@@ -338,13 +351,13 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
     if (!links) apps.set(ref, (links = new Map()));
     return links;
   };
-  const askPerson = ask ?? ((app, folder, accept) => sheet({
+  const askPerson = ask ?? ((app, folder, accept, signal) => sheet({
     title: text().ask(app, folder), note: text().note(app), secondary: text().cancel, primary: text().choose(folder), testId: "app-files-sheet",
-    act: () => picker(folder, accept),
+    act: () => picker(folder, accept), signal,
   }) as Promise<Picked | null>);
-  const askPersonAgain = askAgain ?? ((app, name, more, grant) => sheet({
+  const askPersonAgain = askAgain ?? ((app, name, more, grant, signal) => sheet({
     title: text().askAgain(app, name, more), note: text().note(app), secondary: text().notNow, primary: text().allow, testId: "app-files-again",
-    act: grant,
+    act: grant, signal,
   }).then((granted) => granted === true));
 
   const permitted = async (keep: Keep, request = false): Promise<boolean> => {
@@ -416,9 +429,9 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
   };
 
   return {
-    async pick(ref, title, { folder, accept }) {
+    async pick(ref, title, { folder, accept }, signal) {
       await load(ref);
-      const picked = await askPerson(title, folder, accept);
+      const picked = await askPerson(title, folder, accept, signal);
       if (!picked) throw refusal("cancelled", "Nothing was picked");
       const kept = picked.files.filter(({ path }) => !hidden(path) && (!accept.length || accept.includes(extensionOf(path))));
       const links = linksOf(ref);
@@ -438,7 +451,7 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
       }
       return added.map(({ entry }) => entry);
     },
-    async list(ref, title) {
+    async list(ref, title, signal) {
       await load(ref);
       // Kept picks the browser asks about again (after a restart): the person is asked once on this page.
       const waiting = [...picks.values()].filter((p) => p.stored.ref === ref && !p.granted);
@@ -454,7 +467,9 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
             any ||= p.granted;
           }
           return any;
-        }).catch(() => false);
+        }, signal).catch(() => false);
+        // Its app stopped before the person answered: the app opened again asks again.
+        if (signal?.aborted) askedAgain.delete(ref);
       }
       return [...linksOf(ref).values()].map((link) => link.entry);
     },

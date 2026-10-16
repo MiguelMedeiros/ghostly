@@ -258,6 +258,8 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
   const linkedFiles = () => (launch.permissions.includes("files") ? platform.linkedFiles ?? null : null);
   /** A pick waiting for the person: one at a time per app. */
   let picking = false;
+  /** Aborts as the app stops: a sheet the client shows for it goes with it. */
+  const alive = new AbortController();
   /** When a pick may be asked again: `PICK_AFTER_CANCEL_MS` after the person cancelled one. */
   let pickAgainAt = 0;
   let appId: string | null = null;
@@ -292,6 +294,7 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
   const stop = (reason: AppStopReason = "stopped") => {
     if (phase === "stopped") return;
     phase = "stopped";
+    alive.abort();
     unsubscribe?.();
     unsubscribe = null;
     if (chatOpened && launch.chat) void host.chat.close(launch.chat.linkId, launch.ref).catch(() => {});
@@ -384,7 +387,7 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         if (picking || now() < pickAgainAt) refuse("too-fast");
         picking = true;
         try {
-          return { value: await files.pick(launch.ref, launch.title, options) as unknown as MiniAppJson };
+          return { value: await files.pick(launch.ref, launch.title, options, alive.signal) as unknown as MiniAppJson };
         } catch (error) {
           if (refusalOf(error) === "cancelled") pickAgainAt = now() + PICK_AFTER_CANCEL_MS;
           throw error;
@@ -396,7 +399,7 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         const files = linkedFiles();
         if (!files) return refuse("not-allowed");
         // Counted as file bytes: 100 000 links answered 15 MB, and 50 lists a second made the page copy 758 MB a second.
-        return { value: await counted(() => files.list(launch.ref, launch.title), listBytes) as unknown as MiniAppJson };
+        return { value: await counted(() => files.list(launch.ref, launch.title, alive.signal), listBytes) as unknown as MiniAppJson };
       }
       case "files.read": {
         const files = linkedFiles();
