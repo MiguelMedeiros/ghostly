@@ -991,4 +991,16 @@ describe("GroupChat: the read mark", () => {
     act(() => { document.dispatchEvent(new Event("visibilitychange")); });
     expect(groupReadAt("group-1")).toBe(at + 2);
   });
+
+  // After a restart a message written before the mark but handed over later has lastMessageAt at its writing time,
+  // lastPeerMessageAt (and lastMentionAt) at its arrival: the list calls it unread, so opening reads it.
+  it("reads a member's message that came after the mark though it was written before", () => {
+    const read = Date.now() + 60_000;
+    markGroupRead("group-1", read);
+    const late = active({ lastMessageAt: read, lastPeerMessageAt: read + 53_000 });
+    const { engine } = openGroup(late);
+    expect(groupReadAt("group-1")).toBe(read + 53_000);
+    act(() => engine.update({ groups: [{ ...late, lastMentionAt: read + 54_000 }] }));
+    expect(groupReadAt("group-1")).toBe(read + 54_000);
+  });
 });
