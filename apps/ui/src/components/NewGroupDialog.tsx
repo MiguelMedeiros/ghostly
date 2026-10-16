@@ -27,7 +27,7 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null);
   const [name, setName] = useState("");
-  const { ref: input, onChange: nameChange } = useGroupNameField(name, setName);
+  const { ref: input, ...nameField } = useGroupNameField(name, setName);
   const [kind, setKind] = useState<Kind>("community");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
@@ -65,7 +65,7 @@ export function NewGroupDialog({ onClose, onCreated, returnFocus }: { onClose():
     <h2 id={`${id}-title`} className="text-base font-semibold">{t("group.create.title")}</h2>
     <p className="mt-1 text-sm text-text-muted">{t("group.create.hint")}</p>
     <form className="mt-4" onSubmit={e => { e.preventDefault(); void submit(); }}>
-      <input ref={input} value={name} onChange={nameChange} placeholder={t("group.rename.label")} aria-label={t("group.rename.label")} data-testid="new-group-name"
+      <input ref={input} value={name} {...nameField} placeholder={t("group.rename.label")} aria-label={t("group.rename.label")} data-testid="new-group-name"
         className="w-full rounded-lg bg-input-bg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:ring-1 focus:ring-accent" />
       <div role="radiogroup" aria-label={t("group.create.kind")} className="mt-3 grid gap-2">
         {kinds(t).map(k => <label key={k.kind} data-testid={`new-group-kind-${k.kind}`}

@@ -111,7 +111,7 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
             : <form className="flex items-center gap-2" onSubmit={e => { e.preventDefault(); void rename(); }}>
               <h2 id={`${id}-title`} className="sr-only">{live.name}</h2>
               <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} ref={namingField.ref} value={naming} disabled={busy !== null}
-                onChange={namingField.onChange} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setNaming(null); } }}
+                onChange={namingField.onChange} onCompositionStart={namingField.onCompositionStart} onCompositionEnd={namingField.onCompositionEnd} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setNaming(null); } }}
                 className="min-w-0 flex-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-sm focus:border-accent focus:outline-none" />
               <button type="submit" data-testid="group-rename-save" disabled={busy !== null || !groupName(naming)}
                 className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{t("group.rename.save")}</button>
