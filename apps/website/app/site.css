@@ -616,14 +616,17 @@ body {
 .ghost--halo {
   filter: none;
 }
+/* The idle loops of a ghost or a stage play a few times and rest (fill both), as on /developers: a CSS animation on
+   an SVG element lays the page out at every frame, so looped they kept every stage on screen busy 15 to 52 times a
+   second for as long as the reader looked. Off screen they wait paused (IdleLoops), so each plays when first seen. */
 .ghost--float {
-  animation: ghost-bob 4.2s ease-in-out infinite;
+  animation: ghost-bob 4.2s ease-in-out 3 both;
 }
-/* The app's blink (pairing-scene.css): every 5 s, shut at 97%. */
+/* The app's blink (pairing-scene.css): every 5 s, shut at 97%; twice, then the eyes stay open. */
 .ghost-eyes--blink {
   transform-box: fill-box;
   transform-origin: center;
-  animation: ghost-blink 5s infinite;
+  animation: ghost-blink 5s 2 both;
 }
 .ghost-pupils {
   transition: transform var(--dur-slow) var(--ease-enter);
@@ -631,7 +634,8 @@ body {
 .ghost-mouth-talk {
   transform-box: fill-box;
   transform-origin: center;
-  animation: ghost-talk 0.42s ease-in-out infinite alternate;
+  /* Eight beats (3.4 s), ending nearly shut. */
+  animation: ghost-talk 0.42s ease-in-out 8 alternate both;
 }
 @keyframes ghost-bob {
   50% {
@@ -769,7 +773,8 @@ body {
   animation-play-state: paused !important;
 }
 .act-caret {
-  animation: caret 1s steps(1) infinite;
+  /* A line stopped halfway (the story waits for the scroll) keeps its caret, which blinks four times and stays. */
+  animation: caret 1s steps(1) 4 both;
 }
 @keyframes caret {
   50% {
@@ -1363,10 +1368,11 @@ html:where(:not(.js), .calm, [data-orient="portrait"], [data-touch]) .scene .sce
 .stage-bob {
   transform-box: fill-box;
   transform-origin: 50% 100%;
-  animation: stage-bob 4.2s ease-in-out infinite;
+  animation: stage-bob 4.2s ease-in-out 3 both;
 }
+/* Each node twinkles a few times from its own offset in the cycle, then settles lit. */
 .dht-node {
-  animation: twinkle 4s ease-in-out infinite;
+  animation: twinkle 4s ease-in-out 3 both;
 }
 @keyframes twinkle {
   50% {
