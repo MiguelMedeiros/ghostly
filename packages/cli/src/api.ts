@@ -277,6 +277,8 @@ const METHODS: Record<string, Method> = {
       if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; send it with --force if you mean to`, { kind: secret.kind });
     }
     const wait = oneOf(params, "wait", ["none", "sent", "delivered"] as const, "none");
+    // Read before anything is sent, as `wait` is: a timeout refused after the send made a retry send it again.
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const replyTo = str(params, "reply");
     // Buttons under the text (WISP 406 · Message Buttons): the text is the question, and what older apps show.
     const card = buttonsCard(params);
@@ -287,7 +289,7 @@ const METHODS: Record<string, Method> = {
     if (result.error) throw /not in this chat|cannot be replied to/.test(result.error) ? new CliError("not_found", result.error) : new CliError(result.refused ? "refused" : "unavailable", result.error);
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
     let message = await node(ctx).getMessage(link.id, result.messageId);
-    if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
+    if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, ms);
     return { chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null, ...(card ? { buttons: card.id, card, pressable: pressable(link) } : {}) };
   },
   /**
@@ -303,11 +305,12 @@ const METHODS: Record<string, Method> = {
       if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; edit with --force if you mean to`, { kind: secret.kind });
     }
     const wait = oneOf(params, "wait", ["none", "confirmed"] as const, "none");
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
     if (result.error) throw editRefused(await messageOf(ctx, link.id, messageId), messageId, "chat", result.error, result.refused);
     const id = result.messageId ?? messageId;
     let message = await node(ctx).getMessage(link.id, id);
-    if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
+    if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, ms);
     return { chat: link.id, messageId: id, edits: message?.edit?.seq ?? 0, confirmed: !!message && !message.edit?.pending };
   },
   /**
@@ -375,10 +378,10 @@ const METHODS: Record<string, Method> = {
       if (secret) throw new CliError("confirm", `A message looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; forward it with --force if you mean to`, { kind: secret.kind, messageId: message.id });
     }
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     let results;
     try { ({ results } = await node(ctx).forwardMessages({ linkId: from.linkId, messageIds, to: to.map((t) => t.linkId) })); }
     catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
-    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const out = results.map((result, i) => ({ to: to[i]!.id, kind: to[i]!.group ? "group" as const : "chat" as const, messageIds: result.messageIds, sent: result.sent, error: result.error }));
     if (wait === "sent") for (const [i, result] of out.entries()) for (const messageId of result.messageIds) {
       if (to[i]!.group) { await waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms); continue; }
@@ -524,6 +527,7 @@ const METHODS: Record<string, Method> = {
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const replyTo = str(params, "reply");
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const card = buttonsCard(params);
     // A kept `group typing --for` ends with the message (the engine says stop with it).
     endTyping(ctx, { groupId: group.id }, false);
@@ -533,7 +537,7 @@ const METHODS: Record<string, Method> = {
     const messageId = result.messageId ?? null;
     // `edges`: how many took it so far (none yet is not an error: it goes when one opens). `sent`: whether one did.
     // Before 2026-10-02 `sent` was always true, also for a message no edge had taken.
-    const edges = messageId ? (wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, undefined, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000) : node(ctx).groupTaken({ groupId: group.id, messageId })) : 0;
+    const edges = messageId ? (wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, undefined, ms) : node(ctx).groupTaken({ groupId: group.id, messageId })) : 0;
     return { group: group.id, messageId, sent: edges > 0, edges, ...(card ? { buttons: card.id, card } : {}) };
   },
   /**
@@ -551,6 +555,7 @@ const METHODS: Record<string, Method> = {
     }
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const linkId = `group:${group.id}`;
     const before = (await node(ctx).getMessage(linkId, messageId))?.edit?.seq ?? 0;
     const result = await node(ctx).editMessage({ linkId, messageId, text, ...(mentions.length ? { mentions } : {}) });
@@ -561,7 +566,7 @@ const METHODS: Record<string, Method> = {
     // message never edited, as if an edit had gone.
     if (edits === before) return { group: group.id, messageId, edits, sent: false, edges: 0, unchanged: true };
     // An edit waiting for the pace is not said yet: `--wait sent` waits for that too, then for an edge to take it.
-    const edges = !edits ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, edits, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000)
+    const edges = !edits ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, edits, ms)
       : node(ctx).groupTaken({ groupId: group.id, messageId, edit: edits });
     return { group: group.id, messageId, edits, sent: edges > 0 || (!!message && !message.edit?.pending), edges };
   },

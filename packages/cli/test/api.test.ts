@@ -185,6 +185,23 @@ describe("chats", () => {
     expect(node.sendMessage).toHaveBeenCalledOnce();
   });
 
+  it("a --timeout out of range is refused before anything is sent, edited or forwarded: a retry never sends it twice", async () => {
+    const { ctx, node } = fake([msg("me_1", 5, { sender: "me", delivery: "sending" })]);
+    Object.assign(node, { editMessage: vi.fn(async () => ({ error: null, messageId: "me_1" })), forwardMessages: vi.fn(async () => ({ results: [] })) });
+    const engine = node as unknown as Record<"sendMessage" | "sendGroupMessage" | "editMessage" | "forwardMessages", ReturnType<typeof vi.fn>>;
+    const calls: [string, Record<string, unknown>][] = [
+      ["chat.send", { chat: "Alice", text: "hi", wait: "sent" }],
+      ["chat.edit", { chat: "Alice", message: "me_1", text: "new", wait: "confirmed" }],
+      ["group.send", { group: "Crew", text: "hi", wait: "sent" }],
+      ["group.edit", { group: "Crew", message: "k:0:1", text: "new", wait: "sent" }],
+      ["chat.forward", { chat: "Alice", messages: ["me_1"], to: ["Bob"], wait: "sent" }],
+    ];
+    for (const [method, params] of calls) for (const timeout of [0, 99999, ""]) {
+      await expect(callApi(ctx, method, { ...params, timeout })).rejects.toMatchObject({ code: "bad_request", message: "timeout must be a number from 1 to 3600" });
+    }
+    for (const call of ["sendMessage", "sendGroupMessage", "editMessage", "forwardMessages"] as const) expect(engine[call]).not.toHaveBeenCalled();
+  });
+
   it("typing tells the engine this side writes, or stopped, and says whether the chat is live", async () => {
     const { ctx, node } = fake();
     expect(await callApi(ctx, "chat.typing", { chat: "Alice" })).toEqual({ chat: "chat-one", typing: true, kind: "typing", live: false, sendTyping: true });
