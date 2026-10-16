@@ -2,7 +2,7 @@ import { createHash, createPrivateKey, generateKeyPairSync } from "node:crypto";
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
-  APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
+  APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appRevocationFor, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
   APP_STATEMENT_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppUrl, readAppBundle,
   readAppRevocations, readAppStore, seedSigner, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
   type AppManifest, type AppRevokeStatement, type AppStoreIndex, type SignedAppRevocation, type Signer,
@@ -369,6 +369,14 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
   // Read back as a client would (the icon's header, the bundle's size): what is written is never a bundle it refuses.
   const read = readAppBundle(bundle);
   if (!read.ok) throw refused("The bundle made is not valid", read);
+  // Nor one the folder's own revocations already stop: every client that reads them would refuse it, for good.
+  const ref = appRef(key.key, checked.manifest.name);
+  const revocations = existsSync(join(dir, APP_REVOKE_FILE)) ? readAppRevocations(new Uint8Array(readFileSync(join(dir, APP_REVOKE_FILE)))) : null;
+  const held = revocations?.ok ? revocations.revocations : [];
+  if (appRevocationFor({ ref, sequence, digest: read.bundle.digest }, held)) {
+    const clear = Math.max(sequence, ...held.map((r) => r.statement.app === ref && "upTo" in r.statement ? r.statement.upTo : 0)) + 1;
+    throw refused(`${join(dir, APP_REVOKE_FILE)} already revokes version ${sequence} of ${ref}, and every client that reads it would stop it: give --sequence ${clear}`, { reason: "revoked" }, { sequence: clear });
+  }
   mkdirSync(dirname(out), { recursive: true });
   writeWhole(out, bundle);
 
@@ -391,7 +399,7 @@ export async function publishApp(dirArg: string, keyArg: string, outArg?: string
  * (or `--bundle`), signed by that app's publisher key and added to `<dir>/ghostly-revoke.json`, which stays canonical.
  * The key is never made here: only the key that signed the app may revoke its versions.
  */
-export async function revokeApp(dirArg: string, keyArg: string, what: { digests?: string[]; upTo?: number; reason?: string; bundle?: string }): Promise<Record<string, unknown>> {
+export async function revokeApp(dirArg: string, keyArg: string, what: { digests?: string[]; upTo?: number; reason?: string; bundle?: string; force?: boolean }): Promise<Record<string, unknown>> {
   const dir = resolve(dirArg);
   const bundlePath = resolve(what.bundle ?? join(dir, APP_BUNDLE_FILE));
   const listPath = join(dir, APP_REVOKE_FILE);
@@ -405,6 +413,10 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
   if (!read.ok) throw refused(`${bundlePath} is not a valid bundle`, read);
   const manifest = read.bundle.manifest;
   const ref = appRef(manifest.publisher, manifest.name);
+  // Clients keep a revocation for good: past the newest version (a typo, 30 for 3), it stops versions not made yet.
+  if (what.upTo !== undefined && what.upTo > manifest.sequence && !what.force) {
+    throw new CliError("usage", `--up-to ${what.upTo} is past ${bundlePath}'s version, ${manifest.sequence}: it would also stop versions ${manifest.sequence + 1} to ${what.upTo} before they exist, for good. Give --up-to ${manifest.sequence}, or --force if versions up to ${what.upTo} were published from elsewhere`);
+  }
 
   const keyPath = resolve(keyArg);
   if (!existsSync(keyPath)) throw new CliError("not_found", `No key file ${keyPath}: only the key that signed ${ref} (${appFingerprint(manifest.publisher)}) revokes its versions`);

@@ -267,6 +267,29 @@ describe("app revoke", () => {
     expect((error(await ghostly(["app", "revoke", dir, "--key", key, "--digest", "not-a-digest"]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("bad-revocation");
     expect(readAppRevocations(new Uint8Array(readFileSync(join(dir, "ghostly-revoke.json"))))).toMatchObject({ ok: true, revocations: { length: 2 } });
   }, 60_000);
+
+  it("refuses --up-to past the newest version unless --force, and publish never makes a version the list already stops", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const key = vectorKey(tmp(), "publisher");
+    for (let i = 0; i < 3; i++) ok(await ghostly(["app", "publish", dir, "--key", key]));
+    // A typo, 30 for 3: clients keep a revocation for good, so versions 4 to 30 would be stopped before they exist.
+    const typo = error(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "30"]), "usage", 2);
+    expect(typo.message).toContain("--up-to 3");
+    expect(existsSync(join(dir, "ghostly-revoke.json"))).toBe(false);
+    // Meant (versions published from another folder went past this bundle): --force writes it.
+    expect(ok(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "30", "--force"]))).toMatchObject({ upTo: 30, current: true, added: true });
+    // The next version, 4, is one the list stops: refused, naming the sequence that clears it, and nothing written.
+    const before = readFileSync(join(dir, "app.ghostlyapp"));
+    const stopped = error(await ghostly(["app", "publish", dir, "--key", key]), "refused", 1) as { message: string; details?: { reason?: string; sequence?: number } };
+    expect(stopped.details).toMatchObject({ reason: "revoked", sequence: 31 });
+    expect(stopped.message).toContain("--sequence 31");
+    error(await ghostly(["app", "publish", dir, "--key", key, "--sequence", "30"]), "refused", 1);
+    expect(readFileSync(join(dir, "app.ghostlyapp")).equals(before)).toBe(true);
+    expect(ok(await ghostly(["app", "publish", dir, "--key", key, "--sequence", "31"]))).toMatchObject({ sequence: 31, previous: 3 });
+    // Up to the bundle's own sequence needs no --force.
+    expect(ok(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "31"]))).toMatchObject({ upTo: 31, current: true });
+  }, 60_000);
 });
 
 describe("app verify", () => {
