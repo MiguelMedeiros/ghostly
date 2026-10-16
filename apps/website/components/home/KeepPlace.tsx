@@ -72,7 +72,11 @@ class Hold extends Component<{ shape: string }> {
   }
 
   componentDidUpdate(_prev: { shape: string }, _state: unknown, marks: Mark[] | null) {
-    if (marks) hold(marks);
+    if (!marks) return;
+    hold(marks);
+    // Some of the page sizes itself only after this commit (a deck measures its width as it mounts, and renders
+    // again): held once more when that is done, still before the browser paints.
+    requestAnimationFrame(() => hold(marks));
   }
 
   render() {
