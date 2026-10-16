@@ -1,0 +1,1 @@
+Public ingress for 1:1 contact points at the new draft [8xx · Contact Links](../../8xx-contact-links.md), which proposes the separate ingress route and the abuse policy this document asks for. No wire change here.
