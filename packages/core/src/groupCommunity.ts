@@ -1,6 +1,6 @@
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { concatBytes, fromBase64Url, randomBytes, toBase64Url, utf8Decode, utf8Encode } from "./bytes";
+import { concatBytes, fromBase64Url, isZ32Key, randomBytes, toBase64Url, utf8Decode, utf8Encode } from "./bytes";
 import { identityFromSeedB64, publicKeyFromZ32, sign, verify } from "./identity";
 import { sanitizeNick } from "./text";
 import {
@@ -1064,7 +1064,10 @@ export class CommunitySession {
     this.pruneSide();
     await this.persist();
     this.hooks.broadcast({ t: "group-commit", v: 2, g: this.id, commit });
-    if (FRESH.has(kind)) for (const [key] of roster) if (key !== this.myKey) this.hooks.addressed(key, { t: "group-secret", v: 2, g: this.id, to: key, h: hash, s: sealSecret(key, secret, secretAad(this.id, hash, key)) });
+    // A key respelled in its last character could be pinned and added by a build before `MEMBER_KEY` was canonical, and
+    // the roster that holds it is in every member's chain: `sealSecret` would throw on it, past the persist and the
+    // broadcast above, so it gets no secret instead.
+    if (FRESH.has(kind)) for (const [key] of roster) if (key !== this.myKey && isZ32Key(key)) this.hooks.addressed(key, { t: "group-secret", v: 2, g: this.id, to: key, h: hash, s: sealSecret(key, secret, secretAad(this.id, hash, key)) });
     this.hooks.changed();
     return { commit, hash, secret };
   }
@@ -1094,7 +1097,7 @@ export class CommunitySession {
   rewelcome(memberKey: string): Promise<(CommunityChainFrame | CommunityWelcomeFrame)[]> {
     return this.serialize(async () => {
       this.requireMember();
-      if (!rosterHas(this.roster, memberKey) || memberKey === this.myKey) throw new Error("Not a member");
+      if (!rosterHas(this.roster, memberKey) || memberKey === this.myKey || !isZ32Key(memberKey)) throw new Error("Not a member");
       for (let i = this.state.chain.length - 1; i >= 0; i--) {
         const c = this.state.chain[i];
         if (c.k === "add" && c.s === memberKey) return this.welcomeFor(memberKey, communityCommitHash(c));
@@ -1142,7 +1145,7 @@ export class CommunitySession {
       this.state.entry = { key: entry?.pubKeyZ32 ?? "", seedB64: entry?.seedB64 ?? "" };
       await this.persist();
       // Every member can answer the new link: its seed, sealed to each.
-      if (entry) for (const key of this.others) this.hooks.addressed(key, this.entryFrame(key)!);
+      if (entry) for (const key of this.others) { const frame = this.entryFrame(key); if (frame) this.hooks.addressed(key, frame); }
       this.hooks.changed();
       return this.state.entry.key;
     });
@@ -1617,7 +1620,8 @@ export class CommunitySession {
   }
 
   private async receiveSync(from: string, frame: CommunitySyncFrame): Promise<void> {
-    if (!this.isRecentMember(from) || !Number.isSafeInteger(frame.e) || typeof frame.h !== "string") return;
+    // Nothing is sealed to a key that is not canonical (see `commit`).
+    if (!this.isRecentMember(from) || !isZ32Key(from) || !Number.isSafeInteger(frame.e) || typeof frame.h !== "string") return;
     let answered = this.syncsAnswered.get(from);
     if (!answered) this.syncsAnswered.set(from, answered = new RateWindow(COMMUNITY_LIMITS.syncAnswers, COMMUNITY_LIMITS.syncWindowMs, () => this.hooks.clock?.() ?? Date.now()));
     if (!answered.take()) return;
@@ -1711,7 +1715,7 @@ export class CommunitySession {
   /** The current entry seed sealed to a member, when I hold it: sealed once per seed, not on every sync answer. */
   private entryFrame(to: string): CommunityEntryFrame | null {
     const { key, seedB64 } = this.state.entry;
-    if (!key || !seedB64) return null;
+    if (!key || !seedB64 || !isZ32Key(to)) return null;
     const sealed = this.sealedEntries.get(to);
     if (sealed?.seedB64 === seedB64 && sealed.frame.x === key) return { ...sealed.frame };
     const frame: CommunityEntryFrame = { t: "group-entry", v: 2, g: this.id, to, x: key, s: sealSecret(to, fromBase64Url(seedB64), entryAad(this.id, to)) };

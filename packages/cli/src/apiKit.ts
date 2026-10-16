@@ -1,4 +1,4 @@
-import { INVITE_TAKEN } from "@ghostly/core";
+import { INVITE_TAKEN, isZ32Key } from "@ghostly/core";
 import type { GhostlyNode } from "@ghostly/browser/engine/node";
 import type { EngineState, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import { CliError } from "./errors";
@@ -82,8 +82,19 @@ export function oneOf<T extends string>(params: Params, name: string, values: re
 
 // ---------- finding things ----------
 
-/** A contact key as chats show it (`peer`): 52 characters of z-base-32. */
-export const CONTACT_KEY = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
+const KEY_SHAPED = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
+/**
+ * A contact key as chats show it (`peer`): 52 characters of z-base-32, in its one canonical spelling. The same 52
+ * characters with the last one respelled decode to the same bytes but are no key (WISP 02): refused here, so that
+ * they never fall through to a chat's name, which its contact chooses.
+ */
+export const CONTACT_KEY = {
+  test(ref: string): boolean {
+    if (isZ32Key(ref)) return true;
+    if (KEY_SHAPED.test(ref)) throw new CliError("bad_request", `${JSON.stringify(ref)} is not a contact key: a key has one spelling, and its last character is not this one`);
+    return false;
+  },
+};
 
 /**
  * A chat by its id; by its contact's key (only by the key: a name is never taken for one); by the label this side gave

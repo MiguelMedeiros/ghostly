@@ -1,7 +1,7 @@
 import { ed25519, x25519 } from "@noble/curves/ed25519.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { fromBase64Url, toBase64Url, utf8Encode } from "./bytes";
+import { fromBase64Url, isZ32Key, toBase64Url, utf8Encode } from "./bytes";
 import { encrypt, tryDecrypt } from "./crypto";
 import { identityFromSeed, identityFromSeedB64, publicKeyFromZ32, sign, verify, type Identity } from "./identity";
 import type { LinkParams } from "./invite";
@@ -109,7 +109,6 @@ export class CapsRefusedError extends Error {
 const IDENT = /^[a-z0-9][a-z0-9._-]*\/[0-9]+$/;
 const HEX64 = /^[0-9a-f]{64}$/;
 const SIG = /^[A-Za-z0-9_-]{86}$/;
-const Z32 = /^[ybndrfg8ejkmcpqxot1uwisza345h769]{52}$/;
 const KEY = /^[A-Za-z0-9_-]{43}$/;
 const hexToKey = (hex: string) => toBase64Url(Uint8Array.from(hex.match(/../g)!, b => parseInt(b, 16)));
 const keyToHex = (key: string) => Array.from(fromBase64Url(key), b => b.toString(16).padStart(2, "0")).join("");
@@ -271,7 +270,7 @@ export class CapsKeys {
     const [version, rev, issued, author, versions, transports, capabilities, extensions, rawDescriptors, name, choice] = body;
     const descriptors = parseDescriptors(rawDescriptors);
     if (version !== 1 || !Number.isSafeInteger(rev) || (rev as number) < 0 || !Number.isSafeInteger(issued) || (issued as number) <= 0 ||
-      typeof author !== "string" || !Z32.test(author) ||
+      !isZ32Key(author) ||
       !list(versions, CAPS_LIMITS.versions, v => Number.isSafeInteger(v) && (v as number) > 0) ||
       !list(transports, CAPS_LIMITS.transports, ident) || (transports as string[]).includes("dht/1") ||
       !list(capabilities, CAPS_LIMITS.capabilities, ident) || !list(extensions, CAPS_LIMITS.extensions, ident) ||

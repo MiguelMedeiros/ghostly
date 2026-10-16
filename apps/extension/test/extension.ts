@@ -4,8 +4,8 @@ import { fire, installFakeChrome, settle, type FakeWorld } from "./fakeChrome";
 import { engineControl, type FakeEngineServer } from "./fakeEngine";
 
 /** A peer key and a service a contact shares, as the viewer addresses them. */
-export const PEER = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1u";
-export const OTHER_PEER = "h769ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqx";
+export const PEER = "ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqxot1o";
+export const OTHER_PEER = "h769ybndrfg8ejkmcpqxot1uwisza345h769ybndrfg8ejkmcpqy";
 export const SERVICE = "atlas";
 
 /**
