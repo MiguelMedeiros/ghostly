@@ -272,7 +272,7 @@ function sheet(parts: { title: string; note?: string; secondary: string; primary
     box.append(title);
     if (parts.note) {
       const note = document.createElement("p");
-      note.className = "mt-2 text-sm text-text-secondary";
+      note.className = "mt-2 text-sm text-text-secondary [overflow-wrap:anywhere]";
       note.dir = "auto";
       note.textContent = parts.note;
       box.append(note);

@@ -52,6 +52,15 @@ describe("picking", () => {
     await expect(cancelled).rejects.toThrow(/^cancelled: /);
   });
 
+  it("a long app title with no space breaks inside the sheet, in its title and its note", async () => {
+    const pick = webLinkedFiles({ text: () => text, picker: async () => null }).pick(REF, "ReaderForVeryLongFolderNamesAndFilesXYZ", { folder: true, accept: [] });
+    const sheet = await shown("[data-testid=app-files-sheet]");
+    expect(sheet.querySelector("h2")!.className).toContain("[overflow-wrap:anywhere]");
+    expect(sheet.querySelector("p")!.className).toContain("[overflow-wrap:anywhere]");
+    (sheet.querySelector("[data-testid=app-files-cancel]") as HTMLButtonElement).click();
+    await expect(pick).rejects.toThrow(/^cancelled: /);
+  });
+
   it("the picker closed without a pick is cancelled too", async () => {
     const host = webLinkedFiles({ text: () => text, picker: async () => null });
     const pick = host.pick(REF, "Cinema", { folder: true, accept: [] });
