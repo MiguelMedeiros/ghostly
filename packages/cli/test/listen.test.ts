@@ -389,4 +389,22 @@ describe("listen with an allowlist and --turns", () => {
     expect(result.code).toBe(2);
     expect(result.json).toMatchObject({ error: { code: "usage" } });
   });
+
+  it("a blank --webhook, --exec, --cursor, --from or --group is a usage error before the profile opens", async () => {
+    const cases: [string[], string][] = [
+      [["--webhook", ""], "--webhook needs a URL"],
+      [["--exec", ""], "--exec needs a command"],
+      [["--exec", "  "], "--exec needs a command"],
+      [["--cursor", ""], "--cursor needs a file"],
+      [["--from", "bob", "--from", ""], "--from needs a chat or a contact key"],
+      [["--group", ""], "--group needs a group"],
+    ];
+    const seen = [];
+    for (const [args] of cases) {
+      // No profile in this home: anything past the check would fail as no profile, not as usage.
+      const result = await ghostly(["--home", mkdtempSync(join(tmpdir(), "ghostly-listen-")), "listen", ...args]);
+      seen.push({ args, code: result.code, json: result.json });
+    }
+    expect(seen).toMatchObject(cases.map(([args, message]) => ({ args, code: 2, json: { error: { code: "usage", message } } })));
+  });
 });
