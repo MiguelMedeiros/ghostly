@@ -91,6 +91,24 @@ const TRANSPORT_NAMES: Record<string, PairedTransport | "auto" | "dht"> = {
   "webrtc/1": "webrtc/1", "iroh/1": "iroh/1", "hyperdht/1": "hyperdht/1",
 };
 
+// ---------- chat names ----------
+
+/** The engine keeps a chat's name to 48 UTF-16 units (renameLink). */
+const CHAT_NAME_UNITS = 48;
+
+/**
+ * A chat's name on this side (`chat rename`, an invite's `--label`): what the engine keeps whole, on one line, refused
+ * with the rule as a profile's or a group's name is. Taken as given, the engine cut it at 48 UTF-16 units without a
+ * word (half an emoji left as a lone surrogate) and kept line breaks. Counted as the engine counts: an emoji is two.
+ */
+function chatName(params: Params, name: string): string | undefined {
+  const value = str(params, name);
+  if (value !== undefined && (value.trim().length > CHAT_NAME_UNITS || /\p{Cc}/u.test(value.trim()))) {
+    throw new CliError("bad_request", `A chat's name is up to ${CHAT_NAME_UNITS} characters on one line (an emoji counts as two)`);
+  }
+  return value;
+}
+
 // ---------- mentions ----------
 
 /** Code points before `index` (UTF-16) in `text`: mentions count code points (WISP 902 § Mentions). */
@@ -220,7 +238,7 @@ const METHODS: Record<string, Method> = {
   },
 
   async "invite.create"(ctx, params) {
-    const label = str(params, "label");
+    const label = chatName(params, "label");
     const { linkId, inviteCode } = await node(ctx).createLink();
     if (label) await node(ctx).renameLink({ linkId, label });
     // Native listeners start for the chat on screen (or a paired one): a new invite is the chat a bot waits on.
@@ -236,6 +254,7 @@ const METHODS: Record<string, Method> = {
   },
   async "invite.join"(ctx, params) {
     let invite = str(params, "invite", true).trim();
+    const label = chatName(params, "label");
     const hash = invite.indexOf("#");
     if (/^https?:\/\//i.test(invite) && hash !== -1) invite = invite.slice(hash + 1);
     let linkId: string;
@@ -250,7 +269,6 @@ const METHODS: Record<string, Method> = {
       if (/does not look like/i.test(message)) throw new CliError("bad_request", message);
       throw error;
     }
-    const label = str(params, "label");
     if (label) await node(ctx).renameLink({ linkId, label });
     showUntilPaired(ctx, linkId);
     return { chat: linkId };
@@ -419,7 +437,7 @@ const METHODS: Record<string, Method> = {
   },
   async "chat.rename"(ctx, params) {
     const link = chatNotGroup(ctx, params, "group rename", "<name...>");
-    await node(ctx).renameLink({ linkId: link.id, label: str(params, "name") ?? "" });
+    await node(ctx).renameLink({ linkId: link.id, label: chatName(params, "name") ?? "" });
     return chatJson(findChat(state(ctx).links, link.id));
   },
   async "chat.remove"(ctx, params) {
