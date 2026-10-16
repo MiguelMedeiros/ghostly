@@ -91,6 +91,7 @@ function listen(){
   if(native()){
     listening=true;
     if(!androidApp()){
+      void sweepLeftOver();
       void import("@tauri-apps/api/event").then(({listen})=>listen<string>("notification-open",({payload})=>opened(payload))).catch(()=>{listening=false;});
       return;
     }
@@ -170,13 +171,15 @@ const oneNoticePerChat=()=>androidApp() || (native() && /Linux/i.test(platform()
  * opens, in the profile's storage (with its chats, never in a notification): the next page reads them, replaces, takes
  * away and opens those as its own. The ones it cannot map (a call's, another profile's) go as it first uses
  * notifications, once the profile is open, before it posts its own.
+ * The Linux app keeps them so too: its page loads again (a reload) while the app's process, which shows them, runs on.
+ * An app that exits takes its own back (apps/desktop notifications.rs `exit`).
  */
 const chatTags=new Map<string,string>();
 const tagsKey=()=>`${getPrefix()}notification_tags`;
 let restored=false;
 /** This profile's chat tags, as the earlier page left them. */
 function restore(){
-  if(restored || !androidApp()) return;
+  if(restored || !oneNoticePerChat()) return;
   restored=true;
   try{
     const kept=JSON.parse(localStorage.getItem(tagsKey())??"[]") as unknown;
@@ -189,7 +192,7 @@ function restore(){
   }catch{/* unreadable: they go as any unknown one */}
 }
 function keepTags(){
-  if(!androidApp()) return;
+  if(!oneNoticePerChat()) return;
   try{
     if(chatTags.size) localStorage.setItem(tagsKey(),JSON.stringify([...chatTags]));
     else localStorage.removeItem(tagsKey());
@@ -198,7 +201,7 @@ function keepTags(){
 let leftOver:Promise<void>|undefined;
 function sweepLeftOver():Promise<void>{
   restore();
-  leftOver??=androidApp()?invoke<void>("native_clear_notifications",{keep:[...chatTags.values()]}).catch(()=>{/* an older app */}):Promise.resolve();
+  leftOver??=oneNoticePerChat()?invoke<void>("native_clear_notifications",{keep:[...chatTags.values()]}).catch(()=>{/* an older app */}):Promise.resolve();
   return leftOver;
 }
 function chatTag(chat:string):string{
