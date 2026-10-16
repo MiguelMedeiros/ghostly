@@ -91,6 +91,19 @@ describe("the argument parser", () => {
     expect(() => parseArgs(["--limit", "ten"], { limit: { type: "number", description: "" } })).toThrow(/takes a number/);
   });
 
+  it("refuses a number option given as \"\" (an unset variable) as it refuses \"abc\", never reading it as 0", () => {
+    // Number("") is 0: `usage send --all --left ""` posted "0% left" to every chat, `listen --since ""` replayed the journal.
+    for (const [name, option] of [["usage send", "left"], ["task send", "progress"], ["events", "since"], ["chat disconnect", "hold"], ["typing", "for"]] as const) {
+      const command = COMMANDS[name] ?? TEXT_COMMANDS[name];
+      for (const argv of [[`--${option}`, ""], [`--${option}`, " "], [`--${option}=`]]) {
+        expect(() => parseArgs(["x", ...argv], command.options!, idSlot(command)), `${name} ${argv.join(" ")}`).toThrow(new CliError("usage", `--${option} takes a number, not ${JSON.stringify(argv[1] ?? "")}`));
+      }
+    }
+    // `listen` parses with its own spec in main.ts, through the same parser.
+    expect(() => parseArgs(["--since", ""], { since: { type: "number", description: "" } })).toThrow(/^--since takes a number, not ""$/);
+    expect(parseArgs(["--left", "0"], COMMANDS["usage send"].options!).options).toEqual({ left: 0 });
+  });
+
   it("moves global options given before the command after it", () => {
     expect(liftGlobals(["--home", "/h", "-p", "bot", "--pretty", "send", "c", "hi"])).toEqual(["send", "c", "hi", "--home", "/h", "-p", "bot", "--pretty"]);
     expect(liftGlobals(["--profile=bot", "chat", "list"])).toEqual(["chat", "list", "--profile=bot"]);
