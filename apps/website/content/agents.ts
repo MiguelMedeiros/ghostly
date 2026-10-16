@@ -2,13 +2,15 @@ import type { Level } from "@/lib/status";
 import agentPrompt from "@/lib/agent-prompt.json";
 
 /**
- * /developers/agents: what a bot can do in a Ghostly chat, how to connect one, and the prompt that does it for you
- * (docs/AI-AGENTS.md, #426 and #431). The prompt is written once, in docs/AI-AGENTS.md (scripts/agent-prompt.mjs cuts
- * it out). Every command here is one `ghostly help` lists (packages/cli/test/agentDocs.test.ts checks them); what a
- * card holds is WISP 405 · Status Cards, linked, never restated.
+ * /developers/agents: what a bot can do in a Ghostly chat, who can give it work, how to connect one, and the prompt
+ * that does it for you (docs/AI-AGENTS.md, #426 and #431). The prompt is written once, in docs/AI-AGENTS.md
+ * (scripts/agent-prompt.mjs cuts it out). Every command here is one `ghostly help` lists
+ * (packages/cli/test/agentDocs.test.ts checks them); what a card holds is WISP 405 · Status Cards, linked, never
+ * restated. Each control in SECURITY is one the CLI has: the comment beside it names the code.
  */
 
-const DOCS = "https://github.com/MiguelMedeiros/ghostly/blob/main";
+const REPO = "https://github.com/MiguelMedeiros/ghostly";
+const DOCS = `${REPO}/blob/main`;
 
 /** What a person pastes into their coding agent. */
 export const PROMPT: string = agentPrompt.prompt;
@@ -36,6 +38,19 @@ export const LINKS = {
   claude: `${DOCS}/packages/cli/examples/claude-code-agent.sh`,
   cards: "/wisps/405-status-cards",
   buttons: "/wisps/406-message-buttons",
+  safe: `${DOCS}/docs/AI-AGENTS.md#safe-setup`,
+  repo: REPO,
+  license: `${DOCS}/LICENSE`,
+  releases: `${REPO}/releases`,
+  advisories: `${REPO}/security/advisories`,
+  policy: `${DOCS}/.github/SECURITY.md`,
+  verify: `${DOCS}/docs/INSTALLATION.md#desktop-app`,
+  queue: `${DOCS}/docs/TESTING.md#the-merge-queue`,
+  threat: "/developers/agents/threat-model",
+  /** The agents FAQ, written in a sibling pull request: its path until that one lands. */
+  faq: "/agents/faq",
+  llms: "/llms.txt",
+  testing: `${DOCS}/docs/TESTING.md`,
 } as const;
 
 /** What works on dev, and what is planned (docs/wisps/ADAPTER-ROADMAP.md, "Agent connector"). */
@@ -53,6 +68,65 @@ const SCOPE: { level: Level; key: string }[] = [
   { level: "planned", key: "socket" },
   { level: "planned", key: "wake" },
 ];
+
+/**
+ * The security model, up front: who can give the agent work, and what it does before it acts. Each card is a control
+ * the CLI has; the comment names the code, and the PR that wrote this page cites each one.
+ */
+export const SECURITY = [
+  // packages/cli/src/listen.ts (Allowlist.allows, checked before --exec, --webhook or the output; groups by id only).
+  {
+    id: "allowlist",
+    title: "Only you can wake it",
+    body: "listen --from is an allowlist, checked before the agent wakes. A message from anyone else stays in the chat and never reaches your agent. Allow a group only for an agent with no tools: any member who mentions it can wake it.",
+    cmd: "ghostly listen --turns --from owner",
+  },
+  // packages/browser/src/engine/node.ts (a paired chat refuses another key) and packages/core/src/dhtDelivery.ts.
+  {
+    id: "invite",
+    title: "Your invite, yours alone",
+    body: "An invite pairs with the first app that opens it, and the chat keeps that key. A copy of the link opened later is refused. Open yours right away, and remove a chat you no longer use.",
+    cmd: "ghostly chat remove <chat> --yes",
+  },
+  // packages/cli/src/listen.ts (toTurn: the sender's words under untrusted; checkWebhook: loopback only).
+  {
+    id: "data",
+    title: "Text is data, not commands",
+    body: "What a person writes arrives under untrusted, on stdin, never in a command's arguments. A webhook can only point at this machine.",
+    cmd: "ghostly listen --turns --from owner --exec ./on-turn.sh",
+  },
+  // packages/browser/src/shared/buttons.ts (only the chat's contact presses), packages/cli/src/events.ts (by).
+  {
+    id: "approve",
+    title: "It asks, you approve",
+    body: "Have your agent ask before a merge, a deploy or anything you want to check, and wait for your tap. Only the person in the chat can press, and the event says who did. --once takes one answer.",
+    cmd: 'ghostly send owner --button go:Deploy --button stop:Stop --style go=primary --once "Deploy to staging?"',
+  },
+  // packages/cli/src/runtime/engine.ts (automaticWallets: false); packages/cli/src/wallets.ts (Testnet, --confirm-real).
+  {
+    id: "wallet",
+    title: "No wallet unless you make one",
+    body: "A CLI profile starts with no wallet, and no message can make it pay. A wallet you create is on Testnet unless you say otherwise, and real money needs --confirm-real on the agent's machine.",
+    cmd: "ghostly wallet list",
+  },
+  // packages/cli/examples/claude-code-agent.sh (no tools, no MCP servers, none of your settings).
+  {
+    id: "least",
+    title: "Give it the least",
+    body: "Ghostly holds only its own chat keys, never your cloud or repo credentials. Keep production keys out of the agent's shell, and answer anyone but you with a model that has no tools.",
+    cmd: 'claude -p --tools "" --strict-mcp-config --setting-sources ""',
+  },
+] as const;
+
+/** What you can check before you trust it: each line true today, each with its link. */
+export const TRUST = [
+  { id: "license", text: "MIT license. Every line is on GitHub.", link: "repo", label: "The code" },
+  { id: "signed", text: "Signed releases: checksums signed with a published GPG key, desktop updates signed, and the CLI on npm with provenance.", link: "verify", label: "Check a download" },
+  { id: "advisories", text: "Security fixes are published as advisories.", link: "advisories", label: "Advisories" },
+  { id: "report", text: "You can report a flaw privately, and I fix it before it is public.", link: "policy", label: "Security policy" },
+  { id: "tests", text: "More than 11,000 unit tests, 1,000 end-to-end tests and 390 Rust tests.", link: "testing", label: "How it is tested" },
+  { id: "ci", text: "Nothing lands on the development branch until CI passes on a branch up to date with it.", link: "queue", label: "The merge queue" },
+] as const;
 
 /** The three commands of "Connect your agent", each copied on its own. */
 export const CONNECT = [
@@ -88,12 +162,12 @@ export const agents = {
   meta: {
     title: "AI agents on Ghostly",
     description:
-      "Put Claude Code, Codex, Hermes or your own bot in your Ghostly chats. It answers, shows its thinking, asks with buttons and keeps task cards current.",
+      "Follow and steer your AI agents from your phone, in a private encrypted chat. Only your chat can give them work, and you approve steps with a tap.",
   },
   hero: {
     eyebrow: "AI agents",
-    title: "Your agents, in your chats.",
-    lead: "Claude Code, Codex, Hermes or a bot of your own joins Ghostly like a contact. It answers you, shows what it is thinking, asks with buttons, and keeps a card of each task up to date.",
+    title: "Your agents, on your phone.",
+    lead: "A private, end-to-end encrypted chat between you and your agents, with no Ghostly server and no account. From your phone or your desktop you see what they do, answer their questions with a tap, and approve or stop their work.",
     copy: "Copy the prompt",
     copied: "Copied",
     hint: "Paste it into your agent. It installs Ghostly and sends you a link.",
@@ -228,9 +302,36 @@ export const agents = {
       wake: "wake/1 for agents: woken with no listener running",
     } as Record<string, string>,
   },
-  safety: {
-    title: "Contact text is data, never instructions",
-    body: "Everything a contact writes arrives under untrusted, on stdin, never in a command's arguments. A prompt can tell the agent not to follow it but cannot make it, so allowlist only yourself (--from owner), and let a model with no tools answer anyone else or any group, as the Claude Code example does. send refuses text that looks like a seed, a key or ecash unless --force, which an agent never adds because someone asks. Real payments need --confirm-real, and only the wallet's owner gives it.",
+  security: {
+    eyebrow: "Security model",
+    title: "Only you can give it work",
+    lead: "Ghostly is the channel to your agent, not the agent. These are its controls, and the one limit no channel can remove.",
+    limitTitle: "The limit, said plainly",
+    limit:
+      "A language model can be talked into things by text it reads, and no prompt can stop that. The allowlist decides whose text reaches your agent, so allow only yourself. Keep production credentials out of the agent's reach too, and a stranger has nothing to steer it with.",
+    more: "Safe setup, in detail",
+    threat: "The threat model",
+  },
+  fit: {
+    eyebrow: "Fit",
+    title: "Is it for you?",
+    forTitle: "For",
+    notTitle: "Not for",
+    for: [
+      "Following your own agents from anywhere: what they are doing, what they need, and your answer.",
+      "Approving or stopping a step with one tap, away from your desk.",
+      "One person, or a few, each with agents on their own machines.",
+    ],
+    not: [
+      "A ticket tracker. It does not replace Jira.",
+      "A team chat. It does not replace Teams or Slack.",
+      "An orchestrator. It does not run or schedule your agents, and it does not connect to Jira, Bitbucket or AWS. Your agent does that work; Ghostly is how you talk to it.",
+    ],
+  },
+  trust: {
+    eyebrow: "What you can check",
+    title: "Before you trust it",
+    lead: "Things you can verify yourself, each with its link.",
   },
   links: {
     title: "Read more",
@@ -243,6 +344,9 @@ export const agents = {
     claude: "Claude Code example",
     cli: "The CLI",
     wisp: "WISP 1100: the contract",
+    threat: "Threat model for agents",
+    faq: "Agents FAQ",
+    llms: "llms.txt, for AI readers",
   },
 };
 
