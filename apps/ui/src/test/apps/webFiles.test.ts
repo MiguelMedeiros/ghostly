@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
+import { PICK_AFTER_CANCEL_MS } from "../../lib/apps/broker";
 import { handlePicker, idbPickStore, pickSheetText, webLinkedFiles, type PickSheetText, type PickStore, type PickedFile, type StoredPick } from "../../lib/apps/webFiles";
 import { translatorFor } from "../../locales";
 
@@ -102,6 +103,29 @@ describe("picking", () => {
     // Stopped before it asked: no sheet at all.
     await expect(host.pick(REF, "Cinema", { folder: true, accept: [] }, app.signal)).rejects.toThrow(/^cancelled: /);
     expect(document.querySelector("[data-testid=app-files-sheet]")).toBeNull();
+  });
+
+  it("one sheet at a time per app, whichever chat asks: the others are too-fast, and so is every pick PICK_AFTER_CANCEL_MS after a Cancel", async () => {
+    let clock = 1_000;
+    const host = webLinkedFiles({ text: () => text, picker: async () => null, now: () => clock });
+    const sheets = () => document.querySelectorAll("[data-testid=app-files-sheet]").length;
+    // The app open in two chats has a broker in each: both ask at once.
+    const first = host.pick(REF, "Cinema", { folder: true, accept: [] });
+    const second = host.pick(REF, "Cinema", { folder: true, accept: [] });
+    await expect(second).rejects.toThrow(/^too-fast: /);
+    await shown("[data-testid=app-files-sheet]");
+    expect(sheets()).toBe(1);
+    // Another app is not held up by it.
+    const other = host.pick("pubkeyalpha/reader", "Reader", { folder: false, accept: [] }).catch((error: Error) => error.message);
+    await vi.waitFor(() => expect(sheets()).toBe(2));
+    for (const cancel of document.querySelectorAll<HTMLButtonElement>("[data-testid=app-files-cancel]")) cancel.click();
+    await expect(first).rejects.toThrow(/^cancelled: /);
+    expect(await other).toMatch(/^cancelled: /);
+    await expect(host.pick(REF, "Cinema", { folder: true, accept: [] })).rejects.toThrow(/^too-fast: /);
+    expect(sheets()).toBe(0);
+    clock += PICK_AFTER_CANCEL_MS;
+    void host.pick(REF, "Cinema", { folder: true, accept: [] }).catch(() => {});
+    await shown("[data-testid=app-files-sheet]");
   });
 
   it("the picker closed without a pick is cancelled too", async () => {
