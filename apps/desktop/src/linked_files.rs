@@ -470,11 +470,24 @@ impl LinkedFiles {
             use std::io::Write;
             let mut journal = fs::OpenOptions::new()
                 .create(true)
+                .read(true)
                 .append(true)
                 .open(forgotten_file(&file))
                 .map_err(|e| e.to_string())?;
+            // A line cut off by a crash leaves the file without its line feed: this one starts a line of its own, or it
+            // would be glued onto that one and name nothing after the next start.
+            let mut last = [b'\n'];
+            if journal.seek(SeekFrom::End(0)).map_err(|e| e.to_string())? > 0 {
+                journal.seek(SeekFrom::End(-1)).map_err(|e| e.to_string())?;
+                journal.read_exact(&mut last).map_err(|e| e.to_string())?;
+            }
+            let line = if last[0] == b'\n' {
+                format!("{id}\n")
+            } else {
+                format!("\n{id}\n")
+            };
             journal
-                .write_all(format!("{id}\n").as_bytes())
+                .write_all(line.as_bytes())
                 .map_err(|e| e.to_string())?;
         }
         let mut books = locked(&self.books);
@@ -876,6 +889,15 @@ mod tests {
             .map(|e| e.id)
             .collect();
         assert_eq!(ids, [added[1].id.clone(), added[2].id.clone()]);
+        // The next forget is not glued onto the cut line: it holds after another start.
+        again.forget("ghostly", APP, &added[2].id).unwrap();
+        let ids: Vec<String> = LinkedFiles::new(links.base.clone())
+            .list("ghostly", APP)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(ids, [added[1].id.clone()]);
     }
 
     #[test]
