@@ -70,8 +70,12 @@ describe("ghostly x401 key and credential", { timeout: 120_000 }, () => {
     const jwk = ok(await run("x401", "key", "new")).jwk as X401HolderJwk;
     expect(error(await run("x401", "credential", "add", file("old.txt", issueSdJwtVc({ holder: jwk, payload: { exp: 1_700_000_000 } }))), "bad_request", 1).message).toMatch(/expired/);
     expect(error(await run("x401", "credential", "add", file("junk.txt", "hello")), "bad_request", 1).message).toMatch(/Not an SD-JWT VC/);
-    expect(error(await run("x401", "credential", "add", join(dir, "missing.txt")), "usage", 2).message).toMatch(/Cannot read/);
     expect(requests).toEqual([]);
+  });
+
+  it("says a credential file that is not there or is a folder as every other file it reads", async () => {
+    expect(error(await run("x401", "credential", "add", join(dir, "missing.txt")), "not_found", 3).message).toBe(`No such file or folder: ${join(dir, "missing.txt")}`);
+    expect(error(await run("x401", "credential", "add", dir), "bad_request", 1).message).toBe(`${dir} is a folder: name a file`);
   });
 
   it("answers the words of a group with its commands", async () => {
