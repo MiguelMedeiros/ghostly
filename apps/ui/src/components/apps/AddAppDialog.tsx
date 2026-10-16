@@ -74,7 +74,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 sm:p-4 animate-fade-in" {...backdrop}>
       <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} data-testid="apps-add-dialog"
-        className="focus:outline-none w-full sm:max-w-md bg-panel-header border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 space-y-4 max-h-[90dvh] overflow-y-auto pb-safe">
+        className="sheet sheet-padded focus:outline-none w-full sm:max-w-md bg-panel-header border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl p-5 space-y-4 max-h-[90dvh] overflow-y-auto">
         <h2 id={titleId} className="text-lg font-medium text-text-primary">{t("apps.add.title")}</h2>
         {/* noValidate: a link the field's type refuses is answered below in the app's words, not by the browser's own bubble. */}
         <form className="space-y-2" noValidate onSubmit={(e) => { e.preventDefault(); void check(); }}>
