@@ -875,7 +875,7 @@ html[data-standalone="true"] {
     box-shadow: none;
   }
 
-  .wallet-screen [data-testid="wallet-balance"] > span:first-child {
+  .wallet-screen [data-testid="wallet-balance"] > bdi:first-child {
     font-size: 2rem;
   }
 }
