@@ -1469,6 +1469,17 @@ export interface PublicGraphView {
 export interface PublicPostImageView { src?: string; miss?: string; hosts: string[]; width?: number; height?: number }
 
 /** The profile's did:dht (WISP 310-did-dht): its own key, public to everyone, never tied to a chat. */
+/** A request in Requests (WISP 8xx): what the asker said. The name is what it typed, unverified. */
+export interface ContactRequestView {
+  /** The asker key. */
+  id: string;
+  name: string;
+  text: string;
+  receivedAt: number;
+  /** When it ends unanswered. */
+  expires: number;
+}
+
 /** The profile's contact link (WISP 8xx): what the owner shows and shares. */
 export interface ContactLinkView {
   /** `ghostly1r…` */
@@ -1478,6 +1489,10 @@ export interface ContactLinkView {
   createdAt: number;
   /** `busy`: too many requests wait; new ones are counted, not read. */
   state: "open" | "busy";
+  /** Requests waiting in Requests. */
+  waiting: number;
+  /** How many people tried while the link was busy, since the owner last looked; never their names. */
+  missed: number;
   /** When the link record last went out. */
   publishedAt?: number;
   /** Why the last publish failed. */
@@ -1740,6 +1755,8 @@ export interface EngineState {
   did?: ProfileDidView;
   /** This profile's contact link, when it has one. */
   contactLink?: ContactLinkView;
+  /** The requests its contact link took, newest first. */
+  contactRequests?: ContactRequestView[];
   /** The Nostr social layer: the person's own keys' data and the effective settings. */
   nostr: NostrSocialState;
   /** Private groups and pending invitations (WISP 900). */
