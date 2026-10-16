@@ -1,5 +1,5 @@
 import { CliError } from "../errors";
-import { type Command, force, groupWait, cursor, needs, prLinked, quota, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, typingFor, usageFields, usageOptions, wait } from "./shared";
+import { type Command, force, groupWait, cursor, needs, prLinked, quota, refs, routineFields, routineOptions, runOf, secret, showInvite, taskFields, taskOptions, typingFor, usageFields, usageOptions, wait } from "./shared";
 
 const BUTTON_UPDATE = "button update <chat|group> <message> [--chosen <button>] [--close] [--text <text>] [--force] [--wait none|confirmed|sent] [--timeout s]";
 
@@ -76,6 +76,7 @@ export const commands: Record<string, Command> = {
     },
     params: ({ options }, a) => {
       if (!Array.isArray(options.to) || !options.to.length) throw new CliError("usage", "Missing --to: ghostly forward <chat|group> <message>... --to <chat|group>... [--force] [--wait none|sent] [--timeout s]");
+      refs(options.to, "to", "chat or group");
       return { chat: a.chat, messages: (a.message ?? "").split(" ").filter(Boolean), to: options.to, force: options.force === true, wait: options.wait, timeout: options.timeout };
     },
   },
