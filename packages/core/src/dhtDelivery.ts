@@ -9,7 +9,7 @@ import type { PairingCredentials } from "./pairedSession";
 import { measureRecords, MAX_DNS_PACKET_BYTES, PKARR_FUTURE_SKEW_MS, type GhostRecord, type SignedPacket } from "./pkarr";
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
-import { AWAITING_PEER_MS, unusedInviteWait } from "./link";
+import { AWAITING_PEER_MS, countUnusedInvite, unusedInviteWait } from "./link";
 import { REACTION_LIMITS, readDhtReactions, validReactionNumber, type WireReaction } from "./reactions";
 import { readForwarded } from "./forwards";
 import { validEditNumber } from "./pairedEdits";
@@ -406,6 +406,7 @@ export class DhtDelivery {
     if (this.controlTimer) clearTimeout(this.controlTimer);
     if (this.announceTimer) clearTimeout(this.announceTimer);
     this.timer = this.controlTimer = this.announceTimer = null;
+    countUnusedInvite(this.options.transport, this, false);
     await this.chain;
   }
   async setMode(mode: DeliveryMode): Promise<void> {
@@ -936,9 +937,10 @@ export class DhtDelivery {
   get pollMs(): number {
     if (this.options.pollMs) return this.options.pollMs;
     const now = Date.now();
-    // An invite nobody used, no longer awaited: the older it is, the less often its mailbox is read.
-    const unused = this.unusedInviteAge(now);
-    if (unused !== undefined && !this.active && now >= this.fastUntil) return unusedInviteWait(unused, this.mode === "dht" ? DHT_POLL_MS : STREAM_POLL_MS);
+    // An invite nobody used, no longer awaited: the older it is, the less often its mailbox is read, as far as their count needs.
+    const unused = this.running ? this.unusedInviteAge(now) : undefined;
+    const readers = countUnusedInvite(this.options.transport, this, unused !== undefined && !this.active && now >= this.fastUntil);
+    if (unused !== undefined && !this.active && now >= this.fastUntil) return unusedInviteWait(unused, this.mode === "dht" ? DHT_POLL_MS : STREAM_POLL_MS, readers);
     if (this.mode === "dht" || (this.state.peerMode === "dht" && now < this.leavingUntil) || now < this.fastUntil) return DHT_POLL_MS;
     if (this.live) return LIVE_POLL_MS;
     // Our text awaits its receipt: the receipt is what the person is looking at.

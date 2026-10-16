@@ -101,9 +101,30 @@ export const AWAITING_PEER_MS = 10 * 60_000;
  * to invites nobody may ever open, and a join on one was noticed 90 s later (bug hunt 1013-1642, 2026-10-13).
  */
 export const UNUSED_INVITE_WAIT_MAX_MS = 3 * 60_000;
-/** The wait between reads of an unused invite of age `age` (`UNUSED_INVITE_WAIT_MAX_MS`), never shorter than the pace's `interval`. */
-export function unusedInviteWait(age: number, interval: number): number {
-  return Math.max(interval, Math.min(UNUSED_INVITE_WAIT_MAX_MS, Math.round(age / 5)));
+/**
+ * The reads a minute the unused invites of an app (their keys and their mailboxes) take between them, half the relays'
+ * background share: the slower reads stretch only as far as their count needs. Slowed whatever the count, a single
+ * invite opened 20 minutes later was noticed 136 s after the join, where the background pace takes 30 s at most (bug
+ * hunt 1014-0136, 2026-10-14).
+ */
+export const UNUSED_INVITE_READS_PER_MINUTE = 10;
+/** The keys and mailboxes of unused invites read slowly over each transport (an app's relays). */
+const unusedInviteReaders = new WeakMap<PkarrTransport, Set<object>>();
+/** Counts `reader` (an invite's key or mailbox) among the unused ones read over `transport` while `unused`, or no longer: how many there are. */
+export function countUnusedInvite(transport: PkarrTransport, reader: object, unused: boolean): number {
+  let readers = unusedInviteReaders.get(transport);
+  if (!readers) unusedInviteReaders.set(transport, readers = new Set());
+  if (unused) readers.add(reader); else readers.delete(reader);
+  return readers.size;
+}
+/**
+ * The wait between reads of an unused invite of age `age`, one of `readers` read over the same relays: a fifth of its
+ * age, up to `UNUSED_INVITE_WAIT_MAX_MS`, but no longer than their count needs (`UNUSED_INVITE_READS_PER_MINUTE`), and
+ * never shorter than the pace's `interval`.
+ */
+export function unusedInviteWait(age: number, interval: number, readers: number): number {
+  const share = Math.round(readers * 60_000 / UNUSED_INVITE_READS_PER_MINUTE);
+  return Math.max(interval, Math.min(UNUSED_INVITE_WAIT_MAX_MS, Math.round(age / 5), share));
 }
 /**
  * A group link's peer whose packet advertises and carries no `_tr` on every read for this long publishes none: what it
@@ -395,6 +416,7 @@ export class LinkSession {
     if (this.publishRetryTimer) clearTimeout(this.publishRetryTimer);
     if (this.firstPublishTimer) clearTimeout(this.firstPublishTimer);
     this.pollTimer = this.heartbeatTimer = this.publishRetryTimer = this.firstPublishTimer = null;
+    countUnusedInvite(this.transport, this, false);
     this.rtcSignal = null;
     this.callSignal = null;
     this.events.onStatus?.("offline");
@@ -586,11 +608,13 @@ export class LinkSession {
     const since = Date.now() - this.expectUntil;
     // An offer out a while: 4, 4, 8 s… between looks (on the relays), as long as its window lasts.
     const stepping = this.fastStepsAfter ? Date.now() - this.fastStepsAfter : -1;
+    // Counted among the app's unused invites while read as one (below).
+    const unused = countUnusedInvite(this.transport, this, pace === "background" && since >= 0 && !this.presence.online && this.invite());
     if (pace === "fast" && stepping >= 0) return Math.min(OFFER_STEP_MAX * interval, Math.max(2 * interval, stepping));
     if (pace === "fast" || pace === "connected" || since < 0) return interval;
     // An invite nobody used, or a joined one whose inviter never came, no longer awaited: the older it is, the less often
-    // it is read. Nobody there: an inviter gone may have left a packet, its goodbye, before the join.
-    if (pace === "background" && !this.presence.online && this.invite()) return unusedInviteWait(Date.now() - this.awaitingSince, interval);
+    // it is read, as far as their count needs. Nobody there: an inviter gone may have left a packet, its goodbye, before the join.
+    if (pace === "background" && !this.presence.online && this.invite()) return unusedInviteWait(Date.now() - this.awaitingSince, interval, unused);
     return Math.min(interval, Math.max(2 * this.intervals.fast, since));
   }
 
