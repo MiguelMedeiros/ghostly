@@ -279,9 +279,12 @@ export class MeshHubs {
         for (const key of [...this.host.edges(groupId).keys(), ...hubs]) out.add(key);
       } else {
         for (const key of live.myHubs) out.add(key);
-        // An admin on an app without hubs cannot be reached through them for a leave (it drops `group-bye`).
-        const admin = session.admin;
-        if (admin && legacy.includes(admin)) out.add(admin);
+        // An admin on an app without hubs cannot be reached through them for a leave (it drops `group-bye`). And while
+        // no hub of mine has its edge up, the admin's edge too: a member removed while away is told by nobody else (its
+        // hubs dropped it), and the admin keeps an edge for it (`StoredGroup.farewells`). Else the admin's side never opens it.
+        const admin = session.admin, mine = this.host.edges(groupId);
+        const hubUp = live.myHubs.some(key => { const id = mine.get(key); return !!id && this.host.linkReady(id); });
+        if (admin && (legacy.includes(admin) || !hubUp)) out.add(admin);
       }
       if (session.isAdmin) for (const key of legacy) out.add(key);
     }
