@@ -1,0 +1,26 @@
+#!/bin/sh
+# status: show your owner what you are doing, as "thinking" with a short status line in their chat.
+#
+#   status "<what you are doing>" [seconds]    a status line, kept up to 600 s (default 300); call again at each step
+#   status --stop                              take it down (a message you send ends it anyway)
+#
+# The line is cut to 40 characters and links are taken out (the app shows no status that holds one). It shows while
+# the chat is live. Needs GHOSTLY_OWNER_CHAT.
+set -eu
+owner=${GHOSTLY_OWNER_CHAT:-}
+[ -n "$owner" ] || { echo "status: set GHOSTLY_OWNER_CHAT to your owner's chat id" >&2; exit 2; }
+
+case "${1:-}" in
+  -h|--help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  --stop) ghostly typing "$owner" --stop >/dev/null; exit 0 ;;
+esac
+
+secs=${2:-300}
+case "$secs" in ''|*[!0-9]*) echo "status: seconds must be a number" >&2; exit 2 ;; esac
+[ "$secs" -le 600 ] || secs=600
+[ "$secs" -ge 1 ] || secs=1
+
+# One line, no links, at most 40 characters (counted as characters, not bytes).
+line=$(printf '%s' "${1:-}" | jq -Rrs 'gsub("[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]]*|www\\.[^[:space:]]*"; "") | gsub("[[:space:]]+"; " ") | gsub("^ +| +$"; "") | .[0:40]')
+[ -n "$line" ] || { echo 'status: usage: status "<what you are doing>" [seconds] | --stop' >&2; exit 2; }
+ghostly typing "$owner" --kind thinking --status "$line" --for "$secs" >/dev/null
