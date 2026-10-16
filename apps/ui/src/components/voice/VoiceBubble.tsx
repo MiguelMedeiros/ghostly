@@ -20,6 +20,7 @@ import {
   releasePlayback,
   voiceRate,
 } from "../../lib/voicePlayback";
+import { forgetPosition, holdPlayback, playingFrom, rememberPosition, rememberedPosition, takePlayback, usePlayingChat } from "../../lib/nowPlaying";
 import { decodeToWav } from "../../lib/voiceDecode";
 import { followSpeaker } from "../../lib/mediaDevices";
 import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMediaSession, type MediaSessionPlayer } from "../../lib/mediaSession";
@@ -57,7 +58,8 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   const seconds = file.voice.duration / 1000;
 
   const [state, setState] = useState<PlayState>("idle");
-  const [position, setPosition] = useState(0);
+  // Paused or left part-way earlier in this session: it goes on from there (lib/nowPlaying.ts).
+  const [position, setPosition] = useState(() => rememberedPosition(file.id)?.at ?? 0);
   const [rate, setRate] = useState(voiceRate);
   const [played, setPlayed] = useState(() => sender === "me" || isVoicePlayed(file.id));
   const [problem, setProblem] = useState<string | null>(null);
@@ -75,12 +77,23 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   const playRef = useRef<HTMLButtonElement>(null);
   const waveRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  /** Stops the player following the speaker chosen in Settings. */
-  const speakerRef = useRef<(() => void) | null>(null);
+  /**
+   * Lets go of what the player holds besides its URLs: it stops following the speaker chosen in Settings. Taken back
+   * from the app (it played on while the chat was away), all that it holds.
+   */
+  const letGoRef = useRef<(() => void) | null>(null);
+  /** The player's events drive this bubble until it hands the player to the app. */
+  const listenRef = useRef<AbortController | null>(null);
   const blobRef = useRef<Blob | null>(null);
   const urlsRef = useRef<string[]>([]);
   const frameRef = useRef(0);
-  const positionRef = useRef(0);
+  const positionRef = useRef(position);
+  /** The message it is in, found when it starts: the bar's tap opens the chat there. */
+  const messageRef = useRef<string | undefined>(undefined);
+  /** What the now-playing bar shows of it, should it play on away from here. */
+  const chat = usePlayingChat();
+  const trackRef = useRef({ title: "", from: "", chat });
+  trackRef.current = { title: t("chat.voice.message"), from: playingFrom(sender === "me", t("chat.reply.you"), peerName, chat), chat };
   const loadingRef = useRef<Promise<HTMLAudioElement | null> | null>(null);
   /** A play() is being started: its own rejection reports what went wrong, not the element's error event. */
   const startingRef = useRef(false);
@@ -147,6 +160,43 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
     return true;
   }, [report, file.voice.duration]);
 
+  /** This bubble follows `audio`: its own, or one taken back from the app. */
+  const listen = useCallback((audio: HTMLAudioElement) => {
+    listenRef.current?.abort();
+    const { signal } = (listenRef.current = new AbortController());
+    audio.addEventListener("timeupdate", () => {
+      setPosition(audio.currentTime);
+      mediaSessionPosition(file.id, audio.currentTime, seconds, audio.playbackRate);
+    }, { signal });
+    audio.addEventListener("ended", () => {
+      stopFrames();
+      releasePlayback(file.id);
+      forgetPosition(file.id);
+      setState("idle");
+      setPosition(0);
+      showProgress(0);
+      audio.currentTime = 0;
+      releaseMediaSession(file.id);
+      playNextVoice(rootRef.current);
+    }, { signal });
+    audio.addEventListener("pause", () => {
+      stopFrames();
+      // Where it stopped, not where the last frame drew it: it goes on from there, here or after the chat was away.
+      showProgress(audio.currentTime);
+      setState((s) => (s === "playing" ? "paused" : s));
+      mediaSessionState(file.id, "paused");
+    }, { signal });
+    audio.addEventListener("error", () => {
+      report("media element", audio.error);
+      if (startingRef.current) return;
+      // Broke off while playing.
+      stopFrames();
+      releasePlayback(file.id);
+      setState("idle");
+      giveUp(t("chat.voice.couldNotPlay"));
+    }, { signal });
+  }, [file.id, seconds, showProgress, report, giveUp, t]);
+
   /** The player, made on first use: reading the bytes of every voice message on screen would be waste. */
   const load = useCallback((): Promise<HTMLAudioElement | null> => {
     if (audioRef.current) return Promise.resolve(audioRef.current);
@@ -169,35 +219,13 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
         return null;
       }
       applyVoiceRate(audio, voiceRate());
-      audio.addEventListener("timeupdate", () => {
-        setPosition(audio.currentTime);
-        mediaSessionPosition(file.id, audio.currentTime, seconds, audio.playbackRate);
-      });
-      audio.addEventListener("ended", () => {
-        stopFrames();
-        releasePlayback(file.id);
-        setState("idle");
-        setPosition(0);
-        showProgress(0);
-        audio.currentTime = 0;
-        releaseMediaSession(file.id);
-        playNextVoice(rootRef.current);
-      });
-      audio.addEventListener("pause", () => { stopFrames(); setState((s) => (s === "playing" ? "paused" : s)); mediaSessionState(file.id, "paused"); });
-      audio.addEventListener("error", () => {
-        report("media element", audio.error);
-        if (startingRef.current) return;
-        // Broke off while playing.
-        stopFrames();
-        releasePlayback(file.id);
-        setState("idle");
-        giveUp(t("chat.voice.couldNotPlay"));
-      });
+      listen(audio);
       const speaker = followSpeaker(audio);
-      speakerRef.current = speaker.stop;
+      letGoRef.current = speaker.stop;
       await speaker.ready;
       if (!mountedRef.current) {
         // Gone while it loaded: its cleanup has already run, so let go of what was made since.
+        listenRef.current?.abort();
         speaker.stop();
         audio.removeAttribute("src");
         for (const url of urlsRef.current) URL.revokeObjectURL(url);
@@ -208,7 +236,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
       return audio;
     })().finally(() => { loadingRef.current = null; });
     return loadingRef.current;
-  }, [platform, file.id, file.mime, seconds, showProgress, report, giveUp, cannotPlayHere, switchToDecoded, t]);
+  }, [platform, file.id, file.mime, cannotPlayHere, switchToDecoded, listen, t]);
 
   const pause = useCallback(() => {
     turnRef.current += 1;
@@ -249,6 +277,19 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
     }
   }, [report, switchToDecoded, cannotPlayHere, giveUp, t]);
 
+  /** The lock screen and media keys drive the one playing now (through `mediaRef`, always this render's functions). */
+  const claimSession = useCallback((audio: HTMLAudioElement) => {
+    claimMediaSession(file.id, {
+      title: trackRef.current.title,
+      artist: trackRef.current.from,
+      play: () => mediaRef.current?.play(),
+      pause: () => mediaRef.current?.pause(),
+      seekTo: (at) => mediaRef.current?.seekTo(at),
+      next: () => mediaRef.current?.next?.(),
+    });
+    mediaSessionPosition(file.id, audio.currentTime, seconds, audio.playbackRate);
+  }, [file.id, seconds]);
+
   const play = useCallback(async () => {
     if (!ready) return;
     claimPlayback(file.id);
@@ -276,18 +317,10 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
     }
     setState("playing");
     followAudio();
-    // The lock screen and media keys drive the one playing now (through `mediaRef`, always this render's functions).
-    claimMediaSession(file.id, {
-      title: t("chat.voice.message"),
-      artist: sender === "me" ? t("chat.reply.you") : peerName,
-      play: () => mediaRef.current?.play(),
-      pause: () => mediaRef.current?.pause(),
-      seekTo: (at) => mediaRef.current?.seekTo(at),
-      next: () => mediaRef.current?.next?.(),
-    });
-    mediaSessionPosition(file.id, audio.currentTime, seconds, audio.playbackRate);
+    messageRef.current = rootRef.current?.closest<HTMLElement>("[data-message-id]")?.dataset.messageId;
+    claimSession(audio);
     if (sender === "peer" && !played) { markVoicePlayed(file.id); setPlayed(true); }
-  }, [ready, file.id, load, seconds, showProgress, start, followAudio, sender, played, peerName, t]);
+  }, [ready, file.id, load, seconds, showProgress, start, followAudio, claimSession, sender, played]);
 
   useEffect(() => registerVoicePlayer(file.id, { play: () => void play(), pause }), [file.id, play, pause]);
   useEffect(() => onVoiceRate((next) => {
@@ -298,18 +331,61 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
-  useEffect(() => () => {
+  // Back on screen while the app plays it on (lib/nowPlaying.ts): it takes its player back, playing or paused as it is.
+  useLayoutEffect(() => {
+    const handed = takePlayback(file.id);
+    if (!handed) {
+      showProgress(positionRef.current);
+      return;
+    }
+    const { audio } = handed;
+    audioRef.current = audio;
+    letGoRef.current = handed.release;
+    // Its Web Audio fallback, if it needed one, was tried where it started.
+    decodedRef.current = true;
+    messageRef.current = handed.messageId;
+    listen(audio);
+    applyVoiceRate(audio, voiceRate());
+    showProgress(audio.currentTime);
+    setPosition(audio.currentTime);
+    claimSession(audio);
+    if (audio.paused) {
+      mediaSessionState(file.id, "paused");
+      setState("paused");
+      return;
+    }
+    claimPlayback(file.id);
+    setState("playing");
+    followAudio();
+  }, [file.id, showProgress, listen, claimSession, followAudio]);
+  // A layout cleanup: it runs before the app's own (App), which stops one held when the app itself goes.
+  useLayoutEffect(() => () => {
     turnRef.current += 1;
     wantedRef.current = false;
     stopFrames();
+    listenRef.current?.abort();
+    const audio = audioRef.current;
+    const urls = urlsRef.current;
+    const letGo = letGoRef.current;
+    audioRef.current = null;
+    urlsRef.current = [];
+    letGoRef.current = null;
+    const release = () => {
+      audio?.pause();
+      audio?.removeAttribute("src");
+      letGo?.();
+      for (const url of urls) URL.revokeObjectURL(url);
+    };
+    if (audio && !audio.paused && !audio.ended) {
+      // Leaving the screen while it plays (another chat, another page, the chat list): it plays on, with the bar.
+      holdPlayback({ ...trackRef.current, id: file.id, kind: "voice", messageId: messageRef.current, duration: seconds, audio, release });
+      return;
+    }
+    rememberPosition(file.id, positionRef.current, seconds);
     releasePlayback(file.id);
     releaseMediaSession(file.id);
-    audioRef.current?.pause();
-    audioRef.current?.removeAttribute("src");
-    speakerRef.current?.();
-    for (const url of urlsRef.current) URL.revokeObjectURL(url);
-    urlsRef.current = [];
-  }, [file.id]);
+    release();
+  }, [file.id, seconds]);
 
   const seekTo = useCallback((at: number) => {
     const clamped = Math.min(seconds, Math.max(0, at));

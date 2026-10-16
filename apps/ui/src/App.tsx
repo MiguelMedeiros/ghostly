@@ -25,6 +25,8 @@ import { useCallOnSync } from "./hooks/useCallOnSync";
 import { useI18n } from "./contexts/I18nContext";
 import { useAppSessions } from "./lib/apps/running";
 import { useGroupDownloadsSync } from "./lib/groupDownloads";
+import { NowPlayingBar } from "./components/NowPlayingBar";
+import { stopHeld } from "./lib/nowPlaying";
 
 /** The browser's status bar follows the header of whichever theme is active. */
 function useThemeColor() {
@@ -185,6 +187,9 @@ export function App() {
   useComputerAwake();
   const chats = useLoadedChats();
   const mainRef = useRef<HTMLElement>(null);
+  // A voice message or audio file playing on away from its chat (lib/nowPlaying.ts) stops with the app itself (the
+  // profile closing): after the bubbles' layout cleanups have handed it over.
+  useEffect(() => () => stopHeld(), []);
 
   const inChat = pathname.startsWith("/chat");
   // A group is a conversation too: on a phone it takes the whole screen, without the tab bar.
@@ -202,10 +207,13 @@ export function App() {
         <Sidebar />
         {/* Keyed as on a phone: a phone turned on its side (or back) keeps the open chat and page mounted, and the
             message field its focus and its keyboard. */}
-        <main key="main" ref={mainRef} tabIndex={-1} className="flex-1 flex min-w-0 focus:outline-none">
-          <Fragment key="chats">{chats("flex-1 flex flex-col min-w-0")}</Fragment>
+        {/* Two rows: a voice message playing on away from its chat (NowPlayingBar) over the open chat or page. A grid
+            rather than a wrapper around them, which would load the open chat again when the bar came. */}
+        <main key="main" ref={mainRef} tabIndex={-1} className="flex-1 grid grid-cols-[minmax(0,1fr)] grid-rows-[auto_minmax(0,1fr)] min-w-0 focus:outline-none">
+          <NowPlayingBar key="playing" className="row-start-1" />
+          <Fragment key="chats">{chats("row-start-2 col-start-1 flex flex-col min-w-0 min-h-0")}</Fragment>
           {!inChat && (
-            <div key="page" className="flex-1 flex flex-col min-w-0">
+            <div key="page" className="row-start-2 col-start-1 flex flex-col min-w-0 min-h-0">
               <Outlet />
             </div>
           )}
@@ -218,8 +226,11 @@ export function App() {
   // One screen at a time. The sidebar is the chat list and stays mounted: it is
   // what keeps the sessions polling and the notifications coming.
   const onChatList = pathname === "/";
+  // A voice message playing on away from its chat: above the tab bar, or at the top in a chat, which has none.
+  const tabs = !inChat && !inGroup;
   return (
     <div className="app-shell w-full flex flex-col bg-app-bg">
+      {!tabs && <NowPlayingBar key="playing" className="now-playing-top shrink-0" />}
       <main key="main" className="flex-1 flex flex-col min-h-0 min-w-0">
         <div className={onChatList ? "flex-1 flex min-h-0" : "hidden"}>
           <Sidebar />
@@ -231,7 +242,8 @@ export function App() {
           </div>
         )}
       </main>
-      {!inChat && !inGroup && <MobileTabBar />}
+      {tabs && <NowPlayingBar key="playing" className="shrink-0 border-t" />}
+      {tabs && <MobileTabBar />}
       <InstallSteps />
     </div>
   );
