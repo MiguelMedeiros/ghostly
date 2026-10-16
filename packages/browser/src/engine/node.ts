@@ -43,7 +43,7 @@ import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
-import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, traceLink } from "@ghostly/core";
+import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, parseEngineError, traceLink } from "@ghostly/core";
 import { ClockWatch, DirectPathWatch, firstDeviceSetSecret } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
@@ -5074,7 +5074,11 @@ export class GhostlyNode implements EngineImplementation {
     const answered: string[] = [];
     let last: unknown;
     for (const url of defaults) {
-      try { answered.push((await this.wallet.checkMint(url)).url); } catch (error) { last = error; }
+      try { answered.push((await this.wallet.checkMint(url)).url); } catch (error) {
+        // The app chose this mint: nobody typed its address, so there is none to check. It did not answer, as any server.
+        const unreachable = error instanceof Error ? parseEngineError(error.message) : null;
+        last = unreachable?.code === "mintUnreachable" ? Object.assign(engineError("hostUnreachable", unreachable.values), { cause: error }) : error;
+      }
     }
     if (!answered.length) throw last instanceof Error ? last : new Error("No mint answered");
     // A mint of the other network stays where it is; these become this network's, the first one primary.
