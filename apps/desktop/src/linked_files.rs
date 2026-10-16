@@ -3,8 +3,8 @@
 //!
 //! - The app's broker (in the Ghostly window) asks; only the Ghostly window may call these commands, and an app window
 //!   never names a path: it reads by the ids given here.
-//! - A folder brings everything under it except hidden files and folders (a name starting with "."); symbolic links
-//!   are not followed. `accept`, when it names extensions, keeps only those.
+//! - A folder brings everything under it except hidden files and folders (a name starting with ".") and folders that
+//!   cannot be read; symbolic links are not followed. `accept`, when it names extensions, keeps only those.
 //! - A link remembers the size and date its file had when picked: a file that changed since reads as `changed`, one
 //!   that went as `gone`, until it is picked again.
 //! - Links live in `linked/<space>/<app>.json` in the app's data folder (`space` is the page's database name, `<app>`
@@ -210,8 +210,8 @@ fn accepted(name: &str, accept: &[String]) -> bool {
     extension.is_some_and(|e| accept.contains(&e))
 }
 
-/// Everything under a folder that `accept` names, its name first in each path: hidden entries and symbolic links left
-/// out, at most one more than `MAX_ENTRIES` (so a folder past it is known to be).
+/// Everything under a folder that `accept` names, its name first in each path: hidden entries, symbolic links and
+/// folders that cannot be read left out, at most one more than `MAX_ENTRIES` (so a folder past it is known to be).
 pub fn walk(root: &Path, accept: &[String]) -> Result<Vec<(String, PathBuf)>, String> {
     let top = root
         .file_name()
@@ -221,10 +221,13 @@ pub fn walk(root: &Path, accept: &[String]) -> Result<Vec<(String, PathBuf)>, St
     let mut found = Vec::new();
     let mut stack = vec![(top, root.to_path_buf())];
     while let Some((shown, dir)) = stack.pop() {
-        let mut entries: Vec<_> = fs::read_dir(&dir)
-            .map_err(|e| e.to_string())?
-            .filter_map(Result::ok)
-            .collect();
+        // Only the picked folder must be read: one under it that cannot be (`lost+found`, another user's) is left out.
+        let listing = match fs::read_dir(&dir) {
+            Ok(listing) => listing,
+            Err(e) if dir == root => return Err(e.to_string()),
+            Err(_) => continue,
+        };
+        let mut entries: Vec<_> = listing.filter_map(Result::ok).collect();
         entries.sort_by_key(|e| e.file_name());
         for entry in entries {
             let Some(name) = entry.file_name().to_str().map(str::to_string) else {
@@ -755,6 +758,32 @@ mod tests {
             .unwrap()
             .iter()
             .all(|(p, _)| !p.contains("elsewhere") && !p.contains("link.mp4")));
+    }
+
+    /// `lost+found` at the root of an ext4 drive, a folder of another user: the rest of the folder is still linked.
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_that_cannot_be_read_is_left_out_and_the_rest_is_linked() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = films();
+        let locked = root.join("lost+found");
+        fs::create_dir(&locked).unwrap();
+        fs::write(locked.join("kept.mp4"), b"x").unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        // As root every folder can be read: nothing to prove.
+        let readable = fs::read_dir(&locked).is_ok();
+        let found = walk(&root, &["mp4".to_string()]);
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o700)).unwrap();
+        if readable {
+            return;
+        }
+        let found: Vec<String> = found.unwrap().into_iter().map(|(p, _)| p).collect();
+        assert_eq!(found, ["Films/Season 1/E01.mp4", "Films/Up.mp4"]);
+        // The picked folder itself must be read.
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o000)).unwrap();
+        let picked = walk(&root, &[]);
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(picked.is_err());
     }
 
     #[test]
