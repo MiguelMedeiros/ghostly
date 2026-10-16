@@ -1480,6 +1480,17 @@ export interface ContactRequestView {
   expires: number;
 }
 
+/** A request this profile sent through someone's contact link (WISP 8xx), shown on the chat made for it. */
+export interface ContactAskView {
+  chatId: string;
+  /**
+   * `sending`, `knocking`: on its way. `seen`: it arrived; the owner accepts it or nothing is said. `off`: the link was
+   * turned off. `ended`: no answer in seven days.
+   */
+  state: "sending" | "knocking" | "seen" | "off" | "ended";
+  expires: number;
+}
+
 /** The profile's contact link (WISP 8xx): what the owner shows and shares. */
 export interface ContactLinkView {
   /** `ghostly1r…` */
@@ -1757,6 +1768,8 @@ export interface EngineState {
   contactLink?: ContactLinkView;
   /** The requests its contact link took, newest first. */
   contactRequests?: ContactRequestView[];
+  /** The requests this profile sent through others' contact links. */
+  contactAsks?: ContactAskView[];
   /** The Nostr social layer: the person's own keys' data and the effective settings. */
   nostr: NostrSocialState;
   /** Private groups and pending invitations (WISP 900). */
