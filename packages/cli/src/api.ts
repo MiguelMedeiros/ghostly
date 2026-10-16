@@ -19,6 +19,7 @@ import { GROUP_ADMIN_METHODS, noMember } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
 import { IDENTITY_METHODS } from "./identities";
 import { X401_METHODS } from "./x401";
+import { CONTACT_LINK_METHODS } from "./contactLinks";
 import { SERVICE_METHODS } from "./services";
 import { BACKUP_METHODS } from "./backup";
 import { CALL_METHODS } from "./calls/api";
@@ -177,6 +178,7 @@ const METHODS: Record<string, Method> = {
   ...GROUP_ADMIN_METHODS,
   ...IDENTITY_METHODS,
   ...X401_METHODS,
+  ...CONTACT_LINK_METHODS,
   ...SERVICE_METHODS,
   ...BACKUP_METHODS,
   ...CALL_METHODS,
