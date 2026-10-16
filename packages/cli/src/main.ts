@@ -238,7 +238,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   }],
   ["settings get [--show-secret]", "The profile's settings", { "show-secret": o("boolean", "Show credentials too") }],
   ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, readRelays, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick"],
-  ["engine <method> [json-params | -] [--confirm-real] [--show-secret]", "Any call of the app's engine, with its own parameters", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets") }],
+  ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes]", "Any call of the app's engine, with its own parameters", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups") }],
   ["engine --list", "The engine's calls"],
   ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
   ["identity add <provider> [subject] [--signer id] [--field name=value]... [--days n]", "Make an identity proof (a tool's or a published one finishes with identity complete)", {
@@ -753,7 +753,7 @@ async function listenCommand(argv: string[]): Promise<void> {
 }
 
 async function engineCommand(argv: string[]): Promise<void> {
-  const parsed = parseArgs(argv, { "confirm-real": { type: "boolean", description: "" }, "show-secret": { type: "boolean", description: "" }, list: { type: "boolean", description: "" } });
+  const parsed = parseArgs(argv, { "confirm-real": { type: "boolean", description: "" }, "show-secret": { type: "boolean", description: "" }, yes: { type: "boolean", description: "" }, list: { type: "boolean", description: "" } });
   const g = globals(parsed);
   pretty = g.pretty;
   if (parsed.options.list) { noMoreThan(0, parsed.positionals, "engine --list"); print({ methods: [...ENGINE_METHODS, ...ENGINE_READS].sort() }); return; }
@@ -769,7 +769,8 @@ async function engineCommand(argv: string[]): Promise<void> {
   }
   const confirmReal = parsed.options["confirm-real"] === true;
   if (confirmReal && params && typeof params === "object") (params as Record<string, unknown>).confirmedReal = true;
-  let result = await withSession(g, (s) => s.call("engine.call", { method, params, confirmReal }), { offline: ENGINE_READS.includes(method) });
+  const yes = parsed.options.yes === true;
+  let result = await withSession(g, (s) => s.call("engine.call", { method, params, confirmReal, yes }), { offline: ENGINE_READS.includes(method) });
   if (method === "getState" && !showSecret && result && typeof result === "object") {
     const { hideStateSecrets } = await engineApi();
     result = hideStateSecrets(result as Parameters<typeof hideStateSecrets>[0]);

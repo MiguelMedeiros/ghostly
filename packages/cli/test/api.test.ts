@@ -647,6 +647,37 @@ describe("the engine passthrough", () => {
     await callApi(ctx, "engine.call", { method: "payRequest", params: { linkId: "x", paymentId: "y", confirmedReal: true }, confirmReal: true });
     expect(node.payRequest).toHaveBeenCalledWith({ linkId: "x", paymentId: "y", confirmedReal: true });
   });
+
+  it("a call that deletes chats or groups asks for yes, as the commands made for it do", async () => {
+    const { ctx, node } = fake();
+    const calls = { clearProfileData: vi.fn(), removeLink: vi.fn(), leaveGroup: vi.fn(async () => ({})), forgetGroup: vi.fn(), deviceRemove: vi.fn() };
+    Object.assign(node, calls);
+    for (const [method, call] of Object.entries(calls)) {
+      await expect(callApi(ctx, "engine.call", { method, params: {} }), method).rejects.toMatchObject({ code: "confirm", message: expect.stringContaining("--yes") });
+      expect(call, method).not.toHaveBeenCalled();
+    }
+    await callApi(ctx, "engine.call", { method: "removeLink", params: { linkId: "chat-one" }, yes: true });
+    expect(calls.removeLink).toHaveBeenCalledWith({ linkId: "chat-one" });
+  });
+
+  it("clearProfileData says what it removed, and a daemon stops instead of serving the engine it shut down", async () => {
+    const { ctx, node } = fake();
+    const stop = vi.fn();
+    Object.assign(node, { clearProfileData: vi.fn(async () => undefined) });
+    Object.assign(ctx, { stop });
+    vi.useFakeTimers();
+    try {
+      expect(await callApi(ctx, "engine.call", { method: "clearProfileData", yes: true })).toEqual({ cleared: { chats: 2, groups: 1 }, stopped: true });
+      // Answered first, then stopped (as daemon.stop does).
+      expect(stop).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(stop).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+    Object.assign(ctx, { mode: "one-shot", stop: undefined });
+    expect(await callApi(ctx, "engine.call", { method: "clearProfileData", yes: true })).toEqual({ cleared: { chats: 2, groups: 1 } });
+  });
 });
 
 describe("groups", () => {

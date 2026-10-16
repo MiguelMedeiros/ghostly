@@ -44,6 +44,18 @@ export const ENGINE_METHODS: readonly string[] = [
 export const ENGINE_READS: readonly string[] = ["getState", "getMessages"];
 
 /**
+ * Calls that delete what this device holds, by what they delete: they go only with `--yes` (`yes: true` over the
+ * socket), as `chat remove`, `group leave` and `group forget` ask for it.
+ */
+export const DESTRUCTIVE_CALLS: ReadonlyMap<string, string> = new Map([
+  ["clearProfileData", "deletes every chat and group on this device (the wallets stay)"],
+  ["removeLink", "deletes a chat's keys and history on this device"],
+  ["leaveGroup", "deletes a group's history and files on this device"],
+  ["forgetGroup", "deletes a group's history on this device"],
+  ["deviceRemove", "takes a device off this profile"],
+]);
+
+/**
  * Calls whose answer holds a secret (chat seeds, wallet phrases and keys, ecash, backups): the CLI prints their
  * result only with `--show-secret`.
  */

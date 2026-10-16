@@ -122,7 +122,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `chat wait <chat> [--until live\|text\|paired] [--timeout s]` | Wait for a chat to go live, carry text, or see its contact. Live means a session that exists now, in this run of the daemon: a chat that was live before a restart counts once its contact answers again |
 | `daemon [--detach] [--timeout s]`, `daemon status [--timeout s]`, `daemon stop [--timeout s]`, `daemon restart [--timeout s]` | Keep the profile online; `status` names its version and its socket (`socket`, for the [socket API](#the-socket-api)); `restart` stops it and starts this release's code in the background ([After an upgrade](#after-an-upgrade)). Ctrl-C, SIGTERM and the terminal closing (SIGHUP) stop it cleanly |
 | `edit <chat> <message> [text… \| --text <text> \| --stdin] [--force] [--wait none\|confirmed] [--timeout s]` | Replace the text of a message you sent (1:1 chats, `group edit` for a group; `<message>` is the `messageId` `send` gave, or its wire id). The contact sees it in place, marked edited; `--wait confirmed` waits for its app to confirm (the default without a daemon). At most 100 edits a message, no time limit; an older contact app gets it once it shows edits |
-| `engine <method> [json \| -] [--confirm-real] [--show-secret]`, `engine --list` | Any call of the app's engine |
+| `engine <method> [json \| -] [--confirm-real] [--show-secret] [--yes]`, `engine --list` | Any call of the app's engine. One that deletes chats or groups (`clearProfileData`, `removeLink`, `leaveGroup`, `forgetGroup`, `deviceRemove`) needs `--yes`; `clearProfileData` answers what it removed and stops a daemon |
 | `events [--since seq]` | What the event journal holds, without following |
 | `file list <chat\|group>`, `file accept\|decline\|pause\|resume\|cancel [<chat>] <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3), and so does a group's file that did not come by itself (over 8 MiB). A file's id names its chat or its group, so `<chat>` may be left out |
 | `file resend [<chat>] <file>`, `file request [<chat>] <file>` | A file that stopped moving: sent again from here, or asked for again from the contact (a group's file: from whoever holds it); either goes on from the bytes the receiver holds (files/3) |
@@ -378,7 +378,7 @@ receive|address|redeem`, `wallet.mint.add`, `lightning.default|rename`, `pay`, `
 `identity.providers|list|add|complete|cancel|remove|share|withdraw|contact|recheck`, `service.list|add|remove|enable|share|peer|open|close`,
 `call.start|answer|hangup|list|get|flush|auto`,
 `events.replay`, `events.subscribe`, `daemon.stop`, and `engine.call` with
-`{"method":"<engine call>","params":{…},"confirmReal":false}` for anything else the app does. Parameters are the
+`{"method":"<engine call>","params":{…},"confirmReal":false,"yes":false}` for anything else the app does. Parameters are the
 commands' (see `src/api.ts`). Errors: `{"id":…,"error":{"code","message","details"?}}` with the codes above.
 
 ## Calls
