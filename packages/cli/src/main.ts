@@ -268,7 +268,8 @@ function help(): string {
     ...Object.entries(GLOBAL_OPTIONS).map(([name, o]) => `  --${name}${o.short ? `, -${o.short}` : ""}`.padEnd(24) + o.description),
     "",
     "A <chat> is its id, a unique prefix of it, or its name; a <group> the same. Exit codes: 0 done, 1 failed,",
-    "2 usage, 3 not found, 4 timed out, 5 needs --force/--yes/--confirm-real. See packages/cli/README.md.",
+    "2 usage, 3 not found, 4 timed out, 5 needs --force/--yes/--confirm-real.",
+    "More: https://ghostly.tools/cli, or the README.md beside this CLI.",
   ].join("\n");
 }
 
