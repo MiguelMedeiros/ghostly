@@ -1,4 +1,5 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { fromBase64Url, fromZ32, randomBytes, toBase64Url, toZ32 } from "./bytes";
 
 /**
@@ -13,9 +14,31 @@ export interface Identity {
   pubKeyZ32: string;
 }
 
+/** How many public keys `identityFromSeed` keeps: a start with 50 chats and 20 groups derives about 400 distinct ones. */
+export const IDENTITY_MEMO_SIZE = 1024;
+/**
+ * Public keys already derived, by the SHA-256 of their seed, the most recently used last. A chat's start derives the
+ * same few seeds' keys again and again (its link, its delivery, its capability record): ~0.25 ms each in V8, ~3.4x
+ * that in JSC. The seed itself is never kept, so a seed its owner zeroes leaves nothing behind here.
+ */
+const publicKeys = new Map<string, Uint8Array>();
+
+function publicKeyOf(seed: Uint8Array): Uint8Array {
+  const id = toBase64Url(sha256(seed));
+  let key = publicKeys.get(id);
+  if (key) publicKeys.delete(id);
+  else {
+    key = ed25519.getPublicKey(seed);
+    if (publicKeys.size >= IDENTITY_MEMO_SIZE) publicKeys.delete(publicKeys.keys().next().value!);
+  }
+  publicKeys.set(id, key);
+  // A copy: a caller that writes over its key never changes another's.
+  return key.slice();
+}
+
 export function identityFromSeed(seed: Uint8Array): Identity {
   if (seed.length !== 32) throw new Error("Seed must be exactly 32 bytes");
-  const publicKey = ed25519.getPublicKey(seed);
+  const publicKey = publicKeyOf(seed);
   return {
     seed,
     seedB64: toBase64Url(seed),
