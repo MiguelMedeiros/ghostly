@@ -327,6 +327,13 @@ export interface RelayTransportOptions {
   log?: (line: string) => void;
 }
 
+/** What `answer` says, or false when it has not said within `ms`. */
+function answeredWithin(answer: Promise<boolean>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), ms); });
+  return Promise.race([answer, late]).finally(() => clearTimeout(timer));
+}
+
 export function normalizeRelayUrl(input: string): string | null {
   try {
     const url = new URL(input.trim());
@@ -684,7 +691,9 @@ export class RelayTransport implements PkarrTransport {
       // reserve keeps (`spareHeldFor`). It comes later (`catchUpLater`), unless that relay does not take it. An app
       // opened with 30 contacts online wrote each offer to both relays, and the chats whose contact's offer or answer
       // came a few seconds later found both minutes spent: 11 of 30 were down past the first minute (2026-10-14).
-      if (first && isChat(asker(options, true)) && this.spareHeldFor(relay, Date.now()) > 0 && await first) {
+      // That relay's answer is waited for `SLOW_MS` at most: one slow to say it took the packet (up to the 10 s
+      // timeout) held the copy here, and a contact reading this relay found nothing, as long.
+      if (first && isChat(asker(options, true)) && this.spareHeldFor(relay, Date.now()) > 0 && await answeredWithin(first, SLOW_MS)) {
         throw new DiscoveryBudgetError(Math.max(CATCH_UP_MIN_MS, this.spareHeldFor(relay, Date.now())));
       }
       // A relay refuses (428) to replace a packet whose DHT put is still in flight, unless told which
