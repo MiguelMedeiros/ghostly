@@ -73,6 +73,19 @@ describe("the task commands", () => {
     expect(() => params("task send", ["g1", "--json", "{nope"])).toThrow(/not valid JSON/);
   });
 
+  it("refuse a --json file that is not there or is a folder in the CLI's words with the path, and \"\" as naming no file", () => {
+    // Before, Node's text ("ENOENT: no such file or directory, open …", "EISDIR: illegal operation on a directory, read" with
+    // no path), and "" was the current folder.
+    const dir = mkdtempSync(join(tmpdir(), "ghostly-cardjson-"));
+    const missing = join(dir, "nofile.json");
+    for (const name of ["task send", "routine send", "usage send"]) {
+      const send = (...json: string[]) => () => params(name, ["g1", ...json]);
+      expect(send("--json", missing)).toThrow(expect.objectContaining({ code: "not_found", message: `No such file or folder: ${missing}` }));
+      expect(send("--json", dir)).toThrow(expect.objectContaining({ code: "bad_request", message: `${dir} is a folder: name a file` }));
+      expect(send("--json", "")).toThrow(expect.objectContaining({ code: "usage", message: "A path given as \"\" names no file" }));
+    }
+  });
+
   it("refuse a new card without its title as a usage error (exit 2) that names the flag; --json may give it", () => {
     expect(() => params("task send", ["g1", "--steps", "1/4"])).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(/^--title is needed: ghostly task send/) }));
     expect(() => params("task send", ["g1", "--title", " "])).toThrow(expect.objectContaining({ code: "usage" }));
