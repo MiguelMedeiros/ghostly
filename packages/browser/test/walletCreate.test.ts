@@ -90,6 +90,16 @@ describe("one click makes a wallet of a type on a network", () => {
     expect(wallets()).toEqual([]);
   });
 
+  // The app chose the mint: nobody typed an address, so there is none to check ("Check the address: it should be a
+  // Cashu mint" is for a mint added by its URL). Said as any server that did not answer.
+  it("Cashu: the app's own test mint not answering is a host that did not answer, with no address to check", async () => {
+    const { node, reachable, started } = engine();
+    await started;
+    node["settings"].mints = [];
+    reachable.clear();
+    await expect(node.walletCreate({ type: "cashu", network: "testnet" })).rejects.toThrow(`Could not create the Testnet Cashu wallet: Could not reach ${new URL(TEST_MINT).host}. Nothing was saved; try again.`);
+  });
+
   it("Ark: Testnet on Mutinynet and Mainnet on Bitcoin, each checked with its server and stored under its own key", async () => {
     const { node, wallets, started } = engine();
     await started;
