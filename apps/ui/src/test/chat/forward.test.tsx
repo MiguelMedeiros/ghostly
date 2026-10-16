@@ -206,6 +206,70 @@ describe("the Forward to… picker", () => {
     expect(screen.getByTestId("forward-chosen")).toHaveTextContent(/^Ana!, Bo\?$/);
   });
 
+  // Send again sends one call per set of owed messages: a chat that got everything was called with none, which the engine
+  // refuses ("No message to forward"), and that one refusal, in English with no name, hid what the other call delivered.
+  it("a chat that got everything, ticked again, is not sent anything again nor called with nothing", async () => {
+    const all = [message({ id: "a", text: "dinner at eight", timestamp: 1 }), message({ id: "b", text: "📎 pic.png", file: PICTURE, timestamp: 2 })];
+    let offline = true;
+    fakeEngine.on("forwardMessages", ({ to, messageIds }: { to: string[]; messageIds: string[] }) => {
+      if (!messageIds.length) throw new Error("No message to forward");
+      return { results: to.map(t => t === "link-bo" && offline
+        ? { to: t, messageIds: [], sent: [], error: "You are offline" }
+        : { to: t, messageIds: messageIds.map(id => `me_${id}`), sent: messageIds, error: null }) };
+    });
+    const { user } = open(all, "link-1", "pt");
+    const rows = screen.getAllByTestId("forward-target");
+    await user.click(rows[0]!);
+    await user.click(rows[2]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(screen.getByTestId("forward-sent")).toHaveTextContent("Enviado para Ana");
+    await user.click(rows[0]!);
+    offline = false;
+    await user.click(screen.getByTestId("forward-send"));
+    expect(fakeEngine.callsTo("forwardMessages")).toEqual([
+      { linkId: "link-1", messageIds: ["a", "b"], to: ["link-ana", "link-bo"] },
+      { linkId: "link-1", messageIds: ["a", "b"], to: ["link-bo"] },
+    ]);
+    expect(screen.queryByTestId("forward-error")).toBeNull();
+  });
+
+  it("a call that is refused keeps what the other calls delivered, and says the refusal under its chats' names", async () => {
+    chat("chat-cy", "peer-cy", "Cy", 2_500);
+    fakeEngine.update({ links: ["ana", "bo", "cy"].map(n => linkView({ id: `link-${n}`, peerPubKeyZ32: `peer-${n}` })) });
+    const all = [message({ id: "a", text: "dinner at eight", timestamp: 1 }), message({ id: "b", text: "📎 pic.png", file: PICTURE, timestamp: 2 })];
+    let first = true;
+    fakeEngine.on("forwardMessages", ({ to, messageIds }: { to: string[]; messageIds: string[] }) => {
+      if (first) {
+        first = false;
+        // Ana gets the text, the picture finds no room; Cy is offline.
+        return { results: to.map(t => t === "link-ana"
+          ? { to: t, messageIds: ["me_a"], sent: ["a"], error: "Not enough space on this device" }
+          : { to: t, messageIds: [], sent: [], error: "You are offline" }) };
+      }
+      // The text was deleted from this chat meanwhile: a call that names it is refused whole.
+      if (messageIds.includes("a")) throw new Error("That message is not in this chat");
+      return { results: to.map(t => ({ to: t, messageIds: messageIds.map(id => `me_${id}`), sent: messageIds, error: null })) };
+    });
+    const { user } = open(all, "link-1", "pt");
+    const row = (name: string) => screen.getAllByTestId("forward-target").find(r => r.textContent?.includes(name))!;
+    await user.click(row("Ana"));
+    await user.click(row("Cy"));
+    await user.click(screen.getByTestId("forward-send"));
+    await user.click(screen.getByTestId("forward-send"));
+    const said = screen.getByTestId("forward-error");
+    expect(said).toHaveTextContent(/^Cy: Essa mensagem não está mais nesta conversa/);
+    expect(said).not.toHaveTextContent("That message");
+    expect(screen.getByTestId("forward-sent")).toHaveTextContent("Enviado para Ana");
+    expect(screen.getByTestId("forward-chosen")).toHaveTextContent(/^Cy$/);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(fakeEngine.callsTo("forwardMessages")).toEqual([
+      { linkId: "link-1", messageIds: ["a", "b"], to: ["link-ana", "link-cy"] },
+      { linkId: "link-1", messageIds: ["b"], to: ["link-ana"] },
+      { linkId: "link-1", messageIds: ["a", "b"], to: ["link-cy"] },
+      { linkId: "link-1", messageIds: ["a", "b"], to: ["link-cy"] },
+    ]);
+  });
+
   // The engine's line for a copy that found no room on this device, however the storage said it (engine/forwards.ts
   // forwardError): IndexedDB, the OPFS worker, Desktop's io error. Said in the app's language, never as sent.
   it.each([

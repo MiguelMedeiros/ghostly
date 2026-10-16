@@ -8,6 +8,7 @@ import type { ChatMessage } from "../../lib/types";
 import { SecretGuardDialog } from "../SecretGuardDialog";
 import { ChatTargetRow } from "./ChatTargets";
 import { useChatTargets, type ChatTarget } from "../../hooks/useChatTargets";
+import { rawError } from "../../lib/errorText";
 import { problemLine } from "../../lib/problemText";
 
 /**
@@ -63,22 +64,22 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
     if (found) { setSecret(found); return; }
     setBusy(true);
     setProblems([]);
-    // Each chat what it did not get yet: the chats that are owed the same messages go in one call.
+    // Each chat what it did not get yet: the chats that are owed the same messages go in one call. One that got all of
+    // it already (ticked again) is not called with nothing, which the engine refuses: it has it.
     const owed = new Map<string, { ids: string[]; to: string[] }>();
+    const had: string[] = [];
     for (const c of chosen) {
       const ids = messages.map(m => m.id).filter(id => !got[c.target!]?.includes(id));
+      if (!ids.length) { had.push(c.target!); continue; }
       const key = ids.join("\n");
       const call = owed.get(key) ?? owed.set(key, { ids, to: [] }).get(key)!;
       call.to.push(c.target!);
     }
-    let outcome: ForwardOutcome[];
-    try {
-      outcome = (await Promise.all([...owed.values()].map(call => forwardMessages(from, call.ids, call.to)))).flat();
-    } catch (error) {
-      setProblems([{ name: "", error: problemLine(error, t) }]);
-      setBusy(false);
-      return;
-    }
+    // A call refused whole does not hide what the others delivered: its chats say its refusal, the rest what they got.
+    const calls = [...owed.values()];
+    const settled = await Promise.allSettled(calls.map(call => forwardMessages(from, call.ids, call.to)));
+    const outcome: ForwardOutcome[] = settled.flatMap((s, i) => s.status === "fulfilled" ? s.value
+      : calls[i]!.to.map(to => ({ to, messageIds: [], sent: [], error: rawError(s.reason) })));
     setBusy(false);
     const gotNow = { ...got };
     for (const o of outcome) gotNow[o.to] = [...(gotNow[o.to] ?? []), ...(o.sent ?? [])];
@@ -92,8 +93,8 @@ export function ForwardDialog({ from, messages, onClose, onSent }: {
     });
     if (failed.length) {
       setProblems(failed);
-      const went = chosen.filter(c => outcome.some(o => o.to === c.target && o.error === null));
-      setSentTo(now => [...now, ...went.map(c => c.name)]);
+      const went = chosen.filter(c => had.includes(c.target!) || outcome.some(o => o.to === c.target && o.error === null));
+      setSentTo(now => [...now, ...went.map(c => c.name).filter(name => !now.includes(name))]);
       setChosen(now => now.filter(c => !went.includes(c)));
       return;
     }

@@ -42,6 +42,10 @@
   "chat": {
     "editTooMany": "Este mensaje ya no se puede editar",
     "editTooManyNext": "Un mensaje admite {{max}} ediciones como máximo.",
+    "forwardNone": "No hay nada que reenviar",
+    "forwardNoneNext": "Elige los mensajes de nuevo y reenvíalos.",
+    "messageGone": "Ese mensaje ya no está en este chat",
+    "messageGoneNext": "Se eliminó. Vuelve al chat y elige de nuevo.",
     "noRoom": "No hay espacio para un chat nuevo",
     "noRoomNext": "Libera espacio en este dispositivo, por ejemplo borrando chats antiguos, y vuelve a intentarlo.",
     "replyGone": "No se puede responder a ese mensaje",
