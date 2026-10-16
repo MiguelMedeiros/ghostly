@@ -942,6 +942,17 @@ html[data-standalone="true"] {
   html[data-keyboard="true"] .toast-place.toast-place-page {
     bottom: 1.5rem;
   }
+
+  /* A dialog that is not a <dialog> (Apps → Add, Add identity, New wallet): its layer over the whole window ends
+     where the keyboard starts, so the panel is centred in what is left and scrolls within it, instead of its field
+     and buttons sitting under the keyboard. */
+  html[data-keyboard="true"] .fixed.inset-0:has(> [aria-modal="true"]) {
+    bottom: calc(100% - var(--app-height, 100%));
+  }
+
+  html[data-keyboard="true"] .fixed.inset-0 > [aria-modal="true"] {
+    max-height: 100%;
+  }
 }
 
 /* Where the card would cover the field it is about (a short screen with the keyboard up: a phone on its side shows
