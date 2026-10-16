@@ -5,7 +5,7 @@ import {
   APP_BUNDLE_LIMITS, APP_PREFIXES, appFingerprint, appRef, appStoreDecision, assembleAppBundle, canonicalJson, canonicalJsonBytes,
   APP_STATEMENT_LIMITS, checkAppManifest, checkAppRevokeStatement, checkAppStoreIndex, fromBase64Url, isAppUrl, readAppBundle,
   readAppRevocations, readAppStore, seedSigner, signAppObject, signAppRevocation, signAppStore, toBase64Url, toZ32, type AppBundle,
-  type AppManifest, type AppRevokeStatement, type AppStoreIndex, type SignedAppRevocation, type Signer,
+  type AppManifest, type AppRevokeStatement, type AppStoreIndex, type AppStoreReading, type SignedAppRevocation, type Signer,
 } from "@ghostly/core";
 import { templateManifest, templatePage, templateReadme } from "./appTemplate";
 import { CliError } from "./errors";
@@ -448,7 +448,8 @@ export async function revokeApp(dirArg: string, keyArg: string, what: { digests?
  * `store sign <index> --key <file> [--out <dir>]`: a store index written by hand (any JSON layout; `key` may be left
  * out and is then the signing key's) becomes `ghostly-store.json`, canonical, and `ghostly-store.sig`, in `--out` or
  * beside the index. It is read back as a client reads it (`expires` at most 90 days ahead), and refused when the index
- * already there, signed by the same key, has a higher `sequence`, or the same one with other content.
+ * already there has a higher `sequence`, or the same one with other content, or is signed by another key (another
+ * store is another `--out`). The key is made only when no signed index is there.
  */
 export async function signStore(indexArg: string, keyArg: string, outArg?: string, now = Math.floor(Date.now() / 1000)): Promise<Record<string, unknown>> {
   const indexPath = resolve(indexArg);
@@ -462,12 +463,24 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new CliError("bad_request", `${indexPath} is not a JSON object`);
   const index = value as Record<string, unknown>;
 
+  // The index this one follows, when the folder holds a signed one: a store is its key, so only that key signs over it.
+  const indexOut = join(outDir, STORE_INDEX_FILE), sigOut = join(outDir, STORE_SIG_FILE);
+  let held: AppStoreReading | null = null;
+  if (existsSync(indexOut) && existsSync(sigOut)) {
+    const read = readAppStore(new Uint8Array(readFileSync(indexOut)), new Uint8Array(readFileSync(sigOut)), now);
+    if (read.ok) held = read.store;
+  }
+
   let key: LoadedKey;
   if (existsSync(keyPath)) key = readKey(keyPath, "store");
   else if (index.key !== undefined) throw new CliError("not_found", `No key file ${keyPath}: the index names the store key ${typeof index.key === "string" ? appFingerprint(index.key) : JSON.stringify(index.key)}`);
+  else if (held) throw new CliError("not_found", `No key file ${keyPath}: ${indexOut} is signed by ${appFingerprint(held.index.key)}, and only that key signs its next index`);
   else key = makeKey(keyPath, "store");
   if (index.key !== undefined && index.key !== key.key) {
     throw refused(`${indexPath} names another store key than ${keyPath}'s (${appFingerprint(key.key)})`, { reason: "store-key" });
+  }
+  if (held && held.index.key !== key.key) {
+    throw refused(`${indexOut} is signed by another store key (${appFingerprint(held.index.key)}) than ${keyPath}'s (${appFingerprint(key.key)}): a store is its key; sign with that key, or give another --out for another store`, { reason: "store-key" }, { held: held.index.key });
   }
   index.key = key.key;
 
@@ -478,20 +491,15 @@ export async function signStore(indexArg: string, keyArg: string, outArg?: strin
   if (!read.ok) throw refused(`${indexPath} would be refused by a client`, read);
   const store = read.store;
 
-  // The index this one follows, when the folder holds one this key signed.
-  const indexOut = join(outDir, STORE_INDEX_FILE), sigOut = join(outDir, STORE_SIG_FILE);
   let previous: number | null = null;
-  if (existsSync(indexOut) && existsSync(sigOut)) {
-    const held = readAppStore(new Uint8Array(readFileSync(indexOut)), new Uint8Array(readFileSync(sigOut)), now);
-    if (held.ok && held.store.index.key === key.key) {
-      previous = held.store.index.sequence;
-      const decision = appStoreDecision(
-        { key: key.key, sequence: held.store.index.sequence, digest: held.store.digest },
-        { key: key.key, sequence: store.index.sequence, digest: store.digest },
-      );
-      if (decision === "rollback" || decision === "equivocation") {
-        throw refused(`${indexOut} already holds sequence ${held.store.index.sequence} of this store: ${decision === "rollback" ? "a lower one is refused by every client" : "the same one with other content is refused as equivocation"}; raise sequence`, { reason: decision }, { held: held.store.index.sequence });
-      }
+  if (held) {
+    previous = held.index.sequence;
+    const decision = appStoreDecision(
+      { key: key.key, sequence: held.index.sequence, digest: held.digest },
+      { key: key.key, sequence: store.index.sequence, digest: store.digest },
+    );
+    if (decision === "rollback" || decision === "equivocation") {
+      throw refused(`${indexOut} already holds sequence ${held.index.sequence} of this store: ${decision === "rollback" ? "a lower one is refused by every client" : "the same one with other content is refused as equivocation"}; raise sequence`, { reason: decision }, { held: held.index.sequence });
     }
   }
 
