@@ -1469,6 +1469,21 @@ export interface PublicGraphView {
 export interface PublicPostImageView { src?: string; miss?: string; hosts: string[]; width?: number; height?: number }
 
 /** The profile's did:dht (WISP 310-did-dht): its own key, public to everyone, never tied to a chat. */
+/** The profile's contact link (WISP 8xx): what the owner shows and shares. */
+export interface ContactLinkView {
+  /** `ghostly1r…` */
+  code: string;
+  /** `https://ghostly.tools/#ghostly1r…` */
+  link: string;
+  createdAt: number;
+  /** `busy`: too many requests wait; new ones are counted, not read. */
+  state: "open" | "busy";
+  /** When the link record last went out. */
+  publishedAt?: number;
+  /** Why the last publish failed. */
+  error?: string;
+}
+
 export interface ProfileDidView {
   /** `did:dht:…` */
   id: string;
@@ -1723,6 +1738,8 @@ export interface EngineState {
   identityProofs: IdentityProofView[];
   /** This profile's public DID. Absent until the engine has loaded it. */
   did?: ProfileDidView;
+  /** This profile's contact link, when it has one. */
+  contactLink?: ContactLinkView;
   /** The Nostr social layer: the person's own keys' data and the effective settings. */
   nostr: NostrSocialState;
   /** Private groups and pending invitations (WISP 900). */
