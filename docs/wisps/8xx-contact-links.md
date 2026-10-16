@@ -70,7 +70,7 @@ One TXT record `_cl` holding the JSON array `[1, state, bits, seen]`, not sealed
 
 - `state`: `"open"`, `"busy"` (the owner takes no new request now) or `"off"` (the link was turned off, for good).
 - `bits`: the stamp's difficulty this link asks for, 16 to 24 ([Stamp](#stamp)).
-- `seen`: at most 32 entries, each the first 9 bytes of `SHA-256(utf8("ghostly-contact/1 seen") || L || K)` in base64url (12 characters), for the requests the owner's app took in the last seven days, newest first. A requester that finds its own entry knows its request arrived and stops knocking. A request declined stays listed like any other: `seen` says "arrived", never what the owner did with it.
+- `seen`: at most 32 entries, each the first 9 bytes of `SHA-256(utf8("ghostly-contact/1 seen") || L || K)` in base64url (12 characters), for the requests the owner's app took in the last seven days, newest first. A requester that finds its own entry knows its request arrived and stops knocking. A request declined stays listed like any other: `seen` says "arrived", never what the owner did with it. When an older entry has dropped off and its requester knocks again, the owner's app puts the entry back at the front without reading the request again, so nobody knocks for a week into a link that already has its request.
 
 The owner's app publishes it when the link is made, at every change, and every hour while the app runs. With no link record (an owner away for hours: the DHT forgets) a requester knocks all the same, at the default difficulty; its request waits for the owner.
 
