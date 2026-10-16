@@ -1,0 +1,1 @@
+Offering again: an answerer starts an answered call over up to 4 times, as many as the headless CLI offers again, since the same race can refuse its answer on the new connection too; before, a failure after the first start-over was final, and the call ended while the CLI still had offers left.
