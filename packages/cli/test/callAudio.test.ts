@@ -1,7 +1,7 @@
 import { createSocket } from "node:dgram";
 import { describe, expect, it, vi } from "vitest";
 import { CallAudio, type RtpTrack } from "../src/calls/audio";
-import { callIceServers, CallMedia, gathering, HOST_GATHER_MS, loadCallStack, type CallStack } from "../src/calls/media";
+import { callIceServers, CallMedia, callUsesTurn, gathering, HOST_GATHER_MS, loadCallStack, type CallStack } from "../src/calls/media";
 import { bytesToMs, frameBytes, PARTIAL_WAIT_MS, PlaybackQueue, type CallRate } from "../src/calls/pcm";
 import { isRtcp, parseRtp, ReorderBuffer, RtpWriter, sequenceDelta, TICKS_PER_FRAME, type RtpPacket } from "../src/calls/rtp";
 import { dominantHz, level, tone } from "./support/tone";
@@ -207,6 +207,46 @@ describe("a call's candidates", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("with a TURN server, wait for the relay candidate, not the reflexive one: a far TURN server's comes after it", async () => {
+    vi.useFakeTimers();
+    try {
+      const waiting = (turn: boolean) => {
+        let candidate: (line: string) => void = () => {};
+        const started = Date.now();
+        let ended: number | null = null;
+        void gathering({ onLocalCandidate: (cb) => { candidate = cb as typeof candidate; }, onGatheringStateChange: () => {} }, { turn }).then(() => { ended = Date.now() - started; });
+        return { candidate: (line: string) => candidate(line), ended: () => ended };
+      };
+      const host = "a=candidate:1 1 UDP 2122317823 192.168.1.20 50000 typ host", srflx = "a=candidate:2 1 UDP 1686109951 203.0.113.7 50000 typ srflx raddr 192.168.1.20 rport 50000";
+      const relay = "a=candidate:3 1 UDP 16777215 198.51.100.9 60000 typ relay raddr 203.0.113.7 rport 50000";
+
+      // STUN at once, the TURN allocation (two round trips) 300 ms later: the relay goes in the description.
+      const far = waiting(true);
+      far.candidate(host);
+      far.candidate(srflx);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(far.ended()).toBeNull();
+      far.candidate(relay);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(far.ended()).toBe(450);
+
+      // A TURN server that never answers: what was gathered goes after the bounded wait.
+      const silent = waiting(true);
+      silent.candidate(host);
+      silent.candidate(srflx);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(silent.ended()).toBe(HOST_GATHER_MS);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("know a call's ICE servers have a TURN server", () => {
+    expect(callUsesTurn(callIceServers([], { GHOSTLY_STUN: "1" }))).toBe(false);
+    expect(callUsesTurn(callIceServers([{ urls: "stun:stun.example.org" }], { GHOSTLY_STUN: "1" }))).toBe(false);
+    expect(callUsesTurn(callIceServers([{ urls: "turn:turn.example.org", username: "u", credential: "p" }], { GHOSTLY_STUN: "0" }))).toBe(true);
   });
 });
 
