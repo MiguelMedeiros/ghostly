@@ -89,7 +89,8 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
           amount: <b>{t("wallet.cards.amount", { amount: formatAmount(quote.amount, t.language), unit })}</b>,
           fees: <span className="opacity-70"> {t("wallet.lightning.feesThrough", { fee: formatAmount(quote.feeReserve, t.language), source: sourceName(quote.source) })}</span>,
         })}</p>
-        {info.description && <p className={muted}>{info.description}</p>}
+        {/* The server's own words, in any script: laid out by their own direction. */}
+        {info.description && <p className={muted} dir="auto">{info.description}</p>}
         {over !== undefined && <p className={`${dense ? "text-[11px]" : "text-xs"} text-danger-ink m-0`} data-testid="lnurl-over">{t("payments.composer.tooMuch", { amount: formatAmount(over, t.language), unit })}</p>}
         {confirming && over === undefined ? <ConfirmRealMoney what={t("wallet.lightning.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => pay(true)} onBack={() => setConfirming(false)} /> : (
           <div className="flex flex-wrap gap-2">
@@ -113,7 +114,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   const onEnter = (e: React.KeyboardEvent) => { if (e.key === "Enter" && !composition.composing(e)) { e.preventDefault(); e.stopPropagation(); getInvoice(); } };
   return (
     <div className="space-y-2" data-testid="lnurl-amount-form">
-      <p className={`${dense ? "text-xs" : "text-sm"} m-0`}><b>{info.text}</b>{info.description ? ` · ${info.description}` : ""}</p>
+      <p className={`${dense ? "text-xs" : "text-sm"} m-0`}><b>{info.text}</b>{info.description && <> · <bdi>{info.description}</bdi></>}</p>
       <p className={muted} data-testid="lnurl-domain">{t("wallet.lightning.domainLine", {
         answered: info.callbackDomain !== info.domain ? t("wallet.lightning.answeredVia", { domain: info.domain, callback: info.callbackDomain }) : t("wallet.lightning.answeredBy", { domain: info.domain }),
         limits: fixed ? t("wallet.lightning.asksExactly", { amount: formatAmount(info.minSat, t.language), unit }) : t("wallet.lightning.takesRange", { min: formatAmount(info.minSat, t.language), max: formatAmount(info.maxSat, t.language), unit }),
