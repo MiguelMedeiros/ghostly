@@ -127,7 +127,7 @@ The stamp does not stop a determined flood: a machine makes a few thousand a day
 | Entries per slot | 6, made today or yesterday | Oldest dropped by the next writer |
 | Request lifetime | 7 days | "No answer" for the requester, dropped for the owner |
 | Name, text | 48 UTF-16 units, 200 UTF-8 bytes | Refused before sending |
-| Stamp difficulty | 16 to 24 bits, 18 by default | — |
+| Stamp difficulty | 16 to 24 bits, 18 by default | A link record asking for more or less is not a link record |
 
 An owner's app goes `busy` by itself at 32 waiting and back to `open` below 24. It raises `bits` by 2 (up to 24) for a day when a day brought more than 60 knocks with good stamps that it could not take, and steps back by 2 a day after. The owner sees how many people tried while the link was busy ("12 more tried to reach you"), never their names or texts, which were never read.
 
