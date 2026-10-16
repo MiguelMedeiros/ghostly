@@ -6,7 +6,7 @@ import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, 
 import { connectDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
 import { ENGINE_METHODS, ENGINE_READS, SECRET_RESULTS } from "./engineMethods";
-import { asCliError, CliError, EXIT } from "./errors";
+import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import type { RuntimeOptions } from "./runtime/engine";
@@ -779,7 +779,8 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
   }
   if (command.method === "x401.credential.add") {
     try { params.credential = params.file === "-" ? await readStdin() : readFileSync(params.file as string, "utf8"); }
-    catch (error) { throw new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
+    // A file not there, a folder, one not allowed: said as every other file the CLI reads.
+    catch (error) { throw localFileError(error, params.file as string) ?? new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
     delete params.file;
   }
   const secretWarning = await secretsFromStdin(command.method, params, readStdin, process.stdin.isTTY === true);
