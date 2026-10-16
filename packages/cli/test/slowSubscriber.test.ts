@@ -96,4 +96,31 @@ describe.skipIf(process.platform === "win32")("a subscriber that stops reading",
       client.destroy();
     } finally { await s.close(); }
   });
+
+  it("a connection takes one subscription: a second subscribe is refused, and each event still comes once", async () => {
+    const journal = Array.from({ length: 4 }, (_, i) => ({ seq: i + 1, id: `e${i + 1}`, type: "message.received", at: 0, text: "hi" }) as GhostlyEvent);
+    const { hub, listeners, emit } = fakeHub(journal);
+    const s = await served("twice", hub);
+    try {
+      const client = connect(s.path);
+      const seqs: number[] = [];
+      const answers = new Map<number, { result?: unknown; error?: { code: string } }>();
+      createInterface({ input: client }).on("line", (line) => {
+        const message = JSON.parse(line) as { id?: number; result?: unknown; error?: { code: string }; event?: GhostlyEvent };
+        if (message.event) seqs.push(message.event.seq); else answers.set(message.id!, message);
+      });
+      client.write(JSON.stringify({ id: 1, method: "events.subscribe", params: { since: 0 } }) + "\n");
+      // Again, as a bot catching up would: today a second listener and a second replay, outside the connection's bound.
+      client.write(JSON.stringify({ id: 2, method: "events.subscribe", params: { since: 0 } }) + "\n");
+      while (answers.size < 2) await turn();
+      emit("live");
+      while (!seqs.includes(5)) await turn();
+      await turn();
+      expect(seqs).toEqual([1, 2, 3, 4, 5]);
+      expect(listeners.size).toBe(1);
+      expect(answers.get(1)?.result).toMatchObject({ subscribed: true });
+      expect(answers.get(2)?.error?.code).toBe("bad_request");
+      client.destroy();
+    } finally { await s.close(); }
+  });
 });

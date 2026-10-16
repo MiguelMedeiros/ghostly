@@ -91,6 +91,9 @@ One JSON object per line each way:
 {"event":{"seq":41,"type":"message.received",…}}
 ```
 
+A connection takes one `events.subscribe`: a second on it is refused (`bad_request`), and a new stream is a new
+connection.
+
 The methods mirror the commands (`chat.send`, `group.create`, `wallet.list`, `pay`, …), and `engine.call` reaches any
 call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '<json>'` do the same from the shell.
 
