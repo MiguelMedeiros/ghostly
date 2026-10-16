@@ -36,6 +36,7 @@ export function LandOnHash() {
       if (el && e.target instanceof Node && e.target.contains(el)) land();
     };
     const stop = () => {
+      delete document.documentElement.dataset.landing;
       ro.disconnect();
       window.clearTimeout(timer);
       document.removeEventListener("transitionend", risen);
@@ -43,6 +44,8 @@ export function LandOnHash() {
       window.removeEventListener("hashchange", stop);
     };
     const timer = window.setTimeout(stop, SETTLE_MS);
+    // While the page is being taken to the section, nothing else holds a place (KeepPlace reads this).
+    document.documentElement.dataset.landing = "1";
     for (const type of TOUCHED) window.addEventListener(type, stop, { passive: true });
     window.addEventListener("hashchange", stop);
     document.addEventListener("transitionend", risen);
