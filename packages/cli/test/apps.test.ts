@@ -382,4 +382,29 @@ describe("store sign", () => {
     writeFileSync(join(dir, "unknown.json"), JSON.stringify({ ...index, extra: 1 }));
     expect((error(await ghostly(["store", "sign", join(dir, "unknown.json"), "--key", key, "--out", tmp()]), "refused", 1) as { details?: { reason?: string } }).details?.reason).toBe("unknown-key");
   }, 60_000);
+
+  it("never makes a key or signs over an index there that another store key signed", async () => {
+    const dir = tmp();
+    const keys = tmp();
+    const key = vectorKey(keys, "store");
+    const { key: _key, ...index } = JSON.parse(vector.index) as Record<string, unknown> & { sequence: number };
+    writeFileSync(join(dir, "index.json"), JSON.stringify(index));
+    const first = ok(await ghostly(["store", "sign", join(dir, "index.json"), "--key", key]));
+    const held = readFileSync(join(dir, "ghostly-store.json"), "utf8");
+    const heldSig = readFileSync(join(dir, "ghostly-store.sig"), "utf8");
+    writeFileSync(join(dir, "index.json"), JSON.stringify({ ...index, sequence: index.sequence + 1 }));
+    // A mistyped --key path: no new key, the held index stays.
+    const typo = join(keys, "stor.pem");
+    expect(error(await ghostly(["store", "sign", join(dir, "index.json"), "--key", typo]), "not_found", 3).message).toContain(String(first.fingerprint));
+    expect(existsSync(typo)).toBe(false);
+    // Another store key that is there: refused, naming both.
+    const other = vectorKey(keys, "other store");
+    const refusal = error(await ghostly(["store", "sign", join(dir, "index.json"), "--key", other]), "refused", 1) as { message: string; details?: { reason?: string } };
+    expect(refusal.details?.reason).toBe("store-key");
+    expect(refusal.message).toContain(String(first.fingerprint));
+    expect(readFileSync(join(dir, "ghostly-store.json"), "utf8")).toBe(held);
+    expect(readFileSync(join(dir, "ghostly-store.sig"), "utf8")).toBe(heldSig);
+    // Another store is another --out.
+    expect(ok(await ghostly(["store", "sign", join(dir, "index.json"), "--key", other, "--out", tmp()]))).toMatchObject({ previous: null, keyCreated: false });
+  }, 60_000);
 });
