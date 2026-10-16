@@ -855,6 +855,52 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(serving(alice).filter(a => a.peer === t.key(bob, id))).toHaveLength(1);
   });
 
+  it("members that each confirm a little now and then do not keep a holder's places: they are let go, or give a place to the next member", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol, dave, erin], id } = await t.mesh(["alice", "bob", "carol", "dave", "erin"]);
+    for (const p of [bob, carol, dave, erin]) { t.files.get(p)!.settings.autoDownloads = false; t.files.get(p)!.settings.serveFiles = false; }
+    const { messageId, meta } = await t.send(alice, id, pattern(3 * 1024 * 1024, 9), { name: "big.bin" });
+    await t.world.run(2_000);
+    // Bob's, Carol's and Dave's side of files/3 is not the app: each accepts the offer from 0, then confirms `step` more
+    // bytes every 25 seconds, and asks again as soon as its transfer is let go.
+    const askers = [bob, carol, dave], confirmed = new Map<string, { peer: Peer; offset: number }>();
+    let step = 1;
+    t.world.drop = (from, to, frame) => {
+      t.seen.push({ from: from.name, to: to.name, frame });
+      if (from !== alice || !askers.includes(to) || typeof frame.t !== "string") return false;
+      if (frame.t === "pf-offer") {
+        confirmed.set(frame.id as string, { peer: to, offset: 0 });
+        queueMicrotask(() => t.world.sendFiles(to, to.host.edges(id).get(t.key(alice, id))!, { t: "pf-accept", id: frame.id, offset: 0 }));
+      }
+      if (frame.t === "pf-abort" || frame.t === "pf-refuse") {
+        confirmed.delete(frame.id as string);
+        queueMicrotask(() => t.say(to, alice, id, { t: "group-want", g: id, id: messageId }));
+      }
+      return frame.t.startsWith("pf-");
+    };
+    const trickle = async (ms: number) => {
+      for (let at = 0; at < ms; at += 25_000) {
+        await t.world.run(25_000, 1_000);
+        for (const [wire, c] of confirmed) { c.offset += step; t.world.sendFiles(c.peer, c.peer.host.edges(id).get(t.key(alice, id))!, { t: "pf-got", id: wire, offset: c.offset }); }
+      }
+    };
+    for (const p of askers) t.say(p, alice, id, { t: "group-want", g: id, id: messageId });
+    await t.world.run(1_000);
+    expect(serving(alice)).toHaveLength(3);
+    // A byte every 25 seconds is not moving: their transfers are let go after 30 seconds, and asked again.
+    const first = [...confirmed.keys()];
+    await trickle(75_000);
+    expect([...confirmed.keys()].some(wire => first.includes(wire))).toBe(false);
+    // 16 KiB every 25 seconds is, but a place is kept that long only while nobody else waits: Erin is served.
+    step = GROUP_FILE_LIMITS.serveMoveBytes;
+    await trickle(GROUP_FILE_LIMITS.servePlaceMs);
+    await erin.groups.downloadFile(t.got(erin, id, messageId).message!.file!.id);
+    const asked = t.world.now;
+    while (!t.done(erin, id, messageId) && t.world.now - asked < 20 * 60_000) await trickle(25_000);
+    expect(t.world.now - asked).toBeLessThan(GROUP_FILE_LIMITS.servePlaceMs + 2 * GROUP_FILE_LIMITS.wantWaitMs);
+    expect(sha(t.got(erin, id, messageId).bytes!)).toBe(meta.d);
+  });
+
   it("a holder that serves the rest of a file counts that rest toward its day, not the whole file", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
