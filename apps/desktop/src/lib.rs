@@ -181,6 +181,7 @@ macro_rules! commands {
             linked_files::linked_files_forget,
             linked_files::linked_files_list,
             linked_files::linked_files_pick,
+            linked_files::linked_files_pick_cancel,
             linked_files::linked_files_read,
             native_call::native_call_accept,
             native_call::native_call_answer,

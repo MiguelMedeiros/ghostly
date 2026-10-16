@@ -467,12 +467,13 @@ export interface AppsPlatform {
 
 /**
  * Files the person picks for an app (WISP 1200 · Linked files), kept by the client as links, never copies, per app.
- * Its refusals are thrown as `"<code>: words"`: `cancelled`, `changed`, `gone`, `too-large`.
+ * Its refusals are thrown as `"<code>: words"`: `cancelled`, `changed`, `gone`, `too-large`, `too-fast`.
  */
 export interface LinkedFilesHost {
   /**
    * Asks the person with the client's own sheet and picker, then keeps links to what was picked. `signal` aborts when
-   * the app stops: its sheet goes with it, and the pick is `cancelled`.
+   * the app stops: its sheet goes with it, and the pick is `cancelled`. A dialog the client cannot take back (Desktop's)
+   * keeps nothing, and the app gets no other one until it is answered (`too-fast`).
    */
   pick(ref: string, title: string, options: { folder: boolean; accept: string[] }, signal?: AbortSignal): Promise<MiniAppLinkedFile[]>;
   /** Every link the app keeps; where the browser must be asked again to read kept ones, the person is asked once (a sheet that goes on `signal`, as pick's). */

@@ -38,6 +38,7 @@ const COMMANDS: &[&str] = &[
     "linked_files_forget",
     "linked_files_list",
     "linked_files_pick",
+    "linked_files_pick_cancel",
     "linked_files_read",
     "lnd_request",
     "local_fetch",
