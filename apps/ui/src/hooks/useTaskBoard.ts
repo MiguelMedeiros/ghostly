@@ -143,6 +143,11 @@ export function useCardIndex(): readonly CardIndexRow[] {
   return useSyncExternalStore(subscribe, () => rows);
 }
 
+/** Whether the engine's index answered yet: until then `useCardIndex` is empty because nothing is known. */
+export function useCardIndexRead(): boolean {
+  return useSyncExternalStore(subscribe, () => loaded);
+}
+
 /*
  * What the board shows of a chat or a group: its name, its members' names, a contact's picture and the identities they
  * can be shown as right now (a proof that expires leaves at the engine's next state). The engine sends a new state a
