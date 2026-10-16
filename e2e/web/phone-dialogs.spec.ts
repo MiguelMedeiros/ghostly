@@ -102,6 +102,45 @@ for (const screen of [{ name: "an iPad mini on its side", width: 1133, height: 7
   });
 }
 
+for (const screen of [{ name: "an iPhone on its side", width: 874, height: 402, keyboard: 200 }, { name: "an iPad mini on its side", width: 1133, height: 744, keyboard: 360 }]) {
+  test(`${screen.name}: a dialog that is not a <dialog> keeps its field and button above the keyboard`, { tag: ["@feature:app.mobile-layout", "@feature:apps.page", "@feature:proofs.ssh.github"] }, async ({ peer }) => {
+    // From 768px no sheet rule moves these panels: centred in a layer over the whole screen, which iOS keeps under the
+    // keyboard, the URL field and Check (Apps → Add), the account field and Start (Add identity) were under it.
+    const visible = screen.height - screen.keyboard;
+    const { page } = await peer("side-dialogs", { mobile: true, viewport: { width: screen.width, height: screen.height } });
+    await iosKeyboard(page);
+    await page.goto("/#/apps");
+    await page.getByTestId("apps-add").click();
+    const url = page.getByTestId("apps-add-url");
+    await expect(url).toBeFocused();
+    await keyboard(page, screen.keyboard);
+    await within(url, visible);
+    await page.getByTestId("apps-add-check").scrollIntoViewIfNeeded();
+    await within(page.getByTestId("apps-add-check"), visible);
+    await keyboard(page, 0);
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("apps-add-dialog")).toHaveCount(0);
+
+    await page.goto("/#/identities");
+    await page.getByTestId("identities-new").click();
+    const add = page.getByTestId("add-identity");
+    await add.getByTestId("add-identity-ssh-github").click();
+    const subject = add.getByTestId("add-identity-subject");
+    await subject.focus();
+    await keyboard(page, screen.keyboard);
+    await within(add, visible);
+    await subject.scrollIntoViewIfNeeded();
+    await within(subject, visible);
+    await subject.fill("octo-cat");
+    await add.getByTestId("add-identity-start").scrollIntoViewIfNeeded();
+    await within(add.getByTestId("add-identity-start"), visible);
+
+    // Keyboard down: centred in the whole screen again.
+    await keyboard(page, 0);
+    await expect.poll(async () => { const box = (await add.boundingBox())!; return box.y + box.height > visible; }).toBe(true);
+  });
+}
+
 test("an iPhone with a hardware keyboard: the message field stays above the shortcut bar when the phone turns", { tag: ["@feature:app.mobile-layout", "@feature:app.responsive"] }, async ({ peer }) => {
   // Turned with the bar up, iOS reports the whole screen again a moment later and keeps it while the bar stays over
   // the field (iOS 26 Simulator, installed app: 402 of 402 on its side with the bar showing; r6c saw "68px short").
