@@ -48,6 +48,12 @@ export const FILE_LIMITS = {
   minWindowBytes: 64 * 1024,
   /** How much longer than the shortest round trip seen a confirm may take, by the queue the files keep on the path. */
   queueMs: 50,
+  /**
+   * A shortest round trip no confirm has come close to for this long is measured again, with the queue drained
+   * (`ChatFiles.paced`). A path that got longer mid-session (another route, a relay) read as a queue for good before, and
+   * held the window at its floor: 0.5 MiB/s where the same path from the start gave 8 MiB/s.
+   */
+  baseProbeMs: 10_000,
   /** A receiver asks its person before taking a file larger than this. */
   askAboveBytes: 25 * 1024 * 1024,
   /** Files taken without asking, per contact, while stored. Past it, every file is asked about. */
@@ -321,6 +327,10 @@ export class ChatFiles {
   private window: number = FILE_LIMITS.minWindowBytes;
   /** The shortest round trip of a chunk to its confirm on this session: the path without a queue. */
   private baseRtt = Infinity;
+  /** When a confirm last came close to `baseRtt`, or a probe measured it. */
+  private baseAt = 0;
+  /** The path's own round trip is being measured: one chunk in flight from `since`, until one sent then is confirmed. */
+  private probe?: { since: number; window: number };
 
   constructor(private readonly host: ChatFilesHost) {}
 
@@ -378,6 +388,8 @@ export class ChatFiles {
     // Another session may be another path.
     this.window = FILE_LIMITS.minWindowBytes;
     this.baseRtt = Infinity;
+    this.baseAt = 0;
+    this.probe = undefined;
     void this.sayRoom();
     this.sweep();
     for (const entry of this.entries.values()) {
@@ -487,18 +499,34 @@ export class ChatFiles {
   }
 
   private shouldPump(entry: Entry): boolean {
-    return this.fileMayPump(entry) && this.inFlight() < this.window;
+    return this.fileMayPump(entry) && this.inFlight() < (this.probe ? FILE_LIMITS.chunkBytes : this.window);
   }
 
   /**
-   * A confirm came for a chunk sent `rtt` ago with `flight` bytes in flight then: the window becomes what keeps the path
+   * A confirm came for a chunk sent at `sentAt` with `flight` bytes in flight then: the window becomes what keeps the path
    * busy with no more than `FILE_LIMITS.queueMs` of queue on it (delay-based, as LEDBAT). Throughput is about
    * flight / rtt, so flight × (base + queueMs) / rtt: it grows while confirms come about as fast as they can, and shrinks
    * when they slow down because the files queue on a slow uplink, ahead of everything else the sender says there.
+   * The base is measured again once no confirm has come close to it for `FILE_LIMITS.baseProbeMs`: with one chunk in
+   * flight, so the queue drains first and a slow link's own queue never passes for a longer path.
    */
-  private paced(rtt: number, flight: number): void {
-    rtt = Math.max(1, rtt);
+  private paced(sentAt: number, flight: number): void {
+    const now = this.now(), rtt = Math.max(1, now - sentAt);
+    if (this.probe) {
+      // Sent before the probe: it waited behind the queue the probe lets drain.
+      if (sentAt < this.probe.since) return;
+      this.baseRtt = rtt;
+      this.baseAt = now;
+      this.window = this.probe.window;
+      this.probe = undefined;
+      return;
+    }
+    if (rtt - this.baseRtt < FILE_LIMITS.queueMs / 2) this.baseAt = now;
     this.baseRtt = Math.min(this.baseRtt, rtt);
+    if (now - this.baseAt > FILE_LIMITS.baseProbeMs) {
+      this.probe = { since: now, window: this.window };
+      return;
+    }
     // No queue to speak of yet: twice as much per round trip at least, as a long fast path needs many to fill.
     const fits = Math.max((flight * (this.baseRtt + FILE_LIMITS.queueMs)) / rtt, rtt - this.baseRtt < FILE_LIMITS.queueMs / 2 ? 2 * flight : 0);
     // Little was in flight (a file starting or ending): that says nothing about a larger window being too large.
@@ -932,7 +960,7 @@ export class ChatFiles {
         // The last chunk this confirms says how long the path took (one sent before a resync says nothing).
         let sample: Outgoing["sends"][number] | undefined;
         while (out.sends.length && out.sends[0].end <= frame.offset) sample = out.sends.shift();
-        if (sample?.generation === out.generation) this.paced(this.now() - sample.at, sample.flight);
+        if (sample?.generation === out.generation) this.paced(sample.at, sample.flight);
         this.changed(outgoing, true);
         this.wakeHeld();
         if (record.confirmed === record.file.size) void this.sendSum(outgoing);
