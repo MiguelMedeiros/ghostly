@@ -7,7 +7,7 @@
 const CLAIM = "ghostly_feedback_claim:";
 /** How long a claim is kept: an event older than 5 s is never presented (AttentionFeedback). */
 const CLAIM_MS = 10_000;
-/** Every this many claims, the old ones are dropped. */
+/** On a page's first claim and every this many after it, the old ones are dropped (the first drops what earlier starts left). */
 const DROP_EVERY = 64;
 let claimed = 0;
 try { localStorage.removeItem("ghostly_feedback_claims"); } catch { /* unavailable */ }
@@ -31,11 +31,15 @@ export function claimFeedback(id: string, now: number): boolean {
   try {
     if (localStorage.getItem(key) !== null) return false;
     localStorage.setItem(key, String(now));
-    if (++claimed % DROP_EVERY === 0) {
-      for (let i = localStorage.length - 1; i >= 0; i--) {
-        const old = localStorage.key(i);
-        if (old?.startsWith(CLAIM) && !(now - Number(localStorage.getItem(old)) < CLAIM_MS)) localStorage.removeItem(old);
+    if (claimed++ % DROP_EVERY === 0) {
+      // Keys read forwards in one pass before any is removed: WebKit's key(i) walks from the start again whenever i goes
+      // down or the map changed, so reading backwards while removing was quadratic (18.7 s for a 1000/s burst).
+      const keys: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const name = localStorage.key(i);
+        if (name?.startsWith(CLAIM)) keys.push(name);
       }
+      for (const old of keys) if (!(now - Number(localStorage.getItem(old)) < CLAIM_MS)) localStorage.removeItem(old);
     }
   } catch { /* unavailable: the page's own dedupe still applies */ }
   return true;
