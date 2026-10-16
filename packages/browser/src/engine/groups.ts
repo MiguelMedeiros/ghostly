@@ -132,7 +132,7 @@ export interface GroupsHost {
    */
   historyGone?(groupId: string): void;
   emit(): void;
-  /** My name, for community groups, where it travels (encrypted) with my messages. */
+  /** My name, sealed with my messages in every group: past 16 members, most members hold no edge with me to hear it there. */
   myNick?(): string | undefined;
   /** An application frame a member of a community sent the group (a note about a payment, a request to everyone). */
   communityApp?(groupId: string, sender: string, frame: Record<string, unknown>): Promise<void> | void;
@@ -2305,6 +2305,7 @@ export class Groups {
   private attach(state: GroupState, frames: GroupMessageFrame[] = []): void {
     const session: GroupSession = new GroupSession(state, {
       clock: () => this.now(),
+      nick: () => this.host.myNick?.(),
       seqFloor: () => this.host.seqFloor?.() ?? 0,
       adminWork: () => this.host.adminWork?.(state.id) ?? true,
       adminTurn: () => this.host.adminTurn?.(state.id) ?? Promise.resolve(true),

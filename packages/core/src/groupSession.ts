@@ -1,6 +1,6 @@
 import { fromBase64Url, randomBytes, toBase64Url, utf8Encode } from "./bytes";
 import { identityFromSeedB64, publicKeyFromZ32, sign, verify } from "./identity";
-import { sanitizeNick } from "./text";
+import { MAX_NICK_LENGTH, sanitizeNick } from "./text";
 import { EngineError, engineError } from "./engineErrors";
 import {
   GROUP_PROFILE, confirmationMatches, confirmationTag, decryptText, encryptText, epochKeys, newEpochSecret, openSecret, sealSecret,
@@ -108,8 +108,11 @@ export const GROUP_READ_NOTE = `Everyone in the group can read everything sent w
  * of its own; the text is the caption, or a line an older app shows instead. `xs` covers it after `sc`, before `o`.
  * `o`: where a message said again under a later epoch was first said (WISP 902 § Catch-up, "Frames said again"): that
  * frame's epoch and sequence, in the clear like the header. `xs` covers it last, only when there is one.
+ * `nk`: the name the author's app says (WISP 902 § Messages, "The author's name"), sealed in a box of its own, and `ns`
+ * the author's signature over that box and the header. Outside `xs`: a member on an app from before that hands the frame
+ * on drops both, and the copy stays whole.
  */
-export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: string; n: number; ts: number; nn: string; c: string; sig: string; m?: { n: string; c: string }; r?: { n: string; c: string }; f?: number; sc?: { n: string; c: string }; fl?: { n: string; c: string }; o?: { e: number; n: number }; xs?: string }
+export interface GroupMessageFrame { t: "group-msg"; g: string; e: number; s: string; n: number; ts: number; nn: string; c: string; sig: string; m?: { n: string; c: string }; r?: { n: string; c: string }; f?: number; sc?: { n: string; c: string }; fl?: { n: string; c: string }; o?: { e: number; n: number }; xs?: string; nk?: { n: string; c: string }; ns?: string }
 /**
  * An edit of message `<s>:<e>:<n>` by its author (WISP 902 § Edits): edit number `v`, the new text (and its mentions)
  * as JSON `{ text, m?, sc? }` sealed under the key of the message's epoch `e`, signed by the author. `sc`: the status card
@@ -225,6 +228,11 @@ export interface GroupSessionHooks {
   /** The clock the limits read (the engine's, or a simulation's); the wall clock when absent. */
   clock?(): number;
   /**
+   * The name my app says to the group's members, sealed in each message I write (`nk`): past 16 members, most never
+   * hold an edge with me to hear it there. None when the person shares no name.
+   */
+  nick?(): string | undefined;
+  /**
    * The lowest sequence number this member sends at, in any epoch (WISP 06 § Raised counters): 0 for a profile that
    * never took over or was never restored. A copy of a profile started from older state sends above every number the
    * copy it replaced may have used, so the other members do not drop its frames as already seen.
@@ -273,6 +281,13 @@ const isCardBox = isSealedBox(MAX_CARD_BOX);
 const MAX_FILE_BOX = Math.ceil((GROUP_FILE_LIMITS.nameChars * 4 + GROUP_FILE_LIMITS.mimeChars + 17_000) * 4 / 3) + 4;
 const fileAad = (f: Pick<GroupMessageFrame, "g" | "e" | "s" | "n" | "ts">) => JSON.stringify(["ghostly-group/1 file", f.g, f.e, f.s, f.n, f.ts]);
 const isFileBox = isSealedBox(MAX_FILE_BOX);
+/** The author's name (`MAX_NICK_LENGTH` characters of up to four bytes each), sealed; signed apart from `xs` (`ns`). */
+const MAX_NICK_BOX = Math.ceil((MAX_NICK_LENGTH * 4 + 16) * 4 / 3) + 4;
+const nickAad = (f: Pick<GroupMessageFrame, "g" | "e" | "s" | "n" | "ts">) => JSON.stringify(["ghostly-group/1 nick", f.g, f.e, f.s, f.n, f.ts]);
+const nickSigned = (f: Pick<GroupMessageFrame, "g" | "e" | "s" | "n" | "ts">, nk: { n: string; c: string }) =>
+  utf8Encode(JSON.stringify(["ghostly-group/1 nick", f.g, f.e, f.s, f.n, f.ts, nk.n, nk.c]));
+const isNickBox = isSealedBox(MAX_NICK_BOX);
+const isSignature = (v: unknown): v is string => typeof v === "string" && v.length === 86 && B64.test(v);
 const B64 = /^[A-Za-z0-9_-]*$/;
 const secretAad = (g: string, e: number, member: string) => JSON.stringify(["ghostly-group/1 secret", g, e, member]);
 const messageAad = (f: Pick<GroupMessageFrame, "g" | "e" | "s" | "n" | "ts">) => JSON.stringify([f.g, f.e, f.s, f.n, f.ts]);
@@ -329,7 +344,7 @@ const ownKey = (f: { e: number; n: number }) => `${f.e}:${f.n}`;
 /** What a frame weighs in a log, roughly: its boxes plus the fixed fields around them. */
 const frameKey = (f: GroupMessageFrame) => `${f.s}:${f.e}:${f.n}`;
 /** What a kept frame counts for against `GROUP_LIMITS.relayBytes`. */
-export const frameBytes = (f: GroupMessageFrame) => f.c.length + (f.m?.c.length ?? 0) + (f.r?.c.length ?? 0) + (f.sc?.c.length ?? 0) + (f.fl?.c.length ?? 0) + 400;
+export const frameBytes = (f: GroupMessageFrame) => f.c.length + (f.m?.c.length ?? 0) + (f.r?.c.length ?? 0) + (f.sc?.c.length ?? 0) + (f.fl?.c.length ?? 0) + (f.nk?.c.length ?? 0) + 400;
 
 /** Only the fields an edit frame has, as `clean` does for a message. */
 const cleanEdit = (f: GroupEditFrame): GroupEditFrame => ({ t: GROUP_EDIT_FRAME, g: f.g, e: f.e, s: f.s, n: f.n, v: f.v, ts: f.ts, nn: f.nn, c: f.c, sig: f.sig });
@@ -341,7 +356,8 @@ function clean(f: GroupMessageFrame): GroupMessageFrame {
     ...(readForwarded(f.f) ? { f: f.f } : {}), ...(isCardBox(f.sc) ? { sc: { n: f.sc.n, c: f.sc.c } } : {}),
     ...(isFileBox(f.fl) ? { fl: { n: f.fl.n, c: f.fl.c } } : {}),
     ...(readFirstPlace(f.o, f.e) ? { o: readFirstPlace(f.o, f.e)! } : {}),
-    ...(typeof f.xs === "string" && f.xs.length === 86 && B64.test(f.xs) ? { xs: f.xs } : {}) };
+    ...(typeof f.xs === "string" && f.xs.length === 86 && B64.test(f.xs) ? { xs: f.xs } : {}),
+    ...(isNickBox(f.nk) && isSignature(f.ns) ? { nk: { n: f.nk.n, c: f.nk.c }, ns: f.ns } : {}) };
 }
 
 /** Whether the member whose sync this is lacks a frame: above what it has from that sender, or one it names as missing. */
@@ -408,6 +424,8 @@ export class GroupSession {
   private asked = new Map<string, number>();
   /** The signed leave of each member I last passed on, kept for an admin that was away (`byesHeld`). In memory only. */
   private byesPassed = new Map<string, GroupByeFrame>();
+  /** Member → when the name I hold for it was said: its message's time, or the moment an edge said it (`heardName`). In memory only. */
+  private readonly nickAt = new Map<string, number>();
   private queue = Promise.resolve();
   /** One metadata frame that names a commit or an epoch I do not have yet: tried again when the chain moves. */
   private pendingMeta: { from: string; frame: unknown } | undefined;
@@ -882,8 +900,11 @@ export class GroupSession {
       ...(extra.reply ? { r: encryptText(key, replyAad(header), JSON.stringify(extra.reply)) } : {}), ...(extra.forwarded ? { f: extra.forwarded } : {}),
       ...(extra.card ? { sc: encryptText(key, cardAad(header), JSON.stringify(extra.card)) } : {}),
       ...(extra.file ? { fl: encryptText(key, fileAad(header), JSON.stringify(extra.file)) } : {}), ...(o ? { o } : {}) };
+    const nick = sanitizeNick(this.hooks.nick?.());
+    const nk = nick === undefined ? undefined : encryptText(key, nickAad(header), nick);
     return { t: "group-msg", ...unsigned, sig: toBase64Url(sign(messageSigned(unsigned), this.identity.seed)), ...boxes,
-      xs: toBase64Url(sign(messageSignedWhole({ ...unsigned, ...boxes }), this.identity.seed)) };
+      xs: toBase64Url(sign(messageSignedWhole({ ...unsigned, ...boxes }), this.identity.seed)),
+      ...(nk ? { nk, ns: toBase64Url(sign(nickSigned(header, nk), this.identity.seed)) } : {}) };
   }
 
   /** Into my bounded log, for members who missed it. */
@@ -1053,6 +1074,8 @@ export class GroupSession {
   setNick(key: string, nick: string | undefined): Promise<void> {
     return this.serialize(async () => {
       const clean = sanitizeNick(nick);
+      // Said now on an edge: a message written before it no longer names the member (`heardName`).
+      this.nickAt.set(key, this.now());
       if ((this.state.nicks[key] ?? undefined) === clean) return;
       if (clean) this.state.nicks[key] = clean; else delete this.state.nicks[key];
       await this.persist();
@@ -1217,6 +1240,8 @@ export class GroupSession {
     const key = epochKeys(secret, this.id, raw.e).message;
     const text = decryptText(key, messageAad(raw), raw.nn, raw.c);
     if (text === null) return;
+    // Saved below with the message, whichever way it goes.
+    if (this.heardName(key, raw)) this.hooks.changed();
     const firstFrame = first && { ...raw, e: first.e, n: first.n };
     if (firstFrame && rosterHas(this.state.chain[first.e]?.m ?? [], this.myKey) && this.isDuplicate(firstFrame)) {
       // I read the first one: kept and passed on for those who could not, not shown twice.
@@ -1296,6 +1321,23 @@ export class GroupSession {
   private wholeSigned(raw: GroupMessageFrame): boolean {
     if (typeof raw.xs !== "string" || raw.xs.length !== 86 || !B64.test(raw.xs)) return false;
     try { return verify(fromBase64Url(raw.xs), messageSignedWhole(raw), publicKeyFromZ32(raw.s)); } catch { return false; }
+  }
+
+  /**
+   * The author's name in a message (`nk`), when the author's signature over it (`ns`) holds: any copy, handed on or
+   * not, whole or not, since a member handing it on can only drop it. Taken only from a message newer than the one it
+   * last came in, or than the moment an edge last said it (`setNick`), so a catch-up's older pages never bring back a
+   * name the member changed since. Whether the name I hold changed.
+   */
+  private heardName(key: Uint8Array, raw: GroupMessageFrame): boolean {
+    if (!isNickBox(raw.nk) || !isSignature(raw.ns) || raw.ts <= (this.nickAt.get(raw.s) ?? 0)) return false;
+    try { if (!verify(fromBase64Url(raw.ns), nickSigned(raw, raw.nk), publicKeyFromZ32(raw.s))) return false; } catch { return false; }
+    const nick = sanitizeNick(decryptText(key, nickAad(raw), raw.nk.n, raw.nk.c));
+    if (nick === undefined) return false;
+    this.nickAt.set(raw.s, raw.ts);
+    if (this.state.nicks[raw.s] === nick) return false;
+    this.state.nicks[raw.s] = nick;
+    return true;
   }
 
   private openMentions(key: Uint8Array, raw: GroupMessageFrame, text: string, everyone: boolean): GroupMention[] {

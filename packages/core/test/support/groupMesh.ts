@@ -25,6 +25,8 @@ export class Mesh {
   rows = false;
   /** What each member's app holds on its rows: message id → the frame it keeps, oldest first. */
   readonly frames = new Map<string, Map<string, GroupMessageFrame>>();
+  /** Member key → the name its app says in its messages (`hooks.nick`); none for a member not in it. */
+  readonly names = new Map<string, string>();
   add(state: GroupState, name?: string): GroupSession {
     const key = identityFromSeedB64(state.seedB64).pubKeyZ32;
     if (!this.frames.has(key)) this.frames.set(key, new Map());
@@ -33,6 +35,7 @@ export class Mesh {
       kept: (id, frame) => { if (this.rows) rows.set(id, frame); },
       save: async s => { this.saved.set(session.myKey, s); this.saves.set(session.myKey, (this.saves.get(session.myKey) ?? 0) + 1); },
       clock: () => this.clock ?? Date.now(),
+      nick: () => this.names.get(session.myKey),
       send: (to, frame) => {
         this.sentFrames.push({ from: session.myKey, to, frame: clone(frame) });
         const target = this.sessions.get(to);
