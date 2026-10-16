@@ -782,6 +782,8 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
     try { params.credential = params.file === "-" ? await readStdin() : readFileSync(params.file as string, "utf8"); }
     // A file not there, a folder, one not allowed: said as every other file the CLI reads.
     catch (error) { throw localFileError(error, params.file as string) ?? new CliError("usage", `Cannot read the credential: ${error instanceof Error ? error.message : String(error)}`); }
+    // Nothing read is said of the file or stdin given, not as the API's missing `credential`.
+    if (!params.credential) throw new CliError("bad_request", params.file === "-" ? "Nothing on stdin: give the SD-JWT VC the issuer sent" : `${params.file as string} is empty: it holds the SD-JWT VC the issuer sent`);
     delete params.file;
   }
   const secretWarning = await secretsFromStdin(command.method, params, readStdin, process.stdin.isTTY === true);
