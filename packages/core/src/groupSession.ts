@@ -1080,7 +1080,8 @@ export class GroupSession {
       this.nickAt.set(key, this.now());
       if ((this.state.nicks[key] ?? undefined) === clean) return;
       if (clean) this.state.nicks[key] = clean; else delete this.state.nicks[key];
-      await this.persist();
+      // Another member's name comes over its edge as often as it likes: saved within the wait, as a message's change.
+      if (key === this.myKey) await this.persist(); else this.persistSoon();
       this.hooks.changed();
     });
   }

@@ -818,6 +818,14 @@ export class GhostLink {
   /** Edit frames the contact may send per window; the rest go unconfirmed and come again. */
   private readonly editsReceived = new RateWindow(EDIT_RECEIVE_LIMIT, EDIT_RATE_WINDOW_MS);
   private readonly wakeReceived = new RateWindow(6, 60_000);
+  /**
+   * The contact's name and picture, each saved when it changes: said once a session and when changed, so a handful a
+   * minute each. Past that only the newest waits, read once the window has room again.
+   */
+  private readonly peerSaid = {
+    "paired-nick": { window: new RateWindow(6, 60_000), read: null as (() => void) | null, timer: null as ReturnType<typeof setTimeout> | null },
+    "paired-avatar": { window: new RateWindow(6, 60_000), read: null as (() => void) | null, timer: null as ReturnType<typeof setTimeout> | null },
+  };
   private livenessTimer: ReturnType<typeof setInterval> | null = null;
   private peerAnswersPings = false;
   /** When the ping awaiting its pong went, and the round trip last measured on this session. */
@@ -3898,18 +3906,8 @@ export class GhostLink {
           if (typeof frame?.t === "string" && frame.t.startsWith("proof-") && this.peerProofSupport) {
             await this.options.events?.onPeerProof?.(frame); return;
           }
-          if (frame?.t === "paired-avatar") {
-            const avatar = sanitizeAvatar(frame.a);
-            if (avatar !== undefined) this.options.events?.onPeerAvatar?.(avatar);
-            return;
-          }
-          if (frame?.t === "paired-nick") {
-            const nick = sanitizeNick(frame.n);
-            if (typeof frame.n === "string") this.options.events?.onPeerNick?.(nick ?? null);
-            if (nick !== this.peerNickOverride) {
-              this.peerNickOverride = nick ?? null;
-              this.options.events?.onPresence?.(this.presence);
-            }
+          if (frame?.t === "paired-avatar" || frame?.t === "paired-nick") {
+            this.peerSays(channel, frame.t, frame);
             return;
           }
           if (frame?.t === SESSION_CAPABILITIES_FRAME) {
@@ -4359,6 +4357,49 @@ export class GhostLink {
     if (!this.dialing) setTimeout(() => this.maybeKnockEarly(offered.epoch), 0);
   }
 
+  /**
+   * A name or picture the contact said, once it is one (reading it costs little; saving it is what counts): past the
+   * window the newest waits for room on this session, so the last word still counts.
+   */
+  private peerSays(channel: FrameChannel, kind: "paired-nick" | "paired-avatar", frame: Record<string, unknown>): void {
+    let read: () => void;
+    if (kind === "paired-avatar") {
+      const avatar = sanitizeAvatar(frame.a);
+      if (avatar === undefined) return;
+      read = () => this.options.events?.onPeerAvatar?.(avatar);
+    } else {
+      // Something that is not text clears what is shown, and is not said as a removal.
+      const nick = sanitizeNick(frame.n) ?? null, said = typeof frame.n === "string";
+      read = () => {
+        if (said) this.options.events?.onPeerNick?.(nick);
+        if (nick !== this.peerNickOverride) {
+          this.peerNickOverride = nick;
+          this.options.events?.onPresence?.(this.presence);
+        }
+      };
+    }
+    const held = this.peerSaid[kind];
+    if (!held.timer && held.window.take()) { read(); return; }
+    held.read = read;
+    if (held.timer) return;
+    const due = () => {
+      held.timer = null;
+      if (this.channel !== channel || !held.read) { held.read = null; return; }
+      if (!held.window.take()) { held.timer = setTimeout(due, held.window.wait()); return; }
+      const next = held.read;
+      held.read = null;
+      next();
+    };
+    held.timer = setTimeout(due, held.window.wait());
+  }
+  /** What the contact said of itself and was still waiting goes with the session: the next one says it again. */
+  private dropPeerSaid(): void {
+    for (const said of Object.values(this.peerSaid)) {
+      if (said.timer) clearTimeout(said.timer);
+      said.timer = null; said.read = null;
+    }
+  }
+
   /** A ping on the session right after a wake, with `PONG_WAIT_MS` for its answer: none, and the session is dead. */
   private probeAfterWake(channel: FrameChannel): void {
     if (!this.peerAnswersPings || this.paired?.state.status !== "ready") return;
@@ -4396,6 +4437,7 @@ export class GhostLink {
     this.channel = this.httpHost = this.httpClient = this.files = null;
     this.peerServicesOverride = null;
     this.peerNickOverride = null;
+    this.dropPeerSaid();
     this.sessionCapabilities.reset();
     this.typingSender.reset(); this.typingReceiver.clear();
     this.appsSuspended();
