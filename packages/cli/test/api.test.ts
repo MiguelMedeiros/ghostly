@@ -604,6 +604,8 @@ describe("groups", () => {
     expect(() => mentionsFor("hi", ["Ana"], group)).toThrow(/Write @Ana/);
     expect(() => mentionsFor("@abc hi", ["abc"], group)).toThrow(/more than one/);
     expect(() => mentionsFor("@x", ["nobody"], group)).toThrow(/No member/);
+    // This profile's own key was "No member" too.
+    expect(() => mentionsFor("@mekey hi", ["mekey"], group)).toThrow(expect.objectContaining({ code: "bad_request", message: '"mekey" is you: name another member of Crew' }));
   });
 
   it("send passes the mentions to the engine", async () => {

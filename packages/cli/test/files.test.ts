@@ -74,7 +74,15 @@ describe("group administration", () => {
     expect(findMember(group, "ana").key).toBe("abcd12");
     expect(findMember(group, "abce").key).toBe("abce34");
     expect(() => findMember(group, "abc")).toThrow(/more than one/);
-    expect(() => findMember(group, "me")).toThrow(/No member/);
+    expect(() => findMember(group, "nobody")).toThrow(/No member/);
+  });
+
+  // This profile's own key or a prefix of it answered not_found "No member" as if it were not in the group.
+  it("says a ref that names this profile itself is you, not that no member is there", () => {
+    const own = { name: "Crew", members: [{ key: "595m389h77", me: true }, { key: "abcd12", nick: "Ana", me: false }] } as unknown as GroupView;
+    for (const ref of ["595m389h77", "595m"]) {
+      expect(() => findMember(own, ref)).toThrow(expect.objectContaining({ code: "bad_request", message: `${JSON.stringify(ref)} is you: name another member of Crew` }));
+    }
   });
 
   it("a member's whole key is that member, whatever another member calls itself", () => {
