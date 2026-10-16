@@ -58,6 +58,23 @@ describe("chats", () => {
     expect(() => findChat(links, "zed")).toThrow(/No chat/);
   });
 
+  // A chat's name was taken whatever it held and cut by the engine at 48 UTF-16 units: half an emoji stayed as a lone
+  // surrogate, a newline was kept, and the invite was made before its name was cut.
+  it("a chat's name is what the engine keeps whole on one line, refused before anything is made", async () => {
+    const { ctx, node } = fake();
+    const calls = Object.assign(node, { renameLink: vi.fn(), createLink: vi.fn(), joinLink: vi.fn() });
+    const rule = { code: "bad_request", message: "A chat's name is up to 48 characters on one line (an emoji counts as two)" };
+    for (const name of ["y".repeat(49), `${"x".repeat(47)}👻`, "a\nb", "tab\there"]) {
+      await expect(callApi(ctx, "chat.rename", { chat: "chat-one", name }), JSON.stringify(name)).rejects.toMatchObject(rule);
+      await expect(callApi(ctx, "invite.create", { label: name }), JSON.stringify(name)).rejects.toMatchObject(rule);
+      await expect(callApi(ctx, "invite.join", { invite: "ghostly1abc", label: name }), JSON.stringify(name)).rejects.toMatchObject(rule);
+    }
+    for (const made of [calls.renameLink, calls.createLink, calls.joinLink]) expect(made).not.toHaveBeenCalled();
+    // What the engine keeps whole is taken: 46 characters and an emoji, spaces around trimmed by the engine.
+    await callApi(ctx, "chat.rename", { chat: "chat-one", name: ` ${"x".repeat(46)}👻 ` });
+    expect(calls.renameLink).toHaveBeenCalledWith({ linkId: "chat-one", label: ` ${"x".repeat(46)}👻 ` });
+  });
+
   // `invite join <your own invite>` said the engine's tag for its RPC clients: "own-invite <chat id>: This is your own…".
   it("joining your own invite is refused in a sentence alone, with the chat that owns it as its own field", async () => {
     const { ctx, node } = fake();
