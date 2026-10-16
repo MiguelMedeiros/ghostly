@@ -425,7 +425,8 @@ fn on_page_load<R: tauri::Runtime>(
     }
 }
 
-/// The native listeners of the page before this one: stopped, their eight places free (`TransportState::page_started`).
+/// The native listeners of the page before this one: stopped, their eight places free (`TransportState::page_started`);
+/// its apps' file dialogs: let go.
 #[cfg(desktop)]
 fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(transports) = app.try_state::<paired_transport::TransportState>() {
@@ -433,6 +434,10 @@ fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
     if let Some(hyperdht) = app.try_state::<hyperdht::HyperState>() {
         hyperdht.page_started();
+    }
+    // Its apps' file dialogs, still on screen: they keep nothing (`LinkedFiles::page_started`).
+    if let Some(links) = app.try_state::<linked_files::LinkedFiles>() {
+        links.page_started();
     }
 }
 
