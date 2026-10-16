@@ -3,7 +3,7 @@ import type { DhtFileAnnouncement, DhtFileOffer } from "./dhtFiles";
 import { PairedFiles } from "./pairedFiles";
 import { TransportSwitch, allowedTransports, type SwitchPlan } from "./transportSwitch";
 import { proofHash, type ProofAdapter, type ProofScope } from "./peerProofs";
-import { IDENTITY_MAX_FRAME, type IdentityScope } from "./identityProofs";
+import { IDENTITY_FRAME_LIMIT, IDENTITY_FRAME_WINDOW_MS, IDENTITY_MAX_FRAME, type IdentityScope } from "./identityProofs";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { identityFromSeedB64, publicKeyFromZ32 } from "./identity";
 import { TRANSPORTS, irohRelayUrl, checkedDescriptors, rankTransports, relayedTransports, transportOrder, type NativeEndpoint, type NativeBinding, type NativeTransport, type PairedTransport, type TransportDescriptors } from "./pairedTransports";
@@ -826,6 +826,8 @@ export class GhostLink {
     "paired-nick": { window: new RateWindow(6, 60_000), read: null as (() => void) | null, timer: null as ReturnType<typeof setTimeout> | null },
     "paired-avatar": { window: new RateWindow(6, 60_000), read: null as (() => void) | null, timer: null as ReturnType<typeof setTimeout> | null },
   };
+  /** Identity-proof frames the contact may send per window; the rest are dropped before they are read. */
+  private readonly identityReceived = new RateWindow(IDENTITY_FRAME_LIMIT, IDENTITY_FRAME_WINDOW_MS);
   private livenessTimer: ReturnType<typeof setInterval> | null = null;
   private peerAnswersPings = false;
   /** When the ping awaiting its pong went, and the round trip last measured on this session. */
@@ -3901,7 +3903,8 @@ export class GhostLink {
             return;
           }
           if (typeof frame?.t === "string" && frame.t.startsWith("idp-") && this.identitySupport) {
-            await this.options.events?.onIdentityProof?.(frame); return;
+            if (this.identityReceived.take()) await this.options.events?.onIdentityProof?.(frame);
+            return;
           }
           if (typeof frame?.t === "string" && frame.t.startsWith("proof-") && this.peerProofSupport) {
             await this.options.events?.onPeerProof?.(frame); return;

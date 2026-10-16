@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createIdentity } from "../src/identity";
 import {
-  IDENTITY_CLOCK_SKEW, IDENTITY_MAX_EVIDENCE, IdentityExchange, boundVerifiedIdentity, emptyIdentityLedger, identityStatement, newIdentityBinding,
+  IDENTITY_CLOCK_SKEW, IDENTITY_MAX_EVIDENCE, IDENTITY_MAX_RECEIVED, IdentityExchange, boundVerifiedIdentity, emptyIdentityLedger, identityStatement, newIdentityBinding,
   receivedIdentityStatus, signIdentityPresentation, verifyIdentityPresentation,
   type IdentityLedger, type IdentityStatement, type LocalIdentityProof, type ReceivedIdentity, type VerifiedIdentity,
 } from "../src/identityProofs";
@@ -110,8 +110,8 @@ function world() {
       revoked: async st => { if (state.revokedFails) throw new Error("resolver down"); return state.revoked.has(st.id); },
     });
   }
-  const addProof = (options: { evidence?: unknown; issuedAt?: number; validity?: number; provider?: string } = {}) => {
-    const { binding, seed } = newIdentityBinding({ provider: options.provider ?? "test", subject: SUBJECT, validitySeconds: options.validity ?? 86_400, now: options.issuedAt ?? now });
+  const addProof = (options: { evidence?: unknown; issuedAt?: number; validity?: number; provider?: string; subject?: string } = {}) => {
+    const { binding, seed } = newIdentityBinding({ provider: options.provider ?? "test", subject: options.subject ?? SUBJECT, validitySeconds: options.validity ?? 86_400, now: options.issuedAt ?? now });
     const statement = identityStatement(binding);
     proofs.set(statement.id, { statement, evidence: options.evidence ?? { for: statement.id }, seed });
     return statement.id;
@@ -368,6 +368,48 @@ describe("verifying a presentation", () => {
     await w.peers.bob.receive(await present(w, newer));
     expect(w.ledgers.bob.received.map(r => r.id).sort()).toEqual([other, newer].sort());
   });
+  it("keeps a bounded number of a contact's proofs, refusing one more before checking or looking it up", async () => {
+    const w = world();
+    const presentAs = async (subject: string) => { w.state.subject = subject; const id = w.addProof({ subject }); await w.peers.bob.receive(await present(w, id)); return id; };
+    const kept: string[] = [];
+    for (let i = 0; i < IDENTITY_MAX_RECEIVED; i++) kept.push(await presentAs(`subject-${i}`));
+    expect(w.ledgers.bob.received).toHaveLength(IDENTITY_MAX_RECEIVED);
+    const checks = w.verify.mock.calls.length;
+    const revoked = vi.spyOn(w.state.revoked, "has");
+    // A flood of fresh identities: each refused at once, nothing stored, no provider check, no revocation lookup.
+    for (let i = 0; i < 50; i++) {
+      const id = await presentAs(`flood-${i}`);
+      expect(result(w)).toEqual({ t: "idp-result", id, ok: false, error: "Your contact keeps too many identities from you already" });
+    }
+    expect(w.ledgers.bob.received.map(r => r.id)).toEqual(kept);
+    expect(w.ledgers.bob.challenges).toEqual([]);
+    expect(w.verify.mock.calls.length).toBe(checks);
+    expect(revoked).not.toHaveBeenCalled();
+    // A newer proof of an identity already kept still replaces it.
+    const newer = await presentAs("subject-3");
+    expect(result(w)).toMatchObject({ id: newer, ok: true });
+    expect(w.ledgers.bob.received).toHaveLength(IDENTITY_MAX_RECEIVED);
+    // One the contact withdrew gives its place to a new identity.
+    await w.peers.bob.receive({ t: "idp-withdraw", id: kept[0] });
+    const fresh = await presentAs("subject-new");
+    expect(result(w)).toMatchObject({ id: fresh, ok: true });
+    expect(w.ledgers.bob.received.map(r => r.id)).not.toContain(kept[0]);
+    expect(w.ledgers.bob.received).toHaveLength(IDENTITY_MAX_RECEIVED);
+  });
+
+  it("holds the bound for presentations checked at the same time", async () => {
+    const w = world();
+    const keep = IDENTITY_MAX_RECEIVED - 4;
+    for (let i = 0; i < keep; i++) { w.state.subject = `subject-${i}`; await w.peers.bob.receive(await present(w, w.addProof({ subject: w.state.subject }))); }
+    // Eight answered challenges in flight (all a verifier keeps), each checked before any is stored: four fit.
+    const frames: Frame[] = [];
+    for (let i = 0; i < 8; i++) frames.push(await present(w, w.addProof({ subject: `late-${i}` })));
+    w.verify.mockImplementation(async s => ({ subject: s.binding.subject, source: "Test" }));
+    await Promise.all(frames.map(f => w.peers.bob.receive(f)));
+    expect(w.ledgers.bob.received).toHaveLength(IDENTITY_MAX_RECEIVED);
+    expect(w.sent("idp-result").slice(-8).filter(f => f.frame.ok === false)).toHaveLength(4);
+  });
+
 });
 
 describe("re-checking a received proof", () => {

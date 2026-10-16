@@ -33,6 +33,15 @@ export const IDENTITY_MAX_EVIDENCE = 16 * 1024;
 export const IDENTITY_MAX_FRAME = 32 * 1024;
 /** Unanswered challenges a verifier keeps per conversation. */
 const MAX_CHALLENGES = 8;
+/**
+ * Proofs a verifier keeps from one contact. A newer proof of the same identity replaces the older one, and one no longer
+ * standing (withdrawn, revoked, expired) gives its place to a new one; past that a presentation is refused before it is
+ * checked, so a contact cannot make this side store, re-send to its pages and look up its proofs without end.
+ */
+export const IDENTITY_MAX_RECEIVED = 16;
+/** `idp-*` frames a paired session reads from the contact per `IDENTITY_FRAME_WINDOW_MS`; the rest are dropped unread. */
+export const IDENTITY_FRAME_LIMIT = 40;
+export const IDENTITY_FRAME_WINDOW_MS = 60_000;
 
 export const IDENTITY_PROVIDER_ID = /^[a-z][a-z0-9-]{0,31}$/;
 /** Printable ASCII without spaces, so the statement can be built but never needs parsing. */
@@ -265,6 +274,20 @@ export function receivedIdentityStatus(r: ReceivedIdentity, presenter: string | 
   return r.status === "unconfirmed" ? "unconfirmed" : "verified";
 }
 
+const standing = (r: ReceivedIdentity, now: number) =>
+  r.status !== "withdrawn" && r.status !== "revoked" && Math.min(r.binding.expiresAt, r.verified.expiresAt ?? Infinity) > now;
+/**
+ * `received` with room for one more proof: `replaced` (the older proof of the same identity) dropped, then the oldest ones
+ * no longer standing; undefined when every place is still taken.
+ */
+function receivedWithRoom(received: ReceivedIdentity[], id: string, replaced: (r: ReceivedIdentity) => boolean, now: number): ReceivedIdentity[] | undefined {
+  const kept = received.filter(r => r.id !== id && !replaced(r));
+  const gone = kept.filter(r => !standing(r, now)).sort((a, b) => a.verifiedAt - b.verifiedAt);
+  const drop = new Set(gone.slice(0, Math.max(0, kept.length - IDENTITY_MAX_RECEIVED + 1)));
+  const out = kept.filter(r => !drop.has(r));
+  return out.length < IDENTITY_MAX_RECEIVED ? out : undefined;
+}
+
 const shortError = (e: unknown) => clean(e instanceof Error ? e.message : String(e), 160) ?? "Invalid proof";
 
 /**
@@ -279,6 +302,8 @@ export class IdentityCheckUnavailable extends Error {
 
 /** What the contact is told when the check failed with an IdentityCheckUnavailable. */
 export const IDENTITY_CHECK_UNAVAILABLE = "Your contact's app could not check it. Try again later.";
+
+const TOO_MANY_RECEIVED = "Your contact keeps too many identities from you already";
 
 const peerError = (e: unknown) => e instanceof IdentityCheckUnavailable ? IDENTITY_CHECK_UNAVAILABLE : shortError(e);
 
@@ -480,6 +505,10 @@ export class IdentityExchange {
     /** The same, as this side's own timeline says it. */
     let reason: string | undefined;
     try {
+      // Before anything is checked or looked up: a contact past the bound costs this side nothing more.
+      // The checked subject is not known yet: an identity kept under the binding's subject may be the one replaced.
+      const mayReplace = (r: ReceivedIdentity) => r.binding.provider === binding.provider && (r.binding.subject === binding.subject || r.verified.subject === binding.subject);
+      if (!receivedWithRoom(this.options.storage.read().received, id, mayReplace, now)) throw new Error(TOO_MANY_RECEIVED);
       if (JSON.stringify(evidence ?? null).length > IDENTITY_MAX_EVIDENCE) throw new Error("Evidence too large");
       if (!verifyIdentityPresentation(binding.key, sig as string, id, scope, nonce, issuedAt)) throw new Error("The proof key did not sign this conversation's challenge");
       if (binding.issuedAt > now + IDENTITY_CLOCK_SKEW) throw new Error("The proof is dated in the future");
@@ -495,13 +524,15 @@ export class IdentityExchange {
       const challenge = challengeOf(l);
       if (!challenge) throw new Error("Unknown or reused identity challenge");
       const challenges = l.challenges.filter(c => c.nonce !== nonce);
+      // A newer proof of the same identity replaces the older one; the bound holds for presentations checked at once.
+      const subject = verified?.subject;
+      const received = verified && receivedWithRoom(l.received, id, r => r.binding.provider === binding.provider && r.verified.subject === subject, now);
+      if (verified && !received) { verified = undefined; error = reason = TOO_MANY_RECEIVED; }
       const logged = this.log(l, { type: "result", side: "theirs", proof: id, requested: challenge.id, provider: binding.provider,
         subject: verified?.subject ?? binding.subject, ok: !!verified, ...(reason ? { error: reason } : {}) });
-      if (!verified) return { ...logged, challenges };
+      if (!verified || !received) return { ...logged, challenges };
       const record: ReceivedIdentity = { id, binding, evidence, verified, presenter: scope.subject, audience: scope.audience, context: scope.context,
         verifiedAt: now, checkedAt: now, status: "verified" };
-      // A newer proof of the same identity replaces the older one.
-      const received = l.received.filter(r => r.id !== id && !(r.binding.provider === binding.provider && r.verified.subject === verified!.subject));
       return { ...logged, challenges, received: [...received, record] };
     });
     this.send(verified ? { t: "idp-result", id, ok: true } : { t: "idp-result", id, ok: false, error });
