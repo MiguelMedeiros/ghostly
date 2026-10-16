@@ -11,7 +11,7 @@ import { CopyPrompt, CopyPromptButton } from "./CopyPrompt";
 import { AgentDemo } from "./AgentDemo";
 import { AgentSteps } from "./AgentSteps";
 import { Cmd } from "./Cmd";
-import { agents, scope, CONNECT, LINKS, PROMPT, SHOWS, STEPS, TURN } from "@/content/agents";
+import { agents, scope, CONNECT, LINKS, PROMPT, SECURITY, SHOWS, STEPS, TRUST, TURN } from "@/content/agents";
 import "@/app/cli.css";
 import "@/app/agents.css";
 
@@ -24,9 +24,10 @@ const SHOT = { src: "/screenshots/current/agents.webp", width: 1280, height: 820
 const PHONE = { src: "/screenshots/current/agents-mobile.webp", width: 390, height: 844, sizes: "(min-width: 761px) min(19vw - 9px, 234px), min(70vw - 22px, 300px)" };
 
 /**
- * /developers/agents: a bot at work in a chat (AgentDemo) beside one button that copies the prompt; then the real app
- * with what a bot can show, three steps to connect one by hand, the prompt itself, and how it works (AgentSteps, with
- * the detail folded under it in the /cli page's layout, cli.css).
+ * /developers/agents: a bot at work in a chat (AgentDemo) beside one button that copies the prompt; then the security
+ * model (who can give the agent work, and the limit) and who it is for; the real app with what a bot can show, three
+ * steps to connect one by hand, the prompt itself, and how it works (AgentSteps, with the detail folded under it in the
+ * /cli page's layout, cli.css); then what a reader can check before trusting it.
  */
 export function AgentsPage() {
   const t = agents;
@@ -47,6 +48,62 @@ export function AgentsPage() {
             <p className="muted ag-note">{t.hero.hint}</p>
           </div>
           <AgentDemo t={t.demo} />
+        </div>
+      </section>
+
+      <section className="wrap cl-block ag-section" id="security" aria-labelledby="ag-security" data-testid="agent-security">
+        <span className="eyebrow">{t.security.eyebrow}</span>
+        <h2 id="ag-security" className="ag-h2">
+          {t.security.title}
+        </h2>
+        <p className="muted ag-lead">{t.security.lead}</p>
+        <ul className="ag-shows">
+          {SECURITY.map((s) => (
+            <li key={s.id} className="ag-show">
+              <h3 className="ag-h3">{s.title}</h3>
+              <p className="muted">{s.body}</p>
+              <code className="mono">
+                <Cmd text={s.cmd} />
+              </code>
+            </li>
+          ))}
+        </ul>
+        <div className="ag-limit">
+          <h3 className="ag-h3">{t.security.limitTitle}</h3>
+          <p>{t.security.limit}</p>
+          <p className="ag-limit-links">
+            <IntentLink className="link-arrow" href={LINKS.threat}>
+              {t.security.threat} →
+            </IntentLink>{" "}
+            <a className="link-arrow" href={LINKS.safe}>
+              {t.security.more} ↗
+            </a>
+          </p>
+        </div>
+      </section>
+
+      <section className="wrap cl-block ag-section" id="fit" aria-labelledby="ag-fit">
+        <span className="eyebrow">{t.fit.eyebrow}</span>
+        <h2 id="ag-fit" className="ag-h2">
+          {t.fit.title}
+        </h2>
+        <div className="ag-fit">
+          <div className="ag-show">
+            <h3 className="ag-h3">{t.fit.forTitle}</h3>
+            <ul className="ag-list">
+              {t.fit.for.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </div>
+          <div className="ag-show">
+            <h3 className="ag-h3">{t.fit.notTitle}</h3>
+            <ul className="ag-list">
+              {t.fit.not.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </div>
         </div>
       </section>
 
@@ -179,13 +236,6 @@ export function AgentsPage() {
           </p>
         </section>
 
-        <section className="cl-block ag-sub" aria-labelledby="ag-safety">
-          <h3 id="ag-safety" className="ag-h3">
-            {t.safety.title}
-          </h3>
-          <p className="muted">{t.safety.body}</p>
-        </section>
-
         <section className="cl-block ag-sub" aria-labelledby="ag-scope">
           <h3 id="ag-scope" className="ag-h3">
             {t.scope.title}
@@ -201,11 +251,44 @@ export function AgentsPage() {
         </section>
       </details>
 
+      <section className="wrap cl-block ag-section" id="trust" aria-labelledby="ag-trust" data-testid="agent-trust">
+        <span className="eyebrow">{t.trust.eyebrow}</span>
+        <h2 id="ag-trust" className="ag-h2">
+          {t.trust.title}
+        </h2>
+        <p className="muted ag-lead">{t.trust.lead}</p>
+        <ul className="ag-trust">
+          {TRUST.map((item) => (
+            <li key={item.id}>
+              <span>{item.text}</span>{" "}
+              <a className="link-arrow" href={LINKS[item.link]}>
+                {item.label} ↗
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
+
       <section className="wrap cl-block ag-sub" aria-labelledby="ag-links">
         <h3 id="ag-links" className="ag-h3">
           {t.links.title}
         </h3>
         <ul className="cl-links">
+          <li>
+            <IntentLink className="link-arrow" href={LINKS.threat}>
+              {t.links.threat} →
+            </IntentLink>
+          </li>
+          <li>
+            <a className="link-arrow" href={LINKS.faq}>
+              {t.links.faq} →
+            </a>
+          </li>
+          <li>
+            <a className="link-arrow" href={LINKS.llms}>
+              {t.links.llms} →
+            </a>
+          </li>
           <li>
             <a className="link-arrow" href={LINKS.skill}>
               {t.links.skill} ↗

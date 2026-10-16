@@ -11,7 +11,7 @@ import { ghostly } from "./support/cli";
  */
 
 const ROOT = resolve(import.meta.dirname, "../../..");
-const DOCS = ["packages/cli/SKILL.md", "docs/AI-AGENTS.md", "apps/website/content/agents.ts"];
+const DOCS = ["packages/cli/SKILL.md", "docs/AI-AGENTS.md", "apps/website/content/agents.ts", "apps/website/content/agentsThreat.ts"];
 const GLOBAL = ["--profile", "--home", "--pretty", "--help", "--version"];
 const WORD = /^[a-z][a-z-]*$/;
 
