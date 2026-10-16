@@ -105,6 +105,11 @@ export class ContactLinks {
     this.schedulePoll(0);
   }
 
+  /** Whether a link key is one of this profile's, current or turned off. */
+  owns(linkKeyZ32: string): boolean {
+    return this.stored.current?.linkKeyZ32 === linkKeyZ32 || this.stored.retired.some(link => link.linkKeyZ32 === linkKeyZ32);
+  }
+
   /** The requests waiting, newest first. */
   requests(): ContactRequestView[] {
     return [...this.stored.current?.requests ?? []].reverse().map(r => ({ id: r.key, name: r.name, text: r.text, receivedAt: r.receivedAt, expires: r.expires }));
