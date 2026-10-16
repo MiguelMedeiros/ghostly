@@ -1,0 +1,72 @@
+import { expect, test, type Page } from "@playwright/test";
+
+/**
+ * A phone reader who scrolls into the story before the page runs keeps what they were looking at. The server draws
+ * the chapters for a wide window (stage.tsx), the head script folds them into an article before the first paint,
+ * and the phone chapters only replace them once React hydrates: a different height above the reader, so the story
+ * jumped under them. The page's scripts are held here until the reader has scrolled.
+ */
+
+async function holdScripts(page: Page) {
+  let release = () => {};
+  const scripts = new Promise<void>((r) => (release = r));
+  await page.route(/\/_next\/static\/chunks\/.*\.js$/, async (route) => {
+    await scripts;
+    await route.continue();
+  });
+  // The head's layout flags run before the first paint (inline). Where the build still queues them for Next's
+  // runtime, inline them here, so the only change left at hydration is the chapters' shape.
+  await page.route(
+    (url) => url.pathname === "/",
+    async (route) => {
+      const res = await route.fetch();
+      let html = await res.text();
+      const queued = html.match(/\(self\.__next_s=self\.__next_s\|\|\[\]\)\.push\(\[0,\{"children":"(var d=document\.documentElement;.*?)","id":"js-flag"\}\]\)/);
+      if (queued) html = html.replace("<head>", `<head><script>${JSON.parse(`"${queued[1]}"`)}</script>`);
+      await route.fulfill({ response: res, body: html });
+    },
+  );
+  return () => release();
+}
+
+/** What is at the middle of the screen: its chapter, and the part of it (the picture, a step, the eyebrow). */
+const middle = (page: Page) =>
+  page.evaluate(() => {
+    const el = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+    // (Steps take no pointer: over one, the point finds their list.)
+    const part = el?.closest(".scene-visual, .scene-static-figure") ? "picture" : el?.closest(".scene-steps, .scene-static-steps") ? "steps" : el?.closest(".eyebrow") ? "eyebrow" : el?.tagName;
+    return `${el?.closest("section[id]")?.id ?? "-"} ${part}`;
+  });
+
+const CASES = [
+  // The reader stops with a chapter's picture in the middle of the screen, or with a chapter's first step there.
+  { name: "a picture", at: "#dht .scene-visual", part: "dht picture", title: null },
+  { name: "a step", at: "#alive .scene-step h3", part: "alive steps", title: "#alive :is(.scene-step, .scene-static-step) h3" },
+];
+
+for (const c of CASES) {
+  test(`a reader who scrolled to ${c.name} before hydration sees the same part of the story after it`, async ({ page }) => {
+    const release = await holdScripts(page);
+    await page.goto("/", { waitUntil: "commit" });
+    await page.waitForFunction(() => performance.getEntriesByName("first-contentful-paint").length > 0 && !!document.getElementById("open"));
+    await expect(page.locator("#invite.scene--phone")).toHaveCount(0);
+
+    await page.evaluate((sel) => {
+      const r = document.querySelector(sel)!.getBoundingClientRect();
+      scrollTo({ top: scrollY + r.top + r.height / 2 - innerHeight / 2, behavior: "instant" });
+    }, c.at);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    expect(await middle(page)).toBe(c.part);
+    const titleTop = () => page.evaluate((sel) => (sel ? Math.round(document.querySelector(sel)!.getBoundingClientRect().top) : 0), c.title);
+    const before = await titleTop();
+
+    release();
+    await expect(page.locator("#invite.scene--phone")).toHaveCount(1);
+    await page.waitForLoadState("load");
+    await page.waitForTimeout(1000);
+
+    expect(await middle(page)).toBe(c.part);
+    // The step's title the reader was on stays where it was (the phone draws it a little larger).
+    expect(Math.abs((await titleTop()) - before)).toBeLessThanOrEqual(24);
+  });
+}
