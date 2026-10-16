@@ -70,8 +70,12 @@ export function list(params: Params, name: string): string[] {
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) throw new CliError("bad_request", `${name} must be a list of strings`);
   return value as string[];
 }
+/**
+ * One of `values`; `fallback` when it was left out. Given empty (an unset variable in a script: `wallet remove ""`), it
+ * is refused like any other wrong choice, never read as left out: that acted on the default (the Cashu wallet).
+ */
 export function oneOf<T extends string>(params: Params, name: string, values: readonly T[], fallback: T): T {
-  const value = str(params, name) ?? fallback;
+  const value = params[name] === "" ? "" : str(params, name) ?? fallback;
   if (!values.includes(value as T)) throw new CliError("bad_request", `${name} must be one of ${values.join(", ")}`);
   return value as T;
 }
