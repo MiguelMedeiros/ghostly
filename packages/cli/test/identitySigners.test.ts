@@ -56,4 +56,13 @@ describe("identity signers on Node", () => {
     });
     expect(node.beginIdentityProof).not.toHaveBeenCalled();
   });
+
+  // It said "subject is required", the API's parameter, to `ghostly identity add domain` (the usage shows [subject]).
+  it("asks for a missing subject in the provider's words, and where it goes", async () => {
+    const { ctx, node } = fake();
+    await expect(callApi(ctx, "identity.add", { provider: "domain" })).rejects.toMatchObject({
+      code: "bad_request", message: "Domain takes a subject, its domain (example.com): ghostly identity add domain <subject>",
+    });
+    expect(node.beginIdentityProof).not.toHaveBeenCalled();
+  });
 });

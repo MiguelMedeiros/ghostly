@@ -119,7 +119,13 @@ export const IDENTITY_METHODS: Record<string, Method> = {
       return { done: true, proof: proofJson(proof) };
     }
     if (signer.kind === "redirect") throw new CliError("unavailable", `${signer.label} needs a browser window: make this proof in the app`);
-    const { draftId, binding } = await begin(ctx, p, str(params, "subject", true), params);
+    const subject = str(params, "subject");
+    // In the provider's words and where it goes: `identity add <provider> [subject]` shows it optional (in-app signers bring theirs).
+    if (!subject) {
+      const what = p.subject ? `, its ${p.subject.label.toLowerCase()}${p.subject.placeholder ? ` (${p.subject.placeholder})` : ""}` : "";
+      throw new CliError("bad_request", `${p.label} takes a subject${what}: ghostly identity add ${p.id} <subject>`);
+    }
+    const { draftId, binding } = await begin(ctx, p, subject, params);
     const statement = identityStatement(binding);
     drafts.set(draftId, { draftId, provider: p.id, signer: signer.id, binding, createdAt: Date.now() });
     return { done: false, draft: draftId, provider: p.id, signer: signer.id, statement: statement.text, instructions: instructionsJson(signer.instructions(statement)), expiresInSeconds: DRAFT_TTL_MS / 1000 };
