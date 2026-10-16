@@ -21,7 +21,16 @@ export function findMember(group: GroupView, ref: string) {
   const byKey = others.filter((m) => m.key === ref);
   const matches = byKey.length ? byKey : others.filter((m) => m.key.startsWith(ref) || m.nick?.trim().toLowerCase() === lower);
   if (matches.length === 1) return matches[0];
-  throw new CliError(matches.length ? "bad_request" : "not_found", matches.length ? `${JSON.stringify(ref)} names more than one member` : `No member ${JSON.stringify(ref)} in ${group.name}`);
+  throw matches.length ? new CliError("bad_request", `${JSON.stringify(ref)} names more than one member`) : noMember(group, ref);
+}
+
+/**
+ * A ref no other member answers to. When it is this profile's own key (or a prefix of it), it says so: "No member"
+ * read as if this profile were not in the group.
+ */
+export function noMember(group: GroupView, ref: string): CliError {
+  if (group.members.some((m) => m.me && m.key.startsWith(ref))) return new CliError("bad_request", `${JSON.stringify(ref)} is you: name another member of ${group.name}`);
+  return new CliError("not_found", `No member ${JSON.stringify(ref)} in ${group.name}`);
 }
 
 /**
