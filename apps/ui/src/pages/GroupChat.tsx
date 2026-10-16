@@ -30,7 +30,7 @@ import { GroupInvitationCard } from "../components/GroupInvitation";
 import { authorName, forgetGroupLocal, groupStatusText, markGroupRead, memberName, memberPhoto } from "../lib/groups";
 import { clearChatNotification } from "../lib/notifications";
 import { useWindowAway, windowAway } from "../lib/windowAway";
-import { authorsOf, type MessageAuthor } from "../lib/senderRuns";
+import { authorsMemo, type MessageAuthor } from "../lib/senderRuns";
 import { MemberColorsProvider } from "../contexts/MemberColorsContext";
 import { chatNamesForPeer } from "../lib/storage";
 import { useContactFaces, withContactFaces } from "../components/identities/contactFace";
@@ -376,6 +376,8 @@ export function GroupChat() {
   // A bot's routines in a row: one row, opened on a tap (WISP 405 · Status Cards), whichever of its rows are in the page.
   const stacks = useMemo(() => routineStacks(messages, m => m), [messages]);
   const stackHeads = useMemo(() => new Map([...stacks.values()].flatMap(run => run.slice(1).map(m => [m.id, run[0].id] as const))), [stacks]);
+  // Who wrote each message, over the whole history: worked out again only when what it reads changes (`authorsMemo`).
+  const [authorsFor] = useState(authorsMemo);
   // A long group has a window of its rows in the page, never the whole history (useRowWindow, see Chat.tsx).
   const rowIds = useMemo(() => messages.map(m => m.id), [messages]);
   const rowWindow = useRowWindow(rowIds, groupId ?? "", { opensOn: leftOn(groupId ?? ""), heads: stackHeads });
@@ -471,8 +473,7 @@ export function GroupChat() {
     .map(m => noteIdOf(state, m.paymentId!)));
   // Who wrote each member's message (their colour, their picture once per run): see `authorsOf`.
   // A bot's routines folded into one row count as one message of the run (the rest are under it, drawn when it opens).
-  const folded = stackHeads;
-  const authors = authorsOf(messages.filter(m => !folded.has(m.id)), group, ownNotes, key => memberPhoto(group, { key, me: false }, state.links, faceOf));
+  const authors = authorsFor(messages, stackHeads, group, ownNotes, key => memberPhoto(group, { key, me: false }, state.links, faceOf));
   /** A member's face in the Tasks panel, as their messages show it (`authorsOf`); none for my own cards ("me"). */
   const memberFace = (key: string): MemberFaceOf | undefined => key === "me" ? undefined : {
     key, name: group.members.find(x => x.key === key)?.nick || group.formerNames?.[key] || "",
