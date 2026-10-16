@@ -216,7 +216,8 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                 {pasted && (
                   <p className="text-text-primary text-sm" data-testid="wallet-pay-preview">
                     <span className="text-accent">⚡</span> <b>{pasted.amountSat === null ? t("wallet.lightning.anyAmount") : sats(pasted.amountSat)}</b>
-                    {pasted.description && <span className="text-text-muted"> · {pasted.description}</span>}
+                    {/* A memo is text someone else wrote, in any script: laid out by its own direction, as the chat's invoice card does. */}
+                    {pasted.description && <span className="text-text-muted"> · <bdi>{pasted.description}</bdi></span>}
                     {pasted.expiresAt * 1000 < Date.now() && <span className="text-danger"> · {t("wallet.lightning.expired")}</span>}
                   </p>
                 )}
