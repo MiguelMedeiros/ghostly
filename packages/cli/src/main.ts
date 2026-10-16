@@ -469,7 +469,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
     print({ restarted: true, stopped, before, version: VERSION, ...started });
     return;
   }
-  if (sub) throw new CliError("usage", "ghostly daemon [--detach] [--timeout s] | daemon status | daemon stop | daemon restart");
+  if (sub) throw unknownCommand("daemon", sub);
   const startFor = seconds(parsed, 60);
   if (!parsed.options.detach) { await runDaemon(g); return; }
   print(await startDetached(g, startFor));
