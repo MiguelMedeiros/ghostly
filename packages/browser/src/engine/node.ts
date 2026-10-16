@@ -1173,6 +1173,17 @@ export class GhostlyNode implements EngineImplementation {
       const params = decodeInviteCode(code);
       return !params || inviteOwnership(params, [...this.links.values()].map((l) => l.stored)).kind !== "new";
     },
+    // The chat is the requester's invite, joined; its name and first message are the ones the request carried.
+    // Never a chat this profile has already: checked again here, since one may have been joined since the request came.
+    accept: async (request) => {
+      const params = decodeInviteCode(request.invite);
+      if (!params || inviteOwnership(params, [...this.links.values()].map((l) => l.stored)).kind !== "new") throw new Error("This request's invite is for a chat you already have.");
+      const { linkId } = await this.joinLink({ inviteCode: request.invite });
+      this.renameLink({ linkId, label: request.name });
+      // Dated by the request, never later than it came: the requester chose that date.
+      await this.storeMessage({ linkId, id: `peer_contact_${request.key.slice(0, 32)}`, text: request.text, sender: "peer", timestamp: Math.min(request.issued, request.receivedAt), via: "pkarr" });
+      return linkId;
+    },
   });
 
   /** The Nostr social layer (profile, follows, notes, publication) on top of verified Nostr proofs. */
@@ -2641,6 +2652,8 @@ export class GhostlyNode implements EngineImplementation {
   turnOffContactLink(): Promise<void> { return this.contactLinks.turnOff(); }
   /** The contact link was shown or copied, or Requests opened: look for requests now and often for a while. */
   contactLinkShown(): void { this.contactLinks.shown(); }
+  acceptContactRequest({ id }: { id: string }): Promise<{ linkId: string }> { return this.contactLinks.accept(id); }
+  declineContactRequest({ id }: { id: string }): Promise<void> { return this.contactLinks.decline(id); }
   lookupIdentityDisplay(params: { linkId: string; id: string }): Promise<void> {
     // A Nostr profile comes through the social layer, from the relays the person configured.
     const r = this.links.get(params.linkId)?.stored.identities?.received.find(x => x.id === params.id);
