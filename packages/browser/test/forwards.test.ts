@@ -298,6 +298,25 @@ describe("a forward a group took part of", { timeout: 60_000 }, () => {
   });
 });
 
+describe("a group I was removed from", { timeout: 60_000 }, () => {
+  // Its page keeps the history and offers Forward on it: the engine refused it whole with "Chat not found", which the
+  // dialog pinned on the chosen chat's name. The messages are read from this device; membership is for sending to one.
+  it.each(["mesh", "community"] as const)("its kept %s history is forwarded, while sending to it is still refused", async (profile) => {
+    const t = await setup();
+    const { groupId } = await t.node.createGroup({ name: "Plaza", profile });
+    await db.addMessage({ linkId: `group:${groupId}`, id: "peer_old", text: "the address is Rua 7", sender: "peer", member: "m", timestamp: Date.now(), via: "datalink" });
+    const groups = (t.node as unknown as { groups: { session(id: string): unknown; communities: { session(id: string): unknown } } }).groups;
+    const session = (profile === "mesh" ? groups.session(groupId) : groups.communities.session(groupId)) as { out(reason: string, text: string): void };
+    session.out("removed", "You were removed from this group");
+    expect(t.node.getState().groups.find(g => g.id === groupId)?.status).toBe("removed");
+    const { results } = await t.node.forwardMessages({ linkId: `group:${groupId}`, messageIds: ["peer_old"], to: [`group:${groupId}`, t.b.id] });
+    expect(results[0]).toEqual({ to: `group:${groupId}`, messageIds: [], sent: [], error: "You are not in this group" });
+    expect(results[1]).toMatchObject({ to: t.b.id, error: null, sent: ["peer_old"] });
+    await vi.waitFor(() => expect(t.b.got).toMatchObject([{ text: "the address is Rua 7", forwarded: 1 }]));
+    await expect(t.node.forwardMessages({ linkId: "group:not-here", messageIds: ["peer_old"], to: [t.b.id] })).rejects.toThrow("Chat not found");
+  });
+});
+
 describe("why a forward failed", () => {
   it("says no room however the storage put it, and is never empty", () => {
     expect(forwardError(new DOMException("", "QuotaExceededError"))).toBe("Not enough space on this device (QuotaExceededError)");
