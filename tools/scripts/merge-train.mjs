@@ -493,10 +493,13 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const relabeled = vouchedAt(events, p.labels, null);
     if (p.sticky && relabeled && Date.parse(p.sticky.updated_at ?? p.sticky.created_at) < Date.parse(relabeled)) [p.stale, p.sticky] = [p.sticky, undefined];
     p.alone = aloneMark(p.sticky);
-    // No position comment records the queued head yet: tell it by time, the head's first CI against the label.
+    // No position comment records the queued head yet: tell it by time, when the branch became this head against the
+    // label. A force push the pull request logged counts too, whatever head it left (one put back reads as old).
     if (!p.sticky && inLine(p.labels)) {
       p.labeledAt = vouchedAt(events, p.labels, null);
-      p.pushedAt = await gh.headPushedAt(p.sha);
+      p.pushedAt = await gh.headPushedAt(p.sha, p.branch);
+      const forced = events.filter((e) => e.event === "head_ref_force_pushed").map((e) => e.created_at).sort().at(-1);
+      if (p.pushedAt && forced && Date.parse(forced) > Date.parse(p.pushedAt)) p.pushedAt = forced;
     }
   }
   const byNumber = new Map(queued.map((p) => [p.number, p]));
@@ -1008,6 +1011,7 @@ export class BudgetLow extends Error {}
  */
 export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promise((r) => setTimeout(r, ms)), fetchImpl = fetch, timeout = REQUEST_TIMEOUT, signal, warn = (m) => console.log(`::warning::${m}`) } = {}) {
   let warnedChecks = false;
+  let warnedActivity = false;
   let cancelDenied = null;
   const backoff = (attempt, after) => wait(Math.min(60, Number(after) || 2 ** attempt * 5) * 1000);
   const api = async (method, path, body) => {
@@ -1187,8 +1191,25 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
       }
       return { cancelled };
     },
-    /** When a commit was pushed: its earliest check suite (GitHub makes them on the push), or null before any. */
-    headPushedAt: async (sha) => (await must("GET", `/commits/${sha}/check-suites?per_page=100`)).check_suites.map((s) => s.created_at).sort()[0] ?? null,
+    /**
+     * When a branch became a commit: the later of the commit's earliest check suite (GitHub makes them on the push) and
+     * the branch's latest push to it in the repository's activity, or null before any suite. A suite belongs to the
+     * commit, not the branch: an earlier head put back, or a commit pushed on another branch first, has one from before.
+     * Activity this token may not read leaves the suite's time, with a warning once.
+     */
+    headPushedAt: async (sha, branch) => {
+      const first = (await must("GET", `/commits/${sha}/check-suites?per_page=100`)).check_suites.map((s) => s.created_at).sort()[0] ?? null;
+      if (!first || !branch) return first;
+      const r = await api("GET", `/activity?ref=${encodeURIComponent(`refs/heads/${branch}`)}&per_page=100`);
+      if (r.status === 403 || r.status === 404) {
+        if (!warnedActivity) warn(`This token may not read the repository's activity (${r.data?.message ?? `HTTP ${r.status}`}), so a head's push is read from its first check suite only. Give the queue app "Contents: read".`);
+        warnedActivity = true;
+        return first;
+      }
+      if (!r.ok) throw new Error(`GET activity of ${branch}: HTTP ${r.status} ${r.data?.message ?? ""}`);
+      const moved = (Array.isArray(r.data) ? r.data : []).filter((a) => a.after === sha).map((a) => a.timestamp).sort((a, b) => Date.parse(a) - Date.parse(b)).at(-1);
+      return moved && Date.parse(moved) > Date.parse(first) ? moved : first;
+    },
     comments: (n) => all(`/issues/${n}/comments`),
     branchSha: async (base) => (await must("GET", `/git/ref/heads/${base}`)).object.sha,
     comment: (n, body) => must("POST", `/issues/${n}/comments`, { body }),
