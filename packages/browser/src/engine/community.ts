@@ -2,7 +2,7 @@ import {
   COMMUNITY_LIMITS, COMMUNITY_TOPOLOGY, CommunitySession, GROUP_READ_NOTE_COMMUNITY, KNOCK_TTL_MS, MAX_KNOCKS, MEMBER_KEY,
   beaconKeys, beaconRecords, createIdentity, decodeCommunityLink, doorHubs, groupName, entryParams, publicKeyFromZ32, encodeCommunityLink, freshHubs, identityFromSeedB64, knockIdentity, knockRecords, lobbyKeys, lobbyRecords, mergeBeacon, newerHead, readBeaconHead, type CommunityHead,
   mentionsMember, receivedTimestamp, mergeKnocks, mergeLobby, pickHubs, rankHubs, readBeacon, readKnocks, readLobby, rosterHas, shouldBeHub,
-  GROUP_HAVE_FRAME, WATCH_PEER_MS,
+  GROUP_HAVE_FRAME, WATCH_PEER_MS, COMMUNITY_PIN_FRAME,
   type CommunityFrame, type CommunityMessageFrame, type GroupEdit, type GroupFileMeta, type GroupMention, type WireReply, type StatusCard, type CommunityState, type GroupEntryLink, type GroupMetaChange, type Hub, type Knock, type Roster,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
@@ -1826,6 +1826,9 @@ export class Communities {
       // Outside the session's queue, in order: what they carry (a payment) may send through the session again.
       // Who holds which files (WISP 503) is the file desk's; anything else the engine's.
       app: m => this.deliver(id, () => m.frame.t === GROUP_HAVE_FRAME ? this.files?.communityApp(id, m.sender, m.frame) : this.host.communityApp?.(id, m.sender, m.frame)),
+      // The admin's pin is the group's state, said once: kept past the store and handed to whoever was away however
+      // much was said since, an unpin too (WISP 903, agents#1095). Only the admin's: no one else's pin is taken.
+      lasting: m => m.frame.t === COMMUNITY_PIN_FRAME && m.sender === session.admin ? COMMUNITY_PIN_FRAME : undefined,
       pair: m => this.deliver(id, () => this.host.communityPair?.(id, m.sender, m.payload)),
       changed: () => { void this.membershipChanged(id); },
       metaChanged: (by, change, at) => {

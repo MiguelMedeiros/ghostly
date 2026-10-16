@@ -202,6 +202,8 @@ Only the community's admin pins a message, or unpins it ([400](400-chat.md#pinne
 
 A member takes it only when the payload's author is the admin at that moment and `n` is at most 10 minutes past its clock ([400](400-chat.md#pinned-message)); a pin from anyone else is dropped. Apps from before drop the frame as they drop reactions.
 
+**Kept past the store (revision 2026-10-16).** A pin is said once, and the store keeps the last 256 frames: a member away while more than that went by was handed neither the pin nor an unpin, and kept the bar it had for good. So every member keeps the newest admin `pin` frame it took (or sent) beside the store, as it came, signature and all, and when it answers a `group-sync` hands it, before the stored frames and under the same checks (the other's high-water marks, the epochs it was in), once the store no longer holds it. Nothing changes on the wire: it is the same frame, taken and deduplicated as before. Apps from before keep no such frame and hand only what their store holds.
+
 ## Edits
 
 The author of a text can edit it ([400](400-chat.md#edits), revision 0.9) with an application frame of the group, sealed and signed like any payload, so every member (and every hub) carries it and a member who was away gets it with the catch-up:

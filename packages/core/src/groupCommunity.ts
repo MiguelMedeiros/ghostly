@@ -57,6 +57,11 @@ export const COMMUNITY_LIMITS = {
   appBytes: 8 * 1024,
   /** Frames from everyone kept for whoever was away. */
   store: 256,
+  /**
+   * Application frames that say state rather than news (the admin's pin): the newest of each kind, kept past the
+   * store (`CommunitySessionHooks.lasting`). A few kinds at most.
+   */
+  lasting: 8,
   storeBytes: 1024 * 1024,
   /** Epoch secrets kept (by commit), main branch and losing ones together. */
   secrets: 96,
@@ -320,6 +325,11 @@ export interface CommunityState {
   /** Recent frames from everyone (mine included), oldest first. */
   store: CommunityMessageFrame[];
   /**
+   * Kind → the newest application frame of that kind that says the group's state (`CommunitySessionHooks.lasting`),
+   * kept when the store rolls past it, and handed with a catch-up to a member who lacks it. Absent in older states.
+   */
+  lasting?: Record<string, CommunityMessageFrame>;
+  /**
    * Frames of mine no edge took when I said them (none was up), as `e:h16:n`, oldest first: the first member I reach
    * may have joined after I sealed them, and carries them all the same (see `receiveSync`). Absent in older states.
    */
@@ -358,6 +368,13 @@ export interface CommunitySessionHooks {
   /** To one member, wherever they are: over their edge if I have it, else to the hubs with `to`. */
   addressed(to: string, frame: CommunitySecretFrame | CommunityEntryFrame): void;
   message(message: CommunityIncomingMessage): Promise<void> | void;
+  /**
+   * Whether an application frame (mine or a member's) says the group's state rather than news, and of which kind: the
+   * newest frame of each kind is kept past the store and handed with every catch-up to a member who lacks it, however
+   * much was said since (a pin, which travels once: a member away past 256 frames never got it, agents#1095).
+   * Undefined for anything else. Asked once the frame is read, before the `app` hook.
+   */
+  lasting?(message: CommunityIncomingApp): string | undefined;
   /** An application frame for the group (see `sendApp`). */
   app?(message: CommunityIncomingApp): Promise<void> | void;
   /** A payload another member sealed to me (see `sendPair`). Payloads to others are carried, never opened. */
@@ -1201,6 +1218,7 @@ export class CommunitySession {
     this.state.statusReason = reason;
     this.state.secrets = {};
     this.state.store = [];
+    delete this.state.lasting;
     this.state.entry = { key: this.state.entry.key, seedB64: "" };
     this.waiting = []; this.waitingBytes = 0; this.pendingCommits.clear(); this.pendingSecrets.clear();
   }
@@ -1245,9 +1263,26 @@ export class CommunitySession {
       if (!isObject(frame) || utf8Encode(JSON.stringify(frame)).length > COMMUNITY_LIMITS.appBytes) return { error: "Too large for the group" };
       const sent = await this.sendPayload(() => ({ x: frame }), nick, now);
       if ("error" in sent) return sent;
+      this.keepLasting({ id: sent.id, sender: this.myKey, epoch: sent.frame.e, timestamp: sent.frame.ts, frame }, sent.frame);
       await this.say(sent.frame);
       return { id: sent.id };
     });
+  }
+
+  /**
+   * An application frame that says the group's state (`CommunitySessionHooks.lasting`) in place of the one of its
+   * kind kept now, unless that one is newer (by the author's time, then the frame's identity, so every member keeps
+   * the same one).
+   */
+  private keepLasting(message: CommunityIncomingApp, frame: CommunityMessageFrame): void {
+    const kind = this.hooks.lasting?.(message);
+    if (typeof kind !== "string" || !kind) return;
+    const kept = { ...this.state.lasting };
+    const now = kept[kind];
+    if (now && (now.ts > frame.ts || (now.ts === frame.ts && frameKey(now) >= frameKey(frame)))) return;
+    if (!now && Object.keys(kept).length >= COMMUNITY_LIMITS.lasting) return;
+    kept[kind] = frame;
+    this.state.lasting = kept;
   }
 
   /**
@@ -1533,7 +1568,11 @@ export class CommunitySession {
       const file = parsed.fl === undefined ? undefined : readGroupFileMeta(parsed.fl) ?? undefined;
       await this.hooks.message({ id, sender: raw.s, epoch: raw.e, seq: raw.n, timestamp: raw.ts, text, ...(mentions.length ? { mentions } : {}), ...(reply ? { reply } : {}), ...(forwarded ? { forwarded } : {}), ...(card ? { card } : {}), ...(file ? { file } : {}) });
     }
-    else if (isObject(parsed.x)) await this.hooks.app?.({ id, sender: raw.s, epoch: raw.e, timestamp: raw.ts, frame: parsed.x });
+    else if (isObject(parsed.x)) {
+      const app = { id, sender: raw.s, epoch: raw.e, timestamp: raw.ts, frame: parsed.x };
+      this.keepLasting(app, raw);
+      await this.hooks.app?.(app);
+    }
     else {
       // Someone else's is carried and kept for them, never opened; mine opens only if its sender sealed it to me here.
       const box = parsed.p as Record<string, unknown>;
@@ -1670,7 +1709,11 @@ export class CommunitySession {
     // statement they missed before the first message written after it: they place its line where it comes, as they do
     // each message.
     const metas = this.metaFor(from, frame.mt);
-    for (const stored of this.state.store) {
+    // The group's state said once (the admin's pin) and since rolled out of the store: before the store's frames, as
+    // older than all of them, under the same checks (agents#1095).
+    const inStore = new Set(this.state.store.map(frameKey));
+    const lasting = Object.values(this.state.lasting ?? {}).filter(f => !inStore.has(frameKey(f))).sort((a, b) => a.ts - b.ts);
+    for (const stored of [...lasting, ...this.state.store]) {
       if (stored.s === from) continue;
       // What they have first: the checks below hash commits for every stored frame, and a member up to date has them
       // all; a hub answered each 30 s sync in ~4 ms (2026-10-08).
