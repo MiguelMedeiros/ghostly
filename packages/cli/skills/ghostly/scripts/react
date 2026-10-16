@@ -1,0 +1,24 @@
+#!/bin/sh
+# react: react to one of your owner's messages with an emoji (it replaces your earlier one on that message).
+#
+#   react <messageId> [emoji]           default 👀: "seen, an answer is coming"
+#   react <messageId> <emoji> --remove  take your reaction back
+#
+# React 👀 as soon as a turn arrives. When the whole answer is "ok" or "thanks", swap 👀 for a fitting emoji rather
+# than sending a message. <messageId> is the turn's `messageId`. Needs GHOSTLY_OWNER_CHAT.
+set -eu
+owner=${GHOSTLY_OWNER_CHAT:-}
+[ -n "$owner" ] || { echo "react: set GHOSTLY_OWNER_CHAT to your owner's chat id" >&2; exit 2; }
+case "${1:-}" in -h|--help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;; esac
+
+remove=; id=; emoji=
+for arg in "$@"; do
+  case "$arg" in
+    --remove) remove=--remove ;;
+    -*) echo "react: unknown option $arg" >&2; exit 2 ;;
+    *) if [ -z "$id" ]; then id=$arg; elif [ -z "$emoji" ]; then emoji=$arg; else echo "react: too many arguments" >&2; exit 2; fi ;;
+  esac
+done
+[ -n "$id" ] || { echo 'react: usage: react <messageId> [emoji] [--remove]' >&2; exit 2; }
+case "$id" in agent.turn:*) id=${id##*:} ;; esac
+ghostly react "$owner" "$id" "${emoji:-👀}" $remove >/dev/null
