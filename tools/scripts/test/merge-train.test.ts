@@ -75,10 +75,12 @@ function fakeRepo() {
     Object.assign(p, { open: false, merged: true });
     return { ok: true };
   };
+  /** As the REST layer reads a list: its first 1000, oldest first, marked `truncated` when they fill every page. */
+  const read = <T,>(list: T[]) => (list.length >= 1000 ? Object.assign(list.slice(0, 1000), { truncated: true }) : list);
   const gh = {
     pulls: async (base: string) => [...pulls.values()].filter((p) => p.open && p.base === base).map((p) => ({ ...p, labels: [...p.labels] })),
     mergedPulls: async (base: string) => [...pulls.values()].filter((p) => p.merged && p.base === base).map((p) => ({ ...p, labels: [...p.labels] })),
-    events: async (n: number) => events.get(n) ?? [],
+    events: async (n: number) => read(events.get(n) ?? []),
     headPulls: async (branch: string) => [...pulls.values()].filter((p) => p.branch === branch).map((p) => ({ ...p, labels: [...p.labels] })),
     /** The newest run on the commit, then the ones before it (`earlier`): the first the train counts. */
     ciJobs: async (sha: string, counts: (jobs: object[], run: object) => boolean | Promise<boolean> = () => true) => {
@@ -95,7 +97,7 @@ function fakeRepo() {
       return { cancelled: ids };
     },
     headPushedAt: async (sha: string) => (pushed.has(sha) ? pushed.get(sha) : "2026-10-01T00:00:00Z"),
-    comments: async (n: number) => comments.get(n) ?? [],
+    comments: async (n: number) => read(comments.get(n) ?? []),
     branchSha: async (base: string) => tips[base],
     behindBy: async (tip: string, head: string) => (sitsOn.get(head) === tip ? 0 : 3),
     comment: async (n: number, body: string) => {
@@ -1582,6 +1584,79 @@ describe("one pull request alone", () => {
     await repo.run();
     expect(repo.landed).toEqual([]); // the planted mark would say "rebased onto dev0, green": the train rebases it itself
     expect(repo.pushes).toHaveLength(1);
+  });
+});
+
+describe("a pull request with more comments or events than the train reads", () => {
+  const strangers = (n: number, from = 5000) => Array.from({ length: n }, (_, i) => ({ id: from + i, body: "+1", user: { login: "stranger" } }));
+  const trainSaid = (repo: ReturnType<typeof fakeRepo>, n: number) => (repo.comments.get(n) ?? []).filter((c) => c.user?.login === "train");
+
+  it("holds one whose own position comment could be past the first 1000 comments: no rebase, no new comment every run", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { behind: true });
+    repo.comments.set(11, strangers(1000));
+    for (let i = 0; i < 3; i++) {
+      const r = await repo.run();
+      expect(r).toMatchObject({ merged: [], dropped: [], opened: [], inFlight: null });
+      expect(r.log.join("\n")).toMatch(/#11 waits: it has more comments than the train reads \(1000\)/);
+    }
+    expect(repo.pushes).toEqual([]); // never rebased, so its own push never reads as one after `queue`
+    expect(trainSaid(repo, 11)).toEqual([]);
+    expect(repo.pulls.get(11)!.labels).toEqual([LABEL.queue]);
+
+    // Under the cap again (a maintainer deleted some): it goes on, alone, and its position comment is found next run.
+    repo.comments.set(11, strangers(990));
+    expect((await repo.run()).inFlight).toBe(11);
+    repo.settle();
+    expect((await repo.run()).merged).toEqual([11]);
+  });
+
+  it("does not let other people's comments hide a later push: the reviewed head on record still drops it", async () => {
+    const repo = fakeRepo();
+    repo.add(11, { ci: running }); // its position comment records h11
+    await repo.run();
+    // 1001 comments: the train's own is the 1000th, the last one read.
+    repo.comments.set(11, [...strangers(999), ...repo.comments.get(11)!, ...strangers(1, 9000)]);
+    repo.pulls.get(11)!.sha = "x11"; // an older head, green before the review, pushed back
+    repo.runs.set("x11", green);
+    repo.pushed.set("x11", "2026-10-07T00:00:00Z");
+    const r = await repo.run();
+    expect(r.dropped).toEqual([11]);
+    expect(repo.landed).toEqual([]);
+  });
+
+  it("holds one whose events go past what it reads, and counts no green run on it: a base change may be missing", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.events.get(11)!.push(...Array.from({ length: 999 }, () => ({ event: "mentioned", created_at: "2026-10-08T00:10:00Z" })));
+    repo.events.get(11)!.push({ event: "base_ref_changed", created_at: "2026-10-08T00:20:00Z" }); // past the cap
+    repo.kinds.set("h11", { event: "pull_request", head_branch: "fix-11" });
+    const r = await repo.run();
+    expect(r).toMatchObject({ merged: [], opened: [], dropped: [] });
+    expect(r.log.join("\n")).toMatch(/#11: it has more events than the train reads, so a base change may be missing/);
+    expect(r.log.join("\n")).toMatch(/#11 waits: it has more events than the train reads/);
+    expect(repo.landed).toEqual([]);
+    expect(trainSaid(repo, 11)).toEqual([]);
+  });
+
+  it("says so when a list fills every page it reads (REST)", async () => {
+    const page = (n: number, from: number) => Array.from({ length: n }, (_, i) => ({ id: from + i }));
+    const sent: string[] = [];
+    const lists: Record<number, number> = { 1: 1000, 2: 950 };
+    const fetchImpl = async (url: string) => {
+      const [, n, p] = url.match(/issues\/(\d+)\/comments\?per_page=100&page=(\d+)/)!.map(Number);
+      sent.push(url);
+      const left = Math.max(0, lists[n] - (p - 1) * 100);
+      return { status: 200, ok: true, headers: new Headers({ "x-ratelimit-remaining": "4000" }), text: async () => JSON.stringify(page(Math.min(100, left), (p - 1) * 100)) };
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    const full = await gh.comments(1);
+    expect(full).toHaveLength(1000);
+    expect(full.truncated).toBe(true);
+    const short = await gh.comments(2);
+    expect(short).toHaveLength(950);
+    expect(short.truncated).toBeUndefined();
+    expect(sent).toHaveLength(20);
   });
 });
 
