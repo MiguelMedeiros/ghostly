@@ -24,13 +24,14 @@ const BITS = 16;
 /** An owner on an in-memory Pkarr that requesters write to with the core's own records. */
 function world() {
   const pkarr = new Map<string, GhostRecord[]>();
-  const state = { reads: 0, own: new Set<string>() };
+  const state = { reads: 0, publishes: 0, own: new Set<string>(), accepted: [] as { key: string; invite: string; name: string; text: string }[] };
   const host: ContactLinkHost = {
     online: () => true,
     emit: () => {},
-    publish: async (identity, records) => { pkarr.set(identity.pubKeyZ32, records); },
+    publish: async (identity, records) => { state.publishes++; pkarr.set(identity.pubKeyZ32, records); },
     resolve: async key => { state.reads++; return pkarr.get(key) ?? null; },
     ownInvite: code => state.own.has(code),
+    accept: async request => { state.accepted.push({ key: request.key, invite: request.invite, name: request.name, text: request.text }); return `chat-${state.accepted.length}`; },
   };
   const links = new ContactLinks(host);
   /** A requester asks through the link: its request under its asker key, its knock in its slot. */
@@ -140,5 +141,52 @@ describe("a contact link's requests, the owner's side (WISP 8xx)", () => {
     await vi.advanceTimersByTimeAsync(POLL_SHOWN_MS * 2);
     expect(w.state.reads).toBe(settled);
     w.links.stop();
+  });
+});
+
+describe("accept and decline (WISP 8xx)", () => {
+  it("accept joins the request's invite as a chat with its name and text, and the key is never read again", async () => {
+    const w = world();
+    const linkKey = await linkOf(w);
+    const { asker, invite } = w.ask(linkKey, { name: "Kevin", text: "Hello!" });
+    await w.links.poll();
+    expect(await w.links.accept(asker.pubKeyZ32)).toEqual({ linkId: "chat-1" });
+    expect(w.state.accepted).toEqual([{ key: asker.pubKeyZ32, invite, name: "Kevin", text: "Hello!" }]);
+    expect(w.links.requests()).toEqual([]);
+    expect(w.links.view()?.waiting).toBe(0);
+    const reads = w.state.reads;
+    await w.links.poll();
+    expect(w.state.reads - reads).toBe(4);
+    expect(w.links.requests()).toEqual([]);
+  });
+
+  it("decline says nothing: no publish, seen unchanged, and the key is never read again", async () => {
+    const w = world();
+    const linkKey = await linkOf(w);
+    const { asker } = w.ask(linkKey);
+    await w.links.poll();
+    const record = w.pkarr.get(linkKey);
+    const publishes = w.state.publishes;
+    await w.links.decline(asker.pubKeyZ32);
+    expect(w.state.publishes).toBe(publishes);
+    expect(w.pkarr.get(linkKey)).toBe(record);
+    expect(readLinkRecord(record!)?.seen).toEqual([seenEntry(linkKey, asker.pubKeyZ32)]);
+    expect(w.links.requests()).toEqual([]);
+    expect(JSON.stringify(await wrap((await store(STORES.settings, "readonly")).get(CONTACT_LINKS_KEY)))).not.toContain("Hello from your site");
+    const reads = w.state.reads;
+    await w.links.poll();
+    expect(w.state.reads - reads).toBe(4);
+    expect(w.state.accepted).toEqual([]);
+  });
+
+  it("an expired or unknown request cannot be accepted", async () => {
+    const w = world();
+    const linkKey = await linkOf(w);
+    const { asker } = w.ask(linkKey, { expires: NOW + 60_000 });
+    await w.links.poll();
+    vi.setSystemTime(NOW + 60_000);
+    await expect(w.links.accept(asker.pubKeyZ32)).rejects.toThrow("This request expired");
+    await expect(w.links.accept(createIdentity().pubKeyZ32)).rejects.toThrow("This request is no longer waiting");
+    expect(w.state.accepted).toEqual([]);
   });
 });
