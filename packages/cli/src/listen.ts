@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { CONTACT_KEY } from "./apiKit";
-import { CliError } from "./errors";
+import { CliError, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { turnRef } from "./turnRefs";
 
@@ -131,7 +131,9 @@ export function checkWebhook(url: string): URL {
 
 export function readCursor(path: string | undefined): number | undefined {
   if (!path || !existsSync(path)) return undefined;
-  const value = Number(readFileSync(path, "utf8").trim());
+  let text: string;
+  try { text = readFileSync(path, "utf8"); } catch (error) { throw localFileError(error, path) ?? error; }
+  const value = Number(text.trim());
   return Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
