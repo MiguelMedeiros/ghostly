@@ -116,6 +116,30 @@ describe("picking", () => {
     await expect(many.pick(REF, "Cinema", { folder: true, accept: [] })).rejects.toThrow(/^too-large: /);
     expect(await many.list(REF, "Cinema")).toEqual([]);
   });
+
+  it("a pick at the limit lets the page answer while its links are made, from a few draws of randomness", async () => {
+    const n = MINI_APP_LIMITS.filesEntries;
+    const files = Array.from({ length: n }, (_, i) => ({ path: `Music/Album ${i % 1000}/${i} - song.flac`, file: { size: 4096 + i, lastModified: 1 + i } }));
+    const stored: StoredPick[] = [];
+    const store: PickStore = { all: async () => [], put: async (pick) => { stored.push(pick); }, forget: async () => {}, remove: async () => {}, clear: async () => {} };
+    // A timer set as the picker answers: it fires before the pick ends only if the pick lets the thread go.
+    let answered = false;
+    const host = webLinkedFiles({ text: () => text, store, ask: async () => { setTimeout(() => { answered = true; }, 0); return { files, keep: { files: [] } }; } });
+    const draws = vi.spyOn(crypto, "getRandomValues");
+    const added = await host.pick(REF, "Player", { folder: true, accept: [] });
+    expect(answered).toBe(true);
+    // One draw per entry held the page ~250 ms at 100,000 entries; 16 bytes × 4096 ids fit one draw.
+    expect(draws.mock.calls.length).toBeLessThanOrEqual(Math.ceil(n / 4096) + 1);
+    expect(added).toHaveLength(n);
+    expect(added.every((e) => /^[A-Za-z0-9_-]{22}$/.test(e.id))).toBe(true);
+    // Each id is its 16 random bytes as base64url, unpadded.
+    const bytes = draws.mock.results[draws.mock.results.length - 1]!.value as Uint8Array;
+    expect(added[n - 1]!.id).toBe(Buffer.from(bytes.subarray(bytes.length - 16)).toString("base64url"));
+    expect(new Set(added.map((e) => e.id)).size).toBe(n);
+    expect(added[n - 1]).toMatchObject({ path: `Music/Album 999/${n - 1} - song.flac`, size: 4096 + n - 1, modified: n, available: true });
+    expect(stored[0]!.entries.map((e) => e.id)).toEqual(added.map((e) => e.id));
+    expect(await host.list(REF, "Player")).toHaveLength(n);
+  });
 });
 
 describe("reading and forgetting", () => {
