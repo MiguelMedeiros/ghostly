@@ -619,6 +619,47 @@ describe("answering a call", () => {
     expect(lines(call)).toEqual(["call_received", "call_missed", "call_received"]);
   });
 
+  it("calling back while the contact's held-back call still rings there rings that call, not a second one crossing it", async () => {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    call.receive(remote.hangUp(Date.now() + 1));
+    act(() => { vi.advanceTimersByTime(500); });
+    const held = Date.now();
+    call.receive(remote.offer(held));
+    expect(call.result.current.callState).toBe("idle");
+    const results = call.addCallEventMessage.mock.results;
+    const missedLine = results[results.length - 1]!.value;
+
+    // The person sees the missed call and calls back while it still rings the contact's side. A call of ours would
+    // cross it: the contact's earlier offer wins the glare there, and this side already spent it, so neither rang.
+    act(() => { vi.advanceTimersByTime(5000); });
+    act(() => { void call.result.current.startCall(false); });
+    expect(call.result.current.callState).toBe("incoming");
+    expect(call.publishedKinds()).toEqual([null]);
+    // Its line says it rang here, not that it was missed.
+    expect(call.removeCallEventMessage).toHaveBeenCalledExactlyOnceWith(missedLine);
+    expect(call.addCallEventMessage).toHaveBeenLastCalledWith("call_received", false, undefined, held);
+
+    act(() => { void call.result.current.acceptCall(false); });
+    devices.userMedia[0].grant();
+    await settle();
+    expect(call.publishedKinds()).toEqual([null, "a"]);
+    expect(call.result.current.callState).toBe("connecting");
+  });
+
+  it("calling back once the held-back call stopped ringing places a call of its own", async () => {
+    const call = renderCall();
+    call.receive(remote.offer(Date.now()));
+    call.receive(remote.hangUp(Date.now() + 1));
+    act(() => { vi.advanceTimersByTime(500); });
+    call.receive(remote.offer(Date.now()));
+    call.receive(remote.hangUp(Date.now() + 1));
+
+    act(() => { void call.result.current.startCall(false); });
+    expect(call.result.current.callState).toBe("offering");
+    expect(call.removeCallEventMessage).not.toHaveBeenCalled();
+  });
+
   it("a call placed again once a person could have redialled rings", () => {
     const call = renderCall();
     call.receive(remote.offer(Date.now()));
