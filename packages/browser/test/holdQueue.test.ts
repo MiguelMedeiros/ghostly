@@ -112,7 +112,7 @@ function setup() {
 }
 
 const engines: HoldEngine[] = [];
-afterEach(async () => { for (const e of engines.splice(0)) await e.stop(); });
+afterEach(async () => { for (const e of engines.splice(0)) await e.stop(); vi.useRealTimers(); });
 
 describe("the sender's queue", () => {
   it("a message deleted before pickup leaves storage and the manifest, and the contact never sees it", async () => {
@@ -391,10 +391,11 @@ describe("picking up: the storage and the pointer misbehave", () => {
     void a;
   });
 
-  it("a contact saying it holds items makes this side look at once; an acknowledgement read twice settles once", async () => {
-    const { a, b, look, holdText } = setup();
+  it("a contact saying it holds items makes this side look at once (past the gap); an acknowledgement read twice settles once", async () => {
+    const { a, b, clock, look, holdText } = setup();
     await look(b);
     await holdText("m1", "one");
+    clock.t += 5_000;
     await b.engine.peerSaid("link-b", { peerAllows: true, peerTop: 1 });
     await vi.waitFor(() => expect(b.received).toHaveLength(1));
     await vi.waitFor(() => expect(b.stored.hold!.inSeq).toBe(1));
@@ -408,5 +409,22 @@ describe("picking up: the storage and the pointer misbehave", () => {
     await look(a);
     expect(a.stored.hold!.peerAck).toBe(1);
     expect(a.delivery.size).toBe(0);
+  });
+
+  it("a contact repeating that it holds items, every 20 ms for a minute, gets its items read and the chat's reads kept to their pace", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { b, transport, clock, look, holdText } = setup();
+    await look(b);
+    await holdText("m1", "one");
+    const resolve = vi.spyOn(transport, "resolve");
+    for (let i = 0; i < 3_000; i++) {
+      clock.t += 20;
+      await b.engine.peerSaid("link-b", { peerAllows: true, peerTop: 1_000 + i });
+      await vi.advanceTimersByTimeAsync(20);
+    }
+    expect(b.received).toEqual([{ kind: "text", id: "wire-m1-item", text: "one" }]);
+    // One read the contact asked for every 30 s, beside the chat's own pace: never one per frame, nor one per 5 s.
+    expect(resolve.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(resolve.mock.calls.length).toBeLessThanOrEqual(5);
   });
 });
