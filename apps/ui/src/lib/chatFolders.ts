@@ -243,11 +243,13 @@ export const OTHER_CHATS_ID = "chat-folder-others-rows";
 export function useChatFolders(): { folders: ChatFolder[]; folderOf: (chat: string) => string | undefined; othersFolded: boolean; orderOf: (folder: string | undefined) => readonly string[] | undefined } {
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   useEffect(() => {
+    // Another page's write of anything else (a group's read mark, many a second) redrew the whole chat list.
+    const stored = (event: StorageEvent) => { if (!event.key || event.key === foldersKey()) redraw(); };
     window.addEventListener(FOLDERS_EVENT, redraw);
-    window.addEventListener("storage", redraw);
+    window.addEventListener("storage", stored);
     return () => {
       window.removeEventListener(FOLDERS_EVENT, redraw);
-      window.removeEventListener("storage", redraw);
+      window.removeEventListener("storage", stored);
     };
   }, []);
   const { folders, chats, othersFolded, orders } = read();
