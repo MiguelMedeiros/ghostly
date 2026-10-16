@@ -164,6 +164,11 @@ export const GROUP_SIGNALING_ALLOWANCE_SHARE = 2 / 15;
  * later, or not in 3 minutes; 2 of them were not back in 6 (bug hunt, 2026-10-14). Sized for 5 communities' way back
  * in the first minute on the default relays: a reading of each beacon, and a read and a write in a hub's lobby (a write
  * goes to every relay). A member asks it only while it has no edge up in that community.
+ *
+ * At worst a relay then sees, in one minute, its limit, the chats' allowance past it, the edges' and this one: 46 on a
+ * relay of 30 (pkarr.pubky.org allows 50 an address, `x-ratelimit-limit`), 92 on pkarr.pubky.app's 60 (it allows 1000)
+ * and 7 on relay.pkarr.org's 5 (it allows 10). A share raised past those limits gets 429s (docs/TRANSPORTS.md, "The
+ * default list").
  */
 export const WAY_BACK_SHARE = 1 / 5;
 /** Past the limit, a group's reads within its allowance go no more often than this on a relay. */
@@ -1129,10 +1134,12 @@ export class RelayTransport implements PkarrTransport {
     // Watch reads: their share, spread over the minute, the keys read longest ago first.
     const watched = (this.spentWatch.get(relay) ?? []).filter((at) => now - at < GROUP_RATION_WINDOW_MS);
     this.spentWatch.set(relay, watched);
+    // A key's turn among the others (`TURN_WAIT_MS`): apart, as a way back waits it whatever its allowance.
+    let turn = 0;
     if (isWatch(who)) {
       const most = Math.max(1, Math.ceil(limit * WATCH_SHARE * GROUP_RATION_WINDOW_MS / 60_000));
       if (watched.length >= most) wait = Math.max(wait, watched[watched.length - most] + GROUP_RATION_WINDOW_MS - now);
-      if (this.readsAhead(key, now, watchLane(who)) > 0) wait = Math.max(wait, TURN_WAIT_MS);
+      if (this.readsAhead(key, now, watchLane(who)) > 0) turn = TURN_WAIT_MS;
     }
     // The chats' watch reads: theirs, the same way; not a departed read past the limit.
     const chatWatched = (this.spentChatWatch.get(relay) ?? []).filter((at) => now - at < GROUP_RATION_WINDOW_MS);
@@ -1140,7 +1147,7 @@ export class RelayTransport implements PkarrTransport {
     if (isChatWatch(who) && !departed) {
       const most = Math.max(1, Math.ceil(limit * CHAT_WATCH_SHARE * GROUP_RATION_WINDOW_MS / 60_000));
       if (chatWatched.length >= most) wait = Math.max(wait, chatWatched[chatWatched.length - most] + GROUP_RATION_WINDOW_MS - now);
-      if (this.readsAhead(key, now, watchLane(who)) > 0) wait = Math.max(wait, TURN_WAIT_MS);
+      if (this.readsAhead(key, now, watchLane(who)) > 0) turn = TURN_WAIT_MS;
     }
     // The groups' reads after one found the minute full: spread over it, in turn.
     const rationed = (this.spentGroupReads.get(relay) ?? []).filter((at) => now - at < GROUP_RATION_WINDOW_MS);
@@ -1150,7 +1157,7 @@ export class RelayTransport implements PkarrTransport {
     if (isGroupRead(who) && !pastLimit && now - (this.groupsFullAt.get(relay) ?? -Infinity) < GROUP_RATION_MS) {
       const most = Math.max(1, Math.ceil(limit * GROUP_RATION_WINDOW_MS / 60_000));
       if (rationed.length >= most) wait = Math.max(wait, rationed[rationed.length - most] + GROUP_RATION_WINDOW_MS - now);
-      if (this.readsAhead(key, now) > 0) wait = Math.max(wait, TURN_WAIT_MS);
+      if (this.readsAhead(key, now) > 0) turn = TURN_WAIT_MS;
     }
     if ((who.group && !groupFloor) || who.background) {
       const reserved = this.chatReservedFor(relay, now);
@@ -1167,10 +1174,12 @@ export class RelayTransport implements PkarrTransport {
     // A read past the limit within the groups' allowance takes no request a waiting write could have (it is no signal).
     if (((writer === null && who.group && !pastLimit) || who.background) && !starved) wait = Math.max(wait, waiting("group"));
     // In turn per key: a key read longer ago that is asking too goes first (`READ_TURN_MS`).
-    if (turns && wait <= 0 && isTurnRead(who) && this.turnAhead(relay, key, who, now)) wait = TURN_WAIT_MS;
-    // A community member's way back that all this holds goes within its own allowance (`WAY_BACK_SHARE`).
+    if (turns && wait <= 0 && isTurnRead(who) && this.turnAhead(relay, key, who, now)) turn = TURN_WAIT_MS;
+    // A community member's way back that all this holds goes within its own allowance (`WAY_BACK_SHARE`), past a turn
+    // too: the key whose turn it is waits for the same. Not past a turn alone: a request is free, and that key takes it
+    // first, a second, as for any group's read; the allowance stays for a full minute.
     if (wait > 0 && isWayBack(who) && this.wayBackLeft(relay, who, now) > 0) return 0;
-    return Math.max(wait, 0);
+    return Math.max(wait, turn, 0);
   }
 
   /** What is left of the community members' way back allowance on this relay (`WAY_BACK_SHARE`); its reads leave a write the last of it. */

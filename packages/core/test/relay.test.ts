@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, CHAT_RESERVE_MOST_SHARE, CHAT_RESERVE_PER_CHAT, CHAT_WATCH_SHARE, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WAY_BACK_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, CHAT_RESERVE_MOST_SHARE, CHAT_RESERVE_PER_CHAT, CHAT_WATCH_SHARE, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RELAY_REQUESTS_PER_MINUTE, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WAY_BACK_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
 import type { PkarrRequestOptions, PkarrTransport } from "../src/transport";
 // covers: core.relay-client
 
@@ -1426,5 +1426,35 @@ describe("relay transport: a community member's way back has its own share past 
     expect(await went(() => relay.resolve(createIdentity().pubKeyZ32, { back: true }))).toBe(false);
     expect(await went(() => group.resolve(createIdentity().pubKeyZ32, { back: true, background: true }))).toBe(false);
     expect(await went(() => group.resolve(createIdentity().pubKeyZ32, { back: true }))).toBe(true);
+  });
+
+  it("waits a group read's turn when nothing else holds it, and keeps its allowance for a full minute", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const { group, log, went } = setup();
+      const start = Date.now(), beacon = createIdentity().pubKeyZ32, edge = createIdentity().pubKeyZ32;
+      // The groups fill the minute, the beacon among them; the edge's member, never read, finds it full.
+      await group.resolve(createIdentity().pubKeyZ32);
+      vi.setSystemTime(start + 1_000);
+      await group.resolve(beacon);
+      for (let i = 2; i < REQUESTS_PER_MINUTE; i++) await group.resolve(createIdentity().pubKeyZ32);
+      vi.setSystemTime(start + 59_000);
+      expect(await went(() => group.resolve(edge))).toBe(false);
+      // The first read ages out: one request is free, and it is the edge's turn (read longest ago).
+      vi.setSystemTime(start + 60_500);
+      expect(await went(() => group.resolve(beacon, { back: true }))).toBe(false);
+      expect(await went(() => group.resolve(edge))).toBe(true);
+      // The minute is full again: now the way back goes within its own allowance, all of it left.
+      for (let i = 0; i < allowance - 1; i++) expect(await went(() => group.resolve(beacon, { back: true }))).toBe(true);
+      expect(log.slice(-allowance).map((r) => r.key)).toEqual([edge, ...Array(allowance - 1).fill(beacon)]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("keeps a relay's worst minute (its limit and every allowance past it) within what the relay allows", () => {
+    // Each relay's own limit an address, from its `x-ratelimit-limit` (docs/TRANSPORTS.md, "The default list").
+    const allows: Record<string, number> = { "https://pkarr.pubky.org": 50, "https://pkarr.pubky.app": 1000, "https://relay.pkarr.org": 10 };
+    const worst = (limit: number) => limit + [SIGNALING_ALLOWANCE_SHARE, GROUP_SIGNALING_ALLOWANCE_SHARE, WAY_BACK_SHARE].reduce((sum, share) => sum + Math.floor(limit * share), 0);
+    expect(worst(REQUESTS_PER_MINUTE)).toBe(46);
+    for (const [relay, allowed] of Object.entries(allows)) expect(worst(RELAY_REQUESTS_PER_MINUTE[relay] ?? REQUESTS_PER_MINUTE)).toBeLessThanOrEqual(allowed);
   });
 });
