@@ -31,6 +31,22 @@ pub fn check_space(space: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// What an io error says to the page. A full disk or a used-up quota starts with Linux's words, "No space left on
+/// device", on every OS, with the system's own after them: the page tells no room by those words (a forward's
+/// `forwardError`, a received file's "Could not store the file"), and Windows says it its own way, in its own language.
+fn io_text(error: std::io::Error) -> String {
+    let text = error.to_string();
+    let full = matches!(
+        error.kind(),
+        std::io::ErrorKind::StorageFull | std::io::ErrorKind::QuotaExceeded
+    );
+    if full && !text.starts_with("No space left on device") {
+        format!("No space left on device: {text}")
+    } else {
+        text
+    }
+}
+
 /// What a profile's files take on disk ([`FileStore::usage`]), for Settings' "Storage used".
 #[derive(serde::Serialize, Default, Debug, PartialEq, Eq)]
 pub struct Usage {
@@ -105,27 +121,26 @@ impl FileStore {
             return Err("Too much at once".into());
         }
         let path = self.path(space, id)?;
-        private_folder(path.parent().unwrap()).map_err(|e| e.to_string())?;
+        private_folder(path.parent().unwrap()).map_err(io_text)?;
         let mut options = OpenOptions::new();
         options.create(true).truncate(false).write(true);
         // A received file is the chat's plain bytes: the user's alone, whatever the umask.
         #[cfg(unix)]
         std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-        let mut file = options.open(&path).map_err(|e| e.to_string())?;
-        let length = file.metadata().map_err(|e| e.to_string())?.len();
+        let mut file = options.open(&path).map_err(io_text)?;
+        let length = file.metadata().map_err(io_text)?.len();
         if length != offset {
             return Err("File write out of order".into());
         }
-        file.seek(SeekFrom::Start(offset))
-            .map_err(|e| e.to_string())?;
-        file.write_all(bytes).map_err(|e| e.to_string())
+        file.seek(SeekFrom::Start(offset)).map_err(io_text)?;
+        file.write_all(bytes).map_err(io_text)
     }
 
     /// What was written so far survives a crash. Opened for writing: Windows refuses to flush a read-only handle
     /// (`FlushFileBuffers`, "Access is denied").
     pub fn flush(&self, space: &str, id: &str) -> Result<(), String> {
         match OpenOptions::new().write(true).open(self.path(space, id)?) {
-            Ok(file) => file.sync_all().map_err(|e| e.to_string()),
+            Ok(file) => file.sync_all().map_err(io_text),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e.to_string()),
         }
@@ -146,27 +161,26 @@ impl FileStore {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound && size == 0 => return Ok(()),
             Err(e) => return Err(e.to_string()),
         };
-        if size < file.metadata().map_err(|e| e.to_string())?.len() {
-            file.set_len(size).map_err(|e| e.to_string())?;
+        if size < file.metadata().map_err(io_text)?.len() {
+            file.set_len(size).map_err(io_text)?;
         }
-        file.sync_all().map_err(|e| e.to_string())
+        file.sync_all().map_err(io_text)
     }
 
     /// At most `length` bytes from `offset`; fewer only at the end of the file.
     pub fn read(&self, space: &str, id: &str, offset: u64, length: u64) -> Result<Vec<u8>, String> {
-        let mut file = File::open(self.path(space, id)?).map_err(|e| e.to_string())?;
-        file.seek(SeekFrom::Start(offset))
-            .map_err(|e| e.to_string())?;
+        let mut file = File::open(self.path(space, id)?).map_err(io_text)?;
+        file.seek(SeekFrom::Start(offset)).map_err(io_text)?;
         let mut out = Vec::new();
         file.take(length.min(MAX_STEP))
             .read_to_end(&mut out)
-            .map_err(|e| e.to_string())?;
+            .map_err(io_text)?;
         Ok(out)
     }
 
     /// SHA-256 of the stored file, base64url, read in 1 MiB steps.
     pub fn digest(&self, space: &str, id: &str) -> Result<String, String> {
-        let mut file = File::open(self.path(space, id)?).map_err(|e| e.to_string())?;
+        let mut file = File::open(self.path(space, id)?).map_err(io_text)?;
         Ok(URL_SAFE_NO_PAD.encode(digest_of(&mut file)?))
     }
 
@@ -192,7 +206,7 @@ impl FileStore {
         for entry in entries.flatten() {
             let name = entry.file_name();
             if name.to_string_lossy().starts_with(prefix) && entry.path().is_file() {
-                fs::remove_file(entry.path()).map_err(|e| e.to_string())?;
+                fs::remove_file(entry.path()).map_err(io_text)?;
             }
         }
         Ok(())
@@ -237,14 +251,14 @@ impl FileStore {
         while !dir.exists() {
             dir = dir.parent().ok_or("No data folder")?;
         }
-        fs4::available_space(dir).map_err(|e| e.to_string())
+        fs4::available_space(dir).map_err(io_text)
     }
 
     /// Copies a stored file to `target`, a step at a time, marked as downloaded (`mark_downloaded`). Not on Android,
     /// whose document picker gives no path (the Kotlin side copies there).
     #[cfg_attr(target_os = "android", allow(dead_code))]
     pub fn copy_to(&self, space: &str, id: &str, target: &Path) -> Result<(), String> {
-        let mut from = File::open(self.path(space, id)?).map_err(|e| e.to_string())?;
+        let mut from = File::open(self.path(space, id)?).map_err(io_text)?;
         write_whole(target, |to| std::io::copy(&mut from, to).map(|_| ()))?;
         mark_downloaded(target);
         Ok(())
@@ -274,7 +288,7 @@ fn write_whole(
     if result.is_err() {
         let _ = fs::remove_file(&partial);
     }
-    result.map_err(|e| e.to_string())
+    result.map_err(io_text)
 }
 
 /// `.<name>.<random>.part` beside `target`.
@@ -355,7 +369,7 @@ fn digest_of(reader: &mut impl Read) -> Result<[u8; 32], String> {
     let mut hash = Sha256::new();
     let mut buffer = vec![0u8; 1024 * 1024];
     loop {
-        let read = reader.read(&mut buffer).map_err(|e| e.to_string())?;
+        let read = reader.read(&mut buffer).map_err(io_text)?;
         if read == 0 {
             break;
         }
@@ -629,6 +643,42 @@ pub async fn file_bytes_save<R: tauri::Runtime>(
 mod tests {
     // covers: files.storage, files.download
     use super::*;
+
+    /// The issue: Windows says a full disk in its own words ("There is not enough space on the disk. (os error
+    /// 112)", in the system's language), which the page's rules for a full disk never matched, so a forward showed
+    /// them raw and a received file said to ask for it again instead of to free some space.
+    #[test]
+    fn a_full_disk_says_so_in_the_words_the_page_knows_on_every_os() {
+        use std::io::{Error, ErrorKind};
+        let windows = Error::new(
+            ErrorKind::StorageFull,
+            "There is not enough space on the disk. (os error 112)",
+        );
+        assert_eq!(
+            io_text(windows),
+            "No space left on device: There is not enough space on the disk. (os error 112)"
+        );
+        // Linux's own words stay as they are; a quota used up reads as no room too.
+        #[cfg(target_os = "linux")]
+        {
+            assert_eq!(
+                io_text(Error::from_raw_os_error(28)),
+                "No space left on device (os error 28)"
+            );
+            assert_eq!(
+                io_text(Error::from_raw_os_error(122)),
+                "No space left on device: Disk quota exceeded (os error 122)"
+            );
+        }
+        // Anything else as before.
+        assert_eq!(
+            io_text(Error::new(
+                ErrorKind::PermissionDenied,
+                "Access is denied. (os error 5)"
+            )),
+            "Access is denied. (os error 5)"
+        );
+    }
 
     fn store() -> (FileStore, PathBuf) {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
