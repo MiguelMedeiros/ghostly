@@ -55,7 +55,9 @@ by IP), so about 3 invites a minute go out at once. Past that, `invite create` s
 link works from then on. A one-shot (no daemon) waits up to 20 s for it before it leaves.
 
 To join someone else's invite: `ghostly invite join <ghostly1… or link> --label bob`. The invite is the app's own, so
-the other side can be the web app, the extension, the Desktop or another `ghostly`.
+the other side can be the web app, the extension, the Desktop or another `ghostly`. A one-shot (no daemon) waits up
+to 60 s for the inviter, then answers `"paired":true|false` and the `stage`; when it did not pair, stderr says the next
+step (keep the profile running with `ghostly daemon --detach`, then `ghostly chat wait bob --until paired`).
 
 ## Profiles
 
