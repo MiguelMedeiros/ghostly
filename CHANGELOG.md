@@ -4,6 +4,125 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.3.3
+
+### Fixed
+
+**Apps**
+
+- On an iPhone, Apps → Add stands on the keyboard: its link field and Check were under it.
+- On a slow connection an app, a store or a revocation list that is still downloading now finishes instead of being dropped after 30 seconds. A read that stalls says it took too long on this connection, not that the host could not be reached.
+
+**CLI**
+
+- `ghostly app verify` and `ghostly app serve` refuse a version its publisher revoked in the `ghostly-revoke.json` beside the bundle (beside the file, or beside the URL as a client reads it), with the reason `revoked` and the publisher's words. Before, they took it as valid, though a client stops it.
+- `ghostly app publish --out ""`, `app revoke --bundle ""` and `store sign --out ""` (an unset variable in a script) are a usage error, "A path given as \"\" names no file", instead of naming the current folder.
+- The README that `ghostly app init` writes installs `@ghostlytools/sdk` in the folder above the app's (`npm install --save-dev --prefix ..`), so its next step, `ghostly app publish .`, no longer meets `node_modules` (refused as too many files) or bundles `package.json` and `package-lock.json`.
+- A CLI call always ends when it is hung up, even when its audio codec fails as it closes: the contact is told, the program reads the end of its audio, `call.ended` goes out and the connection closes. Before, such a failure stopped the end halfway and the call stayed open on both sides.
+- A CLI daemon in three or more calls at once keeps every call's audio intact. Before, as calls ended and others started, one call's audio could be written over another's codec: that call turned to noise, answers and hang-ups failed with "memory access out of bounds", and after a few rounds no call worked until the daemon restarted.
+- `--json <file>` of `ghostly task send`, `routine send` and `usage send` (and their updates) with a file that is not there now answers `not_found` (exit 3, "No such file or folder: <path>"), with a folder `bad_request` ("<path> is a folder: name a file"), and `--json ""` is refused as naming no file. Before, a usage error with Node's own text (a folder's named no path), and `""` read the current folder.
+- `chat accept <chat> <method> --networks ""` (or `","`) is now refused like an unknown network, and says to use `--off` to stop taking the method. It exited 0 and left the method on no network while `methods` still said it was on.
+- A chat's name given to `ghostly chat rename`, `invite create --label` or `invite join --label` is refused with the rule (`bad_request`, "A chat's name is up to 48 characters on one line"), before any invite is made, instead of being cut at 48 without a word. A cut through an emoji left half of it in the name, and a newline or a tab was kept.
+- `""` given where a chat or a group is named (an unset variable in a script) names nothing: `forward … --to ""` and `call auto on --from ""` are a usage error before the profile opens (`--to "" names no chat or group`, exit 2), and so is `--to "group:"`. `""` was a prefix of every id: with one chat it forwarded to that chat or put it on auto-answer, and `--to "group:"` forwarded a chat's message into the only group. A daemon's API callers get `bad_request` for the same.
+- An empty choice, such as an unset variable in a script, is now refused, naming the choices: `wallet remove ""`, `wallet create ""`, `chat accept <chat> "" --off`, `--wait ""`, `--kind ""` and the rest. It was read as the default and acted on: `wallet remove ""` aimed at the Cashu wallet, and `chat accept <chat> "" --off` turned Cashu off for the chat.
+- A number option given as `""`, such as an unset variable in a script, is now refused as `--left abc` is: `--left takes a number, not ""`. It was read as 0 and acted on: `usage send --all --left ""` posted "0% left" to every chat, `task send --progress ""` a card at 0%, `listen --since "" --exec` ran the hook over every event the journal holds, and `chat disconnect --hold ""` ended the hold.
+- A required argument given as `""` (an unset variable in a script) is the same usage error as one left out (`Missing <chat>: ghostly chat show <chat>`, exit 2), before the profile opens. In 63 commands it opened the profile, then answered `bad_request` with the engine's parameter name (`chat is required`, exit 1). A path given as `""` names no file: `profile picture ""` read the current folder. `chat rename <chat> ""` still gives the chat back the contact's name.
+- A group command that names the profile itself (its own key or a prefix of it) in `group remove`, `group admin`, `group hub` or `--mention` now says `"<key>" is you: name another member of <group>` (bad_request). It answered not_found "No member <key> in <group>", as if the profile were not in the group.
+- `ghostly identity add domain` without a subject now says "Domain takes a subject, its domain (example.com): ghostly identity add domain <subject>", in each provider's own words. It answered "subject is required", the API's parameter name.
+- `ghostly listen` now refuses an empty `--webhook`, `--exec`, `--cursor`, `--from` or `--group`, such as a unit file's `--webhook "$URL"` with the variable unset, before the profile opens. An empty `--webhook`, `--exec` or `--cursor` ran a plain listen without a word: no hook, no POST, no cursor kept. An empty `--from` or `--group` failed later as "chat is required".
+- A missing argument's usage error names it as the usage line next to it shows it: `ghostly chat pay bob` says `Missing <sats>`, not `Missing <amount>`, and `ghostly service add web` says `Missing <http://127.0.0.1:port>`, not `Missing <target>`. Commands that take a chat or a group say `Missing <chat|group>`.
+- `profile backup`, `profile restore`, `profile picture`, `group picture` and `identity complete` now name the files they read as every other command does. A `--passphrase-file` or `--evidence-file` that is a folder says "<path> is a folder: name a file" (it said "the path"), `--passphrase-file ""` and `backup --out ""` (an unset variable) are refused as naming no file (they said "No such file or folder: " and "<current folder> exists"), an empty passphrase file says it is empty instead of asking for the --passphrase-file that was given, and a picture that is a folder or not readable is named as such, not "No file".
+- `ghostly profile` and `ghostly settings`, alone or with a word they do not take, and `ghostly daemon frob`, now answer as every other group: "ghostly profile takes a command: create, list, ... (ghostly help profile)" and "Unknown command: settings frob: ghostly settings takes get or set (ghostly help settings)". `ghostly help chat histroy` (a word the group does not take) is now the same usage error as `ghostly chat histroy`, where it printed the chat group's list with exit 0.
+- `store sign` with a `--key` file that is not there no longer makes a new store key over a folder that holds an index signed by another key: it answers `not_found` naming that key, and a key that is there but is not that one is `refused` (`store-key`), as `app publish` does. Another store is another `--out`.
+- `usage send --all` checks `--wait` and `--timeout` once, before any chat, and refuses a wrong one with `bad_request` (exit 1) as `usage send <chat>` does. When no chat takes the card, the command now fails (exit 1) instead of exiting 0, and each chat's refusal carries its `code` and `message` like every other error. Before, a wrong `--wait` or `--timeout` came back once per chat as plain text, and the run still exited 0.
+- `ghostly send`, `edit`, `group send` and `group edit` with an empty text argument (`send bob ""`) answer "No text" when stdin is a pipe or a file. Before, they read stdin as the text, so in `while read line; do ghostly send bob "$line"; done < file` an empty line sent the rest of the file as one message and ended the loop. Stdin is read only when no text is given at all, or with `--stdin`.
+
+**Everywhere**
+
+- Each message that arrives no longer rewrites a 29 KB list in the browser's storage. The app claimed every sound and notification by writing back the last 256 message ids each time: a busy group of 10,000 messages wrote about 290 million characters, and each write also reached every other open page. A claim is now a few dozen characters, kept for 10 seconds.
+- With the app open in several tabs or windows, the chat list no longer redraws whenever another one saves something it does not show (such as when a group was last read); only a change to folders, mutes or how a contact is shown redraws it.
+- As the app starts, the chat list no longer jumps down a second later when the groups and the Tasks entry come in: it is drawn once, with them, so a click aimed at a chat opens that chat.
+- CLI: `ghostly app revoke --up-to N` with N past the bundle's own sequence (a typo, 30 for 3) is now a usage error naming the newest version, unless `--force`. `ghostly app publish` refuses a sequence that the folder's `ghostly-revoke.json` already revokes (`details.reason` `revoked`) and names the `--sequence` that clears it. Before, both went through without a word, and clients that read the revocation stopped the new version for good.
+- CLI: a second `events.subscribe` on a daemon socket connection that is subscribed already is refused (`bad_request`). Before, every later event came once per subscribe, and each replay got past the connection's 8 MiB bound for unread data.
+- CLI: a `ghostly listen` paused with Ctrl+Z, or any client of the daemon's socket that stops reading, no longer makes the daemon keep every later event in memory until it reads again. Past 8 MiB unread the daemon ends that connection, and `listen` picks up again after the last event it took.
+- Closing the Ghostly window on Linux or Windows makes it disappear at once again. It no longer stayed on screen, still usable, for about half a second while the app said goodbye to your contacts.
+- On an iPhone or iPad on its side, a dialog stands above the keyboard while it is up: New group's Create, Forward's Send and Join were under it.
+- Private groups past 16 members (on hubs): a member's name now travels with its messages, so once it writes, members it holds no edge with show its name instead of "Member" and its key (in messages, the @ list, reactions and the members list). A member that has written nothing since, or whose app is from before, still shows as "Member" to them.
+- On the Linux Desktop, opening Ghostly again right after closing its window opens it. For about 0.4 s after the close, while Ghostly said goodbye to your contacts, a new launch handed over to the app that was leaving and no window was left. That launch now starts once the old app has gone.
+- A link to the app with a stray `%` in its address (`#/chat/%`, `#/join/%E0`) no longer shows the "Something went wrong" screen: it is read as a link the app cannot use, and the app goes on.
+- The Copy button behind a notice's ⓘ is now 24 px tall, easy to tap on a phone.
+- On an iPhone or iPad on its side, Apps → Add, Add identity, New wallet, Delete profile and Publish on Nostr stand above the keyboard while you type: their field and buttons were under it.
+- The web and Desktop app start faster with many chats: while each chat makes its first read, the chat list and the sync find its chat by its key instead of reading every stored chat once per chat.
+- Opening the app with many chats does less work while the page is still settling. Each chat's keys are worked out once per run instead of up to four times, which halves that part of the start: about 130 ms instead of 260 ms for 50 chats on a slow machine.
+- Opening the app with many chats no longer freezes the page for up to most of a second right as the chat list appears. Chats now connect a few at a time, most recently used first, and the page keeps answering clicks in between.
+
+**Calls**
+
+- Calling back a contact whose call was just kept as missed (it came right after one that barely rang) while that call still rings on their side now rings it here, so you can answer it. Before, your call crossed theirs, each side ignored the other's, and both ended with "No answer".
+- A call from a headless bot no longer ends when the bot's call library refuses the app's answer twice in a row: the app starts over on each new offer, as many times as the bot offers again.
+- In Arabic (or any right-to-left language), the call screens show a contact's name in its own direction: a chat named "Ana!" rang as "!Ana" on the incoming-call card, the call window and the locked screen's ringing card. An Arabic name in the English app is fixed the same way.
+- A call placed from the web app or the CLI rings about a quarter of a second sooner, and an answer from them connects as much sooner. Each waited 400 ms after finding its public address for nothing the call uses.
+- A CLI call with a TURN server in its profile carries the relay's address in its offer and answer when that server is far away. The CLI waited for its public address only, so a TURN server 100 ms or more away gave its relay too late, and on networks where only the relay connects the call failed.
+- A call in a current chat no longer reads the contact's record on a relay as it starts or rings, on each side. Its signals go only over the chat's live connection, so the read found nothing. Ending such a call also no longer cuts short the chat's own quick look for the contact.
+- A call placed again within 2 seconds of one that rang for a while now rings. That covers a call that was cancelled (switching from voice to video, or a hang-up by mistake) and one that rang out. Before, the contact never saw it, and the caller heard "Calling…" for a minute. Only a call that barely rang still holds the next one back, so a contact calling and hanging up over and over still rings once.
+
+**Chat**
+
+- A chat's name longer than 48 characters is cut between whole characters, never through an emoji, and new lines or tabs in it become spaces, as in a group's name.
+- When a forward reaches some chats and another refuses it, the chats that got it leave the selection and the dialog says so. Pressing Send again sent the messages a second time to the chats that already had them.
+- A removed chat no longer leaves its message queue and file transfers in memory: a CLI bot that pairs with new contacts and removes their chats kept them for every chat it ever removed.
+- On a phone, the voice recorder's hint ("Too short. Hold to record, release to send") wraps instead of running off the screen's edge in Spanish, French, Italian and Portuguese.
+- A voice message or audio file started from the keyboard keeps the focus on its play button, so Space again pauses it instead of scrolling the chat.
+- A screen reader hears "Recording" and the position in a voice message or audio file ("0:05 of 0:30") in the app's language, not in English.
+- On a Linux Desktop or a CLI bot with more than eight live chats, a chat that hands its connection to another one no longer has the contact's app look it up as if it had quit. The contact read it every second or two for two minutes: about 90 lookups after each handover on the Desktop, now about 6, the pace of a chat in the background. Both apps need this version; an older contact still looks it up as before.
+
+**Wallets**
+
+- When a new Cashu wallet's mint does not answer, the app now says only that it could not reach it. Before, it also said "Check the address: it should be a Cashu mint", though the app had chosen that mint and there was no address to check. A mint you add by its address still gets that advice.
+- In Arabic, a wallet's balance no longer reads "100,000sats": the unit sits on the number's left with a gap, and a Testnet unit's words stay together ("sats تجريبية") instead of one of them going beside the source's name. In the Cashu, Lightning, Spark, Fedimint, Ark, Bark and on-chain wallets.
+- A contact's payment memo that reads like one of the wallet's own notes ("Test coins from the test mint") is shown as written in the Cashu history, and its ecash plays the coin sound: it no longer passes for Get test coins.
+- In Arabic, a pasted invoice's memo in a wallet's Send, and a Lightning address's description, read in their own order: "1 cup coffee" no longer shows its "1" before the separator. The chat's invoice card already did this.
+
+**Files**
+
+- A large file's progress is kept as it was at a cut: the newest progress is written once its 2 s are up, and at once when the chat's connection goes. Before, only the first progress of each 2 s was written, so an app restarted soon after a cut showed the file where it stood before (a whole resumed stretch on a fast link).
+- A large file that could not be sent because this device had no room for its copy keeps its red "Not sent" mark and its "Not enough space on this device" line after you reload the app. Before, the reload showed it as sent and "No longer available", though it never left the device.
+
+**Groups**
+
+- A long group catching up stutters less: who wrote each message is worked out about seven times faster, and only again when the messages, the names or the pictures change.
+- Joining a private group by its link no longer stalls at "Let in: getting the group's keys" when the joiner or the admin is on a network that lets no direct connection through (a VPN, a firewall): the join goes on over Iroh's relay. A group's connections now recover on such a network too: when a VPN comes on with the group open, they go on over Iroh's relay as 1:1 chats do, and stay there instead of going back to direct connections that fail again. A CLI daemon's log now says each step of a join through a link (knock seen, entry session opening, welcome sent).
+- The name field of New group and Rename takes a name as long as a group may have, counted in characters: a name made of emoji no longer stopped at half the length (a family emoji counted as 11), and a name too long is cut between whole emoji, never through one.
+- An open group no longer writes when it was last read for every change in the group (a member coming online, a reach update), only when something new came or the page shows again, so the app's other open tabs and windows stop redrawing their chat list several times a second.
+- In a private group of more than 16 members, a member removed while briefly offline now learns of it within seconds of coming back, instead of about 3 minutes later, during which its messages looked sent and reached nobody.
+- Two members of a group or community who go by the same name, both picked from the @ list, are each mentioned where you picked them: the second one no longer went to the first, so they get the @, the sound and the notification. The same goes for picking the other one while editing a message.
+
+**Website**
+
+- On a phone, the website home no longer moves the wallet or identity panel you are reading when the page finishes loading: the room kept for each card deck is as tall as the deck a phone gets, and the page keeps its place once the decks have their size.
+- The first screen of the developer page no longer keeps a phone busy while you read it. The protocol explainer's ghosts floated and blinked, and its connecting line marched, for as long as they were on screen, and the page redrew itself about 60 times a second: almost a tenth of a second of work every second on a phone, over a quarter of one on a slow phone. The ghosts now float and blink a few times and rest, and the line marches only while a step plays.
+- The protocol explainer at the top of the website's Developers page plays each step smoothly on slower computers and phones. Each frame now redraws only the shapes the step moves, not the whole explainer, so a step that ran at about 20 frames a second on a slower processor runs at 60.
+- The end of every page of the site no longer keeps a phone busy while you read the footer. The sleeping ghost's three z's rose and faded forever, and the page worked out its styles about 15 times a second for it: a fiftieth of a second of work every second on a phone, a tenth of one on a slow phone. The z's now rise a few times when the footer shows and then rest.
+- The end of the home page (the download panel and the footer) no longer keeps the page busy with animations nobody can see: the gradient words of the title a screen above, the drifting network of the first act and the little pointer ghost left behind when you scroll now rest until they are back on screen. The page did about a tenth of a second of work every second there, a fifth on a slow phone.
+- A page you only read (privacy, terms, a WISP) no longer downloads the scripts of the home, the developer pages, the WISP catalogue and the CLI guide (about 110 KB) as its menu and footer come into view: each page loads when you point at, focus or touch its link.
+- On a computer, the little ghost that follows the pointer no longer keeps the page busy once it falls asleep: it floats and breathes its z's a few times, then rests, as the footer's ghost does. Before, it kept going for as long as the page stayed open, at the top of every page too.
+- On a phone or a tablet, a reader who starts scrolling the home page before it has finished loading no longer sees the story jump when the chapters take their phone or card shape: what was in the middle of the screen stays there, and the step being read keeps its title where it was.
+- A link to a section of the website (ghostly.tools/#download from a README or a chat, a heading of a WISP, a roadmap entry) opens the page at that section again. The page scrolled smoothly through everything above it first, up to 70,000 pixels in under two seconds. Clicks inside the page still scroll smoothly.
+- On a slow connection the site's pages no longer show a simpler layout first and rearrange themselves a second or two later, moving the text out from under you if you had started scrolling: they open in their final layout.
+- The website's story scenes and the top of the home and roadmap pages settle while you read. The ghosts bob, blink and talk a few times and the network's dots twinkle a few times, then they rest, instead of keeping the page busy for as long as a scene is on screen.
+
+### For developers
+
+- A release build can no longer be put into test mode. The test identity providers and the regtest fake wallets answered to a `ghostly-test-identities` or `ghostly-test-providers` key in the browser's storage in every build. They now answer only in a development build and in the e2e suite's build (made with VITE_APPS_TEST, the same build flag as the mini-app test switch); a released build ignores the key, and so does a plain `npm run build:web`. `testProvidersEnabled` and `testIdentitiesEnabled`, still exported by `@ghostlytools/sdk/fakes`, are folded to false when the SDK is built: a plugin that wants the fakes in the app registers them itself, as before.
+
+**Everywhere**
+
+- A contact's or member's key is read only in its one canonical z-base-32 spelling. A 52-character key whose last character is changed to one of the others that decode to the same 32 bytes is now refused at the invite, pair offer, capability record, identity proof, roster commit, group frame, CLI contact reference, extension viewer address or Pubky homeserver record that carries it, instead of being kept and then failing later as a contact-key mismatch, or, for an unpinned first contact, being stored under that odd spelling. A group frame or commit under such a key is dropped like any other malformed one, and no longer ends the session it came over. No key the app writes is affected, so nothing changes for existing chats. Only a contact's odd client could have presented a respelled key to an earlier build, and what that build stored under it now fails in its one place with an invalid-key error: that chat's DHT delivery and its apps. A member added under one gets no group secret; in a mesh group the other members refuse the changes made over a roster that spells it so, and that group has to be made again.
+
+### Thanks
+
+- Thanks to @vforvilela (#2978, #2979) for the reports and fixes in this release.
+
 ## 1.3.2
 
 ### Security
