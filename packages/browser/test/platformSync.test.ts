@@ -393,6 +393,21 @@ describe("a long chat, on every update", () => {
   });
 });
 
+describe("finding a contact's chat", () => {
+  it("reads only that chat, not every stored chat once per lookup", async () => {
+    // At every start each link is mid-sync, and the sidebar's marks and the mirror looked up each one's chat with a read
+    // of every stored chat: 5,050 reads per engine state with 50 chats.
+    const CHATS = 30;
+    for (let i = 0; i < CHATS; i++) storage.saveSession(session({ id: `s${i}`, peerPubKeyB64: `peer-${i}`, mySeedB64: `seed-${i}` }));
+    // The chats' keys are read once, the first time any chat is looked for.
+    expect(sync.sessionForPeer("peer-0")?.id).toBe("s0");
+    const reads = vi.spyOn(localStorage, "getItem");
+    for (let i = 0; i < CHATS; i++) expect(sync.sessionForPeer(`peer-${i}`)?.id).toBe(`s${i}`);
+    expect(sync.sessionForPeer("nobody")).toBeUndefined();
+    expect(reads.mock.calls.filter(([key]) => storage.isSessionKey(key)).length).toBeLessThanOrEqual(CHATS);
+  });
+});
+
 describe("the contact's own name", () => {
   const view = (peerNick?: string) => link({ createdAt: 1, profile: "paired-chat/1", peerNick });
   async function report(links: LinkView[]) {
