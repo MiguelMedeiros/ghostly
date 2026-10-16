@@ -135,7 +135,8 @@ interface Connection {
 async function openConnection(stack: CallStack, options: ConnectionOptions, offer: CallSignal | null, held = false): Promise<Connection> {
   const { ndc } = stack;
   const bind = process.env.GHOSTLY_CALL_BIND;
-  const pc = new ndc.PeerConnection("ghostly-call", { iceServers: callIceServers(options.iceServers), ...(bind ? { bindAddress: bind } : {}) });
+  const iceServers = callIceServers(options.iceServers);
+  const pc = new ndc.PeerConnection("ghostly-call", { iceServers, ...(bind ? { bindAddress: bind } : {}) });
   // Each line says how long after this connection was made it happened: the order of the connection's states and
   // the contact's answer is what explains a call that failed as it connected. The states are heard from the start.
   const born = Date.now();
@@ -177,7 +178,7 @@ async function openConnection(stack: CallStack, options: ConnectionOptions, offe
       videoTrack = pc.addTrack(video);
       videoTrack.onMessage(() => {});
     }
-    const gathered = gathering(pc);
+    const gathered = gathering(pc, { turn: callUsesTurn(iceServers) });
     if (offer) pc.setRemoteDescription(buildSdpFromSignal(held ? { ...offer, c: [] } : offer), "offer");
     else pc.setLocalDescription("offer");
     await gathered;
@@ -343,8 +344,19 @@ function mdnsNote(signal: CallSignal, log: (line: string) => void): void {
   }
 }
 
-/** Resolves once the local description has its candidates (see GATHER_MS and HOST_GATHER_MS). */
-export function gathering(pc: Pick<PeerConnection, "onGatheringStateChange" | "onLocalCandidate">): Promise<void> {
+/** Whether a call's ICE servers (`callIceServers`) have a TURN server: its relay candidate is then the one waited for. */
+export function callUsesTurn(servers: readonly (string | IceServer)[]): boolean {
+  return servers.some((server) => typeof server !== "string");
+}
+
+/**
+ * Resolves once the local description has its candidates (see GATHER_MS and HOST_GATHER_MS). `turn`: the connection
+ * has a TURN server, and its relay candidate is waited for rather than the reflexive one, as the apps' calls do
+ * (`waitForIceGathering`): an allocation takes two round trips, and a TURN server 100 ms away gave its relay after the
+ * description had gone without it, on the networks where only the relay connects.
+ */
+export function gathering(pc: Pick<PeerConnection, "onGatheringStateChange" | "onLocalCandidate">, { turn = false }: { turn?: boolean } = {}): Promise<void> {
+  const wanted = turn ? / typ relay/ : / typ srflx/;
   return new Promise((resolve) => {
     let settle: ReturnType<typeof setTimeout> | null = null;
     let any = false;
@@ -354,7 +366,7 @@ export function gathering(pc: Pick<PeerConnection, "onGatheringStateChange" | "o
     pc.onGatheringStateChange((state) => { if (state === "complete") done(); });
     pc.onLocalCandidate((candidate) => {
       any = true;
-      if (!settle && / typ srflx/.test(candidate)) settle = setTimeout(done, SETTLE_MS);
+      if (!settle && wanted.test(candidate)) settle = setTimeout(done, SETTLE_MS);
     });
   });
 }
