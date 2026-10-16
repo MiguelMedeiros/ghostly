@@ -25,6 +25,12 @@ export const DEFAULT_LIMITS = Object.freeze({
   listens: 16,
   /** Dials one client may start per minute. */
   connectsPerMinute: 60,
+  /** How long a client may hold its WebSocket with no listen open and no dial started (a browser listens within seconds). */
+  idleMs: 30_000,
+  /** How often the relay pings each client; one that has not answered the last ping by the next is dropped. */
+  pingMs: 30_000,
+  /** How long a connection may take to send its request (headers included) before it upgrades. */
+  requestMs: 15_000,
 })
 
 /**
@@ -51,25 +57,34 @@ const fixOptions = (options = {}, gone) => ({ ...options, signAnnounce: fixSign(
 /**
  * The DHT one client's relay session sees: listen and dial within its budget, nothing else. Topic lookups
  * and announcements are refused (Ghostly never uses them), so the relay is no open crawler. Past a limit
- * the client is dropped.
+ * the client is dropped, and so is one that holds its slot with no listen open and no dial for `idleMs`.
  */
 function clientDht(dht, limits, drop, gone) {
   let listening = 0
   let dials = []
+  let idle = null
+  const watchIdle = () => {
+    clearTimeout(idle)
+    idle = listening > 0 ? null : setTimeout(() => drop('idle'), limits.idleMs)
+  }
+  watchIdle()
+  void gone.then(() => clearTimeout(idle))
   return new Proxy(dht, {
     get(target, prop) {
       if (prop === 'createServer') return (options, onconnection) => {
         if (++listening > limits.listens) { drop('listen limit'); throw new Error('Listen limit reached') }
+        watchIdle()
         const server = target.createServer(options, onconnection)
         const listen = server.listen.bind(server)
         server.listen = (keyPair, listenOptions) => listen(keyPair, fixOptions(listenOptions, gone))
-        server.once('close', () => { listening-- })
+        server.once('close', () => { listening--; watchIdle() })
         return server
       }
       if (prop === 'connect') return (publicKey, options) => {
         const now = Date.now()
         dials = dials.filter(at => now - at < 60_000)
         if (dials.push(now) > limits.connectsPerMinute) { drop('dial limit'); throw new Error('Dial limit reached') }
+        watchIdle()
         return target.connect(publicKey, options)
       }
       if (prop === 'lookup' || prop === 'announce' || prop === 'lookupAndUnannounce' || prop === 'unannounce') return () => {
@@ -167,7 +182,8 @@ export async function startRelay(options = {}) {
   const stats = { accepted: 0, refused: 0, dropped: 0 }
   const origins = new Set(options.origins ?? [])
 
-  const server = http.createServer((request, response) => {
+  // Node's defaults (60 s for the headers, 300 s for the request) let a connection that never upgrades sit for minutes.
+  const server = http.createServer({ requestTimeout: limits.requestMs, headersTimeout: limits.requestMs, connectionsCheckingInterval: Math.min(1000, limits.requestMs) }, (request, response) => {
     if (request.url === '/healthz') {
       response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
       response.end(JSON.stringify({ ok: true, clients: clients.size, ...stats, firewalled: dht.firewalled }))
@@ -215,9 +231,19 @@ export async function startRelay(options = {}) {
         setTimeout(() => { paused = false; ws._socket?.resume() }, Math.ceil(-tokens / limits.bytesPerSecond * 1000))
       }
     })
+    // A peer that has gone without closing (a sleeping laptop, a dead route) still holds its slot: one that has not
+    // answered the last ping by the next is dropped.
+    let answered = true
+    ws.on('pong', () => { answered = true })
+    const ping = setInterval(() => {
+      if (!answered) return drop('no pong')
+      answered = false
+      ws.ping()
+    }, limits.pingMs)
     let leave
     const gone = new Promise(resolve => { leave = resolve })
     ws.once('close', () => {
+      clearInterval(ping)
       leave()
       clients.delete(ws)
       const left = (perAddress.get(address) ?? 1) - 1

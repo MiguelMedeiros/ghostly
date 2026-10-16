@@ -259,6 +259,41 @@ it("drops a client past its listen budget and refuses topic queries, and keeps s
   await own.close();
 }, 60_000);
 
+it("frees the slot of a client that neither listens nor dials, one that stops answering pings, and a request that never ends, but keeps a browser", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const { WebSocket: NodeWebSocket } = await import("ws");
+  const { connect } = await import("node:net");
+  const reasons: string[] = [];
+  const own = await startRelay({ testnet: 2, limits: { idleMs: 1500, pingMs: 300, requestMs: 1000 }, log: (what: string, why: string) => { reasons.push(`${what} ${why}`); } });
+  const browser = await createRelayedHyperEndpoint(seed(), own.url);
+  const gone = vi.fn();
+  browser.onUnavailable = gone;
+  // Opens its WebSocket and says nothing (it answers pings).
+  const silent = new WebSocket(own.url);
+  const silentClosed = new Promise(resolve => silent.addEventListener("close", resolve));
+  // Says nothing and never answers a ping.
+  const deaf = new NodeWebSocket(own.url, { autoPong: false });
+  const deafClosed = new Promise(resolve => deaf.once("close", resolve));
+  // Sends half a request and never upgrades.
+  const half = connect(Number(new URL(own.url).port), "127.0.0.1");
+  half.on("error", () => {});
+  let answer = "";
+  half.on("data", data => { answer += String(data); });
+  half.write("GET / HTTP/1.1\r\nHost: relay\r\n");
+  const halfClosed = new Promise(resolve => half.once("close", resolve));
+  await vi.waitFor(() => expect(own.stats().accepted).toBe(3));
+  await Promise.all([deafClosed, silentClosed, halfClosed]);
+  expect(answer).toMatch(/^HTTP\/1\.1 408/);
+  expect(reasons).toEqual(expect.arrayContaining(["dropped no pong", "dropped idle"]));
+  expect(own.stats().clients).toBe(1);
+  // The browser listens, answers pings, and stays.
+  await new Promise(resolve => setTimeout(resolve, 2000));
+  expect(gone).not.toHaveBeenCalled();
+  expect(own.stats()).toMatchObject({ clients: 1, dropped: 2 });
+  await browser.close();
+  await own.close();
+}, 60_000);
+
 it("carries a whole paired chat between two browsers with WebRTC off, pinned as on any transport", async () => {
   const invitation = createLink();
   const params = [invitation.mine, invitation.invite];
