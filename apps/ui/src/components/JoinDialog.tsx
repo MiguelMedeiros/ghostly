@@ -15,10 +15,12 @@ import { Notice } from "./ui/Notice";
 
 /**
  * The QR decoder (about 127 KiB), loaded when a scan or a picture read first needs it, not with the first screen.
- * Loaded once; a load that failed is tried again the next time.
+ * Loaded once; a load that failed is tried again the next time. A load that failed (offline, or a deploy replaced the
+ * chunk under an open tab) is said as such, never as the camera or the picture.
  */
+class QrReaderNotLoaded extends Error {}
 let decoder: Promise<typeof import("jsqr").default> | null = null;
-const qrDecoder = () => (decoder ??= import("jsqr").then((module) => module.default, (cause: unknown) => { decoder = null; throw cause; }));
+const qrDecoder = () => (decoder ??= import("jsqr").then((module) => module.default, (cause: unknown) => { decoder = null; throw new QrReaderNotLoaded(String(cause)); }));
 
 /**
  * Scanned data is only parsed as an invite; never opened as a URL or executed. A picture pasted or dropped on the
@@ -157,10 +159,10 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
         window.setTimeout(tick, 160);
       };
       tick();
-    } catch {
+    } catch (cause) {
       if (current !== generation.current) return;
       stop();
-      setError({ tone: "error", title: t(onDevice ? "devices.join.cameraUnavailable" : "join.cameraUnavailable") }); setManual(true);
+      setError({ tone: "error", title: t(cause instanceof QrReaderNotLoaded ? "join.qrReaderNotLoaded" : onDevice ? "devices.join.cameraUnavailable" : "join.cameraUnavailable") }); setManual(true);
     }
   };
   // Once, on opening, after the dialog is up; `scan` itself stops anything a closed dialog started.
@@ -185,7 +187,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
         if (current !== generation.current) return;
         if (qr) accept(qr.data); else setError({ tone: "error", title: t("join.noQr") });
       } finally { bitmap.close(); }
-    } catch { if (current === generation.current) setError({ tone: "error", title: t("join.imageFailed") }); }
+    } catch (cause) { if (current === generation.current) setError({ tone: "error", title: t(cause instanceof QrReaderNotLoaded ? "join.qrReaderNotLoaded" : "join.imageFailed") }); }
     finally { if (current === generation.current && !closed.current) { busyRef.current = false; setBusy(false); } }
   };
   // A screenshot of the QR, pasted (the Mac app's WebKit hands it as a file) or dropped: read as "Open image" reads
