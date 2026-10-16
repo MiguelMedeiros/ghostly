@@ -436,6 +436,9 @@ describe("a run of the train", () => {
     expect(repo.members()).toEqual([11, 12, 13, 14]);
     expect(repo.cancelled).toEqual([111, 112, 113]);
     expect(r.log).toContain("CANCEL #11: its own CI run 111 (the batch's CI is its gate)");
+    // `gh pr checks` lists a cancelled job as "fail": the comment says these are not failures, so nobody pushes for them.
+    for (const n of [11, 12, 13]) expect(repo.comments.get(n)!.at(-1)!.body).toMatch(/the train cancels that run if it is still going\. Cancelled checks here are not failures/);
+    expect(repo.comments.get(14)!.at(-1)!.body).not.toMatch(/cancel/i);
     // The batch's own CI is the gate: nothing lands until it is green.
     expect(repo.landed).toEqual([]);
     repo.settle();
@@ -459,6 +462,11 @@ describe("a run of the train", () => {
     expect(repo.members()).toEqual([11, 12]);
     expect(repo.cancelled).toEqual([113]);
     expect(r.log).toContain("CANCEL #13: its own CI run 113 (its head is behind `dev`: it lands on a batch's CI or on a rebase's)");
+    const said = (n: number) => repo.comments.get(n)!.at(-1)!.body;
+    expect(said(13)).toMatch(/1st\*\*\. It can board on its fast tier .*the train cancels its own full CI run.* Cancelled checks here are not failures/);
+    expect(said(14)).toMatch(/Cancelled checks here are not failures/);
+    // Its full run is what lets #15 board, and a draft's run is not cancelled: neither is told so.
+    for (const n of [15, 16]) expect(said(n)).not.toMatch(/cancel/i);
     // Its place holds, and it boards the next batch on its fast tier.
     repo.settle();
     await repo.run();

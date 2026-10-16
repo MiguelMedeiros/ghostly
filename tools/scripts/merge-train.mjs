@@ -16,7 +16,8 @@
 //   batch is a pull request from `batch/<base>-<stamp>`; CI runs on it once, and that full run is the gate: a pull
 //   request boards on its fast tier alone, and its own full CI run still going is cancelled (when the token may cancel
 //   runs; else one log line), which frees runners for the batch. So is the run of one still waiting in line on a green
-//   fast tier whose head is behind the base: it never lands on that run.
+//   fast tier whose head is behind the base: it never lands on that run. Its position comment says the cancelled
+//   checks are not failures.
 // - Green on `dev`: the batch's pull requests are merged one at a time, in the batch's order, each with GitHub's squash
 //   merge at the head the batch holds and with the message of the batch's commit of it. So each shows as merged, with
 //   a commit GitHub wrote and signed. Before the first merge dev's tip must be the batch's base. After each one, dev's
@@ -308,14 +309,25 @@ export function batchBody(base, baseSha, head, prs, next, extra = {}, commits = 
 export function positionText(base, pr, place, batch, head = pr.sha, alone = null, held = null) {
   const mark = `<!-- merge-train:head ${head} -->`;
   const hold = held ? ` The train is on hold: CI Success on \`${base}\` itself is ${held}, and nobody is blamed until it is green.` : "";
+  // The train cancels a pull request's own full CI that it does not land on (`cancelOwnCi`), and `gh pr checks` lists
+  // each cancelled job as "fail" (the gate under ci.yml's unrendered name): said here, so nobody pushes to "fix" it.
+  const own = pr.ci !== "success" && pr.ci !== "failure" && !pr.draft;
+  const cancelled = " Cancelled checks here are not failures; a push would take it out of the line.";
   if (alone) {
     const again = alone.retried ? " (a second run, after a red one)" : "";
     const where = held ? `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}) as ${alone.sha.slice(0, 12)}${again}.` : `Rebased onto \`${base}\` (${alone.baseSha.slice(0, 12)}), waiting for CI Success on ${alone.sha.slice(0, 12)}${again}.`;
     return `${POSITION}${mark}<!-- merge-train:alone ${JSON.stringify(alone)} -->\nMerge train: next into \`${base}\`, alone. ${where}${hold}`;
   }
-  if (batch) return `${POSITION}${mark}\nMerge train: in batch #${batch} into \`${base}\`${held ? "." : ", waiting for its CI."}${hold}`;
+  if (batch) {
+    const note = own ? ` Its own full CI is not needed: the batch's CI is its gate, so the train cancels that run if it is still going.${cancelled}` : "";
+    return `${POSITION}${mark}\nMerge train: in batch #${batch} into \`${base}\`${held ? "." : ", waiting for its CI."}${note}${hold}`;
+  }
   const why = waiting(pr);
-  return `${POSITION}${mark}\nMerge train: in line for \`${base}\`: **${ordinal(place)}**.${why ? ` Waiting: ${why}. It keeps its place.` : ""}${hold}`;
+  const note =
+    !why && own && pr.fast === "success"
+      ? ` It can board on its fast tier (CI Success (draft)): while its head is behind \`${base}\`, the train cancels its own full CI run, which it would not land on.${cancelled}`
+      : "";
+  return `${POSITION}${mark}\nMerge train: in line for \`${base}\`: **${ordinal(place)}**.${why ? ` Waiting: ${why}. It keeps its place.` : note}${hold}`;
 }
 
 /** The head a pull request had when the train first saw it queued (the reviewed one), from its position comment. */
