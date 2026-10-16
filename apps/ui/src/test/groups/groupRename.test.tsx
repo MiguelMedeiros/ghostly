@@ -85,6 +85,22 @@ describe("renaming a group in the app", () => {
     await waitFor(() => expect(engine.callsTo("renameGroup")).toEqual([{ groupId: "group-1", name: "🎉".repeat(40) }]));
   });
 
+  // agents#1097: one letter went in, the name's "!" went, the caret jumped to the end and "ong " was cut there.
+  it("typing into the middle of a full name keeps the name and the caret as they were", async () => {
+    const full = "Weekend trip to the mountains with the whole family and friends!";
+    fakeEngine.update({ groups: [admin({ name: full })] });
+    const { user } = renderApp(<GroupMembersDialog group={admin({ name: full })} onClose={() => {}} />);
+    await user.click(screen.getByTestId("group-rename"));
+    const input = screen.getByTestId("group-rename-input") as HTMLInputElement;
+    await user.type(input, "long ", { initialSelectionStart: 8, initialSelectionEnd: 8 });
+    expect(input).toHaveValue(full);
+    expect(input.selectionStart).toBe(8);
+    // Room made, the next keystroke goes in where the caret is.
+    await user.keyboard("{Backspace}{Backspace}");
+    await user.keyboard("🎉");
+    expect(input).toHaveValue("Weeken🎉trip to the mountains with the whole family and friends!");
+  });
+
   it("a member cannot rename it", () => {
     fakeEngine.update({ groups: [notAdmin()] });
     renderApp(<GroupMembersDialog group={notAdmin()} onClose={() => {}} />);
