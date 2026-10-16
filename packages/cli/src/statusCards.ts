@@ -89,6 +89,18 @@ function cardTexts(value: unknown, out: string[] = []): string[] {
 }
 
 /**
+ * The first text in `value` (a card's fields, a message's text…) that looks like a seed, a private key or a Cashu token,
+ * read as given and as a card carries it (`cardLine`).
+ */
+export function secretIn(value: unknown): ReturnType<typeof findSecret> {
+  for (const text of cardTexts(value)) {
+    const secret = findSecret(text) ?? findSecret(cardLine(text, Infinity) ?? "");
+    if (secret) return secret;
+  }
+  return null;
+}
+
+/**
  * The secret guard `send` has (docs/CLI.md § Safety): a card whose text looks like a seed, a private key or a Cashu
  * token goes only with `--force`. `fields` are what this command gives (an update's own, not the card it merges over).
  * A card's text is read as given and as the card carries it (`cardLine`): a line loses its invisible characters on the
