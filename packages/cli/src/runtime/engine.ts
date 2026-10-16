@@ -7,6 +7,7 @@ import { irohRelayProblem } from "@ghostly/browser/platform/irohWeb";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { loadCallStack } from "../calls/media";
 import { CliError } from "../errors";
+import { joinLogLine } from "../joinLog";
 import { nodeLocalFetch } from "../services";
 import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
@@ -179,9 +180,10 @@ function irohWasmBytes(): Buffer {
 
 /**
  * How a runtime starts: `deferGroups` leaves the groups' sessions unstarted (a one-shot for one chat); `offline` starts
- * no chat or group and publishes nothing (a one-shot that only reads).
+ * no chat or group and publishes nothing (a one-shot that only reads); `logJoins` says the steps of a join through a
+ * group's link on stderr (a daemon, whose log that is: `joinLog.ts`).
  */
-export interface RuntimeOptions { deferGroups?: boolean; offline?: boolean }
+export interface RuntimeOptions { deferGroups?: boolean; offline?: boolean; logJoins?: boolean }
 
 /**
  * Starts the app's engine on this profile (WISP 1100 § Runtime): IndexedDB on disk, WebRTC through libdatachannel,
@@ -204,10 +206,15 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   const pinned = pkarrRelays();
   const pinnedIroh = irohRelays();
   const trace = process.env.GHOSTLY_LINK_TRACE;
-  if (trace) {
-    setLinkTraceSink(line => appendFileSync(trace, line + "\n", { mode: 0o600 }));
-    // A join through a group's link, step by step (what the door read, whom it let in), in the same file.
-    (await import("@ghostly/browser/engine/joinTrace")).setJoinTraceSink(line => appendFileSync(trace, line + "\n", { mode: 0o600 }));
+  if (trace) setLinkTraceSink(line => appendFileSync(trace, line + "\n", { mode: 0o600 }));
+  if (trace || options.logJoins) {
+    // A join through a group's link, step by step (what the door read, whom it let in), in the same file; a daemon
+    // also says its knocks and entry sessions in its log.
+    (await import("@ghostly/browser/engine/joinTrace")).setJoinTraceSink(line => {
+      if (trace) appendFileSync(trace, line + "\n", { mode: 0o600 });
+      const said = options.logJoins ? joinLogLine(line) : null;
+      if (said) process.stderr.write(said + "\n");
+    });
   }
   const store = await openPersistentIndexedDb(paths.db);
   // A profile a restore made, started for the first time: its store is the backup's, as old as the backup. Its ecash
