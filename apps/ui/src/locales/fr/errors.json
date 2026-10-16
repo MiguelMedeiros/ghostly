@@ -6,6 +6,7 @@
     "lostPeer": "Le pair Ghostly a été perdu",
     "noRoom": "Pas assez d'espace sur cet appareil",
     "noRoomNext": "Libérez de l'espace, puis réessayez.",
+    "partNotLoaded": "Une partie de Ghostly ne s'est pas chargée.",
     "pickCard": "Choisissez d'abord une carte Lightning",
     "signerKey": "Votre signataire détient une autre clé que cette identité. Rien n'a été publié.",
     "starting": "Ghostly démarre…",
