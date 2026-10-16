@@ -689,16 +689,23 @@ export class GhostlyNode implements EngineImplementation {
   /** Other profiles of this device, looked at for new messages (WISP 04 § Checking other profiles). */
   private readonly profilePeek: ProfilePeek;
   /** Whether this device's WebRTC attempts say direct connections are blocked on its network (`directPath.ts`). */
-  private readonly directPath = new DirectPathWatch(() => { if (!this.shuttingDown) this.emitState(); });
+  private readonly directPath = new DirectPathWatch(blocked => {
+    if (this.shuttingDown) return;
+    this.emitState();
+    // Every group link still on WebRTC goes native: the ones this side answers on fail with no evidence of their own.
+    if (blocked) for (const [linkId, live] of this.links) if (live.stored.group && !live.link?.isDataLinkOpen) void this.edgeWithoutRtc(linkId);
+  });
   /** Whether this device's clock seems to be off, from what the relays' answers and several contacts' packets say (`clockWatch.ts`). */
   private readonly clock = new ClockWatch(() => { if (!this.shuttingDown) this.emitState(); });
   private clockOff: (() => void) | undefined;
   /**
    * Edges of groups whose WebRTC did not connect (`edgeWithoutRtc`): they go on as an app with no WebRTC does, over a
    * native transport, until the member is seen online again after a packet said it was gone (`away`, `edgeRtcPresence`).
-   * Not kept: the next start tries WebRTC first again.
+   * Not kept: the next start tries WebRTC first again. `held`: it stays native on a return too, until the network changes.
    */
-  private readonly edgeRtcOff = new Map<string, { away: boolean }>();
+  private readonly edgeRtcOff = new Map<string, { away: boolean; held: boolean }>();
+  /** Edges put back on WebRTC by a return (`edgeRtcPresence`) since the network last changed: failing again holds them native. */
+  private readonly edgeRtcRetried = new Set<string>();
   private readonly pollIntervals: PollIntervals;
   private readonly localFetch: LocalFetch;
   private readonly links = new Map<string, LiveLink>();
@@ -3046,6 +3053,8 @@ export class GhostlyNode implements EngineImplementation {
    */
   wake(params: { network?: boolean } = {}): void {
     if (params.network) { this.transport.networkChanged?.(); this.directPath.reset(); }
+    // An edge held native on the old network may try WebRTC again on its member's next return.
+    if (params.network) { for (const off of this.edgeRtcOff.values()) off.held = false; this.edgeRtcRetried.clear(); }
     // A group link whose native listener failed to start on the old network tries again at the next tick, its wait anew.
     if (params.network) for (const failed of this.nativeFailed.values()) { failed.at = 0; failed.wait = 0; }
     for (const live of this.links.values()) live.link?.wake({ network: params.network });
@@ -6594,6 +6603,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!live?.stored.group) return;
     this.links.delete(linkId);
     this.edgeRtcOff.delete(linkId);
+    this.edgeRtcRetried.delete(linkId);
     this.groupWakeReceived.delete(linkId);
     this.quietEdges.delete(linkId);
     // Its native slot, if it held one, is free: a group link waiting for one tries at the next tick.
@@ -6817,17 +6827,20 @@ export class GhostlyNode implements EngineImplementation {
         onPairingState: state => { live.pairing = state; this.emitState(); },
         onDirectEvidence: evidence => {
           this.directPath.note(peer, evidence);
-          if (!entry && evidence !== "open" && evidence !== "closed") void this.edgeWithoutRtc(linkId);
+          if (evidence !== "open" && evidence !== "closed") void this.edgeWithoutRtc(linkId);
         },
         // WebRTC here refused every answer to the edge's offers, through the pauses after them: the next offer would
         // wait minutes of backoff while the member is there. The edge goes on over a native transport for this run, as
         // one whose WebRTC connected nothing does.
-        onAnswersRefused: () => { if (!entry) void this.edgeWithoutRtc(linkId); },
+        onAnswersRefused: () => { void this.edgeWithoutRtc(linkId); },
         onDataLinkState: state => {
           traceJoin(group, `link.${state}`, { role });
           // The last moment the member was reachable on it: when it opens, and when it stops being open.
           if (state === "open" || live.dataLink === "open") live.lastSyncAt = Date.now();
           if (state === "open" && !entry) this.groups.edgeOpen(group, peer);
+          // Live over a native transport after WebRTC failed: the member is reachable and WebRTC is not. A return no
+          // longer says the failure was its app going (`edgeRtcPresence`).
+          if (state === "open") { const off = this.edgeRtcOff.get(linkId); if (off) off.held = true; }
           // Payments with this member that did not get through go again, never twice.
           if (state === "open" && !entry && member()) void this.desk.replay(linkId).catch(() => {});
           live.dataLink = state;
@@ -6865,13 +6878,17 @@ export class GhostlyNode implements EngineImplementation {
    * app with no WebRTC (WISP 902 § Transports): it runs its native endpoints and says so in its packet (`_tr`, with no
    * `webrtc/1`), the member's app starts its own for it as it does for a Linux Desktop, and the two meet over Iroh
    * through its relay. Until the member comes back (`edgeRtcPresence`), or for this run of the app.
+   * An entry session of a group's link too: there, the admin's packet was seen and the session never went live, and the
+   * join stayed at "Let in: getting the group's keys" for as long as the joiner waited (2026-10-16).
    */
   private async edgeWithoutRtc(linkId: string): Promise<void> {
     const live = this.links.get(linkId);
-    if (!live?.link || !live.stored.group || live.stored.groupEntry || this.shuttingDown || this.options.webrtcGroupLinks) return;
+    if (!live?.link || !live.stored.group || this.shuttingDown || this.options.webrtcGroupLinks) return;
     if (this.edgeRtcOff.has(linkId) || this.keepsGroupNative(live.stored) || !Object.keys(this.nativeFactories).length) return;
-    this.edgeRtcOff.set(linkId, { away: false });
+    // Failed again after a return put it back on WebRTC: it was the network, and the edge stays native.
+    this.edgeRtcOff.set(linkId, { away: false, held: this.edgeRtcRetried.has(linkId) });
     traceLink(live.myPubKeyZ32, "edge-rtc-off", {});
+    if (live.stored.groupEntry) traceJoin(live.stored.group, "link.native", { role: live.stored.groupEntry });
     await this.restartEdge(linkId);
   }
 
@@ -6881,15 +6898,19 @@ export class GhostlyNode implements EngineImplementation {
    * not a network that blocks direct connections. Held native for this whole run, the edge said so in its packet, the
    * member's app followed on its next starts, and past the group links' native slots members stayed unreachable for as
    * long as this app ran (2026-10-09). The edge tries WebRTC again, its `_tr` with `webrtc/1` again (WISP 902 §
-   * Transports); a network that really blocks it costs one more failed attempt per return.
+   * Transports). Not an edge held native (`held`: it failed again after a return, or went live natively), nor while
+   * this device's attempts say its network blocks direct connections: a member's packet that carries a WebRTC signal
+   * and its `_tr` can leave its `_svc` out for size and read as gone, and on a VPN each such return put the edge back on
+   * a WebRTC that died again (2026-10-16). A network that really blocks it costs one more failed attempt per network.
    */
   private edgeRtcPresence(linkId: string, presence: PeerPresence): void {
     const off = this.edgeRtcOff.get(linkId);
     if (!off) return;
     if (!presence.online) { off.away = true; return; }
-    if (!off.away) return;
+    if (!off.away || off.held || this.directPath.blocked) return;
     const live = this.links.get(linkId);
     this.edgeRtcOff.delete(linkId);
+    this.edgeRtcRetried.add(linkId);
     if (live) traceLink(live.myPubKeyZ32, "edge-rtc-back", {});
     // Its native slot, if it held one, is free: a group link waiting for one tries at the next tick.
     this.groupNativeWaiting.delete(linkId);
@@ -6907,6 +6928,8 @@ export class GhostlyNode implements EngineImplementation {
     await link.stop(false).catch(() => {});
     if (this.links.get(linkId) !== live || live.link || this.shuttingDown || !this.networkOn) return;
     this.startEdge(linkId);
+    // An entry session's other side is there now: its packet, with the transports it starts for this one, is looked for fast.
+    if (live.stored.groupEntry) this.links.get(linkId)?.link?.expectPeer();
   }
 
   private startLink(linkId: string, messages: StoredMessage[]): void {

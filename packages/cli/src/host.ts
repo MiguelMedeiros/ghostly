@@ -47,7 +47,7 @@ export async function openHost(paths: ProfilePaths, mode: ApiContext["mode"], ve
   const release = acquireLock(paths);
   let runtime;
   try {
-    runtime = await startRuntime(paths, options);
+    runtime = await startRuntime(paths, mode === "daemon" ? { ...options, logJoins: true } : options);
   } catch (error) {
     release();
     throw error;
