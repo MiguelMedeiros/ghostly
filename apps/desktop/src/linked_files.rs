@@ -476,7 +476,7 @@ impl LinkedFiles {
                 .map_err(|e| e.to_string())?;
             // A line cut off by a crash leaves the file without its line feed: this one starts a line of its own, or it
             // would be glued onto that one and name nothing after the next start.
-            let mut last = [b'\n'];
+            let mut last = *b"\n";
             if journal.seek(SeekFrom::End(0)).map_err(|e| e.to_string())? > 0 {
                 journal.seek(SeekFrom::End(-1)).map_err(|e| e.to_string())?;
                 journal.read_exact(&mut last).map_err(|e| e.to_string())?;
