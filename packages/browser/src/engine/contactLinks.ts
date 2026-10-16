@@ -1,5 +1,5 @@
 import {
-  createContactLink, encodeContactLink, endedRequests, identityFromSeedB64, inboxRecord, inviteLink, knockSlotIdentity, linkRecords, newInbox, openRequest,
+  clearMissed, createContactLink, encodeContactLink, endedRequests, identityFromSeedB64, inboxRecord, inviteLink, knockSlotIdentity, linkRecords, newInbox, openRequest,
   planKnocks, readKnockSlot, settleRequest, takeRequest, turnOff, KNOCK_SLOTS, type ContactRequest, type GhostRecord, type Identity, type InboxState,
 } from "@ghostly/core";
 import { STORES, store, wrap } from "../shared/idb";
@@ -45,6 +45,8 @@ export interface ContactLinkHost {
   resolve(pubKeyZ32: string): Promise<GhostRecord[] | null>;
   /** Whether a chat invite is one this profile made or already joined: a request carrying one is no request. */
   ownInvite(code: string): boolean;
+  /** Joins a request's invite as a chat named and opened as the request says; the chat's id. */
+  accept(request: ContactRequest & { key: string; receivedAt: number }): Promise<string>;
 }
 
 export const CONTACT_LINKS_KEY = "contactLinks";
@@ -106,6 +108,26 @@ export class ContactLinks {
   /** The requests waiting, newest first. */
   requests(): ContactRequestView[] {
     return [...this.stored.current?.requests ?? []].reverse().map(r => ({ id: r.key, name: r.name, text: r.text, receivedAt: r.receivedAt, expires: r.expires }));
+  }
+
+  /**
+   * Accept: the owner joins the invite the request carries, and the chat starts as any chat does. The request leaves
+   * Requests and its asker key is never read again on this link.
+   */
+  accept(id: string): Promise<{ linkId: string }> {
+    return this.serial(async () => {
+      const request = this.stored.current?.requests?.find(r => r.key === id);
+      if (!request) throw new Error("This request is no longer waiting");
+      if (request.expires <= Date.now()) throw new Error("This request expired");
+      const linkId = await this.host.accept(request);
+      await this.settle(id);
+      return { linkId };
+    });
+  }
+
+  /** Decline: nothing is said back. The request's name and text are deleted, and its asker key is never read again. */
+  decline(id: string): Promise<void> {
+    return this.serial(() => this.settle(id));
   }
 
   /** Reads the knock slots once and takes what is new into Requests. */
@@ -224,6 +246,17 @@ export class ContactLinks {
     await this.save({ ...this.stored, current: { ...latest, inbox, requests } });
     this.host.emit();
     if (changed) await this.publishNow();
+  }
+
+  private async settle(key: string): Promise<void> {
+    const current = this.stored.current;
+    if (!current?.requests?.some(r => r.key === key)) return;
+    // Answering a request is looking at Requests: who tried while the link was busy has been seen too.
+    const inbox = clearMissed(settleRequest(current.inbox, key));
+    await this.save({ ...this.stored, current: { ...current, inbox, requests: current.requests.filter(r => r.key !== key) } });
+    this.host.emit();
+    // `seen` does not change, so a decline says nothing; a busy link that opened again says so.
+    if (inbox.state !== current.inbox.state) await this.publishNow();
   }
 
   private retire(now: number): StoredContactLinks["retired"] {
