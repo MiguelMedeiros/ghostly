@@ -93,6 +93,13 @@ describe("ghostly x401 key and credential", { timeout: 120_000 }, () => {
     expect(error(await run("x401", "credential", "add", dir), "bad_request", 1).message).toBe(`${dir} is a folder: name a file`);
   });
 
+  // An empty one answered "credential is required": the API's parameter, not the file the person gave.
+  it("says a credential file or stdin that holds nothing is empty", async () => {
+    const empty = file("empty.txt", "");
+    expect(error(await run("x401", "credential", "add", empty), "bad_request", 1).message).toBe(`${empty} is empty: it holds the SD-JWT VC the issuer sent`);
+    expect(error(await ghostly(["--home", dir, "x401", "credential", "add", "-"], { env, input: "" }), "bad_request", 1).message).toBe("Nothing on stdin: give the SD-JWT VC the issuer sent");
+  });
+
   it("answers the words of a group with its commands", async () => {
     expect(error(await run("x401", "credential"), "usage", 2).message).toBe("ghostly x401 credential takes a command: add, list or remove (ghostly help x401 credential)");
     expect(error(await run("x401", "credential", "frob"), "usage", 2).message).toBe("Unknown command: x401 credential frob: ghostly x401 credential takes add, list or remove (ghostly help x401 credential)");
