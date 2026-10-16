@@ -29,5 +29,5 @@ export const commands: Record<string, Command> = {
     options: { "show-secret": { type: "boolean", description: "Print the claims' values too (a name, a document number...)" } }, params: ({ options }) => secret(options),
   },
   "x401 credential remove": { method: "x401.credential.remove", usage: "x401 credential remove <id>", summary: "Remove a credential and its holder key", args: ["id"], params: (_, a) => ({ id: a.id }) },
-  "x401 key new": { method: "x401.key.new", usage: "x401 key new", summary: "A fresh P-256 holder key: its public JWK goes to the issuer" },
+  "x401 key new": { method: "x401.key.new", usage: "x401 key new", summary: "A fresh P-256 holder key: its public JWK goes to the issuer (the 8 newest wait for a credential; past them, the oldest is dropped)" },
 };

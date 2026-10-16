@@ -15,9 +15,10 @@ async function engine<T>(work: () => Promise<T>): Promise<T> {
 }
 
 export const X401_METHODS: Record<string, Method> = {
+  /** `dropped`: the oldest key still waiting, gone for this one (a profile keeps the 8 newest waiting). */
   async "x401.key.new"(ctx) {
-    const { id, jwk } = await node(ctx).newX401HolderKey();
-    return { key: id, jwk };
+    const { id, jwk, dropped } = await node(ctx).newX401HolderKey();
+    return { key: id, jwk, ...(dropped ? { dropped } : {}) };
   },
 
   async "x401.credential.add"(ctx, params) {
