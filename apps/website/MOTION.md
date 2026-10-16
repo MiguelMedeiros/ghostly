@@ -148,6 +148,8 @@ watches:
   `app/dev-steps.css`, and moves on `move` (packets travel a route at an even
   speed, and a route draws behind its packet). Two labels that share a place
   swap: the next arrives after the last has started to leave, never on top.
+  The connecting line's dashes march on `--t` too, so they stop with the
+  step; the ghosts float three times and blink twice, then rest.
 - The copy card changes first (out `fast`, in `base` after it), then the
   picture answers. All cards share one grid cell, so the panel never changes
   height and nothing below it moves.
