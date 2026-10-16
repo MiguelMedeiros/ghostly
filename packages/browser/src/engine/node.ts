@@ -1166,6 +1166,13 @@ export class GhostlyNode implements EngineImplementation {
     emit: () => this.emitState(),
     // Background: the link record can wait for a chat's signaling.
     publish: (identity, records) => this.transport.publish(identity, records, { background: true }),
+    resolve: async (pubKeyZ32) => (await this.transport.resolve(pubKeyZ32, { background: true }))?.records ?? null,
+    // One this profile made or already joined: anyone who saw that invite could put it in a request, and accepting it
+    // would name an existing chat as the request says and put the request's text in it.
+    ownInvite: (code) => {
+      const params = decodeInviteCode(code);
+      return !params || inviteOwnership(params, [...this.links.values()].map((l) => l.stored)).kind !== "new";
+    },
   });
 
   /** The Nostr social layer (profile, follows, notes, publication) on top of verified Nostr proofs. */
@@ -2323,6 +2330,7 @@ export class GhostlyNode implements EngineImplementation {
       identityProofs: this.identities.views(),
       did: this.did.view(),
       contactLink: this.contactLinks.view(),
+      contactRequests: this.contactLinks.requests(),
       nostr: this.nostrSocial.state(),
       edges: [...[...this.links.values()].filter(live => live.stored.group && !live.stored.groupEntry).map(live => this.viewOf(live)), ...this.communityPayViews(groups)],
       groups: groups.map(group => ({ ...group, ...(this.groupAdminOff.has(group.id) && { adminOff: true as const }), ...(this.reactionNotes.has(`group:${group.id}`) && { lastReaction: this.reactionNotes.get(`group:${group.id}`) }), ...this.groupWakeView(group), members: group.members.map(member => {
@@ -2631,6 +2639,8 @@ export class GhostlyNode implements EngineImplementation {
   /** A new contact link for the profile; the one before is turned off. */
   createContactLink(): Promise<ContactLinkView> { return this.contactLinks.create(); }
   turnOffContactLink(): Promise<void> { return this.contactLinks.turnOff(); }
+  /** The contact link was shown or copied, or Requests opened: look for requests now and often for a while. */
+  contactLinkShown(): void { this.contactLinks.shown(); }
   lookupIdentityDisplay(params: { linkId: string; id: string }): Promise<void> {
     // A Nostr profile comes through the social layer, from the relays the person configured.
     const r = this.links.get(params.linkId)?.stored.identities?.received.find(x => x.id === params.id);
