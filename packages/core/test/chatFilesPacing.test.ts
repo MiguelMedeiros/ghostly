@@ -7,9 +7,12 @@ import type { FileInfo } from "../src/files";
  * A file sent over a link with a bottleneck, on a clock of its own: the sender's frames leave one after another at
  * `upBytesPerMs` (a queue with no end, as netem's), and each way takes `delayMs`. Every `sayEveryMs` the sender says
  * something else in the chat (a text, a ring) on the same channel; how long that takes to arrive is what is measured.
+ * `delayMs` may change with the clock (the path moves), and `confirmed` is when each confirm reached the sender.
  */
-async function slowUplink(options: { size: number; upBytesPerMs: number; delayMs: number; sayEveryMs: number }) {
+async function slowUplink(options: { size: number; upBytesPerMs: number; delayMs: number | ((now: number) => number); sayEveryMs: number }) {
   let now = 0, upFree = 0;
+  const delay = () => (typeof options.delayMs === "number" ? options.delayMs : options.delayMs(now));
+  const confirmed: { at: number; offset: number }[] = [];
   const events: { at: number; to: "a" | "b"; frame: Record<string, unknown>; said?: number }[] = [];
   const schedule = (event: (typeof events)[number]) => {
     let i = events.length;
@@ -18,13 +21,13 @@ async function slowUplink(options: { size: number; upBytesPerMs: number; delayMs
   };
   const uplink = (frame: Record<string, unknown>, bytes: number, said?: number) => {
     upFree = Math.max(now, upFree) + bytes / options.upBytesPerMs;
-    schedule({ at: upFree + options.delayMs, to: "b", frame, said });
+    schedule({ at: upFree + delay(), to: "b", frame, said });
   };
   const records = new Map<string, FileTransferRecord>();
   const host = (name: "a" | "b"): ChatFilesHost => ({
     send: (frame) => {
       if (name === "a") uplink(JSON.parse(JSON.stringify(frame)) as Record<string, unknown>, JSON.stringify(frame).length);
-      else schedule({ at: now + options.delayMs, to: "a", frame: JSON.parse(JSON.stringify(frame)) as Record<string, unknown> });
+      else schedule({ at: now + delay(), to: "a", frame: JSON.parse(JSON.stringify(frame)) as Record<string, unknown> });
       return true;
     },
     sendData: (id, offset, data) => { uplink({ t: "pf-data", id, offset, data: Buffer.from(data).toString("base64url") }, data.length + 32); return true; },
@@ -57,10 +60,18 @@ async function slowUplink(options: { size: number; upBytesPerMs: number; delayMs
       if (event.frame.t === "text") { latencies.push({ at: event.said!, ms: now - event.said! }); continue; }
       if (event.frame.t === "pf-accept" && started < 0) started = now;
       if (event.frame.t === "pf-sum") finished = now;
+      if (event.frame.t === "pf-got" && event.to === "a") confirmed.push({ at: now, offset: event.frame.offset as number });
       await (event.to === "a" ? a : b).handle(event.frame);
     }
   } finally { a.detach(); b.detach(); }
-  return { latencies, seconds: (finished - started) / 1000 };
+  return { latencies, seconds: (finished - started) / 1000, confirmed };
+}
+
+/** Bytes per second confirmed between `from` and `to` (ms on the test's clock). */
+function rate(confirmed: { at: number; offset: number }[], from: number, to: number): number {
+  const inside = confirmed.filter((c) => c.at >= from && c.at <= to);
+  if (inside.length < 2) return 0;
+  return ((inside[inside.length - 1].offset - inside[0].offset) / (inside[inside.length - 1].at - inside[0].at)) * 1000;
 }
 
 describe("a file sent over a slow uplink", () => {
@@ -74,6 +85,27 @@ describe("a file sent over a slow uplink", () => {
     expect(worst, `texts took up to ${Math.round(worst)} ms`).toBeLessThan(250);
     // The link stays full: the file takes about as long as the link needs for it.
     expect(seconds).toBeLessThan((size / upBytesPerMs / 1000) * 1.1);
+  }, 60_000);
+
+  it("keeps its texts quick over many re-measures of the path, the link still full", async () => {
+    // 40 s of upload at 5 Mbit/s: the path's round trip is measured again several times, never with the files' own queue.
+    const size = 24 * 1024 * 1024, upBytesPerMs = 5_000_000 / 8 / 1000;
+    const { latencies, seconds } = await slowUplink({ size, upBytesPerMs, delayMs: 20, sayEveryMs: 1_000 });
+    const late = latencies.filter((l) => l.at > 20_000);
+    expect(late.length).toBeGreaterThan(8);
+    const worst = Math.max(...late.map((l) => l.ms));
+    expect(worst, `texts took up to ${Math.round(worst)} ms`).toBeLessThan(250);
+    expect(seconds).toBeLessThan((size / upBytesPerMs / 1000) * 1.1);
+  }, 60_000);
+
+  it("gets its rate back when the path gets longer mid-transfer", async () => {
+    // 1 Gbit/s, 10 ms each way, then 60 ms from the first second on (another route, a relay). The longer round trip read
+    // as 100 ms of queue for good: the window stayed at its floor, 0.5 MiB/s where the same path from the start gives 8.
+    const size = 120 * 1024 * 1024;
+    const { confirmed } = await slowUplink({ size, upBytesPerMs: 125_000, delayMs: (now) => (now > 1_000 ? 60 : 10), sayEveryMs: 60_000 });
+    // From a few seconds after the path is measured again (`FILE_LIMITS.baseProbeMs`) to the end.
+    const after = rate(confirmed, 13_000, Infinity);
+    expect(after, `${(after / 2 ** 20).toFixed(2)} MiB/s`).toBeGreaterThan((FILE_LIMITS.windowBytes / 0.12) * 0.8);
   }, 60_000);
 
   it("keeps a full window on a fast link with a long round trip", async () => {
