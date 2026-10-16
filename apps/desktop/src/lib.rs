@@ -1043,13 +1043,14 @@ mod tests {
             }
         }
         let seen = Seen(Arc::default(), Instant::now());
+        let what =
+            |seen: &Seen| -> Vec<_> { seen.0.lock().unwrap().iter().map(|(w, _)| *w).collect() };
         hold_close(seen.clone());
         // Before the goodbye's wait: the window is already gone from the screen, and not yet closed.
-        let now: Vec<_> = seen.0.lock().unwrap().iter().map(|(what, _)| *what).collect();
-        assert_eq!(now, ["hide"]);
+        assert_eq!(what(&seen), ["hide"]);
         std::thread::sleep(Duration::from_millis(DEPART_MS + 300));
+        assert_eq!(what(&seen), ["hide", "close"]);
         let all = seen.0.lock().unwrap().clone();
-        assert_eq!(all.iter().map(|(what, _)| *what).collect::<Vec<_>>(), ["hide", "close"]);
         assert!(all[1].1 >= Duration::from_millis(DEPART_MS), "{all:?}");
     }
 }
