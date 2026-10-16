@@ -119,13 +119,22 @@ HandshakeProxy.prototype.recv = function (payload) {
   return recvHandshake.call(this, payload)
 }
 
-/** The address a client connects from: the proxy's word for it only when the relay is told to trust one. */
-function addressOf(request, trustProxy) {
-  if (trustProxy) {
-    const forwarded = request.headers['cf-connecting-ip'] ?? String(request.headers['x-forwarded-for'] ?? '').split(',')[0].trim()
-    if (forwarded) return String(forwarded)
+/**
+ * The address a client counts against. Behind Cloudflare (`cloudflare`), `CF-Connecting-IP`, which its edge writes
+ * over the client's. Behind `proxies` reverse proxies (a tunnel, nginx), the entry that many from the end of
+ * `X-Forwarded-For` (the ones before it are the client's to write). Otherwise, or without the header, the socket's.
+ */
+export function addressOf(request, { proxies = 0, cloudflare = false } = {}) {
+  const socket = request.socket.remoteAddress ?? 'unknown'
+  if (cloudflare) {
+    const header = request.headers['cf-connecting-ip']
+    const connecting = String(Array.isArray(header) ? header[0] : header ?? '').trim()
+    if (connecting) return connecting
   }
-  return request.socket.remoteAddress ?? 'unknown'
+  if (!proxies) return socket
+  const header = request.headers['x-forwarded-for']
+  const hops = (Array.isArray(header) ? header.join(',') : header ?? '').split(',').map(item => item.trim()).filter(Boolean)
+  return hops.length >= proxies ? hops[hops.length - proxies] : socket
 }
 
 /**
@@ -134,7 +143,7 @@ function addressOf(request, trustProxy) {
  * the relay moves handshake messages and ciphertext). `GET /healthz` answers with the counts.
  *
  * options: port, host, bootstrap (host:port list), testnet (size of an in-process HyperDHT network, for tests
- * and e2e), limits, origins (allowed `Origin` values; empty allows any), trustProxy, log.
+ * and e2e), limits, origins (allowed `Origin` values; empty allows any), proxies, cloudflare (see addressOf), log.
  */
 export async function startRelay(options = {}) {
   const limits = { ...DEFAULT_LIMITS, ...options.limits }
@@ -169,7 +178,7 @@ export async function startRelay(options = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: limits.payloadBytes, perMessageDeflate: false })
 
   server.on('upgrade', (request, socket, head) => {
-    const address = addressOf(request, options.trustProxy)
+    const address = addressOf(request, { proxies: options.proxies, cloudflare: options.cloudflare })
     const origin = request.headers.origin
     const refuse = (status, why) => {
       stats.refused++; log('refused', why)
