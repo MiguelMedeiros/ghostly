@@ -10,14 +10,16 @@
 //   (ci.yml planned it from other files: a run for another base) does not count; the run before it does. Nor does a
 //   green pull request run that is not its own: from another branch, from before its base was changed, or while another
 //   pull request from its branch into another base holds the same head (that base's ci.yml ran it).
-// - One batch per base at a time: up to 12 pull requests from the front of the line, built on the base's tip with one
-//   squash commit per pull request, in order ("<title> (#n)"). One that conflicts drops out: `queue:conflict`, one
-//   comment, `queue` taken off (`queue:conflict` comes off once it has `queue` back, as does `queue:failed`). The
-//   batch is a pull request from `batch/<base>-<stamp>`; CI runs on it once, and that full run is the gate: a pull
-//   request boards on its fast tier alone, and its own full CI run still going is cancelled (when the token may cancel
-//   runs; else one log line), which frees runners for the batch. So is the run of one still waiting in line on a green
-//   fast tier whose head is behind the base: it never lands on that run. Its position comment says the cancelled
-//   checks are not failures.
+// - One batch per base at a time: up to 12 pull requests from the front of the line, once 3 can board, or the one that
+//   has waited longest has waited 15 minutes since it could (queued, and its CI green), or one has `queue:priority`
+//   (MIN_BATCH, MAX_WAIT). Until then it says it is holding, and only the first in line lands, if it needs no CI run
+//   (green on its own full run, at the base's tip). A batch is built on the base's tip with one squash commit per pull
+//   request, in order ("<title> (#n)"). One that conflicts drops out: `queue:conflict`, one comment, `queue` taken off
+//   (`queue:conflict` comes off once it has `queue` back, as does `queue:failed`). The batch is a pull request from
+//   `batch/<base>-<stamp>`; CI runs on it once, and that full run is the gate: a pull request boards on its fast tier
+//   alone, and its own full CI run still going is cancelled (when the token may cancel runs; else one log line), which
+//   frees runners for the batch. So is the run of one still waiting in line on a green fast tier whose head is behind
+//   the base: it never lands on that run. Its position comment says the cancelled checks are not failures.
 // - Green on `dev`: the batch's pull requests are merged one at a time, in the batch's order, each with GitHub's squash
 //   merge at the head the batch holds and with the message of the batch's commit of it. So each shows as merged, with
 //   a commit GitHub wrote and signed. Before the first merge dev's tip must be the batch's base. After each one, dev's
@@ -81,6 +83,13 @@ export const LABEL = { queue: "queue", priority: "queue:priority", conflict: "qu
 // 12, not 5: each pull request's own full CI no longer gates boarding (the batch's does), so one batch run covers more
 // of the line, and bisection still finds a culprit of 12 in four splits.
 export const MAX_BATCH = 12;
+// A new batch waits for company: it leaves with MIN_BATCH pull requests that can board, or once the one that has waited
+// longest has waited MAX_WAIT since it could board, or at once for `queue:priority`. Pull requests come in minutes
+// apart and each batch's CI takes ~20 minutes, one at a time, so leaving with the first one ready made batches of ~2
+// (15 batches on 2026-10-15/16: 1 to 4 each): more full CI runs, and a slower line. The schedule (every 5 minutes) wakes
+// the train for the deadline.
+export const MIN_BATCH = 3;
+export const MAX_WAIT = 15 * 60_000;
 /** The most pages of 100 the train reads of one list (comments, events, pull requests, jobs). */
 const PAGES_READ = 10;
 const POSITION = "<!-- merge-train:position -->";
@@ -264,6 +273,23 @@ export function waiting(pr) {
 /** The next batch: the first pull requests of the line that can board, up to `max`. Nobody behind overtakes them. */
 export const pickBatch = (line, max = MAX_BATCH) => line.filter((p) => !waiting(p)).slice(0, max);
 
+/**
+ * Whether the next batch (`next`, from `pickBatch`) waits for more company: null when it may leave, else how many can
+ * board and the longest any of them has waited (ms) since it could (`boardableAt`).
+ */
+export function holdBatch(next, now, { minBatch = MIN_BATCH, maxWait = MAX_WAIT } = {}) {
+  if (!next.length || next.length >= minBatch || next.some((p) => p.priority)) return null;
+  const waited = Math.max(...next.map((p) => now - (Date.parse(p.boardableAt ?? p.queuedAt) || 0)));
+  return waited >= maxWait ? null : { count: next.length, waited };
+}
+
+/** The hold, as the log says it. */
+export const holdText = ({ count, waited }, { minBatch = MIN_BATCH, maxWait = MAX_WAIT } = {}) =>
+  `holding: ${count} boardable, oldest waited ${Math.floor(waited / 60_000)} min; a batch leaves at ${minBatch} or at ${Math.round(maxWait / 60_000)} min`;
+
+/** When a gate's newest job (by id) finished, or null. */
+export const gateDoneAt = (jobs, name) => jobs.filter((j) => j.name === name).sort((a, b) => (b.id ?? 0) - (a.id ?? 0))[0]?.completed_at ?? null;
+
 /** After a red batch: the culprit (a batch of one), or the half to try now and the half that goes right after it. */
 export function bisect(prs) {
   if (prs.length === 1) return { culprit: prs[0], first: [], second: [] };
@@ -405,7 +431,7 @@ const conflictText = (base, reason) =>
  * One run of the train for one base. `gh` reads and writes GitHub, `git` builds and pushes batches (both are fakes
  * in the tests). In a dry run every write is logged instead. Returns the log and what happened.
  */
-export async function tick({ gh, git, base, login, dry = false, stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14), also = [], now = Date.now(), log = [], pause = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+export async function tick({ gh, git, base, login, dry = false, stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14), also = [], now = Date.now(), log = [], pause = (ms) => new Promise((r) => setTimeout(r, ms)), minBatch = MIN_BATCH, maxWait = MAX_WAIT }) {
   if (!BASE.test(base)) throw new Error(`Not a train base: ${JSON.stringify(base)}`);
   // The train's own GitHub login: only its comments count as position comments (anyone can write the marks).
   if (!login) throw new Error("The train's own login is required");
@@ -498,9 +524,14 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const events = (p.events = await gh.events(p.number));
     p.queuedAt = queuedAt(events, p.createdAt);
     p.priority = p.labels.includes(LABEL.priority);
-    p.ci = ciState(await gh.ciJobs(p.sha, counts(p)));
+    const jobs = await gh.ciJobs(p.sha, counts(p));
+    p.ci = ciState(jobs);
     // The fast tier on the same head: read only when CI Success alone does not decide.
-    if (p.ci !== "success" && p.ci !== "failure") p.fast = draftState(await gh.draftJobs(p.sha));
+    const drafts = p.ci !== "success" && p.ci !== "failure" ? await gh.draftJobs(p.sha) : null;
+    if (drafts) p.fast = draftState(drafts);
+    // It could board from when it was queued, or from when the gate it boards on turned green, whichever is later.
+    const greenAt = p.ci === "success" ? gateDoneAt(jobs, "CI Success") : p.fast === "success" ? gateDoneAt(drafts, DRAFT_GATE) : null;
+    p.boardableAt = greenAt && Date.parse(greenAt) > Date.parse(p.queuedAt) ? greenAt : p.queuedAt;
     const said = await gh.comments(p.number);
     p.sticky = said.find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
     // GitHub lists both oldest first, and anyone may comment: past what the train reads, its own position comment (the
@@ -1002,9 +1033,14 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const lone = line().find((p) => p.alone?.sha === p.sha && canGoAlone(p));
     if (lone) inFlight = await flyAlone(lone);
   }
+  /** The next batch waiting for company (`holdBatch`), or null. */
+  let holding = null;
   while (inFlight === null || inFlight === undefined) {
     const next = pickBatch(line());
-    if (next.length === 1 && canGoAlone(next[0])) inFlight = await goAlone(next[0]);
+    holding = holdBatch(next, now, { minBatch, maxWait });
+    // While it waits, the front still lands at once when it can with no CI run: green on its own full run, at the tip.
+    if (holding) inFlight = canGoAlone(next[0]) && next[0].ci === "success" && (await gh.behindBy(await gh.branchSha(base), next[0].sha)) === 0 ? await goAlone(next[0]) : false;
+    else if (next.length === 1 && canGoAlone(next[0])) inFlight = await goAlone(next[0]);
     else inFlight = (await board(next)) ?? false;
   }
   inFlight ||= null;
@@ -1028,7 +1064,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     await setSticky(p, text);
     if (!aboard.has(p.number)) await cancelBehind(p);
   }
-  say(inFlight ? `IN FLIGHT #${inFlight.number}${inFlight.alone ? " (alone)" : ""}` : "Nothing to board.");
+  say(inFlight ? `IN FLIGHT #${inFlight.number}${inFlight.alone ? " (alone)" : ""}` : holding ? holdText(holding, { minBatch, maxWait }) : "Nothing to board.");
   return { log, ...done, inFlight: inFlight?.number ?? null };
 }
 
