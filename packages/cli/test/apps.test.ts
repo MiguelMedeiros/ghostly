@@ -223,6 +223,13 @@ describe("app publish", () => {
     expect(error(await ghostly(["store", "sign", index, "--key", join(keys, "store.key"), "--out", ""]), "usage", 2).message).toMatch(/^A path given as "" names no file/);
     expect(existsSync(join(keys, "store.key"))).toBe(false);
   }, 60_000);
+
+  it("names a store index that is a folder, as every other file option does", async () => {
+    const keys = tmp();
+    const folder = tmp();
+    expect(error(await ghostly(["store", "sign", folder, "--key", join(keys, "store.key")]), "bad_request", 1).message).toBe(`${folder} is a folder: name a file`);
+    expect(existsSync(join(keys, "store.key"))).toBe(false);
+  }, 60_000);
 });
 
 describe("app publish --sequence", () => {
