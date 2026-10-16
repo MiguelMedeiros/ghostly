@@ -68,6 +68,10 @@ requests, tips and "balance" in a chat, with test coins: [examples/payment-bot.m
 A Claude Code agent on `listen --turns` with an allowlist (it will not start without one), "thinking" while it works
 and `send --reply` for its answer: [examples/claude-code-agent.sh](examples/claude-code-agent.sh).
 
+Agents: [skills/ghostly](skills/ghostly) is a skill for an AI coding agent (Claude Code first) that talks to its
+owner over Ghostly: `listen`, `say` (with buttons), `status` and `react`, in `sh`, and only the owner's chat gives it
+orders.
+
 ## Profiles
 
 Each profile is a folder, `~/.ghostly/profiles/<name>/` (0700; files 0600), with its own chats, keys and wallets.

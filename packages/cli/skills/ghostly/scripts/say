@@ -1,0 +1,44 @@
+#!/bin/sh
+# say: send a message to your owner's chat, and only there. Prints the new message's id.
+#
+#   say [--reply <messageId>] [--button id:Label]... [--style id=primary|neutral|danger]... [--once] "<text>"
+#   printf '%s' "<text>" | say [--reply <messageId>] [--button id:Label]...
+#
+# The text always goes to `ghostly send` on stdin, so a text that starts with "-" stays text and nothing passes
+# through the shell. --reply quotes the message you answer (a turn's `messageId`). --button asks with buttons; a
+# press comes back through `listen` as a turn with `press`. Needs GHOSTLY_OWNER_CHAT.
+set -eu
+owner=${GHOSTLY_OWNER_CHAT:-}
+[ -n "$owner" ] || { echo "say: set GHOSTLY_OWNER_CHAT to your owner's chat id" >&2; exit 2; }
+
+reply=
+text=
+has_text=0
+# Each argument is read once and either kept as text or moved to the end as an option for `ghostly send`.
+n=$#
+need() { [ "$n" -ge 1 ] || { echo "say: $1 needs a value" >&2; exit 2; }; }
+add() { text=${text:+$text }$1; has_text=1; }
+while [ "$n" -gt 0 ]; do
+  arg=$1; shift; n=$((n - 1))
+  case "$arg" in
+    --reply) need "$arg"; reply=$1; shift; n=$((n - 1)) ;;
+    --button|--style) need "$arg"; set -- "$@" "$arg" "$1"; shift; n=$((n - 1)) ;;
+    --once) set -- "$@" --once ;;
+    -h|--help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --) while [ "$n" -gt 0 ]; do add "$1"; shift; n=$((n - 1)); done ;;
+    -?*) echo "say: unknown option $arg" >&2; exit 2 ;;
+    *) add "$arg" ;;
+  esac
+done
+
+# A turn's `id` (agent.turn:<source>:<chat>:<messageId>) is not a message id: keep its last part.
+case "$reply" in agent.turn:*) reply=${reply##*:} ;; esac
+[ -n "$reply" ] && set -- --reply "$reply" "$@"
+
+if [ "$has_text" = 0 ]; then text=$(cat); fi
+[ -n "$text" ] || { echo 'say: nothing to send' >&2; exit 2; }
+
+out=$(printf '%s' "$text" | ghostly send "$owner" --stdin "$@") || { code=$?; printf '%s\n' "$out" >&2; exit "$code"; }
+id=$(printf '%s' "$out" | jq -r '.messageId // empty')
+[ -n "$id" ] || { echo "say: not sent: $out" >&2; exit 1; }
+printf '%s\n' "$id"
