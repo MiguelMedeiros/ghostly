@@ -28,7 +28,7 @@ export function LandOnHash() {
     if (!id || !document.getElementById(id)) return;
 
     // Looked up each time: a chapter that takes another shape is a new element with the same id.
-    const land = () => document.getElementById(id)?.scrollIntoView({ block: "start" });
+    const land = () => document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "instant" });
     const ro = new ResizeObserver(land);
     // A block that rises into place as it shows (Reveal) was measured before it rose: land again once it has.
     const risen = (e: TransitionEvent) => {

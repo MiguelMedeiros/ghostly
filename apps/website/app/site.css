@@ -73,8 +73,10 @@ html {
   overflow-x: clip;
   scroll-padding-top: calc(var(--nav-h) + 16px);
 }
+/* Only once the reader has touched the page (layout.tsx, js-flag): a link that names a section opens there, the
+   browser's jump to it on load and LandOnHash's re-landing are not a flight through the page. */
 @media (prefers-reduced-motion: no-preference) {
-  html {
+  html.landed {
     scroll-behavior: smooth;
   }
 }
