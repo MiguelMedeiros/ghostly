@@ -388,6 +388,7 @@ export class Communities {
       const mention = [...history].reverse().find(m => m.mentioned);
       const mentionAt = cameOrWritten(mention?.timestamp, mention ? group.came?.mention : undefined);
       if (mentionAt) this.lastMentionAt.set(group.id, mentionAt);
+      this.host.loaded?.(group.id, history);
       // Admissions in flight did not survive the restart; a joiner keeps its side.
       for (const [, linkId] of this.host.entries(group.id)) if (group.joining?.linkId !== linkId) await this.host.closeEdge(linkId);
       // The edges of the last run stay a while, whatever the topology wants at first (see `reconcile`).

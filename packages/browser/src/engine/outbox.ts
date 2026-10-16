@@ -114,8 +114,9 @@ export class Outbox {
     this.now = options.now ?? Date.now;
   }
 
-  async recover(): Promise<void> {
-    for (const message of await this.store.read()) {
+  /** `messages`: the chat's history as the caller just read it (a start has), so it is not read a second time. */
+  async recover(messages?: StoredMessage[]): Promise<void> {
+    for (const message of messages ?? await this.store.read()) {
       // Held items have their own durable queue and are picked up by the store-and-forward engine.
       if (message.via === "hold" || message.sender !== "me") continue;
       if (message.delivery === "queued") { await this.queue(message, message.deliveryError ?? "Not confirmed yet."); continue; }
