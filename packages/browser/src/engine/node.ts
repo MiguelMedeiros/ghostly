@@ -42,7 +42,7 @@ import { ModeChanged, networkLabel, WrongNetworkError } from "./paymentAdapters/
 import { assertConfirmedReal, createTiming, WALLET_NAMES, createFailure, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "./paymentAdapters/walletInstances";
 import { migrateWalletNetworks } from "./paymentAdapters/walletNetworks";
 import { perNetwork, type PerNetwork } from "./paymentAdapters/perNetwork";
-import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, parseEngineError, traceLink } from "@ghostly/core";
+import { COMMUNITY_EDIT_FRAME, INVITE_TAKEN, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, MAX_GROUP_NAME_LENGTH, engineError, engineText, groupName, parseCommunityEdit, parseEngineError, sanitizeDisplayText, traceLink } from "@ghostly/core";
 import { ClockWatch, DirectPathWatch, firstDeviceSetSecret } from "@ghostly/core";
 import { GROUP_WAKE_FRAME, GROUP_WAKE_RECEIVE_LIMIT, GroupWakeLimiter, RateWindow, WAKE_CALL_INTERVAL_MS, WakeLimiter, groupWakeFrame, groupWakes, parseGroupWakeFrame, checkPushEndpoint, newWakeToken, vapidKeysMatch, wakeRequest, type PushRequest, type WakeKind, type WakeTarget } from "@ghostly/core";
 import { COMMUNITY_REACTION_FRAME, GROUP_REACTION_FRAME, REACTION_LIMITS, ReactionWindow, queueReaction, readReaction, validReactionNumber, wireReaction, type WireReaction } from "@ghostly/core";
@@ -2986,7 +2986,9 @@ export class GhostlyNode implements EngineImplementation {
   renameLink({ linkId, label }: { linkId: string; label: string }): void {
     const live = this.links.get(linkId);
     if (!live) return;
-    live.stored = { ...live.stored, label: label.trim().slice(0, 48) || undefined };
+    // One line of 48 characters at most, cut between code points (never through an emoji), as `groupName` does.
+    const clean = sanitizeDisplayText(label.trim().replace(/\s+/gu, " "), 48)?.replace(/ {2,}/g, " ");
+    live.stored = { ...live.stored, label: clean };
     void db.patchLink(linkId, { label: live.stored.label });
     this.emitState();
   }
