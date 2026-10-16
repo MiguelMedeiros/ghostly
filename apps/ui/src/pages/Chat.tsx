@@ -113,6 +113,7 @@ import { clearChatNotification } from "../lib/notifications";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { showChatOnScreen } from "../lib/appBadge";
 import { problemText, type Problem, problemLine } from "../lib/problemText";
+import { AskedNotice } from "../components/requests/AskedNotice";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
@@ -922,6 +923,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               </time>
             </p>
           )}
+          {/* A chat made for a request through someone's contact link (WISP 8xx): where the request is, until an answer. */}
+          <AskedNotice linkId={chatLink?.id} answered={pairedReady} />
           {/* The scene and the invite it waits on: side by side where the column has room for both. */}
           <div className="pairing-invite"><div className="pairing-invite-row">
           {pairing.scene && pairing.progress && (
