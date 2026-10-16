@@ -167,7 +167,7 @@ export function useTabTrap(ref: RefObject<HTMLElement | null>, on = true) {
  * Tab and Shift+Tab go round `root`'s own controls, and a Tab from the page's body goes into it. Focus in a layer of
  * its own (a select's list, a menu drawn over the page) keeps its Tab.
  */
-function keepTabInside(e: KeyboardEvent, root: HTMLElement | null) {
+export function keepTabInside(e: KeyboardEvent, root: HTMLElement | null) {
   if (e.key !== "Tab" || e.defaultPrevented || !root) return;
   const active = document.activeElement;
   const inside = !!active && root.contains(active);

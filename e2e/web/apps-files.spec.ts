@@ -86,6 +86,22 @@ test("an app granted files reads a folder the person picks through the client's 
     await appFrame(ana).locator("#read").click();
     await expect(appFrame(ana).locator("#out")).toHaveText("read world");
 
+    // The sheet is modal: Tab and Shift+Tab stay on its buttons, never on the app's Close or frame under the backdrop.
+    await appFrame(ana).locator("#pick").click();
+    await expect(sheet).toBeVisible();
+    const inSheet = () => ana.page.evaluate(() => !!document.activeElement?.closest("[data-testid=app-files-sheet]"));
+    for (const key of ["Tab", "Tab", "Tab", "Tab", "Tab", "Tab", "Shift+Tab", "Shift+Tab", "Shift+Tab", "Shift+Tab"]) {
+      await ana.page.keyboard.press(key);
+      expect(await inSheet(), key).toBe(true);
+    }
+    // The app stops while the sheet is up: the sheet goes with it, and no picker opens for an app that is gone.
+    // A tick later, so the evaluate answers before the frame goes.
+    await appFrame(ana).evaluate(() => { setTimeout(() => (window as unknown as { ghostly: { close(): void } }).ghostly.close(), 0); });
+    await expect(ana.page.getByTestId("mini-app")).toHaveCount(0);
+    await expect(sheet).toHaveCount(0);
+    await ana.page.getByTestId("installed-app").getByTestId("installed-app-open").click();
+    await expect.poll(() => ana.page.frames().find((f) => f.url().includes("app-frame"))?.locator("#pick").count() ?? 0).toBe(1);
+
     // Cancel: the app hears `cancelled`, and asking again at once is `too-fast`, so the picker does not come straight
     // back in front of the person who closed it.
     await appFrame(ana).locator("#pick").click();
