@@ -5,6 +5,8 @@ import { callApi, findChat, findGroup, hideStateSecrets, mentionsFor, redactSett
 import { chatOrGroup, findChatOrGroup } from "../src/apiKit";
 import { parseArgs } from "../src/args";
 import { COMMANDS } from "../src/commands";
+import { ENGINE_PARAMS } from "../src/engineMethods";
+import { asCliError } from "../src/errors";
 import type { GhostlyEvent } from "../src/events";
 import { allowlist } from "../src/listen";
 import { chatJson, isLive } from "../src/views";
@@ -677,6 +679,30 @@ describe("the engine passthrough", () => {
     }
     Object.assign(ctx, { mode: "one-shot", stop: undefined });
     expect(await callApi(ctx, "engine.call", { method: "clearProfileData", yes: true })).toEqual({ cleared: { chats: 2, groups: 1 } });
+  });
+
+  it("refuses a call given less than it takes, or a value of the wrong kind, naming what it takes", async () => {
+    const { ctx, node } = fake();
+    // As the engine's own: JavaScript's TypeError on what is not there, or nothing done for a chat it does not find.
+    const renameLink = vi.fn(async ({ linkId, label }: { linkId?: string; label?: string }) => { if (linkId) label!.trim(); });
+    const updateSettings = vi.fn(async ({ settings }: { settings: { nostr?: unknown } }) => { void settings.nostr; });
+    const lnurlResolve = vi.fn(async () => { throw new TypeError("fetch failed"); });
+    Object.assign(node, { renameLink, updateSettings, lnurlResolve });
+    const call = (method: string, params?: unknown) => callApi(ctx, "engine.call", { method, params }).then(() => null, asCliError);
+    const takes = (method: string, why: string) => ({ code: "bad_request", message: `${method} takes ${ENGINE_PARAMS[method]}: ${why} (ghostly engine --list --verbose)` });
+    expect(await call("renameLink")).toMatchObject(takes("renameLink", "no parameters given"));
+    expect(await call("renameLink", {})).toMatchObject(takes("renameLink", "linkId, label missing"));
+    expect(await call("renameLink", { linkId: "c" })).toMatchObject(takes("renameLink", "label missing"));
+    expect(await call("updateSettings", { nick: "x" })).toMatchObject(takes("updateSettings", "settings missing"));
+    expect(renameLink).not.toHaveBeenCalled();
+    expect(updateSettings).not.toHaveBeenCalled();
+    // A number for the text: the engine's words behind it.
+    expect((await call("renameLink", { linkId: "c", label: 5 }))?.toJSON()).toEqual({
+      ...takes("renameLink", "a parameter of the wrong kind"), details: { takes: "{ linkId, label }", rawError: "label.trim is not a function" },
+    });
+    expect(await call("renameLink", { linkId: "c", label: "x" })).toBeNull();
+    // The network failing is not the caller's parameters.
+    expect(await call("lnurlResolve", { text: "a@b.c" })).toMatchObject({ code: "engine", message: "fetch failed" });
   });
 });
 
