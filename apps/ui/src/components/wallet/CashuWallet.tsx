@@ -36,11 +36,19 @@ const TX_LABEL = {
  */
 /** The history note of test coins (engine/wallet.ts `testCoins`): not a payment of an invoice. */
 const TEST_COINS_NOTE = "Test coins from the test mint";
-/** The notes the engine writes itself (engine/wallet.ts), in English: shown in the app's language. A memo is shown as written. */
-const ENGINE_NOTES: Record<string, "wallet.cashu.history.note.testCoins" | "wallet.cashu.history.note.requestPaid" | "wallet.cashu.history.note.paymentFailed"> = {
-  [TEST_COINS_NOTE]: "wallet.cashu.history.note.testCoins",
-  "Request paid over Lightning": "wallet.cashu.history.note.requestPaid",
-  "A Lightning payment failed": "wallet.cashu.history.note.paymentFailed",
+/**
+ * The notes the engine writes itself (engine/wallet.ts), in English: shown in the app's language. Each is only ever on
+ * its kind of movement, where no memo goes: a contact's memo (ecash in, a payment out) is shown as written, even one
+ * that reads like a note of the engine's.
+ */
+type EngineNote = "wallet.cashu.history.note.testCoins" | "wallet.cashu.history.note.requestPaid" | "wallet.cashu.history.note.paymentFailed";
+const ENGINE_NOTES: Partial<Record<keyof typeof TX_LABEL, Record<string, EngineNote>>> = {
+  "lightning-in": { [TEST_COINS_NOTE]: "wallet.cashu.history.note.testCoins", "Request paid over Lightning": "wallet.cashu.history.note.requestPaid" },
+  fee: { "A Lightning payment failed": "wallet.cashu.history.note.paymentFailed" },
+};
+const noteText = (t: Translate, { kind, note = "" }: { kind: keyof typeof TX_LABEL; note?: string }) => {
+  const key = ENGINE_NOTES[kind]?.[note];
+  return key ? t(key) : note;
 };
 /** When a movement happened, as the history writes it ("Sep 30, 03:15 PM"; "30 de set., 15:15" in Portuguese). */
 const MOVED_AT: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
@@ -248,7 +256,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                       <span className={`font-semibold shrink-0 tabular-nums ${incoming ? "text-accent" : "text-text-primary"}`}><Signed sign={incoming ? "+" : "−"} amount={formatAmount(tx.amount, t.language)} /> <span className="text-xs font-normal text-text-muted">{unit}</span></span>
                     </div>
                     <div className="flex items-baseline justify-between gap-2 text-xs text-text-muted">
-                      <span className="truncate">{formatAt(tx.timestamp, MOVED_AT, t.language)} · {mint?.name ?? new URL(tx.mint).hostname}{tx.note ? ` · ${ENGINE_NOTES[tx.note] ? t(ENGINE_NOTES[tx.note]) : tx.note}` : ""}</span>
+                      <span className="truncate">{formatAt(tx.timestamp, MOVED_AT, t.language)} · {mint?.name ?? new URL(tx.mint).hostname}{tx.note ? ` · ${noteText(t, tx)}` : ""}</span>
                       <span className={`shrink-0 ${tx.fee > 0 ? "text-warn-ink" : ""}`}>{tx.fee > 0 ? t("wallet.cashu.history.fee", { amount: formatAmount(tx.fee, t.language) }) : t("wallet.cashu.history.noFee")}</span>
                     </div>
                   </div>

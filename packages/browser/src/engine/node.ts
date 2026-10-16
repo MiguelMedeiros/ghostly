@@ -1585,7 +1585,8 @@ export class GhostlyNode implements EngineImplementation {
       const fresh = !this.walletFeedbackIds.has(tx.id);
       this.walletFeedbackIds.add(tx.id);
       if (this.walletFeedbackReady && fresh && tx.amount > 0 && tx.timestamp >= this.feedbackStartedAt) {
-        if (tx.kind === "lightning-in" || tx.kind === "ecash-in") this.feedback("coin", tx.id, undefined, false, tx.note === TEST_COINS_NOTE ? "testcoins" : undefined);
+        // Get test coins is a Lightning receipt: ecash in carries a contact's memo, which may read the same.
+        if (tx.kind === "lightning-in" || tx.kind === "ecash-in") this.feedback("coin", tx.id, undefined, false, tx.kind === "lightning-in" && tx.note === TEST_COINS_NOTE ? "testcoins" : undefined);
         if (tx.kind === "lightning-out") this.feedback("confirmed", tx.id);
       }
     }
