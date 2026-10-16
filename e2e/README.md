@@ -528,7 +528,9 @@ fixture then fails the test.
 
 `useFakeProviders(peer)` sets `localStorage["ghostly-test-providers"] = "1"` and reloads: the fake Lightning
 and Bitcoin providers (regtest, in memory) then show up in the source pickers, in Testnet only. That is
-how `wallet-sources.spec.ts` drives a source with nothing running.
+how `wallet-sources.spec.ts` drives a source with nothing running. The key is read only by a development build
+or one made with `VITE_APPS_TEST=1` (every e2e build is; `testBuild` in `packages/browser/src/shared/features.ts`):
+a release build ignores it.
 
 A real provider (NWC, WebLN, LND, Core Lightning, Breez, BDK, Bitcoin Core…) gets a gated test of its
 own: `GHOSTLY_<NAME>_REGTEST=1` with its services in `e2e/infra`, `test.skip` otherwise. A new one adds its

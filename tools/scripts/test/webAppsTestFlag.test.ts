@@ -27,7 +27,7 @@ it("the web image empties it before its build", () => {
 });
 
 it("the app reads it only from the build (import.meta.env), never from storage or the address", () => {
-  for (const file of ["apps/web/src/host.ts", "apps/web/src/main.tsx", "apps/ui/src/desktop/host.ts", "apps/ui/src/lib/apps/flag.ts"]) {
+  for (const file of ["apps/web/src/host.ts", "apps/web/src/main.tsx", "apps/ui/src/desktop/host.ts", "apps/ui/src/lib/apps/flag.ts", "packages/browser/src/shared/features.ts"]) {
     const text = readFileSync(join(ROOT, file), "utf8");
     const lines = text.split("\n").filter((l) => l.includes("VITE_APPS_TEST") && !/^\s*(\/\/|\/\*\*|\*)/.test(l));
     expect(lines.length, file).toBeGreaterThan(0);
