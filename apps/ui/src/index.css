@@ -401,6 +401,14 @@ html[data-standalone="true"] {
     height: var(--app-height, 100dvh);
   }
 
+  /* A dialog too, as on a phone held upright (below): centred on the whole screen, an iPhone or iPad on its side
+     had New group's Create and Forward's Send under the keyboard. */
+  html[data-keyboard="true"] dialog:modal:not([data-testid="avatar-viewer"]) {
+    top: env(safe-area-inset-top);
+    bottom: calc(100% - var(--app-height, 100%));
+    max-height: calc(var(--app-height, 100dvh) - env(safe-area-inset-top) - 2rem);
+  }
+
   /* As on a phone held upright (below): a field under 16px makes iOS zoom into it on focus, and the page stayed
      zoomed and panned once the keyboard went, an iPhone on its side too (874px wide, two panes). */
   input,
