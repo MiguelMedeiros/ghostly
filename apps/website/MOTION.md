@@ -251,6 +251,10 @@ pointer with a time-based ease (about 2 s to close most of the distance, 4 s
 tired, 8 s asleep), sleeps when you stop and ducks when you reach for it; it
 writes its position straight to the DOM as a transform and stops its clock
 once it has settled (under 3 px a second), waking only for its next mood.
+The ghost asleep in the footer itself breathes its z's three times when the
+footer shows (2 s each, 0.3 s apart), then they rest, bright: looped, they
+restyled the page on the main thread for as long as the reader stayed at the
+end of it.
 
 ### Micro-interactions
 
