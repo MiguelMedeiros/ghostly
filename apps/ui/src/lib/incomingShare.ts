@@ -2,9 +2,10 @@ import { useSyncExternalStore } from "react";
 
 /*
  * Something another app shared into Ghostly (the installed web app is a share target): text, a link, images,
- * files. It is held here, in memory only, from the moment the page receives it until a chat is picked; then
- * it waits for that chat's composer, which puts the text in the draft and the files on the attachment sheet
- * (the same sheet a paste or a drop opens, #349). Nothing is sent until the person sends it there.
+ * files. It is held here, in memory only, from the moment the page receives it until a chat is picked (a profile
+ * switch hands it to the next page, `carryIncomingShare`); then it waits for that chat's composer, which puts the
+ * text in the draft and the files on the attachment sheet (the same sheet a paste or a drop opens, #349). Nothing is
+ * sent until the person sends it there.
  */
 
 /** A file of a share as the picker shows it: a browser's File, or one not read into the page yet. */
@@ -24,6 +25,11 @@ export interface IncomingShare {
    * when a chat's composer takes it, not before the picker shows). Without it, `files` are the Files.
    */
   read?: () => Promise<File[]>;
+  /**
+   * Keeps the share for the page that loads next (a profile switch restarts the app), which shows it in its picker
+   * again. False where it could not be kept. Without it, the share goes with this page.
+   */
+  carry?: () => boolean;
 }
 
 /** A share's files as Files, read now where they were not yet. */
@@ -62,6 +68,11 @@ export function incomingShare(): IncomingShare | null {
 export function dropIncomingShare(): void {
   pending = null;
   emit();
+}
+
+/** The page is about to restart: the share that waits for a chat to be picked is kept for the next page. Whether it was. */
+export function carryIncomingShare(): boolean {
+  try { return pending?.carry?.() ?? false; } catch { return false; }
 }
 
 /** The chat picked: the share waits for its composer. `chat` is the composer's draft id (a session id, `group:<id>`). */
