@@ -1,5 +1,6 @@
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { MessageBubble } from "../../components/MessageBubble";
 import type { LightningAddressInfo } from "../../lib/platform";
 import { fakeEngine, linkView, walletView } from "../fakeEngine";
@@ -15,7 +16,8 @@ import { lightningSource, mint, TEST_MINT } from "./fixtures";
  */
 
 const SETTLED_KEY = "ghostly_settled_money";
-const hash = (fill: number) => Buffer.from(new Uint8Array(32).fill(fill)).toString("hex");
+/** The key Paid is kept under: a digest of the whole invoice. */
+const settledMoneyId = (invoice: string) => Buffer.from(sha256(new TextEncoder().encode(invoice))).toString("hex");
 const message = (text: string) => ({ id: "m1", text, sender: "peer", timestamp: Date.now(), status: "delivered" }) as never;
 
 describe("an edited message with a Lightning invoice", () => {
@@ -35,7 +37,7 @@ describe("an edited message with a Lightning invoice", () => {
     expect(within(card).queryByTestId("invoice-confirm")).not.toBeInTheDocument();
     expect(within(card).getByTestId("invoice-pay")).toBeInTheDocument();
     expect(view.engine.callsTo("walletPayQuote")).toEqual([]);
-    expect(localStorage.getItem(SETTLED_KEY) ?? "[]").not.toContain(hash(2));
+    expect(localStorage.getItem(SETTLED_KEY) ?? "[]").not.toContain(settledMoneyId(edited));
   });
 
   it("an invoice paid before the edit is the one marked Paid", async () => {
@@ -50,8 +52,8 @@ describe("an edited message with a Lightning invoice", () => {
     release();
     await new Promise((resolve) => setTimeout(resolve, 20));
     const settled = localStorage.getItem(SETTLED_KEY) ?? "[]";
-    expect(settled).toContain(hash(1));
-    expect(settled).not.toContain(hash(2));
+    expect(settled).toContain(settledMoneyId(first));
+    expect(settled).not.toContain(settledMoneyId(edited));
     expect(within(screen.getByTestId("invoice-bubble")).queryByTestId("invoice-paid")).not.toBeInTheDocument();
   });
 });
