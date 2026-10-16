@@ -85,11 +85,16 @@ export const RESTART_GRACE_MS = 8000;
 export const RING_MS = 60_000;
 
 /**
- * A call that comes this soon after the contact's last missed one does not ring: no person ends a call and places the
- * next one that fast, a bot looping call and hang-up does (1,375 calls a minute). It is kept as a missed call, and the
- * wait starts over with it, so a burst rings once and a call placed after a pause rings again.
+ * A call that comes this soon after the contact's last missed one does not ring, when that one barely rang
+ * (`BURST_RING_MS`): a bot looping call and hang-up does that (1,375 calls a minute), no person does. It is kept as a
+ * missed call, and the wait starts over with it, so a burst rings once and a call placed after a pause rings again.
+ * A person's call that rang a while, then was cancelled or rang out, holds nothing back: calling again at once (voice to
+ * video, a slip of the finger) rings.
  */
 export const QUICK_REDIAL_MS = 2000;
+
+/** A missed call that rang shorter than this was not a person's (`QUICK_REDIAL_MS`). */
+export const BURST_RING_MS = 1000;
 
 /** How long "No answer" stays on the caller's screen. */
 export const NO_ANSWER_SHOWN_MS = 6000;
@@ -289,8 +294,10 @@ export function useWebRTC({
   const lastProcessedSignalRef = useRef<number>(0);
   const callStateRef = useRef<CallState>("idle");
   const pendingOfferRef = useRef<CallSignal | null>(null);
-  /** When the contact's last call was missed here, on this clock (QUICK_REDIAL_MS). */
+  /** When the contact's last call was missed here, on this clock, if it barely rang (QUICK_REDIAL_MS); 0 otherwise. */
   const lastMissedAtRef = useRef(0);
+  /** When the contact's call began to ring here, on this clock (BURST_RING_MS). */
+  const ringingSinceRef = useRef(0);
   const hangupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const myOfferTimestampRef = useRef<number>(0);
   /** Our published offer's DTLS fingerprint: with its timestamp, what decides who rings when both call at once. */
@@ -1273,6 +1280,7 @@ export function useWebRTC({
       callHadVideoRef.current = offerHasVideo;
       callConnectedEventFiredRef.current = false;
       addCallEventMessage?.("call_received", offerHasVideo, undefined, signal.ts);
+      ringingSinceRef.current = Date.now();
       updateCallState("incoming");
       setFastPoll(true);
     } else if (signal.t === "a" && (callStateRef.current === "offering" || callStateRef.current === "connecting")) {
@@ -1290,7 +1298,7 @@ export function useWebRTC({
       if (callStateRef.current !== "idle") traceCallEnd("contact-hang-up", { state: callStateRef.current, ...(signal.r && { r: signal.r }) });
       // The caller gave up (or its ring ran out) before we answered: a missed call, as when our own ring runs out.
       if (callStateRef.current === "incoming") {
-        lastMissedAtRef.current = Date.now();
+        lastMissedAtRef.current = Date.now() - ringingSinceRef.current < BURST_RING_MS ? Date.now() : 0;
         addCallEventMessage?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current?.ts);
       } else if (callStateRef.current === "offering" && signal.r !== "u" && myOfferTimestampRef.current && callSignalHeardAt(signal) > myOfferTimestampRef.current) {
         // Our call still rang there: the contact declined it (a side that rings sends nothing else).
@@ -1323,7 +1331,8 @@ export function useWebRTC({
         hangUpRef.current(true, false);
         setNoAnswer(true);
       } else {
-        lastMissedAtRef.current = Date.now();
+        // It rang its whole minute: a person's call, which holds the next one back no more than a declined one does.
+        lastMissedAtRef.current = 0;
         addCallEventMessageRef.current?.("call_missed", callHadVideoRef.current, undefined, pendingOfferRef.current?.ts);
         hangUpRef.current(false, false);
       }
