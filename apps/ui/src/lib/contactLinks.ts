@@ -1,3 +1,4 @@
+import { encodeContactLink, readContactLink } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { ensureSession, findSession, updateSessionLabel } from "./storage";
 
@@ -18,4 +19,28 @@ export async function adoptEngineChat(linkId: string): Promise<string> {
   if (!existing && link.label) updateSessionLabel(id, link.label);
   window.dispatchEvent(new Event("session-updated"));
   return id;
+}
+
+/** Said on `window` when a contact link was opened or pasted: the request form takes it (`takeContactLink`). */
+export const CONTACT_LINK_EVENT = "ghostly-contact-link";
+let pending: string | null = null;
+
+/** Whether this text is someone's contact link (`ghostly1r…`, bare or in a link), not a chat invite. */
+export function isContactLink(value: string): boolean {
+  return readContactLink(value).ok;
+}
+
+/** Hands a contact link to the request form. Opening it sends nothing: the person writes and taps Send. */
+export function offerContactLink(value: string): void {
+  const reading = readContactLink(value);
+  // The code alone: a link's host and anything around it go no further.
+  pending = reading.ok ? encodeContactLink(reading.linkKeyZ32) : value.trim();
+  window.dispatchEvent(new Event(CONTACT_LINK_EVENT));
+}
+
+/** The contact link handed over, once. */
+export function takeContactLink(): string | null {
+  const value = pending;
+  pending = null;
+  return value;
 }

@@ -1,5 +1,13 @@
 {
   "accept": "Aceitar",
+  "askLabel": "Nome para esta conversa (só você vê)",
+  "askLead": "Alguém compartilhou este link de contato. Diga quem você é e por que está escrevendo: a pessoa escolhe se responde.",
+  "askLeft": "faltam {{count}} bytes",
+  "askName": "Seu nome",
+  "askPrivate": "Nada é enviado até você tocar em Enviar. Você só descobre quem é se a pessoa aceitar.",
+  "askSend": "Enviar pedido",
+  "askText": "Mensagem",
+  "askTitle": "Enviar pedido",
   "busy": "Há pedidos demais esperando: os novos não são lidos até você responder alguns.",
   "decline": "Recusar",
   "empty": "Nenhum pedido esperando. Quem abrir seu link de contato e escrever para você aparece aqui.",

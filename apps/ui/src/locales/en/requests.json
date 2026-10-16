@@ -1,5 +1,13 @@
 {
   "accept": "Accept",
+  "askLabel": "Name for this chat (only you see it)",
+  "askLead": "Someone shared this contact link. Write who you are and why you are writing: they choose whether to answer.",
+  "askLeft": "{{count}} bytes left",
+  "askName": "Your name",
+  "askPrivate": "Nothing is sent until you tap Send. You learn who they are only if they accept.",
+  "askSend": "Send request",
+  "askText": "Message",
+  "askTitle": "Send a request",
   "busy": "Too many requests are waiting: new ones are not read until you answer some.",
   "decline": "Decline",
   "empty": "No requests waiting. People who open your contact link and write to you show up here.",

@@ -1,5 +1,13 @@
 {
   "accept": "Accepter",
+  "askLabel": "Nom de cette discussion (vous seul le voyez)",
+  "askLead": "Quelqu’un a partagé ce lien de contact. Dites qui vous êtes et pourquoi vous écrivez : la personne choisit de répondre ou non.",
+  "askLeft": "{{count}} octets restants",
+  "askName": "Votre nom",
+  "askPrivate": "Rien n’est envoyé avant que vous touchiez Envoyer. Vous ne saurez qui c’est que si la personne accepte.",
+  "askSend": "Envoyer la demande",
+  "askText": "Message",
+  "askTitle": "Envoyer une demande",
   "busy": "Trop de demandes attendent : les nouvelles ne sont pas lues tant que vous n’avez pas répondu à certaines.",
   "decline": "Refuser",
   "empty": "Aucune demande en attente. Les personnes qui ouvrent votre lien de contact et vous écrivent apparaissent ici.",

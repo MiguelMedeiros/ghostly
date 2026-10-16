@@ -1,5 +1,13 @@
 {
   "accept": "Accetta",
+  "askLabel": "Nome per questa chat (lo vedi solo tu)",
+  "askLead": "Qualcuno ha condiviso questo link di contatto. Scrivi chi sei e perché scrivi: sarà quella persona a scegliere se rispondere.",
+  "askLeft": "{{count}} byte rimasti",
+  "askName": "Il tuo nome",
+  "askPrivate": "Non viene inviato nulla finché non tocchi Invia. Saprai chi è solo se accetta.",
+  "askSend": "Invia richiesta",
+  "askText": "Messaggio",
+  "askTitle": "Invia una richiesta",
   "busy": "Ci sono troppe richieste in attesa: le nuove non vengono lette finché non rispondi ad alcune.",
   "decline": "Rifiuta",
   "empty": "Nessuna richiesta in attesa. Chi apre il tuo link di contatto e ti scrive compare qui.",
