@@ -539,9 +539,16 @@ async function listenCommand(argv: string[]): Promise<void> {
   });
   // Before the profile opens: `listen bob` (meant as `--from bob`) streams nobody's events instead of everybody's.
   noMoreThan(0, parsed.positionals, SPECIAL.find(([usage]) => usage.startsWith("listen "))![0]);
+  // Before the profile opens: a unit file's `--webhook "$URL"` with URL unset ran a plain listen, no hook and no word.
+  const blank = (value: unknown) => typeof value === "string" && value.trim() === "";
+  if (blank(parsed.options.webhook)) throw new CliError("usage", "--webhook needs a URL");
+  if (blank(parsed.options.exec)) throw new CliError("usage", "--exec needs a command");
+  if (parsed.options.cursor === "") throw new CliError("usage", "--cursor needs a file");
+  if ((parsed.options.from as string[] | undefined)?.some(blank)) throw new CliError("usage", "--from needs a chat or a contact key");
+  if ((parsed.options.group as string[] | undefined)?.some(blank)) throw new CliError("usage", "--group needs a group");
   const g = globals(parsed);
   pretty = false; // one event per line
-  if (parsed.options.webhook) checkWebhook(String(parsed.options.webhook));
+  if (parsed.options.webhook !== undefined) checkWebhook(String(parsed.options.webhook));
   const types = (parsed.options.type as string[] | undefined) ?? [];
   const turns = parsed.options.turns === true;
   if (turns && types.length) throw new CliError("usage", "--turns takes the place of --type: a turn is a message received, or a group message that mentions you");
