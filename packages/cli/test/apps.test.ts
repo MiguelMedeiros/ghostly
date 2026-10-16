@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { appRevocationFor, readAppBundle, readAppRevocations, type AppManifest } from "@ghostly/core";
 import { verifyApp } from "../src/apps";
 import { CliError } from "../src/errors";
-import { error, ghostly, ok } from "./support/cli";
+import { error, ghostly, home, ok } from "./support/cli";
 // covers: apps.bundle, apps.store
 
 /*
@@ -289,6 +289,26 @@ describe("app revoke", () => {
     expect(ok(await ghostly(["app", "publish", dir, "--key", key, "--sequence", "31"]))).toMatchObject({ sequence: 31, previous: 3 });
     // Up to the bundle's own sequence needs no --force.
     expect(ok(await ghostly(["app", "revoke", dir, "--key", key, "--up-to", "31"]))).toMatchObject({ upTo: 31, current: true });
+  });
+
+  it("is read by app verify and app serve from the ghostly-revoke.json beside the bundle, as a client reads it", async () => {
+    const { manifest, files } = chess();
+    const dir = appFolder(manifest, files);
+    const key = vectorKey(tmp(), "publisher");
+    const bundle = join(dir, "app.ghostlyapp");
+    const first = ok(await ghostly(["app", "publish", dir, "--key", key]));
+    expect(ok(await ghostly(["app", "verify", bundle]))).toMatchObject({ valid: true, digest: first.digest });
+    ok(await ghostly(["app", "revoke", dir, "--key", key, "--digest", first.digest as string, "--reason", "Leaked a test move list"]));
+
+    const refusal = error(await ghostly(["app", "verify", bundle]), "refused", 1) as { message: string; details?: { reason?: string; detail?: string } };
+    expect(refusal.details).toMatchObject({ reason: "revoked", detail: "Leaked a test move list" });
+    expect(refusal.message).toContain("revoked");
+    const served = error(await ghostly(["--home", home("revoked"), "app", "serve", bundle, "--grant", "chat"]), "refused", 1) as { details?: { reason?: string } };
+    expect(served.details?.reason).toBe("revoked");
+
+    // A version the list does not cover is valid.
+    expect(ok(await ghostly(["app", "publish", dir, "--key", key]))).toMatchObject({ sequence: 2 });
+    expect(ok(await ghostly(["app", "verify", bundle]))).toMatchObject({ valid: true, sequence: 2 });
   }, 60_000);
 });
 
@@ -325,6 +345,7 @@ describe("app verify <url>", () => {
   it("reads a bundle over https, following a redirect held to the same rule", async () => {
     const seen: string[] = [];
     vi.stubGlobal("fetch", async (url: string) => {
+      if (url.endsWith("/ghostly-revoke.json")) return new Response("no", { status: 404 });
       seen.push(url);
       if (url.includes("@")) return new Response(stream([bundle]), { status: 200 });
       return new Response(null, { status: 302, headers: { location: "https://cdn.jsdelivr.net/gh/ana/chess@0123456789abcdef0123456789abcdef01234567/app.ghostlyapp" } });
@@ -350,6 +371,25 @@ describe("app verify <url>", () => {
     await expect(verifyApp("https://example.com/a.ghostlyapp")).rejects.toMatchObject({ code: "refused", details: { reason: "too-large" } });
     expect(pulled).toBeLessThan(20);
   });
+
+  it("refuses a version its publisher revoked in the ghostly-revoke.json beside the URL; none there is no error", async () => {
+    const dir = tmp();
+    writeFileSync(join(dir, "app.ghostlyapp"), bundle);
+    ok(await ghostly(["app", "revoke", dir, "--key", vectorKey(tmp(), "publisher"), "--up-to", "1", "--reason", "Leaked a test move list"]));
+    const list = readFileSync(join(dir, "ghostly-revoke.json"));
+    const seen: string[] = [];
+    let revoked = true;
+    vi.stubGlobal("fetch", async (url: string) => {
+      seen.push(url);
+      if (url.includes("/app.ghostlyapp")) return new Response(stream([bundle]), { status: 200 });
+      return revoked ? new Response(stream([new Uint8Array(list)]), { status: 200 }) : new Response("no", { status: 404 });
+    });
+    const url = "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp?x=1";
+    await expect(verifyApp(url)).rejects.toMatchObject({ code: "refused", details: { reason: "revoked", detail: "Leaked a test move list" } });
+    expect(seen).toEqual([url, "https://raw.githubusercontent.com/ana/chess/HEAD/ghostly-revoke.json"]);
+    revoked = false;
+    expect(await verifyApp(url)).toMatchObject({ valid: true, digest: vector.read.digest });
+  }, 60_000);
 
   it("says not found for a 404", async () => {
     vi.stubGlobal("fetch", async () => new Response("no", { status: 404 }));

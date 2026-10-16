@@ -178,12 +178,45 @@ export async function verifyApp(source: string): Promise<Record<string, unknown>
   return { valid: true, ...described(bundle, bytes), manifest: bundle.manifest };
 }
 
-/** A bundle from a file or an https URL, with every check of `app verify`; `url` when it came from one. */
+/**
+ * The `ghostly-revoke.json` beside a bundle, as a client reads it beside each bundle URL: beside the URL (without its
+ * query), or beside the file. None there, one that does not answer, or one a client would not read, revokes nothing.
+ */
+async function revocationsBeside(source: string, isUrl: boolean): Promise<{ file: string; revocations: SignedAppRevocation[] }> {
+  let file: string;
+  let bytes: Uint8Array;
+  try {
+    if (isUrl) {
+      const at = new URL(source);
+      at.search = "";
+      at.hash = "";
+      file = new URL(APP_REVOKE_FILE, at).href;
+      bytes = await fetchBundle(file);
+    } else {
+      file = join(dirname(resolve(source)), APP_REVOKE_FILE);
+      if (!existsSync(file)) return { file, revocations: [] };
+      bytes = readBundleFile(file);
+    }
+  } catch { return { file: source, revocations: [] }; }
+  const read = readAppRevocations(bytes);
+  return { file, revocations: read.ok ? read.revocations : [] };
+}
+
+/**
+ * A bundle from a file or an https URL, with every check of `app verify`; `url` when it came from one. A version its
+ * publisher revoked in the `ghostly-revoke.json` beside it is refused: a client stops it, with no "Run anyway".
+ */
 export async function checkedBundle(source: string): Promise<{ bundle: AppBundle; bytes: Uint8Array; url?: string }> {
   const isUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(source);
   const bytes = isUrl ? await fetchBundle(source) : readBundleFile(resolve(source));
   const read = readAppBundle(bytes);
   if (!read.ok) throw refused(`${source} is not a valid bundle`, read);
+  const m = read.bundle.manifest;
+  const { file, revocations } = await revocationsBeside(source, isUrl);
+  const revocation = appRevocationFor({ ref: appRef(m.publisher, m.name), sequence: m.sequence, digest: read.bundle.digest }, revocations);
+  if (revocation) {
+    throw refused(`${source} is a version its publisher revoked in ${file}: a client stops it`, { reason: "revoked", ...(revocation.statement.reason !== undefined && { detail: revocation.statement.reason }) }, { file });
+  }
   return { bundle: read.bundle, bytes, ...(isUrl && { url: source }) };
 }
 
