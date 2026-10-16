@@ -11,7 +11,9 @@ import {
   isSessionKey,
   listShownSessions,
   loadSession,
+  loadShownSession,
   peerDisplayName,
+  sessionIdForPeer,
   sessionLinkParams,
   setSessionPeerNick,
   storedSession,
@@ -64,9 +66,13 @@ function forget(sessionId: string): void {
   forgetShownSession(sessionId);
 }
 
-/** The chat with this contact, as the page's cache holds it: not to be changed in place. */
+/**
+ * The chat with this contact, as the page's cache holds it: not to be changed in place. Found by the chats' keys and
+ * read alone: every link is mid-sync at a start, and a read of every chat per link grew with the square of the chats.
+ */
 export function sessionForPeer(peerPubKeyZ32: string): ChatSession | undefined {
-  return listShownSessions().find((s) => s.peerPubKeyB64 === peerPubKeyZ32);
+  const id = sessionIdForPeer(peerPubKeyZ32);
+  return (id && loadShownSession(id)) || undefined;
 }
 
 export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myPubKeyZ32: string, modern = false): ChatMessage {
