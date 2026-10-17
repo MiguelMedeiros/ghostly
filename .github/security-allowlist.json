@@ -15,6 +15,9 @@
     { "package": "rustls", "id": "RUSTSEC-2026-0346", "until": "2026-10-28", "why": "Fixed in 0.23.46, which Cargo.lock takes. Left in native/transports/iroh-web/Cargo.lock only: taking it there means rebuilding the committed browser Iroh (node tools/scripts/build-iroh-web.mjs, needs the wasm32 target, a wasm32 clang and wasm-bindgen-cli 0.2.106). Debug output of session values: we never log them." },
     { "package": "rustls", "id": "RUSTSEC-2026-0347", "until": "2026-10-28", "why": "Same as RUSTSEC-2026-0346 (browser Iroh rebuild). ECH: iroh does not use it." },
     { "package": "rustls", "id": "RUSTSEC-2026-0348", "until": "2026-10-28", "why": "Same as RUSTSEC-2026-0346 (browser Iroh rebuild). Brotli certificate decompression: the browser build has no brotli crate." },
-    { "package": "rustls", "id": "RUSTSEC-2026-0349", "until": "2026-10-28", "why": "Same as RUSTSEC-2026-0346 (browser Iroh rebuild)." }
+    { "package": "rustls", "id": "RUSTSEC-2026-0349", "until": "2026-10-28", "why": "Same as RUSTSEC-2026-0346 (browser Iroh rebuild)." },
+    { "package": "zip", "id": "RUSTSEC-2026-0367", "until": "2026-10-24", "why": "zip via tauri-plugin-updater; dependency update scheduled in the next patch. The updater extracts a zip only on Windows, and only after the download passes the signature check against the release key in apps/desktop/tauri.conf.json." },
+    { "package": "zip", "id": "RUSTSEC-2026-0368", "until": "2026-10-24", "why": "Same as RUSTSEC-2026-0367 (zip via tauri-plugin-updater)." },
+    { "package": "zip", "id": "RUSTSEC-2026-0369", "until": "2026-10-24", "why": "Same as RUSTSEC-2026-0367 (zip via tauri-plugin-updater)." }
   ]
 }
