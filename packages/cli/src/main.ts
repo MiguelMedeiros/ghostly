@@ -204,9 +204,9 @@ export async function oneShotJoinWait(s: Pick<Session, "call">, result: Record<s
   return { answer, note: `Not paired yet: the inviter's app is offline. It pairs when both are online: keep this profile running (ghostly daemon --detach), then ghostly chat wait ${ref} --until paired` };
 }
 
-async function readStdin(): Promise<string> {
+async function readStdin(onData?: () => void): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  for await (const chunk of process.stdin) { onData?.(); chunks.push(chunk as Buffer); }
   return Buffer.concat(chunks).toString("utf8");
 }
 
@@ -933,7 +933,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
   }
   // Before stdin adds its own: only the --value names came on the command line.
   const lineValues = command.method === "wallet.create" ? Object.keys((params.values as Record<string, string> | undefined) ?? {}) : [];
-  const secretWarning = await secretsFromStdin(command.method, params, readStdin, process.stdin.isTTY === true);
+  const secretWarning = await secretsFromStdin(command.method, params, readStdin, process.stdin.isTTY === true, (note) => process.stderr.write(`ghostly: ${note}\n`));
   if (secretWarning) process.stderr.write(`ghostly: ${secretWarning}\n`);
   const result = await withSession(g, async (s) => {
     if (lineValues.length) {
