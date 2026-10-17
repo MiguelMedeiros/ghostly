@@ -27,6 +27,8 @@
   "shareTitle": "Share to…",
   "shareTooLarge": "Too large to share here: {{names}}",
   "shareTooLargeNext": "Open a chat and send it with + → Document.",
+  "shareUnread": "Couldn't read: {{names}}",
+  "shareUnreadNext": "Share it again from its app, or open a chat and send it with + → Document.",
   "shareWaiting": "Getting what was shared...",
   "stepsThen": "Then open Ghostly from its new icon.",
   "storageFull": "Storage full",
