@@ -6751,6 +6751,9 @@ export class GhostlyNode implements EngineImplementation {
       nick: !entry && this.quietEdge(stored) ? undefined : this.sharedNick,
       // A private group's edges look at Pkarr more slowly as it grows: one edge per member (WISP 902 § Cost per member).
       pollIntervals: entry || this.groups.isCommunityGroup(group) ? this.pollIntervals : meshEdgeIntervals(this.pollIntervals, () => this.groups.meshSize(group)),
+      // A member never seen is awaited from when the edge was made, as a chat's contact is: from each start, every edge
+      // to a member away for a day was read every 4 s for ten minutes of every start, as an invite just sent.
+      madeAt: stored.createdAt,
       autoConnect: true,
       // An entry session carries one admission and closes. The member's side always dials (the joiner's key is
       // drawn so), and the joiner's packet is already there: its offer goes in its first packet.
