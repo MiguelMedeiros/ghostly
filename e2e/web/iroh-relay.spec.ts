@@ -59,6 +59,17 @@ test("with WebRTC blocked, two browsers keep chatting over Iroh through a relay,
   await alice.page.getByTestId("connection-details-summary").click();
   await expect(alice.page.getByTestId("connection-relayed")).toHaveText(`Relayed via ${new URL(relay).host}`);
   await expect(alice.page.getByTestId("connection-summary")).toContainText("sees which devices talk and when, never what they say");
+  // The relay line is selected with the mouse and copied: the press on its text gave the focus to the page's main, and
+  // the panel used to take that for focus gone elsewhere and close under the pointer.
+  const line = alice.page.getByTestId("connection-relayed"), box = (await line.boundingBox())!;
+  await alice.page.mouse.move(box.x + 1, box.y + 4);
+  await alice.page.mouse.down();
+  await alice.page.mouse.move(box.x + box.width - 1, box.y + box.height - 4, { steps: 8 });
+  await alice.page.mouse.up();
+  await expect(line).toBeVisible();
+  expect(await alice.page.evaluate(() => String(getSelection()).trim())).toBe(`Relayed via ${new URL(relay).host}`);
+  await alice.page.keyboard.press("ControlOrMeta+C");
+  expect(await alice.page.evaluate(() => navigator.clipboard.readText())).toBe(`Relayed via ${new URL(relay).host}`);
   await alice.page.keyboard.press("Escape");
   await alice.page.getByTestId("connection-options").hover();
   await expect(alice.page.getByTestId("connection-tooltip-detail")).toHaveText(/^relayed · /);
