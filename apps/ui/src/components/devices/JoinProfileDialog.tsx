@@ -6,8 +6,9 @@ import { askPersistentStorage, isIosBrowserTab } from "@ghostly/browser/devices/
 import { readDeviceInvite } from "@ghostly/core";
 import { useI18n, type TranslationKey } from "../../contexts/I18nContext";
 import {
-  defaultDeviceName, deviceNoun, enrollErrorKey, enrollInUse, enrollLoading, failureKey, joinInNewProfile, readDeviceLink, reloadIntoGate, type JoinRequest,
+  defaultDeviceName, deviceNoun, enrollErrorKey, enrollInUse, enrollLoading, failureKey, fitsDeviceName, joinInNewProfile, readDeviceLink, reloadIntoGate, type JoinRequest,
 } from "../../lib/devices";
+import { useFittedNameField } from "../../hooks/useGroupNameField";
 import { isDesktopApp } from "../../lib/externalLink";
 import { nameStepDone } from "../../lib/nameStep";
 import { servicesPlatform } from "../../lib/platform";
@@ -58,6 +59,8 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
   const [code, setCode] = useState(request.code);
   const [profile, setProfile] = useState(request.profile);
   const [name, setName] = useState(() => request.name ?? defaultDeviceName(isDesktopApp() ? { userAgent: navigator.userAgent, desktop: true } : undefined));
+  // What the set keeps of a name, 16 bytes, not 16 characters: the name typed is the name every device shows.
+  const nameField = useFittedNameField(name, setName, fitsDeviceName);
   const [place, setPlace] = useState<Place | null>(null);
   const [view, setView] = useState<EnrollView | null>(null);
   const [kept, setKept] = useState<boolean | null>(null);
@@ -195,7 +198,7 @@ export function JoinProfileDialog({ request = {}, standby = false, onClose, onRe
         <form className="space-y-3" data-testid="device-join-confirm" data-place={place ?? undefined} data-profile={profile || undefined} onSubmit={(event) => { event.preventDefault(); add(); }}>
           <label className="block space-y-1">
             <span className="text-text-secondary">{t("devices.join.name")}</span>
-            <input data-testid="device-join-name" maxLength={16} value={name} onChange={(event) => setName(event.target.value)} className={field} />
+            <input data-testid="device-join-name" {...nameField} value={name} className={field} />
           </label>
           {place === "new" && <InfoLine testId="device-join-new-profile" info={t("devices.join.newProfileInfo")}>{t("devices.join.newProfile")}</InfoLine>}
           {error && <Notice problem={error} testId="device-join-error" />}
