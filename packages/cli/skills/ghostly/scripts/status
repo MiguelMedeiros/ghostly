@@ -12,7 +12,8 @@ owner=${GHOSTLY_OWNER_CHAT:-}
 
 case "${1:-}" in
   -h|--help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-  --stop) ghostly typing "$owner" --stop >/dev/null; exit 0 ;;
+  # A refusal comes as {"error"} JSON on stdout: pass it on, on stderr.
+  --stop) out=$(ghostly typing "$owner" --stop) || { code=$?; printf '%s\n' "$out" >&2; exit "$code"; }; exit 0 ;;
 esac
 
 secs=${2:-300}
@@ -23,4 +24,4 @@ case "$secs" in ''|*[!0-9]*) echo "status: seconds must be a number" >&2; exit 2
 # One line, no links, at most 40 characters (counted as characters, not bytes).
 line=$(printf '%s' "${1:-}" | jq -Rrs 'gsub("[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]]*|www\\.[^[:space:]]*"; "") | gsub("[[:space:]]+"; " ") | gsub("^ +| +$"; "") | .[0:40]')
 [ -n "$line" ] || { echo 'status: usage: status "<what you are doing>" [seconds] | --stop' >&2; exit 2; }
-ghostly typing "$owner" --kind thinking --status "$line" --for "$secs" >/dev/null
+out=$(ghostly typing "$owner" --kind thinking --status "$line" --for "$secs") || { code=$?; printf '%s\n' "$out" >&2; exit "$code"; }

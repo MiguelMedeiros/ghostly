@@ -21,4 +21,5 @@ for arg in "$@"; do
 done
 [ -n "$id" ] || { echo 'react: usage: react <messageId> [emoji] [--remove]' >&2; exit 2; }
 case "$id" in agent.turn:*) id=${id##*:} ;; esac
-ghostly react "$owner" "$id" "${emoji:-👀}" $remove >/dev/null
+# A refusal comes as {"error"} JSON on stdout: pass it on, on stderr.
+out=$(ghostly react "$owner" "$id" "${emoji:-👀}" $remove) || { code=$?; printf '%s\n' "$out" >&2; exit "$code"; }
