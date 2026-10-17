@@ -76,7 +76,7 @@ test("a message written before my reply that reaches me after it still counts as
 
   // Bob's app is closed, and Alice reaches no relay: what she writes now waits with her.
   await bob.page.goto("about:blank");
-  const relays = /^https:\/\/(pkarr\.pubky\.(org|app)|relay\.pkarr\.org)\//;
+  const relays = /^https:\/\/(pkarr\.pubky\.(org|app)|relay\.pkarr\.org|pkarr\.miguelmedeiros\.dev)\//;
   const refuse = (route: Route) => route.abort("connectionrefused");
   await alice.context.route(relays, refuse);
   await say(alice, "written while you were away");

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createIdentity, identityFromSeedB64, type Identity } from "../src/identity";
-import { BACKGROUND_REQUESTS_PER_MINUTE, DEFAULT_RELAYS, RelayTransport } from "../src/relay";
+import { BACKGROUND_REQUESTS_PER_MINUTE, DEFAULT_RELAYS, RELAY_REQUESTS_PER_MINUTE, RelayTransport } from "../src/relay";
 import { fromBase64Url } from "../src/bytes";
 import { buildLinkRecords, emptyLinkRecords } from "../src/records";
 import { createLink, type LinkParams } from "../src/invite";
@@ -704,9 +704,10 @@ describe("LinkSession poll pacing", () => {
     await vi.advanceTimersByTimeAsync(15_000);
     const reads = requests.filter((r) => r.method === "GET").length;
     await expect(relays.publish(createIdentity(), [{ label: "_ts", value: "1" }])).resolves.toBeUndefined();
-    expect(requests.filter((r) => r.method === "PUT").map((r) => r.at)).toEqual([15_000, 15_000]);
-    // The chats' reads took the background share of each relay's minute, not the minute.
-    expect(reads).toBe(2 * BACKGROUND_REQUESTS_PER_MINUTE);
+    expect(requests.filter((r) => r.method === "PUT").map((r) => r.at)).toEqual(DEFAULT_RELAYS.map(() => 15_000));
+    // The chats' reads took the background share of each relay's minute, not the minute: 20 on a relay of 30 or 60,
+    // two thirds of pkarr.miguelmedeiros.dev's 5, so its write still went out there.
+    expect(reads).toBe(2 * BACKGROUND_REQUESTS_PER_MINUTE + Math.ceil(RELAY_REQUESTS_PER_MINUTE["https://pkarr.miguelmedeiros.dev"] * 2 / 3));
     for (const chat of chats) await chat.stop(false);
   });
 

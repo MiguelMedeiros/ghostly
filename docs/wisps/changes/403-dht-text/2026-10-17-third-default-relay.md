@@ -1,0 +1,1 @@
+The browser client's relay budget: 5 requests a minute on pkarr.miguelmedeiros.dev, a default relay since 2026-10-17, which allows 10 an address; 30 on pkarr.pubky.org and 60 on pkarr.pubky.app as before.
