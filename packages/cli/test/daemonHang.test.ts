@@ -14,14 +14,15 @@ describe("a daemon that accepts the socket but never answers", () => {
   afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
 
   /** A profile whose socket accepts the connection, reads nothing and writes nothing: the daemon's event loop wedged. */
-  async function wedged(name: string): Promise<{ dir: string; paths: ReturnType<typeof profilePaths> }> {
+  async function wedged(name: string): Promise<{ dir: string; paths: ReturnType<typeof profilePaths>; received: () => string }> {
     const dir = home(name);
     createProfile(dir, "default");
     const paths = profilePaths(dir, "default");
-    const server: Server = createServer(() => {});
+    let received = "";
+    const server: Server = createServer((socket) => { socket.on("data", (chunk) => (received += chunk.toString())); socket.on("error", () => {}); });
     await new Promise<void>((resolve) => server.listen(paths.socket, resolve));
     cleanups.push(() => { server.close(); rmSync(paths.socket, { force: true }); });
-    return { dir, paths };
+    return { dir, paths, received: () => received };
   }
 
   /** The command's result, or a failure in `ms` that leaves no `ghostly` behind (the old code hung for ever). */
@@ -41,6 +42,18 @@ describe("a daemon that accepts the socket but never answers", () => {
     expect(failure.message).toMatch(/did not answer status in 0\.5 s/);
     expect(failure.message).toContain("ghostly daemon restart");
   });
+
+  it("a write gives up when the version check sent first has no answer in 15 s, with code timeout (exit 4), and was never sent", async () => {
+    const { dir, received } = await wedged("hung-write");
+    const started = Date.now();
+    const failure = error(await within(25_000, ["--home", dir, "send", "bob", "hi", "--wait", "none"]), "timeout", 4);
+    expect(Date.now() - started, "gave up at the check's 15 s, not never").toBeLessThan(20_000);
+    expect(failure.message).toMatch(/did not answer in 15 s; nothing was done/);
+    expect(failure.message).toContain("ghostly daemon restart");
+    // Only the check went out: a daemon that wakes later (SIGCONT) finds no message to send in its socket.
+    expect(received()).toContain('"method":"status"');
+    expect(received()).not.toContain("chat.send");
+  }, 30_000);
 
   it("daemon stop ends the process that holds the profile when the daemon does not answer: restart can then start a fresh one", async () => {
     const { dir, paths } = await wedged("hung-stop");
