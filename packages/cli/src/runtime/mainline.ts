@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import DHT from "bittorrent-dht";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import {
-  HEDGE_MS, RelayTransport, SLOW_MS, isDiscoveryBudgetError, newerPacket, parseRelayPayload, publicKeyFromZ32,
+  HEDGE_MS, RelayTransport, RelaysFailedError, SLOW_MS, isDiscoveryBudgetError, newerPacket, parseRelayPayload, publicKeyFromZ32,
   type DiscoveryStatus, type GhostRecord, type Identity, type PkarrRequestOptions, type PkarrTransport, type RelayTransportOptions, type SignedPacket,
 } from "@ghostly/core";
 
@@ -152,7 +152,10 @@ export class RelaysAndDht implements PkarrTransport {
     const down = () => this.relays.discovery().relays.every((relay) => relay.state === "failing");
     if (!down()) {
       const started = Date.now();
-      const relays = this.relays.resolve(pubKeyZ32, options).then((packet) => ({ packet, failed: null as unknown }), (error: unknown) => ({ packet: null, failed: error }));
+      // A read the relays failed asks the DHT at once, their last copy kept to weigh against its packet. Handed back
+      // as their answer, it stood for each 20 s cooldown until the breaker opened: about 40 s of a contact's old packet
+      // with the newer one on the DHT (bug hunt, 2026-10-17).
+      const relays = this.relays.resolve(pubKeyZ32, options, false).then((packet) => ({ packet, failed: null as unknown }), (error: unknown) => ({ packet: null, failed: error }));
       let timer: ReturnType<typeof setTimeout> | undefined;
       const answered = await Promise.race([relays, new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), HEDGE_MS); })]);
       clearTimeout(timer);
@@ -161,6 +164,7 @@ export class RelaysAndDht implements PkarrTransport {
       if (!answered) return this.hedged(pubKeyZ32, relays, started);
       ({ packet: fromRelays, failed } = answered);
       if (isDiscoveryBudgetError(failed)) throw failed;
+      if (failed instanceof RelaysFailedError) fromRelays = failed.kept;
       if (!failed) this.lastVia = "relay";
       if (!failed && !down()) return fromRelays;
     }
