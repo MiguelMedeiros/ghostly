@@ -4546,7 +4546,9 @@ export class GhostlyNode implements EngineImplementation {
     if (ids.length > FORWARD_MESSAGES) throw new Error(`Forward at most ${FORWARD_MESSAGES} messages at once`);
     if (!targets.length) throw new Error("No chat to forward to");
     if (targets.length > FORWARD_TARGETS) throw new Error(`Forward to at most ${FORWARD_TARGETS} chats at once`);
-    if (linkId.startsWith("group:") ? !this.membership(linkId.slice("group:".length)) : this.links.get(linkId)?.stored.group !== undefined || !this.links.has(linkId))
+    // A group this device keeps, in it or not: its history is read from here, and one I was removed from still shows it.
+    // Sending to a group is what needs being in it.
+    if (linkId.startsWith("group:") ? !this.groups.views().some(g => g.id === linkId.slice("group:".length)) : this.links.get(linkId)?.stored.group !== undefined || !this.links.has(linkId))
       throw new Error("Chat not found");
     // Each one by its id: a long chat or group is not read whole for the few forwarded.
     const chosen = await Promise.all(ids.map(id => db.getMessage(linkId, id)));
