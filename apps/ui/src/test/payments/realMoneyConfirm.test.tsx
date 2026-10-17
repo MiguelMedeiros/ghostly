@@ -42,7 +42,7 @@ describe("a Lightning invoice in a message", () => {
     await user.click(within(card).getByTestId("invoice-confirm"));
     await user.click(screen.getByTestId("review-confirm-send"));
     expect(await within(card).findByTestId("invoice-paid")).toBeInTheDocument();
-    expect(engine.callsTo("walletPayQuote")).toEqual([{ quote: "melt-1", mint: REAL_MINT, confirmedReal: true }]);
+    expect(engine.callsTo("walletPayQuote")).toEqual([{ quote: "melt-1", mint: REAL_MINT, confirmedReal: true, linkId: "link-1", invoice }]);
   });
 
   it("paid with test sats (only a Testnet wallet): Pay pays at once, with no second step", async () => {
@@ -52,7 +52,7 @@ describe("a Lightning invoice in a message", () => {
     await user.click(await within(card).findByTestId("invoice-confirm"));
     expect(screen.queryByTestId("review-mainnet-confirm")).not.toBeInTheDocument();
     expect(await within(card).findByTestId("invoice-paid")).toBeInTheDocument();
-    expect(engine.callsTo("walletPayQuote")).toEqual([{ quote: "melt-1", mint: REAL_MINT }]);
+    expect(engine.callsTo("walletPayQuote")).toEqual([{ quote: "melt-1", mint: REAL_MINT, linkId: "link-1", invoice }]);
   });
 });
 

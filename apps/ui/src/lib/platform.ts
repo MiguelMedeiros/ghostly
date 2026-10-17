@@ -362,8 +362,10 @@ export interface WalletPlatform {
   /**
    * True when paid, false while the payment is pending (or its answer lost). Throws when the sats did not leave. `note`: what it was for, kept with the wallet's record.
    * `confirmedReal`: the person confirmed a Mainnet payment as real money; the engine refuses one without it.
+   * `chat`: the invoice was in a message of this contact's chat; paid on Testnet, they are told (a test mint's invoice
+   * counts only on the payer's word).
    */
-  payQuote(quote: string, mint: string, note?: string, confirmedReal?: boolean): Promise<boolean>;
+  payQuote(quote: string, mint: string, note?: string, confirmedReal?: boolean, chat?: { peerPubKey: string; invoice: string }): Promise<boolean>;
   /**
    * Reads a Lightning address (`name@domain`) or an LNURL and fetches what it asks for. The address's
    * domain learns of the request: say so before calling.
