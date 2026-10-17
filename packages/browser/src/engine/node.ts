@@ -2518,11 +2518,12 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * One invite warmed and waiting (`after` ms from now), warmed again every so often while it waits (the relays forget).
    * Once too old for `takeInvite` to hand out, it is replaced by a new one, warmed at once: warming it on would spend
-   * two puts every few minutes on keys nobody will use, and leave the next invite on cold keys.
+   * two puts every few minutes on keys nobody will use, and leave the next invite on cold keys. The timer set for its age
+   * says so (`aged`): Node times it from the loop's cached clock, so it often fires a few ms before the age by `Date.now()`.
    */
-  private prepareSpare(after = 0): void {
+  private prepareSpare(after = 0, aged = false): void {
     if (this.shuttingDown || !this.networkOn) return;
-    if (this.spare && after === 0 && Date.now() - this.spare.madeAt >= SPARE_INVITE_MAX_AGE_MS) {
+    if (this.spare && after === 0 && (aged || Date.now() - this.spare.madeAt >= SPARE_INVITE_MAX_AGE_MS)) {
       for (const identity of [identityFromSeedB64(this.spare.mine.seedB64), this.spare.inviteKey]) this.warmedKeys.delete(identity.pubKeyZ32);
       this.spare = null;
     }
@@ -2538,8 +2539,9 @@ export class GhostlyNode implements EngineImplementation {
       this.warmedKeys.set(identity.pubKeyZ32, Date.now());
       this.warmKey(identity);
     }
-    const untilAged = spare.madeAt + SPARE_INVITE_MAX_AGE_MS - Date.now();
-    this.spareTimer = setTimeout(() => { this.spareTimer = null; if (this.spare === spare) this.prepareSpare(); }, Math.min(SPARE_INVITE_WARM_EVERY_MS, untilAged));
+    const untilAged = Math.max(0, spare.madeAt + SPARE_INVITE_MAX_AGE_MS - Date.now());
+    const aging = untilAged <= SPARE_INVITE_WARM_EVERY_MS;
+    this.spareTimer = setTimeout(() => { this.spareTimer = null; if (this.spare === spare) this.prepareSpare(0, aging); }, aging ? untilAged : SPARE_INVITE_WARM_EVERY_MS);
   }
 
   async joinLink({ inviteCode }: { inviteCode: string }): Promise<{ linkId: string }> {
