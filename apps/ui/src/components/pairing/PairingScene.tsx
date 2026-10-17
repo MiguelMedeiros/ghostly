@@ -164,7 +164,7 @@ export function PairingScene({ progress, contact, retry, retrying, retryError, i
       <Ghost x={46} y={80} mood={me} className="ps-ghost ps-me" />
       <Ghost x={274} y={80} mood={peer} className="ps-ghost ps-peer" />
     </svg>
-    <div className="ps-names" aria-hidden="true"><span>{t("pairing.you")}</span><span className="ps-contact">{contact || t("pairing.contact")}</span></div>
+    <div className="ps-names" aria-hidden="true"><span>{t("pairing.you")}</span><span className="ps-contact" dir="auto">{contact || t("pairing.contact")}</span></div>
     <div className="ps-caption">
       <p id={titleId} className="ps-label" data-testid="pairing-stage-label">{label}</p>
       {ticking && <p className="ps-time" data-testid="pairing-elapsed"><time dateTime={`PT${Math.floor(elapsed / 1000)}S`} aria-label={t("pairing.elapsed", { time: formatElapsed(elapsed) })}>{formatElapsed(elapsed)}</time>{progress.attempt > 1 && <span> · {t("pairing.attempt", { n: progress.attempt })}</span>}</p>}
