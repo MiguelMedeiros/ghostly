@@ -408,6 +408,12 @@ pub fn open_service_window<R: tauri::Runtime>(
     viewer::open(&app, peer, service, tag, title, unreachable)
 }
 
+/// The profile locked: every contact's app window closes (`viewer::close_all`).
+#[tauri::command]
+pub fn close_service_windows<R: tauri::Runtime>(app: tauri::AppHandle<R>) {
+    viewer::close_all(&app);
+}
+
 #[tauri::command]
 pub fn service_respond<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
