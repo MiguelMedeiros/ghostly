@@ -3308,8 +3308,10 @@ export class GhostlyNode implements EngineImplementation {
     if (!original) return message;
     const resolved: StoredMessage = { ...message, replyTo: { ...replyToOriginal(original, reply.id), ...(reply.member && !original.member && { member: reply.member }), ...(reply.button && { button: reply.button }) } };
     // A press on one of my buttons (WISP 406 · Message Buttons), when it is still open for this person. The history
-    // only says whether this person already answered, so it is read when there is a press to check.
-    const press = buttonPress(resolved, original, []) && buttonPress(resolved, original, history ?? await db.getMessages(message.linkId));
+    // only says whether this person already answered with a `once` button, so it is read when there is such a press
+    // to check: a bot's buttons with no `once` among them take each press as a plain reply costs, however long the chat.
+    const pressed = buttonPress(resolved, original, []);
+    const press = pressed && messageButtons(original)?.buttons.some(b => b.once) ? buttonPress(resolved, original, history ?? await db.getMessages(message.linkId)) : pressed;
     return press ? { ...resolved, press } : resolved;
   }
 
