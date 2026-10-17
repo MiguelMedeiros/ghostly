@@ -50,4 +50,21 @@ describe("accepting a contact request in the engine (WISP 8xx)", () => {
     expect(join).not.toHaveBeenCalled();
     expect(await db.getMessages(row.id)).toEqual([]);
   });
+
+  it("deleting the chat a request made takes the request back", async () => {
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { automaticWallets: false });
+    nodes.push(node);
+    const row: StoredLink = { id: "chat-asked", profile: "paired-chat/1", createdAt: 1, seedB64: createIdentity().seedB64, encKeyB64: createIdentity().seedB64,
+      peerPubKeyZ32: createIdentity().pubKeyZ32, participationSeed: createIdentity().seedB64 };
+    await db.putLink(row);
+    node["links"].set(row.id, { stored: row, myPubKeyZ32: "me", link: null as never, status: "online", dataLink: "open",
+      presence: { online: true, lastPacketAt: 0, services: null }, lastMessageAt: 0, peerAck: 0, lastSyncAt: 0,
+      poll: { polling: false, nextAt: 0, interval: 0 }, files: { receivedBytes: 0, wireIds: new Set(), incoming: new Map() } } as never);
+    const asker = createIdentity();
+    node.contactAsks["asks"] = [{ link: createIdentity().pubKeyZ32, key: asker.pubKeyZ32, seed: { sealed: {} as never, deviceKey: "" }, chatId: row.id,
+      invite: createChatInvite().inviteCode, name: "Kevin", text: "hi", issued: Date.now(), expires: Date.now() + 60_000, state: "knocking" }];
+    expect(node.contactAsks.views()).toHaveLength(1);
+    node.removeLink({ linkId: row.id });
+    await vi.waitFor(() => expect(node.contactAsks.views()).toEqual([]));
+  });
 });

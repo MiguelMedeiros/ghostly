@@ -96,6 +96,25 @@ export class ContactAsks {
     return this.serial(() => this.send(params));
   }
 
+  /**
+   * The chat a request made was deleted: the request is taken back. Nothing more goes out for it, its record under the
+   * asker key is replaced by an empty one so an owner who has not read it yet finds nothing, and asking again through
+   * the link is open. The asker key stays, one per profile and link. An owner who already took it keeps it until it ends.
+   */
+  forgetChat(chatId: string): Promise<void> {
+    return this.serial(async () => {
+      const ask = this.asks.find(a => a.chatId === chatId);
+      if (!ask) return;
+      const out = ask.state === "sending" || ask.state === "knocking" || ask.state === "seen";
+      await this.put({ link: ask.link, seed: ask.seed, key: ask.key });
+      this.host.emit();
+      if (!out || !this.host.online()) return;
+      try {
+        await this.host.publish(await this.identity(ask), []);
+      } catch { /* the record fades from the DHT in hours: nothing republishes it */ }
+    });
+  }
+
   /** Looks after every request not yet seen once (the timer does this at its pace). */
   tick(): Promise<void> {
     return this.serial(() => this.look());

@@ -3089,6 +3089,8 @@ export class GhostlyNode implements EngineImplementation {
     this.nostrSocial.forgetLink(linkId);
     this.hold.forgetLink(linkId);
     this.fileDesk.drop(linkId);
+    // A chat made for a contact link request: deleting it takes the request back.
+    void this.contactAsks.forgetChat(linkId).catch(() => {});
     // Its wake-up target and token go with the row: this chat can no longer wake the contact, nor be woken. The
     // contact still has the subscription, so the app replaces it.
     this.wakeLimiter.reset(linkId);
