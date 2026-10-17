@@ -151,7 +151,8 @@ function RowText({ name, nameClass, marks, status, time, timeClass = "text-text-
     <div className="flex-1 min-w-0">
       <div className="contact-row relative flex items-baseline gap-2">
         <span className="flex flex-1 min-w-0 items-center gap-1.5">
-          <span data-testid="chat-row-name" className={`min-w-0 truncate text-[15px] leading-5 ${nameClass}`}>{name}</span>
+          {/* In its own direction, on the box that cuts it: a Latin name in Arabic is cut at its end, not its start. */}
+          <span data-testid="chat-row-name" dir="auto" className={`min-w-0 truncate text-[15px] leading-5 ${nameClass}`}>{name}</span>
           {marks}
         </span>
         {(status || time || timeCover) && <span className="relative flex shrink-0 items-baseline gap-2">
@@ -312,7 +313,7 @@ const SameChatRow = memo(function SameChatRow(p: ChatRowProps) {
         )}
       </div>
       <RowText
-        name={<bdi>{p.label}</bdi>}
+        name={p.label}
         previewId={previewId}
         // Compact: the working mark right after the name, before the identities.
         marks={<>{p.density === "compact" && working}<ContactMarks peerKey={p.peerPubKey} /></>}
