@@ -250,7 +250,7 @@ export interface EngineApi {
   walletQuoteInvoice(params: { invoice: string; via?: "cashu"; network?:WalletNetwork; card?: string }): { quote: string; mint: string; amount: number; feeReserve: number; source?: string };
   /** `note`: what the payment was for, kept with the wallet's own record of it (a Lightning address, for one). */
   /** `confirmedReal`: required to pay a quote of a Mainnet wallet (real money), refused without it. */
-  walletPayQuote(params: { quote: string; mint: string; note?: string; confirmedReal?: true }): { paid: boolean };
+  walletPayQuote(params: { quote: string; mint: string; note?: string; confirmedReal?: true; linkId?: string; invoice?: string }): { paid: boolean };
   /** Reads a Lightning address or LNURL and fetches what it asks for. Its domain learns of the request. */
   lnurlResolve(params: { text: string; network?:WalletNetwork }): LnurlView;
   /** The invoice for `amount` sats from a resolved address, checked before it is quoted. */
