@@ -5331,7 +5331,7 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * `confirmedReal`: the person confirmed a Mainnet payment as real money; without it one is refused. `linkId` +
    * `invoice`: the chat whose message held the invoice. Paid on Testnet, its contact is told (`sayInvoicePaid`): a test
-   * mint's invoice counts only on the payer's word.
+   * mint's invoice counts only on the payer's word. Still pending, it is told once the payment settles.
    */
   async walletPayQuote({ quote, mint, note, confirmedReal, linkId, invoice }: { quote: string; mint: string; note?: string; confirmedReal?: boolean; linkId?: string; invoice?: string }) {
     // A quote of a Lightning card (each knows its own), or a melt quote the Cashu card asked the mints for.
@@ -5339,7 +5339,7 @@ export class GhostlyNode implements EngineImplementation {
     const lightning = network && this.lightnings[network].withQuote(quote);
     assertConfirmedReal(network ?? mintNetwork(mint), confirmedReal);
     const paid = lightning ? await lightning.pay(quote, { note }) : await this.wallet.payQuote(quote, mint, note);
-    if (paid && linkId && invoice && (network ?? mintNetwork(mint)) === "testnet") this.desk.sayInvoicePaid(linkId, invoice);
+    if (linkId && invoice && (network ?? mintNetwork(mint)) === "testnet") this.desk.sayInvoicePaid(linkId, invoice, { pending: !paid });
     return { paid };
   }
 

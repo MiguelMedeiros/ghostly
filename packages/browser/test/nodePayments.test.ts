@@ -575,13 +575,14 @@ describe("the Cashu wallet and Lightning", () => {
     const cashuPay = vi.spyOn(node["wallet"], "payQuote").mockResolvedValueOnce(true).mockResolvedValueOnce(false).mockResolvedValue(true);
     const invoice = fakeInvoice(25, new Uint8Array(32).fill(9));
     await node.walletPayQuote({ quote: "melt", mint: TEST_MINT, linkId: "l1", invoice });
-    expect(said).toHaveBeenCalledExactlyOnceWith("l1", invoice);
-    // Still pending at the mint: not paid yet, nothing said.
+    expect(said).toHaveBeenCalledExactlyOnceWith("l1", invoice, { pending: false });
+    // Still pending at the mint: not paid yet, said once it settles.
     await node.walletPayQuote({ quote: "melt", mint: TEST_MINT, linkId: "l1", invoice });
+    expect(said).toHaveBeenLastCalledWith("l1", invoice, { pending: true });
     await node.walletPayQuote({ quote: "melt", mint: "https://mint.minibits.cash/Bitcoin", confirmedReal: true, linkId: "l1", invoice });
     await node.walletPayQuote({ quote: "melt", mint: TEST_MINT });
     expect(cashuPay).toHaveBeenCalledTimes(4);
-    expect(said).toHaveBeenCalledOnce();
+    expect(said).toHaveBeenCalledTimes(2);
   });
 
   it("keeps each network's history apart, counts test sats waiting while the page shows Mainnet, and chimes once per new receipt", async () => {

@@ -38,7 +38,8 @@ function objectStore(target: Map<string, Map<string, Row>>, name: string) {
     getAll: () => [...t.values()].map((row) => structuredClone(row)),
     get: (key: string) => (t.has(key) ? structuredClone(t.get(key)) : undefined),
     count: () => t.size,
-    put: (value: Row) => void t.set(String(value[KEYS[name]]), structuredClone(value)),
+    // A store with no key path (`settings`) is given the key, as IndexedDB's.
+    put: (value: Row, key?: IDBValidKey) => void t.set(String(key ?? value[KEYS[name]]), structuredClone(value)),
     delete: (key: string) => void t.delete(key),
   };
 }
