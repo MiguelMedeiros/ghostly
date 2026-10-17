@@ -22,6 +22,8 @@
   "shareFrom": "Arriva da un'altra app o da un sito web. Non parte nulla finché non lo invii.",
   "shareHint": "Scegli una chat. Controlli e invii da lì.",
   "shareNoChats": "Ancora nessuna chat. Iniziane una, poi condividi di nuovo.",
+  "shareNoRoom": "Spazio esaurito su questo dispositivo per: {{names}}",
+  "shareNoRoomNext": "Libera spazio, poi condividilo di nuovo.",
   "shareNone": "Non è stato condiviso nulla, o è già stato ritirato.",
   "shareOneFile": "1 file",
   "shareTitle": "Condividi in…",

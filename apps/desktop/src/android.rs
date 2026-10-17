@@ -170,7 +170,8 @@ pub fn system_bars(color: u32, dark: bool) -> Result<(), String> {
 }
 
 /// A share from another app, as the Kotlin side copied it: its text, the files it made of the shared streams, in
-/// the app's cache, and the names of those it did not copy, too large to bring in (`left_out`) or not read (`unread`).
+/// the app's cache, and the names of those it did not copy, too large to bring in (`left_out`), not read (`unread`) or
+/// with no room for them on the device (`no_room`).
 #[derive(Deserialize, Default, Clone, Debug, PartialEq)]
 pub struct Shared {
     #[serde(default)]
@@ -183,6 +184,8 @@ pub struct Shared {
     pub left_out: Vec<String>,
     #[serde(default)]
     pub unread: Vec<String>,
+    #[serde(default, rename = "noRoom")]
+    pub no_room: Vec<String>,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]

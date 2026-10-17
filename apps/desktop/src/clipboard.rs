@@ -345,8 +345,8 @@ pub async fn read_clipboard_files<R: tauri::Runtime>(
 
 /// Something another app shared into Ghostly (Android's "Share to Ghostly"), for the page's share picker: its text,
 /// and its files on the shelf, which the page reads by token as a paste's ([`read_pasted_bytes`]). `left_out` names
-/// the files Android did not copy, too large to bring in, and `unread` those it could not read: the page's picker
-/// says so.
+/// the files Android did not copy, too large to bring in, `unread` those it could not read and `no_room` those it had
+/// no room for on the device: the page's picker says so.
 #[derive(serde::Serialize, Debug, PartialEq)]
 pub struct IncomingShare {
     pub title: String,
@@ -355,6 +355,8 @@ pub struct IncomingShare {
     #[serde(rename = "leftOut")]
     pub left_out: Vec<String>,
     pub unread: Vec<String>,
+    #[serde(rename = "noRoom")]
+    pub no_room: Vec<String>,
 }
 
 /// A share's files on the shelf: regular files only, each once, at most [`MAX_PASTED_FILES`] (as a paste's), with
@@ -367,6 +369,7 @@ pub fn shelve_share(
     files: Vec<(PathBuf, Option<String>)>,
     left_out: Vec<String>,
     unread: Vec<String>,
+    no_room: Vec<String>,
 ) -> IncomingShare {
     let mimes: std::collections::HashMap<PathBuf, Option<String>> = files.iter().cloned().collect();
     let files = pasted_files(files.into_iter().map(|(path, _)| path).collect())
@@ -387,6 +390,7 @@ pub fn shelve_share(
         files,
         left_out,
         unread,
+        no_room,
     }
 }
 
@@ -422,6 +426,7 @@ pub fn incoming_share_take<R: tauri::Runtime>(
             files,
             shared.left_out,
             shared.unread,
+            shared.no_room,
         )))
     }
     #[cfg(not(target_os = "android"))]
@@ -654,8 +659,8 @@ mod tests {
     }
 
     /// Android's "Share to Ghostly": the files the share brought are read by token, as a paste's, with the type the
-    /// sharing app gave; a folder or a missing file is left out, and the names of those Android left out as too large
-    /// or could not read reach the page. Desktop has no share waiting, ever.
+    /// sharing app gave; a folder or a missing file is left out, and the names of those Android left out as too large,
+    /// could not read or had no room for reach the page. Desktop has no share waiting, ever.
     #[test]
     fn a_share_from_another_app_is_read_like_a_paste() {
         // covers: app.android.share-target
@@ -675,6 +680,7 @@ mod tests {
             ],
             vec!["VID_1.mp4".into()],
             vec!["IMG_2.jpg".into()],
+            vec!["VID_3.mp4".into()],
         );
         assert_eq!(
             serde_json::to_value(&share).unwrap()["leftOut"],
@@ -683,6 +689,10 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&share).unwrap()["unread"],
             serde_json::json!(["IMG_2.jpg"])
+        );
+        assert_eq!(
+            serde_json::to_value(&share).unwrap()["noRoom"],
+            serde_json::json!(["VID_3.mp4"])
         );
         assert_eq!(share.title, "A title");
         assert_eq!(share.text, "Look at this https://example.com");
@@ -720,6 +730,7 @@ mod tests {
             String::new(),
             String::new(),
             vec![(dir.join("photo.jpg"), None), (dir.join("video.mp4"), None)],
+            Vec::new(),
             Vec::new(),
             Vec::new(),
         );

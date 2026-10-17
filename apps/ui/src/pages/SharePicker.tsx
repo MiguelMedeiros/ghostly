@@ -29,6 +29,7 @@ export function SharePicker() {
   const hasFiles = !!share?.files.length;
   const leftOut = share?.leftOut ?? [];
   const unread = share?.unread ?? [];
+  const noRoom = share?.noRoom ?? [];
   const targets = useChatTargets();
   const preview = share ? shareText(share) : "";
 
@@ -56,6 +57,11 @@ export function SharePicker() {
           {unread.length > 0 && (
             <Notice tone="error" className="text-sm" testId="share-unread"
               title={t("pwa.shareUnread", { names: unread.join(", ") })} next={t("pwa.shareUnreadNext")} />
+          )}
+          {/* Files Android had no room to copy (the device is full): sharing again only helps once there is space. */}
+          {noRoom.length > 0 && (
+            <Notice tone="error" className="text-sm" testId="share-no-room"
+              title={t("pwa.shareNoRoom", { names: noRoom.join(", ") })} next={t("pwa.shareNoRoomNext")} />
           )}
           {/* Nothing else came: no chat to pick. */}
           {!isEmptyShare(share) && (
