@@ -27,6 +27,7 @@
   "shareTitle": "Condividi in…",
   "shareTooLarge": "Troppo grande da condividere qui: {{names}}",
   "shareTooLargeNext": "Apri una chat e invialo con + → Documento.",
+  "shareTooLargeUnnamed": "Troppo grande da condividere qui",
   "shareUnread": "Impossibile leggere: {{names}}",
   "shareUnreadNext": "Condividilo di nuovo dalla sua app, oppure apri una chat e invialo con + → Documento.",
   "shareWaiting": "Ricezione di ciò che è stato condiviso...",

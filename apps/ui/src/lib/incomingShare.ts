@@ -15,7 +15,7 @@ export interface IncomingShare {
   text: string;
   url: string;
   files: SharedFile[];
-  /** The names of files left out as too large to bring into the page (Android's share); the picker says so. */
+  /** The names of files left out as too large to bring into the page (`""`: name not known); the picker says so. */
   leftOut?: string[];
   /** The names of files Android could not read (a revoked permission, a broken stream); the picker says so. */
   unread?: string[];
