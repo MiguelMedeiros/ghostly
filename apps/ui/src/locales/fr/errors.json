@@ -532,6 +532,7 @@
     "listenerReleased": "En pause pour une autre discussion. Ouvrez celle-ci pour reprendre.",
     "noAddress": "L'adresse de votre contact pour ce transport n'est pas encore connue",
     "noAddressNext": "Reconnectez-vous une fois par WebRTC pour l'échanger.",
+    "noAddressWait": "Elle arrive quand votre contact ouvre cette discussion dans son app.",
     "noOverlap": "Vos choix de transport ne correspondent pas",
     "noOverlapNext": "Activez le Secours, ou choisissez le même transport des deux côtés.",
     "noneConnected": "Aucun transport n'a pu se connecter",

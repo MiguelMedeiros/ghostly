@@ -1160,6 +1160,22 @@ describe("native transports", () => {
     await expect(kept.connect()).rejects.toThrow(/Peer native address unavailable/);
     expect(dial).not.toHaveBeenCalled();
   });
+
+  it("with no WebRTC between the two apps, a contact's unknown address is not left to a WebRTC session that cannot happen", async () => {
+    // The contact's app gave this chat's listener to another chat (or never said it): over WebRTC, a session tells it.
+    const NO_RTC = "Peer native address unavailable; the contact's app has not given it yet";
+    const both = makeLink(createLink().mine, { native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1", "webrtc/1"] } });
+    both.registerEndpoint(endpoint());
+    await expect(both.connect()).rejects.toThrow("Peer native address unavailable; reconnect WebRTC once to exchange endpoints");
+    // The contact's app runs no WebRTC (a Linux Desktop, the CLI): it says the address itself, once it uses the chat.
+    const theirs = makeLink(createLink().mine, { native: { preferred: "iroh/1", fallback: false, peerTransports: ["iroh/1"] } });
+    theirs.registerEndpoint(endpoint());
+    await expect(theirs.connect()).rejects.toThrow(NO_RTC);
+    // Nor does this app.
+    const mine = makeLink(createLink().mine, { rtcAvailable: false, native: { preferred: "iroh/1", fallback: false, peerTransports: ["iroh/1", "webrtc/1"] } });
+    mine.registerEndpoint(endpoint());
+    await expect(mine.connect()).rejects.toThrow(NO_RTC);
+  });
 });
 
 describe("changing transport on an open session", () => {

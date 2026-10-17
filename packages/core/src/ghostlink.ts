@@ -2369,7 +2369,12 @@ export class GhostLink {
   private async dialNative(transport: PairedTransport, epoch: number): Promise<true | Error> {
     const endpoint = this.endpoints.get(transport as NativeEndpoint["transport"]);
     const descriptor = this.peerDescriptors[transport as NativeEndpoint["transport"]];
-    if (!endpoint || !descriptor) return new Error("Peer native address unavailable; reconnect WebRTC once to exchange endpoints");
+    if (!endpoint || !descriptor) {
+      // A WebRTC session tells it. With no WebRTC between the two apps (a Linux Desktop, the CLI), the contact's app says
+      // it once it takes this chat's listener back, as the chat is used there: no session of ours can ask for it.
+      const rtc = this.availableTransports.includes("webrtc/1") && (!this.peerTransports || this.peerTransports.includes("webrtc/1"));
+      return new Error(rtc ? "Peer native address unavailable; reconnect WebRTC once to exchange endpoints" : "Peer native address unavailable; the contact's app has not given it yet");
+    }
     const started = Date.now();
     const dialed = this.nativeDial = { epoch, transport: transport as NativeTransport, endpoint: endpointId(transport as NativeTransport, descriptor), offline: this.isOffline() };
     try {

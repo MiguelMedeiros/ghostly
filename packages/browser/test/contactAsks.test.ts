@@ -1,9 +1,19 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createChatInvite, knockSlotIdentity, knockSlotOf, linkRecords, readContactLink, readKnockSlot, readLinkRecord, REQUEST_LIFETIME_MS, type GhostRecord } from "@ghostly/core";
+import {
+  createChatInvite, encodeContactLink, identityFromSeed, knockSlotIdentity, knockSlotOf, linkRecords, readContactLink, readKnockSlot, readLinkRecord,
+  REQUEST_LIFETIME_MS, type GhostRecord, type Identity,
+} from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import { ContactLinks } from "../src/engine/contactLinks";
 import { ASK_FAST_MS, CONTACT_ASKS_KEY, ContactAsks } from "../src/engine/contactAsks";
+
+/** The next asker key the requester makes, when a test needs one it knows. */
+const askers: { next?: Identity } = {};
+vi.mock("@ghostly/core", async importOriginal => {
+  const real = await importOriginal<typeof import("@ghostly/core")>();
+  return { ...real, createIdentity: () => { const next = askers.next; askers.next = undefined; return next ?? real.createIdentity(); } };
+});
 
 vi.mock("../src/engine/paymentAdapters/persistence", async importOriginal => {
   const real = await importOriginal<typeof import("../src/engine/paymentAdapters/persistence")>();
@@ -58,7 +68,8 @@ async function settled<T>(work: Promise<T>): Promise<T> {
 const keyOf = (code: string) => { const r = readContactLink(code); if (!r.ok) throw new Error(r.reason); return r.linkKeyZ32; };
 
 beforeEach(async () => {
-  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+  // A fake `performance` too: the paced stamp then never sees its slice end and is made at once, as these tests expect.
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "performance"] });
   vi.setSystemTime(NOW);
   await transact([STORES.settings], stores => { stores[STORES.settings].clear(); });
 });
@@ -170,6 +181,38 @@ describe("asking through a contact link (WISP 8xx)", () => {
     await settled(w.requester.ask({ code, name: "Kevin", text: "hi again" }));
     const again = await wrap<{ key: string; state: string }[]>((await store(STORES.settings, "readonly")).get(CONTACT_ASKS_KEY));
     expect(again).toEqual([expect.objectContaining({ key: first, state: "knocking" })]);
+  });
+
+  it("makes the stamp without holding the thread: the page's other tasks run while it is made", async () => {
+    const w = world();
+    await w.requester.load();
+    // For this link, asker key and day the first 20-bit stamp is 505,622: about a second of hashing in one go.
+    const link = identityFromSeed(new Uint8Array(32).fill(3)).pubKeyZ32;
+    w.pkarr.set(link, linkRecords({ state: "open", bits: 20, seen: [] }));
+    askers.next = identityFromSeed(new Uint8Array(32).fill(7));
+    // Real timers, so the stamp runs in real time; the day stays the one the stamp above is for.
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    // A task that posts itself again, as the page's input, drawing and port messages come one task at a time.
+    let last = performance.now(), longest = 0, running = true;
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => {
+      const at = performance.now();
+      longest = Math.max(longest, at - last);
+      last = at;
+      if (running) channel.port2.postMessage(null);
+    };
+    channel.port2.postMessage(null);
+    await w.requester.ask({ code: encodeContactLink(link), name: "Kevin", text: "hi" });
+    // Behind the first look the answer started.
+    await w.requester.tick();
+    running = false;
+    channel.port1.close();
+    const [ask] = await wrap<{ stamp: { stamp: number } }[]>((await store(STORES.settings, "readonly")).get(CONTACT_ASKS_KEY));
+    expect(ask.stamp.stamp).toBe(505_622);
+    expect(w.requester.views()[0].state).toBe("knocking");
+    expect(longest).toBeLessThan(250);
   });
 
   it("looks at the link every 30 s while it waits to be seen", async () => {

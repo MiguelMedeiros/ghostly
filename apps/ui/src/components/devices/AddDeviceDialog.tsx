@@ -79,9 +79,11 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     notice.show(text);
     if (field) focusToRetype(field === "password" ? passwordInput.current : againInput.current);
   };
+  /** The error is over: the card that says it again goes with it, not over what comes next. */
+  const clear = () => { setError(null); notice.dismiss(); };
 
   const start = async () => {
-    setError(null); setBusy(true);
+    clear(); setBusy(true);
     try {
       const first = await engine.call("deviceEnrollInvite", { name: defaultDeviceName(isDesktopApp() ? { userAgent: navigator.userAgent, desktop: true } : undefined) });
       ended.current = false; dismissed.current = false;
@@ -93,7 +95,7 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
   };
 
   const submitPassword = async () => {
-    setError(null);
+    clear();
     if (step === "type") {
       setBusy(true);
       const valid = !!stored && await verifyPassword(password, stored);
@@ -144,13 +146,13 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
         <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void submitPassword(); }}>
           <div>
             <input ref={passwordInput} type="password" autoFocus autoComplete={step === "type" ? "current-password" : "new-password"} data-testid="device-add-password" aria-label={step === "type" ? t("devices.password.current") : t("devices.password.new")} placeholder={step === "type" ? t("devices.password.current") : t("devices.password.new")}
-              {...invalid("password")} value={password} onChange={(event) => { setPassword(event.target.value); if (error?.field === "password") setError(null); }} className={`${field} aria-invalid:border-danger aria-invalid:focus:ring-danger`} />
+              {...invalid("password")} value={password} onChange={(event) => { setPassword(event.target.value); if (error?.field === "password") clear(); }} className={`${field} aria-invalid:border-danger aria-invalid:focus:ring-danger`} />
             <FieldError id={`${id}-password-error`} testId="device-add-password-error">{wrong("password")}</FieldError>
           </div>
           {step !== "type" && (
             <div>
               <input ref={againInput} type="password" autoComplete="new-password" data-testid="device-add-password-again" aria-label={t("devices.password.confirm")} placeholder={t("devices.password.confirm")}
-                {...invalid("again")} value={again} onChange={(event) => { setAgain(event.target.value); if (error?.field === "again") setError(null); }} className={`${field} aria-invalid:border-danger aria-invalid:focus:ring-danger`} />
+                {...invalid("again")} value={again} onChange={(event) => { setAgain(event.target.value); if (error?.field === "again") clear(); }} className={`${field} aria-invalid:border-danger aria-invalid:focus:ring-danger`} />
               <FieldError id={`${id}-again-error`} testId="device-add-password-again-error">{wrong("again")}</FieldError>
             </div>
           )}
