@@ -15,8 +15,8 @@
   },
   "compat": {
     "burned": "A conversa foi apagada",
-    "continued": "Convidou o seu contacto para uma nova conversa.",
-    "hint": "Esta conversa foi criada com um código do Ghostly 0.4. Texto e chamadas continuam a funcionar nos dois sentidos; uma nova conversa acrescenta ficheiros, pagamentos e mensagens guardadas.",
+    "continued": "Você convidou seu contato para uma nova conversa.",
+    "hint": "Esta conversa foi criada com um código do Ghostly 0.4. Texto e chamadas continuam funcionando nos dois sentidos; uma nova conversa acrescenta arquivos, pagamentos e mensagens guardadas.",
     "label": "Conversa de compatibilidade · Ghostly antigo",
     "open": "Abrir a nova conversa",
     "overLimit": "Não foi possível publicar a mensagem: limite da DHT excedido.",
