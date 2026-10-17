@@ -84,7 +84,10 @@ describe("a device link whose other device is away", () => {
     await run(3 * 60_000);
     await settled(phone.links.start());
     const back = Date.now();
-    while (Date.now() - back < 60_000 && !(desktop.links.live(phone.slot.key) && phone.links.live(desktop.slot.key))) await run(250);
+    // Usually one background read (31-41 s). A read that lands just before the other side's publish finds nothing new
+    // and waits a second pace (66-76 s): two paces, and the slack a slow host's fake clock runs ahead of real work.
+    const within = 3 * RELAY_POLL_INTERVALS.background;
+    while (Date.now() - back < within && !(desktop.links.live(phone.slot.key) && phone.links.live(desktop.slot.key))) await run(250);
     expect(desktop.links.live(phone.slot.key) && phone.links.live(desktop.slot.key)).toBe(true);
   }, 120_000);
 });
