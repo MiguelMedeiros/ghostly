@@ -27,14 +27,18 @@ test("a store's Refresh and Uninstall's Export keep the keyboard focus once thei
   // Open in a chat's + → Apps did while an app started).
   let answer!: () => void;
   const held = new Promise<void>((resolve) => { answer = resolve; });
-  await ana.context.route(STORE_URL, async (route) => { await held; await route.fulfill({ status: 500, headers: { "access-control-allow-origin": "*" }, body: "" }); });
+  let asked = 0;
+  await ana.context.route(/ghostly-store\.json/, async (route) => { asked++; await held; await route.fulfill({ status: 500, headers: { "access-control-allow-origin": "*" }, body: "" }); });
   await ana.page.keyboard.press("Enter");
+  await expect.poll(() => asked).toBe(1);
   await expect(refresh).toHaveAttribute("aria-busy", "true");
-  await expect(refresh).toBeFocused();
+  // The browser moves the focus off a disabled button at its next frame: wait for one before reading it.
+  await ana.page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  expect(await refresh.evaluate((el) => el === document.activeElement)).toBe(true);
   answer();
   await expect(refresh).not.toHaveAttribute("aria-busy");
   await expect(refresh).toBeFocused();
-  await ana.context.unroute(STORE_URL);
+  await ana.context.unroute(/ghostly-store\.json/);
 
   await listed.getByTestId("app-listing-install").click();
   await ana.page.getByTestId("app-install-confirm").click();
