@@ -4,6 +4,21 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.3.7
+
+### Security
+
+- Chats: a voice message or an audio file playing shows on the lock screen and in the system's media controls as "Voice message" or "Audio" from Ghostly, like every notice, no longer with the contact's name or the file's name. Locking the app pauses what plays, and the system's controls let go of it.
+- Groups: a member that says it holds a group file it does not hold can no longer keep another member's download from finishing.
+- Groups: a member can no longer make a payment request or payment appear in another member's name.
+- Shared web apps: a contact can no longer reach paths outside the shared one on servers that ignore `;` parameters or decode twice.
+- Desktop: a contact can no longer stop HyperDHT in every chat at once with one message made of control characters.
+- Desktop: a video or audio file played before a reload or a profile switch is no longer served under the link the page before got: a new page starts with none, and a file plays again only by a link that page asks for.
+- Desktop on Windows: a contact's app can no longer open browser tabs to your computer or local network, and opens at most 20 links per window.
+- CLI: a Cashu request can no longer be paid twice by `chat pay-request` and then approving a review made before it.
+- Wallet: test sats received as Fedimint notes are no longer reported as a Mainnet payment by `ghostly payment list` and the `payment.created` and `payment.updated` events.
+- Merge train: only the train's own comment that starts with its position mark counts as a pull request's position comment, and file names in its drop comment are escaped, so a workflow file's name can no longer make the train take a later, unreviewed head.
+
 ## 1.3.6
 
 ### Security
