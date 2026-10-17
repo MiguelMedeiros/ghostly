@@ -1436,7 +1436,10 @@ export class Communities {
     // reads the beacon (a closed app stays listed until its entry goes stale; a new hub waits a minute). A hub
     // with no other in sight is the door at once, before its own entry is listed: a new group's first hub, whose
     // beacon write waited for the relays' budget while another group's link signaled, answered no knock for a minute.
-    const hubs = doorHubs(this.hubs(live), now, s.myKey);
+    // Not a hub of a few seconds that knows of another (the one that let it in, whose entry may be the one held back):
+    // both at the door alone answered the same knocks, and two joiners let in by each forked the chain.
+    const known = [...live.seenHubs.keys()].filter(key => key !== s.myKey && this.recentHub(live, key) && !this.gone(live, key));
+    const hubs = doorHubs(this.hubs(live), now, s.myKey, { since: live.hubSince, known });
     if (!hubs.includes(s.myKey)) return;
     const door = [...hubs].sort()[0], doorSig = [...hubs].sort().join(",");
     // Just became the door (the one before went): whatever knocked meanwhile, in any record.
