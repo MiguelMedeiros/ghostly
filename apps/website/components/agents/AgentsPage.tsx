@@ -242,6 +242,11 @@ export function AgentsPage() {
             </a>
           </li>
           <li>
+            <Link className="link-arrow" href="/agents/faq">
+              {t.links.faq} →
+            </Link>
+          </li>
+          <li>
             <Link className="link-arrow" href="/cli">
               {t.links.cli} →
             </Link>

@@ -44,6 +44,11 @@ test("the sitemap lists /agents/faq", async ({ request }) => {
   expect(xml).toContain(`<loc>https://ghostly.tools${PATH}</loc>`);
 });
 
+test("/developers/agents links to /agents/faq", async ({ page }) => {
+  await page.goto("/developers/agents");
+  await expect(page.locator(`main a[href="${PATH}"]`)).toHaveText(/Agents FAQ/);
+});
+
 test("/agents/faq: axe finds nothing serious, wide or on a phone", async ({ page }) => {
   for (const width of [1280, 375]) {
     await page.setViewportSize({ width, height: 812 });
