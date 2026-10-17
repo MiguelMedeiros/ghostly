@@ -41,6 +41,15 @@ function mark(): Mark[] | null {
       const title = (el.matches(STEP) ? el : nearest(el.children, y))?.querySelector(TITLE);
       if (title && !marks.some((m) => m.el === title)) marks.push(marked(title, 0, title.getBoundingClientRect().top));
     }
+    if (!step && el.matches("section[id].scene") && !marks.some((m) => m.part)) {
+      step = true;
+      // The middle of the screen in a chapter but on none of its parts (past its last step, in its padding): the
+      // chapter folds to a few lines a step before it runs and takes far more after, so a spot as far down it lands
+      // elsewhere. The reader's step is the one nearest, kept by its title, ahead of what was found on the way here.
+      const list = el.querySelector(STEPS);
+      const title = list && nearest(list.children, y)?.querySelector(TITLE);
+      if (title) marks.unshift(marked(title, 0, title.getBoundingClientRect().top));
+    }
     const r = el.getBoundingClientRect();
     // A title keeps its top too: the other shape may wrap it over another number of lines.
     if (el.matches(TITLE)) marks.push(marked(el, 0, r.top));
