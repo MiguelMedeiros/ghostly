@@ -2,7 +2,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appCardId, statusCardText, type AppCard } from "@ghostly/core";
-import type { AppPreview, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
+import type { AppPreview, AppStorePreview, AppStoreSummary, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { MessageBubble } from "../../components/MessageBubble";
 import { MessageInput } from "../../components/MessageInput";
@@ -446,6 +446,42 @@ describe("with the apps flag on", () => {
     await user.click(screen.getByTestId("apps-add-check"));
     expect(await screen.findByTestId("apps-add-error")).toHaveTextContent("Apps come only from GitHub (raw.githubusercontent.com) or jsDelivr at a commit.");
     expect(asked).toEqual([{ url: "http://example.com/github.com/app.ghostlyapp" }]);
+  });
+
+  it("a link edited while Check runs drops the old link's answer: no store or app of it shows, and Add store adds the new one", async () => {
+    const OLD = "https://raw.githubusercontent.com/ana/old/HEAD/ghostly-store.json";
+    const NEW = "https://raw.githubusercontent.com/ana/new/HEAD/ghostly-store.json";
+    const answers = new Map<string, (found: AppStorePreview) => void>();
+    let answerApp!: (found: AppPreview) => void;
+    const added: unknown[] = [];
+    fakeEngine.on("appStorePreview", ({ url }) => new Promise((resolve) => answers.set(url, resolve)))
+      .on("appStoreAdd", (params) => { added.push(params); return {} as AppStoreSummary; })
+      .on("appPreview", () => new Promise((resolve) => { answerApp = resolve; }));
+    const store = (url: string, name: string): AppStorePreview => ({ url, key: name, name, kind: "curated", sequence: 1, apps: 1, fingerprint: "abcd efgh", expires: 9e9, expired: false });
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    const field = screen.getByTestId("apps-add-url");
+    await user.type(field, OLD);
+    await user.click(screen.getByTestId("apps-add-check"));
+    // The person fixes the link before the old one answers.
+    await user.clear(field);
+    await user.type(field, NEW);
+    await act(async () => answers.get(OLD)!(store(OLD, "Old store")));
+    expect(screen.queryByTestId("apps-add-store")).not.toBeInTheDocument();
+    expect(screen.getByTestId("apps-add-check")).toHaveTextContent("Check");
+
+    await user.click(screen.getByTestId("apps-add-check"));
+    await act(async () => answers.get(NEW)!(store(NEW, "New store")));
+    expect(await screen.findByTestId("apps-add-store")).toHaveTextContent("New store");
+    await user.click(screen.getByTestId("apps-add-store-confirm"));
+    expect(added).toEqual([{ url: NEW, key: "New store" }]);
+
+    // An app link edited while it is read: its install screen does not open for the link the field no longer holds.
+    await user.clear(field);
+    await user.type(field, "https://github.com/ana/chess");
+    await user.click(screen.getByTestId("apps-add-check"));
+    await user.type(field, "-two");
+    await act(async () => answerApp(preview()));
+    expect(screen.queryByTestId("app-install")).not.toBeInTheDocument();
   });
 
   it("words that are no link get the dialog's own error, not the browser's validation bubble", async () => {
