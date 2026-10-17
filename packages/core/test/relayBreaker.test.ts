@@ -50,6 +50,57 @@ describe("relay breaker", () => {
     expect(breaker.allDownProbe(["a", "b"])).toBeNull();
   });
 
+  it("a relay that answers after every relay was left alone for failing ends the outage: the others are asked again now, and one still down trips again for longer", () => {
+    const { breaker, advance, recoveries } = clocked();
+    const trip = (relay: string) => { for (let i = 0; i < BREAKER_THRESHOLD; i++) breaker.failure(relay, "error", "no answer"); };
+    const relays = ["a", "b", "c"];
+    for (const relay of relays) trip(relay);
+    // Three minutes of outage: each probe every 15 s fails, and the waits grow.
+    for (let t = 0; t < 180_000; t += 1_000) {
+      advance(1_000);
+      const probe = breaker.allDownProbe(relays);
+      if (probe) { breaker.beginAllDown(probe); breaker.failure(probe, "error", "no answer"); }
+    }
+    // The network is back: the next probe is answered.
+    advance(BREAKER_ALL_DOWN_PROBE_MS);
+    const probe = breaker.allDownProbe(relays)!;
+    breaker.beginAllDown(probe);
+    breaker.success(probe);
+    expect(recoveries).toEqual([probe]);
+    // The others are asked now, not minutes later: a client whose probe another relay answered would see none of this one's packets until then.
+    expect(relays.map((relay) => breaker.blockedFor(relay))).toEqual([0, 0, 0]);
+    expect(breaker.health(relays).map((health) => health.state)).toEqual(["ok", "ok", "ok"]);
+    // One of them is really down: its probe fails and it is left alone again, for longer than a first trip.
+    const down = relays.find((relay) => relay !== probe)!;
+    breaker.begin(down);
+    breaker.failure(down, "error", "no answer");
+    expect(breaker.blockedFor(down)).toBeGreaterThan(BREAKER_BASE_MS);
+  });
+
+  it("a relay that answers its probe while another was still in use, or throttling us, asks nothing early of one left alone", () => {
+    for (const [kind, failures] of [["error", 1], ["throttled", BREAKER_THRESHOLD]] as const) {
+      const { breaker, advance } = clocked();
+      for (let i = 0; i < BREAKER_THRESHOLD; i++) breaker.failure("a", "error", "no answer");
+      advance(10_000);
+      for (let i = 0; i < BREAKER_THRESHOLD; i++) breaker.failure("b", "error", "no answer");
+      for (let i = 0; i < failures; i++) breaker.failure("c", kind, "HTTP 500");
+      advance(BREAKER_BASE_MS - 10_000);
+      breaker.begin("a");
+      breaker.success("a");
+      // No outage: "c" was reachable all along (or only rate limited), so "b" waits out its own wait.
+      expect(breaker.blockedFor("b")).toBeGreaterThan(0);
+    }
+    // Nor while a relay of the list never failed at all.
+    const { breaker, advance } = clocked();
+    for (let i = 0; i < BREAKER_THRESHOLD; i++) breaker.failure("a", "error", "no answer");
+    advance(10_000);
+    for (let i = 0; i < BREAKER_THRESHOLD; i++) breaker.failure("b", "error", "no answer");
+    advance(BREAKER_BASE_MS - 10_000);
+    breaker.begin("a");
+    breaker.success("a", ["a", "b", "c"]);
+    expect(breaker.blockedFor("b")).toBeGreaterThan(0);
+  });
+
   it("requests out before a trip that fail after it do not trip it again: a first trip is a minute, then its probe", () => {
     const { breaker, trips, advance } = clocked();
     // A start burst: 15 requests out at once to a relay that refuses them all.

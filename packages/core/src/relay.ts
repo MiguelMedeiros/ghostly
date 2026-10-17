@@ -502,7 +502,7 @@ export class RelayTransport implements PkarrTransport {
     if (failure) { this.breaker.failure(relay, failure.kind, failure.reason); return; }
     // It answered this kind of request: an earlier failure of it no longer keeps the next one back.
     if (method) this.networkCooldown.delete(`${method} ${relay}`);
-    this.breaker.success(relay);
+    this.breaker.success(relay, this.relays);
   }
 
   setRelays(relays: string[]): void {
@@ -998,7 +998,7 @@ export class RelayTransport implements PkarrTransport {
     this.slowUntil.set(relay, Date.now() + SLOW_DEMOTE_MS);
     const another = this.relays.some((r) => r !== relay && this.breaker.blockedFor(r) === 0 && !this.isCoolingDown(r, "GET"));
     if (another) this.breaker.failure(relay, "error", "slow");
-    else this.breaker.success(relay);
+    else this.breaker.success(relay, this.relays);
   }
 
   /**
