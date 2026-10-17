@@ -242,6 +242,36 @@ describe("the floating card", () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 1_100)));
     expect(screen.queryByTestId("toast")).toBeNull();
   });
+
+  it("with the keyboard up, not over the button of the focused field's form either: it goes to the top", async () => {
+    function Form() {
+      const notice = useToast();
+      return <>
+        <Toast toast={notice.toast} onDismiss={notice.dismiss} place="dialog" />
+        <form onSubmit={(event) => { event.preventDefault(); notice.show("Use 8 characters or more."); }}>
+          <input aria-label="password" />
+          <button type="submit">Next</button>
+        </form>
+      </>;
+    }
+    // A 375×667 phone with the keyboard up (407 px left): the dialog 50-358, the field 180-224, Next 293-337; the card
+    // at the bottom of what is left 329-383 (over Next's lower 8 px), at the top 60-114.
+    const box = (top: number, bottom: number) => DOMRect.fromRect({ x: 16, y: top, width: 343, height: bottom - top });
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.matches("input")) return box(180, 224);
+      if (this.matches("button[type=submit]")) return box(293, 337);
+      if (this.matches("[data-testid=toast]")) return this.parentElement?.dataset.at === "top" ? box(60, 114) : box(329, 383);
+      return box(0, 0);
+    });
+    try {
+      const { user } = renderApp(<Form />);
+      await user.click(screen.getByRole("textbox", { name: "password" }));
+      await user.keyboard("abc{Enter}");
+      expect(screen.getByTestId("toast")).toHaveTextContent("Use 8 characters or more.");
+      expect(screen.getByRole("textbox", { name: "password" })).toHaveFocus();
+      expect(screen.getByTestId("toast-region")).toHaveAttribute("data-at", "top");
+    } finally { rect.mockRestore(); }
+  });
 });
 
 describe("the lock password's fields and password managers", () => {

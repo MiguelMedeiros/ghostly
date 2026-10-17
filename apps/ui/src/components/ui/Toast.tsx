@@ -14,8 +14,8 @@ import type { ToastMessage } from "../../hooks/useToast";
  *   above the tab bar and the keyboard on a phone, since the column ends there;
  * - `dialog`: inside a modal `<dialog>`, where everything outside it is inert and under its backdrop.
  *
- * It never covers the field it is about: where the card at the bottom would be over the focused field or the error
- * line under it (a short screen with the keyboard up, a phone on its side), it goes to the top (`useClearOfField`).
+ * It never covers the field it is about: where the card at the bottom would be over the focused field, the error
+ * line under it or its form's button (a short screen with the keyboard up, a phone on its side), it goes to the top (`useClearOfField`).
  */
 export function Toast({ toast, onDismiss, place = "screen", testId = "toast" }: { toast: ToastMessage | null; onDismiss(): void; place?: "screen" | "page" | "dialog"; testId?: string }) {
   const { t } = useI18n();
@@ -51,13 +51,17 @@ export function Toast({ toast, onDismiss, place = "screen", testId = "toast" }: 
   return place === "screen" ? createPortal(card, document.body) : card;
 }
 
-/** The focused field and the lines that describe it (its error), where the card must not be; null when none has the focus. */
+/**
+ * The focused field, the lines that describe it (its error) and its form's buttons (Next, pressed again once it is
+ * typed again), where the card must not be; null when none has the focus.
+ */
 function fieldBoxes(): DOMRect[] | null {
   const field = document.activeElement;
   if (!(field instanceof HTMLElement) || !field.matches("input, textarea, select, [contenteditable=true]")) return null;
   const described = (field.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean)
     .map((id) => document.getElementById(id)).filter((el): el is HTMLElement => !!el);
-  return [field, ...described].map((el) => el.getBoundingClientRect()).filter((box) => box.width > 0 && box.height > 0);
+  const buttons = [...field.closest("form")?.querySelectorAll("button") ?? []];
+  return [field, ...described, ...buttons].map((el) => el.getBoundingClientRect()).filter((box) => box.width > 0 && box.height > 0);
 }
 
 /** How many pixels of `boxes` the card's box covers. */
@@ -72,8 +76,8 @@ function covered(card: DOMRect, boxes: readonly DOMRect[]): number {
 }
 
 /**
- * Puts the card at the top of its place (`data-at="top"`) while at the bottom it would cover the focused field or its
- * error, and back at the bottom otherwise: where it covers less when both would. Measured when it shows, when the
+ * Puts the card at the top of its place (`data-at="top"`) while at the bottom it would cover the focused field, its
+ * error or its form's buttons, and back at the bottom otherwise: where it covers less when both would. Measured when it shows, when the
  * focus moves, and when the visible area changes (the keyboard, a scroll, the phone turning).
  */
 function useClearOfField(toast: ToastMessage | null): RefObject<HTMLDivElement | null> {
