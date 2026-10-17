@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import DHT from "bittorrent-dht";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import {
-  RelayTransport, isDiscoveryBudgetError, newerPacket, parseRelayPayload, publicKeyFromZ32,
+  HEDGE_MS, RelayTransport, SLOW_MS, isDiscoveryBudgetError, newerPacket, parseRelayPayload, publicKeyFromZ32,
   type DiscoveryStatus, type GhostRecord, type Identity, type PkarrRequestOptions, type PkarrTransport, type RelayTransportOptions, type SignedPacket,
 } from "@ghostly/core";
 
@@ -128,13 +128,20 @@ export class RelaysAndDht implements PkarrTransport {
     if (!this.dht) return toRelays();
     const onDht = this.dht.put(pubKeyZ32, payload);
     onDht.catch(() => {});
+    const onRelays = toRelays();
+    onRelays.catch(() => {});
+    // Out on the DHT is out (a Pkarr relay reads the DHT for a key it has not got): a relay that takes the request and
+    // never answers held each publish for its 10 s timeout, an invite's first among them, while the DHT took it in
+    // milliseconds. The relays' copy finishes in the background. A budget's hold is said before any request goes, so
+    // it still wins this race: the caller tries again, and the relays take it when it frees (browser contacts read only them).
+    const tookIt = onDht.then(() => true, () => false);
+    if (await Promise.race([onRelays.then(() => false, () => false), tookIt])) return;
     try {
-      await toRelays();
+      await onRelays;
     } catch (error) {
-      // Held back by this app's budget: the relays take it when it frees (browser contacts read only them).
       if (isDiscoveryBudgetError(error)) throw error;
-      // The relays failed: out on the DHT is out (a Pkarr relay reads the DHT for a key it has not got).
-      await onDht.catch(() => { throw error; });
+      // The relays failed: the DHT's answer is the publish's.
+      if (!(await tookIt)) throw error;
     }
   }
 
@@ -144,21 +151,56 @@ export class RelaysAndDht implements PkarrTransport {
     // Every relay left alone for failing: the relays answer from what they last saw, if anything; the DHT is asked.
     const down = () => this.relays.discovery().relays.every((relay) => relay.state === "failing");
     if (!down()) {
-      try { fromRelays = await this.relays.resolve(pubKeyZ32, options); this.lastVia = "relay"; } catch (error) {
-        if (isDiscoveryBudgetError(error)) throw error;
-        failed = error;
-      }
+      const started = Date.now();
+      const relays = this.relays.resolve(pubKeyZ32, options).then((packet) => ({ packet, failed: null as unknown }), (error: unknown) => ({ packet: null, failed: error }));
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const answered = await Promise.race([relays, new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), HEDGE_MS); })]);
+      clearTimeout(timer);
+      // The relays have not answered within a hedge's time (one that takes requests and never answers held each read
+      // for its 10 s timeout): the DHT is asked too.
+      if (!answered) return this.hedged(pubKeyZ32, relays, started);
+      ({ packet: fromRelays, failed } = answered);
+      if (isDiscoveryBudgetError(failed)) throw failed;
+      if (!failed) this.lastVia = "relay";
       if (!failed && !down()) return fromRelays;
     }
     try {
-      const fromDht = await this.dht.get(pubKeyZ32);
+      const fromDht = await this.fromDht(pubKeyZ32);
       this.lastVia = "dht";
-      if (fromDht) this.relays.sawTimestamp(pubKeyZ32, fromDht.timestampMicros);
       return newerPacket(fromRelays, fromDht);
     } catch (error) {
       if (fromRelays) return fromRelays;
       throw failed ?? error;
     }
+  }
+
+  private async fromDht(pubKeyZ32: string): Promise<SignedPacket | null> {
+    const packet = await this.dht!.get(pubKeyZ32);
+    if (packet) this.relays.sawTimestamp(pubKeyZ32, packet.timestampMicros);
+    return packet;
+  }
+
+  /**
+   * A read the relays are slow to answer, the DHT asked beside them: the first packet wins. The DHT finding none is
+   * the answer once a slow relay would have had its say (`SLOW_MS`, a relay fetching the packet from the DHT itself),
+   * or once the relays answered too. Both failing: the relays' reason.
+   */
+  private async hedged(pubKeyZ32: string, relays: Promise<{ packet: SignedPacket | null; failed: unknown }>, started: number): Promise<SignedPacket | null> {
+    const dht = this.fromDht(pubKeyZ32).then((packet) => ({ packet, failed: null as unknown, via: "dht" as const }), (error: unknown) => ({ packet: null, failed: error, via: "dht" as const }));
+    const viaRelays = relays.then((r) => ({ ...r, via: "relay" as const }));
+    const first = await Promise.race([viaRelays, dht]);
+    if (first.packet) { this.lastVia = first.via; return first.packet; }
+    const fromDht = await dht;
+    if (fromDht.packet) { this.lastVia = "dht"; return fromDht.packet; }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const slowAfter = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), Math.max(0, SLOW_MS - (Date.now() - started))); });
+    const fromRelays = await Promise.race([viaRelays, slowAfter]);
+    clearTimeout(timer);
+    if (fromRelays?.packet) { this.lastVia = "relay"; return fromRelays.packet; }
+    if (!fromDht.failed) { this.lastVia = "dht"; return null; }
+    if (!fromRelays) throw fromDht.failed;
+    if (!fromRelays.failed) return null;
+    throw fromRelays.failed;
   }
 
   describe(): { protocol: string; relays: string[] } {
