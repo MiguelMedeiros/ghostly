@@ -126,7 +126,14 @@ export function listenForShares(): void {
     if (message?.type === "open-chat") { openChat(message.path, message.profile); return; }
     if (message?.type === "build-gone") { noteBuildGone(); return; }
     if (message?.type !== "share" || !message.item) return;
-    receiveShare(message.item as IncomingShare);
+    const { item } = message;
+    // The page restarts with it still in the picker (a profile switch): the worker holds it again for the next page.
+    const carry = () => {
+      if (!workers.controller) return false;
+      tell(workers.controller, { type: "share-keep", item });
+      return true;
+    };
+    receiveShare({ ...(item as IncomingShare), carry });
     if (!openedForShare()) window.location.hash = "#/shared";
   });
   workers.startMessages();
