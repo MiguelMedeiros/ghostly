@@ -826,25 +826,34 @@ export class GroupFileDesk {
     const theirs = active.filter(a => a.peer === edge.peer);
     const placed = theirs.length > 1 || theirs.some(a => a.sending || this.deps.now() - a.since >= GROUP_FILE_LIMITS.doneWaitMs);
     // All places taken: a member holding none gets the one held longest past `servePlaceMs`, if there is one.
-    if (active.length >= GROUP_FILE_LIMITS.serveAtOnce && (placed || !this.makeRoom())) { edge.busy.add(messageId); return "busy"; }
+    const full = active.length >= GROUP_FILE_LIMITS.serveAtOnce;
+    const room = full && !placed ? this.roomFor() : undefined;
+    if (full && !room) { edge.busy.add(messageId); return "busy"; }
     if (placed) return "busy";
     const today = Math.floor(this.deps.now() / 86_400_000);
     if (this.served.day !== today) this.served = { day: today, bytes: 0 };
-    const reserved = this.servingNow().reduce((sum, a) => sum + a.size, 0);
-    return this.served.bytes + reserved + kept.meta.size > GROUP_FILE_LIMITS.serveBytesPerDay ? "busy" : null;
+    // The transfer ended for this member counts what it sent instead of its share: ended only when the day has room.
+    const reserved = active.reduce((sum, a) => sum + a.size, 0) - (room ? room.size - room.sent : 0);
+    if (this.served.bytes + reserved + kept.meta.size > GROUP_FILE_LIMITS.serveBytesPerDay) return "busy";
+    room?.edge.files.cancel("out", room.wire);
+    return null;
   }
 
-  /** Ends the served transfer that has held its place longest, once past `servePlaceMs`: false when none has. */
-  private makeRoom(): boolean {
+  /**
+   * The served transfer that has held its place longest, once past `servePlaceMs` (undefined when none has): its share
+   * of the day (as in `servingNow`) and what it sent.
+   */
+  private roomFor(): { edge: Edge; wire: string; size: number; sent: number } | undefined {
     const now = this.deps.now();
-    let oldest: { edge: Edge; wire: string; from: number } | undefined;
+    let oldest: { edge: Edge; wire: string; from: number; size: number; sent: number } | undefined;
     for (const edge of this.edgesById.values()) for (const wire of edge.serving.keys()) {
       const record = edge.files.get("out", wire), from = edge.servedMoved.get(wire)?.from ?? now;
-      if (record && !transferEnded(record) && now - from >= GROUP_FILE_LIMITS.servePlaceMs && (!oldest || from < oldest.from)) oldest = { edge, wire, from };
+      if (record && !transferEnded(record) && now - from >= GROUP_FILE_LIMITS.servePlaceMs && (!oldest || from < oldest.from)) {
+        const sent = edge.files.sent(wire);
+        oldest = { edge, wire, from, size: Math.max(record.file.size, sent), sent };
+      }
     }
-    if (!oldest) return false;
-    oldest.edge.files.cancel("out", oldest.wire);
-    return true;
+    return oldest;
   }
 
   /**
