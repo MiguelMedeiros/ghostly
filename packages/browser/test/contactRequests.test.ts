@@ -47,7 +47,7 @@ function world() {
     pkarr.set(slot, knockSlotRecords(linkKey, knocks));
     return { asker, invite };
   };
-  return { pkarr, state, links, ask };
+  return { pkarr, state, host, links, ask };
 }
 
 /** Makes the profile's link and lowers its stamp's difficulty, as a link's stored state. */
@@ -81,6 +81,7 @@ describe("a contact link's requests, the owner's side (WISP 8xx)", () => {
     expect(readLinkRecord(w.pkarr.get(linkKey)!)?.seen).toEqual([seenEntry(linkKey, asker.pubKeyZ32)]);
     // Read once: a second look at the same knock reads no request again.
     const reads = w.state.reads;
+    vi.setSystemTime(NOW + POLL_SHOWN_MS);
     await w.links.poll();
     expect(w.state.reads - reads).toBe(4);
     expect(w.links.requests()).toHaveLength(1);
@@ -94,6 +95,7 @@ describe("a contact link's requests, the owner's side (WISP 8xx)", () => {
     await w.links.poll();
     expect(w.links.requests()).toEqual([]);
     const reads = w.state.reads;
+    vi.setSystemTime(NOW + POLL_SHOWN_MS);
     await w.links.poll();
     expect(w.state.reads - reads).toBe(4);
   });
@@ -131,6 +133,7 @@ describe("a contact link's requests, the owner's side (WISP 8xx)", () => {
     expect(w.state.reads).toBe(first);
     await vi.advanceTimersByTimeAsync(1);
     expect(w.state.reads).toBe(first + 4);
+    await vi.advanceTimersByTimeAsync(POLL_SHOWN_MS);
     w.links.shown();
     await vi.advanceTimersByTimeAsync(0);
     expect(w.state.reads).toBe(first + 8);
@@ -141,6 +144,33 @@ describe("a contact link's requests, the owner's side (WISP 8xx)", () => {
     await vi.advanceTimersByTimeAsync(POLL_SHOWN_MS * 2);
     expect(w.state.reads).toBe(settled);
     w.links.stop();
+  });
+
+  it("a poll or a visit to Requests within 15 s of the last read answers from it, even in a new process", async () => {
+    const w = world();
+    const linkKey = await linkOf(w);
+    await w.links.poll();
+    expect(w.state.reads).toBe(4);
+    const { asker } = w.ask(linkKey);
+    // A script listing requests in a loop: every list polls.
+    for (let i = 0; i < 7; i++) {
+      vi.setSystemTime(Date.now() + 2_000);
+      await w.links.poll();
+    }
+    expect(w.state.reads).toBe(4);
+    // A one-shot is a new engine on the same profile: the last read still counts.
+    const again = new ContactLinks(w.host);
+    await again.load();
+    await again.poll();
+    expect(w.state.reads).toBe(4);
+    again.start();
+    again.shown();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(w.state.reads).toBe(4);
+    await vi.advanceTimersByTimeAsync(NOW + POLL_SHOWN_MS - Date.now());
+    expect(w.state.reads).toBe(4 + 4 + 1);
+    expect(again.requests().map(r => r.id)).toEqual([asker.pubKeyZ32]);
+    again.stop();
   });
 });
 
@@ -155,6 +185,7 @@ describe("accept and decline (WISP 8xx)", () => {
     expect(w.links.requests()).toEqual([]);
     expect(w.links.view()?.waiting).toBe(0);
     const reads = w.state.reads;
+    vi.setSystemTime(NOW + POLL_SHOWN_MS);
     await w.links.poll();
     expect(w.state.reads - reads).toBe(4);
     expect(w.links.requests()).toEqual([]);
@@ -174,6 +205,7 @@ describe("accept and decline (WISP 8xx)", () => {
     expect(w.links.requests()).toEqual([]);
     expect(JSON.stringify(await wrap((await store(STORES.settings, "readonly")).get(CONTACT_LINKS_KEY)))).not.toContain("Hello from your site");
     const reads = w.state.reads;
+    vi.setSystemTime(NOW + POLL_SHOWN_MS);
     await w.links.poll();
     expect(w.state.reads - reads).toBe(4);
     expect(w.state.accepted).toEqual([]);
