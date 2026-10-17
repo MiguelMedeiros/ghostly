@@ -21,9 +21,9 @@ export interface Result { code: number; stdout: string; stderr: string; json: Re
 
 /** Runs `ghostly` to its end (asynchronously: the relay these tests serve lives in this process). */
 /** `bin`: another build of the CLI (an older release, for compatibility tests); this one by default. */
-export function ghostly(args: string[], options: { env?: NodeJS.ProcessEnv; input?: string; bin?: string } = {}): Promise<Result> {
+export function ghostly(args: string[], options: { env?: NodeJS.ProcessEnv; input?: string; bin?: string; cwd?: string } = {}): Promise<Result> {
   return new Promise((done) => {
-    const child = spawn(process.execPath, [options.bin ?? BIN, ...args], { env: testEnv(options.env), stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [options.bin ?? BIN, ...args], { env: testEnv(options.env), cwd: options.cwd, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
