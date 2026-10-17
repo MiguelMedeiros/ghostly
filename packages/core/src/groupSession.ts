@@ -90,7 +90,7 @@ export const GROUP_LIMITS = {
 } as const;
 
 /** What every member should know about who can read what, in the words the apps show. */
-export const GROUP_READ_NOTE = `Everyone in the group can read everything sent while they are a member. Someone removed keeps what they already received and cannot read what comes after; someone who joins later cannot read what came before. Messages go directly to each member; whoever was away gets what they missed from any member who has it (the group's last ${GROUP_LIMITS.relay} messages) when they meet again.`;
+export const GROUP_READ_NOTE = `Everyone in the group can read everything sent while they are a member. Someone removed keeps what they already received and cannot read what comes after; someone who joins later cannot read what came before. Messages go to each member; whoever was away gets what they missed from any member who has it (the group's last ${GROUP_LIMITS.relay} messages) when they meet again.`;
 
 /**
  * `m`: the message's mentions (`GroupMention[]` as JSON), sealed under the same epoch key with a nonce of their own
