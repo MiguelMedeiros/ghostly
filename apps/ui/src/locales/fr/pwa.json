@@ -27,6 +27,7 @@
   "shareTitle": "Partager vers…",
   "shareTooLarge": "Trop volumineux pour être partagé ici : {{names}}",
   "shareTooLargeNext": "Ouvrez une discussion et envoyez-le avec + → Document.",
+  "shareTooLargeUnnamed": "Trop volumineux pour être partagé ici",
   "shareUnread": "Lecture impossible : {{names}}",
   "shareUnreadNext": "Partagez-le à nouveau depuis son app, ou ouvrez une discussion et envoyez-le avec + → Document.",
   "shareWaiting": "Réception du partage...",
