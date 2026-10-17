@@ -9,7 +9,7 @@ import { MessageBoundary } from "./MessageBoundary";
 import { MessageDetailsPanel } from "./MessageDetailsPanel";
 import { VoiceBubble } from "./voice/VoiceBubble";
 import { VideoBubble } from "./video/VideoBubble";
-import { isPlayableAudioType, isPlayableVideoType, shownTime } from "@ghostly/core";
+import { IMAGE_LIMITS, imageSize, isPlayableAudioType, isPlayableVideoType, previewable, shownTime } from "@ghostly/core";
 import { AudioBubble } from "./audio/AudioBubble";
 import { InvoiceBubble } from "./InvoiceBubble";
 import { findMoney } from "../lib/money";
@@ -306,19 +306,41 @@ function isWaybackGif(input: string): boolean {
     && !url.search && !url.hash && url.href === input && WAYBACK_GIF_PATH_RE.test(url.pathname);
 }
 const DATA_IMAGE_SAFE_RE = /^data:image\/(png|jpe?g|gif|webp);/i;
+/** The base64 characters that hold a picture's first `IMAGE_LIMITS.headBytes` bytes. */
+const HEAD_CHARS = Math.ceil(IMAGE_LIMITS.headBytes / 3) * 4;
+
+/**
+ * Whether an inline picture may be drawn: only plain base64 whose own bytes say a size `previewable` takes, as a
+ * picture file (FileBubble). A few characters can declare a picture of gigabytes once decoded.
+ */
+function previewableData(url: string): boolean {
+  const comma = url.indexOf(",");
+  if (comma < 0 || !/;\x20*base64$/i.test(url.slice(0, comma))) return false;
+  try {
+    const head = atob(url.slice(comma + 1).replace(/[\t\n\f\r ]/g, "").slice(0, HEAD_CHARS));
+    return previewable(imageSize(Uint8Array.from(head, (c) => c.charCodeAt(0))));
+  } catch {
+    return false;
+  }
+}
 
 type ContentType = "text" | "image";
 
 function detectContentType(text: string): ContentType {
   const trimmed = text.trim();
-  if (DATA_IMAGE_SAFE_RE.test(trimmed)) return "image";
+  if (DATA_IMAGE_SAFE_RE.test(trimmed)) return previewableData(trimmed) ? "image" : "text";
   if (GIPHY_RE.test(trimmed)) return "image";
   if (IMAGE_URL_RE.test(trimmed)) return "image";
   return "text";
 }
 
-/** Pictures that show by themselves: inline data, and the GIF sources the picker uses. */
-const autoLoads = (url: string) => DATA_IMAGE_SAFE_RE.test(url) || GIPHY_RE.test(url) || isWaybackGif(url);
+/** Pictures the page loads itself: inline data, and Giphy's (its own transcodes, never the sender's bytes). */
+const autoLoads = (url: string) => (DATA_IMAGE_SAFE_RE.test(url) && previewableData(url)) || GIPHY_RE.test(url);
+/**
+ * Pictures that need no click: those, and the picker's Wayback Machine GIFs. Anyone can have the archive keep a GIF,
+ * so the app reads those and checks their size first (lib/pictureLink.ts), as any picture link's.
+ */
+const needsNoClick = (url: string) => autoLoads(url) || isWaybackGif(url);
 const hostOf = (url: string) => { try { return new URL(url).host; } catch { return "picture"; } };
 
 function isOnlyEmojis(text: string): boolean {
@@ -818,7 +840,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const picture = contentType === "image" && !isSystem && !showsCard(message.card) && !appCard ? message.text.trim() : null;
   // No shell's policy lets the page load a picture from any address but the GIF sources': the app reads the others
   // itself, once asked (my own at once), and the bubble shows what came (lib/pictureLink.ts).
-  const readHere = picture !== null && !autoLoads(picture) && (isMe || revealed) ? picture : null;
+  const readHere = picture !== null && !autoLoads(picture) && (isMe || revealed || needsNoClick(picture)) ? picture : null;
   const [pictureRead, setPictureRead] = useState<{ link: string; url: string } | null>(null);
   useEffect(() => {
     if (!readHere) return;
@@ -1109,7 +1131,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             <InvoiceBubble money={money} mine={isMe} peerPubKey={peerPubKey} />
             {timestampEl}
           </div>
-        ) : contentType === "image" && !isMe && !revealed && !autoLoads(message.text.trim()) ? (
+        ) : contentType === "image" && !isMe && !revealed && !needsNoClick(message.text.trim()) ? (
           // Loading a picture tells its server this device's address: from anywhere but the GIF sources,
           // a contact's picture waits for a click.
           <div className="clearfix">
