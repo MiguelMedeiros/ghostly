@@ -1,8 +1,8 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  createChatInvite, encodeContactLink, identityFromSeed, knockSlotIdentity, knockSlotOf, linkRecords, readContactLink, readKnockSlot, readLinkRecord,
-  REQUEST_LIFETIME_MS, type GhostRecord, type Identity,
+  createChatInvite, createIdentity, createRelayPayload, encodeContactLink, identityFromSeed, knockSlotIdentity, knockSlotOf, linkRecords, parseRelayPayload,
+  readContactLink, readKnockSlot, readLinkRecord, REQUEST_LIFETIME_MS, type GhostRecord, type Identity,
 } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
 import { ContactLinks } from "../src/engine/contactLinks";
@@ -151,6 +151,51 @@ describe("asking through a contact link (WISP 8xx)", () => {
     await settled(w.requester.ask({ code: theirs.code, name: "Kevin", text: "hi" }));
     await expect(w.requester.ask({ code: theirs.code, name: "Kevin", text: "again" })).rejects.toThrow("already sent a request");
     expect(w.chats).toHaveLength(1);
+  });
+
+  it("deleting the request's chat takes it back: nothing more goes out, the owner finds no request, and asking again is open", async () => {
+    const w = world();
+    await w.owner.load();
+    await w.requester.load();
+    const { code } = await w.owner.create();
+    const link = keyOf(code);
+    const { chatId } = await settled(w.requester.ask({ code, name: "Kevin", text: "Hi! I read your site." }));
+    await settled(w.requester.tick());
+    const [{ key }] = await wrap<{ key: string }[]>((await store(STORES.settings, "readonly")).get(CONTACT_ASKS_KEY));
+    expect(w.pkarr.get(key)).toBeDefined();
+    await w.requester.forgetChat(chatId);
+    expect(w.requester.views()).toEqual([]);
+    // The request under the asker key is gone: an owner who had not read it yet finds nothing to take. An empty packet
+    // is one a relay takes and a reader reads as no records.
+    expect(w.pkarr.get(key)).toEqual([]);
+    const empty = createIdentity();
+    expect(parseRelayPayload(empty.pubKeyZ32, createRelayPayload(empty, [])).records).toEqual([]);
+    await w.owner.poll();
+    expect(w.owner.requests()).toEqual([]);
+    // Nothing more goes out for it: no request again, no knock again when the knock is wiped.
+    w.pkarr.delete(knockSlotIdentity(link, knockSlotOf(link, key)).pubKeyZ32);
+    const before = new Map(w.pkarr);
+    vi.setSystemTime(NOW + ASK_FAST_MS);
+    await settled(w.requester.tick());
+    expect(w.pkarr).toEqual(before);
+    // Asking again is open, under the same asker key.
+    const again = await settled(w.requester.ask({ code, name: "Kevin", text: "Hi again" }));
+    expect(again.chatId).not.toBe(chatId);
+    await settled(w.requester.tick());
+    // The owner read that key, empty, a moment ago: it reads it again an hour later (WISP 8xx § Taking requests).
+    vi.setSystemTime(NOW + 60 * 60_000 + ASK_FAST_MS);
+    await w.owner.poll();
+    expect(w.owner.requests()).toEqual([expect.objectContaining({ id: key, text: "Hi again" })]);
+  });
+
+  it("a deleted chat that no request made changes nothing", async () => {
+    const w = world();
+    await w.owner.load();
+    await w.requester.load();
+    const { code } = await w.owner.create();
+    const { chatId } = await settled(w.requester.ask({ code, name: "Kevin", text: "hi" }));
+    await w.requester.forgetChat("another-chat");
+    expect(w.requester.views()).toEqual([expect.objectContaining({ chatId })]);
   });
 
   it("a name or text that does not fit makes no chat", async () => {
