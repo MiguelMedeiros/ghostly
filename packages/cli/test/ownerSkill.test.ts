@@ -47,6 +47,8 @@ n=$(ls ${JSON.stringify(log)} | wc -l | tr -d ' ')
 f=${JSON.stringify(log)}/$(printf '%04d' "$n")
 printf '%s\\0' "$@" > "$f"
 case " $* " in *" --stdin "*) printf '\\1' >> "$f"; cat >> "$f" ;; esac
+# A refusal: the CLI prints its {"error"} JSON on stdout and exits with its code.
+[ -z "\${REFUSE:-}" ] || { printf '%s\\n' "$REFUSE"; exit "\${REFUSE_CODE:-1}"; }
 case "$1 $2" in
   "chat show") printf '{"id":"${OWNER}","name":"Owner"}\\n' ;;
   "listen --turns") cat ${JSON.stringify(join(root, "events"))} ;;
@@ -165,5 +167,23 @@ describe.skipIf(process.platform === "win32" || (!hasJq && !process.env.CI))("th
       ["react", "owner", "t_3", "👍"],
       ["react", "owner", "t_3", "👍", "--remove"],
     ]);
+  });
+
+  it("react and status pass on the CLI's refusal: its error JSON on stderr, with its exit code", () => {
+    const t = setup();
+    const notFound = '{"error":{"code":"not_found","message":"That message is not in this chat, or takes no reaction"}}';
+    const badStatus = '{"error":{"code":"bad_request","message":"status: plain text, with no link or markup"}}';
+    const react = t.run("react", ["t_gone"], { env: { REFUSE: notFound, REFUSE_CODE: "3" } });
+    expect(react.status).toBe(3);
+    expect(react.stderr.trim()).toBe(notFound);
+    const status = t.run("status", ["Editing <App> component"], { env: { REFUSE: badStatus } });
+    expect(status.status).toBe(1);
+    expect(status.stderr.trim()).toBe(badStatus);
+    const stop = t.run("status", ["--stop"], { env: { REFUSE: badStatus } });
+    expect(stop.status).toBe(1);
+    expect(stop.stderr.trim()).toBe(badStatus);
+    // On success nothing is printed, as before.
+    const ok = t.run("react", ["t_3"]);
+    expect([ok.status, ok.stdout, ok.stderr]).toEqual([0, "", ""]);
   });
 });
