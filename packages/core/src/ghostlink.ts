@@ -996,6 +996,8 @@ export class GhostLink {
   private resuming: PairedTransport | undefined;
   /** Until then, a dial waits for the native endpoint `resuming` names to start (it is knocked on as it does). */
   private resumeWaitUntil = 0;
+  /** The contact's other native transports were knocked on while this resume waited (`knockWhileResuming`). */
+  private resumeKnocked = false;
   /** What the last live session ran on, kept after it ended: a wake resumes on it (`resumeAfterAbsence`). */
   private lastLiveOn: PairedTransport | undefined;
   /** `resuming` is a wake's, not a restart's. */
@@ -2628,6 +2630,23 @@ export class GhostLink {
     this.knockedEarly = epoch;
     void this.knockEarly(epoch, direct);
   }
+  /**
+   * Back after a restart on a native transport whose endpoint has not started yet (Iroh waits up to 10 s for its relay,
+   * and does not start at all with the relay out of reach): the contact's other direct transports that are up here are
+   * knocked on meanwhile, once per resume, as a resume over WebRTC knocks as its offer goes out. The contact still holds
+   * its old session and reads slowly; before, the chat waited out `RESUME_WAIT_MS` and then the race's 8 s (20.5-22.9 s
+   * between two CLIs, bh-zero43). The first live wins, and the resumed transport is still knocked once it starts.
+   */
+  private knockWhileResuming(): void {
+    if (this.resumeKnocked || !this.fallback || !this.peerFallback || this.dialing || this.channel) return;
+    const relayed = this.upgradesFromRelay() ? [] : this.relayedTransports;
+    const offer = this.transportOffer();
+    const direct = TRANSPORTS.filter(t => t !== "webrtc/1" && t !== this.resuming && this.endpoints.has(t) && offer.includes(t)
+      && !!this.peerTransports?.includes(t) && !relayed.includes(t) && this.canDial(t));
+    if (!direct.length) return;
+    this.resumeKnocked = true;
+    void this.knockEarly(this.connectionEpoch, direct, () => true);
+  }
   private async knockEarly(epoch: number, transports: PairedTransport[], standing = () => this.offerOut): Promise<void> {
     this.knockingEarly = true;
     try {
@@ -2974,8 +2993,10 @@ export class GhostLink {
     // On the DHT the chat is usable: layer 1 is retried at the background pace (WISP 100), not the pairing's.
     // A pin over the DHT alone changes nothing here: the joiner still knocks and the inviter still answers.
     // Back after a restart on a native transport whose endpoint is still starting: it is knocked on once it has, and a
-    // WebRTC offer meanwhile would hold the data link for as long as the contact takes to read it.
-    if (this.resuming && this.resuming !== "webrtc/1" && !this.endpoints.has(this.resuming) && Date.now() < this.resumeWaitUntil) return;
+    // WebRTC offer meanwhile would hold the data link for as long as the contact takes to read it. A knock holds none.
+    if (this.resuming && this.resuming !== "webrtc/1" && !this.endpoints.has(this.resuming) && Date.now() < this.resumeWaitUntil) {
+      this.knockWhileResuming(); return;
+    }
     // The contact said it was going: its old packet says nothing about whether it is back. Its next one does.
     if (this.departed) {
       if (presence.lastPacketAt === this.departed.packet && Date.now() < this.departed.until) return;
@@ -4500,7 +4521,7 @@ export class GhostLink {
     // as it was: the knock of an earlier return would count for this one, and none went from the second on.
     this.knockedEarly = -1;
     traceLink(this.myPubKeyZ32, "wake-resume", { transport });
-    if (transport !== "webrtc/1") { this.resumeWaitUntil = Date.now() + RESUME_WAIT_MS; return; }
+    if (transport !== "webrtc/1") { this.resumeWaitUntil = Date.now() + RESUME_WAIT_MS; this.resumeKnocked = false; return; }
     // The session's close was heard just before the wake, and this side answers the contact's offer already: it knocks
     // meanwhile, as an app back after a restart does.
     if (this.dataLink.state === "answering" && this.answeringEpoch === this.connectionEpoch) {
