@@ -7,7 +7,11 @@ import { createInterface } from 'node:readline'
 
 const MAX_ENDPOINTS = 8
 const MAX_QUEUED = 32
-const MAX_LINE = 256 * 1024
+/**
+ * The longest line read or written here (and the host's `MAX_LINE` in hyperdht.rs). A frame is at most 60 KiB, and
+ * JSON writes a control character as `\u0001`, six bytes for one: 60 KiB of them is a line of 360 KiB.
+ */
+const MAX_LINE = 512 * 1024
 /**
  * Bytes a connection's socket may hold when a send is answered. Past it, the answer waits until the socket drained,
  * so the host counts the frame against the page's send budget while it is not on the wire.
@@ -31,8 +35,14 @@ function attach(record, bound, incoming) {
   emit({ type: 'open', endpoint: record.id, id, binding: bound.binding, incoming })
   // A binary message (WISP 103 § Frames) goes on the line as `bytes`, in base64; text as `text`.
   bound.channel.onMessage = data => {
-    if (typeof data === 'string') emit({ type: 'frame', endpoint: record.id, id, text: data })
-    else if (data instanceof Uint8Array) emit({ type: 'frame', endpoint: record.id, id, bytes: Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString('base64') })
+    const frame = typeof data === 'string' ? { type: 'frame', endpoint: record.id, id, text: data }
+      : data instanceof Uint8Array ? { type: 'frame', endpoint: record.id, id, bytes: Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString('base64') }
+        : null
+    if (!frame) return
+    const line = JSON.stringify(frame)
+    // A line the host would not read stops the whole runtime there: only this connection closes.
+    if (Buffer.byteLength(line) > MAX_LINE) { bound.channel.close(); return }
+    process.stdout.write(line + '\n')
   }
   bound.channel.onClose = () => { if (record.connections.delete(id)) emit({ type: 'closed', endpoint: record.id, id }) }
   return id
