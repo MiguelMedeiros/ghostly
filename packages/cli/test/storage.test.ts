@@ -1,4 +1,5 @@
 import { appendFileSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
+import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deserialize, serialize, setFlagsFromString } from "node:v8";
@@ -143,6 +144,34 @@ describe("persistent IndexedDB", () => {
     expect((d as unknown as { _rawDatabase: { transactions: unknown[] } })._rawDatabase.transactions).toHaveLength(0);
     expect(await read(d.transaction("messages").objectStore("messages").count())).toBe(40);
   });
+
+  it("runs a burst of 5,000 reads with a write among them in about linear time, in order, and answers a socket meanwhile", async () => {
+    const dir = folder();
+    const d = await db(await open(dir));
+    await tx(d, ["settings"], (s) => { s.settings.put("before", "state"); });
+    const server = createServer((socket) => socket.end("pong"));
+    await new Promise<void>((resolve) => server.listen(join(dir, "daemon.sock"), resolve));
+    try {
+      // fake-indexeddb's own scheduler started one transaction per pass and checked each against all the others: this
+      // burst held the event loop for 36 s here (2,000 reads around a write: 19 s).
+      const started = performance.now();
+      const get = () => read(d.transaction("settings").objectStore("settings").get("state"));
+      const first = Array.from({ length: 2500 }, get);
+      const write = tx(d, ["settings"], (s) => { s.settings.put("after", "state"); });
+      const second = Array.from({ length: 2500 }, get);
+      const answered = new Promise<number>((resolve) => {
+        const socket = connect(join(dir, "daemon.sock"));
+        socket.on("data", () => { resolve(performance.now() - started); socket.destroy(); });
+      });
+      const [before, , after] = await Promise.all([Promise.all(first), write, Promise.all(second)]);
+      const took = performance.now() - started;
+      // The reads made before the write see what was there; the ones made after it wait for it and see what it wrote.
+      expect(new Set(before)).toEqual(new Set(["before"]));
+      expect(new Set(after)).toEqual(new Set(["after"]));
+      expect(took).toBeLessThan(1000);
+      expect(await answered).toBeLessThan(1000);
+    } finally { server.close(); }
+  }, 120_000);
 
   it("replays clears and range deletes, and keeps the key generator", async () => {
     const dir = folder();
