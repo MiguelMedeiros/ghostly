@@ -24,6 +24,8 @@
   "shareNoChats": "还没有聊天。先开始一个，再重新分享。",
   "shareNone": "没有分享任何内容，或已被接收。",
   "shareOneFile": "1 个文件",
+  "sharePastLimit": "只收到了前 {{count}} 个文件。未包含:{{names}}",
+  "sharePastLimitNext": "再分享一次其余的文件,或打开一个聊天,用 + → 文档 发送。",
   "shareTitle": "分享到…",
   "shareTooLarge": "太大,无法在这里分享:{{names}}",
   "shareTooLargeNext": "打开一个聊天,用 + → 文档 发送。",

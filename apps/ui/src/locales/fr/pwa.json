@@ -24,6 +24,8 @@
   "shareNoChats": "Pas encore de discussion. Commencez-en une, puis partagez à nouveau.",
   "shareNone": "Rien n'a été partagé, ou c'est déjà récupéré.",
   "shareOneFile": "1 fichier",
+  "sharePastLimit": "Seuls les {{count}} premiers fichiers sont arrivés. Laissés de côté : {{names}}",
+  "sharePastLimitNext": "Partagez le reste à nouveau, ou ouvrez une discussion et envoyez-les avec + → Document.",
   "shareTitle": "Partager vers…",
   "shareTooLarge": "Trop volumineux pour être partagé ici : {{names}}",
   "shareTooLargeNext": "Ouvrez une discussion et envoyez-le avec + → Document.",

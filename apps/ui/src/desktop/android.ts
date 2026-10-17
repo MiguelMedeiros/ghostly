@@ -37,7 +37,8 @@ export function followAppVisibility(listen: ListenWith, doc: Document = document
 
 /**
  * A share from another app as Rust hands it over: its text, its files on the paste shelf, by token, and the names of
- * those Android did not copy, too large to bring in (`leftOut`) or not read (`unread`).
+ * those Android did not copy, too large to bring in (`leftOut`), not read (`unread`) or past the most one share
+ * brings (`pastLimit`).
  */
 interface Shared {
   title: string;
@@ -45,6 +46,7 @@ interface Shared {
   files: { token: string; name: string | null; size: number; mime: string | null }[];
   leftOut?: string[];
   unread?: string[];
+  pastLimit?: string[];
 }
 
 /**
@@ -161,6 +163,7 @@ export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
       files,
       ...(leftOut.length > 0 && { leftOut }),
       ...(unread.length > 0 && { unread }),
+      ...(shared.pastLimit?.length && { pastLimit: shared.pastLimit }),
       read: async () => {
         // Being read: a later share no longer lets these go under it; they go when the read ends.
         if (letGo === done) letGo = null;

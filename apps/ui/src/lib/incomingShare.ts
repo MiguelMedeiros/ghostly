@@ -7,6 +7,12 @@ import { useSyncExternalStore } from "react";
  * (the same sheet a paste or a drop opens, #349). Nothing is sent until the person sends it there.
  */
 
+/**
+ * Most files one share brings, on the web (sw/policy.ts `MAX_SHARED_FILES`) and on Android (GhostlyHostPlugin.kt
+ * `MAX_SHARED_FILES`): keep the three alike.
+ */
+export const MAX_SHARE_FILES = 32;
+
 /** A file of a share as the picker shows it: a browser's File, or one not read into the page yet. */
 export type SharedFile = Pick<File, "name" | "size" | "type">;
 
@@ -19,6 +25,8 @@ export interface IncomingShare {
   leftOut?: string[];
   /** The names of files Android could not read (a revoked permission, a broken stream); the picker says so. */
   unread?: string[];
+  /** The names of files left out past the most one share brings (`MAX_SHARE_FILES`); the picker says so on a line of its own. */
+  pastLimit?: string[];
   /**
    * Reads `files` into the page where they are only names and sizes (the Android app's share: its bytes are read
    * when a chat's composer takes it, not before the picker shows). Without it, `files` are the Files.

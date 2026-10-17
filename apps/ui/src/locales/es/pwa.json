@@ -24,6 +24,8 @@
   "shareNoChats": "Aún no hay chats. Empieza uno y vuelve a compartir.",
   "shareNone": "No se compartió nada, o ya se recogió.",
   "shareOneFile": "1 archivo",
+  "sharePastLimit": "Solo llegaron los primeros {{count}} archivos. Quedaron fuera: {{names}}",
+  "sharePastLimitNext": "Comparte el resto de nuevo, o abre un chat y envíalos con + → Documento.",
   "shareTitle": "Compartir con…",
   "shareTooLarge": "Demasiado grande para compartir aquí: {{names}}",
   "shareTooLargeNext": "Abre un chat y envíalo con + → Documento.",

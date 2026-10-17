@@ -153,6 +153,20 @@ describe("a share from another app", () => {
     expect(incomingShare()?.leftOut).toBeUndefined();
   });
 
+  it("names the files Android left out past the count cap, apart from those too large", async () => {
+    const shares: unknown[] = [
+      { title: "", text: "", files: [{ token: "paste-1", name: "IMG_1.jpg", size: 10, mime: "image/jpeg" }], leftOut: ["VID_1.mp4"], pastLimit: ["IMG_33.jpg", "IMG_34.jpg"] },
+    ];
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "incoming_share_take") return shares.shift() ?? null;
+      if (command === "incoming_share_done") return undefined;
+      throw new Error(command);
+    });
+    takeIncomingShares(invoke as never, vi.fn(async () => {}));
+    await vi.waitFor(() => expect(incomingShare()).not.toBeNull());
+    expect(incomingShare()).toMatchObject({ leftOut: ["VID_1.mp4"], pastLimit: ["IMG_33.jpg", "IMG_34.jpg"] });
+  });
+
   it("shows the picker from names and sizes, and reads only what a paste brings in all once a chat takes it", async () => {
     const MiB = 1024 * 1024;
     const files = [

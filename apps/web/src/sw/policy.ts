@@ -113,9 +113,11 @@ export interface SharedItem {
   text: string;
   url: string;
   files: File[];
+  /** The names of the files past `MAX_SHARED_FILES`, left out: the picker says so. */
+  pastLimit?: string[];
 }
 
-/** Most files one share brings; larger shares keep their first ones. */
+/** Most files one share brings; larger shares keep their first ones, and name the rest. */
 export const MAX_SHARED_FILES = 32;
 
 /**
@@ -149,7 +151,10 @@ export async function readShareBody(request: { body: ReadableStream<Uint8Array> 
   return new Blob(chunks as BlobPart[]);
 }
 
-/** What a share target POST carries, bounded: strings of a sane length, files that are files, `max` bytes of them in all. */
+/**
+ * What a share target POST carries, bounded: strings of a sane length, files that are files, `max` bytes of them in
+ * all. Files past the count cap are only named (`pastLimit`).
+ */
 export function readShare(form: FormData, max = MAX_SHARE_BYTES): SharedItem {
   const text = (name: string) => {
     const value = form.get(name);
@@ -157,13 +162,18 @@ export function readShare(form: FormData, max = MAX_SHARE_BYTES): SharedItem {
   };
   let room = max;
   const files: File[] = [];
+  const pastLimit: string[] = [];
   for (const value of form.getAll("files")) {
     if (typeof value === "string" || !(value.size >= 0)) continue;
-    if (files.length >= MAX_SHARED_FILES || value.size > room) break;
+    if (files.length >= MAX_SHARED_FILES) {
+      pastLimit.push(value.name);
+      continue;
+    }
+    if (value.size > room) break;
     room -= value.size;
     files.push(value);
   }
-  return { title: text("title"), text: text("text"), url: text("url"), files };
+  return { title: text("title"), text: text("text"), url: text("url"), files, ...(pastLimit.length > 0 && { pastLimit }) };
 }
 
 /** Where a profile's push-only worker is registered: its own scope, so each profile has its own subscription. */

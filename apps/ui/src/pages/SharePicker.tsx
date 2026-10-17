@@ -5,7 +5,7 @@ import { useChatTargets } from "../hooks/useChatTargets";
 import { useI18n } from "../contexts/I18nContext";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { Notice } from "../components/ui/Notice";
-import { dropIncomingShare, isEmptyShare, sendShareTo, shareText, useIncomingShare } from "../lib/incomingShare";
+import { MAX_SHARE_FILES, dropIncomingShare, isEmptyShare, sendShareTo, shareText, useIncomingShare } from "../lib/incomingShare";
 
 /** How long the page waits for a share that has not reached it yet before it says there is none. */
 const WAIT_MS = 5000;
@@ -29,6 +29,7 @@ export function SharePicker() {
   const hasFiles = !!share?.files.length;
   const leftOut = share?.leftOut ?? [];
   const unread = share?.unread ?? [];
+  const pastLimit = share?.pastLimit ?? [];
   const targets = useChatTargets();
   const preview = share ? shareText(share) : "";
 
@@ -56,6 +57,11 @@ export function SharePicker() {
           {unread.length > 0 && (
             <Notice tone="error" className="text-sm" testId="share-unread"
               title={t("pwa.shareUnread", { names: unread.join(", ") })} next={t("pwa.shareUnreadNext")} />
+          )}
+          {/* Files past the most one share brings were left out: named apart, as they were not too large. */}
+          {pastLimit.length > 0 && (
+            <Notice tone="error" className="text-sm" testId="share-past-limit"
+              title={t("pwa.sharePastLimit", { count: String(MAX_SHARE_FILES), names: pastLimit.join(", ") })} next={t("pwa.sharePastLimitNext")} />
           )}
           {/* Nothing else came: no chat to pick. */}
           {!isEmptyShare(share) && (
