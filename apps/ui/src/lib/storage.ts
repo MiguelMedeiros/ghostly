@@ -104,6 +104,21 @@ export const ROOM_MESSAGES = 20;
 const gaveRoom = new Set<string>();
 
 /**
+ * Characters of those last messages a chat's stored copy keeps at most, as `STORED_MESSAGES` does with their count: the
+ * newest one whatever its size. A link's thumbnail (~25 K) or a text edited 20 times weighs as much as a hundred plain
+ * messages, and every message that came wrote and parsed again megabytes for a feed's or an agent's chat.
+ */
+export const STORED_CHARS = 100_000;
+
+/** A row's length as stored, by row: a row that changes is a new object (`platform/sync.ts`). */
+const rowChars = new WeakMap<ChatMessage, number>();
+function charsOf(message: ChatMessage): number {
+  let chars = rowChars.get(message);
+  if (chars === undefined) rowChars.set(message, (chars = JSON.stringify(message).length));
+  return chars;
+}
+
+/**
  * A call's lines a chat keeps: its last ones; an older one goes from this device as a deleted message does
  * (`dropOldCallLines`). Nothing else keeps them, so its stored copy keeps every one it has (`stored`): a contact who
  * rang and hung up over and over left two lines a call, thousands, written again with every later message, until
@@ -130,15 +145,20 @@ export function setEngineMessages(sessionId: string, ids: ReadonlySet<string>): 
 const whole = new Map<string, ChatMessage[]>();
 
 /**
- * The session as it is stored: without the messages the engine keeps older than its last `STORED_MESSAGES`, and how
- * many went (`older`), which the unread count needs.
+ * The session as it is stored: without the messages the engine keeps older than its last `STORED_MESSAGES` (or its last
+ * `STORED_CHARS`), and how many went (`older`), which the unread count needs.
  */
 function stored(session: ChatSession): ChatSession {
   const ids = inEngine.get(session.id);
   const all = session.messages;
   const last = gaveRoom.has(session.id) ? ROOM_MESSAGES : STORED_MESSAGES;
-  if (!ids || all.length <= last) return session;
-  const from = all.length - last;
+  if (!ids) return session;
+  let from = all.length;
+  for (let chars = 0; from > 0 && all.length - from < last; from--) {
+    chars += charsOf(all[from - 1]);
+    if (chars > STORED_CHARS && from < all.length) break;
+  }
+  if (!from) return session;
   const keep = all.filter((m, i) => i >= from || !ids.has(m.id));
   if (keep.length === all.length) return session;
   return { ...session, messages: keep, older: (session.older ?? 0) + all.length - keep.length };
