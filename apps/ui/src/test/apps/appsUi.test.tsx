@@ -289,6 +289,18 @@ describe("with the apps flag on", () => {
     expect(fetches).toEqual([]);
   });
 
+  it("names a contact with no name as the chat does, not Anonymous, on the card and its install screen", async () => {
+    fakeEngine.on("appList", () => []).on("appPreview", () => preview());
+    // The chat of a contact with no name passes none (Chat.tsx), and calls them "Contact · <the start of their key>".
+    const { user } = renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" peerNick="" contactName="" linkId="link-1" />);
+    act(() => fakeEngine.update({ links: [ana(true)] }));
+    const card = await screen.findByTestId("app-card");
+    expect(card).toHaveTextContent("Contact · peer opened it here");
+    expect(card).not.toHaveTextContent("Anonymous");
+    await user.click(within(card).getByTestId("app-card-install"));
+    expect(await within(await screen.findByTestId("app-install")).findByTestId("app-sent-by")).toHaveTextContent("Sent by Contact · peer");
+  });
+
   it("says the app needs you both online while the contact is not live, and Open once installed", async () => {
     fakeEngine.on("appList", () => [installed()]);
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);

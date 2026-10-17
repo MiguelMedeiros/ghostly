@@ -1,4 +1,4 @@
-import { publicKeyLabel } from "../lib/publicKeyLabel";
+import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import React, { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { sameValue } from "../lib/sameValue";
 import { clockTime } from "../lib/time";
@@ -986,7 +986,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             {edge && <span aria-hidden="true" data-testid="status-card-edge" className={`absolute inset-y-2 start-1 w-[3px] rounded-full opacity-80 ${edge}`} />}
             {quote && <div className="px-2 pt-2"><ReplyQuote quote={quote} /></div>}
             {appCard
-              ? <AppCardView card={appCard} mine={isMe} contact={contactName || peerNick || t("common.anonymous")} linkId={linkId!} peerKey={peerPubKey} time={time} marks={marks} />
+              // A contact with no name goes by what the chat calls them ("Contact · 1kwb54"); "Anonymous" is my own profile's word.
+              ? <AppCardView card={appCard} mine={isMe} contact={contactName || peerNick || t("common.unnamedContact", { key: contactTag(peerPubKey) })} linkId={linkId!} peerKey={peerPubKey} time={time} marks={marks} />
               : <StatusCardView card={card as ShownCard} time={time} marks={marks} end={message.edit?.at ?? message.timestamp} />}
           </div>
           {refusal}
