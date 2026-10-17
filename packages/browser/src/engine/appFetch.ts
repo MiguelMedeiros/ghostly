@@ -48,25 +48,29 @@ export class AppFetchError extends Error {
 
 /**
  * Reads a URL of the list: its bytes, at most `maxBytes`. With `peek`, the first `maxBytes` bytes and no more, the rest
- * left unread (a bundle's manifest, to see whether it is newer before reading all of it).
+ * left unread (a bundle's manifest, to see whether it is newer before reading all of it). `signal` stops a read whose
+ * bytes nobody will use any more (`network`).
  */
-export type AppFetcher = (url: string, options: { maxBytes: number; peek?: boolean }) => Promise<Uint8Array>;
+export type AppFetcher = (url: string, options: { maxBytes: number; peek?: boolean; signal?: AbortSignal }) => Promise<Uint8Array>;
 
 export function boundedAppFetch(options: { fetcher?: typeof fetch; online?: () => boolean; timeoutMs?: number; idleMs?: number; totalMs?: number } = {}): AppFetcher {
-  return async (url, { maxBytes, peek = false }) => {
+  return async (url, { maxBytes, peek = false, signal: stopped }) => {
     if (!isAppFetchUrl(url)) throw new AppFetchError("host", "Apps are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS");
     if (options.online && !options.online()) throw new AppFetchError("offline", "Offline");
+    if (stopped?.aborted) throw new AppFetchError("network", "The read was stopped");
     const fetcher = options.fetcher ?? globalThis.fetch.bind(globalThis);
     // One signal for the request and its body: the host has `timeoutMs` to answer, then the body `idleMs` between two
     // bytes, the whole read `totalMs`. A read still arriving goes on; one cut by the clock is `slow`, not `network`.
     const controller = new AbortController();
     const cut = () => { controller.abort(new DOMException("The read took too long", "TimeoutError")); };
+    const stop = () => { controller.abort(new DOMException("The read was stopped", "AbortError")); };
+    stopped?.addEventListener("abort", stop);
     const total = setTimeout(cut, options.totalMs ?? APP_FETCH_LIMITS.totalMs);
     let idle = setTimeout(cut, options.timeoutMs ?? APP_FETCH_LIMITS.timeoutMs);
     const heard = () => { clearTimeout(idle); idle = setTimeout(cut, options.idleMs ?? APP_FETCH_LIMITS.idleMs); };
-    const failure = (error: unknown) => controller.signal.aborted
-      ? new AppFetchError("slow", "That took too long on this connection")
-      : new AppFetchError("network", error instanceof Error ? error.message : String(error));
+    const failure = (error: unknown) => stopped?.aborted ? new AppFetchError("network", "The read was stopped")
+      : controller.signal.aborted ? new AppFetchError("slow", "That took too long on this connection")
+        : new AppFetchError("network", error instanceof Error ? error.message : String(error));
     const { signal } = controller;
     let response: Response;
     try {
@@ -76,7 +80,7 @@ export function boundedAppFetch(options: { fetcher?: typeof fetch; online?: () =
         ...(peek && { headers: { range: `bytes=0-${maxBytes - 1}` } }),
       });
     } catch (error) {
-      clearTimeout(total); clearTimeout(idle);
+      clearTimeout(total); clearTimeout(idle); stopped?.removeEventListener("abort", stop);
       throw failure(error);
     }
     heard();
@@ -96,8 +100,8 @@ export function boundedAppFetch(options: { fetcher?: typeof fetch; online?: () =
       const reader = response.body?.getReader();
       if (reader) {
         // A body the signal does not reach (a fetcher of its own) is let go all the same: its pending read ends.
-        const stop = () => { reader.cancel().catch(() => {}); };
-        signal.addEventListener("abort", stop);
+        const letGo = () => { reader.cancel().catch(() => {}); };
+        signal.addEventListener("abort", letGo);
         try {
           for (;;) {
             const { done, value } = await reader.read();
@@ -117,11 +121,11 @@ export function boundedAppFetch(options: { fetcher?: typeof fetch; online?: () =
           if (error instanceof AppFetchError) throw error;
           throw failure(error);
         } finally {
-          signal.removeEventListener("abort", stop);
+          signal.removeEventListener("abort", letGo);
           await reader.cancel().catch(() => {});
         }
       }
-    } finally { clearTimeout(total); clearTimeout(idle); }
+    } finally { clearTimeout(total); clearTimeout(idle); stopped?.removeEventListener("abort", stop); }
     const bytes = new Uint8Array(length);
     let at = 0;
     for (const part of parts) { bytes.set(part, at); at += part.length; }
