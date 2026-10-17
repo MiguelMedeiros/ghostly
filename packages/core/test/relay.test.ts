@@ -888,9 +888,12 @@ describe("relay transport: a relay that held a packet back gets it later", () =>
     return { relay, log };
   }
   const putsOf = (log: ReturnType<typeof twoRelays>["log"], host: string) => log.filter(r => r.method === "PUT" && r.host === host && r.key === id.pubKeyZ32);
-  /** relay.pkarr.org takes 5 requests a minute: spent on reads of another key. */
+  /**
+   * relay.pkarr.org takes 5 requests a minute: spent on writes of another key, which go to every relay (reads go to it
+   * only once a.test refuses them: a relay with a small share takes no read turns).
+   */
   async function spendSmallRelay(relay: RelayTransport) {
-    for (let i = 0; i < 12; i++) await relay.resolve(other.pubKeyZ32).catch(() => {});
+    for (let i = 0; i < 5; i++) await relay.publish(other, [{ label: "_ts", value: String(i) }]);
   }
 
   it("puts the newest packet there once its budget frees, once", async () => {

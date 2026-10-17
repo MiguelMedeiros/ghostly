@@ -358,18 +358,26 @@ describe("the default relays", () => {
     expect(calls).toHaveLength(all);
   });
 
-  it("with pkarr.miguelmedeiros.dev's minute spent, reads take the Pubky relays in turn, not pkarr.pubky.org twice as often", async () => {
+  it("reads take the Pubky relays in turn, and pkarr.miguelmedeiros.dev only when they fail or refuse", async () => {
     const calls: string[] = [];
+    const down = new Set<string>();
     const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      calls.push(`${init?.method ?? "GET"} ${new URL(String(input)).host}`);
+      const host = new URL(String(input)).host;
+      calls.push(`${init?.method ?? "GET"} ${host}`);
+      if (down.has(host)) throw new TypeError("Failed to fetch");
       return new Response(null, { status: 404 });
     }) as typeof fetch;
-    const relay = new RelayTransport({ freshReadMs: 0, relays: DEFAULT_RELAYS, fetch: fetchFn });
-    while (calls.filter(c => c === "GET pkarr.miguelmedeiros.dev").length < 5) await relay.resolve(createIdentity().pubKeyZ32);
-    calls.length = 0;
+    const relay = new RelayTransport({ freshReadMs: 0, relays: DEFAULT_RELAYS, fetch: fetchFn, log: () => {} });
     for (let i = 0; i < 20; i++) await relay.resolve(createIdentity().pubKeyZ32);
+    // As with the two Pubky relays alone: its few requests stay for writes, which go to every relay.
     expect(calls.filter(c => c === "GET pkarr.pubky.org")).toHaveLength(10);
     expect(calls.filter(c => c === "GET pkarr.pubky.app")).toHaveLength(10);
+    expect(calls.filter(c => c === "GET pkarr.miguelmedeiros.dev")).toHaveLength(0);
+    // Both Pubky relays down: reads go on through it.
+    down.add("pkarr.pubky.org").add("pkarr.pubky.app");
+    calls.length = 0;
+    for (let i = 0; i < 3; i++) await expect(relay.resolve(createIdentity().pubKeyZ32)).resolves.toBeNull();
+    expect(calls.filter(c => c === "GET pkarr.miguelmedeiros.dev")).toHaveLength(3);
   });
 
   it("background requests keep to two thirds of pkarr.miguelmedeiros.dev's 5, so a write still goes out there", async () => {
@@ -399,17 +407,18 @@ describe("the default relays", () => {
       return new Response(null, { status: init?.method === "PUT" ? 204 : 404 });
     }) as typeof fetch;
     const relay = new RelayTransport({ freshReadMs: 0, relays: DEFAULT_RELAYS, fetch: fetchFn, log: () => {} });
-    // Reads take the relays in turn, until its 5 are spent: the Pubky relays still have requests left.
-    for (let i = 0; i < 40 && calls.filter(c => c === "GET pkarr.miguelmedeiros.dev").length < 5; i++) await relay.resolve(createIdentity().pubKeyZ32);
-    expect(calls.filter(c => c === "GET pkarr.miguelmedeiros.dev")).toHaveLength(5);
+    // Its 5 spent on writes, which go to every relay.
+    for (let i = 0; i < 5; i++) await relay.publish(createIdentity(), [{ label: "_ts", value: "1" }]);
+    expect(calls.filter(c => c === "PUT pkarr.miguelmedeiros.dev")).toHaveLength(5);
     const before = calls.length;
     await expect(relay.publish(createIdentity(), [{ label: "_ts", value: "1" }])).resolves.toBeUndefined();
     expect(calls.slice(before).sort()).toEqual(["PUT pkarr.pubky.app", "PUT pkarr.pubky.org"]);
-    // Down: a read that finds it so goes on to another relay, and a publish counts once one took it.
+    await expect(relay.resolve(createIdentity().pubKeyZ32)).resolves.toBeNull();
+    // Down: a publish counts once one relay took it, and reads never needed it.
     down = true;
     const fresh = new RelayTransport({ freshReadMs: 0, relays: DEFAULT_RELAYS, fetch: fetchFn, log: () => {} });
+    for (let i = 0; i < 3; i++) await expect(fresh.publish(createIdentity(), [{ label: "_ts", value: "1" }])).resolves.toBeUndefined();
     for (let i = 0; i < 6; i++) await expect(fresh.resolve(createIdentity().pubKeyZ32)).resolves.toBeNull();
-    await expect(fresh.publish(createIdentity(), [{ label: "_ts", value: "1" }])).resolves.toBeUndefined();
   });
 });
 
