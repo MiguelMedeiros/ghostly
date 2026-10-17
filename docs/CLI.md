@@ -124,9 +124,13 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   events get through. See [Allowlist](#allowlist).
 - `--turns` gives one `agent.turn` event per message to answer. See [Agent turns](#agent-turns).
 - `--exec '<command>'` runs a shell command once per event, in order, with the event on **stdin** (never in its
-  arguments, so a contact's text cannot reach the shell).
+  arguments, so a contact's text cannot reach the shell). A command that exits non-zero is said on stderr and the
+  cursor moves past its event: it is not run again.
 - `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
-  followed).
+  followed). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
+  event is tried again, up to a minute apart, until the bridge takes it, and the cursor never moves past it, so a
+  bridge restart loses nothing. stderr says so once ("the webhook at … is not answering: holding event N") and again
+  when it answers. An event the bridge refuses (another 4xx, or a redirect) is said on stderr and passed.
 - With no daemon running, `listen` becomes the daemon, so a hook can answer with `ghostly send`.
 - A reader that stops reading the output, or a hook that falls behind, holds `listen` back: about 1,000 events
   ahead it stops taking more and goes on from the last one once they are handled. The journal keeps what comes
