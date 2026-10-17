@@ -17,6 +17,16 @@ import { renderApp } from "../render";
 const INVOICE = "lnbc21u1p42mkf2dqqpp56q3d9mfahf0974jqwy0yyfrg7zxksgxk7ufcc084yydhfx43daqqsp59g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4q9qrsgqcqzyskhkhqar4dqgqfmarvdttr8x2nrp4txtamfupfftrnn4hmrp7s8ayen7hp2ye58jq8zu65rch9eplpxkhf3pf2nvuynhqxvkw5f7a2vgq486x8x";
 const TOKEN = "cashuB" + "o".repeat(40);
 const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+/** The first bytes of a picture of this size, as each kind's header says it. */
+const heads = {
+  png: (w: number, h: number) => [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, w >>> 24, (w >>> 16) & 255, (w >>> 8) & 255, w & 255, h >>> 24, (h >>> 16) & 255, (h >>> 8) & 255, h & 255, 8, 6, 0, 0, 0],
+  jpeg: (w: number, h: number) => [0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, h >> 8, h & 255, w >> 8, w & 255, 3],
+  gif: (w: number, h: number) => [...new TextEncoder().encode("GIF89a"), w & 255, w >> 8, h & 255, h >> 8, 0, 0, 0],
+  webp: (w: number, h: number) => [...new TextEncoder().encode("RIFF"), 22, 0, 0, 0, ...new TextEncoder().encode("WEBPVP8X"), 10, 0, 0, 0, 0, 0, 0, 0,
+    (w - 1) & 255, ((w - 1) >> 8) & 255, (w - 1) >> 16, (h - 1) & 255, ((h - 1) >> 8) & 255, (h - 1) >> 16],
+};
+const inline = (kind: keyof typeof heads, w: number, h: number) =>
+  `data:image/${kind};base64,${btoa(String.fromCharCode(...heads[kind](w, h)))}`;
 
 /** An old message (history: no entry animation) from the contact, unless the patch says otherwise. */
 const message = (patch: Partial<ChatMessage> = {}): ChatMessage => ({ id: "m1", text: "hello", sender: "peer", timestamp: 1_700_000_000_000, ...patch });
@@ -32,9 +42,10 @@ describe("MessageBubble: pictures", () => {
 
   it.each([
     ["an inline PNG", PNG],
-    ["an inline JPEG", "data:image/jpeg;base64,/9j/4AAQSkZJRg=="],
+    ["an inline JPEG", inline("jpeg", 640, 480)],
     ["an inline GIF", "data:image/gif;base64,R0lGODlhAQABAAAAACw="],
-    ["an inline WebP", "data:image/webp;base64,UklGRhoAAABXRUJQ"],
+    ["an inline WebP", inline("webp", 320, 240)],
+    ["an inline picture as large as a 50 MP photo", inline("png", 8160, 6120)],
     ["a Giphy GIF", "https://media2.giphy.com/media/xT9IgG50Fb7Mi0prBC/giphy.gif"],
     ["a Giphy picture without an image extension", "https://media.giphy.com/media/abc123/200w"],
   ])("loads %s from the contact by itself", (_, url) => {
@@ -43,21 +54,53 @@ describe("MessageBubble: pictures", () => {
     expect(screen.queryByTestId("image-reveal")).not.toBeInTheDocument();
   });
 
-  it("loads a Wayback Machine GIF by itself, drawn as pixel art", () => {
-    const url = "https://web.archive.org/web/20091027000000/http://www.geocities.com/area51/dancing.gif";
+  it.each([
+    ["a PNG", inline("png", 23000, 23000)],
+    ["a GIF", inline("gif", 65535, 65535)],
+    ["a JPEG", inline("jpeg", 60000, 60000)],
+    ["a WebP", inline("webp", 16383, 16383)],
+    ["a picture wider than a panorama", inline("png", 40000, 10)],
+  ])("does not draw an inline %s whose header declares more pixels than a picture file may have", (_, url) => {
+    // About 90 characters that would take gigabytes once decoded, on every receiver's page as the bubble is drawn.
     const { container } = bubble({ text: url });
-    expect(image(container)).toHaveAttribute("src", url);
-    expect(image(container)!.getAttribute("style")).toContain("pixelated");
+    expect(image(container)).toBeNull();
+    expect(screen.queryByTestId("image-reveal")).not.toBeInTheDocument();
+    expect(screen.getByText(url)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["a JPEG with no frame header", "data:image/jpeg;base64,/9j/4AAQSkZJRg=="],
+    ["a WebP with no size", "data:image/webp;base64,UklGRhoAAABXRUJQ"],
+    ["bytes of no kind it reads", `data:image/png;base64,${btoa("BM6\0\0\0\0\0\0\0")}`],
+    ["data that is not base64", "data:image/png,%89PNG%0D%0A%1A%0A"],
+    ["base64 that does not decode", "data:image/png;base64,%69VBORw0KGgo"],
+  ])("does not draw an inline picture whose size its bytes do not say: %s", (_, url) => {
+    const { container } = bubble({ text: url });
+    expect(image(container)).toBeNull();
+    expect(screen.getByText(url)).toBeInTheDocument();
   });
 
   it.each([
     ["a capture with a timestamp", "https://web.archive.org/web/20091027000000/http://www.geocities.com/area51/dancing.gif"],
     ["a capture with no timestamp (as the picker sends it)", "https://web.archive.org/web/http://geocities.com/ghost/0.gif"],
     ["an image capture (im_)", "https://web.archive.org/web/20091027000000im_/http://www.geocities.com/area51/dancing.gif"],
-  ])("loads %s from the Wayback Machine by itself", (_, url) => {
+  ])("reads %s from the Wayback Machine by itself, and draws it as pixel art", async (_, url) => {
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(new Uint8Array(heads.gif(88, 31)) as BodyInit, { status: 200 }));
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => "blob:http://localhost/gif-1");
     const { container } = bubble({ text: url });
-    expect(image(container)).toHaveAttribute("src", url);
     expect(screen.queryByTestId("image-reveal")).not.toBeInTheDocument();
+    // Anyone can have the archive keep a GIF: its bytes are read and checked, never handed to an <img> as they are.
+    expect(fetched).toHaveBeenCalledWith(url, expect.anything());
+    expect(await screen.findByTestId("picture-link")).toHaveAttribute("src", "blob:http://localhost/gif-1");
+    expect(image(container)!.getAttribute("style")).toContain("pixelated");
+  });
+
+  it("falls back to the link for a Wayback Machine GIF whose header declares too many pixels", async () => {
+    const url = "https://web.archive.org/web/20091027000000/http://www.geocities.com/area51/huge.gif";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(new Uint8Array(heads.gif(65535, 65535)) as BodyInit, { status: 200 }));
+    const { container } = bubble({ text: url });
+    expect(await screen.findByRole("link", { name: url })).toHaveAttribute("href", url);
+    expect(image(container)).toBeNull();
   });
 
   it.each([
@@ -183,7 +226,7 @@ describe("MessageBubble: a picture link under each shell's img-src", () => {
   });
 
   it.each(Object.keys(policies))("%s: the pictures that show by themselves are ones its policy lets load", (shell) => {
-    for (const url of [PNG, "https://media2.giphy.com/media/xT9IgG50Fb7Mi0prBC/giphy.gif", "https://web.archive.org/web/http://geocities.com/ghost/0.gif"]) {
+    for (const url of [PNG, "https://media2.giphy.com/media/xT9IgG50Fb7Mi0prBC/giphy.gif"]) {
       const { container, unmount } = bubble({ text: url });
       expect(loads(policies[shell]!(), image(container)!.getAttribute("src")!), `${shell} img-src lets ${url.slice(0, 40)} load`).toBe(true);
       unmount();
@@ -194,6 +237,8 @@ describe("MessageBubble: a picture link under each shell's img-src", () => {
     ["the site cannot be read (no CORS header, or it is down)", async () => { throw new TypeError("Failed to fetch"); }],
     ["the site answers 404", async () => new Response("", { status: 404 })],
     ["what comes is not a picture, whatever the site calls it", async () => answer(new TextEncoder().encode("<svg xmlns='http://www.w3.org/2000/svg'/>"), "image/png")],
+    ["what comes declares more pixels than a picture file may have", async () => answer(new Uint8Array(heads.png(23000, 23000)))],
+    ["what comes does not say its size", async () => answer(new Uint8Array(heads.jpeg(640, 480).slice(0, 4)), "image/jpeg")],
   ])("falls back to the address as a link when %s", async (_, respond) => {
     vi.spyOn(globalThis, "fetch").mockImplementation(respond);
     const url = "https://cdn.example.com/photos/cat.png";

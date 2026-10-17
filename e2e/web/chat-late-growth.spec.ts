@@ -1,6 +1,6 @@
 import { createLink } from "@ghostly/core";
 import type { Page } from "@playwright/test";
-import { chat, expect, test, WAYBACK, type Peer } from "../support/fixtures";
+import { chat, expect, GIF, test, WAYBACK, type Peer } from "../support/fixtures";
 
 /**
  * A long chat like the one with a bot: markdown with bold and lists, emoji, links to a local server and to GitHub with
@@ -10,7 +10,9 @@ import { chat, expect, test, WAYBACK, type Peer } from "../support/fixtures";
  */
 
 /** A picture 320 × 240, served late: it lays out after the chat has opened. */
-const PICTURE = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="320" height="240" fill="#7c5cff"/></svg>`;
+const PICTURE = Buffer.from(GIF);
+PICTURE.writeUInt16LE(320, 6);
+PICTURE.writeUInt16LE(240, 8);
 
 function seedBotChat(page: Page, count: number, label: string, draft?: string): Promise<string> {
   const mine = createLink().mine;
@@ -59,7 +61,7 @@ test("a long bot chat stays on its last message while it lays out and while I ty
   const bob = await peer("late-bob");
   await bob.context.route(WAYBACK, async route => {
     await new Promise(done => setTimeout(done, 150 + Math.random() * 700));
-    await route.fulfill({ status: 200, contentType: "image/svg+xml", body: PICTURE });
+    await route.fulfill({ status: 200, contentType: "image/gif", body: PICTURE });
   });
   const a = await seedBotChat(bob.page, 400, "A", "a draft\nof four\nlines to\nsend later");
   const b = await seedBotChat(bob.page, 30, "B");
