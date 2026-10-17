@@ -7079,6 +7079,8 @@ export class GhostlyNode implements EngineImplementation {
       ? resumeHere(this.transportLogOf(live), this.transportsHere(), stored.peerTransports ?? live.caps?.peer?.transports) : {};
     // The DHT delivery view the pages last heard of (`onDhtDelivery`).
     let dhtShown: string | undefined;
+    // Whether the chat's invite was taken from this side, as last heard (`onDhtDelivery`).
+    let wasTaken = false;
     live.link = new GhostLink({
       paymentMethods: stored.paymentMethods,
       paymentNetworks: this.chatNetworks(stored),
@@ -7191,6 +7193,12 @@ export class GhostlyNode implements EngineImplementation {
         onDhtDelivery: view => {
           if (stored.profile && !stored.group) void this.outboxes.get(linkId)?.flush().catch(() => {}).then(() => this.editQueues.get(linkId)?.flush()).catch(() => {});
           this.observeTransport(linkId);
+          // The invite was not taken after all: the chat takes back the listeners it gave up (`takenFromUs`).
+          const taken = !!live.link?.takenFromUs;
+          if (taken !== wasTaken) {
+            wasTaken = taken;
+            if (!taken && live.stored.deliveryMode !== "dht" && this.keepsNativeEndpoints(linkId, live.stored)) void this.ensureNativeEndpoints(linkId);
+          }
           // Every read of the mailbox says so: the pages hear only of one that changed what the chat shows.
           const shown = JSON.stringify(view);
           if (shown !== dhtShown) { dhtShown = shown; this.emitState(); }
@@ -7684,7 +7692,8 @@ export class GhostlyNode implements EngineImplementation {
   private async startNativeEndpoint(linkId: string, expected: GhostLink | null | undefined, key: NativeTransport,
     factory: (seedB64: string) => Promise<NativeEndpoint>, inUse: boolean): Promise<"no-slot" | "failed" | false> {
     const live = this.links.get(linkId), link = live?.link;
-    if (this.shuttingDown || !live?.stored.profile || live.stored.deliveryMode === "dht" || !link || link !== expected) return false;
+    // Nor a chat whose invite someone else used first: its listener is on the joiner's key every copy derives (`takenFromUs`).
+    if (this.shuttingDown || !live?.stored.profile || live.stored.deliveryMode === "dht" || !link || link !== expected || link.takenFromUs) return false;
     // A group's link runs them only where one side has no WebRTC (`keepsGroupNative`).
     const group = !!live.stored.group;
     if (group && !this.keepsGroupNative(live.stored)) return false;
@@ -7748,7 +7757,7 @@ export class GhostlyNode implements EngineImplementation {
       const starting = factory(seed);
       const endpoint = await Promise.race([starting, this.stopping]);
       if (!endpoint) { void starting.then((late) => late.close(), () => {}); return false; }
-      if (this.shuttingDown || live.stored.deliveryMode === "dht" || live.link !== link || !this.links.has(linkId)) { await endpoint.close(); return false; }
+      if (this.shuttingDown || live.stored.deliveryMode === "dht" || live.link !== link || !this.links.has(linkId) || link.takenFromUs) { await endpoint.close(); return false; }
       link.registerEndpoint(endpoint);
       delete live.transportErrors[key];
       // The record says how to dial it, so a contact whose WebRTC never connects can try it (WISP 03).
