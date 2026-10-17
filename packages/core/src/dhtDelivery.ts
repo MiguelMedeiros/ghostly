@@ -662,7 +662,9 @@ export class DhtDelivery {
     const receiptDue = !!receipt && !receipt.settled && (receipt.next ?? 0) <= now;
     const reseal = this.resealDue;
     const keepAlive = !force && (!pending || pending.next > now) && !receiptDue && !this.reactionsDue && !reseal;
-    if (keepAlive && this.controlDue > now) return;
+    // The invite was taken from this side: its mailbox is the joiner's every copy of the invite derives, and a keep-alive
+    // there would only cover the envelope of whoever joined first. Nothing goes until the invite turns out not taken.
+    if (keepAlive && (this.controlDue > now || (this.state.inviteTaken && !this.options.credentials.peerKey))) return;
     // Dated back (`DHT_ISSUED_BACK_MS`), and a control envelope's lifetime with it: a reader bounds `expires - issued`.
     const expires = pending?.expires ?? now - DHT_ISSUED_BACK_MS + CONTROL_TTL;
     const issued = Math.min(now, Math.max(now - DHT_ISSUED_BACK_MS, expires - (pending ? DHT_MESSAGE_TTL : CONTROL_TTL), (pending?.message[1] ?? 0) - 30_000));
