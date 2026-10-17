@@ -967,13 +967,13 @@ export class RelayTransport implements PkarrTransport {
 
   /**
    * The order a key's read asks the relays in: in turn per key (see `resolve`), relays found slow lately last. A relay
-   * with a small share of its own (`RELAY_REQUESTS_PER_MINUTE` under this client's budget: pkarr.miguelmedeiros.dev's 5)
+   * with a small share of its own (`RELAY_REQUESTS_PER_MINUTE` under `REQUESTS_PER_MINUTE`: pkarr.miguelmedeiros.dev's 5)
    * takes no turns: it comes after the others, for when they refuse, fail or are slow, unless every relay is one. In the
    * turn, it was spent in seconds and the relay after it took its turns too: pkarr.pubky.org got two reads in three and
    * pkarr.pubky.app, with twice its share, one. Its few requests are then left for writes, which go to every relay.
    */
   private readOrder(pubKeyZ32: string): string[] {
-    const full = this.relays.filter((relay) => this.limitOf(relay) >= this.perMinute);
+    const full = this.relays.filter((relay) => !((RELAY_REQUESTS_PER_MINUTE[relay] ?? Infinity) < REQUESTS_PER_MINUTE));
     const ring = full.length ? full : this.relays;
     const last = this.lastReadFrom.get(pubKeyZ32), lastAt = last === undefined ? -1 : this.relays.indexOf(last);
     // After the relay that answered last: the next one in the ring, from where that relay is in the list.

@@ -378,6 +378,13 @@ describe("the default relays", () => {
     calls.length = 0;
     for (let i = 0; i < 3; i++) await expect(relay.resolve(createIdentity().pubKeyZ32)).resolves.toBeNull();
     expect(calls.filter(c => c === "GET pkarr.miguelmedeiros.dev")).toHaveLength(3);
+    // A budget given by hand (the web app's Desktop pace: none) takes the same turns.
+    down.clear();
+    calls.length = 0;
+    const unbounded = new RelayTransport({ freshReadMs: 0, relays: DEFAULT_RELAYS, fetch: fetchFn, requestsPerMinute: Infinity, log: () => {} });
+    for (let i = 0; i < 20; i++) await unbounded.resolve(createIdentity().pubKeyZ32);
+    expect(calls.filter(c => c === "GET pkarr.pubky.org")).toHaveLength(10);
+    expect(calls.filter(c => c === "GET pkarr.pubky.app")).toHaveLength(10);
   });
 
   it("background requests keep to two thirds of pkarr.miguelmedeiros.dev's 5, so a write still goes out there", async () => {
