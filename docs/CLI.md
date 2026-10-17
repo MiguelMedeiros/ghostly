@@ -126,6 +126,9 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
   followed).
 - With no daemon running, `listen` becomes the daemon, so a hook can answer with `ghostly send`.
+- A `listen` started while a daemon runs follows that daemon across a `daemon restart`. When the daemon stays gone
+  (`daemon stop`), it says so once on stderr and waits; it says again when a daemon answers, and goes on from the last
+  event it took.
 - A reader that stops reading the output, or a hook that falls behind, holds `listen` back: about 1,000 events
   ahead it stops taking more and goes on from the last one once they are handled. The journal keeps what comes
   meanwhile (past 10,000 events or 16 MiB, an `events.gap` says what was dropped).

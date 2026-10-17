@@ -713,14 +713,25 @@ async function listenCommand(argv: string[]): Promise<void> {
     }).catch((error) => { client.close(); throw error; });
     // Followed until stopped; a daemon that restarts is picked up again after the last event seen, and so is the
     // subscription the feed closed while the output or the hooks fell behind.
-    let current: DaemonClient | null = client;
+    // A daemon gone longer than a restart takes (`daemon stop`) is said once on stderr, and so is the one that answers
+    // again: the listen waits for it, it does not go silent.
+    let current: DaemonClient | null = client, missedSince = 0, missing = false;
     const reconnect = (wait: number) => void (async () => {
       while (!current && !feed.paused) {
         await new Promise((resolve) => setTimeout(resolve, wait));
         wait = 1000;
         if (current || feed.paused) return;
         const next = await connectDaemon(g.paths.socket, 1000);
-        if (next) { current = next; await follow(next).catch(() => { if (current === next) current = null; }); }
+        if (next) {
+          missedSince = 0;
+          if (missing) { missing = false; process.stderr.write(`ghostly: the daemon of profile ${g.profile} answers again\n`); }
+          current = next;
+          await follow(next).catch(() => { if (current === next) current = null; });
+        } else if (!missedSince) missedSince = Date.now();
+        else if (!missing && Date.now() - missedSince >= 3000) {
+          missing = true;
+          process.stderr.write(`ghostly: the daemon of profile ${g.profile} stopped; waiting for it to start again (ghostly daemon --detach)\n`);
+        }
       }
     })();
     const feed = new Feed(handle, since, () => { const c = current; current = null; c?.destroy(); }, () => reconnect(0));
