@@ -92,6 +92,8 @@ export class Outbox {
   private reopenedWhileBusy = new Set<string>();
   /** The turns taken so far, one after the other (`turn`). */
   private line: Promise<void> = Promise.resolve();
+  /** A bare look (`flush()`) waiting for its turn and not begun yet: it reads the chat as it is then, so another one asked meanwhile is the same. */
+  private lookAhead?: Promise<void>;
   /** How many times the chat reopened, and the count each message last went out under: one sent since is on the new link. */
   private opened = 0;
   private sentUnder = new Map<string, number>();
@@ -327,16 +329,27 @@ export class Outbox {
    */
   flush({ reopened = false }: { reopened?: boolean } = {}): Promise<void> {
     if (this.stopped || (!reopened && !this.scheduled)) return Promise.resolve();
+    // The receipts for n texts the reopened look sends come while it goes on, when the ones it has not reached yet
+    // still have their timers: each queued a look of its own, n whole-chat reads behind it. One that has not begun
+    // yet does for all of them.
+    if (!reopened && this.lookAhead) return this.lookAhead;
     // What goes out from here on goes on the new link: a second look at the chat (the link says it is open in two
     // ways, a receipt comes) does not send it once more.
     const opened = reopened ? ++this.opened : undefined;
-    return this.turn(async () => {
+    const look = this.turn(async () => {
+      if (!reopened && this.lookAhead === look) this.lookAhead = undefined;
       if (this.stopped) return;
       // A send still on its way goes again in this look, in its place: the look waits its turn behind it. One that
       // outlived its turn (`TURN_MS`) is not `sent` yet and this look passes it by: it goes again once it returns.
       if (reopened) for (const id of this.busy) this.reopenedWhileBusy.add(id);
       await this.inOrder(this.due(await this.store.read(), opened));
     });
+    if (reopened) return look;
+    this.lookAhead = look;
+    // A turn that failed before the look began must not stand in for every look after it.
+    const done = () => { if (this.lookAhead === look) this.lookAhead = undefined; };
+    void look.then(done, done);
+    return look;
   }
 
   /**

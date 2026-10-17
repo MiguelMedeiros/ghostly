@@ -486,4 +486,38 @@ describe("a chat with many queued messages and the contact away", () => {
     expect(read.mock.calls.length, "a receipt must not read the chat's history once there is nothing left to send").toBe(0);
     await box.stop();
   });
+
+  it("a contact back to hundreds of waiting texts: the receipts that come during the catch-up do not each read the history again", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    let ready = false;
+    const n = 200, rows: StoredMessage[] = Array.from({ length: n }, (_, i) => {
+      const wireId = `w${String(i).padStart(21, "0")}`;
+      return { linkId: "many", id: `me_${wireId}`, wireId, text: `m${i}`, sender: "me", timestamp: i + 1, via: "datalink", delivery: "waiting" };
+    });
+    // Each store call takes a moment, as an IndexedDB transaction does: the look spans the receipts.
+    const tick = () => new Promise(resolve => setTimeout(resolve, 1));
+    const read = vi.fn(async () => { await tick(); return rows.map(row => ({ ...row })); });
+    const store = { read, get: async (id: string) => { await tick(); const row = rows.find(r => r.id === id); return row && { ...row }; },
+      update: async (id: string, delivery: NonNullable<StoredMessage["delivery"]>, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>) => {
+        await tick();
+        const row = rows.find(r => r.id === id);
+        if (row && row.delivery !== "delivered") Object.assign(row, extra, { delivery, deliveryError: error });
+      } };
+    // The contact's receipt comes back a moment after each send, while the look goes on.
+    const send = vi.fn(async (m: StoredMessage) => { setTimeout(() => void box.received(m.wireId!), 2); return null; });
+    const box = new Outbox(store, send, 20_000, undefined, { resender: { ready: () => ready } });
+    const recovered = box.recover();
+    await vi.advanceTimersByTimeAsync(10);
+    await recovered;
+    read.mockClear();
+    ready = true;
+    void box.flush({ reopened: true });
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(rows.every(r => r.delivery === "delivered")).toBe(true);
+    expect(send).toHaveBeenCalledTimes(n);
+    expect(read.mock.calls.length, "whole-chat reads for the whole catch-up").toBeLessThanOrEqual(3);
+    const stopped = box.stop();
+    await vi.advanceTimersByTimeAsync(10);
+    await stopped;
+  });
 });
