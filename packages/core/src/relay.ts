@@ -305,6 +305,8 @@ export const SLOW_DEMOTE_MS = 60_000;
 export const TURN_SOURCE_TIMEOUT_MS = 8_000;
 /** A relay's refusals of a turn put: someone else wrote (409 an older or equal packet, 412 the condition, 428 a put in flight). */
 const TURN_REFUSALS = [409, 412, 428];
+/** How many times a payload signed here goes again past a relay's later copy (`putRedated`): three puts at most. */
+const PAYLOAD_REDATES = 2;
 /** On a relay's 404: the sequence of an item the DHT holds under the key that is no signed packet. */
 const INVALID_PACKET_SEQ_HEADER = "pkarr-invalid-signed-packet-seq";
 
@@ -652,7 +654,42 @@ export class RelayTransport implements PkarrTransport {
   async publishPayload(pubKeyZ32: string, payload: Uint8Array, options: PkarrRequestOptions = {}, conflict?: (relay: string) => void): Promise<void> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
     const seq = options.signedAt ?? openRelayPayload(pubKeyZ32, payload).seq;
-    await this.putEverywhere(pubKeyZ32, payload, seq, options, conflict);
+    if (options.signedAt === undefined || !options.redate) return this.putEverywhere(pubKeyZ32, payload, seq, options, conflict);
+    await this.putRedated(pubKeyZ32, payload, seq, options, PAYLOAD_REDATES);
+  }
+
+  /**
+   * A payload signed in this process (a group edge's offer or answer, `CarriedTransport`) put on every relay, past what
+   * a relay that answers 409 holds: that one is read, and the records go again at once, signed by `options.redate` dated
+   * just past it, `left` times at most. A packet put here is the key's latest too: a publish dated here next
+   * (`nextTimestamp`, the goodbye after the edge stops) goes past it. Before, the 409 failed the publish (or, when another
+   * relay took it, left the relay's copy in place), the link tried again 4 s on with its clock's date, refused as long as
+   * the relay's copy was later, and an edge started again in the same millisecond lost its new offer to its last one.
+   */
+  private async putRedated(key: string, payload: Uint8Array, timestamp: bigint, options: PkarrRequestOptions, left: number): Promise<void> {
+    if (timestamp > (this.lastTimestamp.get(key) ?? 0n)) this.lastTimestamp.set(key, timestamp);
+    let redated: Promise<boolean> | undefined;
+    const conflict = (relay: string) => {
+      if (left <= 0 || redated) return;
+      redated = (async () => {
+        const held = await this.heldAt(relay, key, asker(options, true));
+        // Not dated at or after this one: the relay was still putting another packet. The caller tries again, as before.
+        if (held === null || held < timestamp) return false;
+        // A later packet of this key went out meanwhile: it is dated past this one, and is what the relays should hold.
+        if (this.lastTimestamp.get(key) !== timestamp) return true;
+        const again = options.redate!(held);
+        if (!again) return true;
+        traceLink(key, "publish-redated", { aheadMs: Number((held - timestamp) / 1000n), relay });
+        await this.putRedated(key, again.payload, again.signedAt, { ...options, signedAt: again.signedAt }, left - 1);
+        return true;
+      })();
+      redated.catch(() => {});
+    };
+    try { await this.putEverywhere(key, payload, timestamp, options, conflict); }
+    catch (error) {
+      const pending = redated as Promise<boolean> | undefined;
+      if (!pending || !(await pending)) throw error;
+    }
   }
 
   /**
