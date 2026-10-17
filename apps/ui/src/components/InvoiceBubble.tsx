@@ -266,6 +266,7 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
   const [inspection, setInspection] = useState<CashuInspection | null | undefined>(undefined);
   const id = settledMoneyId(value);
   const [redeemed, setRedeemed] = useState(() => isSettled(id));
+  const [spent, setSpent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   const { copied, failed, copy } = useMoneyCopy(value);
@@ -333,6 +334,8 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
     >
       {redeemed ? (
         <span className="text-accent-hover text-xs font-bold self-center" data-testid="token-redeemed">{t("payments.invoice.redeemed")}</span>
+      ) : spent ? (
+        <span className="text-text-primary/65 text-xs font-bold self-center" data-testid="token-spent">{t("payments.invoice.alreadySpent")}</span>
       ) : (
         wallet && !mine && !off && inspection.accepted && (
           <button
@@ -343,17 +346,14 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
               setError(null);
               setBusy(true);
               try {
-                try {
-                  await wallet.receiveToken(value);
-                } catch (e) {
-                  // Spent is spent: nothing is left to redeem. A token redeemed before the mark was keyed by the whole
-                  // token (a 1.3.2 mark is its tail, read no more) offers Redeem again, and this is how it learns.
-                  if (parseEngineError(rawError(e))?.code !== "ecashAlreadySpent") throw e;
-                }
+                await wallet.receiveToken(value);
                 markSettled(id);
                 setRedeemed(true);
               } catch (e) {
-                setError(problemText(e, t));
+                // Spent is spent: nothing is left to redeem. The mint does not say who spent it (the contact, someone
+                // they sent it to, or this device on 1.3.2), so it reads spent, never Redeemed, and is not marked.
+                if (parseEngineError(rawError(e))?.code === "ecashAlreadySpent") setSpent(true);
+                else setError(problemText(e, t));
               } finally {
                 setBusy(false);
               }

@@ -250,6 +250,7 @@
     "youObject": "ti"
   },
   "invoice": {
+    "alreadySpent": "Ya gastado",
     "anyAmount": "Cualquier importe",
     "checking": "Comprobando…",
     "confirmWhat": "{{amount}} sats (más una comisión de hasta {{fee}})",

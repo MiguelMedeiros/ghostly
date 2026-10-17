@@ -250,6 +250,7 @@
     "youObject": "te"
   },
   "invoice": {
+    "alreadySpent": "Già speso",
     "anyAmount": "Importo libero",
     "checking": "Verifica…",
     "confirmWhat": "{{amount}} sats (più una commissione fino a {{fee}})",
