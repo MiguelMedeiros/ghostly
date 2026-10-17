@@ -850,7 +850,7 @@ export class Apps {
   private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">): Promise<AppStoreRead> {
     // Read side by side; the first of the two that fails stops the other, whose bytes nobody would use.
     const stop = new AbortController();
-    const read = (at: string, maxBytes: number) => this.host.fetch(at, { maxBytes, signal: stop.signal }).catch((error: unknown) => { stop.abort(); throw error; });
+    const read = (at: string, maxBytes: number) => this.host.fetch(at, { maxBytes, revalidate: true, signal: stop.signal }).catch((error: unknown) => { stop.abort(); throw error; });
     const [indexBytes, sigBytes] = await Promise.all([
       read(url, APP_FETCH_LIMITS.storeIndexBytes),
       read(besideUrl(url, "ghostly-store.sig"), APP_FETCH_LIMITS.sigBytes),
@@ -877,7 +877,7 @@ export class Apps {
       if (read.has(url)) continue;
       read.add(url);
       try {
-        const file = await this.readRevocationsFile(await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes }));
+        const file = await this.readRevocationsFile(await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes, revalidate: true }));
         if (file) (out ??= []).push(...file.filter((r) => r.statement.app === ref));
       } catch { /* not published there, or not reachable now */ }
     }
