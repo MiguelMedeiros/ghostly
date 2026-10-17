@@ -105,8 +105,10 @@ describe("mergeGroupPay: forward only, the initiator describes it", () => {
   it("the payee's description wins over a claim that arrived first; nobody changes who is paid", () => {
     const early = merge(undefined, note({ f: "*", st: "sent", by: C, v: "999" }), C)!;
     expect(early).toMatchObject({ amount: "999", claims: [C] });
+    expect(early.undescribed).toBe(true);
     const described = merge(early, note({ f: "*", v: "100", m: "pizza" }), A)!;
     expect(described).toMatchObject({ amount: "100", memo: "pizza", claims: [C], state: "open" });
+    expect(described.undescribed).toBeUndefined();
     expect(merge(described, note({ to: B, f: A }), B), "another payee for the same id").toBeUndefined();
   });
 
@@ -260,6 +262,33 @@ describe("GroupPayments: every member hears it, the parties say it", () => {
     await peers.get("A")!.engine.edgeReady("g1", "AC");
     await deliver();
     expect(noteOf("C", "req-00001")).toMatchObject({ state: "open", to: A });
+  });
+
+  it("a member's note in another member's name shows nothing until that member describes it", async () => {
+    // M (here D) claims to have paid a request A never made, with D's amount and memo; and says A paid D.
+    const { peers, deliver, noteOf, history } = world({ A, B, C, D });
+    const fake = note({ id: "fresh0001", f: "*", to: A, by: D, st: "sent", v: "5000000", m: "new wallet, pay me here: lnbc1" });
+    await peers.get("C")!.engine.receive("g1", D, fake);
+    // Taken back: nothing of D is left on it, and it would read as A's open request.
+    await peers.get("C")!.engine.receive("g1", D, { ...fake, st: "closed" });
+    await peers.get("C")!.engine.receive("g1", D, note({ id: "pay-fake01", k: "pay", f: A, to: D, st: "paid", v: "5000000" }));
+    expect(history.get("C") ?? []).toEqual([]);
+    for (const id of ["fresh0001", "pay-fake01"]) expect(noteOf("C", id), id).toBeUndefined();
+
+    // A real request by A whose claim came first: shown once A's own note arrives, as A described it.
+    const request = pay({ id: "req-00009", linkId: "AB", memo: "lunch" });
+    await peers.get("C")!.engine.receive("g1", B, note({ id: "req-00009", f: B, to: A, by: B, st: "sent", v: "999", m: "not lunch" }));
+    expect(noteOf("C", "req-00009")).toBeUndefined();
+    peers.get("A")!.payments.push(request);
+    await peers.get("A")!.engine.sync();
+    await deliver();
+    expect(noteOf("C", "req-00009")).toMatchObject({ amount: "100", memo: "lunch", claims: [B], state: "open", to: A });
+    expect(noteOf("C", "req-00009")!.undescribed).toBeUndefined();
+    // A direct payment whose payee's word came first: shown once its payer says it sent it.
+    await peers.get("C")!.engine.receive("g1", A, note({ id: "pay-00002", k: "pay", f: B, to: A, st: "paid" }));
+    expect(noteOf("C", "pay-00002")).toBeUndefined();
+    await peers.get("C")!.engine.receive("g1", B, note({ id: "pay-00002", k: "pay", f: B, to: A, st: "sent" }));
+    expect(noteOf("C", "pay-00002")).toMatchObject({ kind: "payment", from: B, to: A, state: "paid", by: B });
   });
 
   it("a note from someone it is not about is not kept", async () => {

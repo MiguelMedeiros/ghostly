@@ -72,9 +72,11 @@ export function mergeGroupPay(current: GroupPayNote | undefined, frame: GroupPay
   const initiator = frame.k === "req" ? frame.to : frame.f;
   const fields = fieldsOf(frame);
   if (current && (current.kind !== fields.kind || current.to !== fields.to)) return undefined;
-  let next: GroupPayNote = current ? { ...current } : { ...fields, state: "open" };
-  // Until the initiator's own note arrives, a claim's description stands in for it.
-  if (author === initiator) next = { ...next, ...fields };
+  let next: GroupPayNote = current ? { ...current } : { ...fields, state: "open", ...(author === initiator ? {} : { undescribed: true as const }) };
+  // Until the initiator's own note arrives, a claim's description stands in for it, on this device only: a note
+  // still `undescribed` stays out of the group's history (GroupPayments.write), so no member is shown asking for or
+  // sending what another member made up in their name.
+  if (author === initiator) next = (({ undescribed: _, ...rest }) => rest)({ ...next, ...fields });
   if (frame.k === "req" && author !== frame.to) {
     // A payer's word about its own payment: a claim, not the request's state.
     const claims = frame.st === "sent" ? [...new Set([...(next.claims ?? []), author])].sort() : (next.claims ?? []).filter(k => k !== author);
@@ -222,6 +224,8 @@ export class GroupPayments {
 
   private async write(groupId: string, me: string, note: GroupPayNote): Promise<void> {
     this.notes.get(groupId)?.set(note.id, note);
+    // Shown once the member it is about described it; what others said about it waits here until then.
+    if (note.undescribed) return;
     const initiator = note.kind === "request" ? note.to : note.from;
     await this.host.putMessage({ linkId: `group:${groupId}`, id: NOTE_ID(note.id), text: summary(note), sender: initiator === me ? "me" : "peer", member: initiator,
       timestamp: note.createdAt, via: "datalink", groupPay: note });
