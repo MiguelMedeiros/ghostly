@@ -6837,6 +6837,11 @@ export class GhostlyNode implements EngineImplementation {
         // wait minutes of backoff while the member is there. The edge goes on over a native transport for this run, as
         // one whose WebRTC connected nothing does.
         onAnswersRefused: () => { void this.edgeWithoutRtc(linkId); },
+        // This side's offer was answered and connected nothing in a few seconds (`RACE_ANSWERED_MS`): there is no direct
+        // path, as a chat's race takes it. Waiting for ICE to give up (15 s in Chromium, the attempt's 90 s where it never
+        // says `failed`) held a member behind a VPN, and its group messages, that long, where its chats went on over Iroh's
+        // relay in seconds (2026-10-16). Not evidence about this device's network (`directPath`): the member's may block.
+        onRtcStalled: () => { void this.edgeWithoutRtc(linkId); },
         onDataLinkState: state => {
           traceJoin(group, `link.${state}`, { role });
           // The last moment the member was reachable on it: when it opens, and when it stops being open.

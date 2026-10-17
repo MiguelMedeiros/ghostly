@@ -490,6 +490,11 @@ export interface GhostLinkEvents {
    * offer waits the backoff of failed dials, minutes, while the contact is there.
    */
   onAnswersRefused?(): void;
+  /**
+   * A group link's WebRTC offer of this side's was answered and nothing connected `RACE_ANSWERED_MS` later: there is no
+   * direct path, as a chat's race takes it (`scheduleRace`). Said once per offer; the attempt itself goes on.
+   */
+  onRtcStalled?(): void;
   /** The contact's packet came between two reads of its record: its clock against this one (`LinkSessionEvents.onPeerClock`). */
   onPeerClock?(packetAt: number, readBefore: number, readAt: number): void;
   onPoll?(poll: { polling: boolean; nextInMs: number }): void;
@@ -1215,8 +1220,16 @@ export class GhostLink {
         this.answeredAt = 0;
         // This side's offer was answered: what is ranked after WebRTC is dialled soon after, if nothing connects.
         if (state === "connecting" && was === "offering" && this.offerMade?.epoch === this.connectionEpoch) {
-          this.answeredAt = Date.now();
+          const answeredAt = this.answeredAt = Date.now();
           if (this.offered?.epoch === this.connectionEpoch) this.scheduleRace(this.offered.epoch, this.offered.at);
+          // A group link has nothing to race (it runs no native endpoint between two apps with WebRTC): its owner hears
+          // of it, and starts the link again over one (node.ts `edgeWithoutRtc`). Left to ICE, it waited for it to give
+          // up (15 s in Chromium, the attempt's 90 s where the connection never says `failed`), then for the `_tr` both ways.
+          if (options.packetTransports) setTimeout(() => {
+            if (this.answeredAt !== answeredAt || this.channel || this.stopped || this.dataLink.state !== "connecting") return;
+            traceLink(this.myPubKeyZ32, "rtc-stalled", {});
+            events.onRtcStalled?.();
+          }, RACE_ANSWERED_MS);
         }
         if (state !== "idle") return;
         this.dialUnseen = was === "offering" && this.offerUnsent;

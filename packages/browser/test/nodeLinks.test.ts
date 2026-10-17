@@ -1515,6 +1515,36 @@ describe("private groups through the engine", () => {
       expect(iroh).toHaveBeenCalledOnce();
     });
 
+    // A web member already in the group, its VPN on: each edge's offer is answered and connects nothing. The edge waited
+    // for ICE to give up (15 s in Chromium, 90 s where the connection never says `failed`) before it went native, and the
+    // member's group messages waited all that while, where its 1:1 chats went on over Iroh's relay in seconds (2026-10-16).
+    it("an edge on the web whose answered offer connects nothing goes on over Iroh's relay at once, not when ICE gives up", async () => {
+      vi.stubGlobal("RTCPeerConnection", class {});
+      onTestFinished(() => { vi.unstubAllGlobals(); });
+      irohWeb.start.mockImplementation(async () => endpoint());
+      const events = { onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onAttention: vi.fn() };
+      const node = new GhostlyNode(events, { automaticWallets: false, transport: fixture, irohWeb: true });
+      nodes.push(node);
+      await node.start();
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const stalled = await openEdge(node, state, createIdentity().pubKeyZ32);
+      await node["nativeQueue"];
+      const first = edgeOf(stalled);
+      expect(first.options.rtcAvailable).toBe(true);
+      expect(irohWeb.start).not.toHaveBeenCalled();
+      first.options.events.onRtcStalled();
+      await vi.waitFor(() => expect(edgeOf(stalled)).not.toBe(first));
+      // No goodbye: the member must not take the restart for a leave.
+      expect(first.stop).toHaveBeenCalledWith(false);
+      const again = edgeOf(stalled);
+      expect(again.options.rtcAvailable).toBe(false);
+      await vi.waitFor(() => expect(again.registerEndpoint).toHaveBeenCalledOnce());
+      expect(irohWeb.start).toHaveBeenCalledOnce();
+      // A stall is no evidence about this device's network: the notice stays as it was.
+      expect(node.getState().transport.directBlocked).toBeUndefined();
+    });
+
     // A member whose app quit in the middle of the attempt (one-shot CLI commands while its daemon was down) looked like a
     // network that blocks: its edge stayed native for this whole run, and past 4 such edges members stayed unreachable.
     it("an edge gone native tries WebRTC again once its member is seen online after a packet said it was gone, not while it stays online", async () => {
