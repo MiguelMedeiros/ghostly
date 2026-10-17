@@ -23,6 +23,19 @@ test("a store's Refresh and Uninstall's Export keep the keyboard focus once thei
   await expect(refresh).toBeEnabled();
   await expect(refresh).toBeFocused();
 
+  // While it runs, and after it fails: the busy button keeps the focus (a disabled one dropped it to the page, as
+  // Open in a chat's + → Apps did while an app started).
+  let answer!: () => void;
+  const held = new Promise<void>((resolve) => { answer = resolve; });
+  await ana.context.route(STORE_URL, async (route) => { await held; await route.fulfill({ status: 500, headers: { "access-control-allow-origin": "*" }, body: "" }); });
+  await ana.page.keyboard.press("Enter");
+  await expect(refresh).toHaveAttribute("aria-busy", "true");
+  await expect(refresh).toBeFocused();
+  answer();
+  await expect(refresh).not.toHaveAttribute("aria-busy");
+  await expect(refresh).toBeFocused();
+  await ana.context.unroute(STORE_URL);
+
   await listed.getByTestId("app-listing-install").click();
   await ana.page.getByTestId("app-install-confirm").click();
   await ana.page.getByTestId("installed-app").getByRole("button", { name: `${store.title}: details` }).click();
