@@ -12,6 +12,7 @@
   "otherTab": "Ghostly is already open in another tab.",
   "otherTabHint": "Close it and this tab takes over.",
   "reload": "Reload",
+  "reloadUnreachable": "Can't reach Ghostly's server. Check your connection, then reload.",
   "shared": "Sent to Ghostly in your other tab.",
   "sharedHint": "Pick the chat there. You can close this one.",
   "title": "Ghostly can't run in this browser",

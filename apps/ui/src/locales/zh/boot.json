@@ -12,6 +12,7 @@
   "otherTab": "Ghostly 已在另一个标签页中打开。",
   "otherTabHint": "关闭它，此标签页即可接替。",
   "reload": "重新加载",
+  "reloadUnreachable": "无法连接 Ghostly 服务器。请检查网络连接，然后重新加载。",
   "shared": "已发送到你另一个标签页中的 Ghostly。",
   "sharedHint": "请在那里选择聊天。你可以关闭此标签页。",
   "title": "Ghostly 无法在此浏览器中运行",

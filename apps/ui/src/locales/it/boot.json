@@ -12,6 +12,7 @@
   "otherTab": "Ghostly è già aperto in un'altra scheda.",
   "otherTabHint": "Chiudila e questa scheda prende il suo posto.",
   "reload": "Ricarica",
+  "reloadUnreachable": "Impossibile raggiungere il server di Ghostly. Controlla la connessione, poi ricarica.",
   "shared": "Inviato a Ghostly nell'altra scheda.",
   "sharedHint": "Scegli la chat lì. Puoi chiudere questa.",
   "title": "Ghostly non può funzionare in questo browser",
