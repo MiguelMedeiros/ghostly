@@ -151,6 +151,16 @@ export function stopHeld(): void {
   end();
 }
 
+/**
+ * The chat at `path` goes from this device (deleted, left): what plays from it stops, held here, or in its bubble when
+ * that chat is the one on screen (`onScreen`), before the bubble's leaving would hand it here.
+ */
+export function stopPlayingFrom(path: string, onScreen: boolean): void {
+  if (held) {
+    if (held.handed.chat?.path === path) stopHeld();
+  } else if (onScreen) pausePlaying();
+}
+
 /** A call starts: whatever plays pauses, held here or in its bubble. */
 export function pauseForCall(): void {
   if (held) pauseHeld();
