@@ -74,6 +74,13 @@ import { engineError } from "./engineErrors";
 /** Unanswered offers are repeated less and less often: 1.5, 3, 6, then every 12 minutes. */
 /** After a failed attempt: 20 s, then doubling up to 3 min. Someone opening the chat starts it over. */
 const AUTO_CONNECT_RETRY_MS = 20_000;
+/**
+ * Back after a restart (`resume`), a first automatic dial that failed within this long reached nobody (a HyperDHT hole
+ * punch aborted at once on loopback, 4-13 ms): it is tried again after `INSTANT_FAIL_RETRY_MS`, once, before it counts.
+ * Counted, it held the chat 40 s while the app's other chats came back in 0.5-3 s (DHT-direct lab, 2026-10-17).
+ */
+const INSTANT_FAIL_MS = 100;
+const INSTANT_FAIL_RETRY_MS = 3_000;
 /** A group link with nothing to dial looks fast for the member's `_tr` on this many attempts, then at its own pace. */
 const PACKET_TRANSPORTS_FAST_ATTEMPTS = 3;
 /** A native transport that fails this many attempts in a row is skipped for `DEMOTE_MS`, while another remains (WISP 100). */
@@ -993,6 +1000,10 @@ export class GhostLink {
   private resumingWoke = false;
   /** Until then, a session that ends was lost while the app was away (`WAKE_LOST_MS`). */
   private wokeUntil = 0;
+  /** Back after a restart, the first automatic dial is still to go (`INSTANT_FAIL_MS`). */
+  private resumeDial = false;
+  /** That dial failed at once: the next waits `INSTANT_FAIL_RETRY_MS`, not `dialWait`'s backoff. */
+  private instantRetry = false;
 
   constructor(options: GhostLinkOptions) {
     this.options = options;
@@ -1087,6 +1098,7 @@ export class GhostLink {
     this.fallback = options.native?.fallback ?? true;
     this.automatic = options.native?.automatic ?? !options.native?.preferred;
     this.resuming = options.pairing?.credentials.peerKey && options.params.profile ? options.resume : undefined;
+    this.resumeDial = !!this.resuming;
     const events = options.events ?? {};
 
     this.session = new LinkSession({
@@ -2994,6 +3006,10 @@ export class GhostLink {
     const wait = this.dialWait();
     if (Date.now() - this.lastAutoConnectAt < wait) {
       traceLink(this.myPubKeyZ32, "dial-backoff", { failures: this.autoConnectFailures, left: wait - (Date.now() - this.lastAutoConnectAt) });
+      // The contact waits for this side's dial (the higher key, not lost from a live session, where it may come back and
+      // offer): a read before the wait is over can only end here again. The look at its end is armed (`lookAtRetry`),
+      // and the chat reads at its own pace until then, not every 0.7 s for the rest of an app start's window (45 reads).
+      if (!pairing && this.myPubKeyZ32 < this.options.params.peerPubKeyZ32 && Date.now() >= this.lostUntil) this.session.calm();
       this.lookAtRetry();
       return;
     }
@@ -3008,11 +3024,19 @@ export class GhostLink {
    * 12 s: the pairing turned `on-dht` and the next dial waited 160 s, though nothing had been tried.
    */
   private autoDial(): void {
-    const tries = this.anythingToDial();
-    this.lastAutoConnectAt = Date.now();
+    const tries = this.anythingToDial(), started = Date.now();
+    const resumeDial = tries && this.resumeDial;
+    if (tries) this.resumeDial = false;
+    this.instantRetry = false;
+    this.lastAutoConnectAt = started;
     if (tries) this.autoConnectFailures++;
     void this.dial().catch(error => {
-      if (tries) this.tracker?.failed("transport", true);
+      // A restart's first dial that failed at once (`INSTANT_FAIL_MS`): once more soon, and it does not count.
+      if (resumeDial && Date.now() - started < INSTANT_FAIL_MS && this.lastAutoConnectAt === started && this.autoConnectFailures > 0) {
+        this.autoConnectFailures--;
+        this.instantRetry = true;
+        traceLink(this.myPubKeyZ32, "dial-instant-fail", { ms: Date.now() - started });
+      } else if (tries) this.tracker?.failed("transport", true);
       this.dialFailed(error instanceof Error ? error.message : String(error));
       this.lookAtRetry();
     });
@@ -3079,6 +3103,7 @@ export class GhostLink {
 
   /** How long after the last automatic dial the next one may go. A first pairing tries again sooner: the contact just read the invite and is waiting. */
   private dialWait(): number {
+    if (this.instantRetry) return INSTANT_FAIL_RETRY_MS;
     const pairing = !!this.tracker && !this.tracker.done && this.tracker.progress.stage !== "on-dht";
     return pairing ? Math.min(PAIRING_RETRY_MS * 2 ** this.autoConnectFailures, PAIRING_MAX_RETRY_MS)
       : Math.min(AUTO_CONNECT_RETRY_MS * 2 ** this.autoConnectFailures, AUTO_CONNECT_MAX_RETRY_MS);
