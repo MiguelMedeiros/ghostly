@@ -121,6 +121,29 @@ describe("a bot asks with buttons", () => {
     expect((await t.peerRow("Tell me more")).press).toBeUndefined();
   });
 
+  it("takes a press on buttons with no once among them as it takes a plain reply: the chat's history is not read for it", async () => {
+    const t = await setup();
+    const open = { kind: "buttons", id: "any-1", buttons: [{ id: "again", label: "Again" }, { id: "back", label: "Back" }] };
+    const plain = await t.node.sendMessage({ linkId: t.id, text: "Plain" });
+    const question = await t.node.sendMessage({ linkId: t.id, text: "Any time", card: open });
+    const delivered = (id: string) => t.onMessages.mock.calls.some(([, rows]) => rows.some(m => m.id === id && m.delivery === "delivered"));
+    await vi.waitFor(() => expect([delivered(plain.messageId!), delivered(question.messageId!)]).toEqual([true, true]));
+    const whole = vi.spyOn(db, "getMessages");
+    // The chat reads one received reply costs, until the page is told of it.
+    const reads = async (text: string, wire: string, to: string, b: string) => {
+      whole.mockClear();
+      expect(await t.contact.sendMessage(text, Date.now(), WIRE(wire), undefined, { i: (await db.getMessage(t.id, to))!.wireId!, s: "x", f: "recipient", b })).toBeNull();
+      await vi.waitFor(() => expect(t.onMessages.mock.calls.some(([, rows]) => rows.some(m => m.text === text && m.sender === "peer"))).toBe(true));
+      return whole.mock.calls.length;
+    };
+    const reply = await reads("Again", "R", plain.messageId!, "again");
+    const press = await reads("Back", "P", question.messageId!, "back");
+    whole.mockRestore();
+    expect((await t.peerRow("Back")).press).toEqual({ messageId: question.messageId, button: "back", label: "Back" });
+    expect((await t.peerRow("Again")).press).toBeUndefined();
+    expect(press).toBe(reply);
+  });
+
   it("takes a reply that lost its button id (the DHT floor, an older app) by its label", async () => {
     const t = await setup();
     const sent = await t.node.sendMessage({ linkId: t.id, text: QUESTION, card: ask() });
