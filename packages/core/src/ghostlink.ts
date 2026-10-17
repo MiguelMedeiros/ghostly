@@ -993,9 +993,15 @@ export class GhostLink {
     // A link that signs through a signer (a device link) has no seed for what a chat signs beside its session.
     if (options.pairing?.credentials.signer && (options.dht || options.params.deliveryMode === "dht")) throw new Error("A link that signs through a signer has no DHT delivery");
     this.deliveryMode = options.params.deliveryMode ?? "stream";
+    // A joiner that pinned its inviter, then read that someone else used the invite first (`inviteTaken`), never paired:
+    // the engine asks no progress of a pinned chat, yet after a restart its pairing is still the one stopped there, not
+    // a chat on the DHT waiting for a contact who is paired with someone else.
+    const dhtState = options.dht?.state;
+    const takenAtStart = !!options.pairing?.credentials.peerKey && !!dhtState?.inviteTaken && !dhtState.wasLive;
+    const firstPairing = options.pairingProgress ?? (takenAtStart ? { role: "joiner" as const, startedAt: options.madeAt ?? Date.now() } : undefined);
     // A DHT-only invite pairs through its mailbox, not through these stages.
-    this.tracker = options.pairingProgress && options.pairing && !options.pairing.credentials.peerKey && this.deliveryMode !== "dht"
-      ? new PairingTracker(options.pairingProgress.role, options.pairingProgress.startedAt, progress => {
+    this.tracker = firstPairing && options.pairing && (!options.pairing.credentials.peerKey || takenAtStart) && this.deliveryMode !== "dht"
+      ? new PairingTracker(firstPairing.role, firstPairing.startedAt, progress => {
         traceLink(this.myPubKeyZ32, "progress", { stage: progress.stage, attempt: progress.attempt, peerSeen: progress.peerSeen, reason: progress.reason, retryable: progress.retryable, transport: progress.transport });
         options.events?.onPairingProgress?.(progress);
       }) : null;
@@ -1316,6 +1322,8 @@ export class GhostLink {
     // switch intent. Without it both sides' intents start at none, and the chat stays wherever the first dial landed,
     // waiting for nothing. A `preferred` alone is only where to dial first.
     if (options.native?.automatic === false) this.switcher.choseApart();
+    // Pinned over the DHT: if the inviter's envelope reads here again (`untaken`), the chat is on the DHT, still trying.
+    if (takenAtStart) { this.tracker?.pinnedOverDht(); this.tracker?.failed("taken", false, INVITE_TAKEN); }
   }
 
   get myPubKeyZ32(): string {
