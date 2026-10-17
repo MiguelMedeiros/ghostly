@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { useI18n } from "../../contexts/I18nContext";
-import { emojiCategories, emojiLoaded, emojiOf, loadEmoji, recentEmoji, rememberEmoji, searchEmoji, setSkinTone, skinTone, withSkin } from "../../lib/emoji";
+import { ReloadButton } from "../ui/ReloadButton";
+import { emojiCategories, emojiFailedAgain, emojiLoaded, emojiOf, loadEmoji, recentEmoji, rememberEmoji, searchEmoji, setSkinTone, skinTone, withSkin } from "../../lib/emoji";
 import { EMOJI_CATEGORY_ICONS } from "./icons";
 import { CategoryBar, PanelSearch } from "./PanelParts";
 
@@ -19,7 +20,7 @@ type EmojiTabProps = { onPick: (emoji: string) => void; autoFocus?: boolean };
 
 /**
  * The panel's emoji, once their data set is here (`loadEmoji`: the first panel shown loads it, not the first screen).
- * While it comes the tab is empty and busy; a load that failed says so, with Try again.
+ * While it comes the tab is empty and busy; a load that failed says so, with Try again, and Reload once it failed again.
  */
 export function EmojiTab(props: EmojiTabProps) {
   const { t } = useI18n();
@@ -36,6 +37,7 @@ export function EmojiTab(props: EmojiTabProps) {
       {state === "failed" && <div className="expression-trouble" data-testid="emoji-trouble" role="status">
         <p>{t("composer.emojiNotLoading")}</p>
         <button type="button" className="expression-retry" data-testid="emoji-retry" onClick={() => setState("loading")}>{t("composer.retry")}</button>
+        {emojiFailedAgain() && <ReloadButton testId="emoji-reload" className="expression-retry" />}
       </div>}
     </div>
   );
