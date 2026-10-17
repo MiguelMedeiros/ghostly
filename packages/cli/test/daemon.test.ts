@@ -237,4 +237,30 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
     }
     slow.server.close();
   });
+
+  it("a listen through a daemon that stops says so once on stderr, waits, and says when a daemon answers again", async () => {
+    const orphan = home("listen-orphan");
+    ok(await ghostly(["--home", orphan, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    ok(await ghostly(["--home", orphan, "daemon", "--detach"], { env }));
+    const listen = new Running(["--home", orphan, "listen"], env);
+    const gone = "ghostly: the daemon of profile default stopped; waiting for it to start again (ghostly daemon --detach)\n";
+    const back = "ghostly: the daemon of profile default answers again\n";
+    try {
+      ok(await ghostly(["--home", orphan, "invite", "create", "--label", "first"], { env }));
+      await listen.waitFor((l) => l.type === "chat.created");
+      ok(await ghostly(["--home", orphan, "daemon", "stop"], { env }));
+      const until = Date.now() + 15_000;
+      while (!listen.stderr.includes(gone) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100));
+      // Once, however long the wait: a few more failed tries add nothing.
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      expect(listen.stderr).toBe(gone);
+      expect(listen.child.exitCode).toBeNull();
+      ok(await ghostly(["--home", orphan, "daemon", "--detach"], { env }));
+      await listen.waitFor((l) => l.type === "daemon.started");
+      expect(listen.stderr).toBe(gone + back);
+    } finally {
+      await listen.stop();
+      await ghostly(["--home", orphan, "daemon", "stop"], { env });
+    }
+  });
 });
