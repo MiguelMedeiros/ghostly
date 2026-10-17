@@ -24,7 +24,7 @@ import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers
 import type { EngineApi } from "../shared/rpc";
 import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
 import { chatAppId, isAppRef, isAppVersion, publicKeyFromZ32, type AppFrameEvent, type AppSendError } from "@ghostly/core";
-import { GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, readGroupFileMeta } from "@ghostly/core";
+import { FILE_LIMITS, GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, readGroupFileMeta } from "@ghostly/core";
 import { IdentityProofs } from './identities';
 import { setOwnDidSource } from '../proofs/ownDid';
 import { ProfileDid } from './did';
@@ -3209,8 +3209,10 @@ export class GhostlyNode implements EngineImplementation {
     if (!original) return message;
     const resolved: StoredMessage = { ...message, replyTo: { ...replyToOriginal(original, reply.id), ...(reply.member && !original.member && { member: reply.member }), ...(reply.button && { button: reply.button }) } };
     // A press on one of my buttons (WISP 406 · Message Buttons), when it is still open for this person. The history
-    // only says whether this person already answered, so it is read when there is a press to check.
-    const press = buttonPress(resolved, original, []) && buttonPress(resolved, original, history ?? await db.getMessages(message.linkId));
+    // only says whether this person already answered with a `once` button, so it is read when there is such a press
+    // to check: a bot's buttons with no `once` among them take each press as a plain reply costs, however long the chat.
+    const pressed = buttonPress(resolved, original, []);
+    const press = pressed && messageButtons(original)?.buttons.some(b => b.once) ? buttonPress(resolved, original, history ?? await db.getMessages(message.linkId)) : pressed;
     return press ? { ...resolved, press } : resolved;
   }
 
@@ -4049,6 +4051,10 @@ export class GhostlyNode implements EngineImplementation {
     // A known id could only be a replay or an attempt to pass for a file we already have.
     if (files.wireIds.has(wire.id)) return "duplicate file id";
     if (files.receivedBytes + wire.size > LIMITS.maxStoredIncomingBytesPerPeer) return "no room for more files";
+    // files/2 cannot ask the person (WISP 501): it takes only what files/3 would take without asking. Every Ghostly app
+    // lists files/3, so a larger file here comes from an app that left it out to skip the question.
+    if (wire.size > FILE_LIMITS.askAboveBytes) return "file too large without files/3";
+    if (files.receivedBytes + this.fileDesk.autoTaken(linkId) + wire.size > FILE_LIMITS.autoAcceptBytesPerPeer) return "no more files without asking";
     // Said on the floor first and sent whole now (files/2 names its message by the sender's time): the bubble that
     // waited for it goes, so the file shows once.
     const said = this.fileDesk.takeAnnounced(linkId, wire.id);
@@ -6837,6 +6843,11 @@ export class GhostlyNode implements EngineImplementation {
         // wait minutes of backoff while the member is there. The edge goes on over a native transport for this run, as
         // one whose WebRTC connected nothing does.
         onAnswersRefused: () => { void this.edgeWithoutRtc(linkId); },
+        // This side's offer was answered and connected nothing in a few seconds (`RACE_ANSWERED_MS`): there is no direct
+        // path, as a chat's race takes it. Waiting for ICE to give up (15 s in Chromium, the attempt's 90 s where it never
+        // says `failed`) held a member behind a VPN, and its group messages, that long, where its chats went on over Iroh's
+        // relay in seconds (2026-10-16). Not evidence about this device's network (`directPath`): the member's may block.
+        onRtcStalled: () => { void this.edgeWithoutRtc(linkId); },
         onDataLinkState: state => {
           traceJoin(group, `link.${state}`, { role });
           // The last moment the member was reachable on it: when it opens, and when it stops being open.

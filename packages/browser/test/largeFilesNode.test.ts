@@ -533,3 +533,14 @@ it("a contact without files/3 still sends over files/2, but a file larger than t
   await expect(sendOld(t, "old-00003", 10 * 1024 * 1024)).rejects.toThrow("Peer refused or could not store the file");
   expect((await storedIn(t)).map((f) => f.metadata?.size)).toEqual([256 * 1024]);
 }, 60_000);
+
+it("a contact without files/3 cannot send over files/2 a file larger than files/3 takes without asking", async () => {
+  const t = await setup({ files2: true, largeFiles: false });
+  expect(t.contact.supportsLargeFiles).toBe(false);
+  await expect(sendOld(t, "old-00004", FILE_LIMITS.askAboveBytes + 1)).rejects.toThrow("Peer refused or could not store the file");
+  expect(await storedIn(t)).toEqual([]);
+  expect((await db.getMessages(t.id)).filter((m) => m.file)).toEqual([]);
+  // Up to that size, files/2 carries a file as before.
+  await sendOld(t, "old-00005", 256 * 1024);
+  await vi.waitFor(async () => expect((await storedIn(t)).map((f) => f.metadata?.size)).toEqual([256 * 1024]));
+}, 60_000);
