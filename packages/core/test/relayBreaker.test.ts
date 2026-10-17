@@ -317,7 +317,7 @@ describe("the default relays", () => {
       calls.push(`${init?.method ?? "GET"} ${new URL(String(input)).host}`);
       return new Response(null, { status: init?.method === "PUT" ? 204 : 404 });
     }) as typeof fetch;
-    const relay = new RelayTransport({ relays: DEFAULT_RELAYS, fetch: fetchFn });
+    const relay = new RelayTransport({ relays: ["https://pkarr.pubky.org", "https://pkarr.pubky.app"], fetch: fetchFn });
     // Reads go to a relay with requests left: pkarr.pubky.org's 30, then the rest of pkarr.pubky.app's 60.
     for (let i = 0; i < REQUESTS_PER_MINUTE + RELAY_REQUESTS_PER_MINUTE["https://pkarr.pubky.app"] - 1; i++) await relay.resolve(createIdentity().pubKeyZ32);
     expect(calls.filter(c => c === "GET pkarr.pubky.org")).toHaveLength(REQUESTS_PER_MINUTE);
@@ -331,6 +331,71 @@ describe("the default relays", () => {
     calls.length = 0;
     for (let i = 0; i < 11; i++) await bounded.resolve(createIdentity().pubKeyZ32).catch(() => {});
     expect(calls).toHaveLength(10);
+  });
+
+  it("a profile on the two Pubky relays, the defaults until 2026-10-17, gets pkarr.miguelmedeiros.dev; a list of its own is left alone", () => {
+    expect(DEFAULT_RELAYS).toEqual(["https://pkarr.pubky.org", "https://pkarr.pubky.app", "https://pkarr.miguelmedeiros.dev"]);
+    expect(currentRelays(["https://pkarr.pubky.org", "https://pkarr.pubky.app"])).toEqual(DEFAULT_RELAYS);
+    expect(currentRelays(["https://pkarr.pubky.app", "https://pkarr.pubky.org"])).toEqual(["https://pkarr.pubky.app", "https://pkarr.pubky.org"]);
+    expect(currentRelays(["https://pkarr.pubky.org"])).toEqual(["https://pkarr.pubky.org"]);
+    expect(currentRelays(["https://pkarr.pubky.org", "https://pkarr.pubky.app", "https://relay.example.org"])).toEqual(["https://pkarr.pubky.org", "https://pkarr.pubky.app", "https://relay.example.org"]);
+  });
+
+  it("pkarr.miguelmedeiros.dev, which allows 10 requests a minute, gets 5 of ours, and the Pubky relays keep theirs", async () => {
+    const calls: string[] = [];
+    const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(`${init?.method ?? "GET"} ${new URL(String(input)).host}`);
+      return new Response(null, { status: init?.method === "PUT" ? 204 : 404 });
+    }) as typeof fetch;
+    const relay = new RelayTransport({ relays: DEFAULT_RELAYS, fetch: fetchFn });
+    expect(RELAY_REQUESTS_PER_MINUTE["https://pkarr.miguelmedeiros.dev"]).toBe(5);
+    const all = REQUESTS_PER_MINUTE + RELAY_REQUESTS_PER_MINUTE["https://pkarr.pubky.app"] + 5;
+    for (let i = 0; i < all; i++) await relay.resolve(createIdentity().pubKeyZ32);
+    expect(calls.filter(c => c === "GET pkarr.pubky.org")).toHaveLength(REQUESTS_PER_MINUTE);
+    expect(calls.filter(c => c === "GET pkarr.pubky.app")).toHaveLength(60);
+    expect(calls.filter(c => c === "GET pkarr.miguelmedeiros.dev")).toHaveLength(5);
+    await expect(relay.resolve(createIdentity().pubKeyZ32)).rejects.toMatchObject({ code: "discovery-budget" });
+    expect(calls).toHaveLength(all);
+  });
+
+  it("background requests keep to two thirds of pkarr.miguelmedeiros.dev's 5, so a write still goes out there", async () => {
+    const calls: string[] = [];
+    const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(`${init?.method ?? "GET"} ${new URL(String(input)).host}`);
+      return new Response(null, { status: init?.method === "PUT" ? 204 : 404 });
+    }) as typeof fetch;
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://pkarr.miguelmedeiros.dev"], fetch: fetchFn });
+    const id = createIdentity();
+    for (let i = 0; i < 10; i++) await relay.resolve(id.pubKeyZ32, { background: true }).catch(() => {});
+    expect(calls).toHaveLength(4);
+    await relay.publish(createIdentity(), [{ label: "_ts", value: "1" }]);
+    expect(calls.at(-1)).toBe("PUT pkarr.miguelmedeiros.dev");
+    // Then its minute is spent: nothing more goes there.
+    await expect(relay.resolve(createIdentity().pubKeyZ32)).rejects.toMatchObject({ code: "discovery-budget" });
+    expect(calls).toHaveLength(5);
+  });
+
+  it("a write and a read go on through the Pubky relays while pkarr.miguelmedeiros.dev is spent or down", async () => {
+    const calls: string[] = [];
+    let down = false;
+    const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const host = new URL(String(input)).host;
+      calls.push(`${init?.method ?? "GET"} ${host}`);
+      if (down && host === "pkarr.miguelmedeiros.dev") throw new TypeError("Failed to fetch");
+      return new Response(null, { status: init?.method === "PUT" ? 204 : 404 });
+    }) as typeof fetch;
+    const relay = new RelayTransport({ freshReadMs: 0, relays: DEFAULT_RELAYS, fetch: fetchFn, log: () => {} });
+    // Reads take the relays in turn, until its 5 are spent: the Pubky relays still have requests left.
+    for (let i = 0; i < 40 && calls.filter(c => c === "GET pkarr.miguelmedeiros.dev").length < 5; i++) await relay.resolve(createIdentity().pubKeyZ32);
+    expect(calls.filter(c => c === "GET pkarr.miguelmedeiros.dev")).toHaveLength(5);
+    const before = calls.length;
+    await expect(relay.publish(createIdentity(), [{ label: "_ts", value: "1" }])).resolves.toBeUndefined();
+    expect(calls.slice(before).sort()).toEqual(["PUT pkarr.pubky.app", "PUT pkarr.pubky.org"]);
+    // Down: a read that finds it so goes on to another relay, and a publish counts once one took it.
+    down = true;
+    const fresh = new RelayTransport({ freshReadMs: 0, relays: DEFAULT_RELAYS, fetch: fetchFn, log: () => {} });
+    for (let i = 0; i < 6; i++) await expect(fresh.resolve(createIdentity().pubKeyZ32)).resolves.toBeNull();
+    await expect(fresh.publish(createIdentity(), [{ label: "_ts", value: "1" }])).resolves.toBeUndefined();
   });
 });
 
