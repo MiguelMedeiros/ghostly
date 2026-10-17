@@ -83,7 +83,8 @@ async function buildFixture() {
     ...base("chess", "Test Chess"), version: "1.0.2", sequence: 3, tagline: "Play chess with a contact, live in your chat",
     description: "A test app for the site's store pages.\nTwo players, one board, moves sent over the chat.",
     homepage: `${RAW}/chess`, releaseNotes: "Clocks for both players.",
-  }, [page("Test Chess"), { path: "icon.png", bytes: icon(64) }], a);
+    // Larger than any edge the pages draw it at, as a publisher's icon may be: the site serves it resized.
+  }, [page("Test Chess"), { path: "icon.png", bytes: icon(512) }], a);
   const notes = await buildAppBundle({
     ...base("notes", "Test Notes"), permissions: ["chat", "internet", "name"], view: "full", license: "Apache-2.0",
     description: "Shared notes with a contact. It reaches a server of its own, so it asks for the internet.",
