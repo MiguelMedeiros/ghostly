@@ -292,7 +292,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
           </span>
         )}
         <div className="flex-1 min-w-0">
-          <p className="text-[13.5px] leading-tight truncate m-0" title={file.name} data-testid="audio-name"><bdi><Highlight text={file.name} term={highlight} /></bdi></p>
+          <p dir="auto" className="text-[13.5px] leading-tight truncate m-0" title={file.name} data-testid="audio-name"><Highlight text={file.name} term={highlight} /></p>
           <input
             type="range"
             data-testid="audio-seek"

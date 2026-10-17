@@ -115,6 +115,22 @@ describe("a voice message playing as its chat goes", () => {
     expect(screen.getByTestId("now-playing-from")).toHaveTextContent(/^Ana Lima$/);
   });
 
+  it("in the Arabic app a Latin name, chat or file name starts at its start and is cut at its end", async () => {
+    // A <bdi> inside the truncating box took the box's (the page's) direction for the cut: "…elease Agent Number One".
+    const where: PlayingChat = { path: "/group/team", name: "Weekly release planning team" };
+    const file = song();
+    const view = renderApp(<Screen files={[]} audioFiles={[file]} where={where} />, { language: "ar" });
+    fireEvent.click(screen.getByTestId("audio-play"));
+    await flush();
+    view.rerender(<Screen files={[]} audioFiles={[file]} where={where} open={false} />);
+    for (const text of ["Ana", "Weekly release planning team", "Ghost Town.mp3"]) {
+      const shown = within(bar()!).getByText(text);
+      expect(shown).toHaveAttribute("dir", "auto");
+      expect(shown).toHaveClass("truncate");
+    }
+    expect(within(bar()!).getByTestId("now-playing-from")).toHaveTextContent("Ana · Weekly release planning team");
+  });
+
   it("the bar pauses and plays it, from the keyboard too, and says where it is in the app's language", async () => {
     const file = voiceFile();
     const view = renderApp(<Screen files={[file]} />, { route: "/group/family", language: "pt" });

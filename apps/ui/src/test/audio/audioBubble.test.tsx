@@ -115,6 +115,14 @@ describe("an audio file in the chat", () => {
     expect(getFile).not.toHaveBeenCalled();
   });
 
+  it("a name in the other direction than the app's starts at its start, cut at its end", () => {
+    // A <bdi> inside the truncating line took the line's (the page's) direction for the cut: "…g about the release plan.wav".
+    show(song({ name: "تسجيل اجتماع الفريق الأسبوعي.wav" }));
+    const name = screen.getByTestId("audio-name");
+    expect(name).toHaveAttribute("dir", "auto");
+    expect(name).toHaveClass("truncate");
+  });
+
   it("plays from its bytes; the seek bar moves it; the time reads position of length", async () => {
     show(song());
     fireEvent.click(screen.getByTestId("audio-play"));
