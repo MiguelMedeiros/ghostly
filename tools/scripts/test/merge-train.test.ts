@@ -1596,6 +1596,32 @@ describe("one pull request alone", () => {
     expect(repo.pulls.get(11)!.sha).not.toBe(head);
   });
 
+  it.each(["sibling", "events"])("takes a lone pull request whose runs never count out of flight (%s), so the line goes on", async (why) => {
+    const repo = fakeRepo();
+    const at = (min: number) => Date.parse("2026-10-08T00:00:00Z") + min * 60_000;
+    repo.add(11, { behind: true });
+    expect((await repo.run({ now: at(0), maxWait: 0 })).inFlight).toBe(11);
+    const head = repo.pulls.get(11)!.sha;
+    repo.add(12, { behind: true });
+    if (why === "sibling") repo.pulls.set(13, { ...repo.pulls.get(11)!, number: 13, base: "epic/x", labels: [], open: true });
+    else repo.events.get(11)!.push(...Array.from({ length: 1000 }, () => ({ event: "mentioned", created_at: "2026-10-08T00:01:00Z" })));
+    // CI is green on the train's rebase, from the pull request event on its branch: a run own() refuses.
+    repo.runs.set(head, green);
+    repo.kinds.set(head, { event: "pull_request", head_branch: "fix-11" });
+    const r = await repo.run({ now: at(21), maxWait: 0 });
+    const log = r.log.join("\n");
+    expect(log).not.toMatch(/CI never started on #11/);
+    expect(r.inFlight).toBe(12);
+    expect(repo.pushes.filter((p) => p.startsWith("fix-11="))).toEqual([`fix-11=${head}`]); // not rebased again
+    if (why === "sibling") expect(repo.comments.get(11)![0].body).toMatch(/Waiting: another pull request from its branch \(#13 into `epic\/x`\)/);
+    else expect(log).toMatch(/#11 waits: it has more events than the train reads/);
+    repo.settle();
+    const later = await repo.run({ now: at(42), maxWait: 0 });
+    expect(later.merged).toEqual([12]);
+    expect(later.log.join("\n")).not.toMatch(/CI never started on #11/);
+    expect(repo.pushes.filter((p) => p.startsWith("fix-11="))).toHaveLength(1);
+  });
+
   it("takes a pull request that conflicts with the tip out of the line with queue:conflict", async () => {
     const repo = fakeRepo();
     repo.conflicts.add(11);
