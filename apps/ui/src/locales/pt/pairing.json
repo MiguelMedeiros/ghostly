@@ -7,9 +7,9 @@
   "newInvite": "Peça um novo convite ao seu contato.",
   "onDht": {
     "chosen": "Foi escolhido Só DHT para esta conversa.",
-    "noCommonTransport": "As vossas apps não partilham nenhum transporte direto. Os textos curtos passam pela DHT.",
-    "transport": "Ainda não foi possível abrir uma ligação direta. Continua a ser tentada em segundo plano.",
-    "waiting": "Está a ser tentada uma ligação direta em segundo plano."
+    "noCommonTransport": "Os apps de vocês não compartilham nenhum transporte direto. Os textos curtos passam pela DHT.",
+    "transport": "Ainda não foi possível abrir uma conexão direta. Ela continua sendo tentada em segundo plano.",
+    "waiting": "Uma conexão direta está sendo tentada em segundo plano."
   },
   "reason": {
     "expired": "Este convite expirou.",
@@ -43,7 +43,7 @@
     "failed": "Não foi possível conectar",
     "knocking": "Batendo na porta do seu contato…",
     "live": "Conectado",
-    "onDht": "Na DHT. Já pode conversar; está a ser tentada uma ligação direta",
+    "onDht": "Na DHT. Já dá para conversar; uma conexão direta está sendo tentada",
     "publishing": "Colocando seu convite na rede…",
     "resolving": "Procurando o convite na rede…",
     "waiting": "Esperando seu contato abrir o convite"
@@ -54,7 +54,7 @@
     "failed": "Falhou",
     "knocking": "Bater",
     "live": "Ao vivo",
-    "onDht": "Na DHT · a tentar ligação direta",
+    "onDht": "Na DHT · tentando conexão direta",
     "publishing": "Publicar",
     "resolving": "Procurar",
     "waiting": "Esperar"
