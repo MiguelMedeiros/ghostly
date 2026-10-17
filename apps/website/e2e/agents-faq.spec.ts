@@ -39,7 +39,16 @@ test("/agents/faq carries its questions and answers as FAQPage JSON-LD", async (
   expect(faq!.mainEntity.every((q) => q.acceptedAnswer["@type"] === "Answer")).toBe(true);
 });
 
-test("the sitemap lists /agents/faq", async ({ request }) => {
+test("/agents/faq: every link to a page of the site opens that page", async ({ page, request }) => {
+  await page.goto(PATH);
+  const hrefs = await page.locator('main a[href^="/"]').evaluateAll((links) => links.map((a) => a.getAttribute("href")!));
+  expect(hrefs.length).toBeGreaterThan(0);
+  for (const href of new Set(hrefs)) {
+    expect((await request.get(href)).status(), href).toBeLessThan(400);
+  }
+});
+
+test("the sitemap lists /agents/faq",async ({ request }) => {
   const xml = await (await request.get("/sitemap.xml")).text();
   expect(xml).toContain(`<loc>https://ghostly.tools${PATH}</loc>`);
 });
