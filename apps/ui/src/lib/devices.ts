@@ -5,7 +5,8 @@ import type { EnrollFailure } from "@ghostly/browser/devices/enroll";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import type { WalletView } from "@ghostly/browser/shared/types";
 import { useI18n, type TranslationKey } from "../contexts/I18nContext";
-import { DEVICE_INVITE_LIFETIME_S, inviteLink, inviteQrSegments, readInviteCode, sanitizeDisplayText } from "@ghostly/core";
+import { DEVICE_INVITE_LIFETIME_S, TURN_NAME_BYTES, inviteLink, inviteQrSegments, readInviteCode, sanitizeDisplayText } from "@ghostly/core";
+import { utf8Bytes } from "./fitText";
 import { handOverUnlock } from "./lockHandover";
 import { activeProfileId, createProfile, currentProfile, settingsKeyFor, switchProfile } from "./profiles";
 import { protocolLinkCode } from "./url";
@@ -31,7 +32,7 @@ export function lockPasswordProblem(password: string, again: string, deviceSet: 
   return null;
 }
 
-/** A first guess at this device's name, for the person to change: the kind of device, at most 16 characters. */
+/** A first guess at this device's name, for the person to change: the kind of device, in its 16 bytes (`fitsDeviceName`). */
 export function defaultDeviceName(env: { userAgent: string; platform?: string; maxTouchPoints?: number; desktop?: boolean } = typeof navigator === "undefined" ? { userAgent: "" } : { userAgent: navigator.userAgent, platform: navigator.platform, maxTouchPoints: navigator.maxTouchPoints }): string {
   const ua = env.userAgent;
   if (/iPhone/.test(ua)) return "iPhone";
@@ -40,14 +41,17 @@ export function defaultDeviceName(env: { userAgent: string; platform?: string; m
   const os = /Mac OS X|Macintosh/.test(ua) ? "Mac" : /Windows/.test(ua) ? "Windows" : /Linux|X11|CrOS/.test(ua) ? "Linux" : "";
   if (env.desktop) return os ? `${os} app` : "Desktop";
   const browser = /Firefox\//.test(ua) ? "Firefox" : /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "";
-  // The longest of these that fits the 16 characters a name has, never one cut in the middle of a word:
+  // The longest of these that fits the 16 bytes a name has, never one cut in the middle of a word:
   // "Chrome on Mac", "Chrome, Windows", then the system alone.
   const names = browser && os ? [`${browser} on ${os}`, `${browser}, ${os}`, os, browser] : [browser || os || "Browser"];
-  return names.find((name) => name.length <= DEVICE_NAME_MAX) ?? "Browser";
+  return names.find(fitsDeviceName) ?? "Browser";
 }
 
-/** The longest name a device has in its set (`turnName` keeps 16 characters too). */
-export const DEVICE_NAME_MAX = 16;
+/**
+ * Whether a device's name fits its slot in the set whole: 16 UTF-8 bytes (`TURN_NAME_BYTES`), which `turnName` cuts at
+ * a whole character. Not 16 characters: an Arabic or Japanese letter takes 2 or 3 bytes, an emoji 4 or more.
+ */
+export const fitsDeviceName = (name: string): boolean => utf8Bytes(name) <= TURN_NAME_BYTES;
 
 /** "9:41": minutes and seconds left until `expires` (UNIX seconds), at `now` (milliseconds). */
 export const timeLeft = (expires: number, now: number): string => {
