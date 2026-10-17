@@ -1191,6 +1191,25 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     await alice.tick(t0 + 133_000); expect(looks()).toBe(8);
   });
 
+  it("links nobody is using share one pace among the admin's groups, at most 15 s each; a warm one keeps its own", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.now();
+    const world = new World();
+    const alice = world.add("alice", { ...timings, pollMs: 5_000, warmPollMs: 2_000, warmMs: 60_000 });
+    const groups = [await alice.create("One", "mesh"), await alice.create("Two", "mesh"), await alice.create("Three", "mesh")];
+    for (const groupId of groups) await alice.enableLink(groupId);
+    const looks = () => world.resolves.get("alice") ?? 0;
+    const minute = async (from: number) => { const before = looks(); for (let s = 0; s < 60; s++) await alice.tick(from + s * 1_000); return looks() - before; };
+    // Warm (just handed out): each link on its own, every 2 s.
+    expect(await minute(t0)).toBe(90);
+    // Quiet: three links share the 5 s pace, each every 15 s, as one link alone costs. Not 36 a minute for good.
+    expect(await minute(t0 + 120_000)).toBe(12);
+    // One handed out again is warm on its own; the two quiet ones keep the shared pace.
+    vi.setSystemTime(t0 + 180_000);
+    await alice.enableLink(groups[0]);
+    expect(await minute(t0 + 180_000)).toBe(30 + 8);
+  });
+
   it("a joiner knocks at its pace, slower once it has waited long, and not while its entry session is up", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const t0 = Date.now();
