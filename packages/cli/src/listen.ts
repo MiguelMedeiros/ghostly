@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { CONTACT_KEY } from "./apiKit";
+import { connectDaemon, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { turnRef } from "./turnRefs";
@@ -321,7 +322,7 @@ export const MAX_BEHIND = 1_000;
 
 /**
  * Bounds what a listener holds when its output or hooks fall behind (a stdout reader that hung, a slow --exec): past
- * `MAX_BEHIND` events not handled it stops taking events (`pause`: the subscription closes) and drops what still
+ * `MAX_BEHIND` events not handled it stops taking events (`pause`: the subscription stops reading) and drops what still
  * arrives; once every event taken is handled, `resume` opens it again after the last one taken. The daemon's journal
  * keeps what came meanwhile (and says `events.gap` past what it keeps), so a consumer that hangs for a day does not
  * grow the listener by the day's traffic.
@@ -343,4 +344,31 @@ export class Feed {
     this.pause();
     void this.handle.idle().then(() => { this.held = false; this.resume(this.since); });
   };
+}
+
+/**
+ * Follows a daemon's events into `handle` until `close`; a daemon that restarts is picked up again after the last event
+ * seen. A feed that falls behind stops reading the connection, not closes it: what the daemon sent meanwhile (a replay
+ * written whole) is read on resume, so a catch-up reads the journal once, not once per pause. A connection the daemon
+ * ended meanwhile (past what it lets a client leave unread) is opened again after the last event taken.
+ * `subscribed`: the first subscription's answer (a journal that cannot be replayed rejects it).
+ */
+export function followDaemon(socket: string, client: DaemonClient, handle: EventHandler, since: number | undefined): { subscribed: Promise<unknown>; close(): void } {
+  let current: DaemonClient | null = client;
+  const reconnect = (wait: number) => void (async () => {
+    while (!current && !feed.paused) {
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      wait = 1000;
+      if (current || feed.paused) return;
+      const next = await connectDaemon(socket, 1000);
+      if (next) { current = next; await follow(next).catch(() => { if (current === next) current = null; }); }
+    }
+  })();
+  const feed = new Feed(handle, since, () => current?.pause(), () => { if (current) current.resume(); else reconnect(0); });
+  const follow = (c: DaemonClient) => c.subscribe(feed.since, feed.take, () => {
+    if (current !== c) return;
+    current = null;
+    reconnect(1000);
+  });
+  return { subscribed: follow(client), close: () => current?.close() };
 }

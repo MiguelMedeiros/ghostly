@@ -13,12 +13,14 @@ export class DaemonClient {
   private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   private eventListener: ((event: GhostlyEvent) => void) | null = null;
   private closedListener: (() => void) | null = null;
+  /** While paused: the events of the chunk already read, given to the listener on resume. */
+  private held: GhostlyEvent[] | null = null;
 
   constructor(private readonly socket: Socket) {
     createInterface({ input: socket, crlfDelay: Infinity }).on("line", (line) => {
       let message: { id?: number; result?: unknown; error?: { code: ErrorCode; message: string; details?: Record<string, unknown> }; event?: GhostlyEvent };
       try { message = JSON.parse(line); } catch { return; }
-      if (message.event) { this.eventListener?.(message.event); return; }
+      if (message.event) { if (this.held) this.held.push(message.event); else this.eventListener?.(message.event); return; }
       const waiting = typeof message.id === "number" ? this.pending.get(message.id) : undefined;
       if (!waiting) return;
       this.pending.delete(message.id!);
@@ -64,6 +66,28 @@ export class DaemonClient {
     this.eventListener = listener;
     this.closedListener = onClosed ?? null;
     return this.call("events.subscribe", since === undefined ? {} : { since }) as Promise<{ lastSeq: number }>;
+  }
+
+  /**
+   * Stops reading: what the daemon sends waits in the connection (and past its bound the daemon ends it), and no
+   * event reaches the listener until `resume`.
+   */
+  pause(): void {
+    if (this.held) return;
+    this.held = [];
+    this.socket.pause();
+  }
+
+  /** Gives the listener the events held, then reads again; a listener that pauses again keeps the rest held. */
+  resume(): void {
+    const held = this.held;
+    if (!held) return;
+    this.held = null;
+    for (let i = 0; i < held.length; i++) {
+      this.eventListener?.(held[i]);
+      if (this.held) { (this.held as GhostlyEvent[]).unshift(...held.slice(i + 1)); return; }
+    }
+    this.socket.resume();
   }
 
   close(): void {
