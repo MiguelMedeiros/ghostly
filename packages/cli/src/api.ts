@@ -2,7 +2,7 @@ import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH,
 import type { EngineState, GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
-import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
+import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { CliError } from "./errors";
 import {
   bool, chatOf, chatOrGroup, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, waitForState,
@@ -166,6 +166,9 @@ function showUntilPaired(ctx: ApiContext, linkId: string): void {
   const off = ctx.hub.onState((s) => { if (done(s)) hide(); });
   inviteShown.set(ctx, stop);
 }
+
+/** V8's words for reading what a value does not have: an `engine.call` given a parameter of the wrong kind. */
+const BAD_VALUE = /^Cannot (destructure|read properties of (undefined|null))|is not (a function|iterable)/;
 
 // ---------- methods ----------
 
@@ -658,7 +661,7 @@ const METHODS: Record<string, Method> = {
     if (!ENGINE_METHODS.includes(method) && !ENGINE_READS.includes(method)) throw new CliError("not_found", `The engine has no call ${method}`);
     const raw = params.params;
     if (raw !== undefined && (raw === null || typeof raw !== "object" || Array.isArray(raw))) throw new CliError("bad_request", "params must be an object");
-    let args = raw as Params | undefined;
+    const args = raw as Params | undefined;
     // Real money moves only on an explicit confirmation of this call (WISP 1100 § Mainnet).
     if (args && "confirmedReal" in args && !bool(params, "confirmReal")) {
       throw new CliError("confirm", `${method} spends real money: pass --confirm-real (confirmReal: true over the socket) to confirm it`);
@@ -666,14 +669,25 @@ const METHODS: Record<string, Method> = {
     const deletes = DESTRUCTIVE_CALLS.get(method);
     if (deletes && !bool(params, "yes")) throw new CliError("confirm", `${method} ${deletes}; pass --yes (yes: true over the socket) to go on`);
     if (method === "clearProfileData") return clearProfile(ctx);
+    // A call given less than it takes failed with JavaScript's own TypeError, or did nothing and answered null.
+    const takes = ENGINE_PARAMS[method] ?? READ_PARAMS[method];
+    const wrong = (why: string, rawError?: string) => new CliError("bad_request", `${method} takes ${takes || "no parameters"}: ${why} (ghostly engine --list --verbose)`, { takes, ...(rawError ? { rawError } : {}) });
+    const problem = engineParamsProblem(method, args);
+    if (problem) throw wrong(problem);
     if (method === "getMessages") return node(ctx).getMessages(str(args ?? {}, "linkId", true));
     if (method === "getState") return state(ctx);
     // Someone chose the chat on screen: an invite's mark no longer clears it.
     if (method === "setActiveLink") inviteShown.get(ctx)?.();
     const target = (node(ctx) as unknown as Record<string, (p?: unknown) => unknown>)[method];
     if (typeof target !== "function") throw new CliError("not_found", `The engine has no call ${method}`);
-    if (args === undefined) args = undefined;
-    return (await target.call(node(ctx), args)) ?? null;
+    try {
+      return (await target.call(node(ctx), args)) ?? null;
+    } catch (error) {
+      // A value of the wrong kind (a number for a text, a missing key of a typed object) ends as JavaScript reading what is
+      // not there. Not every TypeError: Node's `fetch failed` is the network.
+      if (error instanceof TypeError && BAD_VALUE.test(error.message)) throw wrong("a parameter of the wrong kind", error.message);
+      throw error;
+    }
   },
 };
 
