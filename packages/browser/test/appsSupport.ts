@@ -42,13 +42,14 @@ export function iconPng(side = 32): Uint8Array {
   return out;
 }
 
-export async function bundle(options: { sequence?: number; version?: string; permissions?: AppPermission[]; entry?: string; sources?: string[]; by?: Signer; name?: string; view?: AppViewMode; icon?: Uint8Array; data?: Uint8Array } = {}): Promise<Built> {
+export async function bundle(options: { sequence?: number; version?: string; permissions?: AppPermission[]; entry?: string; sources?: string[]; by?: Signer; name?: string; view?: AppViewMode; icon?: Uint8Array; data?: Uint8Array; description?: string } = {}): Promise<Built> {
   const sequence = options.sequence ?? 1;
   const draft: AppManifestDraft = {
     name: options.name ?? "chess", version: options.version ?? `1.0.${sequence}`, sequence, kind: "mini-app", title: "Chess", tagline: "Play chess with a contact",
     entry: "index.html", permissions: options.permissions ?? ["chat"], runtime: { host: ">=1.2", clients: ["web", "desktop"] }, license: "MIT",
     ...(options.sources && { sources: options.sources }),
     ...(options.view && { view: options.view }),
+    ...(options.description && { description: options.description }),
   };
   const files = [
     { path: "index.html", bytes: utf8Encode(options.entry ?? `<!doctype html><title>Chess</title><p>v${sequence}`) }, { path: "data/openings.json", bytes: utf8Encode("[]") },
