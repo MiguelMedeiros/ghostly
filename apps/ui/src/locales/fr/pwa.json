@@ -22,6 +22,8 @@
   "shareFrom": "Vient d'une autre app ou d'un site web. Rien ne part avant que vous l'envoyiez.",
   "shareHint": "Choisissez une discussion. Vous vérifiez et envoyez là-bas.",
   "shareNoChats": "Pas encore de discussion. Commencez-en une, puis partagez à nouveau.",
+  "shareNoRoom": "Plus de place sur cet appareil pour : {{names}}",
+  "shareNoRoomNext": "Libérez de la place, puis partagez-le à nouveau.",
   "shareNone": "Rien n'a été partagé, ou c'est déjà récupéré.",
   "shareOneFile": "1 fichier",
   "shareTitle": "Partager vers…",

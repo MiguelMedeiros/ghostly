@@ -273,6 +273,16 @@ describe("the Share to… picker", () => {
     expect(screen.getByTestId("share-chat")).toHaveTextContent("Ana");
   });
 
+  it("names the files the device had no room to copy as such, not as unread, also when that was all of a later share", () => {
+    receiveShare(share({ text: "look", noRoom: ["VID_1.mp4"] }));
+    receiveShare(share({ noRoom: ["VID_2.mp4"] }));
+    picker();
+    expect(screen.getByTestId("share-text")).toHaveTextContent("look");
+    expect(screen.getByTestId("share-no-room-title")).toHaveTextContent("No room on this device for: VID_1.mp4, VID_2.mp4");
+    expect(screen.getByTestId("share-no-room-next")).toHaveTextContent("Free some space, then share it again.");
+    expect(screen.queryByTestId("share-unread")).toBeNull();
+  });
+
   it("with nothing shared, it says so once it has waited", () => {
     vi.useFakeTimers();
     try {
