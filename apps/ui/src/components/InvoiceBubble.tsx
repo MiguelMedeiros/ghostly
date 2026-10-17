@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { QRCodeSVG } from "qrcode.react";
-import type { Bolt11Invoice, LightningDestination } from "@ghostly/core";
+import { parseEngineError, type Bolt11Invoice, type LightningDestination } from "@ghostly/core";
 import { LightningAddressPay } from "./wallet/LightningAddressPay";
 import { holdsLess, lightningNetworkFor } from "./walletCardData";
 import { NetworkTag, satsIn } from "./NetworkTag";
@@ -342,7 +342,13 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
               setError(null);
               setBusy(true);
               try {
-                await wallet.receiveToken(value);
+                try {
+                  await wallet.receiveToken(value);
+                } catch (e) {
+                  // Spent is spent: nothing is left to redeem. A token redeemed before the mark was keyed by the whole
+                  // token (a 1.3.2 mark is its tail, read no more) offers Redeem again, and this is how it learns.
+                  if (parseEngineError(rawError(e))?.code !== "ecashAlreadySpent") throw e;
+                }
                 markSettled(id);
                 setRedeemed(true);
               } catch (e) {
