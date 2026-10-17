@@ -18,6 +18,9 @@
     { "package": "rustls", "id": "RUSTSEC-2026-0349", "until": "2026-10-28", "why": "Same as RUSTSEC-2026-0346 (browser Iroh rebuild)." },
     { "package": "zip", "id": "RUSTSEC-2026-0367", "until": "2026-10-24", "why": "zip via tauri-plugin-updater; dependency update scheduled in the next patch. The updater extracts a zip only on Windows, and only after the download passes the signature check against the release key in apps/desktop/tauri.conf.json." },
     { "package": "zip", "id": "RUSTSEC-2026-0368", "until": "2026-10-24", "why": "Same as RUSTSEC-2026-0367 (zip via tauri-plugin-updater)." },
-    { "package": "zip", "id": "RUSTSEC-2026-0369", "until": "2026-10-24", "why": "Same as RUSTSEC-2026-0367 (zip via tauri-plugin-updater)." }
+    { "package": "zip", "id": "RUSTSEC-2026-0369", "until": "2026-10-24", "why": "Same as RUSTSEC-2026-0367 (zip via tauri-plugin-updater)." },
+    { "package": "zvariant", "id": "RUSTSEC-2026-0370", "until": "2026-11-30", "why": "Unmaintained, not vulnerable: merged into zbus 6.0.0 (2026-10-16). Linux D-Bus only, via zbus 5 in apps/desktop and in notify-rust, tauri-plugin-notification and tauri-plugin-single-instance, whose latest releases still require zbus 5. Move to zbus 6 when they do." },
+    { "package": "zbus_names", "id": "RUSTSEC-2026-0371", "until": "2026-11-30", "why": "Same as RUSTSEC-2026-0370 (merged into zbus 6)." },
+    { "package": "zvariant_derive", "id": "RUSTSEC-2026-0372", "until": "2026-11-30", "why": "Same as RUSTSEC-2026-0370 (merged into zbus 6)." }
   ]
 }
