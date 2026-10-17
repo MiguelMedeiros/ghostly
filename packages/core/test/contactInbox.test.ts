@@ -128,7 +128,7 @@ describe("a contact link's limits (WISP 8xx)", () => {
   });
 
   it("asks 2 more bits the day after a flood, up to 24, and steps back down by 2 a day", () => {
-    const flooded = { ...newInbox(NOW), overflow: FLOOD_PER_DAY + 1 };
+    const flooded = { ...newInbox(NOW), overflow: Array.from({ length: FLOOD_PER_DAY + 1 }, (_, i) => `k${i}`) };
     const tomorrow = NOW + 24 * HOUR;
     const raised = planKnocks(L, flooded, [], tomorrow);
     expect(raised.inbox.bits).toBe(STAMP_BITS_DEFAULT + 2);
@@ -136,6 +136,27 @@ describe("a contact link's limits (WISP 8xx)", () => {
     expect(planKnocks(L, { ...flooded, bits: STAMP_BITS_MAX }, [], tomorrow).inbox.bits).toBe(STAMP_BITS_MAX);
     expect(planKnocks(L, { ...newInbox(NOW), bits: 22 }, [], tomorrow).inbox.bits).toBe(20);
     expect(planKnocks(L, newInbox(NOW), [], tomorrow).inbox.bits).toBe(STAMP_BITS_DEFAULT);
+  });
+
+  it.each([
+    ["busy", false],
+    ["open with the hour full", true],
+  ])("counts a knock it could not take once a day, though it is seen at every poll, while %s", (_name, hourFull) => {
+    const tomorrow = NOW + 24 * HOUR;
+    const start = hourFull ? inbox() : inbox({ state: "busy", waiting: Array.from({ length: MAX_WAITING }, (_, i) => ({ key: `w${i}`, expires: NOW + WEEK })) });
+    const poll = (state: InboxState, knocks: ContactKnock[]) => {
+      // Every 5 minutes until the day ends, the hour kept full when open.
+      for (let at = NOW; contactDay(at) === contactDay(NOW); at += 5 * 60_000) {
+        state = planKnocks(L, hourFull ? { ...state, taken: Array.from({ length: NEW_PER_HOUR }, () => at) } : state, knocks, at).inbox;
+      }
+      return state;
+    };
+    const few = poll(start, Array.from({ length: 3 }, () => knock()));
+    expect(few.overflow).toHaveLength(3);
+    // Not flooded: the bits step back towards the default, not 2 up.
+    expect(planKnocks(L, few, [], tomorrow).inbox.bits).toBe(STAMP_BITS_DEFAULT);
+    const many = poll(start,Array.from({ length: FLOOD_PER_DAY + 1 }, () => knock()));
+    expect(planKnocks(L, many, [], tomorrow).inbox.bits).toBe(BITS + 2);
   });
 
   it("a link turned off reads nothing and takes nothing", () => {
