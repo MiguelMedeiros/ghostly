@@ -463,14 +463,17 @@ it("a file said on the floor and cancelled by its sender before it went live say
   expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "Cancelled by the sender" });
 }, 60_000);
 
-it("a file said on the floor and refused here for no room arrives on the sender's Retry once there is room", async () => {
+it("a file said on the floor and refused here for no room says so here, and arrives on the sender's Retry once there is room", async () => {
   const t = await setup();
   await announce(t, "full-00001", 30_000);
   const fileId = (await db.getMessages(t.id)).find((m) => m.id === "peer_full-00001")!.file!.id;
   left = 10_000;
   t.offer("full-00001", 30_000);
   await vi.waitFor(() => expect(t.records.get("out:full-00001")).toMatchObject({ state: "failed", error: expect.stringContaining("Not enough space") }), { timeout: 10_000 });
-  await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "It was refused here" }));
+  // Why, not only that it was refused, and after a restart too.
+  await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "No room on this device for this file" }));
+  await t.restartApp();
+  expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "No room on this device for this file" });
   // The person frees space; the sender presses Retry, as its bubble says. The file takes over the bubble that ended.
   left = 40 * 1024 ** 3;
   t.files.retry("full-00001");
@@ -480,7 +483,7 @@ it("a file said on the floor and refused here for no room arrives on the sender'
   expect(await (await fileBytes()).digest(fileId)).toBe(digestOf(30_000));
 }, 60_000);
 
-it("a file said on the floor and refused here as one too many waiting arrives on the sender's Retry once the person answered them", async () => {
+it("a file said on the floor and refused here as one too many waiting says so, and arrives on the sender's Retry once the person answered them", async () => {
   const t = await setup();
   await announce(t, "many-00001", 30_000);
   const fileId = (await db.getMessages(t.id)).find((m) => m.id === "peer_many-00001")!.file!.id;
@@ -489,7 +492,7 @@ it("a file said on the floor and refused here as one too many waiting arrives on
   await vi.waitFor(async () => { for (const id of asks) expect((await t.incoming(id))?.transfer).toMatchObject({ stage: "asking" }); }, { timeout: 20_000 });
   t.offer("many-00001", 30_000);
   await vi.waitFor(() => expect(t.records.get("out:many-00001")).toMatchObject({ state: "failed", error: expect.stringContaining("too many files waiting") }), { timeout: 10_000 });
-  await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed" }));
+  await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "Too many files are waiting here" }));
   // The person declines the ones waiting; later the sender tries again, as told.
   for (const id of asks) await t.node().fileAction({ linkId: t.id, fileId: (await t.incoming(id))!.fileId, action: "decline" });
   await vi.waitFor(() => { for (const id of asks) expect(t.records.get(`out:${id}`)?.state).toBe("declined"); }, { timeout: 10_000 });
