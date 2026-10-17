@@ -25,6 +25,8 @@ export interface ListenOptions {
   allow?: Allowlist;
   /** `--turns`: only agent turns, as `agent.turn` events. */
   turns?: boolean;
+  /** The first wait before a webhook is tried again (500 ms), doubled each time up to a minute. */
+  retryMs?: number;
 }
 
 /**
@@ -231,16 +233,37 @@ function runExec(command: string, event: GhostlyEvent): Promise<number> {
   });
 }
 
-async function post(url: URL, event: GhostlyEvent): Promise<boolean> {
-  for (let attempt = 0; attempt < 3; attempt++) {
+/** The longest wait between two tries of a webhook that is not answering. */
+const RETRY_MAX_MS = 60_000;
+
+/**
+ * Posts one event; resolves true once the bridge took it, false when it refused it (a 4xx or a redirect, three times).
+ * A bridge that is not there (refused connection, timeout, 5xx, 408, 429) has not handled the event: it is tried again,
+ * waiting up to a minute between tries, for as long as it takes, so the cursor never moves past it. Before, three tries
+ * in 3.5 s and the cursor moved on: a bridge restarting for longer lost every event of the time it was down, for good.
+ */
+async function post(url: URL, event: GhostlyEvent, retryMs: number): Promise<boolean> {
+  let wait = retryMs, holding = false;
+  for (let attempt = 0; ; attempt++) {
+    let down = true;
     try {
       // A redirect is not followed: it would post the event to wherever it points, off this machine too.
       const response = await fetch(url, { method: "POST", redirect: "manual", headers: { "content-type": "application/json", "x-ghostly-event": event.type, "x-ghostly-seq": String(event.seq) }, body: JSON.stringify(event), signal: AbortSignal.timeout(10_000) });
-      if (response.ok) return true;
-    } catch { /* retried */ }
-    await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+      void response.body?.cancel().catch(() => {});
+      if (response.ok) {
+        if (holding) process.stderr.write(`ghostly: the webhook at ${url.href} answers again: event ${event.seq} taken\n`);
+        return true;
+      }
+      down = response.status >= 500 || response.status === 408 || response.status === 429;
+    } catch { /* not there: tried again */ }
+    if (!down && attempt >= 2) return false;
+    if (down && attempt >= 2 && !holding) {
+      holding = true;
+      process.stderr.write(`ghostly: the webhook at ${url.href} is not answering: holding event ${event.seq} (${event.type}) until it does\n`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, wait));
+    wait = Math.min(wait * 2, RETRY_MAX_MS);
   }
-  return false;
 }
 
 /** Events given to a handler and not handled yet: what `listen` holds in memory. */
@@ -277,10 +300,11 @@ export function eventHandler(options: ListenOptions): EventHandler {
         const code = await runExec(options.exec, event);
         if (code !== 0) process.stderr.write(`ghostly: --exec exited ${code} on event ${event.seq} (${event.type})\n`);
       }
-      if (webhook && !(await post(webhook, event))) process.stderr.write(`ghostly: the webhook did not take event ${event.seq} (${event.type})\n`);
+      if (webhook && !(await post(webhook, event, options.retryMs ?? 500))) process.stderr.write(`ghostly: the webhook did not take event ${event.seq} (${event.type})\n`);
       // An output whose reader stopped holds the next event here, not one more line in its buffer per event.
       if (full) await options.drained?.();
-      // A failed handler still moves the cursor: one poisonous event must not stop the stream. The failure is on stderr.
+      // A failed hook (an --exec exiting non-zero, an event the webhook refused) still moves the cursor: one poisonous
+      // event must not stop the stream. The failure is on stderr. A webhook not answering never gets here (`post`).
       if (options.cursor) writeCursor(options.cursor, event.seq);
     }).catch((error: unknown) => {
       try {
