@@ -1,5 +1,5 @@
 import { createContext, useContext, useSyncExternalStore } from "react";
-import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMediaSession } from "./mediaSession";
+import { claimMediaSession, dropMediaSession, mediaSessionPosition, mediaSessionState, releaseMediaSession } from "./mediaSession";
 import { applyVoiceRate, claimPlayback, onVoiceRate, pausePlaying, registerVoicePlayer, releasePlayback } from "./voicePlayback";
 
 /*
@@ -39,6 +39,8 @@ export interface Track {
 
 /** What a bubble hands over: the element playing, and how to let go of what it plays from (URLs, a stream, the speaker it follows). */
 export interface Handed extends Track {
+  /** What the system's media controls call it: "Voice message" or "Audio", never the file's name. */
+  label: string;
   audio: HTMLAudioElement;
   release(): void;
 }
@@ -110,8 +112,7 @@ export function holdPlayback(handed: Handed): void {
   claimPlayback(id);
   held = { handed, dispose: () => { listening.abort(); stopRate(); unregister(); } };
   claimMediaSession(id, {
-    title: handed.title,
-    artist: handed.from,
+    title: handed.label,
     play: resumeHeld,
     pause: pauseHeld,
     seekTo: (at) => { audio.currentTime = Math.max(0, Math.min(durationOf(handed) || at, at)); },
@@ -155,6 +156,12 @@ export function stopHeld(): void {
 export function pauseForCall(): void {
   if (held) pauseHeld();
   else pausePlaying();
+}
+
+/** The app locks: whatever plays pauses, held here or in its bubble, and the system's controls let go of it. */
+export function pauseForLock(): void {
+  pauseForCall();
+  dropMediaSession();
 }
 
 const subscribe = (listener: () => void) => {

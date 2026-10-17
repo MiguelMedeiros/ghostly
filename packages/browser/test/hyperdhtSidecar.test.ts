@@ -90,6 +90,25 @@ it("carries a binary message both ways, as base64 on the line", async () => {
   expect(alive(runtime.child.pid!)).toBe(true);
 });
 
+it("carries a frame that JSON makes six times longer, with every endpoint still up", async () => {
+  const runtime = sidecar();
+  for (const n of [1, 2, 3]) runtime.send({ type: "start", endpoint: n, seedB64: seed(n) });
+  const b = await runtime.next({ type: "started", endpoint: 2 });
+  await runtime.next({ type: "started", endpoint: 1 });
+  await runtime.next({ type: "started", endpoint: 3 });
+  runtime.send({ type: "connect", endpoint: 1, descriptor: b.descriptor });
+  const result = await runtime.next({ type: "result", endpoint: 1 });
+  const incoming = await runtime.next({ type: "open", endpoint: 2, incoming: true });
+  // A contact's largest text frame, all control characters: `\u0001` on the line, a line of about 360 KiB.
+  const text = "\u0001".repeat(60 * 1024);
+  expect(JSON.stringify({ text }).length).toBeGreaterThan(6 * 60 * 1024);
+  runtime.send({ type: "send", endpoint: 1, id: result.id, seq: 1, text });
+  expect(await runtime.next({ type: "frame", endpoint: 2 })).toMatchObject({ id: incoming.id, text });
+  await runtime.next({ type: "sent", endpoint: 1, seq: 1 });
+  expect(runtime.events.some(e => e.type === "closed" || e.type === "stopped")).toBe(false);
+  expect(alive(runtime.child.pid!)).toBe(true);
+});
+
 it("answers each send once its socket has room, and a refused one with an error that names it", async () => {
   // A link slower than the app sends: each frame waits 300 ms in the socket's buffer.
   const runtime = sidecar({ FAKE_ENDPOINT_DELAY_MS: "300" });

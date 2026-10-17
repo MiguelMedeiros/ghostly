@@ -1175,6 +1175,12 @@ export interface GroupPayNote {
   claims?: string[];
   /** The last note this device said about it, sent again when an edge opens. */
   mine?: GroupPayFrame;
+  /**
+   * Known only from another member's word (a payer's claim, a payee's "paid"): the member it is about (the payee of a
+   * request, the payer of a payment) has not described it. Kept on this device only, never in the group's history,
+   * until that member's own note arrives: nothing is shown as a member's that the member never said.
+   */
+  undescribed?: true;
 }
 
 /** `group-pay` on an edge (WISP 902 § Payments). Old apps drop it. */

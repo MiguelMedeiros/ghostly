@@ -214,6 +214,46 @@ describe("a payment in a chat", () => {
     expect(node.getState().payments[review.id]).toMatchObject({ kind: "payment", direction: "out", txid: approved.txid });
   });
 
+  it("a Cashu request is paid once between a review and pay-request, in either order", async () => {
+    const { node } = track(engine());
+    const approve = vi.spyOn(node["paymentCoordinator"], "approve").mockRejectedValue(new Error("reached the approval"));
+    const chat = addChat(node, stubLink());
+    const request: StoredPayment = { id: "req-c1", linkId: chat.id, kind: "request", direction: "in", amount: 10, unit: "sat", state: "pending", createdAt: 1, mints: [TEST_MINT] };
+    node["desk"]["payments"].set(request.id, request);
+    const sent = (): StoredPayment => ({ id: "ecash-1", linkId: chat.id, kind: "payment", direction: "out", amount: 10, unit: "sat", state: "pending", createdAt: 2, requestId: request.id, token: "cashuBsent" });
+    const payRequest = vi.spyOn(node["desk"], "payRequest").mockImplementation(async () => { node["desk"]["payments"].set("ecash-1", sent()); });
+
+    // A review is made (a Cashu review reserves no ecash), then `chat pay-request` pays: the review can no longer be approved.
+    const review = savedReview({ linkId: chat.id, requestId: request.id, address: request.id });
+    await intentRepository.put({ review, prepared: {} });
+    await node.payRequest({ linkId: chat.id, paymentId: request.id });
+    expect(payRequest).toHaveBeenCalledOnce();
+    expect((await intentRepository.get(review.id))?.review.state).toBe("cancelled");
+    await expect(node.approvePayment({ id: review.id })).rejects.toThrow("already has a payment");
+
+    // A review still pending for a request paid meanwhile is not approved either (the store had not caught up, another tab).
+    const late = savedReview({ linkId: chat.id, requestId: request.id, address: request.id });
+    await intentRepository.put({ review: late, prepared: {} });
+    await expect(node.approvePayment({ id: late.id })).rejects.toThrow("already has a payment; reconcile it instead");
+    expect(approve).not.toHaveBeenCalled();
+    expect((await intentRepository.get(late.id))?.review.state).toBe("pending");
+
+    // A review already approved or sent may hold money: pay-request pays nothing beside it.
+    node["desk"]["payments"].delete("ecash-1");
+    await intentRepository.put({ review: { ...late, state: "submitted" }, prepared: {} });
+    await expect(node.payRequest({ linkId: chat.id, paymentId: request.id })).rejects.toThrow("already has a payment. Reconcile it");
+    expect(payRequest).toHaveBeenCalledOnce();
+
+    // A request that names where to pay is paid only through its review: pay-request leaves that review alone.
+    payRequest.mockRestore();
+    const onchain: StoredPayment = { id: "req-btc", linkId: chat.id, kind: "request", direction: "in", amount: 1_000, unit: "sat", state: "pending", createdAt: 3, target: bitcoinTarget() };
+    node["desk"]["payments"].set(onchain.id, onchain);
+    const reviewed = savedReview({ linkId: chat.id, requestId: onchain.id, method: "bitcoin" } as Partial<PaymentReview>);
+    await intentRepository.put({ review: reviewed, prepared: {} });
+    await expect(node.payRequest({ linkId: chat.id, paymentId: onchain.id })).rejects.toThrow("Review and explicitly approve");
+    expect((await intentRepository.get(reviewed.id))?.review.state).toBe("pending");
+  });
+
   it("approval waits for the contact to be back and to still take that way of paying; the review stays", async () => {
     const { node } = track(engine());
     const approve = vi.spyOn(node["paymentCoordinator"], "approve");

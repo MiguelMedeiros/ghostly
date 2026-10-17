@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RACE_DIRECT_MS, TYPING_REFRESH_MS } from "@ghostly/core";
 import { connectDaemon } from "../src/client";
+import { profilePaths } from "../src/profiles";
 import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running, testEnv } from "./support/cli";
 import { dominantHz, tone, wavFile } from "./support/tone";
 // covers: chat.paired.reconnect, headless.buttons, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit, headless.forward, chat.forward.files
@@ -538,7 +539,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
 
   it("send files all at once, as a bot sends photos: each its own message on both sides", async () => {
     // Over the daemon's socket, every request written at once: many land in the same millisecond.
-    const client = (await connectDaemon(sockets[alice]!))!;
+    const client = (await connectDaemon({ socket: sockets[alice]!, dir: profilePaths(alice, "default").dir }))!;
     const names = Array.from({ length: 20 }, (_, i) => `burst-${i}.txt`);
     try {
       const sent = await Promise.all(names.map((name) => {
