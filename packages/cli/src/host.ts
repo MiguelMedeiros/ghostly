@@ -193,6 +193,8 @@ function connection(ctx: ApiContext, socket: Socket): void {
   socket.on("close", unsubscribe);
   socket.on("error", () => {});
   const lines = createInterface({ input: socket, crlfDelay: Infinity });
+  // readline passes on its input's errors: a client that went away with lines still unread (ECONNRESET) is no error.
+  lines.on("error", () => {});
   let buffered = 0;
   socket.on("data", (chunk) => { buffered += chunk.length; if (buffered > MAX_LINE) socket.destroy(); });
   lines.on("line", (line) => {

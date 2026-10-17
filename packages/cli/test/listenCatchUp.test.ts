@@ -58,7 +58,8 @@ describe.skipIf(process.platform === "win32")("a listen attached to the daemon t
     try {
       const client = await connectDaemon(s.path);
       const { seqs, handle } = slowHandler();
-      const following = followDaemon(s.path, client!, handle, 0);
+      // A hold far shorter than a catch-up of 1,000 events: hooks that keep taking events keep the connection.
+      const following = followDaemon(s.path, client!, handle, 0, 1);
       await following.subscribed;
       await expect.poll(() => seqs.length, { timeout: 20_000 }).toBe(backlog);
       expect(seqs).toEqual(Array.from({ length: backlog }, (_, i) => i + 1));
@@ -88,6 +89,27 @@ describe.skipIf(process.platform === "win32")("a listen attached to the daemon t
       // The first replay, and one more after the connection the daemon ended: from the last event read, not the start.
       expect(counted.replays).toBe(2);
       expect(counted.replayed).toBeLessThan(total + 256);
+      following.close();
+    } finally { await s.close(); }
+  });
+
+  it("a feed whose hook takes no event for PAUSE_HOLD_MS ends the connection, and goes on from the last event taken on resume", async () => {
+    const { hub, counted, listeners } = countingHub(2 * MAX_BEHIND);
+    const s = await served("held", hub);
+    try {
+      const client = await connectDaemon(s.path);
+      let open!: () => void;
+      const { seqs, handle } = slowHandler(new Promise<void>((resolve) => { open = resolve; }));
+      const following = followDaemon(s.path, client!, handle, 0, 200);
+      await following.subscribed;
+      // The hook hangs: past the hold, the daemon no longer keeps a subscriber for it.
+      while (handle.behind() < MAX_BEHIND) await turn();
+      await expect.poll(() => listeners.size, { timeout: 5_000 }).toBe(0);
+      open();
+      const total = 2 * MAX_BEHIND;
+      await expect.poll(() => seqs.length, { timeout: 20_000 }).toBe(total);
+      expect(seqs).toEqual(Array.from({ length: total }, (_, i) => i + 1));
+      expect(counted.replays).toBe(2);
       following.close();
     } finally { await s.close(); }
   });
