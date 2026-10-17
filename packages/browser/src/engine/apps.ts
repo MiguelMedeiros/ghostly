@@ -425,6 +425,8 @@ export class Apps {
   private readonly runUsed = new Map<string, number>();
   /** Reads of a bundle under way, by digest: icons drawn at once share one read. */
   private readonly verifying = new Map<string, Promise<AppBundle>>();
+  /** Reads of a bundle's URL under way: an install screen opened again waits on the read the closed one began, not on a second. */
+  private readonly bundleReads = new Map<string, Promise<{ bundle: AppBundle; bytes: Uint8Array }>>();
   /**
    * The `icon.png` of each checked bundle, by digest (at most 256 KiB and 1024 × 1024 pixels, or null for none): every icon shown on the Apps
    * page, in a chat's cards and in the composer's Apps is read without the whole bundle again.
@@ -820,11 +822,17 @@ export class Apps {
 
   // ---------- network ----------
 
-  private async fetchBundle(url: string): Promise<{ bundle: AppBundle; bytes: Uint8Array }> {
-    const bytes = await this.host.fetch(url, { maxBytes: APP_BUNDLE_LIMITS.bundleBytes });
-    const read = await readAppBundleAsync(bytes);
-    if (!read.ok) fail(read.reason, `This is not an app Ghostly can install${read.detail ? ` (${read.detail})` : ""}`);
-    return { bundle: read.bundle, bytes };
+  private fetchBundle(url: string): Promise<{ bundle: AppBundle; bytes: Uint8Array }> {
+    const running = this.bundleReads.get(url);
+    if (running) return running;
+    const read = (async () => {
+      const bytes = await this.host.fetch(url, { maxBytes: APP_BUNDLE_LIMITS.bundleBytes });
+      const read = await readAppBundleAsync(bytes);
+      if (!read.ok) fail(read.reason, `This is not an app Ghostly can install${read.detail ? ` (${read.detail})` : ""}`);
+      return { bundle: read.bundle, bytes };
+    })().finally(() => { this.bundleReads.delete(url); });
+    this.bundleReads.set(url, read);
+    return read;
   }
 
   /**
@@ -835,9 +843,12 @@ export class Apps {
    * this store or another, a preview included, is not checked again.
    */
   private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">): Promise<AppStoreRead> {
+    // Read side by side; the first of the two that fails stops the other, whose bytes nobody would use.
+    const stop = new AbortController();
+    const read = (at: string, maxBytes: number) => this.host.fetch(at, { maxBytes, signal: stop.signal }).catch((error: unknown) => { stop.abort(); throw error; });
     const [indexBytes, sigBytes] = await Promise.all([
-      this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.storeIndexBytes }),
-      this.host.fetch(besideUrl(url, "ghostly-store.sig"), { maxBytes: APP_FETCH_LIMITS.sigBytes }),
+      read(url, APP_FETCH_LIMITS.storeIndexBytes),
+      read(besideUrl(url, "ghostly-store.sig"), APP_FETCH_LIMITS.sigBytes),
     ]);
     if (held?.index && held.digest !== undefined && toBase64Url(await sha256Paced(indexBytes)) === held.digest) {
       return { ok: true, store: { index: held.index, digest: held.digest, expired: held.index.expires < this.nowS() } };
