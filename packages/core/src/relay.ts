@@ -763,6 +763,9 @@ export class RelayTransport implements PkarrTransport {
    *
    * A hedge spends a second request, so it goes only where the budget has requests to spare (`hedgeRoom`), never for a
    * background read (nobody waits on it), and later for a key whose last read found nothing (`HEDGE_MISSING_MS`).
+   *
+   * A group edge's first read of its member after it started (`newest`, `resume`) asks every relay with requests to spare
+   * at once, and takes the newest packet among the answers (WISP 01, the relays' budget).
    */
   async resolve(pubKeyZ32: string, options: PkarrRequestOptions = {}): Promise<SignedPacket | null> {
     if (this.relays.length === 0) throw new Error("No Pkarr relays configured");
@@ -782,9 +785,9 @@ export class RelayTransport implements PkarrTransport {
 
     /**
      * The next relay to ask, its request taken from its budget, or null. A hedge (`hedge`) goes only to a relay with
-     * requests to spare; one passed over for that is still there if the relay asked fails.
+     * requests to spare; one passed over for that is still there if the relay asked fails. `as`: whose request it is.
      */
-    const next = (hedge: boolean): string | null => {
+    const next = (hedge: boolean, as = who): string | null => {
       for (const relay of order) {
         if (tried.has(relay)) continue;
         if (relay !== probe && this.networkCoolingDown(relay, "GET")) { tried.add(relay); down = true; continue; }
@@ -798,9 +801,9 @@ export class RelayTransport implements PkarrTransport {
           continue;
         }
         // Asked before `take`, which notes a refusal (a chat's need, a waiting write): a hedge not sent is no refusal.
-        if (hedge && (this.heldFor(relay, who, Date.now(), pubKeyZ32) > 0 || !this.hedgeRoom(relay))) continue;
+        if (hedge && (this.heldFor(relay, as, Date.now(), pubKeyZ32) > 0 || !this.hedgeRoom(relay))) continue;
         tried.add(relay);
-        if (!this.take(relay, who, pubKeyZ32)) { budgetWait = Math.min(budgetWait, this.heldFor(relay, who, Date.now(), pubKeyZ32)); continue; }
+        if (!this.take(relay, as, pubKeyZ32)) { budgetWait = Math.min(budgetWait, this.heldFor(relay, as, Date.now(), pubKeyZ32)); continue; }
         if (relay === probe) this.breaker.beginAllDown(relay); else this.breaker.begin(relay);
         return relay;
       }
@@ -809,35 +812,56 @@ export class RelayTransport implements PkarrTransport {
 
     const asked = new Map<string, ReadAttempt>();
     let lastAsked = 0;
-    const ask = (hedge: boolean): boolean => {
-      const relay = next(hedge);
+    const ask = (hedge: boolean, as = who): boolean => {
+      const relay = next(hedge, as);
       if (!relay) return false;
       asked.set(relay, this.readFromRelay(relay, pubKeyZ32));
       lastAsked = Date.now();
       return true;
     };
     ask(false);
+    // A group edge's first read of its member after it started (again), which its offer waits on (`newest`, `resume`):
+    // every relay with a request to spare is asked at once, as a hedge would be, and the newest packet wins. The first to
+    // answer may serve an older packet (it refused the member's newest put with a 409, or its budget held the put back
+    // for later) or a 404, and the edge then waited a whole poll for its next read to land on the relay that had it. The
+    // others have `hedgeMs` more once one answered: a slow relay does not hold the read. One read per start: the edge's
+    // other reads, its reads for an answer to an offer among them (most of what an edge to a member gone for good
+    // reads), go to one relay in turn as before, and what an edge reads a minute stays what it was. The other relays are
+    // asked as a plain group read: only the first request is on the edges' floor (`GROUP_SIGNALING_ALLOWANCE_SHARE`), so
+    // a daemon back with many edges spends no more of it than before.
+    const every = !who.background && (!!options.newest || (isGroupRead(who) && who.resume)) && this.relays.length > 1;
+    if (every) { const plain = { ...who, resume: false }; while (ask(true, plain)) { /* one more relay asked */ } hedgeAfter = Infinity; }
 
-    let winner: { attempt: ReadAttempt; outcome: Extract<ReadOutcome, { kind: "packet" | "missing" }> } | null = null;
-    while (asked.size > 0 && !winner) {
+    type Answer = { attempt: ReadAttempt; outcome: Extract<ReadOutcome, { kind: "packet" | "missing" }>; at: number };
+    const answers: Answer[] = [];
+    let graceUntil = Infinity;
+    while (asked.size > 0) {
+      const graceIn = graceUntil - Date.now();
+      if (graceIn <= 0) break;
       const hedgeIn = hedgeAfter - (Date.now() - lastAsked);
       if (hedgeIn <= 0) {
         // No relay to spare a request for a hedge: this read waits for the relays it asked.
         if (!ask(true)) hedgeAfter = Infinity;
         continue;
       }
+      const waitIn = Math.min(hedgeIn, graceIn);
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const hedgeDue = hedgeIn === Infinity ? null : new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), hedgeIn); });
+      const due = waitIn === Infinity ? null : new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), waitIn); });
       const settled = await Promise.race([
         ...[...asked.values()].map((attempt) => attempt.done.then((outcome) => ({ attempt, outcome }))),
-        ...(hedgeDue ? [hedgeDue] : []),
+        ...(due ? [due] : []),
       ]);
       clearTimeout(timer);
       if (!settled) continue;
       const { attempt, outcome } = settled;
       asked.delete(attempt.relay);
       const relay = attempt.relay;
-      if (outcome.kind === "packet" || outcome.kind === "missing") { winner = { attempt, outcome }; break; }
+      if (outcome.kind === "packet" || outcome.kind === "missing") {
+        answers.push({ attempt, outcome, at: Date.now() });
+        if (!every) break;
+        if (graceUntil === Infinity) graceUntil = Date.now() + this.hedgeMs;
+        continue;
+      }
       if (outcome.kind === "throttled") {
         budgetWait = Math.min(budgetWait, this.coolDown(relay, outcome.response));
         this.answered(relay, { kind: "throttled", reason: "rate limited (429)" });
@@ -853,35 +877,43 @@ export class RelayTransport implements PkarrTransport {
       ask(false);
     }
 
-    if (winner) {
-      const { attempt, outcome } = winner, relay = attempt.relay;
-      const took = Date.now() - attempt.started;
-      if (outcome.kind === "packet") {
-        this.sawTimestamp(pubKeyZ32, outcome.packet.timestampMicros);
-        this.newest.set(pubKeyZ32, newerPacket(this.newest.get(pubKeyZ32), outcome.packet)!);
-        this.missing.delete(pubKeyZ32);
-      } else {
+    if (answers.length) {
+      // The newest packet any relay answered with; a 404 only when none had one.
+      const winner = answers.reduce((best, answer) => answer.outcome.kind === "packet"
+        && (best.outcome.kind !== "packet" || answer.outcome.packet.timestampMicros > best.outcome.packet.timestampMicros) ? answer : best);
+      if (winner.outcome.kind === "packet") this.missing.delete(pubKeyZ32);
+      else {
         this.missing.delete(pubKeyZ32);
         this.missing.add(pubKeyZ32);
         if (this.missing.size > READ_TURNS_KEPT) this.missing.delete(this.missing.values().next().value!);
       }
-      if (took <= SLOW_MS) {
-        this.answered(relay, undefined, "GET");
-        this.slowUntil.delete(relay);
-      } else {
-        // It answered this kind of request: an earlier failure of it no longer keeps the next one back.
-        this.networkCooldown.delete(`GET ${relay}`);
-        // A slow packet counts against the relay; a slow 404 says nothing (every relay takes seconds to give one).
-        if (outcome.kind === "packet") this.slow(relay);
-        else this.breaker.cancel(relay);
+      for (const { attempt, outcome, at } of answers) {
+        const relay = attempt.relay;
+        if (outcome.kind === "packet") {
+          this.sawTimestamp(pubKeyZ32, outcome.packet.timestampMicros);
+          this.newest.set(pubKeyZ32, newerPacket(this.newest.get(pubKeyZ32), outcome.packet)!);
+        }
+        if (at - attempt.started <= SLOW_MS) {
+          this.answered(relay, undefined, "GET");
+          this.slowUntil.delete(relay);
+        } else {
+          // It answered this kind of request: an earlier failure of it no longer keeps the next one back.
+          this.networkCooldown.delete(`GET ${relay}`);
+          // A slow packet counts against the relay; a slow 404 says nothing (every relay takes seconds to give one).
+          if (outcome.kind === "packet") this.slow(relay);
+          else this.breaker.cancel(relay);
+        }
       }
-      // The relays still asked are dropped, after the winner's own outcome (a probe that answered is a relay to ask
-      // again). One asked no later than the winner, which a relay beat with the packet, is slow.
+      // The relays still asked are dropped, after the answers' own outcomes (a probe that answered is a relay to ask
+      // again). One asked no later than the first answer, which a relay beat with the packet, is slow. Not one a group
+      // edge's read asked at the same moment: a relay without the packet takes seconds to say 404, and is no slower for it.
+      const first = answers[0];
       for (const loser of asked.values()) {
         loser.controller.abort();
-        if (outcome.kind === "packet" && loser.started <= attempt.started) this.slow(loser.relay);
+        if (!every && first.outcome.kind === "packet" && loser.started <= first.attempt.started) this.slow(loser.relay);
         else this.breaker.cancel(loser.relay);
       }
+      const relay = winner.attempt.relay;
       this.lastRelay = relay;
       this.answeredRead(pubKeyZ32);
       this.readFrom(pubKeyZ32, relay);
