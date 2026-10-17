@@ -117,7 +117,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   walletRemoveMint: "{ url, acceptLoss? }",
   walletReceiveLightning: "{ amount, via?, network?, card? }",
   walletQuoteInvoice: "{ invoice, via?, network?, card? }",
-  walletPayQuote: "{ quote, mint, note?, confirmedReal? }",
+  walletPayQuote: "{ quote, mint, note?, confirmedReal?, linkId?, invoice? }",
   lnurlResolve: "{ text, network? }",
   lnurlInvoice: "{ id, amount, comment?, network? }",
   checkPayment: "{ linkId, paymentId }",
