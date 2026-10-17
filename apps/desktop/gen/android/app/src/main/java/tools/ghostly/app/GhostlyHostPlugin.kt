@@ -36,6 +36,7 @@ import app.tauri.plugin.Plugin
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicBoolean
@@ -216,7 +217,8 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
    * Only what the page takes is copied: each stream in turn while the share stays within [MAX_SHARED_BYTES]
    * (android.ts `withinPasteTotal`, keep the two alike); one that would go past it is left out, by its size before
    * copying, or by its bytes when the app gives no size (nor kept), and only named in `leftOut`, for the page to say
-   * so. A share with nothing else is still nothing for the turns: its names go with the share it lets go, or alone.
+   * so; one that cannot be read (no stream, a revoked permission, a broken stream) is named in `unread`. A share with
+   * nothing else is still nothing for the turns: its names go with the share it lets go, or alone.
    */
   private fun shared(intent: Intent) {
     val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() ?: ""
@@ -237,22 +239,24 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
       try {
         own.deleteRecursively()
         val files = JSONArray()
-        // Named for the page: what was too large to bring in. A copy stopped as a newer share came is not.
+        // Named for the page: what was too large to bring in, and what could not be read. A copy stopped as a newer
+        // share came is not.
         val leftOut = JSONArray()
+        val unread = JSONArray()
         var left = MAX_SHARED_BYTES
         for ((index, uri) in streams.withIndex()) {
           if (!going()) break
+          val name = SharedName.of(displayName(uri), index)
+          val folder = File(own, index.toString())
           try {
-            val name = SharedName.of(displayName(uri), index)
             if ((sizeOf(uri) ?: 0L) > left) {
               leftOut.put(name)
               continue
             }
-            val folder = File(own, index.toString()).apply { mkdirs() }
+            folder.mkdirs()
             val file = File(folder, name)
-            val copied =
-              resolver.openInputStream(uri)?.use { input -> file.outputStream().use { copyAtMost(input, it, left, going) } }
-                ?: continue
+            val input = resolver.openInputStream(uri) ?: throw IOException("No stream for $uri")
+            val copied = input.use { from -> file.outputStream().use { copyAtMost(from, it, left, going) } }
             if (copied < 0) {
               folder.deleteRecursively()
               if (going()) leftOut.put(name)
@@ -262,28 +266,37 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
             files.put(JSONObject().put("path", file.path).put("mime", resolver.getType(uri) ?: JSONObject.NULL))
             shareTurns.has(number)
           } catch (e: Exception) {
-            // One file that cannot be read (a revoked permission, a broken stream) leaves the rest of the share.
+            // One file that cannot be read (a revoked permission, a broken stream) leaves the rest of the share, and
+            // is named for the page; what of it was copied goes.
+            folder.deleteRecursively()
+            if (going()) unread.put(name)
           }
         }
         // No file to read (none copied whole): nothing names the folder to the page, so it goes now.
         if (files.length() == 0) own.deleteRecursively()
         val share =
           if (SharedCopies.nothingIn(title, text, files.length())) null
-          else Handover(own, JSONObject().put("title", title).put("text", text).put("files", files).put("leftOut", leftOut).toString())
+          else Handover(
+            own,
+            JSONObject().put("title", title).put("text", text).put("files", files).put("leftOut", leftOut).put("unread", unread).toString(),
+          )
         // Decided on the main thread, where shares arrive, so none comes between the turn and the handing over. With
         // nothing in it, an older share that waited for this one may go now; with something, this one goes, waits for
         // a newer share still copying, or is dropped.
         activity.runOnUiThread {
           val handed = if (share == null) shareTurns.nothing(number) else shareTurns.ready(number, share)
-          // Nothing but files too large, and no newer share with something: the page names them all the same, with the
-          // older share this one let go (Rust keeps one share: two in a row would lose the first), or alone.
+          // Nothing but files too large or not read, and no newer share with something: the page names them all the
+          // same, with the older share this one let go (Rust keeps one share: two in a row would lose the first), or alone.
           val json =
-            if (share != null || leftOut.length() == 0 || !going()) handed?.json
+            if (share != null || (leftOut.length() == 0 && unread.length() == 0) || !going()) handed?.json
             else {
               val notice = handed?.let { JSONObject(it.json) } ?: JSONObject().put("title", "").put("text", "").put("files", JSONArray())
-              val names = notice.optJSONArray("leftOut") ?: JSONArray()
-              for (i in 0 until leftOut.length()) names.put(leftOut.getString(i))
-              notice.put("leftOut", names).toString()
+              for ((key, more) in listOf("leftOut" to leftOut, "unread" to unread)) {
+                val names = notice.optJSONArray(key) ?: JSONArray()
+                for (i in 0 until more.length()) names.put(more.getString(i))
+                notice.put(key, names)
+              }
+              notice.toString()
             }
           if (json != null) received("share", json)
         }
