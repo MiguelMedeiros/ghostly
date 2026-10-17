@@ -28,7 +28,7 @@ function takenBackWords(group: GroupView, t: Translate): { title: string; next: 
 }
 
 /** The open button of the chat list's row after this group's, if there is one. */
-function rowAfter(groupId: string): HTMLElement | null {
+export function rowAfter(groupId: string): HTMLElement | null {
   const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="chat-row"], [data-testid="group-row"]')];
   const at = rows.findIndex(row => row.dataset.group === groupId);
   return at < 0 ? null : rows[at + 1]?.querySelector<HTMLElement>('[data-testid$="-row-open"]') ?? null;
@@ -39,7 +39,7 @@ function rowAfter(groupId: string): HTMLElement | null {
  * delete dialog's. It was left on the page's body. While the list is still hidden behind the page (a phone, before
  * home shows), the focus does not take: tried again on the next frames, as long as nothing else took it.
  */
-function focusPastRow(next: HTMLElement | null, pressed: Element | null, frames = 60) {
+export function focusPastRow(next: HTMLElement | null, pressed: Element | null, frames = 60) {
   const lost = document.activeElement === null || document.activeElement === document.body || document.activeElement === pressed;
   if (!lost) return;
   const target = next?.isConnected ? next : document.querySelector<HTMLElement>('[data-testid="sidebar-new-chat"]');
