@@ -160,6 +160,13 @@ describe("the English words stay what they were", () => {
     expect(english("group.readNoteCommunity", { count: COMMUNITY_LIMITS.store })).toBe(GROUP_READ_NOTE_COMMUNITY);
   });
 
+  it("a private group's words hold past 16 members, where hubs pass messages on", () => {
+    // The created/joined line is written once and stays as the group grows onto hubs.
+    expect(GROUP_READ_NOTE).not.toMatch(/directly/);
+    expect(english("group.create.privateHint")).not.toMatch(/Everyone connects to everyone/);
+    expect(english("group.create.privateHint")).toMatch(/Up to 16 connect to each other directly; past that, members' apps that stay on \(hubs\) pass messages on\./);
+  });
+
   it("a card worked out without the app's translator is in English", () => {
     const card = idCard(proofView({ sharedWith: 2 }));
     expect(card).toMatchObject({ statusLabel: "Verified", category: "Your own key", shared: "Shared in 2 chats" });
