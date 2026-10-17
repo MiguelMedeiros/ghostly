@@ -4,6 +4,7 @@ import { decodeCommunityLink, decodeGroupEntryLink, readDeviceInvite } from "@gh
 import { enrollErrorKey, failureKey, offerDeviceLink } from "../lib/devices";
 import { INVITE_REFUSAL_MESSAGE, classifyInvite, readInvite } from "../lib/url";
 import { showJoinNotice } from "../lib/joinNotice";
+import { isContactLink, offerContactLink } from "../lib/contactLinks";
 import { pasteShortcut, readClipboardText } from "../lib/clipboard";
 import { dragHasFiles, droppedFiles, pastedFiles, pasteNamesFiles, pasteShowsNothing, platformPastedImage } from "../lib/pastedFiles";
 import { rawError } from "../lib/errorText";
@@ -99,6 +100,8 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       });
       return;
     }
+    // Someone's contact link (WISP 8xx): its request form, in place of Join.
+    if (isContactLink(value)) { joined.current = true; close(); offerContactLink(value.trim()); return; }
     const reading = readInvite(value);
     // A good code that adds a device (WISP 06), scanned from the active device with Join: it goes where such a code goes.
     if (!reading.ok && reading.reason === "device" && readDeviceInvite(value).ok) { joined.current = true; close(); offerDeviceLink(value.trim()); return; }

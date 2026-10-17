@@ -35,6 +35,8 @@ import { problemText, type Problem } from "./lib/problemText";
 import { Notice } from "./components/ui/Notice";
 import { watchWindowAway } from "./lib/windowAway";
 import "./index.css";
+import { ContactAskHost } from "./components/requests/ContactAskDialog";
+import { isContactLink, offerContactLink } from "./lib/contactLinks";
 
 // The pages of the menu, each loaded the first time it is opened (components/MenuPage.tsx).
 const Settings = menuPage(() => import("./pages/Settings").then((m) => m.Settings));
@@ -43,6 +45,7 @@ const Profile = menuPage(() => import("./pages/Profile").then((m) => m.Profile))
 const Identities = menuPage(() => import("./pages/Identities").then((m) => m.Identities));
 const Apps = menuPage(() => import("./pages/Apps").then((m) => m.Apps));
 const Tasks = menuPage(() => import("./pages/Tasks").then((m) => m.Tasks));
+const Requests = menuPage(() => import("./pages/Requests").then((m) => m.Requests));
 const Wallet = menuPage(() => import("./pages/Wallet").then((m) => m.Wallet));
 
 /**
@@ -109,6 +112,8 @@ function ChatLinkIntake() {
     if (!rest) return;
     // A device code opened while the app was open already (the address changed, no new page): the join host takes it.
     if (isDeviceCode(rest)) { offerDeviceLink(rest); navigate("/", { replace: true }); return; }
+    // Someone's contact link (WISP 8xx): a request form, never a chat by itself.
+    if (isContactLink(rest)) { offerContactLink(rest); navigate("/", { replace: true }); return; }
     const reading = readInvite(rest);
     if (reading.ok) {
       if (locked.current) { setHeld(reading.keys); navigate("/", { replace: true }); }
@@ -315,6 +320,7 @@ export function Root() {
             <AppRouter>
               <ErrorBoundary>
               <ChatLinkIntake />
+              <ContactAskHost />
               <JoinNotice />
               <ChatNotStoredNotice />
               <OpenFailureNotice />
@@ -349,6 +355,8 @@ export function Root() {
                       {/* Mini-apps (WISP 1200): the page sends the person home where Apps does not show. */}
                       <Route path="/apps" element={<Apps />} />
                       <Route path="/tasks" element={<Tasks />} />
+                      {/* What the contact link took (WISP 8xx): apart from the chats until accepted. */}
+                      <Route path="/requests" element={<Requests />} />
                       <Route path="/share" element={<Navigate to="/services" replace />} />
                       {/* The installed web app: what another app shared, and the icon's shortcuts (manifest.json). */}
                       <Route path="/shared" element={<SharePicker />} />

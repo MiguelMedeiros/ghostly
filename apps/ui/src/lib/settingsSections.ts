@@ -71,6 +71,7 @@ export const SETTINGS_INDEX: readonly SettingEntry[] = [
   { section: "profile", label: "profileSwitcher.title", words: "settings.searchWords.account", needs: "profiles" },
   { section: "profile", label: "settings.profilePeek", needs: "profiles" },
   { section: "profile", label: "settings.defaultNickname", words: "settings.searchWords.nickname" },
+  { section: "profile", label: "requests.linkTitle", words: "requests.linkWords" },
   { section: "appearance", label: "settings.colorTheme", words: "settings.searchWords.colour" },
   { section: "appearance", label: "settings.colorScheme", words: "settings.searchWords.mode" },
   { section: "appearance", label: "settings.chatListDensity", words: "settings.searchWords.chatList" },

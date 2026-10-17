@@ -109,7 +109,7 @@ export function chatOnly(method: string, params: Record<string, unknown>): boole
 const READS: ReadonlySet<string> = new Set([
   "status", "profile.get", "settings.get", "events.replay", "chat.list", "chat.get", "chat.history", "chat.details",
   "group.list", "group.get", "group.history", "file.list", "wallet.list", "wallet.history", "payment.list", "identity.list", "identity.providers",
-  "identity.contact", "service.list", "service.peer", "call.list", "app.served", "x401.credential.list",
+  "identity.contact", "service.list", "service.peer", "call.list", "app.served", "x401.credential.list", "contact-link.show",
 ]);
 
 /** Whether a one-shot for this call opens the profile offline; test/readOnlyCommands.test.ts names every table command. */
@@ -123,12 +123,13 @@ export function readOnly(method: string, params: Record<string, unknown>): boole
 /**
  * Calls whose change stays on this device: a chat's name here, a chat removed (nothing goes to the contact), auto-answer
  * (calls.json), a proof dropped, a web app added (shared with no one yet), an x401 key or credential (WISP 3xx: never
- * shared with a contact). Opened online, each put the profile's records on the relays and waited for them (6 PUT + 4
- * GET, 3.3 s with a relay that takes 1.5 s), and the contacts' apps saw this device come online. `message delete` stays
- * online: it settles a file offer already on the DHT.
+ * shared with a contact), a contact request declined (WISP 8xx: nothing is said back). Opened online, each put the
+ * profile's records on the relays and waited for them (6 PUT + 4 GET, 3.3 s with a relay that takes 1.5 s), and the
+ * contacts' apps saw this device come online. `message delete` stays online: it settles a file offer already on the DHT.
  */
 const LOCAL_WRITES: ReadonlySet<string> = new Set([
   "chat.rename", "chat.remove", "call.auto", "identity.cancel", "service.add", "x401.key.new", "x401.credential.add", "x401.credential.remove",
+  "requests.decline",
 ]);
 
 /** Settings of this device only: no contact and no relay hears of them (nick, avatar and the relays' do). */
