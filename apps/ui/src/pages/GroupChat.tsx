@@ -28,7 +28,7 @@ import { groupChat } from "../lib/chatMute";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { GroupInvitationCard } from "../components/GroupInvitation";
 import { authorName, forgetGroupLocal, groupPath, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, memberName, memberPhoto } from "../lib/groups";
-import { NowPlayingChat } from "../lib/nowPlaying";
+import { NowPlayingChat, stopPlayingFrom } from "../lib/nowPlaying";
 import { clearChatNotification } from "../lib/notifications";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { authorsMemo, type MessageAuthor } from "../lib/senderRuns";
@@ -381,6 +381,8 @@ export function GroupChat() {
   // What the now-playing bar names, for a voice message from here that plays on elsewhere.
   const groupName = group ? group.name || t("group.chat.unnamed") : "";
   const playingChat = useMemo(() => ({ path: groupPath(groupId), name: groupName }), [groupId, groupName]);
+  // Left or deleted here: what this device keeps of it goes, and so does what plays from it (no bar naming it after).
+  const goneHere = () => { forgetGroupLocal(groupId); stopPlayingFrom(groupPath(groupId), true); };
   // A bot's routines in a row: one row, opened on a tap (WISP 405 · Status Cards), whichever of its rows are in the page.
   const stacks = useMemo(() => routineStacks(messages, m => m), [messages]);
   const stackHeads = useMemo(() => new Map([...stacks.values()].flatMap(run => run.slice(1).map(m => [m.id, run[0].id] as const))), [stacks]);
@@ -717,11 +719,11 @@ export function GroupChat() {
       {viewingPicture && group.picture && <AvatarViewer src={group.picture} name={group.name || t("group.chat.unnamed")} returnFocus={avatarButton} onClose={() => setViewingPicture(false)} />}
       {sharing && (group.entryLink || shareShown) && <GroupShareDialog group={group} created={sharing === "created"} returnFocus={shareRef} onClose={closeShare} />}
       {confirmLeave && <LeaveGroupDialog group={group} returnFocus={optionsRef} onClose={() => setConfirmLeave(false)}
-        onConfirm={async () => { await engine.call("leaveGroup", { groupId }); forgetGroupLocal(groupId); setConfirmLeave(false); nav.home(); }} />}
+        onConfirm={async () => { await engine.call("leaveGroup", { groupId }); goneHere(); setConfirmLeave(false); nav.home(); }} />}
       {/* Deleting an active group, private or community, leaves it: said so, and refused as Leave is while nobody could
           become admin or take the leave. */}
       {confirmForget && group.status === "active" ? <LeaveGroupDialog forget group={group} returnFocus={optionsRef} onClose={() => setConfirmForget(false)}
-        onConfirm={async () => { await engine.call("forgetGroup", { groupId }); forgetGroupLocal(groupId); setConfirmForget(false); nav.home(); }} />
+        onConfirm={async () => { await engine.call("forgetGroup", { groupId }); goneHere(); setConfirmForget(false); nav.home(); }} />
       : confirmForget && <DeleteChatDialog name={group.name} onClose={() => setConfirmForget(false)}
         title={group.name ? t("group.leave.forgetTitle", { name: group.name }) : t("group.leave.forgetTitleUnnamed")} confirm={t("group.menu.forget")}
         // What goes: an invitation (declined, and its sender told; one taken back tells nobody), with the history kept
@@ -733,7 +735,7 @@ export function GroupChat() {
             : (group.invitation.contact ? t("group.forget.invitation", { contact: group.invitation.contact }) : t("group.forget.invitationUnknown")))
           : t("group.forget.kept")}
         // A group I am no longer in (removed, left, an invitation): nothing to leave, only its history here goes.
-        onConfirm={() => { setConfirmForget(false); void act(async () => { await engine.call("forgetGroup", { groupId }); forgetGroupLocal(groupId); nav.home(); }); }} />}
+        onConfirm={() => { setConfirmForget(false); void act(async () => { await engine.call("forgetGroup", { groupId }); goneHere(); nav.home(); }); }} />}
     </div>
     </MemberColorsProvider>
     </NowPlayingChat.Provider>
