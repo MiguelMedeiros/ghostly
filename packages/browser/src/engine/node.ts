@@ -24,7 +24,7 @@ import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers
 import type { EngineApi } from "../shared/rpc";
 import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
 import { chatAppId, isAppRef, isAppVersion, publicKeyFromZ32, type AppFrameEvent, type AppSendError } from "@ghostly/core";
-import { GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, readGroupFileMeta } from "@ghostly/core";
+import { FILE_LIMITS, GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, readGroupFileMeta } from "@ghostly/core";
 import { IdentityProofs } from './identities';
 import { setOwnDidSource } from '../proofs/ownDid';
 import { ProfileDid } from './did';
@@ -4051,6 +4051,10 @@ export class GhostlyNode implements EngineImplementation {
     // A known id could only be a replay or an attempt to pass for a file we already have.
     if (files.wireIds.has(wire.id)) return "duplicate file id";
     if (files.receivedBytes + wire.size > LIMITS.maxStoredIncomingBytesPerPeer) return "no room for more files";
+    // files/2 cannot ask the person (WISP 501): it takes only what files/3 would take without asking. Every Ghostly app
+    // lists files/3, so a larger file here comes from an app that left it out to skip the question.
+    if (wire.size > FILE_LIMITS.askAboveBytes) return "file too large without files/3";
+    if (files.receivedBytes + this.fileDesk.autoTaken(linkId) + wire.size > FILE_LIMITS.autoAcceptBytesPerPeer) return "no more files without asking";
     // Said on the floor first and sent whole now (files/2 names its message by the sender's time): the bubble that
     // waited for it goes, so the file shows once.
     const said = this.fileDesk.takeAnnounced(linkId, wire.id);
