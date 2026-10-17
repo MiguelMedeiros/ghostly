@@ -11,7 +11,7 @@ import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import type { RuntimeOptions } from "./runtime/engine";
-import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, readCursor } from "./listen";
+import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, PAUSE_HOLD_MS, readCursor } from "./listen";
 import { format } from "node:util";
 import { secretsFromStdin, secretValuesWarning, textFromStdin } from "./secretInput";
 import {
@@ -719,8 +719,9 @@ async function listenCommand(argv: string[]): Promise<void> {
       if (!c) return null;
       try { return ((await c.call("chat.get", { chat }, { timeoutMs: ANSWER_MS })) as { peer?: string }).peer || null; } finally { c.close(); }
     }).catch((error) => { client.close(); throw error; });
-    // Followed until stopped, past a daemon restart and past a feed that fell behind (`followDaemon`).
-    const following = followDaemon(g.paths, client, handle, since);
+    // Followed until stopped, past a daemon restart and past a feed that fell behind (`followDaemon`); a daemon gone
+    // longer than a restart takes (`daemon stop`) is said once on stderr, and so is the one that answers again.
+    const following = followDaemon(g.paths, client, handle, since, PAUSE_HOLD_MS, g.profile);
     const stop = () => { following.close(); process.exit(0); };
     onReaderGone(stop);
     await following.subscribed;
