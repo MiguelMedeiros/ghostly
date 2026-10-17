@@ -475,6 +475,28 @@ describe("a limited start (WISP 06 § When a device checks)", () => {
     expect(screen.getByTestId("limited-banner")).toHaveTextContent("Messages you write wait until then.");
   });
 
+  it("while the read at start is out the app opens and asks nothing; if no source answered, the question comes then", async () => {
+    fakeEngine.setState({ limited: true, startCheck: true });
+    render(<Root />);
+    expect(await screen.findByTestId("sidebar")).toBeInTheDocument();
+    expect(screen.queryByTestId("limited-start")).toBeNull();
+    expect(screen.queryByTestId("limited-banner")).toBeNull();
+    // No source answered: this was a limited start after all.
+    act(() => fakeEngine.setState({ limited: true }));
+    expect(await screen.findByTestId("limited-start")).toBeInTheDocument();
+  });
+
+  it("a read at start that says this device is the active one leaves no question behind", async () => {
+    fakeEngine.setState({ limited: true, startCheck: true });
+    render(<Root />);
+    expect(await screen.findByTestId("sidebar")).toBeInTheDocument();
+    act(() => fakeEngine.setState({}));
+    // Going online later checks the turn for a moment: not a limited start, so no question then either.
+    act(() => fakeEngine.setState({ limited: true }));
+    expect(screen.queryByTestId("limited-start")).toBeNull();
+    expect(screen.getByTestId("sidebar")).toBeInTheDocument();
+  });
+
   it("a restored copy checking its turn asks nothing: the app opens, a line says why it is offline, the reason behind the ⓘ", async () => {
     fakeEngine.setState({ limited: true, restoreCheck: "checking" });
     render(<Root />);

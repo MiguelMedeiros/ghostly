@@ -12,7 +12,8 @@ import { Notice } from "../ui/Notice";
  * Limited mode (WISP 06 § When a device checks): the active device of a device set could not read which device is
  * active when it started, so its engine runs with nothing published, dialled, paid or settled until a good read (it
  * reads again every 30 seconds). Before the person sees the app in that state they are asked: "Try again" (start again)
- * or "Start anyway" (the app, offline). Once they went on, a line above the chat list says why nothing goes out.
+ * or "Start anyway" (the app, offline). Once they went on, a line above the chat list says why nothing goes out. While
+ * the read at start is out (`startCheck`) the app shows, and nothing is asked until it answers.
  */
 
 /** Whether the first state this page got from the engine was limited: a limited start. Later ones (going online) are not. */
@@ -30,7 +31,8 @@ const subscribe = (listener: () => void) => {
 type Limited = "ask" | "on" | null;
 function limitedNow(): Limited {
   const state = engine.state;
-  if (!state) return null;
+  // The read at start is still out: the app shows as it is, and whether this start was a limited one waits for its answer.
+  if (!state || state.startCheck) return null;
   startedLimited ??= !!state.limited;
   if (!state.limited) return null;
   // A restored copy whose turn is being checked asks nothing: there is nothing to try again, the engine reads by itself.

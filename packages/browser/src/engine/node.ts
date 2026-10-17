@@ -543,6 +543,12 @@ export interface NodeOptions {
    */
   turnReadAt?: number;
   /**
+   * The read the active device of a device set makes as a condition of starting (WISP 06 § When a device checks), still
+   * out: the engine starts with it in limited mode (`limited`), so the profile is read and shown at once, and its answer
+   * starts the engine properly, keeps it limited, or stops it. Made by `devices/peer.ts`.
+   */
+  startCheck?: Promise<StartCheck>;
+  /**
    * This app stays online, so it offers to be a hub of the private groups past 16 members it is in (WISP 902 · Group
    * Mesh § Hubs). Default: the Desktop app; the CLI says so itself; a browser tab only when the admin pins it.
    */
@@ -637,6 +643,9 @@ function sentNow(message: StoredMessage): StoredMessage {
   return sent;
 }
 
+/** How the active device starts, after its read at start: the whole engine, limited mode, or not at all (`gated`). */
+export interface StartCheck { gated?: DeviceGateView; limited?: true; /** When the read that said this device is the active one was made. */ readAt?: number }
+
 /** What a call refused in limited mode is answered with. */
 export const LIMITED_MODE_ERROR = "Ghostly could not check which device is active yet. This works once it can.";
 
@@ -683,6 +692,8 @@ export class GhostlyNode implements EngineImplementation {
   private settings: Settings = DEFAULT_SETTINGS;
   /** Limited mode (`NodeOptions.limited`): on from the start until `leaveLimited()`. */
   private limitedMode = false;
+  /** The read at start (`NodeOptions.startCheck`) is still out: limited mode until it answers, and the pages ask nothing. */
+  private startChecking = false;
   /** Whether this engine is in limited mode (WISP 06 § When a device checks). */
   get limited(): boolean { return this.limitedMode; }
   /**
@@ -1583,6 +1594,7 @@ export class GhostlyNode implements EngineImplementation {
     // Relays are a setting only where relays are the transport.
     this.relays = options.transport ? null : new RelayTransport();
     this.limitedMode = options.limited === true;
+    this.startChecking = options.startCheck !== undefined;
     this.turnGoodAt = options.turnReadAt ?? null;
     // An engine that starts properly uses the transport as it is, as before.
     this.transport = this.limitedMode ? refusingWhileLimited(options.transport ?? this.relays!, () => this.limitedMode) : options.transport ?? this.relays!;
@@ -1846,9 +1858,11 @@ export class GhostlyNode implements EngineImplementation {
     // The active device of a device set (WISP 06): its links to the other devices, and its turn record put again. A
     // `single` profile never gets here: the gate read no record for it, and nothing more is asked.
     if (!this.options.singleDevice && this.networkOn && knownDeviceGate()?.state === "active") void this.startDeviceSet().catch(() => {});
+    // Started in limited mode while the read at start is out: its answer starts the engine properly, keeps it limited, or stops it.
+    if (this.options.startCheck) void this.afterStartCheck(this.options.startCheck);
     // Started in limited mode because no source answered the read at start: it reads again every 30 seconds, and the
     // first good read either starts it properly or stops it (WISP 06 § When a device checks).
-    if (!this.options.singleDevice && this.limitedMode && knownDeviceGate()?.state === "active") this.readTurnWhileLimited();
+    else if (!this.options.singleDevice && this.limitedMode && knownDeviceGate()?.state === "active") this.readTurnWhileLimited();
     // A restored copy whose turn was not read at the restore: read now, then every 30 seconds while limited.
     if (this.restoreCheck === "checking" && this.limitedMode) this.checkRestoredTurn(0);
   }
@@ -1962,6 +1976,23 @@ export class GhostlyNode implements EngineImplementation {
     return false;
   }
 
+  /**
+   * The answer of the read at start (`NodeOptions.startCheck`), once the profile is loaded: another device took the turn,
+   * and the engine stops having published nothing (the pages start again into the gate, where its device links run); no
+   * good read, and it stays limited, reading every 30 seconds; else it starts properly, as it would have without the wait.
+   */
+  private async afterStartCheck(check: Promise<StartCheck>): Promise<void> {
+    const start = await check.catch((): StartCheck => ({ limited: true }));
+    this.startChecking = false;
+    if (this.shuttingDown) return;
+    if (start.gated) { await this.stopReplaced({ ...start.gated, reload: true }); return; }
+    if (start.limited) { this.emitState(); this.readTurnWhileLimited(); return; }
+    // What the limited start kept as it was stored: the files of groups this device no longer has go, as at a full start.
+    await this.groups.files?.sweep((await db.getGroups()).map((group) => group.id)).catch(() => {});
+    await this.leaveLimited(start.readAt ?? null).catch(() => {});
+    if (!this.options.singleDevice && !this.limitedMode && this.networkOn && knownDeviceGate()?.state === "active") void this.startDeviceSet().catch(() => {});
+  }
+
   private readTurnWhileLimited(after = 30_000): void {
     if (this.limitedTimer) clearTimeout(this.limitedTimer);
     this.limitedTimer = setTimeout(() => {
@@ -2034,15 +2065,16 @@ export class GhostlyNode implements EngineImplementation {
    * Leaves limited mode after the first good turn read that says this device is the active one (WISP 06 § When a
    * device checks: "the first good one either starts the engine properly or stops the device"). What `start()` left
    * out runs now: the wallets, then every chat, the hold storage and the group entries, as when the person goes online.
+   * `readAt`: when that read was made; null when it said nothing of the turn (no device set), which notes no good read.
    */
-  async leaveLimited(): Promise<void> {
+  async leaveLimited(readAt: number | null = Date.now()): Promise<void> {
     if (!this.limitedMode) return;
     // Called while `start()` still loads the chats, it waits: there is nothing to dial before they are loaded.
     if (!this.starting || !(await this.starting)) throw new Error("The engine did not start");
     if (!this.limitedMode) return;
     this.limitedMode = false;
     // Left on a good read that says this device is the active one.
-    this.noteGoodTurn();
+    if (readAt !== null) this.noteGoodTurn(readAt);
     // A wallet that fails to start must not keep the chats from being dialled: the failure is reported after them.
     let failure: unknown = null;
     try {
@@ -2116,8 +2148,8 @@ export class GhostlyNode implements EngineImplementation {
   private turnGoodAt: number | null = null;
 
   /** A good read said this device is the active one: single-writer wallets that waited for one open now. */
-  private noteGoodTurn(): void {
-    this.turnGoodAt = Date.now();
+  private noteGoodTurn(at = Date.now()): void {
+    this.turnGoodAt = at;
     if (this.singleWritersWaiting && this.walletsStarted && !this.limitedMode) void this.openSingleWriters();
   }
 
@@ -2360,6 +2392,7 @@ export class GhostlyNode implements EngineImplementation {
       settings: this.settings,
       ...(this.limitedMode && { limited: true as const }),
       ...(this.limitedMode && this.restoreCheck && { restoreCheck: this.restoreCheck }),
+      ...(this.limitedMode && this.startChecking && { startCheck: true as const }),
       ...(wakeOwnerOf(this.settings.wake, this.ownDeviceKey) && { wakeOwner: wakeOwnerOf(this.settings.wake, this.ownDeviceKey) }),
       transport: {
         ...this.transport.describe(), ...(this.options.irohWeb || this.ownIrohRelays ? { iroh: { relays: this.irohRelays, defaults: [...DEFAULT_IROH_RELAYS] } } : {}),

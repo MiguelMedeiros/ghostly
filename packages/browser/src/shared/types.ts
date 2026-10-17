@@ -1714,6 +1714,11 @@ export interface EngineState {
    */
   restoreCheck?: "checking" | "removed";
   /**
+   * Limited mode only while the active device's read at start is out (WISP 06 § When a device checks): the profile shows
+   * as it is, nothing goes out, and nobody is asked anything until the read answers. Absent otherwise.
+   */
+  startCheck?: true;
+  /**
    * Whose push subscription `settings.wake` is, in a profile on several devices (WISP 06 § Push and the phone): `here`,
    * this device's own; `away`, another device's, given to contacts because this device has none of its own (the page
    * neither replaces nor turns off what is not its own). Absent in a profile on one device, or when nobody said.
