@@ -139,13 +139,15 @@ describe("the Cashu wallet reporting its own invoices and melts", () => {
     await journal(op({ ...melt, paymentHash: hashOf(lost), invoice: lost, paymentId: "r-lost" }));
     await lightning.reportPaymentResolved(paid, true);
     await lightning.reportPaymentResolved(lost, false);
-    await lightning.reportPaymentResolved(fakeInvoice(7, hash()), true, { paymentId: "old-melt", mint: "m" });
+    const old = fakeInvoice(7, hash());
+    await lightning.reportPaymentResolved(old, true, { paymentId: "old-melt", mint: "m" });
     expect((await opOf(lightning, hashOf(paid)))?.state).toBe("paid");
     expect((await opOf(lightning, hashOf(lost)))?.state).toBe("failed");
+    // The invoice goes with it: a chat's invoice paid from its card is told once it settles.
     expect(events.resolved.mock.calls).toEqual([
-      [{ paymentId: "r-paid", providerId: CASHU_MINT_SOURCE, mint: undefined }, true],
-      [{ paymentId: "r-lost", providerId: CASHU_MINT_SOURCE, mint: undefined }, false],
-      [{ paymentId: "old-melt", providerId: CASHU_MINT_SOURCE, mint: "m" }, true],
+      [{ paymentId: "r-paid", providerId: CASHU_MINT_SOURCE, mint: undefined, invoice: paid }, true],
+      [{ paymentId: "r-lost", providerId: CASHU_MINT_SOURCE, mint: undefined, invoice: lost }, false],
+      [{ paymentId: "old-melt", providerId: CASHU_MINT_SOURCE, mint: "m", invoice: old }, true],
     ]);
   });
 });
