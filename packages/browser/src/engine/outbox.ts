@@ -85,7 +85,7 @@ export class Outbox {
   /** Sent, awaiting a receipt. */
   private receipts = new Map<string, ReturnType<typeof setTimeout>>();
   /** Queued: when it is looked at again, how far along the backoff, since when. */
-  private waiting = new Map<string, { timer?: ReturnType<typeof setTimeout>; step: number; since: number }>();
+  private waiting = new Map<string, { timer?: ReturnType<typeof setTimeout>; at: number; step: number; since: number }>();
   private attempts = new Map<string, number>();
   private busy = new Set<string>();
   /** Still in flight when the look a reopened chat asked for began (`flush({ reopened })`): sent again once that send returns. */
@@ -339,12 +339,46 @@ export class Outbox {
     });
   }
 
-  /** A queued message's check came due: the ones written before it that have not gone are looked at first. */
+  /**
+   * A queued message's check came due: the ones written before it that have not gone are looked at first. The checks
+   * of n texts written to an away contact come due a few milliseconds apart, and each read the chat and looked at
+   * every older text again: n²/2 reads at each backoff step. The first look now takes up every check due by the next
+   * few seconds too (`backoffMs[0]`), and what was written before them, and gives each its next one: they come due
+   * together from then on, and the others find theirs taken.
+   */
   private async check(id: string): Promise<void> {
     if (this.stopped) return;
+    // A look since its check came due took it up: it gave it the next one, or sent it.
+    if (this.waiting.get(id)?.timer || this.receipts.has(id)) return;
     const messages = await this.store.read(), message = messages.find(m => m.id === id);
     if (!message || !(toGo(message) || this.file(message))) { await this.attempt(id); return; }
-    await this.inOrder(this.due(messages.filter(m => m.timestamp <= message.timestamp)));
+    const soon = this.now() + this.policy.backoffMs[0], taken: string[] = [];
+    let until = message.timestamp;
+    for (const m of messages) {
+      const wait = this.waiting.get(m.id);
+      if (m.id === id || !wait || this.busy.has(m.id) || !(toGo(m) || this.file(m)) || (wait.timer && wait.at > soon)) continue;
+      // Taken up a little early: as if its timer had fired.
+      if (wait.timer) { clearTimeout(wait.timer); wait.timer = undefined; wait.step++; }
+      taken.push(m.id);
+      if (m.timestamp > until) until = m.timestamp;
+    }
+    await this.inOrder(this.due(messages.filter(m => m.timestamp <= until)));
+    // A look the link's closing cut short: the ones it did not reach keep a check of their own.
+    for (const other of taken) {
+      const wait = this.waiting.get(other);
+      if (!this.stopped && wait && !wait.timer && !this.busy.has(other) && !this.receipts.has(other)) this.schedule(other);
+    }
+  }
+
+  /**
+   * As read by the look in progress, it still waits: the chat cannot carry it, and it is not due to fail or to be
+   * handed to store-and-forward. Nothing acts on it, so it is not read again.
+   */
+  private waitsOn(message: StoredMessage): boolean {
+    const wait = this.waiting.get(message.id);
+    return !!wait && (message.delivery === "queued" || message.delivery === "waiting") && message.via !== "hold"
+      && (message.resendUntil ?? Infinity) > this.now() && !this.resender.ready(message)
+      && !(this.resender.divert && this.now() - wait.since >= this.policy.holdAfterMs);
   }
 
   /**
@@ -353,7 +387,7 @@ export class Outbox {
    */
   private async again(message: StoredMessage, passed?: StoredMessage[]): Promise<boolean> {
     if (message.sender !== "me" || message.via === "hold") return true;
-    if (message.delivery === "queued" || message.delivery === "waiting") return this.attempt(message.id, passed);
+    if (message.delivery === "queued" || message.delivery === "waiting") return this.attempt(message.id, passed, message);
     if (message.delivery !== "sent" || !this.receipts.has(message.id)) return true;
     this.clear(message.id);
     if (this.resender.ready(message)) { if (passed) await this.catchUp(passed); await this.transmitNow(message.id); return true; }
@@ -398,10 +432,12 @@ export class Outbox {
   /**
    * Looks at one queued message: sends it if the chat can carry it, hands it to store-and-forward, or waits more.
    * False when the chat could not carry it and it still waits. `passed`: older messages the chat could not carry a
-   * moment ago, which go first if it can now.
+   * moment ago, which go first if it can now. `read`: its row as the look in progress read it; while it still waits
+   * (`waitsOn`) it is not read again, else a look at n waiting texts read each of them once more.
    */
-  private async attempt(id: string, passed?: StoredMessage[]): Promise<boolean> {
+  private async attempt(id: string, passed?: StoredMessage[], read?: StoredMessage): Promise<boolean> {
     if (this.stopped || this.busy.has(id)) return true;
+    if (read && this.waitsOn(read)) { if (!this.waiting.get(id)?.timer) this.schedule(id); return false; }
     const message = await this.one(id);
     if (!message || (message.delivery !== "queued" && message.delivery !== "waiting") || message.via === "hold") { this.forget(id); return true; }
     if ((message.resendUntil ?? Infinity) <= this.now()) {
@@ -445,9 +481,10 @@ export class Outbox {
   }
 
   private schedule(id: string): void {
-    const wait = this.waiting.get(id) ?? { step: 0, since: this.now() };
+    const wait = this.waiting.get(id) ?? { step: 0, since: this.now(), at: 0 };
     if (wait.timer) clearTimeout(wait.timer);
     const delay = this.policy.backoffMs[Math.min(wait.step, this.policy.backoffMs.length - 1)];
+    wait.at = this.now() + delay;
     wait.timer = setTimeout(() => { wait.timer = undefined; wait.step++; void this.turn(() => this.check(id)).catch(() => {}); }, delay);
     this.waiting.set(id, wait);
   }
