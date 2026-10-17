@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { secretsFromStdin, secretValuesWarning } from "../src/secretInput";
+import { secretsFromStdin, secretValuesWarning, textFromStdin } from "../src/secretInput";
 // covers: headless.cli
 
 const stdin = (text: string) => async () => text;
@@ -66,6 +66,47 @@ describe("secrets from stdin, out of ps", () => {
         await failed;
         expect(notes).toHaveLength(1);
       }
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("wallet redeem with no token on a pipe nobody writes says so on stderr, then gives up with the usage error", async () => {
+    vi.useFakeTimers();
+    try {
+      const notes: string[] = [];
+      const redeem = secretsFromStdin("wallet.redeem", {}, () => new Promise<string>(() => {}), false, (text) => notes.push(text));
+      const failed = expect(redeem).rejects.toMatchObject({ code: "usage", message: expect.stringMatching(/^Missing <cashu-token>: nothing came on stdin in 60 s.*\| ghostly wallet redeem/) });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(notes).toEqual([expect.stringContaining("| ghostly wallet redeem")]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await failed;
+      expect(notes).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("send and edit with no text on a pipe nobody writes say so on stderr, then give up with the usage error; --stdin waits", async () => {
+    vi.useFakeTimers();
+    try {
+      for (const command of ["send bob", "edit bob m1", "group send team", "group edit team m1"]) {
+        const notes: string[] = [];
+        const text = textFromStdin(() => new Promise<string>(() => {}), command, false, (note) => notes.push(note));
+        const failed = expect(text).rejects.toMatchObject({ code: "usage", message: expect.stringMatching(new RegExp(`^No text: nothing came on stdin in 60 s.*\\| ghostly ${command}\\)`)) });
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(notes).toEqual([`Waiting for the text on stdin (… | ghostly ${command}): give it there or as arguments`]);
+        await vi.advanceTimersByTimeAsync(60_000);
+        await failed;
+        expect(notes).toHaveLength(1);
+      }
+      // Text that starts coming is waited for to its end, without a note; the last newline is not part of it.
+      const notes: string[] = [];
+      const slow = (onData?: () => void) => { onData?.(); return new Promise<string>((resolve) => setTimeout(() => resolve("hello\n\n"), 120_000)); };
+      const sent = textFromStdin(slow, "send bob", false, (note) => notes.push(note));
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(await sent).toBe("hello\n");
+      // --stdin asked for it: as long as it takes.
+      const asked = textFromStdin(() => new Promise<string>((resolve) => setTimeout(() => resolve("late"), 120_000)), "send bob", true, (note) => notes.push(note));
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(await asked).toBe("late");
+      expect(notes).toEqual([]);
     } finally { vi.useRealTimers(); }
   });
 
