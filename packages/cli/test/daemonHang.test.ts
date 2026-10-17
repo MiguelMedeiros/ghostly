@@ -59,7 +59,7 @@ describe("a daemon that accepts the socket but never answers", () => {
 
   it("the version check sent ahead of a command has no deadline of its own: the command's ends both, as the command's timeout", async () => {
     const { paths } = await wedged("hung-check");
-    const client = (await connectDaemon(paths.socket))!;
+    const client = (await connectDaemon(paths))!;
     expect(client).toBeTruthy();
     // As session() does: the check first, the command behind it on the same connection, only the command with a deadline.
     const check = client.call("status").catch((error: unknown) => error);
