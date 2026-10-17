@@ -4,6 +4,48 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.3.5
+
+### Fixed
+
+**Devices**
+
+- Add a device: once a refused password is typed again, or the next step comes, the card that said why goes too. It no longer says "Use 8 characters or more." over the code's "Waiting for your other device" on a phone.
+
+**Apps**
+
+- Opening an app's install screen again while it is still downloading waits for that download instead of starting a second one on the same connection, and a store whose signature file cannot be read stops downloading its list at once.
+- Opening the Apps page no longer downloads every store's whole list of apps, and each app's revocation list, again when they have not changed: the browser asks the host whether they changed and gets an empty answer when they have not. A changed list still arrives at once.
+- Adding a store from Apps → Add no longer downloads and checks its whole list of apps a second time when you press Add store: it takes the list the preview just read, so on a slow connection you wait for it only once.
+
+**CLI**
+
+- A message whose first word is a dash and one character, such as `send bob -1` or `send bob -5 degrees`, is still refused but now says to put `--` before text that starts with a dash, as longer words like `-ph` already did.
+
+**Everywhere**
+
+- A profile on several devices no longer reads a device that is away (a phone closed for the day) every 4 seconds for the first ten minutes after each start. That took half of a relay's minute per away device while your chats were reconnecting. Its link is now read every 30 seconds from the start, the same as after those ten minutes: 150 reads in that window went down to 20. A device that comes back is still connected within a minute.
+- On a phone on its side or in a short window, a menu with no room above or below its button stays on the screen and scrolls: a chat's ⋮ menu ran off the bottom edge, Delete chat half cut.
+
+**Groups**
+
+- In a group, members who have been away for a while are no longer looked for every 4 seconds for the first ten minutes after each start, as if they had just been invited. With 16 members of a 32-member group away, that asked the relays for about 240 requests a minute while your chats were reconnecting. They are now read at the group's slower pace from the start, the same as after those ten minutes: about 18 a minute. A member who was just added is still looked for quickly.
+- A group's file you fetch from a member with a slow upload (a phone on mobile data) now moves to the author or another member as soon as one says it is free, going on from what already came. It used to stay with the slow member for the whole file: up to a minute or two for a file the rest of the group had in seconds.
+- A private group past 16 members no longer says each member is a direct link from your app: its connection details say your app links to the admin and the group's hubs, which pass messages on and see who talks when, not what is said. New group says members connect directly only up to 16, and the joined line no longer says messages go directly.
+
+**Chat**
+
+- A long chat whose recent messages carry link previews or many edits (a news bot's, an agent's progress messages) no longer slows down every message that arrives. The copy of a chat the page keeps for its first moment now stays as small as any chat's; the previews and edits still come back from the chat's full history.
+
+**Wallets**
+
+- An ecash token card whose token was already spent reads Redeemed when you tap Redeem, instead of showing the mint's "already spent" error. After the update to 1.3.3, tokens you had redeemed on 1.3.2 offered Redeem again, and Redeem then failed with that error.
+
+**Website**
+
+- The apps pages no longer download each app's icon at the size its publisher made it (up to 1024 px and 256 KB) to draw it at 56 px. The site now serves it at the size the page draws it for your screen, about 1 or 2 KB per app, and the cards on the apps list load their icons only as they come near the screen.
+- On a tablet in landscape, a reader who scrolls past a chapter's last step before the home page has finished loading keeps that step on screen, its title where it was, instead of landing on its picture with the title gone.
+
 ## 1.3.4
 
 ### Security
