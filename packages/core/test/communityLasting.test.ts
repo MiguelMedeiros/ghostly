@@ -21,12 +21,15 @@ const lasting = (session: () => CommunitySession) => (m: CommunityIncomingApp) =
 
 class Net {
   readonly members = new Map<string, Member>();
+  /** Every frame handed, by whom to whom. */
+  readonly sent: { from: Member; to: Member; frame: CommunityFrame }[] = [];
   private pending: Promise<unknown>[] = [];
   constructor(private readonly withLasting = true) {}
 
   private hooks(member: Member): CommunitySessionHooks {
     const deliver = (to: Member | undefined, frame: CommunityFrame) => {
       if (!to || !to.online || !member.online || to === member) return;
+      this.sent.push({ from: member, to, frame });
       this.pending.push(to.session.handle(member.session.myKey, clone(frame)));
     };
     return {
@@ -115,6 +118,38 @@ describe("a community's pin reaches a member who was away however much was said 
     await net.settle();
     expect(alice.session.state.lasting ?? {}).toEqual({});
     expect(carol.session.state.lasting ?? {}).toEqual({});
+  });
+
+  it("a member who holds the pin is not handed it again when its epoch rolled out of the store", async () => {
+    const net = new Net();
+    const alice = net.create("Alice");
+    const bob = await net.admit(alice, "Bob");
+    const carol = await net.admit(alice, "Carol");
+    await net.settle();
+    let t = 1_000;
+    const sentPin = await alice.session.sendApp({ t: "pin", id: "m1", n: 5_000 }, "Alice", t++);
+    if ("error" in sentPin) throw new Error(sentPin.error);
+    await net.settle();
+    const pin = alice.session.state.lasting!.pin;
+    // A commit after the pin, then more than the store keeps: no frame of the pin's epoch is left in it.
+    await net.admit(alice, "Dave");
+    await net.settle();
+    for (let i = 0; i < 300; i++) {
+      const sent = await carol.session.sendText(`Carol ${i}`, "Carol", t++);
+      if ("error" in sent) throw new Error(sent.error);
+      await net.settle();
+    }
+    expect(alice.session.state.store.some(f => f.e === pin.e)).toBe(false);
+    expect(pinsOf(bob)).toHaveLength(1);
+    const handed: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const from = net.sent.length;
+      await alice.session.handle(bob.session.myKey, clone(bob.session.syncFrame()));
+      await net.settle();
+      handed.push(net.sent.slice(from).filter(s => s.from === alice && s.to === bob && s.frame.t === "group-msg" && s.frame.s === pin.s && s.frame.e === pin.e && s.frame.n === pin.n).length);
+    }
+    expect(handed).toEqual([0, 0, 0]);
+    expect(pinsOf(bob)).toHaveLength(1);
   });
 
   it("without the hook nothing is kept past the store: the member back after 300 has no pin (the bug)", async () => {
