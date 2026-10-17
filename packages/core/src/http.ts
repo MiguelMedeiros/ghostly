@@ -57,6 +57,30 @@ export function formatLocalTarget(target: LocalTarget): string {
 }
 
 /**
+ * Whether one segment of a path may read as `..` (or `.`, or hold a separator) on some server, though the URL parser
+ * kept it: servers that drop a segment's `;params` before they normalize (Tomcat, Jetty, older Spring) read `..;` and
+ * `..;jsessionid=1` as `..`, and one that decodes twice (a proxy in front of the app) reads `%252e%252e` as `..`.
+ */
+function climbsOut(segment: string): boolean {
+  // A plain `.` or `..` is the URL parser's to resolve, and the base path check below sees where it lands.
+  if (segment === "." || segment === "..") return false;
+  let text = segment;
+  for (let round = 0; round < 4; round++) {
+    const bare = text.split(";")[0];
+    if (bare === "." || bare === ".." || /[/\\]/.test(text)) return true;
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(text);
+    } catch {
+      return false;
+    }
+    if (decoded === text) return false;
+    text = decoded;
+  }
+  return true;
+}
+
+/**
  * Resolves a peer-supplied path against the configured target. Returns null
  * unless the result stays on the target origin and under its base path.
  */
@@ -69,7 +93,9 @@ export function resolveTargetUrl(target: LocalTarget, path: string): string | nu
   // Encoded separators survive URL normalization here but not in every server:
   // one that decodes `%2f` before routing would take `/app/..%2fadmin` to `/admin`.
   const queryAt = path.indexOf("?");
-  if (/%(2f|5c|2e)/i.test(queryAt === -1 ? path : path.slice(0, queryAt))) return null;
+  const pathPart = queryAt === -1 ? path : path.slice(0, queryAt);
+  if (/%(2f|5c|2e)/i.test(pathPart)) return null;
+  if (pathPart.split("/").some(climbsOut)) return null;
   let url: URL;
   try {
     url = new URL(`${target.origin}${target.basePath}${path}`);
