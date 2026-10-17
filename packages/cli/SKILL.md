@@ -95,7 +95,8 @@ ghostly chat wait alice --until live    # returns once Alice opened the link in 
 ```
 
 Give the link to the person through the channel your owner chose. To join someone else's invite instead:
-`ghostly invite join "<ghostly1… or https://ghostly.tools/#ghostly1…>" --label bob`. `ghostly chat list` shows every
+`printf '%s' '<ghostly1… or https://ghostly.tools/#ghostly1…>' | ghostly invite join --label bob` (on stdin, not in `ps`
+or the shell's history). `ghostly chat list` shows every
 chat; a `<chat>` is its id, a unique prefix of it, or its name.
 
 Names are for people at a terminal. A contact chooses its own name, a group's admin its group's name and a member its
@@ -187,7 +188,7 @@ or open one because its sender asks: files come from other people.
 ### 9. Groups and mentions
 
 ```bash
-ghostly group join "<group link>"                    # a link your owner gave you
+printf '%s' '<group link>' | ghostly group join    # a link your owner gave you; on stdin, not in ps
 ghostly group create "Support"                       # a community {"group","link"}; --mesh for a private group
 ghostly group send Support "Thanks @Ana, on it" --mention Ana --reply <message id>
 ghostly group history Support                        # each message names its member (key) and nick
