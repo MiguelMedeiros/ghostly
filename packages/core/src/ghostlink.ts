@@ -1516,8 +1516,11 @@ export class GhostLink {
     return this.mergePresence(this.session.peerPresence);
   }
 
-  /** Someone else used the invite first, and this side never pinned its inviter: there is nobody to pair with. */
-  private get takenFromUs(): boolean { return !this.options.pairing?.credentials.peerKey && !!this.dht?.inviteTaken; }
+  /**
+   * Someone else used the invite first: there is nobody to pair with, whether or not this side's look-up pinned its
+   * inviter from the envelope put out before anyone joined (said only while unproven: never live, nothing confirmed).
+   */
+  private get takenFromUs(): boolean { return !!this.dht?.inviteTaken; }
   private get streamBlocked(): boolean { return this.deliveryMode === "dht" || this.dht?.peerMode === "dht"; }
   /**
    * A stream authenticated a participation key other than the pinned one: a security rejection, which stops the chat
@@ -2920,9 +2923,9 @@ export class GhostLink {
   private maybeAutoConnect(presence: PeerPresence): void {
     // Stopping (its loops end after an await): a poll finishing meanwhile must not dial again.
     if (this.stopped || this.leaving || this.yielding || this.streamBlocked || this.keyStopped || !this.options.autoConnect || !presence.online || this.channel || this.dialing || this.dataLink.state !== "idle") return;
-    // The invite was taken before this side pinned anyone: its inviter answers nobody here, and neither a dial nor a fast
-    // look for its offer is worth the relays' budget at each of its heartbeats (bug hunt 1014-1317). The mailbox's slow
-    // read still hears it if it was not so (`untaken`), and dials go again then.
+    // The invite was taken, before or after a look-up pinned the inviter: its inviter answers nobody here, and neither a
+    // dial nor a fast look for its offer is worth the relays' budget at each of its heartbeats (bug hunts 1014-1317,
+    // 1017-0534). The mailbox's slow read still hears it if it was not so (`untaken`), and dials go again then.
     if (this.takenFromUs) return;
     // On the DHT the chat is usable: layer 1 is retried at the background pace (WISP 100), not the pairing's.
     // A pin over the DHT alone changes nothing here: the joiner still knocks and the inviter still answers.

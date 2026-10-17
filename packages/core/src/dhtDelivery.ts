@@ -855,8 +855,9 @@ export class DhtDelivery {
     for (const [i, box] of boxes.entries()) {
       if (i > 0 && box === "pinned") {
         // The contact just said it can use it: looked in at once. Otherwise a probe, when the invite's mailbox held a
-        // packet but nothing from the contact, now and then.
-        if (!this.state.peerPinned && (!found || Date.now() - this.pinnedProbeAt < PINNED_PROBE_MS)) return;
+        // packet but nothing from the contact, now and then; never while the invite is taken (that packet is the contact's,
+        // sealed to another: had it pinned this side, it would open here).
+        if (!this.state.peerPinned && (!found || this.state.inviteTaken || Date.now() - this.pinnedProbeAt < PINNED_PROBE_MS)) return;
         if (!this.state.peerPinned) this.pinnedProbeAt = Date.now();
       }
       const address = box === "pinned" ? pinned!.peerAddress : this.peerAddress;
@@ -964,14 +965,14 @@ export class DhtDelivery {
     return age >= AWAITING_PEER_MS ? age : undefined;
   }
   /**
-   * The wait between reads of the mailbox of a joined chat whose invite someone else used first (`inviteTaken`), before
-   * it pinned anyone: nothing is awaited from its inviter, so it is read as an unused invite of its age (counted from
-   * the join) from the notice on, however few other invites the app holds. One slow read stays, so a chat whose invite
-   * turns out not to be taken (`untaken`) still notices. Undefined for any other chat.
+   * The wait between reads of the mailbox of a joined chat whose invite someone else used first (`inviteTaken`), whether
+   * or not its look-up pinned the inviter first (`unanswered`): nothing is awaited from its inviter, so it is read as an
+   * unused invite of its age (counted from the join) from the notice on, however few other invites the app holds. One
+   * slow read stays, so a chat whose invite turns out not to be taken (`untaken`) still notices. Undefined for any other chat.
    */
   private takenInviteWait(): number | undefined {
     const now = Date.now(), madeAt = this.options.inviteMadeAt;
-    if (!this.state.inviteTaken || this.options.credentials.peerKey || madeAt === undefined || this.active || now < this.fastUntil) return undefined;
+    if (!this.state.inviteTaken || madeAt === undefined || this.active || now < this.fastUntil) return undefined;
     return unusedInviteWait(now - Math.min(madeAt, this.startedAt), this.mode === "dht" ? DHT_POLL_MS : STREAM_POLL_MS, Infinity);
   }
   private schedule(): void {
