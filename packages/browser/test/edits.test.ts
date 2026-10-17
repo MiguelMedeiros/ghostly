@@ -106,6 +106,27 @@ describe("editing my message", () => {
     history.mockRestore();
   });
 
+  it("a backlog of edits on their way costs one read per look, and a confirmation reads its own row alone", async () => {
+    // The contact confirms none: every edit stays on its way, ten go per window and the others wait.
+    const t = await setup({ confirm: () => false });
+    const K = 40, now = Date.now();
+    for (let n = 0; n < K; n++) await db.addMessage({ linkId: t.id, id: `me_${now - K + n}`, wireId: String(n).padStart(22, "B"), text: `card ${n}`, sender: "me", timestamp: now - K + n, via: "datalink", delivery: "delivered" });
+    for (let n = 0; n < K; n++) expect((await t.node.editMessage({ linkId: t.id, messageId: `me_${now - K + n}`, text: `card ${n} done` })).error).toBeNull();
+    await vi.waitFor(() => expect(t.contactEdits).toHaveLength(EDIT_SEND_LIMIT));
+    const queue = (t.node as unknown as { editQueues: Map<string, EditQueue> }).editQueues.get(t.id)!;
+    await queue.flush();
+    const transactions = vi.spyOn(IDBDatabase.prototype, "transaction");
+    await queue.flush();
+    const flushed = transactions.mock.calls.length;
+    transactions.mockClear();
+    await queue.received(String(0).padStart(22, "B"), 1);
+    const received = transactions.mock.calls.length;
+    transactions.mockRestore();
+    expect((await t.row(`me_${now - K}`)).edit?.pending).toBeUndefined();
+    // Before: one transaction per row on its way, at every look and every confirmation (K of them, all at once).
+    expect({ flushed, received }).toEqual({ flushed: expect.toBeOneOf([1, 2]), received: expect.toBeOneOf([1, 2, 3, 4]) });
+  });
+
   it("refuses what cannot be edited: the contact's messages, files, payments, notices, empty text, the 101st edit", async () => {
     const t = await setup();
     expect(await t.contact.sendMessage("theirs")).toBeNull();
@@ -324,11 +345,11 @@ describe("EditQueue", () => {
   });
 
   describe("with rows read by their id", () => {
-    function byId(onRow?: (id: string) => void) {
+    function byId(onRow?: (id: string) => void, asked: string[][] = []) {
       const now = { t: 10_000 }, sent: WireEdit[] = [], reads = { n: 0 };
       const q = new EditQueue({
         read: async () => { reads.n++; return [...rows.values()]; },
-        row: async id => { const r = rows.get(id); onRow?.(id); return r; },
+        rows: async ids => { asked.push(ids); return ids.map(id => { const r = rows.get(id); onRow?.(id); return r; }); },
         ready: () => true, now: () => now.t, receiptMs: 1_000,
         send: edit => { sent.push(edit); return null; },
         settle: async id => { const r = rows.get(id)!; rows.set(id, { ...r, edit: { ...r.edit!, pending: undefined } }); },
@@ -356,6 +377,21 @@ describe("EditQueue", () => {
       expect(sent).toHaveLength(2);
       await q.flush({ reopened: true });
       expect([sent.map(e => e.m), reads.n]).toEqual([["t1", "t2", "t3"], 2]);
+    });
+
+    it("a confirmation, live or on the DHT floor, reads the one row it is for", async () => {
+      for (let n = 1; n <= 30; n++) rows.set(`me_${n}`, row(n));
+      const asked: string[][] = [];
+      const { q, sent } = byId(undefined, asked);
+      await q.flush();
+      expect(sent).toHaveLength(EDIT_SEND_LIMIT);
+      asked.length = 0;
+      await q.received(row(2).wireId!, 1);
+      await q.receivedOnDht(dhtEditId(row(3).wireId!, 1));
+      // One that names no edit on its way reads nothing.
+      await q.received("W".repeat(22), 1);
+      expect(asked).toEqual([["me_2"], ["me_3"]]);
+      expect([rows.get("me_2")!.edit!.pending, rows.get("me_3")!.edit!.pending, rows.get("me_4")!.edit!.pending]).toEqual([undefined, undefined, true]);
     });
 
     it("keeps a row edited again while it was read as settled", async () => {
