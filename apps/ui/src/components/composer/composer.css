@@ -298,8 +298,8 @@
 }
 .expression-retry:hover { background: var(--color-surface-hover); }
 .expression-retry:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
-.expression-retry:disabled { opacity: 0.55; cursor: default; }
-.expression-retry:disabled:hover { background: var(--color-surface-alt); }
+.expression-retry:disabled, .expression-retry[aria-disabled="true"] { opacity: 0.55; cursor: default; }
+.expression-retry:disabled:hover, .expression-retry[aria-disabled="true"]:hover { background: var(--color-surface-alt); }
 /* GifCities' rate limit: the wait, then the GIFs this session has from earlier, if any. */
 .gif-busy-wait { font-variant-numeric: tabular-nums; }
 .gif-busy-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
