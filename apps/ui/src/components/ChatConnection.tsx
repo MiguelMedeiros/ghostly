@@ -176,9 +176,10 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
   const close = () => { if (root.current?.open) { root.current.open = false; trigger.current?.focus(); } };
   useOutsideDismiss(root, menuOpen, close);
   // Focus gone to a control outside (a Tab past its end): it closes and leaves the focus there. On a phone the panel
-  // covers the messages, and the control would be under it. A click on its text moves the focus nowhere: it stays.
+  // covers the messages, and the control would be under it. A press on its text (a click, a drag to select a relay)
+  // moves the focus nowhere, or to what holds the panel (the page's <main tabIndex={-1}>, App.tsx): it stays.
   const focusLeft = (e: FocusEvent<HTMLElement>) => {
-    if (!root.current?.open || !(e.relatedTarget instanceof Node) || root.current.contains(e.relatedTarget)) return;
+    if (!root.current?.open || !(e.relatedTarget instanceof Node) || root.current.contains(e.relatedTarget) || e.relatedTarget.contains(root.current)) return;
     root.current.open = false; setMenuOpen(false);
   };
   async function run(action: () => Promise<unknown>, fail = setError) {
