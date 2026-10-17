@@ -2,6 +2,7 @@ import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { ed25519, x25519 } from "@noble/curves/ed25519.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
+import { pacer } from "./appBundle";
 import { concatBytes, fromBase64Url, randomBytes, toBase64Url, utf8Decode, utf8Encode } from "./bytes";
 import { identityFromSeed, identityFromSeedB64, publicKeyFromZ32, type Identity } from "./identity";
 import { readInviteCode } from "./invite";
@@ -145,6 +146,25 @@ export function makeStamp(linkKeyZ32: string, askerZ32: string, day: number, bit
   const base = sha256.create().update(stampPrefix(linkKeyZ32, askerZ32, day));
   for (let stamp = 0; stamp <= 0xffffffff; stamp++) {
     if (leadingZeroBits(base.clone().update(stampBytes(stamp)).digest()) >= bits) return stamp;
+  }
+  throw new Error("No stamp");
+}
+
+/** `makeStampPaced` hashes for this long at most before it lets the thread go. */
+const STAMP_SLICE_MS = 8;
+/** It looks at the clock once every this many hashes: a fraction of a millisecond. */
+const STAMP_HASHES_AT_ONCE = 1024;
+
+/**
+ * `makeStamp` on a thread with other work, as the engine's is the page's on the web and Desktop: 2^24 hashes take from
+ * seconds to minutes, so it hashes in slices and lets the thread go between them. The same stamp, a little later.
+ */
+export async function makeStampPaced(linkKeyZ32: string, askerZ32: string, day: number, bits: number): Promise<number> {
+  const base = sha256.create().update(stampPrefix(linkKeyZ32, askerZ32, day));
+  const pause = pacer(STAMP_SLICE_MS);
+  for (let stamp = 0; stamp <= 0xffffffff; stamp++) {
+    if (leadingZeroBits(base.clone().update(stampBytes(stamp)).digest()) >= bits) return stamp;
+    if (stamp % STAMP_HASHES_AT_ONCE === STAMP_HASHES_AT_ONCE - 1) await pause();
   }
   throw new Error("No stamp");
 }
