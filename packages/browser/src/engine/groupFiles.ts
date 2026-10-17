@@ -200,6 +200,11 @@ interface Want {
   holder?: string;
   linkId?: string;
   at: number;
+  /**
+   * When this round began: once `wantWaitMs` went by and nobody is asked, a new round asks every holder again, the one
+   * left too. Asks that find nobody, or a member that says it holds the file and answers `gone`, do not put it off.
+   */
+  round: number;
   /** Holders asked in this round that had nothing to give: the next ask goes to another. */
   tried: Set<string>;
   /**
@@ -465,7 +470,7 @@ export class GroupFileDesk {
     }
     const want = this.wants.get(kept.id);
     if (!want) this.wants.set(kept.id, this.newWant());
-    else if (!want.wire) { want.tried.clear(); want.why = want.busy = undefined; }
+    else if (!want.wire) { want.tried.clear(); want.why = want.busy = undefined; want.round = this.deps.now(); }
     this.ask(kept);
   }
 
@@ -563,7 +568,7 @@ export class GroupFileDesk {
       const kept = this.kept.get(id);
       if (!kept) { this.wants.delete(id); continue; }
       if (this.leaveSlow(kept, want)) continue;
-      if (now - (want.wire ? want.movedAt : want.at) < GROUP_FILE_LIMITS.wantWaitMs) continue;
+      if (now - (want.wire ? want.movedAt : want.holder ? want.at : want.round) < GROUP_FILE_LIMITS.wantWaitMs) continue;
       if (want.wire) {
         // A holder that stalls, or sends too little to count (`wantMoveBytes`), is left: the transfer ends here, and the
         // next holder is asked (`transferChanged`).
@@ -574,7 +579,7 @@ export class GroupFileDesk {
       }
       if (want.holder) want.tried.add(want.holder);
       // Everyone asked in turn: a new round, as holders come and go.
-      else { want.tried.clear(); want.why = want.busy = undefined; }
+      else { want.tried.clear(); want.why = want.busy = undefined; want.round = now; }
       this.ask(kept);
     }
     this.letGo();
@@ -592,7 +597,7 @@ export class GroupFileDesk {
 
   // -- asking --------------------------------------------------------------------------------------------------
 
-  private newWant(): Want { return { at: this.deps.now(), tried: new Set(), moved: 0, movedAt: 0 }; }
+  private newWant(): Want { return { at: this.deps.now(), round: this.deps.now(), tried: new Set(), moved: 0, movedAt: 0 }; }
 
   /**
    * Wants of this group that wait for a holder: asked now (an edge came up or freed, or a member said it holds

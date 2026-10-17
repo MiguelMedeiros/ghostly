@@ -167,7 +167,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
     resumeAt.current = clamped;
     if (audioRef.current && srcRef.current) audioRef.current.currentTime = clamped;
   };
-  mediaRef.current = { title: file.name, artist: sender === "me" ? t("chat.reply.you") : peerName, play: () => void play(), pause, seekTo: seek };
+  mediaRef.current = { title: t("chat.audio.message"), play: () => void play(), pause, seekTo: seek };
 
   const act = (action: FileAction) => {
     setActionError("");
@@ -325,7 +325,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
             setPlayState("playing");
             // The lock screen and media keys drive the one playing now.
             const shown = mediaRef.current!;
-            claimMediaSession(file.id, { title: shown.title, artist: shown.artist, play: () => mediaRef.current?.play(), pause: () => mediaRef.current?.pause(), seekTo: (at) => mediaRef.current?.seekTo(at) });
+            claimMediaSession(file.id, { title: shown.title, play: () => mediaRef.current?.play(), pause: () => mediaRef.current?.pause(), seekTo: (at) => mediaRef.current?.seekTo(at) });
           }}
           onPause={() => { releasePlayback(file.id); mediaSessionState(file.id, "paused"); setPlayState((was) => (was === "playing" ? "paused" : was)); }}
           onEnded={() => { resumeAt.current = 0; setPosition(0); unload(); setPlayState("idle"); }}

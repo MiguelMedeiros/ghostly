@@ -49,7 +49,6 @@ function describeFailure(what: string, error: unknown): string {
  */
 export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile & { voice: VoiceMeta }; sender: "me" | "peer"; peerName?: string }) {
   const t = useT();
-  const peerName = named ?? t("pairing.contact");
   const { platform, transfer, restoring } = useTransfer(file.id);
   const locale = languageTag(useOptionalI18n()?.language ?? "en");
   // No transfer is "finished" only once the engine has put its kept transfers back after a start (as AudioBubble).
@@ -279,7 +278,6 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
     // The lock screen and media keys drive the one playing now (through `mediaRef`, always this render's functions).
     claimMediaSession(file.id, {
       title: t("chat.voice.message"),
-      artist: sender === "me" ? t("chat.reply.you") : peerName,
       play: () => mediaRef.current?.play(),
       pause: () => mediaRef.current?.pause(),
       seekTo: (at) => mediaRef.current?.seekTo(at),
@@ -287,7 +285,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
     });
     mediaSessionPosition(file.id, audio.currentTime, seconds, audio.playbackRate);
     if (sender === "peer" && !played) { markVoicePlayed(file.id); setPlayed(true); }
-  }, [ready, file.id, load, seconds, showProgress, start, followAudio, sender, played, peerName, t]);
+  }, [ready, file.id, load, seconds, showProgress, start, followAudio, sender, played, t]);
 
   useEffect(() => registerVoicePlayer(file.id, { play: () => void play(), pause }), [file.id, play, pause]);
   useEffect(() => onVoiceRate((next) => {

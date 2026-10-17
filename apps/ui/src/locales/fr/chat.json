@@ -7,6 +7,7 @@
   },
   "audio": {
     "cantPlay": "Cet appareil ne peut pas lire cet audio ({{format}}). Téléchargez-le pour l'écouter.",
+    "message": "Audio",
     "pause": "Mettre l'audio en pause",
     "play": "Lire l'audio",
     "position": "Position dans l'audio",
