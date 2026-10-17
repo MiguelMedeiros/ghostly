@@ -1032,9 +1032,10 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   if (!inFlight) {
     // A head the train may not push to flies no further, whatever its mark says: its next rebase would be a push.
     // Nor one none of whose runs can count (`own`: more events than it reads, or a run another pull request from its
-    // branch or its old base made): its CI reads "none", so each run would rebase and push it again for good while
-    // nobody behind it moves. It waits in line, as `waiting` says, and the next one goes.
-    const refused = (p) => p.unread || (p.ci !== "success" && p.ci !== "failure" && (p.shared?.length || p.retargeted));
+    // branch into another base made): its CI reads "none", so each run would rebase and push it again for good while
+    // nobody behind it moves. It waits in line, as `waiting` says, and the next one goes. (A base changed in flight
+    // needs no more: its mark's base is not the new tip, so it is rebased onto it, and that run counts.)
+    const refused = (p) => p.unread || (p.ci !== "success" && p.ci !== "failure" && p.shared?.length);
     const lone = line().find((p) => p.alone?.sha === p.sha && canGoAlone(p) && !refused(p));
     if (lone) inFlight = await flyAlone(lone);
   }
