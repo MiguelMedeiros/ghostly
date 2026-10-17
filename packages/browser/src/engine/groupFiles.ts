@@ -212,7 +212,7 @@ interface Want {
   /** When the holder offered, and the bytes stored here then: its pace is what moved since. */
   offeredAt?: number;
   offeredBytes?: number;
-  /** Holders that said they hold the file while another served it: one it may leave for, when that one is slow (`leaveSlow`). */
+  /** Holders that said they hold the file while another served it: one it may leave for, as for a known holder, when that one is slow (`leaveSlow`). */
   free?: Set<string>;
   /** What the last holder asked in this round answered, when it was not the file: shown while the want waits. */
   why?: "busy" | "damaged";
@@ -711,12 +711,14 @@ export class GroupFileDesk {
   }
 
   /**
-   * The holder serving this want is slow (served `slowAfterMs`, and at its pace more than `wantWaitMs` to go) and a holder
-   * that said it holds the file since is free to ask: the transfer ends here, what came stays, and the next holder is
-   * asked (`transferChanged`), so a phone's slow upload does not keep a member the author or a fast holder could serve.
+   * The holder serving this want is slow (served `slowAfterMs`, and at its pace more than `wantWaitMs` to go) and another
+   * holder is free to ask, one known before the offer or one that said it holds the file since: the transfer ends here,
+   * what came stays, and the next holder is asked (`transferChanged`), so a phone's slow upload does not keep a member the
+   * author or a fast holder could serve. (The newest holder heard is asked first, whatever its pace: a phone that finished
+   * after a fast member is the one taken.)
    */
   private leaveSlow(kept: Kept, want: Want): boolean {
-    if (!want.wire || !want.free?.size || want.offeredAt === undefined) return false;
+    if (!want.wire || want.offeredAt === undefined) return false;
     const edge = want.linkId ? this.edgesById.get(want.linkId) : undefined;
     const record = edge?.files.get("in", want.wire);
     if (!edge || !record || transferEnded(record) || record.state === "verifying") return false;
@@ -725,7 +727,8 @@ export class GroupFileDesk {
     const stored = Math.max(want.moved, kept.stored ?? 0, want.offeredBytes ?? 0), pace = (stored - (want.offeredBytes ?? 0)) / elapsed;
     if (pace > 0 && (kept.meta.size - stored) / pace <= GROUP_FILE_LIMITS.wantWaitMs) return false;
     const edges = this.deps.edges(kept.groupId);
-    const other = [...want.free].some(key => {
+    const candidates = new Set([...this.knownHolders(kept, this.deps.membership(kept.groupId)), ...want.free ?? []]);
+    const other = [...candidates].some(key => {
       const linkId = edges.get(key);
       return !!linkId && key !== want.holder && this.mayAsk(kept, want, key, linkId) && this.deps.ready(linkId)
         && !!this.edgesById.get(linkId)?.files.live && !this.askedOf(linkId, want);
