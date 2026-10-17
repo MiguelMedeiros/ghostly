@@ -250,6 +250,7 @@
     "youObject": "أنت"
   },
   "invoice": {
+    "alreadySpent": "أُنفق من قبل",
     "anyAmount": "أي مبلغ",
     "checking": "جارٍ التحقق…",
     "confirmWhat": "{{amount}} sats (بالإضافة إلى رسوم حتى {{fee}})",
