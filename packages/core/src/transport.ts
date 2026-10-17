@@ -70,6 +70,12 @@ export interface PkarrRequestOptions {
    * signature is not checked again on the way to the relays, as `RelayTransport.putSigned`'s is not.
    */
   signedAt?: bigint;
+  /**
+   * `publishPayload` only, with `signedAt`: the same records signed again, dated past `after` (what a relay that answered
+   * 409 holds under the key); null when a newer packet of the key took over. The relays' transport puts that one at
+   * once rather than leave the relay's copy in place until the next publish (`RelayTransport.publishPayload`).
+   */
+  redate?: (after: bigint) => { payload: Uint8Array; signedAt: bigint } | null;
 }
 
 /**
