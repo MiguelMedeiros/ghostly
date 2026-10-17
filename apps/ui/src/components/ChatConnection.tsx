@@ -1,6 +1,7 @@
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useCopyKey } from "../hooks/useCopyKey";
+import { useFocusBack } from "../hooks/useFocusBack";
 import { Link } from "react-router-dom";
 import type { PairedTransport } from "@ghostly/core";
 import { useId, useRef, useState, useSyncExternalStore, type FocusEvent } from "react";
@@ -181,7 +182,10 @@ export function ChatConnection({ peerKey, paired = true, myKey, status, pairing,
     if (!root.current?.open || !(e.relatedTarget instanceof Node) || root.current.contains(e.relatedTarget)) return;
     root.current.open = false; setMenuOpen(false);
   };
+  // The choice or button pressed is disabled while its work runs, which drops the focus to the page: it gets it back.
+  const focusBack = useFocusBack(busy);
   async function run(action: () => Promise<unknown>, fail = setError) {
+    focusBack();
     setBusy(true); fail("");
     // The error as it came: the failure line says it in a few words, its English behind the ⓘ.
     try { await action(); } catch (e) { fail(e instanceof Error ? rawError(e) || t("connection.panel.updateFailed") : t("connection.panel.updateFailed")); }
