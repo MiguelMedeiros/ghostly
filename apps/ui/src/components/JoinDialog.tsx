@@ -266,7 +266,8 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       <p className="mt-2 text-center text-xs text-text-secondary">{t("join.pasteScreenshot")}</p>
     </>}
     {error && <Notice problem={error} className="mt-3 text-sm" />}
-    {error && error === reloadProblem && <ReloadButton testId="join-reload" className={`${button} mt-3 w-full border border-border aria-disabled:opacity-60 aria-disabled:cursor-not-allowed`} />}
+    {/* A chat's Join comes back open, the camera on (`#/scan`, the "Scan invite" shortcut); a device's code where it was. */}
+    {error && error === reloadProblem && <ReloadButton testId="join-reload" to={onDevice ? undefined : "#/scan"} className={`${button} mt-3 w-full border border-border aria-disabled:opacity-60 aria-disabled:cursor-not-allowed`} />}
     {own && <div data-testid="join-own-invite" className="mt-3 rounded-lg border border-border bg-input-bg p-3">
       <p role="alert" className="text-sm text-text-primary">{t("join.own")}</p>
       <button type="button" data-testid="join-open-chat" onClick={() => { joined.current = true; stop(); (onOpenChat ?? onClose)(own); }} className={`${button} mt-3 w-full bg-accent text-panel-header`}>{t("join.openChat")}</button>
