@@ -965,12 +965,23 @@ export class RelayTransport implements PkarrTransport {
     throw new Error("No Pkarr relay reachable");
   }
 
-  /** The order a key's read asks the relays in: in turn per key (see `resolve`), relays found slow lately last. */
+  /**
+   * The order a key's read asks the relays in: in turn per key (see `resolve`), among the relays with requests left this
+   * minute, then the ones spent, then relays found slow lately. A relay with a small share (pkarr.miguelmedeiros.dev's
+   * 5) is often spent: counted in the turn, the relay after it took its turns too, and pkarr.pubky.org got two reads in
+   * three while pkarr.pubky.app, with twice its share, got one.
+   */
   private readOrder(pubKeyZ32: string): string[] {
+    const now = Date.now();
+    const spent = (relay: string) => (this.spent.get(relay) ?? []).filter((at) => now - at < 60_000).length >= this.limitOf(relay);
+    const open = this.relays.filter((relay) => !spent(relay));
+    const ring = open.length ? open : this.relays;
     const last = this.lastReadFrom.get(pubKeyZ32), lastAt = last === undefined ? -1 : this.relays.indexOf(last);
-    const start = lastAt >= 0 ? lastAt + 1 : this.cursor++;
-    const turn = this.relays.map((_, i) => this.relays[(start + i) % this.relays.length]);
-    const now = Date.now(), slow = (relay: string) => (this.slowUntil.get(relay) ?? 0) > now;
+    // After the relay that answered last: the next one in the ring, from where that relay is in the list.
+    const after = lastAt < 0 ? -1 : ring.findIndex((relay) => this.relays.indexOf(relay) > lastAt);
+    const start = lastAt < 0 ? this.cursor++ : after < 0 ? 0 : after;
+    const turn = [...ring.map((_, i) => ring[(start + i) % ring.length]), ...this.relays.filter((relay) => !ring.includes(relay))];
+    const slow = (relay: string) => (this.slowUntil.get(relay) ?? 0) > now;
     return [...turn.filter((relay) => !slow(relay)), ...turn.filter(slow)];
   }
 

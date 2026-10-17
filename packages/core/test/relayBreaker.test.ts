@@ -358,6 +358,20 @@ describe("the default relays", () => {
     expect(calls).toHaveLength(all);
   });
 
+  it("with pkarr.miguelmedeiros.dev's minute spent, reads take the Pubky relays in turn, not pkarr.pubky.org twice as often", async () => {
+    const calls: string[] = [];
+    const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(`${init?.method ?? "GET"} ${new URL(String(input)).host}`);
+      return new Response(null, { status: 404 });
+    }) as typeof fetch;
+    const relay = new RelayTransport({ freshReadMs: 0, relays: DEFAULT_RELAYS, fetch: fetchFn });
+    while (calls.filter(c => c === "GET pkarr.miguelmedeiros.dev").length < 5) await relay.resolve(createIdentity().pubKeyZ32);
+    calls.length = 0;
+    for (let i = 0; i < 20; i++) await relay.resolve(createIdentity().pubKeyZ32);
+    expect(calls.filter(c => c === "GET pkarr.pubky.org")).toHaveLength(10);
+    expect(calls.filter(c => c === "GET pkarr.pubky.app")).toHaveLength(10);
+  });
+
   it("background requests keep to two thirds of pkarr.miguelmedeiros.dev's 5, so a write still goes out there", async () => {
     const calls: string[] = [];
     const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
