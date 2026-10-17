@@ -261,6 +261,18 @@ describe("the Share to… picker", () => {
     expect(screen.getByTestId("share-cancel")).toBeInTheDocument();
   });
 
+  it("names the files it could not read apart from those too large, also when that was all of a later share", () => {
+    receiveShare(share({ text: "look", leftOut: ["VID_1.mp4"], unread: ["IMG_2.jpg"] }));
+    // A later share whose only file could not be read: named with the share that waits, which stays.
+    receiveShare(share({ unread: ["IMG_3.jpg"] }));
+    picker();
+    expect(screen.getByTestId("share-text")).toHaveTextContent("look");
+    expect(screen.getByTestId("share-left-out-title")).toHaveTextContent("Too large to share here: VID_1.mp4");
+    expect(screen.getByTestId("share-unread-title")).toHaveTextContent("Couldn't read: IMG_2.jpg, IMG_3.jpg");
+    expect(screen.getByTestId("share-unread-next")).toHaveTextContent("Share it again from its app, or open a chat and send it with + → Document.");
+    expect(screen.getByTestId("share-chat")).toHaveTextContent("Ana");
+  });
+
   it("with nothing shared, it says so once it has waited", () => {
     vi.useFakeTimers();
     try {

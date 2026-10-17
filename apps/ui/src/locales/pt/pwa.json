@@ -27,6 +27,8 @@
   "shareTitle": "Compartilhar com…",
   "shareTooLarge": "Grande demais para compartilhar aqui: {{names}}",
   "shareTooLargeNext": "Abra uma conversa e envie com + → Documento.",
+  "shareUnread": "Não foi possível ler: {{names}}",
+  "shareUnreadNext": "Compartilhe de novo pelo app de origem, ou abra uma conversa e envie com + → Documento.",
   "shareWaiting": "Buscando o que foi compartilhado...",
   "stepsThen": "Depois abra o Ghostly pelo novo ícone.",
   "storageFull": "Armazenamento cheio",
