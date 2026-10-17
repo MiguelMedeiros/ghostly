@@ -574,7 +574,8 @@ export function GroupChat() {
           </button>}
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-1.5">
-              <p className="text-[15px] m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || t("group.chat.unnamed")}</p>
+              {/* In its own direction: a Latin name in Arabic is cut at its end, as in English, not at its start. */}
+              <p dir="auto" className="text-[15px] m-0 leading-tight truncate text-text-primary" data-testid="group-name">{group.name || t("group.chat.unnamed")}</p>
             </div>
             {invited ? <p data-testid="group-members" className="m-0 max-w-full text-xs text-text-muted truncate">{subtitle}</p>
             : <button onClick={() => setShowMembers(true)} data-testid="group-members" className="block max-w-full text-xs text-text-muted truncate hover:text-accent cursor-pointer">

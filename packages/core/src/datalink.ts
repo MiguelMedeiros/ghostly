@@ -288,6 +288,9 @@ export class DataLink {
     catch { return null; }
   }
 
+  /** The peer connection this link holds now (null when idle): a later one is another attempt. */
+  get connection(): RTCPeerConnection | null { return this.pc; }
+
   close(): void {
     // Given up for another transport that went live while this one had long had both descriptions: evidence all the same.
     const stalled = Date.now() - this.connectingSince >= STALLED_EVIDENCE_MS;

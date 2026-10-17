@@ -38,7 +38,8 @@ export interface PairingPresence {
   show: boolean;
   /**
    * The scene itself is on: `show`, until the pairing goes on the DHT, where the chat takes over (WISP 400). It does not
-   * come back: a live link that comes up later is the chat's connection, told by the icon and the timeline.
+   * come back: a live link that comes up later is the chat's connection, told by the icon and the timeline. Only an
+   * invite someone else used first, learnt after, brings it back: that chat has nobody to wait for.
    */
   scene: boolean;
   celebrating: boolean;
@@ -94,7 +95,12 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
   // links, and a chat made a minute before (paired since) would show the scene for a reconnect. That one waits for its link.
   const made = createdAt ?? Date.now();
   const provisional = !!state && made >= pageStart() && Date.now() - made < NEW_CHAT_MS;
-  if (first.current === null && enabled && link) first.current = shown.current || !link.peerParticipationKey;
+  // Someone else used the invite first: the pairing never happened, though the look-up pinned the inviter. After a
+  // restart too, and once the chat was on the DHT, the scene says so: nobody will answer this chat.
+  const taken = reported?.stage === "failed" && reported.reason === "taken";
+  // After a reload the engine lists the chat before its link is up, with no pairing yet: a chat decided paired from that
+  // first look, then said taken, never paired either.
+  if (enabled && link && (first.current === null || taken)) first.current = first.current || shown.current || !link.peerParticipationKey || taken;
   const firstPairing = first.current ?? provisional;
   if (!link && firstPairing) shown.current = true;
 
@@ -186,7 +192,7 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
   if (!enabled) return { progress: null, show: false, scene: false, celebrating: false, retry, retrying, retryError };
   const progress: PairingProgressState = { ...base, linkId, derived: !reported, view };
   const show = firstPairing && !done && (stage !== "live" || celebrating);
-  return { progress, show, scene: show && stage !== "on-dht" && !aside.current, celebrating, retry, retrying, retryError };
+  return { progress, show, scene: show && stage !== "on-dht" && (!aside.current || taken), celebrating, retry, retrying, retryError };
 }
 
 /** The clock, once a second while `running`: for elapsed times that tick on screen. */

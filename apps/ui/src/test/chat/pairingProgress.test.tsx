@@ -469,8 +469,8 @@ describe("texts on the DHT while the scene still pairs (an app with no WebRTC, b
 
 describe("a pairing that ends on the DHT (WISP 400)", () => {
   /** Chat.tsx's split: the pairing in the connection icon while `show`, the scene only while `scene`. */
-  function Chat() {
-    const p = usePairingProgress("peer", { inviter: false, enabled: true, createdAt: Date.now() });
+  function Chat({ createdAt = Date.now() }: { createdAt?: number }) {
+    const p = usePairingProgress("peer", { inviter: false, enabled: true, createdAt });
     return <>
       <ChatConnection peerKey="peer" pairing={p.show && p.progress ? { progress: p.progress } : undefined} />
       {p.scene && p.progress ? <PairingScene progress={p.progress} contact="Alice" retry={() => {}} retrying={false} retryError="" /> : <p>the chat</p>}
@@ -498,6 +498,39 @@ describe("a pairing that ends on the DHT (WISP 400)", () => {
       show(onDht(reason), engine);
       expect(screen.getByTestId("connection-tooltip")).toHaveTextContent(words);
     }
+  });
+
+  const taken = { role: "joiner", stage: "failed", reason: "taken", retryable: false, detail: INVITE_TAKEN, since: Date.now(), startedAt: Date.now(), attempt: 1 } as PairingProgress;
+
+  it("an invite someone else used first, learnt once the chat was on the DHT: the scene comes back to say so", () => {
+    const { engine } = renderApp(<Chat />);
+    show({ ...onDht("waiting"), peerParticipationKey: "p", textDelivery: "dht" }, engine);
+    expect(scene()).toBeNull();
+    show({ ...published, peerParticipationKey: "p", textDelivery: "dht", pairingProgress: taken }, engine);
+    expect(within(scene()!).getByRole("alert")).toHaveTextContent("Someone else joined with this invite first.");
+    expect(screen.getByTestId("connection-options")).not.toHaveAccessibleName("Connection options: On DHT · retrying live");
+  });
+
+  it("after a restart, a chat that pinned its inviter before it learnt the invite was taken still says so", () => {
+    const createdAt = Date.now() - 60_000;
+    const restarted = { ...published, createdAt, peerParticipationKey: "p", textDelivery: "dht", pairingProgress: { ...taken, startedAt: createdAt } } as Partial<LinkView>;
+    fakeEngine.update({ links: [linkView(restarted)] });
+    const { engine } = renderApp(<Chat createdAt={createdAt} />);
+    act(() => engine.update({ links: [linkView(restarted)] }));
+    expect(within(scene()!).getByRole("alert")).toHaveTextContent("Someone else joined with this invite first.");
+    expect(screen.queryByText("the chat")).toBeNull();
+  });
+
+  it("after a restart, the chat's link reaching the page before its pairing says the invite was taken: the scene still comes", () => {
+    const createdAt = Date.now() - 60_000;
+    const stored = { ...unstarted, createdAt, peerParticipationKey: "p", textDelivery: "dht" } as Partial<LinkView>;
+    fakeEngine.update({ links: [linkView(stored)] });
+    const { engine } = renderApp(<Chat createdAt={createdAt} />);
+    act(() => engine.update({ links: [linkView(stored)] }));
+    expect(scene()).toBeNull();
+    act(() => engine.update({ links: [linkView({ ...stored, ...published, pairingProgress: { ...taken, startedAt: createdAt } })] }));
+    expect(within(scene()!).getByRole("alert")).toHaveTextContent("Someone else joined with this invite first.");
+    expect(screen.queryByText("the chat")).toBeNull();
   });
 });
 
@@ -663,6 +696,12 @@ describe("motion", () => {
     expect(css).toMatch(/:root\[data-reduce-motion="true"\] \.ps\[data-stage="knocking"\] :is\(\.ps-route-up, \.ps-route-low\)/);
     expect(css).toMatch(/\.ps\[data-paused\] \*, \.ps\[data-paused\] \{ animation-play-state: paused !important; \}/);
     expect(css).toMatch(/\.ps\[data-still\]\[data-stage="knocking"\] :is\(\.ps-route-up, \.ps-route-low\)/);
+  });
+
+  it("in a right-to-left language the icon mirrors as the scene does: this side and the packet's start on the right", () => {
+    const css = readFileSync(join(fileURLToPath(import.meta.url), "../../../components/pairing/pairing-scene.css"), "utf8");
+    expect(css).toMatch(/:root\[dir="rtl"\] \.ps-svg[^{]*\{ transform: scaleX\(-1\); \}/);
+    expect(css).toMatch(/:root\[dir="rtl"\] \.pg[^{]*\{ transform: scaleX\(-1\); \}/);
   });
 });
 

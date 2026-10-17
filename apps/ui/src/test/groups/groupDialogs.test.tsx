@@ -245,6 +245,13 @@ describe("GroupMembersDialog", () => {
     expect(engine.callsTo("inviteToGroup")).toEqual([{ groupId: "group-1", linkId: "link-carol" }]);
   });
 
+  it("gives the group's, each member's and each contact's name its own direction, so in Arabic a Latin name is cut at its end", () => {
+    members_(groupView({ status: "active", isAdmin: true, name: "Neighbourhood book club", members }), [paired({ id: "link-carol", label: "Carol" })]);
+    expect(screen.getByTestId("group-members-name")).toHaveAttribute("dir", "auto");
+    expect(screen.getAllByTestId("group-member-name").map(name => [name.textContent, name.getAttribute("dir")])).toEqual([["You", "auto"], ["Alice", "auto"], ["Bob", "auto"]]);
+    expect(within(screen.getByTestId("group-invite-contact")).getByText("Carol")).toHaveAttribute("dir", "auto");
+  });
+
   it("names an unnamed contact by their key", () => {
     members_(groupView({ status: "active", isAdmin: true, members }), [paired({ id: "link-x", peerPubKeyZ32: "k".repeat(52) })]);
     expect(screen.getByTestId("group-invite-contact")).toHaveTextContent("Contact · kkkkkk");

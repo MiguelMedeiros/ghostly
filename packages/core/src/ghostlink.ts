@@ -74,6 +74,13 @@ import { engineError } from "./engineErrors";
 /** Unanswered offers are repeated less and less often: 1.5, 3, 6, then every 12 minutes. */
 /** After a failed attempt: 20 s, then doubling up to 3 min. Someone opening the chat starts it over. */
 const AUTO_CONNECT_RETRY_MS = 20_000;
+/**
+ * Back after a restart (`resume`), a first automatic dial that failed within this long reached nobody (a HyperDHT hole
+ * punch aborted at once on loopback, 4-13 ms): it is tried again after `INSTANT_FAIL_RETRY_MS`, once, before it counts.
+ * Counted, it held the chat 40 s while the app's other chats came back in 0.5-3 s (DHT-direct lab, 2026-10-17).
+ */
+const INSTANT_FAIL_MS = 100;
+const INSTANT_FAIL_RETRY_MS = 3_000;
 /** A group link with nothing to dial looks fast for the member's `_tr` on this many attempts, then at its own pace. */
 const PACKET_TRANSPORTS_FAST_ATTEMPTS = 3;
 /** A native transport that fails this many attempts in a row is skipped for `DEMOTE_MS`, while another remains (WISP 100). */
@@ -104,6 +111,8 @@ export const CROSSED_FRESH_MS = 10_000;
  * 7 ms on loopback and under 0.5 s over a relayed Iroh.
  */
 export const CROSSED_PROBE_MS = 1_500;
+/** Frames a connection waiting on `probeCrossed` keeps for the session that may take it: a handshake's few. */
+const PROBE_EARLY_FRAMES = 8;
 /** A WebRTC attempt under way, not yet open: what a member's packet saying it has no WebRTC ends (`peerPacketTransports`). */
 const WEBRTC_ATTEMPT: ReadonlySet<DataLinkState> = new Set(["offering", "answering", "connecting"]);
 /** A joiner gathers its offer while it first looks for the inviter (`dialEarly`) only this soon after the join. */
@@ -979,12 +988,18 @@ export class GhostLink {
   private resuming: PairedTransport | undefined;
   /** Until then, a dial waits for the native endpoint `resuming` names to start (it is knocked on as it does). */
   private resumeWaitUntil = 0;
+  /** The contact's other native transports were knocked on while this resume waited (`knockWhileResuming`). */
+  private resumeKnocked = false;
   /** What the last live session ran on, kept after it ended: a wake resumes on it (`resumeAfterAbsence`). */
   private lastLiveOn: PairedTransport | undefined;
   /** `resuming` is a wake's, not a restart's. */
   private resumingWoke = false;
   /** Until then, a session that ends was lost while the app was away (`WAKE_LOST_MS`). */
   private wokeUntil = 0;
+  /** Back after a restart, the first automatic dial is still to go (`INSTANT_FAIL_MS`). */
+  private resumeDial = false;
+  /** That dial failed at once: the next waits `INSTANT_FAIL_RETRY_MS`, not `dialWait`'s backoff. */
+  private instantRetry = false;
 
   constructor(options: GhostLinkOptions) {
     this.options = options;
@@ -992,9 +1007,15 @@ export class GhostLink {
     // A link that signs through a signer (a device link) has no seed for what a chat signs beside its session.
     if (options.pairing?.credentials.signer && (options.dht || options.params.deliveryMode === "dht")) throw new Error("A link that signs through a signer has no DHT delivery");
     this.deliveryMode = options.params.deliveryMode ?? "stream";
+    // A joiner that pinned its inviter, then read that someone else used the invite first (`inviteTaken`), never paired:
+    // the engine asks no progress of a pinned chat, yet after a restart its pairing is still the one stopped there, not
+    // a chat on the DHT waiting for a contact who is paired with someone else.
+    const dhtState = options.dht?.state;
+    const takenAtStart = !!options.pairing?.credentials.peerKey && !!dhtState?.inviteTaken && !dhtState.wasLive;
+    const firstPairing = options.pairingProgress ?? (takenAtStart ? { role: "joiner" as const, startedAt: options.madeAt ?? Date.now() } : undefined);
     // A DHT-only invite pairs through its mailbox, not through these stages.
-    this.tracker = options.pairingProgress && options.pairing && !options.pairing.credentials.peerKey && this.deliveryMode !== "dht"
-      ? new PairingTracker(options.pairingProgress.role, options.pairingProgress.startedAt, progress => {
+    this.tracker = firstPairing && options.pairing && (!options.pairing.credentials.peerKey || takenAtStart) && this.deliveryMode !== "dht"
+      ? new PairingTracker(firstPairing.role, firstPairing.startedAt, progress => {
         traceLink(this.myPubKeyZ32, "progress", { stage: progress.stage, attempt: progress.attempt, peerSeen: progress.peerSeen, reason: progress.reason, retryable: progress.retryable, transport: progress.transport });
         options.events?.onPairingProgress?.(progress);
       }) : null;
@@ -1071,6 +1092,7 @@ export class GhostLink {
     this.fallback = options.native?.fallback ?? true;
     this.automatic = options.native?.automatic ?? !options.native?.preferred;
     this.resuming = options.pairing?.credentials.peerKey && options.params.profile ? options.resume : undefined;
+    this.resumeDial = !!this.resuming && !options.packetTransports;
     const events = options.events ?? {};
 
     this.session = new LinkSession({
@@ -1194,7 +1216,7 @@ export class GhostLink {
         const plan = this.switcher.pending;
         if (plan?.choices.includes("webrtc/1") && this.paired?.state.status === "ready") {
           void this.attachCandidate(channel, undefined, plan).catch(() => {});
-        } else if (this.activeBinding) channel.close(); else this.attach(channel);
+        } else if (this.activeBinding) this.rtcOverHeld(channel); else this.attach(channel);
       },
       onClose: () => {
         if (this.activeBinding) return;
@@ -1312,6 +1334,8 @@ export class GhostLink {
     // switch intent. Without it both sides' intents start at none, and the chat stays wherever the first dial landed,
     // waiting for nothing. A `preferred` alone is only where to dial first.
     if (options.native?.automatic === false) this.switcher.choseApart();
+    // Pinned over the DHT: if the inviter's envelope reads here again (`untaken`), the chat is on the DHT, still trying.
+    if (takenAtStart) { this.tracker?.pinnedOverDht(); this.tracker?.failed("taken", false, INVITE_TAKEN); }
   }
 
   get myPubKeyZ32(): string {
@@ -2559,6 +2583,23 @@ export class GhostLink {
     this.knockedEarly = epoch;
     void this.knockEarly(epoch, direct);
   }
+  /**
+   * Back after a restart on a native transport whose endpoint has not started yet (Iroh waits up to 10 s for its relay,
+   * and does not start at all with the relay out of reach): the contact's other direct transports that are up here are
+   * knocked on meanwhile, once per resume, as a resume over WebRTC knocks as its offer goes out. The contact still holds
+   * its old session and reads slowly; before, the chat waited out `RESUME_WAIT_MS` and then the race's 8 s (20.5-22.9 s
+   * between two CLIs, bh-zero43). The first live wins, and the resumed transport is still knocked once it starts.
+   */
+  private knockWhileResuming(): void {
+    if (this.resumeKnocked || !this.fallback || !this.peerFallback || this.dialing || this.channel) return;
+    const relayed = this.upgradesFromRelay() ? [] : this.relayedTransports;
+    const offer = this.transportOffer();
+    const direct = TRANSPORTS.filter(t => t !== "webrtc/1" && t !== this.resuming && this.endpoints.has(t) && offer.includes(t)
+      && !!this.peerTransports?.includes(t) && !relayed.includes(t) && this.canDial(t));
+    if (!direct.length) return;
+    this.resumeKnocked = true;
+    void this.knockEarly(this.connectionEpoch, direct, () => true);
+  }
   private async knockEarly(epoch: number, transports: PairedTransport[], standing = () => this.offerOut): Promise<void> {
     this.knockingEarly = true;
     try {
@@ -2901,8 +2942,10 @@ export class GhostLink {
     // On the DHT the chat is usable: layer 1 is retried at the background pace (WISP 100), not the pairing's.
     // A pin over the DHT alone changes nothing here: the joiner still knocks and the inviter still answers.
     // Back after a restart on a native transport whose endpoint is still starting: it is knocked on once it has, and a
-    // WebRTC offer meanwhile would hold the data link for as long as the contact takes to read it.
-    if (this.resuming && this.resuming !== "webrtc/1" && !this.endpoints.has(this.resuming) && Date.now() < this.resumeWaitUntil) return;
+    // WebRTC offer meanwhile would hold the data link for as long as the contact takes to read it. A knock holds none.
+    if (this.resuming && this.resuming !== "webrtc/1" && !this.endpoints.has(this.resuming) && Date.now() < this.resumeWaitUntil) {
+      this.knockWhileResuming(); return;
+    }
     // The contact said it was going: its old packet says nothing about whether it is back. Its next one does.
     if (this.departed) {
       if (presence.lastPacketAt === this.departed.packet && Date.now() < this.departed.until) return;
@@ -2930,6 +2973,12 @@ export class GhostLink {
     const wait = this.dialWait();
     if (Date.now() - this.lastAutoConnectAt < wait) {
       traceLink(this.myPubKeyZ32, "dial-backoff", { failures: this.autoConnectFailures, left: wait - (Date.now() - this.lastAutoConnectAt) });
+      // The contact waits for this side's dial (the higher key, not lost from a live session, where it may come back and
+      // offer): a read before the wait is over can only end here again. The look at its end is armed (`lookAtRetry`),
+      // and the chat reads at its own pace until then, not every 0.7 s for the rest of an app start's window (45 reads).
+      // A paired chat only: a group's link (`packetTransports`) keeps its fast looks for the member's `_tr` and offers,
+      // which its own restart and native fallback rely on (WISP 902 § Transports).
+      if (!pairing && !this.options.packetTransports && this.myPubKeyZ32 < this.options.params.peerPubKeyZ32 && Date.now() >= this.lostUntil) this.session.calm();
       this.lookAtRetry();
       return;
     }
@@ -2944,11 +2993,19 @@ export class GhostLink {
    * 12 s: the pairing turned `on-dht` and the next dial waited 160 s, though nothing had been tried.
    */
   private autoDial(): void {
-    const tries = this.anythingToDial();
-    this.lastAutoConnectAt = Date.now();
+    const tries = this.anythingToDial(), started = Date.now();
+    const resumeDial = tries && this.resumeDial;
+    if (tries) this.resumeDial = false;
+    this.instantRetry = false;
+    this.lastAutoConnectAt = started;
     if (tries) this.autoConnectFailures++;
     void this.dial().catch(error => {
-      if (tries) this.tracker?.failed("transport", true);
+      // A restart's first dial that failed at once (`INSTANT_FAIL_MS`): once more soon, and it does not count.
+      if (resumeDial && Date.now() - started < INSTANT_FAIL_MS && this.lastAutoConnectAt === started && this.autoConnectFailures > 0) {
+        this.autoConnectFailures--;
+        this.instantRetry = true;
+        traceLink(this.myPubKeyZ32, "dial-instant-fail", { ms: Date.now() - started });
+      } else if (tries) this.tracker?.failed("transport", true);
       this.dialFailed(error instanceof Error ? error.message : String(error));
       this.lookAtRetry();
     });
@@ -3015,6 +3072,7 @@ export class GhostLink {
 
   /** How long after the last automatic dial the next one may go. A first pairing tries again sooner: the contact just read the invite and is waiting. */
   private dialWait(): number {
+    if (this.instantRetry) return INSTANT_FAIL_RETRY_MS;
     const pairing = !!this.tracker && !this.tracker.done && this.tracker.progress.stage !== "on-dht";
     return pairing ? Math.min(PAIRING_RETRY_MS * 2 ** this.autoConnectFailures, PAIRING_MAX_RETRY_MS)
       : Math.min(AUTO_CONNECT_RETRY_MS * 2 ** this.autoConnectFailures, AUTO_CONNECT_MAX_RETRY_MS);
@@ -3662,8 +3720,22 @@ export class GhostLink {
     }
     this.replaceWith(channel, binding);
   }
-  private replaceWith(channel: FrameChannel, binding: NativeBinding): void {
-    traceLink(this.myPubKeyZ32, "replacing", { transport: binding.transport, held: this.paired?.state.transport });
+  /**
+   * The contact's WebRTC opened while this side holds a native session, with no switch under way. A contact offers only
+   * with no session of its own: its app is back after a crash, with no way to the held transport (its Iroh relay out of
+   * reach, its listener not up yet), and the held session is dead without this side having heard. Closed at once, the
+   * contact counted a failed dial and waited its backoff: live again 52.8 s after its start (two CLIs over a chosen Iroh
+   * whose relay stopped, bug hunt 2026-10-17). The held session is pinged as for a crossing (`probeCrossed`): heard from,
+   * the WebRTC closes, as before; silent, it takes over. Before the pin, or while the held one authenticates, it closes.
+   */
+  private rtcOverHeld(channel: FrameChannel): void {
+    const held = this.channel;
+    if (!held || this.candidate || !this.options.pairing?.credentials.peerKey || !this.options.params.profile
+      || this.paired?.state.status !== "ready") { channel.close(); return; }
+    this.probeCrossed(held, channel);
+  }
+  private replaceWith(channel: FrameChannel, binding?: NativeBinding): void {
+    traceLink(this.myPubKeyZ32, "replacing", { transport: binding?.transport ?? "webrtc/1", held: this.paired?.state.transport });
     this.attach(channel, binding, { resolve: () => {}, reject: () => {} });
   }
 
@@ -3676,19 +3748,28 @@ export class GhostLink {
   private crossedProbe: { channel: FrameChannel; timer: ReturnType<typeof setTimeout> } | null = null;
   /** Frames heard on the open session, counted from its start: whether the contact answered `probeCrossed`. */
   private framesHeard = 0;
-  private probeCrossed(held: FrameChannel, channel: FrameChannel, binding: NativeBinding): void {
+  private probeCrossed(held: FrameChannel, channel: FrameChannel, binding?: NativeBinding): void {
     this.dropCrossedProbe();
-    traceLink(this.myPubKeyZ32, "dial-crossed", { transport: binding.transport, held: true, probe: true });
+    traceLink(this.myPubKeyZ32, "dial-crossed", { transport: binding?.transport ?? "webrtc/1", held: true, probe: true });
     const heard = this.framesHeard;
     try { this.sendPing(held, false); } catch { /* closing: the dial in is taken below */ }
+    // What the contact sends meanwhile (its offer, sent as its side opened) waits for the session taken below: a WebRTC
+    // data channel drops what comes with no reader, and that session would fail on the proof of an offer it never had.
+    const early: (string | Uint8Array)[] = [];
+    channel.onMessage = data => { if (early.length < PROBE_EARLY_FRAMES) early.push(data); };
+    const take = (attach: () => void) => {
+      channel.onMessage = null; attach();
+      const read = channel.onMessage as FrameChannel["onMessage"];
+      for (const data of early) read?.(data);
+    };
     const timer = setTimeout(() => {
       if (this.crossedProbe?.channel !== channel) return;
       this.crossedProbe = null;
       if (this.stopped || this.leaving || this.candidate) { channel.close(); return; }
-      if (!this.channel) { this.attach(channel, binding); return; }
+      if (!this.channel) { take(() => this.attach(channel, binding)); return; }
       if (this.channel === held && this.framesHeard !== heard) { channel.close(); return; }
-      traceLink(this.myPubKeyZ32, "crossed-held-silent", { transport: binding.transport });
-      this.replaceWith(channel, binding);
+      traceLink(this.myPubKeyZ32, "crossed-held-silent", { transport: binding?.transport ?? "webrtc/1" });
+      take(() => this.replaceWith(channel, binding));
     }, CROSSED_PROBE_MS);
     channel.onClose = () => { if (this.crossedProbe?.channel === channel) { clearTimeout(timer); this.crossedProbe = null; } };
     this.crossedProbe = { channel, timer };
@@ -3798,8 +3879,11 @@ export class GhostLink {
             this.pairedHttp?.close(); this.pairedHttp = null;
             this.channel = channel; this.paired = paired; this.activeBinding = binding; this.channelSince = Date.now();
             oldPaired?.stop();
-            // Off WebRTC: its peer connection goes with the channel, unless WebRTC carries the chat again by then.
-            if (oldChannel) this.retire(oldChannel, () => { if (!oldBinding && this.activeBinding) this.dataLink.close(); }, !oldBinding);
+            // Off WebRTC: its peer connection goes with the channel, unless WebRTC carries the chat again by then. Only
+            // that connection: the contact's offer back to WebRTC can be under way on the link by then (its own old
+            // session retired first), and closing it left the move to its 8 s and the 20 s retry (bh-zero43).
+            const oldRtc = oldBinding ? null : this.dataLink.connection;
+            if (oldChannel) this.retire(oldChannel, () => { if (oldRtc && this.activeBinding && this.dataLink.connection === oldRtc) this.dataLink.close(); }, !oldBinding);
             this.session.setDataLinkOpen(true);
             if (migration.plan) switched = { from, to: paired.state.transport! };
             else { replaced = true; traceLink(this.myPubKeyZ32, "replaced", { from, to: paired.state.transport }); }
@@ -4358,7 +4442,7 @@ export class GhostLink {
     // as it was: the knock of an earlier return would count for this one, and none went from the second on.
     this.knockedEarly = -1;
     traceLink(this.myPubKeyZ32, "wake-resume", { transport });
-    if (transport !== "webrtc/1") { this.resumeWaitUntil = Date.now() + RESUME_WAIT_MS; return; }
+    if (transport !== "webrtc/1") { this.resumeWaitUntil = Date.now() + RESUME_WAIT_MS; this.resumeKnocked = false; return; }
     // The session's close was heard just before the wake, and this side answers the contact's offer already: it knocks
     // meanwhile, as an app back after a restart does.
     if (this.dataLink.state === "answering" && this.answeringEpoch === this.connectionEpoch) {

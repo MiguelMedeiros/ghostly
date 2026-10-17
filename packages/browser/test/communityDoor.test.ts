@@ -335,6 +335,38 @@ describe("a community's door", { timeout: 120_000 }, () => {
     }
     expect(lower).toBe(3);
   });
+
+  // CLI daemons on loopback relays (2026-10-17): a new community whose first hub's beacon entry the relays' budget held
+  // back. The member it let in read no hub in the beacon, became one, and took itself for the door alone too: two hubs
+  // answered the next knocks, one joiner waited two minutes, and two joiners let in by different hubs forked the chain.
+  it("a member that just became a hub, reading no hub while the first hub's beacon entry is held back, leaves the knock to it", async () => {
+    for (let run = 0; run < 3; run++) {
+      const world = new CommunityWorld(undefined, RELAY_NETWORK);
+      const alice = world.add("alice");
+      const { id, link } = await community(world, alice);
+      const beacon = beaconKeys(alice.groups.communities.session(id)!.state.rv, id);
+      const heldUntil = world.now + 3 * 60_000, publish = alice.host.publish;
+      alice.host.publish = async (identity, records, background, door) => {
+        if (identity.pubKeyZ32 === beacon.identity.pubKeyZ32 && world.now < heldUntil) throw new DiscoveryBudgetError(heldUntil - world.now);
+        return publish(identity, records, background, door);
+      };
+      const bob = world.add("bob");
+      await bob.groups.joinByLink(link);
+      await world.until(() => world.member(bob, id), 60_000, 500);
+      await world.until(() => bob.groups.communities.isHub(id), 60_000, 500);
+      const carol = world.add("carol");
+      await carol.groups.joinByLink(link);
+      const key = guestKey(carol);
+      let answering = 0;
+      const took = await world.until(() => {
+        answering = Math.max(answering, [alice, bob].filter(p => [...p.links.values()].some(e => e.kind === "host" && e.peer === key)).length);
+        return world.member(carol, id);
+      }, 3 * 60_000, 500, () => `${answering} hubs answered the knock`);
+      expect(answering).toBe(1);
+      expect(took).toBeLessThanOrEqual(12_000);
+      expect(world.now).toBeLessThan(heldUntil);
+    }
+  });
 });
 
 describe("a joiner away while the door let it in", { timeout: 120_000 }, () => {

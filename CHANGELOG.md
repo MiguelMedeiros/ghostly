@@ -4,6 +4,46 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.3.8
+
+### Security
+
+- CLI: `chat pay` and `chat request` refuse a memo that looks like a recovery phrase, a private key or a Cashu token unless `--force`, as `send` does; `ghostly engine` checks payment memos and group file captions the same way.
+
+### Fixed
+
+**Chats**
+
+- In a chat, ↻ on a voice message, video or file that did not go, Join group on an invite card and Load on a Nostr card keep the focus while they run, as the play buttons do: pressed from the keyboard, they left it on the page, so after a refusal Space scrolled the chat.
+- Forward's Send, pressed from the keyboard, keeps the focus while the forward runs: when a chat refused it, the focus was left on the page, so Enter did nothing and Send was back only through the search field and every chat.
+
+**Chat**
+
+- After the app starts again, a chat whose first connection attempt fails at once tries again 3 seconds later, not 40 seconds later. Before, that chat came back about 40 seconds after the others. While a chat waits before its next attempt, it also stops reading the contact every 0.7 seconds, because those reads could not connect it any sooner: 45 reads in that wait went down to a few.
+- An open chat no longer puts its whole history together again on every update from the engine (several a second while a file or voice message moves). It does so only when a message or a connection line changes, so long chats use less CPU.
+- In Arabic, the chat header's pairing icon now mirrors like the pairing scene under it: you on the right, and the moving dot going the same way.
+- A chat that was live on Iroh when the app quit or crashed comes back in about 3 s when Iroh's relay is out of reach at the restart, over HyperDHT, instead of 20 to 23 s: the app waited 10 s for its Iroh to start, then 8 s more before it tried HyperDHT. It now tries the contact's other direct connections while it waits.
+- A chat whose invite someone else used first still says "Someone else joined with this invite first" after a reload or an app restart, and when the app learns it only once the chat was on the DHT. Before, such a chat could come back as a working chat "On DHT · retrying live", waiting for a contact who was paired with someone else.
+- A chat moved back to WebRTC a moment after leaving it (Iroh or HyperDHT tried, then WebRTC again) no longer sometimes takes 28 s to get there: the contact's app, closing the WebRTC session the chat had left, also closed the new one it was answering, and the move gave up and waited for its next try. Now it goes in about 3 s every time.
+
+**Everywhere**
+
+- CLI: a bot serving a mini-app no longer loses the other chats' events from its event journal. Each frame the contact's app sent was written there, and at the app's allowed rate the journal was full in about 20 seconds, so `listen --since` or `--cursor` after a short stop answered `events.gap` instead of the texts other contacts sent. `app.opened`, `app.message` and `app.closed` now go to live listeners only and are never replayed.
+- CLI: `group history` and `listen` name a member in a group's own lines once their name is known. A line written before the name came kept "Member a4w9nb5y joined" for good, though the same row's `nick` said "Bob"; it now reads "Bob joined", as the app shows it.
+- CLI: `listen --webhook` no longer loses the events that come while its bridge is down. Each event was tried three times over about 3.5 seconds and then passed, the `--cursor` moved past it, so a bridge restarting for longer never got the events of that time, a restarted listener neither. A bridge that is not answering (connection refused, a timeout, a 5xx) now holds the stream: the event is tried again, up to a minute apart, until the bridge takes it, and stderr says so once. An event the bridge refuses with a 4xx is still passed.
+- In Portuguese, the lines shown while a new chat is on the DHT and the notes of a chat from a v0.4 code are now in Brazilian Portuguese like the rest of the app, instead of European Portuguese.
+- A chat live over Iroh or HyperDHT whose contact's app crashes and comes back without that transport (its Iroh relay out of reach, for one) is live again over WebRTC in seconds, not after a minute. Your app still held the old, dead session and closed the contact's new WebRTC connection as soon as it opened.
+
+**Groups**
+
+- In a new community, people opening its link one after another are let in within seconds again, and nobody's admission is undone, when the relays are slow to list the first member's app. Before, the first person let in could start answering the link too: the next joiner waited about two minutes, and two people let in at once by different members could see one of them dropped ("is no longer a member", then "joined" again), with what that person wrote in between never reaching the other.
+- Leaving a group, or deleting one you are in, from the keyboard puts the focus on the chat list's next row, or on New after the last, as deleting a chat does. It was left on the page, so a screen reader said nothing and the next Tab started from the top.
+- In Arabic (or any right-to-left language), a group's or a person's name written in Latin letters that is too long for its place is cut at its end, as in English, in the group's header, the chat list and the group's members dialog. It was cut at its start ("…airro Vila Madalena"), so two groups or members whose names start alike could not be told apart.
+
+**Website**
+
+- Once an hour, a visit to ghostly.tools no longer waits while the site checks every app on its apps pages again. The site checks the store once when it starts, since the store cannot change until the next build.
+
 ## 1.3.7
 
 ### Security

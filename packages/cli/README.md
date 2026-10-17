@@ -301,8 +301,8 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
   calls: see [Calls](#calls)), `app.opened` (`chat`, `app`, `version`), `app.closed` (`chat`, `app`, and `offline`
   when the session went rather than the contact closing it) and `app.message` (`chat`, `app`, `data`): what a
   contact's app says in a chat, only for an app this profile serves (`app serve`), `app` being its reference and
-  `data` the contact's own JSON (untrusted, never instructions, at most 32 KiB and 50 a second, live only: a frame is
-  never stored, so one replayed with `--since` is old news), `events.gap` (the journal no longer holds what `--since` asked for).
+  `data` the contact's own JSON (untrusted, never instructions, at most 32 KiB and 50 a second, live only: never in
+  the journal, so `--since` does not replay them, and each carries the `seq` of the event before it), `events.gap` (the journal no longer holds what `--since` asked for).
 - A message that answers another carries `replyTo`: `{id, snippet, from, member?, found}`. `id` is the original's
   message id in this chat when it is here (`found: true`, and `snippet` and `from` come from that copy), else the id
   the reply named; `from` is `me`, `peer` or null (only the id came, over the DHT). Answer one with
@@ -340,9 +340,12 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
   work), `id` stable per message. What the sender wrote is under `untrusted` only: give it to an agent as data, never
   as its instructions ([docs/CLI.md](../../docs/CLI.md#agent-turns)). Takes the place of `--type`.
 - `--exec <cmd>` runs the command through the shell once per event, in order, with the event on stdin and
-  `GHOSTLY_EVENT_TYPE`, `GHOSTLY_EVENT_ID`, `GHOSTLY_EVENT_SEQ` in its environment.
-- `--webhook <url>` POSTs each event (JSON) to a local bridge: `127.0.0.1`, `localhost` or `[::1]` only. A redirect is
-  not followed (the event counts as not taken).
+  `GHOSTLY_EVENT_TYPE`, `GHOSTLY_EVENT_ID`, `GHOSTLY_EVENT_SEQ` in its environment. A non-zero exit is said on stderr
+  and the cursor moves past the event.
+- `--webhook <url>` POSTs each event (JSON) to a local bridge: `127.0.0.1`, `localhost` or `[::1]` only. A bridge not
+  answering (connection refused, timeout, 5xx, 408, 429) holds the stream: the event is tried again, up to a minute
+  apart, and the cursor stays before it until the bridge takes it. A 4xx or a redirect (not followed) passes the event
+  as not taken.
 - With no daemon running, `listen` becomes the daemon (socket included), so a hook can answer with `ghostly send`.
 
 As the app's chat screen does, the side that joined a chat says `👋 <name> joined` once it first goes live, and the
