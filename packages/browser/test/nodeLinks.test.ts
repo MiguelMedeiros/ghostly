@@ -1378,6 +1378,25 @@ describe("private groups through the engine", () => {
     expect(edge().options.resume).toBe("webrtc/1");
   });
 
+  it("an edge's link counts a member never seen from when the edge was made, not from each start, as a chat's does", async () => {
+    // Counted from each start, an edge to a member away for a day (no packet at the relays) was read every 4 s for the
+    // first ten minutes of every start, as an invite just sent: 16 such members of a group asked the relays for 240 a minute.
+    const { node } = await started();
+    const { groupId } = await node.createGroup({ name: "Plaza" });
+    const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+    const edgeId = await openEdge(node, state, createIdentity().pubKeyZ32);
+    const edge = () => links.filter((l) => l.options.params.id === edgeId).at(-1)!;
+    // Made just now (a member just admitted): its join is still awaited.
+    expect(edge().options.madeAt).toBe((await saved(edgeId))!.createdAt);
+    // Made a month ago: after a restart, nothing is awaited.
+    const monthAgo = Date.now() - 30 * 86_400_000;
+    await db.putLink({ ...(await saved(edgeId))!, createdAt: monthAgo });
+    await node.shutdown();
+    nodes.splice(nodes.indexOf(node), 1);
+    await started();
+    expect(edge().options.madeAt).toBe(monthAgo);
+  });
+
   // covers: groups.native-links
   describe("native transports on a group's links (WISP 902 § Transports)", () => {
     const endpoint = () => ({ transport: "iroh/1" as const, descriptor: { id: "ab".repeat(32), relay: "https://relay.test./", addresses: [] },
