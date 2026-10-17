@@ -520,6 +520,18 @@ describe("a pairing that ends on the DHT (WISP 400)", () => {
     expect(within(scene()!).getByRole("alert")).toHaveTextContent("Someone else joined with this invite first.");
     expect(screen.queryByText("the chat")).toBeNull();
   });
+
+  it("after a restart, the chat's link reaching the page before its pairing says the invite was taken: the scene still comes", () => {
+    const createdAt = Date.now() - 60_000;
+    const stored = { ...unstarted, createdAt, peerParticipationKey: "p", textDelivery: "dht" } as Partial<LinkView>;
+    fakeEngine.update({ links: [linkView(stored)] });
+    const { engine } = renderApp(<Chat createdAt={createdAt} />);
+    act(() => engine.update({ links: [linkView(stored)] }));
+    expect(scene()).toBeNull();
+    act(() => engine.update({ links: [linkView({ ...stored, ...published, pairingProgress: { ...taken, startedAt: createdAt } })] }));
+    expect(within(scene()!).getByRole("alert")).toHaveTextContent("Someone else joined with this invite first.");
+    expect(screen.queryByText("the chat")).toBeNull();
+  });
 });
 
 describe("the connected sound", () => {

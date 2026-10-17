@@ -98,7 +98,9 @@ export function usePairingProgress(peerKey: string | undefined, { inviter, enabl
   // Someone else used the invite first: the pairing never happened, though the look-up pinned the inviter. After a
   // restart too, and once the chat was on the DHT, the scene says so: nobody will answer this chat.
   const taken = reported?.stage === "failed" && reported.reason === "taken";
-  if (first.current === null && enabled && link) first.current = shown.current || !link.peerParticipationKey || taken;
+  // After a reload the engine lists the chat before its link is up, with no pairing yet: a chat decided paired from that
+  // first look, then said taken, never paired either.
+  if (enabled && link && (first.current === null || taken)) first.current = first.current || shown.current || !link.peerParticipationKey || taken;
   const firstPairing = first.current ?? provisional;
   if (!link && firstPairing) shown.current = true;
 
