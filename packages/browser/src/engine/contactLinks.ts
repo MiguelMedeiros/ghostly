@@ -31,7 +31,8 @@ interface StoredRequest extends ContactRequest {
 }
 
 interface StoredContactLinks {
-  current?: StoredLink & { inbox: InboxState; published?: number; requests?: StoredRequest[] };
+  /** `polled`: when the knock slots were last read, kept so a one-shot that lists requests in a loop keeps the pace too. */
+  current?: StoredLink & { inbox: InboxState; published?: number; polled?: number; requests?: StoredRequest[] };
   /** Links turned off, still saying so. */
   retired: Array<StoredLink & { offAt: number; said?: number }>;
 }
@@ -102,7 +103,7 @@ export class ContactLinks {
    */
   shown(): void {
     this.shownAt = Date.now();
-    this.schedulePoll(0);
+    this.schedulePoll(this.pollDue());
   }
 
   /** Whether a link key is one of this profile's, current or turned off. */
@@ -135,9 +136,18 @@ export class ContactLinks {
     return this.serial(() => this.settle(id));
   }
 
-  /** Reads the knock slots once and takes what is new into Requests. */
+  /**
+   * Reads the knock slots once and takes what is new into Requests. Never faster than the link's fastest pace: within
+   * `POLL_SHOWN_MS` of the last read, what that read took is the answer.
+   */
   poll(): Promise<void> {
-    return this.serial(() => this.take());
+    return this.serial(async () => { if (this.pollDue() === 0) await this.take(); });
+  }
+
+  /** How long until the knock slots may be read again. */
+  private pollDue(): number {
+    const since = Date.now() - (this.stored.current?.polled ?? -Infinity);
+    return since >= 0 && since < POLL_SHOWN_MS ? POLL_SHOWN_MS - since : 0;
   }
 
   /** Undefined while the profile has no link. */
@@ -248,7 +258,7 @@ export class ContactLinks {
     if (!latest || latest.linkKeyZ32 !== linkKey) return;
     const requests = [...current.requests ?? [], ...taken].filter(r => inbox.waiting.some(w => w.key === r.key));
     const changed = plan.publish || taken.length > 0 || inbox.state !== current.inbox.state || inbox.bits !== current.inbox.bits;
-    await this.save({ ...this.stored, current: { ...latest, inbox, requests } });
+    await this.save({ ...this.stored, current: { ...latest, inbox, requests, polled: now } });
     this.host.emit();
     if (changed) await this.publishNow();
   }
