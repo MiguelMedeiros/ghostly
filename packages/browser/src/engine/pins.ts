@@ -24,10 +24,18 @@ export function pinView(pin: StoredPin | undefined): PinView | undefined {
 
 /**
  * Whether a private group's pin was made by someone no longer in its roster (`inRoster`): it goes when they do, so a
- * member removed leaves nothing of theirs at the top of the chat.
+ * member removed leaves nothing of theirs at the top of the chat. Their unpin shows nothing already: it stays.
  */
 export function pinOfFormerMember(pin: StoredPin | undefined, inRoster: (key: string) => boolean): boolean {
-  return !!pin && pin.by !== "me" && !inRoster(pin.by);
+  return !!pin?.id && pin.by !== "me" && !inRoster(pin.by);
+}
+
+/**
+ * What a former member's pin is dropped to: an unpin at its number, so only a pin numbered past it shows. Dropped to
+ * none, an older pin a member kept while away (and says again when its edges open) would come back.
+ */
+export function droppedPin(pin: StoredPin, now = Date.now()): StoredPin {
+  return { id: "", n: pin.n, by: pin.by, at: now };
 }
 
 /** Whether I may pin in this group now: the rule (`mayPin`) with my key and its admin's. */

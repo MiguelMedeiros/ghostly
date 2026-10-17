@@ -315,10 +315,13 @@ describe("group roster changes: only the admin, and someone removed reads nothin
     await alice.setPin(groupId, pinBy(key(carol)));
     await carol.setPin(groupId, { ...pinBy(key(carol)), by: "me" });
     await bob.setPin(groupId, pinBy(key(carol)));
+    const n = alice.pinOf(groupId)!.n;
     await alice.remove(groupId, key(carol)); await world.settle();
-    expect(alice.pinOf(groupId)).toBeUndefined();
-    expect(bob.pinOf(groupId)).toBeUndefined();
-    expect(world.peers.get("alice")!.store.groups.get(groupId)!.pin).toBeUndefined();
+    // Dropped to an unpin at its number, unsigned: nothing shows, and only a pin numbered past it does.
+    for (const pin of [alice.pinOf(groupId), bob.pinOf(groupId), world.peers.get("alice")!.store.groups.get(groupId)!.pin]) {
+      expect(pin).toMatchObject({ id: "", n });
+      expect(pin?.sig).toBeUndefined();
+    }
 
     // Mine, or a member's still in the group, stays.
     await alice.setPin(groupId, { ...pinBy(key(bob)), n: Date.now() + 1 });
