@@ -398,7 +398,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
           ) : null}
           {status && (
             <p className={`flex items-center gap-1 min-w-0 text-[11px] m-0 ${failed ? "text-danger-ink" : "text-text-primary/65"}`}>
-              <span className="min-w-0 truncate" data-testid="video-status">{status}</span>
+              {/* Wraps, as a file's line: cut, it lost its speed and time left. */}
+              <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="video-status">{status}</span>
               {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="video-why" danger={!!reason} />}
             </p>
           )}

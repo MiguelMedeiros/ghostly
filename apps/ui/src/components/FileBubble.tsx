@@ -230,7 +230,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
             <Highlight text={file.name} term={highlight} />
           </p>
           <p className={`flex items-center gap-1 text-[11px] m-0 ${failed || missing ? "text-danger-ink" : "text-text-primary/65"}`}>
-            <span className="min-w-0 truncate" data-testid="file-status">{status}</span>
+            {/* Wraps: on a phone, cut at the bubble's width, it lost its speed and time left. */}
+            <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="file-status">{status}</span>
             {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="file-why" danger={!!reason} />}
           </p>
         </div>
