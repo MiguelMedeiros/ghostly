@@ -95,6 +95,12 @@ One JSON object per line each way:
 A connection takes one `events.subscribe`: a second on it is refused (`bad_request`), and a new stream is a new
 connection.
 
+Every command's first line on the socket is a `daemon.hello` with a nonce, and nothing else goes until the answer
+proves, with the secret the daemon writes in the profile's folder (`daemon.secret`, 0600, new at every start), that
+it is the profile's daemon: on Windows the socket is a named pipe whose name another account could open first. What
+cannot prove it is refused (`refused`); a daemon of an older release cannot either, and `ghostly daemon restart` stops
+it through the process that holds the profile and starts this release's.
+
 The methods mirror the commands (`chat.send`, `group.create`, `wallet.list`, `pay`, …), and `engine.call` reaches any
 call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '<json>'` do the same from the shell.
 
