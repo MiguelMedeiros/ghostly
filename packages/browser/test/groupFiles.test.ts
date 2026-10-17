@@ -1024,6 +1024,44 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(sha(t.got(erin, id, messageId).bytes!)).toBe(meta.d);
   });
 
+  it("a place held long is not given to a member the day's serving would turn away anyway: its transfer goes on", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol, dave, erin], id } = await t.mesh(["alice", "bob", "carol", "dave", "erin"]);
+    for (const p of [bob, carol, dave, erin]) { t.files.get(p)!.settings.autoDownloads = false; t.files.get(p)!.settings.serveFiles = false; }
+    const size = 3 * 1024 * 1024;
+    const { messageId } = await t.send(alice, id, pattern(size, 10), { name: "big.bin" });
+    await t.world.run(2_000);
+    // Room in the day for the three served now, and not one byte more: a fourth would pass it, whoever ends.
+    limits.serveBytesPerDay = 3 * size + 1;
+    // Bob's, Carol's and Dave's side of files/3 is not the app: each accepts the offer and confirms `serveMoveBytes`
+    // more every 25 seconds, so their transfers are moving.
+    const askers = [bob, carol, dave], confirmed = new Map<string, { peer: Peer; offset: number }>();
+    t.world.drop = (from, to, frame) => {
+      t.seen.push({ from: from.name, to: to.name, frame });
+      if (from !== alice || !askers.includes(to) || typeof frame.t !== "string") return false;
+      if (frame.t === "pf-offer") {
+        confirmed.set(frame.id as string, { peer: to, offset: 0 });
+        queueMicrotask(() => t.world.sendFiles(to, to.host.edges(id).get(t.key(alice, id))!, { t: "pf-accept", id: frame.id, offset: 0 }));
+      }
+      return frame.t.startsWith("pf-");
+    };
+    for (const p of askers) t.say(p, alice, id, { t: "group-want", g: id, id: messageId });
+    await t.world.run(1_000);
+    expect(serving(alice)).toHaveLength(3);
+    for (let at = 0; at < GROUP_FILE_LIMITS.servePlaceMs + 25_000; at += 25_000) {
+      await t.world.run(25_000, 1_000);
+      for (const [wire, c] of confirmed) { c.offset += GROUP_FILE_LIMITS.serveMoveBytes; t.world.sendFiles(c.peer, c.peer.host.edges(id).get(t.key(alice, id))!, { t: "pf-got", id: wire, offset: c.offset }); }
+    }
+    const mark = t.seen.length;
+    t.say(erin, alice, id, { t: "group-want", g: id, id: messageId });
+    await t.world.run(1_000);
+    const after = t.seen.slice(mark).filter(s => s.from === "alice");
+    expect(after.filter(s => s.to === "erin" && s.frame.t === "group-want-no").map(s => s.frame.why)).toEqual(["busy"]);
+    // Nobody's transfer ended for her.
+    expect(after.filter(s => s.frame.t === "pf-abort" || s.frame.t === "pf-cancel")).toEqual([]);
+    expect(serving(alice)).toHaveLength(3);
+  });
+
   it("a holder that serves the rest of a file counts that rest toward its day, not the whole file", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
