@@ -3934,8 +3934,11 @@ export class GhostLink {
             this.pairedHttp?.close(); this.pairedHttp = null;
             this.channel = channel; this.paired = paired; this.activeBinding = binding; this.channelSince = Date.now();
             oldPaired?.stop();
-            // Off WebRTC: its peer connection goes with the channel, unless WebRTC carries the chat again by then.
-            if (oldChannel) this.retire(oldChannel, () => { if (!oldBinding && this.activeBinding) this.dataLink.close(); }, !oldBinding);
+            // Off WebRTC: its peer connection goes with the channel, unless WebRTC carries the chat again by then. Only
+            // that connection: the contact's offer back to WebRTC can be under way on the link by then (its own old
+            // session retired first), and closing it left the move to its 8 s and the 20 s retry (bh-zero43).
+            const oldRtc = oldBinding ? null : this.dataLink.connection;
+            if (oldChannel) this.retire(oldChannel, () => { if (oldRtc && this.activeBinding && this.dataLink.connection === oldRtc) this.dataLink.close(); }, !oldBinding);
             this.session.setDataLinkOpen(true);
             if (migration.plan) switched = { from, to: paired.state.transport! };
             else { replaced = true; traceLink(this.myPubKeyZ32, "replaced", { from, to: paired.state.transport }); }
