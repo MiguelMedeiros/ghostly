@@ -1451,6 +1451,12 @@ export class CommunitySession {
       if (!recent.has(key)) continue;
       (have[sender] ??= {})[key] = entry.high;
     }
+    // The lasting frames I hold too: once their epoch has no frame left in the store, every answer handed me the pin
+    // again, dropped as a duplicate (2026-10-16).
+    for (const f of Object.values(this.state.lasting ?? {})) {
+      const key = seenKey(f.e, f.h);
+      (have[f.s] ??= {})[key] = Math.max(f.n, have[f.s][key] ?? -1, this.state.seen[f.s]?.[key]?.high ?? -1);
+    }
     const secrets = this.state.chain.slice(-COMMUNITY_LIMITS.window - 1).map(c => communityCommitHash(c)).filter(h => this.state.secrets[h]).map(shortHash);
     const loc: string[] = [];
     for (let back = 1; back < this.state.chain.length && loc.length < 12; back *= 2) loc.push(communityCommitHash(this.state.chain[this.state.chain.length - 1 - back]));
