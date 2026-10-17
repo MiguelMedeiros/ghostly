@@ -119,6 +119,8 @@ ghostly listen --turns --from alice --group team --cursor ~/.ghostly/agent.curso
 - `--exec '<command>'` runs once per turn, in order, with the turn on **stdin** (never in its arguments). Or
   `--webhook http://127.0.0.1:<port>/…` POSTs each turn to a local bridge (loopback only).
 - `--cursor <file>` remembers the last event handled, so a restarted listener resumes where it stopped. Dedupe on `id`.
+  A `--webhook` bridge that is down holds the stream until it is back (nothing is lost); an `--exec` that exits
+  non-zero, or a 4xx from the bridge, passes its event.
 
 A turn:
 
