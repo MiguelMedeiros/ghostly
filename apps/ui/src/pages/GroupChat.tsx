@@ -61,6 +61,7 @@ import { paymentWireId } from "@ghostly/browser/shared/paymentIds";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
 import { Notice } from "../components/ui/Notice";
+import { Spinner } from "../components/wallet/ui";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -297,6 +298,9 @@ export function GroupChat() {
   // group was left). Until this group's own list comes, what the engine last sent for it.
   const [loaded, setLoaded] = useState<{ groupId: string; list: StoredMessage[] }>({ groupId: "", list: NO_MESSAGES });
   const messages = loaded.groupId === groupId ? loaded.list : engine.messages.get(`group:${groupId}`) ?? NO_MESSAGES;
+  // A group with a history whose rows have not come yet (shown at start, the engine still starting): it says it is
+  // loading, not an empty group.
+  const reading = loaded.groupId !== groupId && !engine.messages.has(`group:${groupId}`) && (group?.lastMessageAt ?? 0) > 0;
   /** The message the composer answers (WISP 902 § Replies). */
   const [replyingTo, setReplyingTo] = useState<StoredMessage | null>(null);
   /**
@@ -674,9 +678,10 @@ export function GroupChat() {
             className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger">{t("group.join.cancel")}</button>
         </div>
       </div> : <div className="relative flex-1 min-h-0 flex flex-col">
-      <div ref={jump.listRef} data-message-list className="flex-1 overflow-y-auto [overflow-anchor:none] chat-wallpaper">
+      <div ref={jump.listRef} data-message-list aria-busy={reading || undefined} className="flex-1 overflow-y-auto [overflow-anchor:none] chat-wallpaper">
         {/* A bubble arriving slides in from its side: clipped here, it never makes the list scroll sideways (a scrollbar, and a jump). */}
         <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3 overflow-x-clip">
+          {reading && <div data-testid="group-reading" className="flex justify-center py-6 text-text-muted"><Spinner size={20} /></div>}
           {(() => {
             const drawn = messages.slice(rowWindow.from, rowWindow.to);
             return drawn.map(m => {
