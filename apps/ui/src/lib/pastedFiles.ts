@@ -109,6 +109,22 @@ export function pasteShowsNothing(data: DataTransfer | null): boolean {
   return !!data && !filesOf(data).length && !data.getData("text/plain") && !data.getData("text/html");
 }
 
+/**
+ * Whether a paste is a web browser's "Copy image": HTML that is one picture and no text, and plain text that is
+ * nothing or that picture's address (Firefox's). WebKitGTK hands the page that HTML but not the picture beside it;
+ * the platform may still read it. A rich copy with words beside its pictures is text.
+ */
+export function pasteIsPictureOnly(data: DataTransfer | null): boolean {
+  if (!data || filesOf(data).length) return false;
+  const html = data.getData("text/html");
+  if (!html) return false;
+  const body = new DOMParser().parseFromString(html, "text/html").body;
+  const images = body.querySelectorAll("img");
+  if (images.length !== 1 || body.textContent?.trim()) return false;
+  const plain = data.getData("text/plain").trim();
+  return !plain || plain === images[0].getAttribute("src")?.trim() || plain === images[0].src;
+}
+
 /** Whether a paste named copied files it did not hand over (WebKitGTK shows a file manager's copy as `text/uri-list` only). */
 export function pasteNamesFiles(data: DataTransfer | null): boolean {
   return !!data && [...(data.types ?? [])].some((type) => type === "Files" || type === "text/uri-list");

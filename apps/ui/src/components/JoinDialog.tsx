@@ -5,7 +5,7 @@ import { enrollErrorKey, failureKey, offerDeviceLink } from "../lib/devices";
 import { INVITE_REFUSAL_MESSAGE, classifyInvite, readInvite } from "../lib/url";
 import { showJoinNotice } from "../lib/joinNotice";
 import { pasteShortcut, readClipboardText } from "../lib/clipboard";
-import { dragHasFiles, droppedFiles, pastedFiles, pasteNamesFiles, pasteShowsNothing, platformPastedImage } from "../lib/pastedFiles";
+import { dragHasFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformPastedImage } from "../lib/pastedFiles";
 import { rawError } from "../lib/errorText";
 import { touchOnly } from "../lib/touchOnly";
 import { useI18n } from "../contexts/I18nContext";
@@ -205,13 +205,15 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
   const pastedImage = (event: ClipboardEvent) => {
     const image = pastedFiles(event.clipboardData)?.find(file => file.type.startsWith("image/"));
     if (image) { event.preventDefault(); void readImage(image); return; }
-    // The Linux app's webview shows the page nothing of a copied picture (no files, no text): the app reads it.
-    if (busyRef.current || joined.current || closed.current || !pasteShowsNothing(event.clipboardData)) return;
+    // The Linux app's webview shows the page nothing of a copied picture (no files, no text; a browser's copy, its HTML
+    // and address only): the app reads it.
+    const picture = pasteIsPictureOnly(event.clipboardData);
+    if (busyRef.current || joined.current || closed.current || !(picture || pasteShowsNothing(event.clipboardData))) return;
     const reading = platformPastedImage(IMAGE_MAX);
     if (!reading) return;
     event.preventDefault();
     stop(); setError(null); busyRef.current = true; setBusy(true);
-    const current = generation.current, named = pasteNamesFiles(event.clipboardData);
+    const current = generation.current, named = picture || pasteNamesFiles(event.clipboardData);
     const ended = () => { if (current !== generation.current || closed.current) return false; busyRef.current = false; setBusy(false); return true; };
     reading.then(found => {
       if (!ended()) return;
