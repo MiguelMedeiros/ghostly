@@ -183,6 +183,7 @@ A receiver MUST drop a reply that is not an object of these three strings, whose
 - **Found, then deleted here**: the quote says "Original message deleted".
 - **Not found** (never received here, or named from another chat): the quote shows the wire's line, marked as not found in this chat. It proves nothing about the original; the app never presents it as checked.
 - **Only the id came** (a reply over the DHT, [403](403-dht-text.md#replies)) and nothing here has it: "Original message not available".
+- **Not loaded yet** (the app just started on a long chat, and its older messages are not in): none of the above. The quote shows the wire's line, and a tap does nothing, until the chat's history is in and the original is found or not.
 
 A reply is started from the message's ⋮ (Reply), a reply button beside the message for a pointer, or a swipe towards the end of the line on a touch screen. The composer shows the message being answered above the field, with ✕; Escape lets go of it too, once whatever else the composer has open is closed. A message whose row only this device has (a notice, a group's payment line, an identity shared in the timeline, which is local, [300](300-peer-proofs.md)) cannot be answered. Texts, files and voice messages carry a reply (a file since 401 revision 0.9, #359; a voice message or file sent while a reply is open goes as one, #437); payments cannot. Ghostly's message rows do not take the keyboard focus, so there is no reply shortcut; the reply button is reachable with Tab.
 

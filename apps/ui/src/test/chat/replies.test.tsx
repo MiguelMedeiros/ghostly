@@ -158,6 +158,19 @@ describe("the quote on a reply's bubble", () => {
     expect(screen.getByTestId("reply-quote-note")).toHaveTextContent("The original is not in this chat");
   });
 
+  it("an original not loaded yet (the app just started, the engine's history not in) is not called deleted, and a tap says nothing", async () => {
+    const reply = message({ id: `peer_${OTHER}`, text: "?", replyTo: { id: WIRE, snippet: "lunch at noon?", from: "me", messageId: `me_${WIRE}` } });
+    const quote = quoteFor(reply.replyTo!, replyIndex([reply], false, true), names);
+    expect(quote).toEqual({ state: "loading", name: "You", snippet: "lunch at noon?", mine: true });
+    const { user } = renderApp(<MessageBubble message={reply} peerPubKey="peer" quote={quote} />);
+    expect(screen.getByTestId("message-quote")).toHaveAttribute("data-state", "loading");
+    expect(screen.getByTestId("reply-quote-snippet")).toHaveTextContent("lunch at noon?");
+    await user.click(screen.getByTestId("message-quote"));
+    expect(screen.queryByTestId("reply-quote-note")).not.toBeInTheDocument();
+    // Once the history is all here, one still missing was deleted.
+    expect(quoteFor(reply.replyTo!, replyIndex([reply]), names).state).toBe("deleted");
+  });
+
   it("an original never here shows the replier's line, marked as not found here", () => {
     const quote = quoted({ id: WIRE, snippet: "a line they sent", from: "peer" }, []);
     expect(quote).toEqual({ state: "unverified", name: "Alice", snippet: "a line they sent", mine: false });

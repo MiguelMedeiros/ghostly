@@ -17,8 +17,10 @@ import { englishT, type Translate } from "../locales/translate";
  * - `deleted`: it was here when the reply came, and is gone.
  * - `unverified`: it is not here; the line is only what the replier's app said.
  * - `missing`: it is not here, and nothing came with the reply but its id (a reply over the DHT).
+ * - `loading`: it is not here yet: the chat's older messages have not come in (just started, the engine's history not
+ *   in). The line is what the reply carries until they do.
  */
-export type QuoteState = "found" | "deleted" | "unverified" | "missing";
+export type QuoteState = "found" | "deleted" | "unverified" | "missing" | "loading";
 
 export interface QuoteView {
   state: QuoteState;
@@ -46,17 +48,20 @@ export function messageSnippet(message: { text: string; card?: StatusCard; file?
   return replySnippet(filePreview(message.file, t) ?? message.text);
 }
 
-/** A chat's messages by their id here and by the id a reply names (`replyRef`). */
-export interface ReplyIndex { byId: Map<string, Quotable>; byRef: Map<string, Quotable> }
+/**
+ * A chat's messages by their id here and by the id a reply names (`replyRef`). `partial`: its older messages are not
+ * all here yet (a session read without them, `older` in lib/storage), so one missing may only be not loaded.
+ */
+export interface ReplyIndex { byId: Map<string, Quotable>; byRef: Map<string, Quotable>; partial?: boolean }
 
-export function replyIndex(messages: readonly Quotable[], group = false): ReplyIndex {
+export function replyIndex(messages: readonly Quotable[], group = false, partial = false): ReplyIndex {
   const byId = new Map<string, Quotable>(), byRef = new Map<string, Quotable>();
   for (const message of messages) {
     byId.set(message.id, message);
     const ref = replyRef(message, group);
     if (ref && !byRef.has(ref)) byRef.set(ref, message);
   }
-  return { byId, byRef };
+  return { byId, byRef, ...(partial && { partial }) };
 }
 
 /** The id a reply to this message names; none when it cannot be replied to (a notice, a group payment line). */
@@ -88,9 +93,10 @@ export function quoteFor(reply: MessageReply, index: ReplyIndex, nameOf: NameOf,
     return { state: "found", name: nameOf(from, original.member ?? reply.member), snippet, mine: from === "me", targetId: original.id, ...(member && { member }) };
   }
   const name = reply.from ? nameOf(reply.from, reply.member) : undefined;
-  const state: QuoteState = reply.messageId ? "deleted" : reply.snippet ? "unverified" : "missing";
+  // Not deleted while the older messages are still on their way: it may be among them.
+  const state: QuoteState = index.partial ? "loading" : reply.messageId ? "deleted" : reply.snippet ? "unverified" : "missing";
   const member = reply.from === "peer" ? reply.member : undefined;
-  return { state, name, snippet: state === "unverified" ? reply.snippet : "", mine: reply.from === "me", ...(member && { member }) };
+  return { state, name, snippet: state === "unverified" || state === "loading" ? reply.snippet : "", mine: reply.from === "me", ...(member && { member }) };
 }
 
 /** How long a message a quote jumped to stays marked. */

@@ -66,6 +66,7 @@ import {
   getInviteCode,
   deleteSession,
   loadSession,
+  loadShownSession,
   peerDisplayName,
   updateSessionLabel,
 } from "../lib/storage";
@@ -419,7 +420,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const [editing, setEditing] = useState<ChatMessage | null>(null);
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(visible, id => messages.some(m => m.id === id));
-  const quoteIndex = useMemo(() => replyIndex(messages), [messages]);
+  // Read without its older messages (just started, the engine's history not in yet): a quote's original may be among them.
+  const quoteIndex = useMemo(() => replyIndex(messages, false, !!(sessionId && loadShownSession(sessionId)?.older)), [messages, sessionId]);
   // A bot's buttons (WISP 406 · Message Buttons): which one was chosen, and whether I may still press, from my replies.
   const buttonsOf = useMemo(() => buttonsViews(messages, m => m.ref), [messages]);
   const presses = useMemo(() => compactPresses(messages, m => m.ref), [messages]);
