@@ -227,6 +227,8 @@
 
 /* The scene in small, as the chat's connection icon while a first pairing is on its way (PairingGlyph.tsx). */
 .pg { overflow: visible; }
+/* Mirrored as the scene is, so both put this side on the reading start side and the packet goes the same way. */
+:root[dir="rtl"] .pg { transform: scaleX(-1); }
 .pi-end { fill: currentColor; opacity: 0.7; }
 .pi-me { fill: var(--theme-accent); }
 .pi-line { stroke: currentColor; stroke-width: 2; stroke-dasharray: 2 2; opacity: 0.6; }
