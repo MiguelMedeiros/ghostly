@@ -111,6 +111,8 @@ export const CROSSED_FRESH_MS = 10_000;
  * 7 ms on loopback and under 0.5 s over a relayed Iroh.
  */
 export const CROSSED_PROBE_MS = 1_500;
+/** Frames a connection waiting on `probeCrossed` keeps for the session that may take it: a handshake's few. */
+const PROBE_EARLY_FRAMES = 8;
 /** A WebRTC attempt under way, not yet open: what a member's packet saying it has no WebRTC ends (`peerPacketTransports`). */
 const WEBRTC_ATTEMPT: ReadonlySet<DataLinkState> = new Set(["offering", "answering", "connecting"]);
 /** A joiner gathers its offer while it first looks for the inviter (`dialEarly`) only this soon after the join. */
@@ -1233,7 +1235,7 @@ export class GhostLink {
         const plan = this.switcher.pending;
         if (plan?.choices.includes("webrtc/1") && this.paired?.state.status === "ready") {
           void this.attachCandidate(channel, undefined, plan).catch(() => {});
-        } else if (this.activeBinding) channel.close(); else this.attach(channel);
+        } else if (this.activeBinding) this.rtcOverHeld(channel); else this.attach(channel);
       },
       onClose: () => {
         if (this.activeBinding) return;
@@ -3773,8 +3775,22 @@ export class GhostLink {
     }
     this.replaceWith(channel, binding);
   }
-  private replaceWith(channel: FrameChannel, binding: NativeBinding): void {
-    traceLink(this.myPubKeyZ32, "replacing", { transport: binding.transport, held: this.paired?.state.transport });
+  /**
+   * The contact's WebRTC opened while this side holds a native session, with no switch under way. A contact offers only
+   * with no session of its own: its app is back after a crash, with no way to the held transport (its Iroh relay out of
+   * reach, its listener not up yet), and the held session is dead without this side having heard. Closed at once, the
+   * contact counted a failed dial and waited its backoff: live again 52.8 s after its start (two CLIs over a chosen Iroh
+   * whose relay stopped, bug hunt 2026-10-17). The held session is pinged as for a crossing (`probeCrossed`): heard from,
+   * the WebRTC closes, as before; silent, it takes over. Before the pin, or while the held one authenticates, it closes.
+   */
+  private rtcOverHeld(channel: FrameChannel): void {
+    const held = this.channel;
+    if (!held || this.candidate || !this.options.pairing?.credentials.peerKey || !this.options.params.profile
+      || this.paired?.state.status !== "ready") { channel.close(); return; }
+    this.probeCrossed(held, channel);
+  }
+  private replaceWith(channel: FrameChannel, binding?: NativeBinding): void {
+    traceLink(this.myPubKeyZ32, "replacing", { transport: binding?.transport ?? "webrtc/1", held: this.paired?.state.transport });
     this.attach(channel, binding, { resolve: () => {}, reject: () => {} });
   }
 
@@ -3787,19 +3803,28 @@ export class GhostLink {
   private crossedProbe: { channel: FrameChannel; timer: ReturnType<typeof setTimeout> } | null = null;
   /** Frames heard on the open session, counted from its start: whether the contact answered `probeCrossed`. */
   private framesHeard = 0;
-  private probeCrossed(held: FrameChannel, channel: FrameChannel, binding: NativeBinding): void {
+  private probeCrossed(held: FrameChannel, channel: FrameChannel, binding?: NativeBinding): void {
     this.dropCrossedProbe();
-    traceLink(this.myPubKeyZ32, "dial-crossed", { transport: binding.transport, held: true, probe: true });
+    traceLink(this.myPubKeyZ32, "dial-crossed", { transport: binding?.transport ?? "webrtc/1", held: true, probe: true });
     const heard = this.framesHeard;
     try { this.sendPing(held, false); } catch { /* closing: the dial in is taken below */ }
+    // What the contact sends meanwhile (its offer, sent as its side opened) waits for the session taken below: a WebRTC
+    // data channel drops what comes with no reader, and that session would fail on the proof of an offer it never had.
+    const early: (string | Uint8Array)[] = [];
+    channel.onMessage = data => { if (early.length < PROBE_EARLY_FRAMES) early.push(data); };
+    const take = (attach: () => void) => {
+      channel.onMessage = null; attach();
+      const read = channel.onMessage as FrameChannel["onMessage"];
+      for (const data of early) read?.(data);
+    };
     const timer = setTimeout(() => {
       if (this.crossedProbe?.channel !== channel) return;
       this.crossedProbe = null;
       if (this.stopped || this.leaving || this.candidate) { channel.close(); return; }
-      if (!this.channel) { this.attach(channel, binding); return; }
+      if (!this.channel) { take(() => this.attach(channel, binding)); return; }
       if (this.channel === held && this.framesHeard !== heard) { channel.close(); return; }
-      traceLink(this.myPubKeyZ32, "crossed-held-silent", { transport: binding.transport });
-      this.replaceWith(channel, binding);
+      traceLink(this.myPubKeyZ32, "crossed-held-silent", { transport: binding?.transport ?? "webrtc/1" });
+      take(() => this.replaceWith(channel, binding));
     }, CROSSED_PROBE_MS);
     channel.onClose = () => { if (this.crossedProbe?.channel === channel) { clearTimeout(timer); this.crossedProbe = null; } };
     this.crossedProbe = { channel, timer };
