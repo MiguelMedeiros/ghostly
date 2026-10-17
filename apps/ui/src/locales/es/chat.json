@@ -275,6 +275,11 @@
     "retry": "Enviar de nuevo"
   },
   "noMessages": "Sin mensajes",
+  "nowPlaying": {
+    "close": "Detener y cerrar",
+    "label": "Reproduciendo",
+    "open": "Mostrar en el chat"
+  },
   "offline": "desconectado",
   "online": "en línea",
   "options": "Opciones",

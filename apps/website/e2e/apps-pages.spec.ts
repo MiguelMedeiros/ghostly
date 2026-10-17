@@ -149,8 +149,12 @@ test.describe("once the released Ghostly has Apps", () => {
     for (const title of ["Removed App", "Revoked App", "Older App", "Elsewhere App"]) await expect(page.locator("main")).not.toContainText(title);
     await expect(page.locator(".ap-count")).toHaveText("2 apps");
     await expect(page.locator(".ap-store")).toContainText(`Test Store. Signed by the store key ${fixture.key.slice(0, 16).match(/.{4}/g)!.join(" ")}.`);
-    await expect(page.locator(".ap-card img")).toHaveCount(1);
-    expect(await page.locator(".ap-card img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(64);
+    const icon = page.locator(".ap-card img");
+    await expect(icon).toHaveCount(1);
+    // A card waits to be near the screen: the store may list 200 apps.
+    await expect(icon).toHaveAttribute("loading", "lazy");
+    // The publisher's icon is 512 px; a card draws it at 56 px, on this screen of one device pixel per CSS pixel.
+    await expect.poll(() => icon.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(56);
     expect(others()).toEqual([]);
   });
 
@@ -177,10 +181,32 @@ test.describe("once the released Ghostly has Apps", () => {
     await expect(main.locator(".ap-fingerprint")).toHaveText(fingerprint);
     await expect(main.locator(".ap-code")).toHaveText("https://raw.githubusercontent.com/ghostly-fixtures/chess/HEAD/app.ghostlyapp");
     await expect(main.getByRole("link", { name: "Open Ghostly" })).toHaveAttribute("href", "https://app.ghostly.tools");
-    expect(await main.locator("img.ap-icon").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(64);
+    await expect.poll(() => main.locator("img.ap-icon").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(96);
     await expect(main).toContainText("Clocks for both players.");
     await expect(main).toContainText("Listed by Test Store, reviewed by its maintainers.");
     expect(others()).toEqual([]);
+  });
+
+  test("an icon comes at the size it is drawn on the screen it is drawn on, and the route makes no other", async ({ browser, request }) => {
+    // A phone's screen: three device pixels per CSS pixel.
+    const context = await browser.newContext({ deviceScaleFactor: 3 });
+    const page = await context.newPage();
+    for (const [path, edge] of [["/apps", 168], [`/apps/${CHESS}`, 288]] as const) {
+      await page.goto(LIVE + path);
+      const img = page.locator("img.ap-icon");
+      await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete), path).toBe(true);
+      // The file's own pixels: naturalWidth is in CSS pixels, so a 3x picture of 168 px reads 56.
+      const width = await img.evaluate(async (el: HTMLImageElement) => (await createImageBitmap(await (await fetch(el.currentSrc)).blob())).width);
+      expect(width, path).toBe(edge);
+    }
+    await context.close();
+    const icon = (query: string) => request.get(`${LIVE}/apps/${CHESS}/app-icon${query}`);
+    // As the bundle holds it, for a page cached before the sizes: 512 px.
+    const original = await icon("");
+    expect(original.headers()["content-type"]).toBe("image/png");
+    expect((await original.body()).readUInt32BE(16)).toBe(512);
+    for (const edge of [56, 288]) expect((await icon(`?s=${edge}`)).headers()["content-type"], `${edge}`).toBe("image/webp");
+    for (const edge of ["57", "512", "1024", "-1", ""]) expect((await icon(`?s=${edge}`)).status(), edge).toBe(404);
   });
 
   test("a client the site doesn't know is shown as the manifest names it, an inherited name too", () => {

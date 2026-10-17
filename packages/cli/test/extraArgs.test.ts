@@ -21,7 +21,7 @@ describe("extra words", { timeout: 60_000 }, () => {
       [["daemon", "restart", "extra"], "daemon restart [--timeout s]"],
       [["daemon", "--detach", "extra"], "daemon [--detach] [--timeout s]"],
       [["settings", "get", "extra"], "settings get [--show-secret]"],
-      [["engine", "--list", "extra"], "engine --list"],
+      [["engine", "--list", "extra"], "engine --list [--verbose]"],
     ];
     for (const [args, usage] of cases) {
       expect(error(await ghostly(["--home", dir, ...args]), "usage", 2).message, args.join(" ")).toBe(`Too many arguments: ghostly ${usage}`);

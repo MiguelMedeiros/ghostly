@@ -35,15 +35,24 @@ export interface InboxState {
   reads: Record<string, number>;
   /** When each of the last hour's new requests was taken. */
   taken: number[];
-  /** The UTC day `overflow` counts for, and how many good knocks it could not take. */
+  /**
+   * The UTC day `overflow` counts for, and the distinct asker keys whose good knocks it could not take, at most one past
+   * `FLOOD_PER_DAY`: a knock waits in its slot and is seen again at every poll, but counts once a day.
+   */
   day: number;
-  overflow: number;
+  overflow: string[];
   /** Distinct asker keys that knocked while the link was busy, since the owner last looked, at most `MAX_MISSED`. */
   missed: string[];
 }
 
 export function newInbox(now: number): InboxState {
-  return { state: "open", bits: STAMP_BITS_DEFAULT, waiting: [], done: [], seen: [], reads: {}, taken: [], day: contactDay(now), overflow: 0, missed: [] };
+  return { state: "open", bits: STAMP_BITS_DEFAULT, waiting: [], done: [], seen: [], reads: {}, taken: [], day: contactDay(now), overflow: [], missed: [] };
+}
+
+function withOverflow(inbox: InboxState, key: string): InboxState {
+  // A link saved before the count was per key holds a number here: start the day's keys afresh.
+  const today = Array.isArray(inbox.overflow) ? inbox.overflow : [];
+  return today.length > FLOOD_PER_DAY || today.includes(key) ? inbox : { ...inbox, overflow: [...today, key] };
 }
 
 /** What the owner publishes under the link key. */
@@ -59,9 +68,9 @@ function withSeen(inbox: InboxState, entry: string, now: number): InboxState["se
 function rollDay(inbox: InboxState, now: number): InboxState {
   const day = contactDay(now);
   if (day === inbox.day) return inbox;
-  const flooded = day === inbox.day + 1 && inbox.overflow > FLOOD_PER_DAY;
+  const flooded = day === inbox.day + 1 && inbox.overflow.length > FLOOD_PER_DAY;
   const bits = flooded ? Math.min(STAMP_BITS_MAX, inbox.bits + 2) : Math.max(STAMP_BITS_DEFAULT, inbox.bits - 2);
-  return { ...inbox, day, overflow: 0, bits };
+  return { ...inbox, day, overflow: [], bits };
 }
 
 export interface KnockPlan {
@@ -98,13 +107,13 @@ export function planKnocks(linkKeyZ32: string, inbox: InboxState, knocks: Contac
     }
     if (next.state === "busy") {
       if (next.missed.length < MAX_MISSED && !next.missed.includes(key)) next = { ...next, missed: [...next.missed, key] };
-      next = { ...next, overflow: next.overflow + 1 };
+      next = withOverflow(next, key);
       continue;
     }
     const last = next.reads[key];
     if (last !== undefined && now - last < HOUR_MS) continue;
     if (read.length >= room) {
-      next = { ...next, overflow: next.overflow + 1 };
+      next = withOverflow(next, key);
       continue;
     }
     read.push(key);

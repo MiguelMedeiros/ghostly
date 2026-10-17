@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, CHAT_RESERVE_MOST_SHARE, CHAT_RESERVE_PER_CHAT, CHAT_WATCH_SHARE, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RELAY_REQUESTS_PER_MINUTE, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WAY_BACK_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, CHAT_RESERVE_MOST_SHARE, CHAT_RESERVE_PER_CHAT, CHAT_WATCH_SHARE, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RELAY_REQUESTS_PER_MINUTE, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, SLOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WAY_BACK_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
 import type { PkarrRequestOptions, PkarrTransport } from "../src/transport";
 // covers: core.relay-client
 
@@ -932,12 +932,14 @@ describe("relay transport: a chat's packet one relay took waits for the others w
   // Bug hunt, 2026-10-14: an app opened with 30 contacts online wrote each chat's offer to both relays, and the chats
   // whose contact's offer or answer came a few seconds later found both minutes spent.
   const me = createIdentity();
-  function twoRelays(failing?: string) {
+  function twoRelays(failing?: string, slow?: string) {
     const log: { host: string; method: string; key: string }[] = [];
     const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input)), key = url.pathname.slice(1);
       log.push({ host: url.host, method: init?.method ?? "GET", key });
       if (init?.method !== "PUT") return new Response(null, { status: 404 });
+      // Takes the packet, and says so just before the 10 s timeout.
+      if (url.host === slow && key === me.pubKeyZ32) await new Promise((resolve) => setTimeout(resolve, 9_000));
       return new Response(null, { status: url.host === failing && key === me.pubKeyZ32 ? 500 : 204 });
     }) as typeof fetch });
     return { relay, log };
@@ -971,6 +973,21 @@ describe("relay transport: a chat's packet one relay took waits for the others w
       await busy(relay);
       await relay.publish(me, [{ label: "_ts", value: "1" }], { signal: true });
       expect(putsOf(log)).toEqual(["a.test", "b.test"]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("puts it on the other once the relay that took its request has not answered within SLOW_MS", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      const { relay, log } = twoRelays(undefined, "a.test");
+      await busy(relay);
+      const published = relay.publish(me, [{ label: "_ts", value: "1" }], { signal: true });
+      await vi.advanceTimersByTimeAsync(SLOW_MS - 1);
+      expect(putsOf(log)).toEqual(["a.test"]);
+      await vi.advanceTimersByTimeAsync(1);
+      // Dev: only once a.test answered, 9 s on, and the contact reading b.test found nothing until then.
+      expect(putsOf(log)).toEqual(["a.test", "b.test"]);
+      await published;
     } finally { vi.useRealTimers(); }
   });
 

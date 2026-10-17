@@ -42,8 +42,9 @@ export function menuPage<P extends object>(load: () => Promise<ComponentType<P>>
 function PageNotLoaded({ again, retried }: { again: () => Promise<void>; retried: boolean }) {
   const t = useT();
   const [busy, setBusy] = useState(false);
-  // Chromium keeps a failed import for as long as the page lives, so there "Try again" cannot bring the file: once it
-  // has failed, Reload is offered beside it. Firefox and Safari ask the server again.
+  // A browser that keeps a failed import for as long as the page lives (older Chromium builds did) cannot bring
+  // the file with "Try again": once it has failed, Reload is offered beside it. Chromium 156, Firefox and Safari ask
+  // the server again.
   const [failedAgain, setFailedAgain] = useState(retried);
   const retry = async (button: HTMLButtonElement) => {
     if (busy) return;

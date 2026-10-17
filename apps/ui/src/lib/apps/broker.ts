@@ -85,6 +85,12 @@ interface BrokerOptions {
    * where they lie (`{id, ok, file: AppFileAt}`) when the host can, instead of carrying them. Every check is the same.
    */
   byReference?: boolean;
+  /**
+   * Whether the app is on screen now. A `files.pick` from one that is not (its chat's panel hidden, another chat or
+   * page showing) is refused (`too-fast`): its sheet would come up over what the person is doing, take the focus from
+   * the box they type in, and name an app they cannot see. None: always (a Desktop app window).
+   */
+  shown?: () => boolean;
   now?: () => number;
 }
 
@@ -238,7 +244,7 @@ function storageKey(value: unknown): string {
   return value as string;
 }
 
-export function createBroker({ host: platform, launch, view, post, stopped, byReference = false, now = Date.now }: BrokerOptions): Broker {
+export function createBroker({ host: platform, launch, view, post, stopped, byReference = false, shown = () => true, now = Date.now }: BrokerOptions): Broker {
   const host = platform.running?.(launch.digest) ?? platform;
   let phase: AppPhase = "loading";
   const recent: number[] = [];
@@ -384,7 +390,7 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         const files = linkedFiles();
         if (!files) return refuse("not-allowed");
         const options = pickOptions(args[0]);
-        if (picking || now() < pickAgainAt) refuse("too-fast");
+        if (picking || now() < pickAgainAt || !shown()) refuse("too-fast");
         picking = true;
         try {
           return { value: await files.pick(launch.ref, launch.title, options, alive.signal) as unknown as MiniAppJson };
@@ -512,6 +518,14 @@ export interface RunningApp {
 }
 
 /**
+ * Whether an app's frame is on screen: in the page, in a tab that shows, and not under anything hidden (a chat kept
+ * loaded behind another one, a panel Back hid).
+ */
+export function onScreen(frame: HTMLIFrameElement): boolean {
+  return frame.isConnected && document.visibilityState !== "hidden" && (frame.checkVisibility?.() ?? true);
+}
+
+/**
  * Runs an app in a sandboxed frame of the runner, inside `container`: the frame, its one port, the start and the
  * teardown. The frame is removed when the app stops, for whatever reason.
  */
@@ -535,7 +549,8 @@ export function startApp({ container, host, launch, view, onStop, startTimeoutMs
 
   const broker = createBroker({
     host, launch, view,
-    post: (message, transfer) => { try { port?.postMessage(message, transfer ?? []); } catch { /* closed */ } },
+    shown: () => onScreen(frame),
+    post:(message, transfer) => { try { port?.postMessage(message, transfer ?? []); } catch { /* closed */ } },
     stopped: (reason) => {
       if (timer) clearTimeout(timer);
       frame.removeEventListener("load", loaded);

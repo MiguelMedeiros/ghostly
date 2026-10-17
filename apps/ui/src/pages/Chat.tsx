@@ -57,6 +57,7 @@ import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
 import { CueChat } from "../lib/cues";
+import { NowPlayingChat, pauseForCall } from "../lib/nowPlaying";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import {
   isSessionPinned,
@@ -242,6 +243,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   useEffect(() => {
     const before = previousCallState.current;
     previousCallState.current = callState;
+    // A call starting (placed, or answered) pauses a voice message or audio file that plays, here or held by the app.
+    const quiet = (state: string) => state === "idle" || state === "incoming" || state === "ended";
+    if (!quiet(callState) && quiet(before)) pauseForCall();
     // A muted chat still rings (lib/chatMute.ts, MUTE_SILENCES).
     if (callState === "incoming") return callRings(sessionId) ? startRinging("ring") : undefined;
     if (callState === "offering") return startRinging("ringback");
@@ -559,6 +563,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const shown = shownContactName({ nickname: chatLabel, face, nick: contactNick, fallback: t("common.unnamedContact", { key: contactTag(params?.peerPubKeyB64 ?? "") }) });
   const isAnonymous = shown.from === "key";
   const shownName = shown.name;
+  // What the now-playing bar names, for a voice message from here that plays on in another chat.
+  const playingChat = useMemo(() => ({ path: chatPath(sessionId), name: shownName, contact: true }), [sessionId, shownName]);
   // While locked, the lock screen shows who calls, as this chat shows them, and nothing else of it (WISP 601 § Locked).
   useRingOnLockScreen(params && callState === "incoming" ? {
     id: sessionId, name: shownName, named: !isAnonymous, peerPubKey: params.peerPubKeyB64, photo: face?.photo,
@@ -647,6 +653,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   return (
     // The chat's column, and beside it (over it when narrow) the contact's identities: the page is their container.
     <CueChat.Provider value={sessionId}>
+    <NowPlayingChat.Provider value={playingChat}>
     <div className="chat-pane flex-1 h-full">
     {/* A message that comes while the chat is open, read out once to a screen reader. */}
     <MessageAnnouncer chat={sessionId} messages={messages} nameOf={() => shownName} active={visible} />
@@ -1191,6 +1198,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         card={identityCard} onClose={() => setShowIdentities(false)} />
     )}
     </div>
+    </NowPlayingChat.Provider>
     </CueChat.Provider>
   );
 }

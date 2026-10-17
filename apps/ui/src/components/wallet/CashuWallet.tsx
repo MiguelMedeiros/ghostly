@@ -70,9 +70,8 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   const [amount, setAmount] = useState("");
   const [invoice, setInvoice] = useState<string | null>(null);
   const [paymentHash, setPaymentHash] = useState<string | undefined>();
-  /** Balance when the invoice was created: once it grew by the amount, the invoice was paid. */
-  const [balanceBefore, setBalanceBefore] = useState(0);
-  const [invoiceAt, setInvoiceAt] = useState(0);
+  /** The invoice's mint quote: once its ecash is minted, its Lightning receipt carries it. */
+  const [invoiceQuote, setInvoiceQuote] = useState<string | undefined>();
   const [payInput, setPayInput] = useState("");
   const [quote, setQuote] = useState<{ quote: string; mint: string; amount: number; feeReserve: number } | null>(null);
   /** Real money: Pay opens the second step, and only it pays. */
@@ -100,10 +99,9 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   const unit = satsIn(t, testnet ? "testnet" : "mainnet");
   // Test sats say so wherever an amount shows on a Testnet wallet: its invoice, its mints, what came in.
   const sats = (amount: number) => t("wallet.cards.amount", { amount: formatAmount(amount, t.language), unit });
-  // On Testnet, Get test coins also grows the balance: only a Lightning receive of this amount since the invoice counts.
-  const mintPaid = testnet
-    ? state.history.some((tx) => tx.kind === "lightning-in" && tx.timestamp >= invoiceAt && tx.amount + tx.fee === Number(amount) && tx.note !== TEST_COINS_NOTE && state.mints.some((m) => m.url === tx.mint))
-    : state.balance >= balanceBefore + Number(amount);
+  // Only this invoice's own receipt: other money of the same amount (a contact's ecash, a token taken back, a chat
+  // request paid, test coins) is not a payment of it. A Lightning card's invoice is matched by its hash below.
+  const mintPaid = !!invoiceQuote && state.history.some((tx) => tx.kind === "lightning-in" && tx.quote === invoiceQuote);
   const invoicePaid = invoice !== null && ((viaMint && mintPaid)
     || !!ln?.recent.some((op) => op.direction === "in" && op.paymentHash === paymentHash && op.state === "paid"));
   const isToken = /^cashu[AB]/i.test(payInput.trim());
@@ -191,7 +189,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                   actions={<button type="button" className="px-3 py-1.5 min-h-9 max-md:min-h-11 rounded-lg text-xs font-bold bg-black/20 hover:bg-black/30 transition-colors cursor-pointer" onClick={() => setInvoice(null)}>{t("wallet.cashu.newAmount")}</button>} />
               </div>
             ) : (
-              <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void run(async () => { setBalanceBefore(state.balance); setInvoiceAt(Date.now()); const created = await wallet.receiveLightning(Number(amount), rail === "cashu" ? "cashu" : undefined); setPaymentHash(created.paymentHash); setInvoice(created.invoice); }); }}>
+              <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void run(async () => { const created = await wallet.receiveLightning(Number(amount), rail === "cashu" ? "cashu" : undefined); setInvoiceQuote(created.quote); setPaymentHash(created.paymentHash); setInvoice(created.invoice); }); }}>
                 <Amount value={amount} onChange={setAmount} unit={unit} testId="wallet-receive-amount" autoFocus={focusAmount || actionChosen} />
                 <Button type="submit" variant="primary" className="w-full" data-testid="wallet-create-invoice" disabled={busy || !amount || (viaMint ? !state.mints.length : ln?.status !== "ready")}>{busy ? (viaMint ? t("wallet.cashu.askingMint") : sourceName ? t("wallet.lightning.asking", { source: sourceName }) : t("wallet.lightning.askingSource")) : t("wallet.cashu.createInvoice")}</Button>
                 <Notice>{rail === "cashu" ? t("wallet.cashu.tokenHint") : t("wallet.lightning.anyonePays")}</Notice>

@@ -6,7 +6,7 @@ import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, 
 import { connectDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
 import { here } from "./commands/shared";
-import { ENGINE_METHODS, ENGINE_READS, SECRET_RESULTS } from "./engineMethods";
+import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
 import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
@@ -239,8 +239,8 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   }],
   ["settings get [--show-secret]", "The profile's settings", { "show-secret": o("boolean", "Show credentials too") }],
   ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, readRelays, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick"],
-  ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes]", "Any call of the app's engine, with its own parameters", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups") }],
-  ["engine --list", "The engine's calls"],
+  ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups") }],
+  ["engine --list [--verbose]", "The engine's calls", { verbose: o("boolean", "With what each call takes: { linkId, label }, ? for an optional one") }],
   ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
   ["identity add <provider> [subject] [--signer id] [--field name=value]... [--days n]", "Make an identity proof (a tool's or a published one finishes with identity complete)", {
     signer: o("string", "Which signer makes the proof (identity providers lists them)"), field: o("list", "A field of the provider's form, name=value"),
@@ -643,6 +643,21 @@ async function startDetached(g: Globals, seconds: number) {
   return { daemon: "started", profile: g.profile, pid: child.pid, socket: g.paths.socket, log: g.paths.log };
 }
 
+/**
+ * Nobody reads `listen`'s output any more (`listen | head -n 1`, a `grep -m1` that found its line): it stops as on
+ * SIGTERM, exit 0. Through a daemon it died on an 'error' nobody handled; on its own profile it served on with nobody
+ * to tell, holding the profile until `daemon stop`. Any other failure of the output is still an error.
+ */
+function onReaderGone(stop: () => void): void {
+  let gone = false;
+  process.stdout.on("error", (error: NodeJS.ErrnoException) => {
+    if (gone) return;
+    if (error.code !== "EPIPE") throw error;
+    gone = true;
+    stop();
+  });
+}
+
 async function listenCommand(argv: string[]): Promise<void> {
   const parsed = parseArgs(argv, {
     since: { type: "number", description: "" }, cursor: { type: "string", description: "" }, type: { type: "list", description: "" },
@@ -717,9 +732,11 @@ async function listenCommand(argv: string[]): Promise<void> {
         reconnect(1000);
       });
     };
+    const stop = () => { current?.close(); process.exit(0); };
+    onReaderGone(stop);
     await follow(client);
-    process.on("SIGINT", () => { current?.close(); process.exit(0); });
-    process.on("SIGTERM", () => { current?.close(); process.exit(0); });
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
     return;
   }
   // No daemon: this process becomes it (the socket too, so hooks can answer with `ghostly send`).
@@ -732,6 +749,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   const stop = stopper(async () => { await served.close(); await host.close(); });
   host.ctx.stop = stop;
   onStopSignals(stop);
+  onReaderGone(stop);
   // The hub's listener comes off while the feed is paused, and back after a replay from the last event taken. What a
   // replay gave and the feed did not take yet waits for the resume: one read of the journal per catch-up, not one per
   // pause; the journal is read again only for what came meanwhile.
@@ -755,10 +773,16 @@ async function listenCommand(argv: string[]): Promise<void> {
 }
 
 async function engineCommand(argv: string[]): Promise<void> {
-  const parsed = parseArgs(argv, { "confirm-real": { type: "boolean", description: "" }, "show-secret": { type: "boolean", description: "" }, yes: { type: "boolean", description: "" }, list: { type: "boolean", description: "" } });
+  const parsed = parseArgs(argv, { "confirm-real": { type: "boolean", description: "" }, "show-secret": { type: "boolean", description: "" }, yes: { type: "boolean", description: "" }, list: { type: "boolean", description: "" }, verbose: { type: "boolean", description: "" } });
   const g = globals(parsed);
   pretty = g.pretty;
-  if (parsed.options.list) { noMoreThan(0, parsed.positionals, "engine --list"); print({ methods: [...ENGINE_METHODS, ...ENGINE_READS].sort() }); return; }
+  if (parsed.options.list) {
+    noMoreThan(0, parsed.positionals, "engine --list [--verbose]");
+    const methods = [...ENGINE_METHODS, ...ENGINE_READS].sort();
+    // `takes`: what each call takes, in ENGINE_PARAMS' words.
+    print(parsed.options.verbose ? { methods, takes: Object.fromEntries(methods.map((m) => [m, ENGINE_PARAMS[m] ?? READ_PARAMS[m]])) } : { methods });
+    return;
+  }
   const [method, raw] = parsed.positionals;
   if (!method || parsed.positionals.length > 2) throw new CliError("usage", "ghostly engine <method> [json-params | -]");
   if (!ENGINE_METHODS.includes(method) && !ENGINE_READS.includes(method)) throw new CliError("not_found", `The engine has no call ${method} (ghostly engine --list)`);

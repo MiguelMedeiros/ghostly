@@ -1,5 +1,5 @@
 import {
-  contactDay, createChatInvite, createIdentity, identityFromSeedB64, knockSlotIdentity, knockSlotOf, knockSlotRecords, makeStamp, mergeContactKnocks,
+  contactDay, createChatInvite, createIdentity, identityFromSeedB64, knockSlotIdentity, knockSlotOf, knockSlotRecords, makeStampPaced, mergeContactKnocks,
   readContactLink, readKnockSlot, readLinkRecord, requestRecords, seenEntry, ContactRequestError, REQUEST_LIFETIME_MS, STAMP_BITS_DEFAULT,
   type ContactRequest, type GhostRecord, type Identity,
 } from "@ghostly/core";
@@ -181,7 +181,8 @@ export class ContactAsks {
       const day = contactDay(now);
       const bits = Math.max(record?.bits ?? STAMP_BITS_DEFAULT, STAMP_BITS_DEFAULT);
       // The owner takes today's and yesterday's stamps at the bits its link asks for now: make a new one when that fails.
-      if (!next.stamp || next.stamp.day < day - 1 || next.stamp.bits < bits) next = { ...next, stamp: { day, bits, stamp: makeStamp(ask.link, ask.key, day, bits) } };
+      // Paced: at the 24 bits a link may ask for, the hashing takes up to minutes, and this thread is the page's.
+      if (!next.stamp || next.stamp.day < day - 1 || next.stamp.bits < bits) next = { ...next, stamp: { day, bits, stamp: await makeStampPaced(ask.link, ask.key, day, bits) } };
       await this.goOut(next, await this.identity(next), next.publishedAt === undefined || now - next.publishedAt >= REQUEST_REPUBLISH_MS);
     }
   }

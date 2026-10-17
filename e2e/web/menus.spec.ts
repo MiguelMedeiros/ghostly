@@ -116,3 +116,22 @@ test("every row of the chat, group and New menus is one line and whole, in every
     }
   }
 });
+
+test("a phone on its side: a chat's ⋮ menu stays on the screen and scrolls to its last row", { tag: ["@feature:app.menus", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  // 874 × 402, two panes: no room above the header's ⋮ nor below it for the whole menu. It ran off the screen's bottom
+  // edge, its last row (Delete chat) half cut, with nothing to scroll to it.
+  const SIDE = { width: 874, height: 402 };
+  const { page } = await peer("side-menu", { mobile: true, viewport: SIDE });
+  await page.getByTitle("New Chat").first().click();
+  await page.getByTestId("chat-options").filter({ visible: true }).click();
+  const menu = page.getByTestId("chat-options-menu");
+  await expect(menu).toHaveAttribute("data-menu", "popover");
+  expect((await menu.boundingBox())!.y + (await menu.boundingBox())!.height).toBeLessThanOrEqual(SIDE.height);
+  const last = menu.locator("[data-menu-item]").last();
+  await last.scrollIntoViewIfNeeded();
+  const box = (await last.boundingBox())!;
+  expect(box.y + box.height).toBeLessThanOrEqual(SIDE.height);
+  // The keys reach it too.
+  await page.keyboard.press("End");
+  await expect(last).toBeFocused();
+});

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { QRCodeSVG } from "qrcode.react";
-import type { Bolt11Invoice, LightningDestination } from "@ghostly/core";
+import { parseEngineError, type Bolt11Invoice, type LightningDestination } from "@ghostly/core";
 import { LightningAddressPay } from "./wallet/LightningAddressPay";
 import { holdsLess, lightningNetworkFor } from "./walletCardData";
 import { NetworkTag, satsIn } from "./NetworkTag";
@@ -121,7 +121,8 @@ function relativeExpiry(t: Translate, expiresAt: number, now: number): string {
   return t("payments.invoice.expiresDays", { n: Math.round(left / 86400) });
 }
 
-function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: boolean; off: boolean }) {
+/** `peerPubKey`: the chat the invoice is in, told once it is paid (a test mint's invoice counts only on the payer's word). */
+function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invoice; mine: boolean; off: boolean; peerPubKey?: string }) {
   const { t } = useI18n();
   const all = useServicesPlatform()?.wallet;
   // Paid by the Lightning wallet of the invoice's network: a test invoice never meets real money. An invoice on
@@ -170,7 +171,7 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
   const pay = (payable: { quote: string; mint: string; id: string }, confirmedReal: boolean) =>
     run(async () => {
       try {
-        if (!(await wallet!.payQuote(payable.quote, payable.mint, undefined, confirmedReal))) {
+        if (!(await wallet!.payQuote(payable.quote, payable.mint, undefined, confirmedReal, peerPubKey ? { peerPubKey, invoice: invoice.invoice } : undefined))) {
           // Pending at the mint: the wallet settles it, or gives the sats back, on its own.
           setQuote(null);
           setConfirming(false);
@@ -342,7 +343,13 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
               setError(null);
               setBusy(true);
               try {
-                await wallet.receiveToken(value);
+                try {
+                  await wallet.receiveToken(value);
+                } catch (e) {
+                  // Spent is spent: nothing is left to redeem. A token redeemed before the mark was keyed by the whole
+                  // token (a 1.3.2 mark is its tail, read no more) offers Redeem again, and this is how it learns.
+                  if (parseEngineError(rawError(e))?.code !== "ecashAlreadySpent") throw e;
+                }
                 markSettled(id);
                 setRedeemed(true);
               } catch (e) {
@@ -386,8 +393,8 @@ export function InvoiceBubble({ money, mine, peerPubKey }: { money: MoneyInText;
     <>
       {money.rest && <p className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
       <Fragment key={whatItPays(money)}>
-        {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} off={off} />
-          : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={!!allowed && !allowed.lightning} />} />}
+        {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} peerPubKey={peerPubKey} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} off={off} />
+          : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={!!allowed && !allowed.lightning} peerPubKey={peerPubKey} />} />}
       </Fragment>
       {off && !mine && <p className="text-[11px] text-text-primary/65 mt-1" data-testid="money-off">{t("payments.invoice.methodOff", { method: method === "bitcoin" ? t("payments.invoice.onchainBitcoin") : METHOD_NAME[method] })}</p>}
     </>

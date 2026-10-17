@@ -231,14 +231,36 @@ fn accepted(name: &str, accept: &[String]) -> bool {
     extension.is_some_and(|e| accept.contains(&e))
 }
 
+/// The name a picked folder goes by, first in its paths. A whole drive has none of its own: it goes by its letter (`D`
+/// for `D:\`), its share (`films` for `\\nas\films`) or `Disk` (`/`), never with a `:` or a `\` that would make a
+/// path look absolute.
+fn folder_name(root: &Path) -> Option<String> {
+    use std::path::{Component, Prefix};
+    match root.components().next_back()? {
+        Component::Normal(name) => name.to_str().map(str::to_string),
+        Component::RootDir | Component::Prefix(_) => {
+            let drive = root.components().find_map(|c| match c {
+                Component::Prefix(p) => match p.kind() {
+                    Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => {
+                        Some(char::from(letter).to_string())
+                    }
+                    Prefix::UNC(_, share) | Prefix::VerbatimUNC(_, share) => {
+                        share.to_str().map(str::to_string)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            });
+            Some(drive.unwrap_or_else(|| "Disk".to_string()))
+        }
+        _ => None,
+    }
+}
+
 /// Everything under a folder that `accept` names, its name first in each path: hidden entries, symbolic links and
 /// folders that cannot be read left out, at most one more than `MAX_ENTRIES` (so a folder past it is known to be).
 pub fn walk(root: &Path, accept: &[String]) -> Result<Vec<(String, PathBuf)>, String> {
-    let top = root
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or("A folder with no name")?
-        .to_string();
+    let top = folder_name(root).ok_or("A folder with no name")?;
     let mut found = Vec::new();
     let mut stack = vec![(top, root.to_path_buf())];
     while let Some((shown, dir)) = stack.pop() {
@@ -442,7 +464,14 @@ impl LinkedFiles {
         }
         let mut added = Vec::with_capacity(picked.len());
         for (path, full) in picked {
-            let Ok(meta) = fs::metadata(&full) else {
+            // A file only, as `walk` keeps: opening a named pipe picked with the files waited for a writer for good,
+            // and every app's links with it.
+            if !fs::metadata(&full).is_ok_and(|meta| meta.is_file()) {
+                continue;
+            }
+            // Opened, not only looked at: a file that cannot be read (another user's) is left out, as `walk` leaves
+            // out a folder that cannot be, rather than listed as there and then `gone` on every read.
+            let Ok(meta) = fs::File::open(&full).and_then(|file| file.metadata()) else {
                 continue;
             };
             let (size, modified) = stamp(&meta);
@@ -809,6 +838,24 @@ mod tests {
             .all(|(p, _)| !p.contains("elsewhere") && !p.contains("link.mp4")));
     }
 
+    /// A whole drive has no name of its own (`/`, `D:\`): it is linked under one that keeps every path relative.
+    #[test]
+    fn a_whole_drive_is_named_too() {
+        assert_eq!(folder_name(&films()).as_deref(), Some("Films"));
+        #[cfg(unix)]
+        assert_eq!(folder_name(Path::new("/")).as_deref(), Some("Disk"));
+        #[cfg(windows)]
+        {
+            assert_eq!(folder_name(Path::new(r"D:\")).as_deref(), Some("D"));
+            assert_eq!(folder_name(Path::new(r"\\?\D:\")).as_deref(), Some("D"));
+            assert_eq!(
+                folder_name(Path::new(r"\\nas\films\")).as_deref(),
+                Some("films")
+            );
+        }
+        assert_eq!(folder_name(Path::new("Films/..")), None);
+    }
+
     /// `lost+found` at the root of an ext4 drive, a folder of another user: the rest of the folder is still linked.
     #[cfg(unix)]
     #[test]
@@ -833,6 +880,58 @@ mod tests {
         let picked = walk(&root, &[]);
         fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
         assert!(picked.is_err());
+    }
+
+    /// Another user's file, root's after a `sudo cp`: left out of the pick, not listed as there and then `gone`.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_that_cannot_be_read_is_left_out_and_the_rest_is_linked() {
+        use std::os::unix::fs::PermissionsExt;
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let locked = root.join("Locked.mp4");
+        fs::write(&locked, b"x").unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        // As root every file can be read: nothing to prove.
+        let readable = fs::File::open(&locked).is_ok();
+        let added = pick(&links, walk(&root, &["mp4".to_string()]).unwrap());
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o600)).unwrap();
+        if readable {
+            return;
+        }
+        let added: Vec<String> = added.unwrap().into_iter().map(|e| e.path).collect();
+        assert_eq!(added, ["Films/Season 1/E01.mp4", "Films/Up.mp4"]);
+        let listed = links.list("ghostly", APP).unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(listed.iter().all(|e| e.available));
+    }
+
+    /// A named pipe picked with the files: opening one waits for a writer, and every app's links waited with it.
+    #[cfg(unix)]
+    #[test]
+    fn a_named_pipe_picked_is_left_out_and_nothing_waits_on_it() {
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let pipe = root.join("Live.mp4");
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&pipe)
+            .status()
+            .unwrap()
+            .success());
+        let picked = picked_files(vec![root.join("Up.mp4"), pipe], &["mp4".to_string()]);
+        let (done, added) = std::sync::mpsc::channel();
+        let picker = links.clone();
+        std::thread::spawn(move || done.send(pick(&picker, picked)));
+        let added = added
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the pick waited on the pipe")
+            .unwrap();
+        assert_eq!(
+            added.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(),
+            ["Up.mp4"]
+        );
+        // The lock every app's links take is free again.
+        links.forget("ghostly", APP, "all").unwrap();
     }
 
     #[test]

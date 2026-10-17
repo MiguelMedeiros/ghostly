@@ -1778,10 +1778,22 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.limitedMode) await this.startWallets();
 
     const history = new Map<string, StoredMessage[]>();
-    for (const stored of await db.getLinks()) {
-      if (!stored.group) await this.settleHistory(stored.id);
-      const messages = stored.group ? [] : await db.getMessages(stored.id);
-      const storedFiles = stored.group ? [] : await fileStore.listForLink(stored.id);
+    const links = await db.getLinks();
+    // Links start in the order they are stored (`nativeStartOrder` ranks the chats among them).
+    for (const stored of links) history.set(stored.id, []);
+    // The chat list waits for the groups, and the groups need none of the chats' histories: only their edges, which
+    // have none. 50 chats of 1000 messages read first held the list blank 1.3 s at every start (2.8 s at 4x CPU).
+    for (const stored of links) if (stored.group) this.links.set(stored.id, newLiveLink(stored, 0, linkFilesFrom(stored.id, [], [])));
+    for (const group of await db.getGroups()) await this.settleHistory(`group:${group.id}`);
+    // Groups know their edges from the links above, and may add or drop some before anything dials.
+    await this.groups.load(this.limitedMode);
+    this.groupsLoaded = true;
+    this.emitState();
+    for (const stored of links) {
+      if (stored.group) continue;
+      await this.settleHistory(stored.id);
+      const messages = await db.getMessages(stored.id);
+      const storedFiles = await fileStore.listForLink(stored.id);
       // A file whose message still waits for the chat to be live never started: it goes then (`sendWaiting`), as it
       // would have without the restart, and shows no transfer until it does.
       const waiting = new Set(messages.flatMap(m => m.sender === "me" && m.delivery === "waiting" && m.file ? [m.file.id] : []));
@@ -1789,23 +1801,19 @@ export class GhostlyNode implements EngineImplementation {
       for (const file of storedFiles) if (file.transfer && file.transfer.state !== "done" && !file.wire3 && !waiting.has(file.id)) this.transfers.set(file.id,
         file.transfer.state === "transferring" ? { ...file.transfer, state: "failed", error: "Transfer interrupted. Retry when connected." } : file.transfer);
       // files/3 transfers go on where they stopped, once the chat is live again.
-      if (!stored.group) this.fileDesk.restore(stored.id, storedFiles);
+      this.fileDesk.restore(stored.id, storedFiles);
       const files = linkFilesFrom(stored.id, storedFiles, messages);
       this.links.set(stored.id, newLiveLink(stored, messages[messages.length - 1]?.timestamp ?? 0, files));
       // What waits for the live link is known from this read: a session that opens reads no history for it (`sendWaiting`).
-      if (!stored.group) this.links.get(stored.id)!.waitingSends = Promise.resolve(new Set(messages.filter(waitsForLive).map(m => m.id)));
+      this.links.get(stored.id)!.waitingSends = Promise.resolve(new Set(messages.filter(waitsForLive).map(m => m.id)));
       history.set(stored.id, messages);
       // What the contact's clock was when the chat was last live: its first message of this run is read by it.
       for (const message of messages.slice(-4 * CLOCK_SAMPLES)) this.clockSample(message);
       const note = latestReaction(messages);
       if (note) this.reactionNotes.set(stored.id, note);
-      if (stored.profile && !stored.group) await this.outboxFor(stored.id).recover();
+      if (stored.profile) await this.outboxFor(stored.id).recover();
     }
     this.transfersRestored = true;
-    for (const group of await db.getGroups()) await this.settleHistory(`group:${group.id}`);
-    // Groups know their edges from the links above, and may add or drop some before anything dials.
-    await this.groups.load(this.limitedMode);
-    this.groupsLoaded = true;
     for (const group of this.groups.views()) {
       const note = latestReaction(await db.getMessages(`group:${group.id}`));
       if (note) this.reactionNotes.set(`group:${group.id}`, note);
@@ -4538,7 +4546,9 @@ export class GhostlyNode implements EngineImplementation {
     if (ids.length > FORWARD_MESSAGES) throw new Error(`Forward at most ${FORWARD_MESSAGES} messages at once`);
     if (!targets.length) throw new Error("No chat to forward to");
     if (targets.length > FORWARD_TARGETS) throw new Error(`Forward to at most ${FORWARD_TARGETS} chats at once`);
-    if (linkId.startsWith("group:") ? !this.membership(linkId.slice("group:".length)) : this.links.get(linkId)?.stored.group !== undefined || !this.links.has(linkId))
+    // A group this device keeps, in it or not: its history is read from here, and one I was removed from still shows it.
+    // Sending to a group is what needs being in it.
+    if (linkId.startsWith("group:") ? !this.groups.views().some(g => g.id === linkId.slice("group:".length)) : this.links.get(linkId)?.stored.group !== undefined || !this.links.has(linkId))
       throw new Error("Chat not found");
     // Each one by its id: a long chat or group is not read whole for the few forwarded.
     const chosen = await Promise.all(ids.map(id => db.getMessage(linkId, id)));
@@ -5318,13 +5328,19 @@ export class GhostlyNode implements EngineImplementation {
     return via === "cashu" ? this.wallet.quoteInvoice(invoice, n) : this.lightningCard(n, card).then((c) => c.quote(invoice));
   }
 
-  /** `confirmedReal`: the person confirmed a Mainnet payment as real money; without it one is refused. */
-  async walletPayQuote({ quote, mint, note, confirmedReal }: { quote: string; mint: string; note?: string; confirmedReal?: boolean }) {
+  /**
+   * `confirmedReal`: the person confirmed a Mainnet payment as real money; without it one is refused. `linkId` +
+   * `invoice`: the chat whose message held the invoice. Paid on Testnet, its contact is told (`sayInvoicePaid`): a test
+   * mint's invoice counts only on the payer's word.
+   */
+  async walletPayQuote({ quote, mint, note, confirmedReal, linkId, invoice }: { quote: string; mint: string; note?: string; confirmedReal?: boolean; linkId?: string; invoice?: string }) {
     // A quote of a Lightning card (each knows its own), or a melt quote the Cashu card asked the mints for.
     const network = WALLET_NETWORKS.find((n) => this.lightnings[n].withQuote(quote));
     const lightning = network && this.lightnings[network].withQuote(quote);
     assertConfirmedReal(network ?? mintNetwork(mint), confirmedReal);
-    return { paid: lightning ? await lightning.pay(quote, { note }) : await this.wallet.payQuote(quote, mint, note) };
+    const paid = lightning ? await lightning.pay(quote, { note }) : await this.wallet.payQuote(quote, mint, note);
+    if (paid && linkId && invoice && (network ?? mintNetwork(mint)) === "testnet") this.desk.sayInvoicePaid(linkId, invoice);
+    return { paid };
   }
 
   /** A Lightning address or LNURL (LUD-16, LUD-06): resolved here, in the engine, so every platform fetches the same way. */
@@ -6849,6 +6865,9 @@ export class GhostlyNode implements EngineImplementation {
       nick: !entry && this.quietEdge(stored) ? undefined : this.sharedNick,
       // A private group's edges look at Pkarr more slowly as it grows: one edge per member (WISP 902 § Cost per member).
       pollIntervals: entry || this.groups.isCommunityGroup(group) ? this.pollIntervals : meshEdgeIntervals(this.pollIntervals, () => this.groups.meshSize(group)),
+      // A member never seen is awaited from when the edge was made, as a chat's contact is: from each start, every edge
+      // to a member away for a day was read every 4 s for ten minutes of every start, as an invite just sent.
+      madeAt: stored.createdAt,
       autoConnect: true,
       // An entry session carries one admission and closes. The member's side always dials (the joiner's key is
       // drawn so), and the joiner's packet is already there: its offer goes in its first packet.

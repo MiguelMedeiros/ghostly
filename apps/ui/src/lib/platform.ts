@@ -169,6 +169,8 @@ export interface WalletTransaction {
   /** What this movement cost, exactly. */
   fee: number;
   note?: string;
+  /** `lightning-in`: the mint quote of the invoice paid (what `receiveLightning` returned as `quote`). */
+  quote?: string;
 }
 
 export interface WalletState {
@@ -355,13 +357,15 @@ export interface WalletPlatform {
   /** The primary mint (first in the list) is where Lightning invoices are created. */
   setPrimaryMint(url: string): Promise<void>;
   /** An invoice from the bound Lightning card (else the default for receiving); `via: "cashu"` asks the Cashu mints. */
-  receiveLightning(amount: number, via?: "cashu"): Promise<{ invoice: string; expiresAt: number | null; paymentHash?: string; source?: string }>;
+  receiveLightning(amount: number, via?: "cashu"): Promise<{ quote?: string; invoice: string; expiresAt: number | null; paymentHash?: string; source?: string }>;
   quoteInvoice(invoice: string, via?: "cashu"): Promise<{ quote: string; mint: string; amount: number; feeReserve: number; source?: string }>;
   /**
    * True when paid, false while the payment is pending (or its answer lost). Throws when the sats did not leave. `note`: what it was for, kept with the wallet's record.
    * `confirmedReal`: the person confirmed a Mainnet payment as real money; the engine refuses one without it.
+   * `chat`: the invoice was in a message of this contact's chat; paid on Testnet, they are told (a test mint's invoice
+   * counts only on the payer's word).
    */
-  payQuote(quote: string, mint: string, note?: string, confirmedReal?: boolean): Promise<boolean>;
+  payQuote(quote: string, mint: string, note?: string, confirmedReal?: boolean, chat?: { peerPubKey: string; invoice: string }): Promise<boolean>;
   /**
    * Reads a Lightning address (`name@domain`) or an LNURL and fetches what it asks for. The address's
    * domain learns of the request: say so before calling.

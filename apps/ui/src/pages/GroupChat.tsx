@@ -27,7 +27,8 @@ import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMen
 import { groupChat } from "../lib/chatMute";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { GroupInvitationCard } from "../components/GroupInvitation";
-import { authorName, forgetGroupLocal, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, memberName, memberPhoto } from "../lib/groups";
+import { authorName, forgetGroupLocal, groupPath, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, memberName, memberPhoto } from "../lib/groups";
+import { NowPlayingChat } from "../lib/nowPlaying";
 import { clearChatNotification } from "../lib/notifications";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { authorsMemo, type MessageAuthor } from "../lib/senderRuns";
@@ -377,6 +378,9 @@ export function GroupChat() {
   }, [groupId]);
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(!!group, id => messages.some(m => m.id === id));
+  // What the now-playing bar names, for a voice message from here that plays on elsewhere.
+  const groupName = group ? group.name || t("group.chat.unnamed") : "";
+  const playingChat = useMemo(() => ({ path: groupPath(groupId), name: groupName }), [groupId, groupName]);
   // A bot's routines in a row: one row, opened on a tap (WISP 405 · Status Cards), whichever of its rows are in the page.
   const stacks = useMemo(() => routineStacks(messages, m => m), [messages]);
   const stackHeads = useMemo(() => new Map([...stacks.values()].flatMap(run => run.slice(1).map(m => [m.id, run[0].id] as const))), [stacks]);
@@ -561,6 +565,7 @@ export function GroupChat() {
 
   return (
     <CueChat.Provider value={groupChat(groupId)}>
+    <NowPlayingChat.Provider value={playingChat}>
     {/* Each member's colour, given out over the roster: the same on every member's device (lib/memberColors.ts). */}
     <MemberColorsProvider keys={group.members.map(m => m.key)}>
     {/* A file dropped anywhere on the group goes to the composer (`data-file-drop`), as in a chat. */}
@@ -731,6 +736,7 @@ export function GroupChat() {
         onConfirm={() => { setConfirmForget(false); void act(async () => { await engine.call("forgetGroup", { groupId }); forgetGroupLocal(groupId); nav.home(); }); }} />}
     </div>
     </MemberColorsProvider>
+    </NowPlayingChat.Provider>
     </CueChat.Provider>
   );
 }

@@ -90,7 +90,7 @@ export const GROUP_LIMITS = {
 } as const;
 
 /** What every member should know about who can read what, in the words the apps show. */
-export const GROUP_READ_NOTE = `Everyone in the group can read everything sent while they are a member. Someone removed keeps what they already received and cannot read what comes after; someone who joins later cannot read what came before. Messages go directly to each member; whoever was away gets what they missed from any member who has it (the group's last ${GROUP_LIMITS.relay} messages) when they meet again.`;
+export const GROUP_READ_NOTE = `Everyone in the group can read everything sent while they are a member. Someone removed keeps what they already received and cannot read what comes after; someone who joins later cannot read what came before. Messages go to each member; whoever was away gets what they missed from any member who has it (the group's last ${GROUP_LIMITS.relay} messages) when they meet again.`;
 
 /**
  * `m`: the message's mentions (`GroupMention[]` as JSON), sealed under the same epoch key with a nonce of their own
@@ -1421,15 +1421,17 @@ export class GroupSession {
    * The author's name in a message (`nk`), when the author's signature over it (`ns`) holds: any copy, handed on or
    * not, whole or not, since a member handing it on can only drop it. Taken only from a message newer than the one it
    * last came in, or than the moment an edge last said it (`setNick`), so a catch-up's older pages never bring back a
-   * name the member changed since. Whether the name I hold changed.
+   * name the member changed since. The name I hold already costs no signature check: a box sealed by a member handing
+   * the frame on can only say that name again, at a time under the author's `sig`, and at most hold back an older page's
+   * newer name until the author's next message, as withholding those pages would. Whether the name I hold changed.
    */
   private heardName(key: Uint8Array, raw: GroupMessageFrame): boolean {
     if (!isNickBox(raw.nk) || !isSignature(raw.ns) || raw.ts <= (this.nickAt.get(raw.s) ?? 0)) return false;
-    try { if (!verify(fromBase64Url(raw.ns), nickSigned(raw, raw.nk), publicKeyFromZ32(raw.s))) return false; } catch { return false; }
     const nick = sanitizeNick(decryptText(key, nickAad(raw), raw.nk.n, raw.nk.c));
     if (nick === undefined) return false;
+    if (this.state.nicks[raw.s] === nick) { this.nickAt.set(raw.s, raw.ts); return false; }
+    try { if (!verify(fromBase64Url(raw.ns), nickSigned(raw, raw.nk), publicKeyFromZ32(raw.s))) return false; } catch { return false; }
     this.nickAt.set(raw.s, raw.ts);
-    if (this.state.nicks[raw.s] === nick) return false;
     this.state.nicks[raw.s] = nick;
     return true;
   }

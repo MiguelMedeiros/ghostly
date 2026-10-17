@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { fakeEngine, linkView } from "../fakeEngine";
@@ -46,6 +46,41 @@ describe("the Redeemed mark of an ecash token", () => {
 
     renderApp(<MessageBubble message={message("m2", token)} peerPubKey="peer" />);
     expect(await screen.findByTestId("token-redeemed")).toBeInTheDocument();
+  });
+
+  // A token redeemed before the mark was keyed by the whole token reads Redeem again: the mint's word that it is spent
+  // is what is left, and spent ecash has nothing more to offer.
+  it("is shown when the mint says the token was already spent", async () => {
+    const token = `cashuBa${"o".repeat(60)}`;
+    fakeEngine.setState({ links: [linkView()] });
+    fakeEngine.on("walletInspectCashu", () => ({ inspection: { kind: "token", amount: 1008, unit: "sat", mint: "https://mint.example.com", accepted: true } }));
+    const view = renderApp(<MessageBubble message={message("m1", token)} peerPubKey="peer" />);
+    view.engine.on("walletReceiveToken", () => {
+      throw new Error("This ecash was already spent somewhere else");
+    });
+    const card = await screen.findByTestId("cashu-token-bubble");
+    await view.user.click(within(card).getByTestId("token-redeem"));
+    expect(await within(card).findByTestId("token-redeemed")).toBeInTheDocument();
+    expect(within(card).queryByTestId("token-redeem")).not.toBeInTheDocument();
+    expect(card).not.toHaveTextContent(/already spent/);
+    view.unmount();
+
+    renderApp(<MessageBubble message={message("m2", token)} peerPubKey="peer" />);
+    expect(await screen.findByTestId("token-redeemed")).toBeInTheDocument();
+  });
+
+  it("is not shown when the redeem fails for another reason", async () => {
+    const token = `cashuBa${"o".repeat(60)}`;
+    fakeEngine.setState({ links: [linkView()] });
+    fakeEngine.on("walletInspectCashu", () => ({ inspection: { kind: "token", amount: 1008, unit: "sat", mint: "https://mint.example.com", accepted: true } }));
+    const view = renderApp(<MessageBubble message={message("m1", token)} peerPubKey="peer" />);
+    view.engine.on("walletReceiveToken", () => {
+      throw new Error("Could not reach mint.example.com");
+    });
+    const card = await screen.findByTestId("cashu-token-bubble");
+    await view.user.click(within(card).getByTestId("token-redeem"));
+    await waitFor(() => expect(within(card).getByTestId("token-redeem")).toBeEnabled());
+    expect(within(card).queryByTestId("token-redeemed")).not.toBeInTheDocument();
   });
 });
 

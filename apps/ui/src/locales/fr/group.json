@@ -33,6 +33,7 @@
     "communityConnecting": "Connexion au groupe…",
     "communityNote": "Votre app se relie à un hub du groupe (l'app d'un membre qui relaie), et les hubs transmettent chaque message à tous. Un membre absent reçoit ce qu'il a manqué à son retour.",
     "connecting": "Connexion aux membres…",
+    "hubsNote": "Au-delà de 16 membres, votre app se connecte à quelques membres seulement : l'admin et les hubs du groupe, des apps de membres qui transmettent les messages aux autres. Un hub voit qui parle et quand, pas ce qui est dit. Les liens de groupe utilisent WebRTC, et Iroh ou HyperDHT avec un membre dont l'app n'a pas WebRTC (Ghostly Desktop sous Linux). Un membre injoignable reçoit ce qu'il a manqué à son retour.",
     "label": "Connexion du groupe",
     "labelWith": "Connexion du groupe : {{state}}",
     "noWebrtc": "Les groupes ne se connectent pas encore depuis cette app",
@@ -56,7 +57,7 @@
     "hint": "Vous obtenez un lien à partager : qui l'ouvre rejoint le groupe. Chaque membre lit tout ce qui est envoyé tant qu'il en fait partie.",
     "kind": "Type de groupe",
     "private": "Privé",
-    "privateHint": "Jusqu'à 32 personnes, parmi vos contacts ou via votre lien, qui marche tant que votre app est ouverte. Chacun se connecte à tous.",
+    "privateHint": "Jusqu'à 32 personnes, parmi vos contacts ou via votre lien, qui marche tant que votre app est ouverte. Jusqu'à 16, chacun se connecte directement aux autres ; au-delà, les apps des membres qui restent allumées (hubs) transmettent les messages.",
     "title": "Nouveau groupe"
   },
   "error": {
@@ -223,7 +224,7 @@
     "members": "Membres…",
     "rotate": "Renouveler les clés"
   },
-  "readNote": "Chaque membre du groupe peut lire tout ce qui est envoyé tant qu'il en fait partie. Une personne retirée garde ce qu'elle a déjà reçu et ne peut pas lire la suite ; une personne arrivée plus tard ne peut pas lire ce qui précède. Les messages vont directement à chaque membre ; qui était absent reçoit ce qu'il a manqué de n'importe quel membre qui l'a (les {{count}} derniers messages du groupe) quand ils se retrouvent.",
+  "readNote": "Chaque membre du groupe peut lire tout ce qui est envoyé tant qu'il en fait partie. Une personne retirée garde ce qu'elle a déjà reçu et ne peut pas lire la suite ; une personne arrivée plus tard ne peut pas lire ce qui précède. Les messages vont à chaque membre ; qui était absent reçoit ce qu'il a manqué de n'importe quel membre qui l'a (les {{count}} derniers messages du groupe) quand ils se retrouvent.",
   "readNoteCommunity": "Toute personne ayant le lien du groupe peut le rejoindre, et n'importe quel membre peut faire entrer quelqu'un. Chaque membre peut lire tout ce qui est envoyé tant qu'il en fait partie ; une personne retirée ne peut pas lire la suite, une personne arrivée plus tard ne peut pas lire ce qui précède. Les membres absents reçoivent les {{count}} derniers messages de ceux qui sont là à leur retour.",
   "remove": {
     "body": "Cette personne ne recevra plus les nouveaux messages du groupe.",

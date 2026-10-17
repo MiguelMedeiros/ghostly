@@ -793,6 +793,16 @@ html[data-standalone="true"] {
     padding-top: env(safe-area-inset-top);
   }
 
+  /* A voice message playing on from another chat: its bar at the top of this one (App.tsx) takes the notch's inset,
+     and the chat's header under it does not take it again. */
+  .now-playing-top {
+    padding-top: calc(0.375rem + env(safe-area-inset-top));
+  }
+  .now-playing-top + main .header-safe {
+    height: 3.5rem;
+    padding-top: 0;
+  }
+
   .composer-safe {
     padding-bottom: calc(0.625rem + env(safe-area-inset-bottom));
   }
