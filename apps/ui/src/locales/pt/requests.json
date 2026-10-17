@@ -4,7 +4,7 @@
   "decline": "Recusar",
   "empty": "Nenhum pedido esperando. Quem abrir seu link de contato e escrever para você aparece aqui.",
   "missed": "Mais {{count}} pessoas tentaram falar com você enquanto havia pedidos demais esperando.",
-  "noLink": "Você não tem link de contato. Crie um em Configurações para que as pessoas possam escrever para você.",
+  "noLink": "Você não tem link de contato. Crie um em Ajustes para que as pessoas possam escrever para você.",
   "sidebarCount": "Pedidos, {{count}} esperando",
   "title": "Pedidos",
   "unverified": "Os nomes são o que cada pessoa digitou: ninguém os conferiu. Aceitar começa uma conversa; Recusar não envia nada de volta."
