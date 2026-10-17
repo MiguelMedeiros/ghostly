@@ -44,7 +44,8 @@
 //   tip and CI Success is green on it, the train merges the pull request itself (dev: GitHub's squash merge at that
 //   head; an epic: a fast-forward), with no batch and no new CI run. When it is behind, the train rebases its branch
 //   onto the tip (a push with --force-with-lease, so an author's push wins), waits for CI on exactly that commit, and
-//   merges it the same way. Red there gets one more run on a fresh rebase, then `queue:failed`. A fork, or a head
+//   merges it the same way. Red there gets one more run on a fresh rebase, then `queue:failed`. One none of whose runs can
+//   count as its own (see the line) waits in line and leaves flight, so the next one goes. A fork, or a head
 //   branch the train must never push to (dev, main, an epic, a batch), goes the batch way. So does one whose commits
 //   do not rebase onto the tip: a rebase skips the branch's merges, so a conflict resolved in a merge of the base comes
 //   back, while the batch's squash merge takes the head as it is. If that conflicts too: `queue:conflict`.
@@ -1030,7 +1031,11 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
 
   if (!inFlight) {
     // A head the train may not push to flies no further, whatever its mark says: its next rebase would be a push.
-    const lone = line().find((p) => p.alone?.sha === p.sha && canGoAlone(p));
+    // Nor one none of whose runs can count (`own`: more events than it reads, or a run another pull request from its
+    // branch or its old base made): its CI reads "none", so each run would rebase and push it again for good while
+    // nobody behind it moves. It waits in line, as `waiting` says, and the next one goes.
+    const refused = (p) => p.unread || (p.ci !== "success" && p.ci !== "failure" && (p.shared?.length || p.retargeted));
+    const lone = line().find((p) => p.alone?.sha === p.sha && canGoAlone(p) && !refused(p));
     if (lone) inFlight = await flyAlone(lone);
   }
   /** The next batch waiting for company (`holdBatch`), or null. */
