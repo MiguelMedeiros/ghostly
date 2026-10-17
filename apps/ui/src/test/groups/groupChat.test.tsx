@@ -41,6 +41,11 @@ describe("GroupChat: what the header says", () => {
     expect(composer()).toBeEnabled();
   });
 
+  it("gives the group's name its own direction, so in Arabic a Latin name is cut at its end, not its start", () => {
+    openGroup(active({ name: "Neighbourhood book club" }));
+    expect(screen.getByTestId("group-name")).toHaveAttribute("dir", "auto");
+  });
+
   it("names a group that has no name", () => {
     openGroup(active({ name: "", members: [members[0]] }));
     expect(screen.getByTestId("group-name")).toHaveTextContent("A group");
