@@ -268,6 +268,11 @@ export const peerMessageAt = (map: Map<string, number>, groupId: string): { last
 export interface EntryTimings { pollMs: number; warmPollMs: number; warmMs: number; knockMs: number; slowKnockMs: number; patienceMs: number }
 const ENTRY_TIMINGS: EntryTimings = { pollMs: 5_000, warmPollMs: 2_000, warmMs: 10 * 60_000, knockMs: 5_000, slowKnockMs: 20_000, patienceMs: 2 * 60_000 };
 /**
+ * The slowest a quiet link is looked at while the admin's other links share `pollMs` with it, as a community's door
+ * does (`otherHubKnockPollMs`): an admin with three links on read the relays 36 times a minute for knocks, for good.
+ */
+const LINK_SHARED_MOST_MS = 15_000;
+/**
  * A knock still in the record is written again only once it is this old. Everyone holding the link writes the same
  * Pkarr record, so a knock is read back before it is repeated: one that is there and fresh costs a read, not a read
  * and a write to every relay (a joiner waiting for an admin that is away spent its relays' minute on them, and its
@@ -1301,6 +1306,8 @@ export class Groups {
     try {
       this.authorOrder.tick(now);
       this.lineOrder.tick(now);
+      // Links nobody is using share one pace (`LINK_SHARED_MOST_MS`): one alone is read every `pollMs`, as before.
+      const links = Math.max(1, [...this.stored.values()].filter(g => g.entry && !g.left && this.sessions.get(g.id)?.isAdmin).length);
       for (const group of [...this.stored.values()]) {
         if (group.left) {
           if (now - group.left.at > LEFT_KEPT_MS) await this.forget(group.id);
@@ -1329,7 +1336,7 @@ export class Groups {
           const linkId = this.host.entries(group.id).get(key);
           if (linkId) await this.host.closeEdge(linkId);
         }
-        const every = now < (this.warmUntil.get(group.id) ?? 0) ? this.timings.warmPollMs : this.timings.pollMs;
+        const every = now < (this.warmUntil.get(group.id) ?? 0) ? this.timings.warmPollMs : Math.max(this.timings.pollMs, Math.min(this.timings.pollMs * links, LINK_SHARED_MOST_MS));
         // With every entry session taken, or no room, a knock read now could open nothing: its requests go to the edges.
         const busy = (pending?.size ?? 0) >= MAX_PENDING_ENTRIES || session.roster.length + (pending?.size ?? 0) >= GROUP_MEMBER_CAP.max;
         if (!busy && now - (this.lastPoll.get(group.id) ?? 0) >= every) { this.lastPoll.set(group.id, now); await this.answerKnocks(group, session, now).catch(() => {}); }
