@@ -932,6 +932,7 @@ export class CommunitySession {
     await this.persist();
     this.hooks.changed();
     await this.replayWaiting();
+    await this.renewLasting();
   }
 
   private bestBranch(): Branch {
@@ -1086,6 +1087,7 @@ export class CommunitySession {
     // broadcast above, so it gets no secret instead.
     if (FRESH.has(kind)) for (const [key] of roster) if (key !== this.myKey && isZ32Key(key)) this.hooks.addressed(key, { t: "group-secret", v: 2, g: this.id, to: key, h: hash, s: sealSecret(key, secret, secretAad(this.id, hash, key)) });
     this.hooks.changed();
+    await this.renewLasting();
     return { commit, hash, secret };
   }
 
@@ -1271,15 +1273,15 @@ export class CommunitySession {
 
   /**
    * An application frame that says the group's state (`CommunitySessionHooks.lasting`) in place of the one of its
-   * kind kept now, unless that one is newer (by the author's time, then the frame's identity, so every member keeps
-   * the same one).
+   * kind kept now, unless that one is newer (by the author's time, then its epoch, so one said again under a newer
+   * commit takes the first's place, then the frame's identity, so every member keeps the same one).
    */
   private keepLasting(message: CommunityIncomingApp, frame: CommunityMessageFrame): void {
     const kind = this.hooks.lasting?.(message);
     if (typeof kind !== "string" || !kind) return;
     const kept = { ...this.state.lasting };
     const now = kept[kind];
-    if (now && (now.ts > frame.ts || (now.ts === frame.ts && frameKey(now) >= frameKey(frame)))) return;
+    if (now && (now.ts > frame.ts || (now.ts === frame.ts && (now.e > frame.e || (now.e === frame.e && frameKey(now) >= frameKey(frame)))))) return;
     if (!now && Object.keys(kept).length >= COMMUNITY_LIMITS.lasting) return;
     kept[kind] = frame;
     this.state.lasting = kept;
@@ -1433,6 +1435,53 @@ export class CommunitySession {
     this.persistSoon();
   }
 
+  /**
+   * My lasting frames (`keepLasting`), said again under the current commit once theirs is half the window behind: past
+   * the window no member finds that commit or holds its secret, and a member back from away after more commits than
+   * that was never handed the group's state. With the same content and time and `o` naming the first, as
+   * `resealBehind` says one, so it stays one message, and in the place of the one kept, everywhere.
+   */
+  private async renewLasting(): Promise<void> {
+    if (!this.isMember || !this.state.secrets[this.topHash]) return;
+    for (const [kind, f] of Object.entries(this.state.lasting ?? {})) {
+      if (f.s !== this.myKey || this.epoch - f.e < COMMUNITY_LIMITS.window / 2) continue;
+      const found = this.commitByShort(f.e, f.h), secret = found && this.state.secrets[found.hash];
+      if (!secret) continue;
+      const plain = decryptText(epochKeys(fromBase64Url(secret), this.id, f.e).message, messageAad(f), f.nn, f.c);
+      let parsed: unknown = null;
+      try { parsed = plain === null ? null : JSON.parse(plain); } catch { /* not a payload to say again */ }
+      if (!isObject(parsed) || !isObject(parsed.x)) continue;
+      const o = readOriginal(parsed.o, f) ?? { e: f.e, h: f.h, n: f.n };
+      const id = communityMessageId(this.myKey, o.e, o.h, o.n);
+      // Still the group's state, said by me (an admin's pin, while I am the admin).
+      if (this.hooks.lasting?.({ id, sender: this.myKey, epoch: this.epoch, timestamp: f.ts, frame: parsed.x }) !== kind) continue;
+      const { nick, o: _first, ...body } = parsed;
+      void _first;
+      const name = typeof nick === "string" ? nick : undefined;
+      const fits = (withNick: boolean) => Math.ceil((utf8Encode(JSON.stringify({ ...body, o, ...(withNick && name ? { nick: name } : {}) })).length + 16) * 4 / 3) + 4 <= MAX_TEXT_BOX;
+      if (!fits(false)) continue;
+      const sent = await this.sendPayload(() => ({ ...body, o }), fits(true) ? name : undefined, f.ts);
+      if ("error" in sent) continue;
+      this.resealedFrom.set(frameKey(sent.frame), id);
+      this.keepLasting({ id, sender: this.myKey, epoch: sent.frame.e, timestamp: f.ts, frame: parsed.x }, sent.frame);
+      await this.say(sent.frame);
+    }
+  }
+
+  /** Whether a lasting frame kept here is `f`'s author's, said at its time, and is the message `id` (the first's, said again). */
+  private keepsLasting(f: CommunityMessageFrame, id: string): boolean {
+    return Object.values(this.state.lasting ?? {}).some(kept => {
+      if (kept.s !== f.s || kept.ts !== f.ts || frameKey(kept) === frameKey(f)) return false;
+      const found = this.commitByShort(kept.e, kept.h), secret = found && this.state.secrets[found.hash];
+      const plain = secret ? decryptText(epochKeys(fromBase64Url(secret), this.id, kept.e).message, messageAad(kept), kept.nn, kept.c) : null;
+      let parsed: unknown;
+      try { parsed = plain === null ? null : JSON.parse(plain); } catch { return false; }
+      if (!isObject(parsed)) return false;
+      const o = readOriginal(parsed.o, kept) ?? kept;
+      return communityMessageId(kept.s, o.e, o.h, o.n) === id;
+    });
+  }
+
   /** The message a frame of mine is: the first one's id for a frame said again (`resealBehind`), else its own. */
   messageIdOf(f: { s: string; e: number; h: string; n: number }): string {
     return (f.s === this.myKey && this.resealedFrom.get(frameKey(f))) || communityMessageId(f.s, f.e, f.h, f.n);
@@ -1556,13 +1605,18 @@ export class CommunitySession {
     // (A first one I only carried, let in after it was sealed, was never shown here: this one is.)
     const firstAt = original && this.commitByShort(original.e, original.h);
     const readFirst = !!firstAt && rosterHas(this.rosterOf(firstAt.hash) ?? [], this.myKey);
-    if (original && readFirst && this.isDuplicate(first)) { this.markSeen(raw); this.keep(raw); this.persistSoon(); return true; }
+    const id = communityMessageId(raw.s, first.e, first.h, first.n);
+    // Or the group's state said again once more (`renewLasting`), its first past the window: the one kept here names it.
+    if (original && ((readFirst && this.isDuplicate(first)) || this.keepsLasting(raw, id))) {
+      // Kept in the first's place, so it outlives the first's commit.
+      if (isObject(parsed.x)) this.keepLasting({ id, sender: raw.s, epoch: raw.e, timestamp: raw.ts, frame: parsed.x }, raw);
+      this.markSeen(raw); this.keep(raw); this.persistSoon(); return true;
+    }
     const text = typeof parsed.text === "string" ? parsed.text.slice(0, COMMUNITY_LIMITS.textBytes) : undefined;
     // Exactly one of: text, an application frame for the group, a payload for one member.
     if ([text !== undefined, isObject(parsed.x), isObject(parsed.p)].filter(Boolean).length !== 1) return false;
     const nick = typeof parsed.nick === "string" ? sanitizeNick(parsed.nick) : undefined;
     if (nick && this.state.nicks[raw.s] !== nick) { this.state.nicks[raw.s] = nick; this.hooks.changed(); }
-    const id = communityMessageId(raw.s, first.e, first.h, first.n);
     if (text !== undefined) {
       const mentions = validMentions(parsed.m, text, false);
       // A reply that does not hold is left out, never the text.
