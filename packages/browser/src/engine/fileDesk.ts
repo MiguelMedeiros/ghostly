@@ -367,7 +367,7 @@ export class FileDesk {
   }
 
   /** files/3 files this contact sent that were taken without asking and are kept (or on their way). */
-  private autoTaken(linkId: string): number {
+  autoTaken(linkId: string): number {
     const chat = this.chats.get(linkId);
     if (!chat) return 0;
     return chat.files.records().filter((r) => r.direction === "in" && !r.consented && r.state !== "asking" && !["failed", "declined", "cancelled"].includes(r.state))

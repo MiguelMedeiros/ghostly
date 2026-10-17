@@ -4,6 +4,32 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.3.6
+
+### Security
+
+- Chats: a file larger than 25 MiB from a contact is always asked about before it is stored, whatever the contact's app. A modified app that left out the newer file transfer could have files up to 100 MiB stored without the question.
+
+### Fixed
+
+**Apps**
+
+- An app card from a contact with no name says "Contact · 1kwb54 opened it here", and its install screen "Sent by Contact · 1kwb54", as the chat calls them, instead of "Anonymous".
+- Apps → Add: a link corrected while Check runs no longer gets the old link's answer. Before, the old link's store showed under the new link and Add store added the old store (or the old link's install screen opened).
+
+**Everywhere**
+
+- A private group member whose network lets no direct connection through (a VPN, a firewall that drops UDP) reaches the other members over Iroh's relay a few seconds after a connection to them fails, as its 1:1 chats do. Before, each connection to a member waited for WebRTC to give up first, 15 seconds to a minute and a half, so a member who turned a VPN on had its group messages held all that while.
+
+**Chat**
+
+- Joining with an invite someone else used first, the pairing says "Ask your contact for a new one" once, not a second time on the line under it.
+- A press on a bot's buttons with no `once` button among them no longer reads the chat's whole history: it costs what a plain reply does, however long the chat (a full read is about 100 ms at 10,000 messages on the CLI daemon). Pressing a contact's buttons already worked this way.
+
+### For developers
+
+- The website's Docker image builds again from a clean cache. Its lockfile kept a package (`@napi-rs/wasm-runtime` 1.2.0) whose peers nothing in it met, so `npm ci` on Node 26 asked the registry to settle them and stopped on "Missing: @emnapi/core@ from lock file" when that answer did not come. A test now runs the site's `npm ci` offline, which passes only when the lockfile settles everything by itself.
+
 ## 1.3.5
 
 ### Fixed
