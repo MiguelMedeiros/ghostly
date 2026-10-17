@@ -7,6 +7,7 @@
   },
   "audio": {
     "cantPlay": "This device can't play this audio ({{format}}). Download it to listen.",
+    "message": "Audio",
     "pause": "Pause audio",
     "play": "Play audio",
     "position": "Position in audio",

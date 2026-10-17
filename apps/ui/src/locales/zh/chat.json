@@ -7,6 +7,7 @@
   },
   "audio": {
     "cantPlay": "此设备无法播放此音频（{{format}}）。请下载后收听。",
+    "message": "音频",
     "pause": "暂停音频",
     "play": "播放音频",
     "position": "音频播放位置",

@@ -7,6 +7,7 @@
   },
   "audio": {
     "cantPlay": "Este aparelho não reproduz este áudio ({{format}}). Baixe para ouvir.",
+    "message": "Áudio",
     "pause": "Pausar áudio",
     "play": "Tocar áudio",
     "position": "Posição no áudio",

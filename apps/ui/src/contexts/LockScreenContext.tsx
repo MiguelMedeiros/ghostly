@@ -13,6 +13,7 @@ import { activeProfileId } from "../lib/profiles";
 import { takeUnlockHandover } from "../lib/lockHandover";
 import { stopRunningApps } from "../lib/apps/open";
 import { closeServiceWindows } from "../lib/serviceWindows";
+import { pauseForLock } from "../lib/voicePlayback";
 
 interface LockScreenContextValue {
   isLocked: boolean;
@@ -105,10 +106,13 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
 
   // The apps running (Desktop's windows of their own, the web's frames under the lock) stop when it locks: their
   // brokers would go on answering behind it. So do the windows of contacts' apps (Desktop), which this page serves.
+  // A voice message, audio file or video playing pauses, and the system's media controls let go of it: the app stays
+  // mounted under the lock (a call goes on), and they would go on playing it aloud and driving it from the lock screen.
   useEffect(() => {
     if (!isLocked) return;
     stopRunningApps();
     closeServiceWindows();
+    pauseForLock();
   }, [isLocked]);
 
   const lock = useCallback(() => {
