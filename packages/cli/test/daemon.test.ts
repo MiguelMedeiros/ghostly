@@ -1,10 +1,12 @@
 import { spawn } from "node:child_process";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo, type Server } from "node:net";
+import { dirname } from "node:path";
 import { createInterface } from "node:readline";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import packageJson from "../package.json" with { type: "json" };
+import { privateFolder } from "../src/privateFolder";
 import { createProfile, lockOwner, profilePaths } from "../src/profiles";
 import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 // covers: headless.daemon, headless.cli
@@ -31,7 +33,10 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
   it("a command warns on stderr when the daemon runs another release, and still answers", async () => {
     const other = home("old-daemon");
     createProfile(other, "default");
-    const socket = profilePaths(other, "default").socket;
+    const { socket, dir: profile } = profilePaths(other, "default");
+    // Where a long temp folder puts the socket (macOS's /var/folders/…): in a folder of /tmp, made as the daemon makes it.
+    const outside = dirname(socket) !== profile;
+    if (outside) privateFolder(dirname(socket), "the test's daemon will not put its socket there");
     const methods: string[] = [];
     const server: Server = createServer((connection) => {
       createInterface({ input: connection }).on("line", (line) => {
@@ -40,7 +45,7 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
         connection.write(JSON.stringify({ id, result: method === "status" ? { version: "0.0.1", profile: "default" } : { chats: [] } }) + "\n");
       });
     });
-    await new Promise<void>((r) => server.listen(socket, r));
+    await new Promise<void>((listening, failed) => { server.once("error", failed); server.listen(socket, listening); });
     try {
       const listed = await ghostly(["--home", other, "chat", "list"]);
       expect(ok(listed)).toEqual({ chats: [] });
@@ -49,7 +54,7 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
       expect(methods).toEqual(["status", "chat.list"]);
     } finally {
       server.close();
-      rmSync(socket, { force: true });
+      rmSync(outside ? dirname(socket) : socket, { recursive: true, force: true });
     }
   });
 

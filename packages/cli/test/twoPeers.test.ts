@@ -481,8 +481,9 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const saved = ok(await as(bob, "file", "save", incoming.id, "--dir", bob));
     expect(sha(saved.path as string)).toBe(sha(small));
     error(await as(bob, "file", "save", incoming.id, "--dir", bob), "confirm", 5);
-    // A name of 124 characters but 364 bytes, over what Linux and macOS take in one name (255): saved shortened, a text
-    // still; an explicit path that long is a bad request naming it, not the engine's ENAMETOOLONG.
+    // A name of 124 characters but 364 bytes, over the 255 bytes Linux takes in one name: saved shortened, a text still.
+    // An explicit path whose name is too long is a bad request naming it, not the engine's ENAMETOOLONG: one over 255
+    // characters too, as macOS (APFS) counts 255 UTF-16 units and takes the 364 bytes above.
     const longName = `${"文".repeat(120)}.txt`;
     ok(await as(alice, "file", "send", "bob", small, "--name", longName));
     const longMessage = await listen.waitFor((e) => e.type === "message.received" && (e.message as { file?: { name: string } }).file?.name === longName);
@@ -493,7 +494,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(Buffer.byteLength(savedName)).toBeLessThanOrEqual(255);
     expect(savedName).toMatch(/^文+\.txt$/);
     expect(sha(savedLong.path as string)).toBe(sha(small));
-    expect(error(await as(bob, "file", "save", longId, "--path", join(bob, longName)), "bad_request", 1).message).toMatch(/too long for this file system/);
+    expect(error(await as(bob, "file", "save", longId, "--path", join(bob, `${"文".repeat(300)}.txt`)), "bad_request", 1).message).toMatch(/too long for this file system/);
     // A name that starts with a dash is saved with a _ first: in the folder it is a file to every tool, never an option.
     ok(await as(alice, "file", "send", "bob", small, "--name=-rf"));
     const dashMessage = await listen.waitFor((e) => e.type === "message.received" && (e.message as { file?: { name: string } }).file?.name === "-rf");
