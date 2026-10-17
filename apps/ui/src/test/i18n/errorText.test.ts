@@ -67,6 +67,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Transport change cancelled", `${CORE}/ghostlink.ts`],
   ["Transport preferences do not overlap. Enable fallback or choose the same supported transport on both sides.", `${CORE}/transportSwitch.ts`],
   ["Peer native address unavailable; reconnect WebRTC once to exchange endpoints", `${CORE}/ghostlink.ts`],
+  ["Peer native address unavailable; the contact's app has not given it yet", `${CORE}/ghostlink.ts`],
   ["Native connection limit reached", "native/transports/hyperdht/endpoint.mjs"],
   ["HyperDHT handshake timed out", "native/transports/hyperdht/endpoint.mjs"],
   ["Noise handshake failed", "native/transports/hyperdht/endpoint.mjs"],
@@ -580,6 +581,14 @@ describe("errors in the app's language", () => {
     expect(knownErrorParts(away, translators.pt)).toEqual({ title: "Este contato está offline", next: "Convide quando ele estiver online." });
     const old = new Error("Their app does not take part in groups: they need an updated Ghostly first.");
     expect(knownErrorParts(old, english)).toEqual({ title: "Their app needs an update first", next: "Their app needs groups (an updated Ghostly)." });
+  });
+
+  it("a contact's unknown native address with no WebRTC between the two apps says it comes from them, not to reconnect over WebRTC", () => {
+    const withRtc = new Error("Peer native address unavailable; reconnect WebRTC once to exchange endpoints");
+    expect(knownErrorParts(withRtc, english)?.next).toBe("Reconnect over WebRTC once to exchange it.");
+    const noRtc = new Error("Peer native address unavailable; the contact's app has not given it yet");
+    expect(knownErrorParts(noRtc, english)).toEqual({ title: "Your contact's address for this transport isn't known yet", next: "It comes once your contact opens this chat in their app.", detail: noRtc.message });
+    expect(knownErrorParts(noRtc, translators.pt)?.next).toBe("Chega quando o contato abrir esta conversa no app.");
   });
 
   it("a part of Ghostly that did not load is said in the language, not in the browser's English", () => {

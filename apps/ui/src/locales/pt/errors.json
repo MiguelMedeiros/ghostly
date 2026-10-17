@@ -532,6 +532,7 @@
     "listenerReleased": "Pausado para outra conversa. Abra esta conversa para retomar.",
     "noAddress": "O endereço do seu contato para esse transporte ainda não é conhecido",
     "noAddressNext": "Reconecte uma vez por WebRTC para trocá-lo.",
+    "noAddressWait": "Chega quando o contato abrir esta conversa no app.",
     "noOverlap": "Suas escolhas de transporte não combinam",
     "noOverlapNext": "Ligue a Alternativa ou escolha o mesmo transporte nos dois lados.",
     "noneConnected": "Nenhum transporte conseguiu conectar",
