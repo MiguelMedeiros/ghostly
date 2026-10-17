@@ -212,7 +212,10 @@ interface Want {
   /** When the holder offered, and the bytes stored here then: its pace is what moved since. */
   offeredAt?: number;
   offeredBytes?: number;
-  /** Holders that said they hold the file while another served it: one it may leave for, when that one is slow (`leaveSlow`). */
+  /**
+   * Holders that answered `busy` in this round and said since, while another served it, that they hold the file (a place
+   * of theirs freed): one it may leave for, when that one is slow (`leaveSlow`).
+   */
   free?: Set<string>;
   /** What the last holder asked in this round answered, when it was not the file: shown while the want waits. */
   why?: "busy" | "damaged";
@@ -712,8 +715,9 @@ export class GroupFileDesk {
 
   /**
    * The holder serving this want is slow (served `slowAfterMs`, and at its pace more than `wantWaitMs` to go) and a holder
-   * that said it holds the file since is free to ask: the transfer ends here, what came stays, and the next holder is
-   * asked (`transferChanged`), so a phone's slow upload does not keep a member the author or a fast holder could serve.
+   * that answered it busy said since that a place freed (`want.free`), and is free to ask: the transfer ends here, what
+   * came stays, and the next holder is asked (`transferChanged`), so a phone's slow upload does not keep a member the
+   * author or a fast holder could serve.
    */
   private leaveSlow(kept: Kept, want: Want): boolean {
     if (!want.wire || !want.free?.size || want.offeredAt === undefined) return false;
@@ -783,8 +787,11 @@ export class GroupFileDesk {
       const want = this.wants.get(kept.id);
       if (!want) continue;
       want.tried.delete(from);
+      // Free for it only when it says so after answering it busy: its places freed. Any other `group-have` says it holds
+      // the file, not that a place is free (one that just fetched it says so to every edge, whose waiting members take
+      // its places at once): left for, it would answer busy, and the transfer left would be lost for nothing.
+      if (want.wire && from !== want.holder && want.busy?.has(from)) (want.free ??= new Set()).add(from);
       want.busy?.delete(from);
-      if (want.wire && from !== want.holder) (want.free ??= new Set()).add(from);
       if (want.holder) continue;
       if (this.deps.transfers.get(kept.id)?.stage === "queued" && !this.freeFor(kept, want, free ??= this.freeEdges(groupId).filter(([key]) => key === from))) continue;
       this.ask(kept);
