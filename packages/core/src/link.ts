@@ -475,6 +475,16 @@ export class LinkSession {
     this.expectPeer();
   }
 
+  /**
+   * Nothing a read finds can be acted on for a while (a dial waiting out its backoff, whose end has a look of its own):
+   * the windows that look fast for the contact (`expectPeer`, `watchPeer`) end, and the link reads at its pace from the
+   * next read on. An offer of this side's out keeps its window.
+   */
+  calm(): void {
+    if (this.rtcSignal !== null) return;
+    this.fastPollUntil = this.fastStepsAfter = this.expectUntil = this.watchUntil = 0;
+  }
+
   /** The data link carries chat and services while it is up. */
   setDataLinkOpen(open: boolean): void {
     this.connected = open;
