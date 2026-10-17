@@ -707,13 +707,17 @@ async function clearProfile(ctx: ApiContext): Promise<{ cleared: { chats: number
 }
 
 /**
- * The engine's calls that send a text this side writes: `engine.call` runs the secret guard of `send`, `edit` and
- * `forward` on them too (docs/CLI.md § Safety), so a raw call is no way around it. `force: true` (`--force`) sends it.
+ * The engine's calls that send a text this side writes (a message, a file's caption, a payment's memo): `engine.call`
+ * runs the secret guard of `send`, `edit` and `forward` on them too (docs/CLI.md § Safety), so a raw call is no way around it. `force: true` (`--force`) sends it.
  */
-const ENGINE_SENDS: ReadonlySet<string> = new Set(["sendMessage", "sendGroupMessage", "editMessage", "forwardMessages"]);
+const ENGINE_SENDS: ReadonlySet<string> = new Set([
+  "sendMessage", "sendGroupMessage", "editMessage", "forwardMessages", "sendGroupFile",
+  // A payment's memo reaches the contact as a message's text does (`chat pay` and `chat request` guard it too).
+  "sendPayment", "requestPayment", "requestGroupPayment", "askToPay",
+]);
 
 async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
-  let texts: unknown = [args.text, args.card];
+  let texts: unknown = [args.text, args.card, args.caption, args.memo];
   if (method === "forwardMessages") {
     const ids = Array.isArray(args.messageIds) ? args.messageIds.filter((id): id is string => typeof id === "string") : [];
     const linkId = args.linkId;
