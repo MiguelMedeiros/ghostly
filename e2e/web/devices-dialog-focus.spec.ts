@@ -9,6 +9,8 @@ import { DEVICE_SET_PASSWORD } from "../support/devices";
 test("Add a device from the keyboard: the password field has the focus, and the password typed with its spaces shows the code", { tag: ["@feature:devices.enroll"] }, async ({ peer }) => {
   const { page } = await peer("desktop");
   await page.goto("/#/profile");
+  // Off until the device set has loaded, and press() (unlike click()) does not wait for that: its Enter would go nowhere.
+  await expect(page.getByTestId("device-add-open")).toBeEnabled();
   await page.getByTestId("device-add-open").press("Enter");
   const add = page.getByTestId("device-add");
   await expect(add).toBeVisible();
