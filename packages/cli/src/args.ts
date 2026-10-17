@@ -52,7 +52,7 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
         inline = eq === -1 ? undefined : arg.slice(eq + 1);
       } else {
         const long = byShort.get(arg.slice(1));
-        if (!long) throw new CliError("usage", `Unknown option ${arg}`);
+        if (!long) throw new CliError("usage", `Unknown option ${arg} (put -- before text that starts with a dash)`);
         name = long;
       }
       if (name.startsWith("no-") && all[name.slice(3)]?.type === "boolean" && inline === undefined) { options[name.slice(3)] = false; continue; }
