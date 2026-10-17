@@ -235,6 +235,25 @@ describe("FileBubble: files/3", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("↻ pressed from the keyboard keeps the focus while it runs, so a refused resend leaves it on ↻", async () => {
+    // A focused button that turns disabled loses the focus to the page in a browser, as the voice play button did
+    // in this same spot: Space then scrolled the chat.
+    let refuse!: (error: Error) => void;
+    const retryFile = vi.spyOn(servicesPlatform!, "retryFile").mockImplementation(() => new Promise<void>((_, reject) => { refuse = reject; }));
+    show({ state: "failed", direction: "out", transferred: 0, size: 10, error: "Connection lost", retry: true }, { id: "chat1-out-4" });
+    const button = screen.getByTestId("file-retry");
+    button.focus();
+    fireEvent.click(button);
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button).toBeEnabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(button);
+    expect(retryFile).toHaveBeenCalledTimes(1);
+    await act(async () => { refuse(new Error("No connection to your contact")); });
+    expect(button).not.toHaveAttribute("aria-disabled");
+    expect(button).toHaveFocus();
+  });
+
   it("a picture sent from here shows at once, and keeps its image while the transfer starts, moves and ends", async () => {
     const created: string[] = [], revoked: string[] = [];
     const { createObjectURL, revokeObjectURL } = URL;
