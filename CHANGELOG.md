@@ -4,6 +4,28 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.3.4
+
+### Security
+
+- Chats: in a chat where both apps send files the newer way, a file sent the old way is refused, so a contact can no longer skip the question asked above 25 MiB or the check for free space.
+- Desktop: a contact's web app window closes when the Ghostly page starts again (a profile switch or a reload) and when the profile locks, and the page no longer answers it.
+- Desktop: the updater is built without the archive extractor it never needed (updates are installers, AppImages and macOS archives), which removes the `zip` crate and its known flaws (RUSTSEC-2026-0367, RUSTSEC-2026-0368, RUSTSEC-2026-0369).
+- CLI: `ghostly engine sendMessage`, `sendGroupMessage`, `editMessage` and `forwardMessages` refuse a text that looks like a recovery phrase, a private key or a Cashu token, as `send` does, unless given `--force`.
+- Releases: the merge train holds a run when another pull request from the same branch has more events, or the branch more pull requests, than it reads.
+
+### Fixed
+
+**Identities**
+
+- A click on Load profile, Load follows or Load notes on a contact's Nostr card no longer does nothing when it lands while the card is still turning over: the buttons wait for the turn to end, as Check again does.
+- Loading a Nostr profile, follow list or notes checks each event's signature once, not once for every relay that sends it: with eight relays, Load notes did eight times the work.
+
+### For developers
+
+- CLI: `engine.call` refuses (`confirm`) `sendMessage`, `sendGroupMessage`, `editMessage` and `forwardMessages` with secret-looking text unless the request says `"force": true` (`ghostly engine … --force`).
+- Desktop updates: `latest.json` points only at what the updater installs as it is (the macOS `.app.tar.gz`, the AppImage, the Windows `-setup.exe` or `.msi`), never at a zipped archive.
+
 ## 1.3.3
 
 ### Security
