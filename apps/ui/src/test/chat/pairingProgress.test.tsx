@@ -131,6 +131,14 @@ describe("the inviter's scene", () => {
       .toEqual(["publishing", "waiting", "answering", "connecting", "live"]);
   });
 
+  it("runs the contact's name in its own direction, so in Arabic a Latin name is cut at its end, not its start", () => {
+    const { engine } = renderApp(<Pairing inviter />);
+    show(published, engine);
+    const name = scene()!.querySelector(".ps-contact")!;
+    expect(name.textContent).toBe("Alice");
+    expect(name.getAttribute("dir")).toBe("auto");
+  });
+
   it("says in words when the invite has waited long, and how long", () => {
     const { engine } = renderApp(<Pairing inviter />);
     show({ ...published, createdAt: Date.now() - 125_000 }, engine);
