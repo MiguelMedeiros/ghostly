@@ -1392,9 +1392,17 @@ export class Communities {
    * communities while its 30 chats signaled got back into them one at a time, 4 to 10 minutes, one not at all in 16: its
    * entry went unwritten, the other hubs took it for gone (`hubDead`) and its members asked them (bug hunt, 2026-10-14).
    * Not a hub alone in the beacon: nobody carries the group without it, and its door's looks stay background ones.
+   *
+   * Alone as my last reading of the beacon said, and only while that reading is fresh. One that aged out says nothing of
+   * now: judged by my clock against it, every hub it listed went stale, and I was alone. An app back from a restart as a
+   * member of a community whose hubs did not list it read the beacon once (its way back); its edge stayed down while its
+   * other links took its relays' budget, its reading aged out, it stepped up as a hub "alone", and its readings and its
+   * entry went as background looks the relays held: it never read the beacon again, nobody listed it, and it was not
+   * back in that community in 10 minutes (bug hunt, 2026-10-17).
    */
   private wayBack(groupId: string, live: Live): boolean {
-    if (live.hub && !freshHubs(this.hubs(live), this.now()).some(h => h.key !== live.session.myKey)) return false;
+    const read = live.beaconAt, now = this.now();
+    if (live.hub && now - read < COMMUNITY_TOPOLOGY.beaconFreshMs && !freshHubs(this.hubs(live), read).some(h => h.key !== live.session.myKey)) return false;
     return ![...this.host.edges(groupId).values()].some(id => this.host.linkReady(id, 2));
   }
 
