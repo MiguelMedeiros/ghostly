@@ -734,6 +734,9 @@ export class GhostlyNode implements EngineImplementation {
   private transfersRestored = false;
   /** `start` has loaded the groups (EngineState.groupsLoaded). */
   private groupsLoaded = false;
+  /** Settles as `start` has loaded the groups: a group's history reads as stored from then on (`EngineServer.handle`). */
+  private groupsLoadedNow!: () => void;
+  readonly groupsRead = new Promise<void>((resolve) => { this.groupsLoadedNow = resolve; });
   private readonly feedbackStartedAt = Date.now();
   private readonly feedbackIds = new Set<string>();
   private walletFeedbackReady = false;
@@ -1788,6 +1791,7 @@ export class GhostlyNode implements EngineImplementation {
     // Groups know their edges from the links above, and may add or drop some before anything dials.
     await this.groups.load(this.limitedMode);
     this.groupsLoaded = true;
+    this.groupsLoadedNow();
     this.emitState();
     for (const stored of links) {
       if (stored.group) continue;
