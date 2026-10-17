@@ -429,10 +429,14 @@ fn on_page_load<R: tauri::Runtime>(
 /// The native listeners of the page before this one: stopped, their eight places free (`TransportState::page_started`);
 /// its apps' file dialogs: let go. The app windows it opened close (`app_sandbox::page_started`), and so do the
 /// windows of its contacts' apps (`viewer::close_all`): the page there now would answer them for another profile.
+/// The tokens it got to play stored files stop serving them (`StreamGrants::close_all`).
 #[cfg(desktop)]
 fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     app_sandbox::page_started(app);
     viewer::close_all(app);
+    if let Some(grants) = app.try_state::<file_stream::StreamGrants>() {
+        grants.close_all();
+    }
     if let Some(transports) = app.try_state::<paired_transport::TransportState>() {
         transports.page_started();
     }
@@ -1028,6 +1032,30 @@ mod tests {
         assert_eq!(serve(), tauri::http::StatusCode::GATEWAY_TIMEOUT);
         page_started(app.handle());
         assert_eq!(serve(), tauri::http::StatusCode::FORBIDDEN);
+    }
+
+    /// A stored file the page before this one played (another profile's, or the same one before a reload) is served
+    /// no more under its token: that page never closed it, and the page there now did not ask for it.
+    #[test]
+    fn a_new_page_closes_the_file_stream_tokens_the_page_before_got() {
+        let app = app();
+        let dir = std::env::temp_dir().join(format!("ghostly-page-stream-{}", std::process::id()));
+        let files = file_store::FileStore::new(dir.clone());
+        files.append("a", "f", 0, &[1, 2, 3]).unwrap();
+        app.manage(file_stream::StreamGrants::default());
+        let grants = app.state::<file_stream::StreamGrants>();
+        let token = grants.open(&files, "a", "f", "video/mp4").unwrap();
+        let serve = || {
+            let request = tauri::http::Request::builder()
+                .uri(format!("{}://localhost/{token}", file_stream::SCHEME))
+                .body(Vec::new())
+                .unwrap();
+            file_stream::respond(&files, &grants, "main", &request).status()
+        };
+        assert_eq!(serve(), tauri::http::StatusCode::OK);
+        page_started(app.handle());
+        assert_eq!(serve(), tauri::http::StatusCode::NOT_FOUND);
+        std::fs::remove_dir_all(dir).ok();
     }
 
     /// The Ghostly window closed on Linux or Windows ends the app. By the exit, Tauri has dropped the window and its
