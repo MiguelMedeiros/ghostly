@@ -368,9 +368,15 @@ receive|address|redeem`, `wallet.mint.add`, `lightning.default|rename`, `pay`, `
 `file.send|list|action|wait|save`, `group.invite|remove|admin|rotate|link|picture|hub`, `profile.picture|backup`,
 `identity.providers|list|add|complete|cancel|remove|share|withdraw|contact|recheck`, `service.list|add|remove|enable|share|peer|open|close`,
 `call.start|answer|hangup|list|get|flush|auto`,
-`events.replay`, `events.subscribe`, `daemon.stop`, and `engine.call` with
+`events.replay`, `events.subscribe`, `daemon.stop`, `daemon.hello`, and `engine.call` with
 `{"method":"<engine call>","params":{…},"confirmReal":false}` for anything else the app does. Parameters are the
 commands' (see `src/api.ts`). Errors: `{"id":…,"error":{"code","message","details"?}}` with the codes above.
+
+Before its first request, a program can check that the socket is the profile's daemon and not a process that opened
+its path first (on Windows the socket is a named pipe, which any account of the machine may open): send
+`{"id":"hello","method":"daemon.hello","params":{"nonce":"<16 random bytes, hex>"}}`; the answer's `proof` is
+HMAC-SHA256 over `ghostly-daemon:<nonce>` keyed with the 32 bytes (hex) in `daemon.secret` in the profile's folder,
+which the daemon writes anew, 0600, at every start. The CLI sends nothing else until that proof matches.
 
 ## Calls
 

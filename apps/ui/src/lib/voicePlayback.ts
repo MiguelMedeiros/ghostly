@@ -1,3 +1,4 @@
+import { dropMediaSession } from "./mediaSession";
 import { getPrefix } from "./storage";
 
 /**
@@ -33,6 +34,16 @@ export function claimPlayback(id: string): void {
 
 export function releasePlayback(id: string): void {
   if (playing === id) playing = null;
+}
+
+/**
+ * The app locks: whatever plays (a voice message, an audio file, a video) pauses, and the system's media controls let
+ * go of it. The app stays mounted under the lock (a call goes on), so it would go on playing aloud and be driven from
+ * the lock screen.
+ */
+export function pauseForLock(): void {
+  if (playing) players.get(playing)?.pause();
+  dropMediaSession();
 }
 
 /**

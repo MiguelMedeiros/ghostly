@@ -60,7 +60,7 @@ describe("an audio file in the chat", () => {
       show(song());
       fireEvent.click(screen.getByTestId("audio-play"));
       await flush();
-      expect(session.metadata).toMatchObject({ init: { title: "Ghost Town.mp3", artist: "Ana" } });
+      expect(session.metadata).toMatchObject({ init: { title: "Audio", artist: "Ghostly" } });
       expect(session.playbackState).toBe("playing");
       const audio = loaded(10);
       act(() => handlers.get("pause")!({}));
@@ -75,7 +75,7 @@ describe("an audio file in the chat", () => {
     }
   });
 
-  it("names the person who sent it to the system's media controls in the app's language", async () => {
+  it("names neither the file nor who sent it to the system's media controls, in the app's language", async () => {
     const session = { metadata: null as unknown, playbackState: "none", setActionHandler: vi.fn(), setPositionState: vi.fn() };
     Object.defineProperty(navigator, "mediaSession", { configurable: true, value: session });
     vi.stubGlobal("MediaMetadata", class { constructor(public init: object) {} });
@@ -84,7 +84,7 @@ describe("an audio file in the chat", () => {
       renderApp(<AudioBubble file={song()} sender="me" peerName="Ana" />, { language: "pt" });
       fireEvent.click(screen.getByTestId("audio-play"));
       await flush();
-      expect(session.metadata).toMatchObject({ init: { title: "Ghost Town.mp3", artist: "Você" } });
+      expect(session.metadata).toMatchObject({ init: { title: "Áudio", artist: "Ghostly" } });
     } finally {
       Reflect.deleteProperty(navigator, "mediaSession");
       vi.unstubAllGlobals();

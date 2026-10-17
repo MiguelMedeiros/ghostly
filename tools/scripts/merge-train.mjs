@@ -326,6 +326,12 @@ export function positionText(base, pr, place, batch, head = pr.sha, alone = null
 }
 
 /** The head a pull request had when the train first saw it queued (the reviewed one), from its position comment. */
+/**
+ * Whether a comment is the train's position comment: its own, and starting with the mark (as `positionText` writes
+ * it). Not any of its comments that holds the mark: another text of its own may quote a pull request's.
+ */
+const isPosition = (c, login) => c.user?.login === login && (c.body ?? "").startsWith(POSITION);
+
 export const queuedHead = (sticky) => sticky?.body?.match(HEAD)?.[1] ?? null;
 
 const newCommitsText = (what) =>
@@ -376,8 +382,9 @@ export const noSkip = (text) => text.replace(SKIP_CI, "($1)");
 /** GitHub's refusal of a push whose commits change a workflow, by a token without the `workflows` permission. */
 const WORKFLOW_PUSH_REFUSED = /without `?workflows`? permission/;
 
+// A file name may hold any text, the train's marks too: `<` is escaped (as for titles in `batchBody`) so none forms.
 const workflowText = (base, workflows) =>
-  `Merge train: this pull request changes a workflow (${workflows.join(", ")}), and the queue app may not push a branch that does (its token has no \`workflows\` permission), so it left the line: the rest of the line goes on without it. It lands by hand into \`${base}\`, or once the app is given that permission (then remove \`queue:failed\`).`;
+  `Merge train: this pull request changes a workflow (${workflows.map((f) => f.replaceAll("<", "&lt;")).join(", ")}), and the queue app may not push a branch that does (its token has no \`workflows\` permission), so it left the line: the rest of the line goes on without it. It lands by hand into \`${base}\`, or once the app is given that permission (then remove \`queue:failed\`).`;
 
 const conflictText = (base, reason) =>
   reason === "empty"
@@ -494,7 +501,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     // The fast tier on the same head: read only when CI Success alone does not decide.
     if (p.ci !== "success" && p.ci !== "failure") p.fast = draftState(await gh.draftJobs(p.sha));
     const said = await gh.comments(p.number);
-    p.sticky = said.find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
+    p.sticky = said.find((c) => isPosition(c, login));
     // GitHub lists both oldest first, and anyone may comment: past what the train reads, its own position comment (the
     // reviewed head) or the latest `queue` may be missing. That is a doubt, not "none yet": it waits, and gets no new comment.
     if (events.truncated) p.unread = "events";
@@ -686,7 +693,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         before++;
         // That run may have stopped before the labels and the position comment went.
         for (const l of Object.values(LABEL)) if (was.labels.includes(l)) await w.removeLabel(s.number, l);
-        const sticky = (await gh.comments(s.number)).find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
+        const sticky = (await gh.comments(s.number)).find((c) => isPosition(c, login));
         if (sticky) await w.deleteComment(sticky.id);
       }
     }

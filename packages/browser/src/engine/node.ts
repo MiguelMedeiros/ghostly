@@ -5451,7 +5451,7 @@ export class GhostlyNode implements EngineImplementation {
         if(!request || request.linkId!==params.linkId || request.direction!=="in" || request.state!=="pending" || request.amount!==params.amount)throw new Error("Payment review does not match the authenticated request");
         if(params.target.method!=="cashu" ? JSON.stringify(request.target)!==JSON.stringify(params.target) : !!request.target || params.target.address!==request.id || !request.mints?.includes(params.target.provider))throw new Error("Selected method or mint does not match the authenticated request");
         // A failed payment still holding its token was not taken back yet: the contact may still redeem it.
-        if(request.lightningPending || this.desk.records().some(p=>p.kind==="payment" && p.requestId===request.id && p.linkId===params.linkId && p.state!=="reclaimed" && (p.state!=="failed" || !!p.token)))throw engineError("requestPaymentInFlight");
+        if(request.lightningPending || this.requestPaidHere(request.id, params.linkId))throw engineError("requestPaymentInFlight");
         const asked=paymentNetwork(request);
         if(asked!==paying)throw new Error(crossNetwork(paying, asked));
       } else if(params.target.method!=="cashu" || !payee || params.target.address!==payee)throw new Error("Destination does not match the authenticated peer");
@@ -5461,6 +5461,13 @@ export class GhostlyNode implements EngineImplementation {
     if(params.target.method==="fedimint" && !params.requestId)throw new Error("Fedimint ecash is paid on a contact's request in a chat");
     const memo=typeof params.memo==="string" ? params.memo.trim().slice(0,140) || undefined : undefined;
     return this.paymentCoordinator.prepare(params.target,params.amount,params.feeCap,{payee:params.payee,linkId:params.linkId,requestId:params.requestId,memo});
+  }
+  /**
+   * A payment of mine for this request is out, or failed with its ecash not taken back yet (the contact may still
+   * redeem it): paying the request again would pay it twice.
+   */
+  private requestPaidHere(requestId: string, linkId: string): boolean {
+    return this.desk.records().some(p=>p.kind==="payment" && p.requestId===requestId && p.linkId===linkId && p.state!=="reclaimed" && (p.state!=="failed" || !!p.token));
   }
   /** The wallets of a review's network read again after it moved money. */
   private async refreshNetwork(review: PaymentReview) {
@@ -5478,6 +5485,8 @@ export class GhostlyNode implements EngineImplementation {
       if (intent.review.requestId) {
         const request = this.desk.payment(intent.review.requestId);
         if (!request || request.state !== "pending" || request.lightningPending) throw engineError("requestNotAwaiting");
+        // Paid since this review was made (`chat pay-request`, ecash waiting on the contact's answer): it would pay twice.
+        if (this.requestPaidHere(request.id, intent.review.linkId)) throw engineError("requestPaymentInFlight");
       }
       // Reach the contact first, as preparing does: until the chat is live again (after a restart, say), its ways of
       // paying are not known, and Cashu would read as off.
@@ -5558,7 +5567,19 @@ export class GhostlyNode implements EngineImplementation {
    * `network`: the card chosen to pay; a request of the other network is refused, nothing spent. `card`: the Lightning card
    * that pays; absent, the network's default one. `confirmedReal`: required on Mainnet.
    */
-  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?: WalletNetwork; confirmedReal?: boolean; card?: string }) {
+  async payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?: WalletNetwork; confirmedReal?: boolean; card?: string }) {
+    // A review made for this open request could still be approved once this paid it, and pay it twice (a Cashu review
+    // reserves no ecash). One still pending is cancelled first, so no Approve sends it; one approved or sent may
+    // hold money, and nothing is paid here. A request that names where to pay (`target`) is paid only through its
+    // review, and the desk refuses it below: its review is left alone.
+    const request = this.desk.payment(params.paymentId);
+    if (request?.kind === "request" && request.direction === "in" && request.linkId === params.linkId && request.state === "pending" && !request.target) {
+      for (const { review } of await intentRepository.list()) {
+        if (review.requestId !== request.id || review.linkId !== params.linkId || review.state === "failed" || review.state === "cancelled") continue;
+        if (review.state === "pending" && await this.paymentCoordinator.cancel(review.id).then(() => true, () => false)) continue;
+        throw engineError("requestHasPayment");
+      }
+    }
     return this.desk.payRequest(params);
   }
 

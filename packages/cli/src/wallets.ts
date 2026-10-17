@@ -123,7 +123,7 @@ export function walletJson(instance: WalletInstanceView, s: EngineState) {
 export function paymentJson(p: PaymentView) {
   return {
     id: p.id, chat: p.linkId, kind: p.kind, direction: p.direction, amount: p.amount, unit: p.unit, memo: p.memo ?? null,
-    state: p.state, error: p.error ?? null, network: paymentNetwork(p), method: p.target?.method ?? (p.invoice ? "lightning" : p.mint || p.mints ? "cashu" : null),
+    state: p.state, error: p.error ?? null, network: paymentNetwork(p), method: p.target?.method ?? (p.federation || p.federations ? "fedimint" : p.invoice ? "lightning" : p.mint || p.mints ? "cashu" : null),
     createdAt: p.createdAt, ...(p.group ? { group: p.group } : {}), ...(p.closed ? { closed: true } : {}), ...(p.txid ? { txid: p.txid } : {}),
   };
 }
