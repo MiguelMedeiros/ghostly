@@ -378,6 +378,15 @@ describe("the engine's own report (the pairing-progress contract)", () => {
     expect(screen.getByTestId("connection-pairing-details")).not.toHaveTextContent("Someone else joined");
   });
 
+  it("an invite someone else took asks for a new one once: its own words already say it", () => {
+    const { engine } = renderApp(<Pairing inviter={false} />);
+    show(report({ stage: "failed", reason: "taken", retryable: false }), engine);
+    const alert = within(scene()!).getByRole("alert");
+    expect(alert).toHaveTextContent("Someone else joined with this invite first. Ask your contact for a new one.");
+    expect(alert).not.toHaveTextContent("Ask your contact for a new invite.");
+    expect(screen.queryByTestId("pairing-retry")).toBeNull();
+  });
+
   it("a slow stage's dial error is behind an ⓘ, not a line in English", async () => {
     const { engine, user } = renderApp(<Pairing inviter={false} />, { language: "pt" });
     show(report({ stage: "knocking", since: Date.now() - 60_000, detail: "Timed out connecting to the peer" }), engine);
