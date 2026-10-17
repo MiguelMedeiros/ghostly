@@ -10,7 +10,7 @@ import {
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
-import { STATUS_CARD_METHODS } from "./statusCards";
+import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
 import { endTyping, keepOneShot, keepTyping, sayTyping } from "./typing";
@@ -657,6 +657,7 @@ const METHODS: Record<string, Method> = {
     if (args && "confirmedReal" in args && !bool(params, "confirmReal")) {
       throw new CliError("confirm", `${method} spends real money: pass --confirm-real (confirmReal: true over the socket) to confirm it`);
     }
+    if (args && ENGINE_SENDS.has(method) && !bool(params, "force")) await guardEngineSend(ctx, method, args);
     if (method === "getMessages") return node(ctx).getMessages(str(args ?? {}, "linkId", true));
     if (method === "getState") return state(ctx);
     // Someone chose the chat on screen: an invite's mark no longer clears it.
@@ -667,6 +668,26 @@ const METHODS: Record<string, Method> = {
     return (await target.call(node(ctx), args)) ?? null;
   },
 };
+
+/**
+ * The engine's calls that send a text this side writes: `engine.call` runs the secret guard of `send`, `edit` and
+ * `forward` on them too (docs/CLI.md § Safety), so a raw call is no way around it. `force: true` (`--force`) sends it.
+ */
+const ENGINE_SENDS: ReadonlySet<string> = new Set(["sendMessage", "sendGroupMessage", "editMessage", "forwardMessages"]);
+
+async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
+  let texts: unknown = [args.text, args.card];
+  if (method === "forwardMessages") {
+    const ids = Array.isArray(args.messageIds) ? args.messageIds.filter((id): id is string => typeof id === "string") : [];
+    const linkId = args.linkId;
+    texts = typeof linkId === "string" && linkId ? await Promise.all(ids.map(async (id) => {
+      const message = await node(ctx).getMessage(linkId, id);
+      return message && !message.file ? message.text : null;
+    })) : [];
+  }
+  const secret = secretIn(texts);
+  if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; call ${method} with --force if you mean to`, { kind: secret.kind });
+}
 
 /** Reacts to a message of a chat or a group (`group:<id>`): `emoji`, or `remove` for "" (WISP 400 § Reactions). */
 async function react(ctx: ApiContext, linkId: string, params: Params): Promise<{ messageId: string; emoji: string | null; removed: boolean }> {

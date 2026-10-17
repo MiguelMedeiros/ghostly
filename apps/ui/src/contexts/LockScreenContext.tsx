@@ -12,6 +12,7 @@ import { hashPassword, needsRehash, verifyPassword } from "../lib/settings";
 import { activeProfileId } from "../lib/profiles";
 import { takeUnlockHandover } from "../lib/lockHandover";
 import { stopRunningApps } from "../lib/apps/open";
+import { closeServiceWindows } from "../lib/serviceWindows";
 
 interface LockScreenContextValue {
   isLocked: boolean;
@@ -103,9 +104,11 @@ export function LockScreenProvider({ children }: { children: ReactNode }) {
   const checkIdleRef = useRef<() => void>(() => {});
 
   // The apps running (Desktop's windows of their own, the web's frames under the lock) stop when it locks: their
-  // brokers would go on answering behind it.
+  // brokers would go on answering behind it. So do the windows of contacts' apps (Desktop), which this page serves.
   useEffect(() => {
-    if (isLocked) stopRunningApps();
+    if (!isLocked) return;
+    stopRunningApps();
+    closeServiceWindows();
   }, [isLocked]);
 
   const lock = useCallback(() => {

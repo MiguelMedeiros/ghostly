@@ -496,6 +496,8 @@ export interface GhostLinkEvents {
   /** The peer is sending a file. Return where to put it, or null (or a reason) to refuse. */
   onFileStored?(file: FileInfo): Promise<string | undefined>;
   onFileIncoming?(file: FileInfo): FileSink | string | null;
+  /** The room this device has left for files (null: it does not say): a files/2 file larger than that is refused. */
+  onFileRoom?(): Promise<number | null>;
   onFileProgress?(fileId: string, transferred: number, direction: "in" | "out"): void;
   onFileComplete?(fileId: string, direction: "in" | "out"): void;
   onFileFailed?(fileId: string, reason: string, direction: "in" | "out"): void;
@@ -3797,6 +3799,8 @@ export class GhostLink {
           else if (paired.supports("files/2")) this.pairedFiles = new PairedFiles(channel, {
             onIncoming: file => events.onFileIncoming?.(file) ?? null,
             onStored: events.onFileStored,
+            replaced: () => this.supportsLargeFiles,
+            room: events.onFileRoom,
             onProgress: events.onFileProgress,
             onComplete: events.onFileComplete,
             onFailed: events.onFileFailed,

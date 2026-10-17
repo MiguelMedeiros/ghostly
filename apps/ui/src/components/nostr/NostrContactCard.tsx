@@ -15,9 +15,10 @@ import { initial } from "../../lib/initial";
  * What a contact's proven Nostr key lets the person see, each part on request: the profile (kind 0),
  * whom they follow (kind 3) with direction hints against the person's own list, and their recent notes
  * (kind 1), moderated by the person's own mute list. Every part shows where it came from and when. `compact` (on the
- * Nostr ID card's back) says what loading reveals in one short line.
+ * Nostr ID card's back) says what loading reveals in one short line. `turning`: that back is still swinging round,
+ * and its buttons wait, as the rest of the back's do (ContactIdentitiesPanel.tsx).
  */
-export function NostrContactCard({ linkId, view, name, compact = false }: { linkId: string; view: NostrContactView; name: string; compact?: boolean }) {
+export function NostrContactCard({ linkId, view, name, compact = false, turning = false }: { linkId: string; view: NostrContactView; name: string; compact?: boolean; turning?: boolean }) {
   const { t, language } = useI18n();
   const ago = agoIn(language);
   const state = useEngineState();
@@ -26,6 +27,7 @@ export function NostrContactCard({ linkId, view, name, compact = false }: { link
   const [error, setError] = useState("");
   const [publish, setPublish] = useState<NostrDraftRequest | null>(null);
   const busy = view.loading;
+  const wait = !!busy || turning;
   const load = (what: "profile" | "follows" | "notes", more = false) => { setError(""); void engine.call("nostrLoadContact", { linkId, subject: view.subject, what, more }).catch(e => setError(problemLine(e, t))); };
   const loadOwn = (subject: string) => { setError(""); void engine.call("nostrLoadOwn", { subject }).catch(e => setError(problemLine(e, t))); };
   const p = view.profile, f = view.follows, n = view.notes;
@@ -59,7 +61,7 @@ export function NostrContactCard({ linkId, view, name, compact = false }: { link
           </div>
         ) : p && !p.found ? <p data-testid="nostr-profile-none">{t("identities.nostr.profileNone")}</p> : null}
         {p && <p className="text-[11px]" data-testid="nostr-profile-source">{profile ? t("identities.nostr.profileSourceChanged", { when: when(p), time: ago(profile.eventAt) }) : t("identities.nostr.profileSource", { when: when(p) })}</p>}
-        <Button data-testid="nostr-load-profile" disabled={!!busy} onClick={() => load("profile")}>{busy === "profile" ? t("identities.activity.loading") : p ? t("identities.nostr.refreshProfile") : t("identities.nostr.loadProfile")}</Button>
+        <Button data-testid="nostr-load-profile" disabled={wait} onClick={() => load("profile")}>{busy === "profile" ? t("identities.activity.loading") : p ? t("identities.nostr.refreshProfile") : t("identities.nostr.loadProfile")}</Button>
       </div>
 
       {/* Social graph */}
@@ -72,15 +74,15 @@ export function NostrContactCard({ linkId, view, name, compact = false }: { link
               <li data-testid="nostr-hint-you-follow">{f.hints.youFollow ? t("identities.nostr.youFollowThem") : t("identities.nostr.notYouFollowThem")} <span className="text-[11px]">{t("identities.nostr.yourListLoaded", { time: ago(f.hints.myFollowsAt) })}</span></li>
               <li data-testid="nostr-hint-mutual">{f.hints.mutual === 1 ? t("identities.nostr.mutualOne") : t("identities.nostr.mutual", { count: f.hints.mutual })}</li>
             </ul>
-          ) : myKey ? <p>{t("identities.nostr.loadOwnHint")} <Button data-testid="nostr-load-own" disabled={!!busy || own.find(o => o.subject === myKey)?.loading} onClick={() => loadOwn(myKey)}>{t("identities.nostr.loadMineShort")}</Button></p>
+          ) : myKey ? <p>{t("identities.nostr.loadOwnHint")} <Button data-testid="nostr-load-own" disabled={wait || own.find(o => o.subject === myKey)?.loading} onClick={() => loadOwn(myKey)}>{t("identities.nostr.loadMineShort")}</Button></p>
             : <p className="text-[11px]">{t("identities.nostr.addToCompare")}</p>}
           <p className="text-[11px]">{t("identities.nostr.followsSource", { when: when(f), time: ago(f.eventAt) })}</p>
         </>}
         <div className="flex flex-wrap gap-2">
-          <Button data-testid="nostr-load-follows" disabled={!!busy} onClick={() => load("follows")}>{busy === "follows" ? t("identities.activity.loading") : f ? t("identities.nostr.refreshFollows") : t("identities.nostr.loadFollows")}</Button>
+          <Button data-testid="nostr-load-follows" disabled={wait} onClick={() => load("follows")}>{busy === "follows" ? t("identities.activity.loading") : f ? t("identities.nostr.refreshFollows") : t("identities.nostr.loadFollows")}</Button>
           {settings?.publish && myKey && f?.hints && (f.hints.youFollow
-            ? <Button data-testid="nostr-unfollow" disabled={!!busy} onClick={() => setPublish({ subject: myKey, action: "unfollow", target: view.subject })}>{t("identities.nostr.unfollow")}</Button>
-            : <Button data-testid="nostr-follow" disabled={!!busy} onClick={() => setPublish({ subject: myKey, action: "follow", target: view.subject })}>{t("identities.nostr.follow")}</Button>)}
+            ? <Button data-testid="nostr-unfollow" disabled={wait} onClick={() => setPublish({ subject: myKey, action: "unfollow", target: view.subject })}>{t("identities.nostr.unfollow")}</Button>
+            : <Button data-testid="nostr-follow" disabled={wait} onClick={() => setPublish({ subject: myKey, action: "follow", target: view.subject })}>{t("identities.nostr.follow")}</Button>)}
         </div>
       </div>
 
@@ -101,12 +103,12 @@ export function NostrContactCard({ linkId, view, name, compact = false }: { link
           <p className="text-[11px]">{t("identities.nostr.notesSource", { when: when(n) })}</p>
         </>}
         <div className="flex flex-wrap gap-2">
-          <Button data-testid="nostr-load-notes" disabled={!!busy} onClick={() => load("notes")}>{busy === "notes" ? t("identities.activity.loading") : n ? t("identities.nostr.refreshNotes") : t("identities.nostr.loadNotes")}</Button>
-          {n?.more && !n.authorMuted && <Button data-testid="nostr-notes-more" disabled={!!busy} onClick={() => load("notes", true)}>{t("identities.nostr.olderNotes")}</Button>}
+          <Button data-testid="nostr-load-notes" disabled={wait} onClick={() => load("notes")}>{busy === "notes" ? t("identities.activity.loading") : n ? t("identities.nostr.refreshNotes") : t("identities.nostr.loadNotes")}</Button>
+          {n?.more && !n.authorMuted && <Button data-testid="nostr-notes-more" disabled={wait} onClick={() => load("notes", true)}>{t("identities.nostr.olderNotes")}</Button>}
         </div>
       </div>
 
-      {(p || f || n) && <Button data-testid="nostr-forget" disabled={!!busy} onClick={() => void engine.call("nostrForgetContact", { linkId, subject: view.subject }).catch(e => setError(problemLine(e, t)))}>{t("identities.nostr.forget")}</Button>}
+      {(p || f || n) && <Button data-testid="nostr-forget" disabled={wait} onClick={() => void engine.call("nostrForgetContact", { linkId, subject: view.subject }).catch(e => setError(problemLine(e, t)))}>{t("identities.nostr.forget")}</Button>}
       {(error || view.error) && <Notice tone="error" testId="nostr-contact-error">{error || view.error}</Notice>}
       {publish && <NostrPublishDialog request={publish} onClose={() => setPublish(null)} onDone={() => load("follows")} />}
     </div>

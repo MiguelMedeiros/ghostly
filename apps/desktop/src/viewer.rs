@@ -329,6 +329,35 @@ pub fn forget_window<R: tauri::Runtime>(app: &AppHandle<R>, label: &str) {
     }
 }
 
+/// The page that opened the viewer windows is gone (a profile switch, a reload, the WebView back after its process
+/// died) or its profile locked: every one of them closes. The page there now would answer their requests over its own
+/// chat with that contact, with the other profile's cookies in the window, and a locked one would go on answering
+/// them behind the lock screen. Their bindings go first, so a request still to come is refused, and every request
+/// still waiting fails at once.
+pub fn close_all<R: tauri::Runtime>(app: &AppHandle<R>) {
+    let Some(state) = app.try_state::<ViewerState>() else {
+        return;
+    };
+    for label in forget_all(&state) {
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.close();
+        }
+    }
+}
+
+/// Drops every binding and every request still waiting, and names the windows.
+fn forget_all(state: &ViewerState) -> Vec<String> {
+    let labels = state
+        .windows
+        .lock()
+        .map(|mut windows| windows.drain().map(|(label, _)| label).collect())
+        .unwrap_or_default();
+    if let Ok(mut pending) = state.pending.lock() {
+        pending.clear();
+    }
+    labels
+}
+
 /// A viewer window is one contact's app in one origin. What it asks for has to
 /// be that origin, or its contact would be serving code into another one.
 #[cfg(test)]
@@ -837,6 +866,58 @@ mod routing_tests {
         let asked = requests(&app);
         forget_window(app.handle(), "svc-1");
         for label in ["svc-1", "svc-2", "main"] {
+            let response = tauri::async_runtime::block_on(handle(
+                app.handle().clone(),
+                label.into(),
+                request("GET", &format!("{SCHEME}://atlas.{PEER}.{TAG}/"), b""),
+            ));
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "{label}");
+        }
+        assert!(asked.try_recv().is_err(), "nothing reached the main window");
+    }
+
+    #[test]
+    fn a_new_page_or_the_lock_closes_every_window_and_its_waiting_requests_fail() {
+        let app = app();
+        open(
+            app.handle(),
+            PEER.into(),
+            "atlas".into(),
+            TAG.into(),
+            "Atlas".into(),
+            None,
+        )
+        .unwrap();
+        bind(&app, "svc-9");
+        let asked = requests(&app);
+        let waiting = tauri::async_runtime::spawn(handle(
+            app.handle().clone(),
+            "svc-9".into(),
+            request("GET", &format!("{SCHEME}://atlas.{PEER}.{TAG}/"), b""),
+        ));
+        let carried = asked.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        close_all(app.handle());
+
+        // Told at once, not after the timeout, and the answer of the page there now goes nowhere.
+        let started = std::time::Instant::now();
+        let response = tauri::async_runtime::block_on(waiting).unwrap();
+        assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+        assert!(started.elapsed() < REQUEST_TIMEOUT / 2);
+        respond(
+            app.handle(),
+            carried["id"].as_u64().unwrap(),
+            ServiceResponse {
+                status: 200,
+                headers: vec![],
+                body_b64: String::new(),
+            },
+        );
+        let state = app.state::<ViewerState>();
+        assert!(state.windows.lock().unwrap().is_empty());
+        assert!(state.pending.lock().unwrap().is_empty());
+        // Its next request (a click, a poll) is refused and never reaches the page.
+        for label in ["svc-0", "svc-9"] {
             let response = tauri::async_runtime::block_on(handle(
                 app.handle().clone(),
                 label.into(),
