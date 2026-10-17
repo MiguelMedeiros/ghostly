@@ -1191,6 +1191,21 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     await alice.tick(t0 + 133_000); expect(looks()).toBe(8);
   });
 
+  it("a link just handed out is looked at fast for a minute, as a community's door, not for ten", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.now();
+    const world = new World();
+    const alice = world.add("alice");
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.enableLink(groupId);
+    const looks = () => world.resolves.get("alice") ?? 0;
+    for (let t = 0; t < 60_000; t += 1_000) await alice.tick(t0 + t);
+    expect(looks()).toBe(30); // every 2 s
+    // Nobody came in the minute: every 5 s for the nine after, 12 a minute, not 30 a minute.
+    for (let t = 60_000; t < 10 * 60_000; t += 1_000) await alice.tick(t0 + t);
+    expect(looks() - 30).toBe(108);
+  });
+
   it("a joiner knocks at its pace, slower once it has waited long, and not while its entry session is up", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const t0 = Date.now();
