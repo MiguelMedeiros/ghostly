@@ -75,7 +75,7 @@ test.describe("service worker", () => {
 
     // No network: Playwright's offline mode leaves routed requests alone, and the test relay is one, so it goes too.
     let offline = false;
-    await ana.context.route(/^https:\/\/(pkarr\.pubky\.(org|app)|relay\.pkarr\.org)\//, (r) => (offline ? r.abort("internetdisconnected") : r.fallback()));
+    await ana.context.route(/^https:\/\/(pkarr\.pubky\.(org|app)|relay\.pkarr\.org|pkarr\.miguelmedeiros\.dev)\//, (r) => (offline ? r.abort("internetdisconnected") : r.fallback()));
     await ana.page.goto("about:blank");
     offline = true;
     await ana.context.setOffline(true);

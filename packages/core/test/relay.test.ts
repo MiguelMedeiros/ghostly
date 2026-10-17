@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, CHAT_RESERVE_MOST_SHARE, CHAT_RESERVE_PER_CHAT, CHAT_WATCH_SHARE, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RELAY_REQUESTS_PER_MINUTE, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, SLOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WAY_BACK_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, DEFAULT_RELAYS, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, CHAT_RESERVE_MOST_SHARE, CHAT_RESERVE_PER_CHAT, CHAT_WATCH_SHARE, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RELAY_REQUESTS_PER_MINUTE, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, SLOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WAY_BACK_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
 import type { PkarrRequestOptions, PkarrTransport } from "../src/transport";
 // covers: core.relay-client
 
@@ -888,9 +888,12 @@ describe("relay transport: a relay that held a packet back gets it later", () =>
     return { relay, log };
   }
   const putsOf = (log: ReturnType<typeof twoRelays>["log"], host: string) => log.filter(r => r.method === "PUT" && r.host === host && r.key === id.pubKeyZ32);
-  /** relay.pkarr.org takes 5 requests a minute: spent on reads of another key. */
+  /**
+   * relay.pkarr.org takes 5 requests a minute: spent on writes of another key, which go to every relay (reads go to it
+   * only once a.test refuses them: a relay with a small share takes no read turns).
+   */
   async function spendSmallRelay(relay: RelayTransport) {
-    for (let i = 0; i < 12; i++) await relay.resolve(other.pubKeyZ32).catch(() => {});
+    for (let i = 0; i < 5; i++) await relay.publish(other, [{ label: "_ts", value: String(i) }]);
   }
 
   it("puts the newest packet there once its budget frees, once", async () => {
@@ -1523,9 +1526,11 @@ describe("relay transport: a community member's way back has its own share past 
 
   it("keeps a relay's worst minute (its limit and every allowance past it) within what the relay allows", () => {
     // Each relay's own limit an address, from its `x-ratelimit-limit` (docs/TRANSPORTS.md, "The default list").
-    const allows: Record<string, number> = { "https://pkarr.pubky.org": 50, "https://pkarr.pubky.app": 1000, "https://relay.pkarr.org": 10 };
+    const allows: Record<string, number> = { "https://pkarr.pubky.org": 50, "https://pkarr.pubky.app": 1000, "https://relay.pkarr.org": 10, "https://pkarr.miguelmedeiros.dev": 10 };
     const worst = (limit: number) => limit + [SIGNALING_ALLOWANCE_SHARE, GROUP_SIGNALING_ALLOWANCE_SHARE, WAY_BACK_SHARE].reduce((sum, share) => sum + Math.floor(limit * share), 0);
     expect(worst(REQUESTS_PER_MINUTE)).toBe(46);
     for (const [relay, allowed] of Object.entries(allows)) expect(worst(RELAY_REQUESTS_PER_MINUTE[relay] ?? REQUESTS_PER_MINUTE)).toBeLessThanOrEqual(allowed);
+    // Every default relay is in the list: one added without its limit here fails.
+    expect(DEFAULT_RELAYS.filter((relay) => !(relay in allows))).toEqual([]);
   });
 });
