@@ -51,7 +51,9 @@ class MemoryFiles implements GroupFileStore {
     if (this.corrupt && offset === 0 && part.length) part[0] ^= 0xff;
     return part;
   }
-  async room() { return null; }
+  /** The room left for files, or null when it does not say. */
+  roomLeft: number | null = null;
+  async room() { return this.roomLeft; }
 }
 
 /** `brief`: views that go in the next state the engine sends, and then away (as the engine's `dropBriefViews`, `sent`). */
@@ -402,6 +404,40 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     bob.online = false;
     await t.world.run(2 * GROUP_FILE_LIMITS.wantWaitMs + 2_000);
     expect(t.got(carol, id, messageId).transfer).toMatchObject({ state: "transferring", stage: "waiting", wait: "nobody" });
+  });
+
+  it("a file this device has no room for is not fetched by itself, and one whose room went before the offer stops and says so", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    const store = t.files.get(bob)!.store;
+    store.roomLeft = 100_000;
+    const wants = (messageId: string) => t.seen.filter(s => s.from === "bob" && s.frame.t === "group-want" && s.frame.id === messageId).length;
+    const offers = () => t.seen.filter(s => s.to === "bob" && s.frame.t === "pf-offer").length;
+    // Under the automatic size, but more than the room here: it waits for a Download, which says why it cannot come.
+    const auto = await t.send(alice, id, pattern(300_000, 9));
+    await t.world.until(() => t.done(carol, id, auto.messageId), 60_000);
+    await t.world.run(5 * 60_000);
+    expect(wants(auto.messageId)).toBe(0);
+    expect(t.got(bob, id, auto.messageId).transfer).toMatchObject({ state: "transferring", stage: "asking" });
+    await expect(bob.groups.downloadFile(t.got(bob, id, auto.messageId).message!.file!.id)).rejects.toThrow("Not enough space on this device for this file");
+    // Downloaded with room, the room gone before a holder offers: the offer is refused once, and the file stops and says so.
+    store.roomLeft = 10_000_000;
+    let checks = 0;
+    store.room = async () => (checks++ === 0 ? 10_000_000 : 50_000);
+    const fileId = t.got(bob, id, auto.messageId).message!.file!.id;
+    await bob.groups.downloadFile(fileId);
+    const before = offers();
+    await t.world.run(5 * 60_000);
+    expect(t.seen.filter(s => s.from === "bob" && s.frame.t === "pf-refuse" && s.frame.why === "no-room").length).toBe(1);
+    expect(offers() - before).toBe(1);
+    expect(t.got(bob, id, auto.messageId).transfer).toMatchObject({ state: "failed", direction: "in", retry: true, error: "Not enough space on this device for this file" });
+    // Kept so: a restart does not ask for it again by itself.
+    expect(store.records.get(fileId)!.transfer).toMatchObject({ state: "failed" });
+    // With room again, Download brings it.
+    store.room = async () => null;
+    await bob.groups.downloadFile(fileId);
+    await t.world.until(() => t.done(bob, id, auto.messageId), 60_000);
+    expect(sha(t.got(bob, id, auto.messageId).bytes!)).toBe(auto.meta.d);
   });
 
   it("a holder that stalls mid-way is left, and the next holder goes on from the bytes stored here", async () => {

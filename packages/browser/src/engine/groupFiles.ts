@@ -263,6 +263,8 @@ const WAITING_NOTES = {
 } as const;
 /** Why a want stopped: every holder served bytes that are not the author's file. */
 const DAMAGED = "Every copy of this file arrived damaged and was deleted. Ask for it again later.";
+/** Why a want stopped, or a Download was refused: this device has no room for the file. */
+const NO_ROOM = "Not enough space on this device for this file";
 
 export class GroupFileDesk {
   private readonly kept = new Map<string, Kept>();
@@ -431,7 +433,8 @@ export class GroupFileDesk {
     // Pace). Counted as they come, so a catch-up of files sent over hours is one burst: none of them is lost to it.
     const paced = this.pace(this.takenPace, `${groupId}\n${m.sender}`, GROUP_FILE_LIMITS.announceTaken, GROUP_FILE_LIMITS.announceWindowMs).take();
     const id = groupFileId(groupId, "in");
-    const auto = paced && this.deps.settings().autoDownloads && fetchesByItself(m.file, this.keptAutomatically(groupId));
+    // No room here for it: it waits for a Download, which says so, rather than be asked for and refused here.
+    const auto = paced && this.deps.settings().autoDownloads && fetchesByItself(m.file, this.keptAutomatically(groupId)) && await this.hasRoom(m.file.size);
     const holders = this.ahead.get(`${groupId}\n${m.id}`) ?? [];
     this.ahead.delete(`${groupId}\n${m.id}`);
     const kept: Kept = { id, groupId, message: m.id, author: m.sender, meta: m.file, mine: false, auto, asked: false, held: false, holders, damaged: new Set() };
@@ -452,8 +455,7 @@ export class GroupFileDesk {
     const kept = this.kept.get(fileId);
     if (!kept) throw new Error("No such file");
     if (kept.held) return;
-    const room = await this.deps.store.room().catch(() => null);
-    if (room !== null && kept.meta.size > room) throw new Error("Not enough space on this device for this file");
+    if (!await this.hasRoom(kept.meta.size)) throw new Error(NO_ROOM);
     if (!kept.asked || kept.paused) {
       kept.asked = true; kept.paused = false;
       await this.deps.store.patch(kept.id, { group: this.groupField(kept) }).catch(() => {});
@@ -670,7 +672,7 @@ export class GroupFileDesk {
     const edges = this.deps.edges(kept.groupId);
     const known = this.knownHolders(kept, membership);
     // Every holder known served it damaged: asking again would fetch the same bytes, all of them, round after round.
-    if (known.length && known.every(key => kept.damaged.has(key))) { this.stopDamaged(kept); return; }
+    if (known.length && known.every(key => kept.damaged.has(key))) { this.stopFailed(kept); return; }
     const others = this.waitForKnown(kept, want, known, edges) ? [] : [...edges.keys()].filter(key => !known.includes(key) && membership && key !== membership.me && membership.couldRead(key, kept.message));
     const order = [...known, ...others].filter(key => this.mayAsk(kept, want, key, edges.get(key)));
     // The holder last left for this file is asked once the others were.
@@ -736,12 +738,15 @@ export class GroupFileDesk {
     return true;
   }
 
-  /** No holder serves the author's bytes: the want stops, and stays stopped after a restart, until Download. */
-  private stopDamaged(kept: Kept): void {
+  /**
+   * No holder serves the author's bytes (`DAMAGED`), or this device has no room for them (`NO_ROOM`): the want stops,
+   * and stays stopped after a restart, until Download.
+   */
+  private stopFailed(kept: Kept, error = DAMAGED): void {
     this.wants.delete(kept.id);
     const { size } = kept.meta;
-    void this.deps.store.patch(kept.id, { transfer: { state: "failed", transferred: 0, size, error: DAMAGED } }).catch(() => {});
-    this.show(kept, { state: "failed", transferred: 0, size, direction: "in", retry: true, error: DAMAGED });
+    void this.deps.store.patch(kept.id, { transfer: { state: "failed", transferred: 0, size, error } }).catch(() => {});
+    this.show(kept, { state: "failed", transferred: 0, size, direction: "in", retry: true, error });
   }
 
   /** A holder's no: the next one is asked. One that deleted the file is no holder any more. */
@@ -953,12 +958,27 @@ export class GroupFileDesk {
     return edge;
   }
 
-  /** An offer that answers my want (`filesFrame` checked that): taken, unless it is not the file announced or there is no room. */
+  /**
+   * An offer that answers my want (`filesFrame` checked that): taken, unless it is not the file announced or there is no
+   * room. With no room, every holder's offer would be refused the same: the want stops and says so, until Download.
+   */
   private async decide(edge: Edge, file: FileInfo): Promise<OfferDecision> {
     const kept = this.kept.get(edge.taking.get(file.id) ?? ""), want = kept && this.wants.get(kept.id);
     if (!kept || kept.held || want?.linkId !== edge.linkId || want.wire !== file.id || file.size !== kept.meta.size) return { refuse: "invalid" };
     const room = await this.deps.store.room().catch(() => null);
-    return room !== null && file.size > room ? { refuse: "no-room", room } : "accept";
+    if (room === null || file.size <= room) return "accept";    // A refused offer makes no transfer here, so nothing else ends the want.
+    edge.taking.delete(file.id);
+    if (this.wants.get(kept.id) === want && want.wire === file.id) {
+      this.stopFailed(kept, NO_ROOM);
+      this.retry(kept.groupId);
+    }
+    return { refuse: "no-room", room };
+  }
+
+  /** This device has room for a file of this size, or does not say. */
+  private async hasRoom(size: number): Promise<boolean> {
+    const room = await this.deps.store.room().catch(() => null);
+    return room === null || size <= room;
   }
 
   private async openTarget(edge: Edge, record: FileTransferRecord): Promise<IncomingTarget> {
