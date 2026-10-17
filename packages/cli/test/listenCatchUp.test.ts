@@ -30,13 +30,13 @@ function countingHub(count: number) {
   };
 }
 
-/** A hook that handles each event one turn after the one before: slow enough for the feed to fall behind. */
-function slowHandler(gate: Promise<void> = Promise.resolve()) {
+/** A hook that handles each event one turn after the one before (`step`): slow enough for the feed to fall behind. */
+function slowHandler(gate: Promise<void> = Promise.resolve(), step: (done: () => void) => void = setImmediate) {
   const seqs: number[] = [];
   let chain = gate, behind = 0;
   const handle = (event: GhostlyEvent) => {
     behind++;
-    chain = chain.then(() => new Promise<void>((resolve) => setImmediate(resolve))).then(() => { seqs.push(event.seq); behind--; });
+    chain = chain.then(() => new Promise<void>((resolve) => step(resolve))).then(() => { seqs.push(event.seq); behind--; });
   };
   return { seqs, handle: Object.assign(handle, { behind: () => behind, idle: () => chain }) as EventHandler };
 }
@@ -58,12 +58,28 @@ describe.skipIf(process.platform === "win32")("a listen attached to the daemon t
     try {
       const client = await connectDaemon(s.address);
       const { seqs, handle } = slowHandler();
-      // A hold far shorter than a catch-up of 1,000 events: hooks that keep taking events keep the connection.
-      const following = followDaemon(s.address, client!, handle, 0, 1);
+      const following = followDaemon(s.address, client!, handle, 0);
       await following.subscribed;
       await expect.poll(() => seqs.length, { timeout: 20_000 }).toBe(backlog);
       expect(seqs).toEqual(Array.from({ length: backlog }, (_, i) => i + 1));
       // Before: one replay per pause (5) and about 15,000 events written, most of them thrown away with the connection.
+      expect(counted).toEqual({ replays: 1, replayed: backlog });
+      following.close();
+    } finally { await s.close(); }
+  });
+
+  it("a hook that is slow but still takes events keeps the connection past PAUSE_HOLD_MS: still one read of the journal", async () => {
+    const backlog = 2 * MAX_BEHIND;
+    const { hub, counted } = countingHub(backlog);
+    const s = await served("slow", hub);
+    try {
+      const client = await connectDaemon(s.address);
+      // About 1 ms an event: each pause lasts a second or more, ten times the hold.
+      const { seqs, handle } = slowHandler(undefined, (done) => setTimeout(done, 1));
+      const following = followDaemon(s.address, client!, handle, 0, 100);
+      await following.subscribed;
+      await expect.poll(() => seqs.length, { timeout: 30_000 }).toBe(backlog);
+      expect(seqs).toEqual(Array.from({ length: backlog }, (_, i) => i + 1));
       expect(counted).toEqual({ replays: 1, replayed: backlog });
       following.close();
     } finally { await s.close(); }
