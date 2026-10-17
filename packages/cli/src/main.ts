@@ -13,7 +13,7 @@ import type { Host } from "./host";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, readCursor } from "./listen";
 import { format } from "node:util";
-import { secretsFromStdin, secretValuesWarning } from "./secretInput";
+import { secretsFromStdin, secretValuesWarning, textFromStdin } from "./secretInput";
 import {
   checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
   type ProfilePaths,
@@ -837,7 +837,9 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
     text = String(parsed.options.text);
   } else if (parsed.options.stdin || (words.length === 0 && !process.stdin.isTTY)) {
     if (text) throw new CliError("usage", "Give the text as arguments or on stdin, not both");
-    text = (await readStdin()).replace(/\n$/, "");
+    // What the note and the give-up name: the command as typed (a name with a space, quoted).
+    const typed = [name, ...[target, ...(message !== undefined ? [message] : [])].map((word) => /^[\w@.:+-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`)].join(" ");
+    text = await textFromStdin(readStdin, typed, parsed.options.stdin === true, (note) => process.stderr.write(`ghostly: ${note}\n`));
   }
   if (!text.trim()) throw new CliError("usage", `No text: ghostly ${spec.usage}`);
   const params: Record<string, unknown> = { [spec.target]: target, text, force: parsed.options.force === true, ...(message !== undefined && { message }) };
