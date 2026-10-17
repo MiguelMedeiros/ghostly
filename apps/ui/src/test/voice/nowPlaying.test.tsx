@@ -49,6 +49,8 @@ function Screen({ files, open = true, audioFiles = [], where = FAMILY }: { files
         </NowPlayingChat.Provider>
       )}
       <Where />
+      {/* What comes after the bar, as the tab bar does on a phone. */}
+      <button type="button">Chats</button>
     </>
   );
 }
@@ -161,6 +163,19 @@ describe("a voice message playing as its chat goes", () => {
     await flush();
     expect(audio.players).toHaveLength(2);
     expect(audio.players[1]!.currentTime).toBe(6);
+  });
+
+  it("closed from the keyboard, the focus goes on to what comes after the bar, not to the page's body", async () => {
+    const file = voiceFile();
+    const view = renderApp(<Screen files={[file]} />);
+    fireEvent.click(screen.getByTestId("voice-play"));
+    await flush();
+    view.rerender(<Screen files={[file]} open={false} />);
+
+    screen.getByRole("button", { name: "Stop and close" }).focus();
+    await view.user.keyboard("{Enter}");
+    expect(bar()).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Chats" }));
   });
 
   it("played to its end away from its chat: the bar goes, and it starts from the beginning next time", async () => {
