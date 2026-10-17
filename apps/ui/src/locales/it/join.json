@@ -22,6 +22,7 @@
   "pasteScreenshot": "Oppure incolla uno screenshot del codice QR.",
   "placeholder": "Incolla l'invito…",
   "qrReaderNotLoaded": "Il lettore QR non si è caricato. Controlla la connessione, poi riprova.",
+  "qrReaderReload": "Il lettore QR non si è ancora caricato. Ricarica Ghostly per caricarlo.",
   "scan": "Scansiona QR",
   "submit": "Unisciti",
   "title": "Unisciti a una chat",
