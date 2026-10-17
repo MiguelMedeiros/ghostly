@@ -50,6 +50,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { fileSpace, registerFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/fileBytesNative";
 import { setWindowThemeSink } from "../lib/windowTheme";
+import { setServiceWindowsCloser } from "../lib/serviceWindows";
 import { setNameStepUnderTest } from "../lib/nameStep";
 import { appsTestFetch } from "./appsTestFetch";
 import { appsPlatform } from "../lib/apps/flag";
@@ -334,6 +335,8 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   // Every step of a link's way to a live connection goes to the app's log (see `diagnostic_log`), so a
   // pairing that took long can be read back afterwards, step by step.
   setLinkTraceSink((line) => void invoke("diagnostic_log", { line: `link ${line}` }).catch(() => {}));
+  // A contact's app windows close when the profile locks; Rust closes them itself when this page is replaced.
+  setServiceWindowsCloser(() => void invoke("close_service_windows").catch(() => {}));
   listenForAppCommands();
   // Kept running until Rust says which WebKitGTK this is: a sound before the answer must not freeze the page.
   setSoundsRelease(soundsRelease(null));

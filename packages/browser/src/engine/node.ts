@@ -7395,6 +7395,7 @@ export class GhostlyNode implements EngineImplementation {
           return held.digest;
         },
         onFileIncoming: (file) => this.receiveFile(linkId, file),
+        onFileRoom: async () => (await fileBytes()).room(),
         onFileProgress: (id, transferred, direction) =>
           this.fileProgress(this.localFileId(linkId, id, direction), transferred),
         onFileComplete: (id, direction) =>
