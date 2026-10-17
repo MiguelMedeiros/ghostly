@@ -155,6 +155,16 @@ describe.skipIf(process.platform === "win32" || (!hasJq && !process.env.CI))("th
     expect(t.calls()[2].argv[7], "the default").toBe("300");
   });
 
+  it("status takes out every link the app refuses (mailto:, nostr:, …) and every '<' a tag could start with", () => {
+    const t = setup();
+    for (const line of ["Editing <App> component", "Comparing a<b in sort", "Closing </div>", "Opening mailto:dev@example.com now",
+      "Paying LIGHTNING:lnbc1xyz", "Tagging ghostly:invite", "Sending nostr:npub1abc", "Calling tel:+15550100"]) {
+      expect(t.run("status", [line]).status, line).toBe(0);
+    }
+    expect(t.calls().map((c) => c.argv[5])).toEqual(["Editing ‹App> component", "Comparing a‹b in sort", "Closing ‹/div>",
+      "Opening now", "Paying", "Tagging", "Sending", "Calling"]);
+  });
+
   it("react answers with 👀 by default, or the emoji given, and takes it back", () => {
     const t = setup();
     expect(t.run("react", ["t_3"]).status).toBe(0);

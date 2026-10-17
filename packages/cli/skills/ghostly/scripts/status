@@ -20,7 +20,8 @@ case "$secs" in ''|*[!0-9]*) echo "status: seconds must be a number" >&2; exit 2
 [ "$secs" -le 600 ] || secs=600
 [ "$secs" -ge 1 ] || secs=1
 
-# One line, no links, at most 40 characters (counted as characters, not bytes).
-line=$(printf '%s' "${1:-}" | jq -Rrs 'gsub("[A-Za-z][A-Za-z0-9+.-]*://[^[:space:]]*|www\\.[^[:space:]]*"; "") | gsub("[[:space:]]+"; " ") | gsub("^ +| +$"; "") | .[0:40]')
+# One line, no links, at most 40 characters (counted as characters, not bytes). The links are the ones the app refuses
+# (core pairedTyping.ts LINK_OR_MARKUP), and '<' becomes '‹' so "<App>" does not read as a tag.
+line=$(printf '%s' "${1:-}" | jq -Rrs 'gsub("[a-z][a-z0-9+.-]*://[^[:space:]]*|www\\.[^[:space:]]*|(mailto|javascript|data|nostr|lightning|bitcoin|ghostly|magnet|tel|sms|file):[^[:space:]]*"; ""; "i") | gsub("<"; "‹") | gsub("[[:space:]]+"; " ") | gsub("^ +| +$"; "") | .[0:40]')
 [ -n "$line" ] || { echo 'status: usage: status "<what you are doing>" [seconds] | --stop' >&2; exit 2; }
 ghostly typing "$owner" --kind thinking --status "$line" --for "$secs" >/dev/null
