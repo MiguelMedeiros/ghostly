@@ -26,6 +26,8 @@ export function SiteFooter({ apps = false }: { apps?: boolean }) {
         { label: t.links.catalog, href: "/wisps" },
         { label: t.links.cli, href: "/cli" },
         { label: t.links.roadmap, href: "/roadmap" },
+        // What an AI agent reads first (scripts/llms.mjs): a text file, so a plain link, never a prefetched page.
+        { label: t.links.llms, href: "/llms.txt" },
       ],
     },
     {
@@ -58,7 +60,7 @@ export function SiteFooter({ apps = false }: { apps?: boolean }) {
               <ul>
                 {col.links.map((l) => (
                   <li key={l.label}>
-                    {l.href.startsWith("http") ? <a href={l.href}>{l.label}</a> : <IntentLink href={l.href}>{l.label}</IntentLink>}
+                    {l.href.startsWith("http") || l.href.endsWith(".txt") ? <a href={l.href}>{l.label}</a> : <IntentLink href={l.href}>{l.label}</IntentLink>}
                   </li>
                 ))}
               </ul>
