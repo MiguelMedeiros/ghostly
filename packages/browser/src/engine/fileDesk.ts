@@ -84,6 +84,9 @@ const ANNOUNCED_FOR_MS = 7 * 24 * 60 * 60_000;
 /** Progress is written to the database at most this often; every change of state is written at once. */
 const SAVE_EVERY_MS = 2_000;
 
+/** The views of finished transfers the states carry, the newest (`FileDesk.finished`). */
+const DONE_VIEWS_KEPT = 16;
+
 export type FileDeskAction = "accept" | "decline" | "pause" | "resume" | "cancel" | "retry" | "resend" | "request";
 
 /**
@@ -478,7 +481,8 @@ export class FileDesk {
   private save(chat: Chat, id: string, record: FileTransferRecord): void {
     const held = chat.unsaved.get(id);
     if (held) { clearTimeout(held.timer); chat.unsaved.delete(id); }
-    chat.lastSaved.set(id, Date.now());
+    // Ended: no more progress to space out.
+    if (transferEnded(record)) chat.lastSaved.delete(id); else chat.lastSaved.set(id, Date.now());
     const transfer = this.deps.transfers.get(id);
     chat.saving = chat.saving.then(() => fileStore.patch(id, { wire3: record, ...(transfer && { transfer: { state: transfer.state, transferred: transfer.transferred, size: transfer.size, error: transfer.error } }) })).catch(() => {});
   }
@@ -499,7 +503,10 @@ export class FileDesk {
     } else this.speeds.delete(id);
     if (view.stage === "asking" && record.direction === "in") { view.room = this.deps.transfers.get(id)?.room; void this.room(id); }
     // One that finished before this run (a session opening walks them all) gets no view back (`restore`).
-    if (record.state !== "done" || this.underway.has(id) || this.deps.transfers.has(id)) this.deps.transfers.set(id, view);
+    if (record.state !== "done" || this.underway.has(id) || this.deps.transfers.has(id)) {
+      this.deps.transfers.set(id, view);
+      if (record.state === "done") this.finished(id);
+    }
     // Ended, then going again (sent again, taken again): its next end is reported too.
     if (!transferEnded(record)) { this.underway.add(id); this.ended.delete(id); }
     else if (!this.ended.has(id)) { this.ended.add(id); this.deps.settled?.(linkId, id, record, this.underway.delete(id)); }
@@ -538,6 +545,24 @@ export class FileDesk {
   private readonly ended = new Set<string>();
   /** Transfers seen under way in this run, until they end. */
   private readonly underway = new Set<string>();
+  /** The views of the transfers that finished last in this run, oldest first (`finished`). */
+  private readonly done = new Set<string>();
+
+  /**
+   * A transfer finished: its view stays for the next states (its bubble, the CLI's `file.done`), then leaves them once
+   * newer ones finished. A file with no transfer reads as finished, so the bubble needs none; a view kept for each would
+   * go into every state the engine builds, so each would cost more with every file the chat had in this run.
+   */
+  private finished(id: string): void {
+    this.done.delete(id);
+    this.done.add(id);
+    for (const oldest of this.done) {
+      if (this.done.size <= DONE_VIEWS_KEPT) break;
+      this.done.delete(oldest);
+      // Gone already (its message deleted), or going again: not this one's to drop.
+      if (this.deps.transfers.get(oldest)?.state === "done") this.deps.transfers.delete(oldest);
+    }
+  }
 
   /** The free space an offer is decided against, shown with it. */
   private async room(id: string): Promise<void> {
