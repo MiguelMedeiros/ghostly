@@ -273,6 +273,18 @@ describe("the Share to… picker", () => {
     expect(screen.getByTestId("share-chat")).toHaveTextContent("Ana");
   });
 
+  it("names the files past the count cap on a line of its own, with how to send them", () => {
+    const files = Array.from({ length: 32 }, (_, i) => file(`IMG_${i + 1}.jpg`));
+    receiveShare(share({ files, pastLimit: ["IMG_33.jpg", "IMG_34.jpg"] }));
+    picker();
+    expect(screen.getByTestId("share-files")).toHaveTextContent("32 files");
+    expect(screen.getByTestId("share-past-limit-title")).toHaveTextContent("Only the first 32 files came in. Left out: IMG_33.jpg, IMG_34.jpg");
+    expect(screen.getByTestId("share-past-limit-next")).toHaveTextContent("Share the rest again, or open a chat and send them with + → Document.");
+    // Not said as too large: that is not why they were left out.
+    expect(screen.queryByTestId("share-left-out")).toBeNull();
+    expect(screen.getByTestId("share-chat")).toHaveTextContent("Ana");
+  });
+
   it("with nothing shared, it says so once it has waited", () => {
     vi.useFakeTimers();
     try {

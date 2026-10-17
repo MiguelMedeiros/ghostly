@@ -24,6 +24,8 @@
   "shareNoChats": "まだチャットがありません。始めてから、もう一度共有してください。",
   "shareNone": "共有されたものはないか、すでに受け取り済みです。",
   "shareOneFile": "1 個のファイル",
+  "sharePastLimit": "届いたのは最初の {{count}} 個のファイルだけです。除外: {{names}}",
+  "sharePastLimitNext": "残りをもう一度共有するか、チャットを開いて + → 書類 から送ってください。",
   "shareTitle": "共有先…",
   "shareTooLarge": "大きすぎてここでは共有できません: {{names}}",
   "shareTooLargeNext": "チャットを開いて + → 書類 から送ってください。",

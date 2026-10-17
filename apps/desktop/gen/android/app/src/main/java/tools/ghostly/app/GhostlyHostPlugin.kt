@@ -219,13 +219,16 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
    * copying, or by its bytes when the app gives no size (nor kept), and only named in `leftOut`, for the page to say
    * so; one that cannot be read (no stream, a revoked permission, a broken stream) is named in `unread`. A share with
    * nothing else is still nothing for the turns: its names go with the share it lets go, or alone.
+   * Streams past [MAX_SHARED_FILES] are never copied, only named in `pastLimit` (with the share's first ones).
    */
   private fun shared(intent: Intent) {
     val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() ?: ""
     val title = intent.getStringExtra(Intent.EXTRA_SUBJECT) ?: intent.getStringExtra(Intent.EXTRA_TITLE) ?: ""
     val authorities = ownAuthorities()
-    val streams =
-      streamsOf(intent).filter { SharedStream.takes(it.scheme, it.authority, authorities) }.take(MAX_SHARED_FILES)
+    val all = streamsOf(intent).filter { SharedStream.takes(it.scheme, it.authority, authorities) }
+    val streams = all.take(MAX_SHARED_FILES)
+    // Past the most one share brings: never copied, only named in `pastLimit`, for the page to say so.
+    val past = all.drop(MAX_SHARED_FILES)
     // Nothing to copy either: it does not overtake a share still copying.
     if (SharedCopies.nothingIn(title, text, streams.size)) return
     val resolver = activity.contentResolver
@@ -272,14 +275,25 @@ class GhostlyHostPlugin(private val activity: Activity) : Plugin(activity) {
             if (going()) unread.put(name)
           }
         }
+        val pastLimit = JSONArray()
+        for ((offset, uri) in past.withIndex()) {
+          if (!going()) break
+          try {
+            pastLimit.put(SharedName.of(displayName(uri), MAX_SHARED_FILES + offset))
+          } catch (e: Exception) {
+            // A name that cannot be read is left unsaid, as its file would be.
+          }
+        }
         // No file to read (none copied whole): nothing names the folder to the page, so it goes now.
         if (files.length() == 0) own.deleteRecursively()
         val share =
           if (SharedCopies.nothingIn(title, text, files.length())) null
-          else Handover(
-            own,
-            JSONObject().put("title", title).put("text", text).put("files", files).put("leftOut", leftOut).put("unread", unread).toString(),
-          )
+          else
+            Handover(
+              own,
+              JSONObject().put("title", title).put("text", text).put("files", files).put("leftOut", leftOut)
+                .put("unread", unread).put("pastLimit", pastLimit).toString(),
+            )
         // Decided on the main thread, where shares arrive, so none comes between the turn and the handing over. With
         // nothing in it, an older share that waited for this one may go now; with something, this one goes, waits for
         // a newer share still copying, or is dropped.

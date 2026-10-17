@@ -103,6 +103,14 @@ describe("a share target's form", () => {
     expect(item.files[0]!.name).toBe("f0.txt");
   });
 
+  it("names the files past the count cap, for the picker to say they did not come in", () => {
+    const form = new FormData();
+    for (let i = 1; i <= 40; i++) form.append("files", new File(["x"], `IMG_${i}.jpg`, { type: "image/jpeg" }));
+    const item = readShare(form);
+    expect(item.files).toHaveLength(MAX_SHARED_FILES);
+    expect(item.pastLimit).toEqual(["IMG_33.jpg", "IMG_34.jpg", "IMG_35.jpg", "IMG_36.jpg", "IMG_37.jpg", "IMG_38.jpg", "IMG_39.jpg", "IMG_40.jpg"]);
+  });
+
   it("an empty form is an empty share", () => {
     expect(readShare(new FormData())).toEqual({ title: "", text: "", url: "", files: [] });
   });
