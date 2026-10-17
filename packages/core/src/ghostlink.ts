@@ -1065,6 +1065,7 @@ export class GhostLink {
         // stops saying it if an envelope of the contact's reads here again.
         if (view.inviteTaken) this.tracker?.failed("taken", false, INVITE_TAKEN);
         else this.tracker?.untaken();
+        this.takenChanged();
         this.streamBlockChanged();
         // A contact who chose DHT only (a ghostly1 code carries no mode) paired through the mailbox: the first
         // pairing ends on the DHT, chosen (WISP 400), and the stream attempt it will never answer is not a failure.
@@ -1076,6 +1077,7 @@ export class GhostLink {
       },
     }) : null;
     this.streamWasBlocked = this.streamBlocked;
+    this.quietForTaken = this.takenFromUs;
     this.peerDescriptors = checkedDescriptors(options.native?.peerDescriptors);
     this.peerTransports = options.native?.peerTransports;
     this.saidTransports = !!options.packetTransports && !!options.packetTransportsSaid;
@@ -1530,7 +1532,25 @@ export class GhostLink {
   }
 
   /** Someone else used the invite first, and this side never pinned its inviter: there is nobody to pair with. */
-  private get takenFromUs(): boolean { return !this.options.pairing?.credentials.peerKey && !!this.dht?.inviteTaken; }
+  get takenFromUs(): boolean { return !this.options.pairing?.credentials.peerKey && !!this.dht?.inviteTaken; }
+  /**
+   * The session runs on the joiner's link key, which every copy of the invite derives: while the invite is taken from
+   * this side, its packets there read as those of whoever joined first. Republished every 4 minutes, they kept that
+   * joiner online at the inviter for good once it quit, dialled at an endpoint long dead (bug hunt 1016-2110). So the
+   * session stops without a goodbye (one would say the joiner left) and the native listeners go; only the mailbox's
+   * slow read stays, to notice the invite was not taken after all, and that starts it all again.
+   */
+  private quietForTaken = false;
+  private takenChanged(): void {
+    const taken = this.takenFromUs;
+    if (taken === this.quietForTaken || this.stopped) return;
+    this.quietForTaken = taken;
+    traceLink(this.myPubKeyZ32, "taken-quiet", { taken });
+    if (taken) {
+      void this.session.stop(false);
+      void Promise.allSettled([...this.endpoints.keys()].map(t => this.releaseEndpoint(t)));
+    } else if (this.deliveryMode !== "dht") this.session.start();
+  }
   private get streamBlocked(): boolean { return this.deliveryMode === "dht" || this.dht?.peerMode === "dht"; }
   /**
    * A stream authenticated a participation key other than the pinned one: a security rejection, which stops the chat
@@ -1585,7 +1605,7 @@ export class GhostLink {
     this.lastAutoConnectAt = 0;
     if (mode === "dht") { this.disconnect(); this.heldSignal = null; }
     // The link session runs before the contact can learn the new method (from the envelope setMode publishes).
-    else this.session.start();
+    else if (!this.quietForTaken) this.session.start();
     await this.dht.setMode(mode);
     if (mode === "dht") {
       await this.session.stop(false);
@@ -1603,7 +1623,7 @@ export class GhostLink {
       this.session.expectPeer();
       this.resumeWaitUntil = Date.now() + RESUME_WAIT_MS;
     }
-    if (this.deliveryMode !== "dht") this.session.start();
+    if (this.deliveryMode !== "dht" && !this.quietForTaken) this.session.start();
     // A joiner has just opened the invite: the inviter is there, and its first-contact envelope is worth reading
     // at the signaling pace now (an inviter speeds up when the joiner's fresh packet shows).
     if (this.tracker && !this.tracker.done && this.options.pairingProgress?.role === "joiner") { this.dht?.expect(); this.dialEarly(); }
@@ -1998,7 +2018,7 @@ export class GhostLink {
   private transportOffer(): PairedTransport[] { return transportOrder(this.availableTransports, this.preferred, this.fallback); }
 
   registerEndpoint(endpoint: NativeEndpoint): void {
-    if (this.stopped || this.deliveryMode === "dht" || !this.options.params.profile) { void endpoint.close(); return; }
+    if (this.stopped || this.deliveryMode === "dht" || this.quietForTaken || !this.options.params.profile) { void endpoint.close(); return; }
     this.endpoints.set(endpoint.transport, endpoint);
     traceLink(this.myPubKeyZ32, "endpoint-up", { transport: endpoint.transport });
     endpoint.onConnection = ({ channel, binding }) => {
