@@ -60,6 +60,11 @@ export interface PkarrRequestOptions {
    */
   resume?: boolean;
   /**
+   * A read of a group edge's member that its start waits on (`CarriedTransport`'s first, or a group edge's `resume`):
+   * every relay with a request to spare is asked at once, and the newest packet wins (`RelayTransport.resolve`).
+   */
+  newest?: boolean;
+  /**
    * A community member's way back to its group while it has no edge up there (`Communities.wayBack`): its readings of the
    * beacon and its request in a hub's lobby. Its own small allowance past the relay's minute (`WAY_BACK_SHARE` in
    * relay.ts), not the edges' signaling's.

@@ -108,6 +108,12 @@ export class CarriedTransport implements PkarrTransport {
   private returned = -1n;
   /** The newest packet of the member's any read returned, from the relays or a carrier: nothing older is taken after it. */
   private seen = -1n;
+  /**
+   * No read of the member's packet answered by the relays yet since this edge started (again): the next one asks every
+   * relay at once (`PkarrRequestOptions.newest`). An edge started again on a VPN (its WebRTC gave up) read whichever
+   * relay's turn it was, and one that refused or had not got the member's newest offer answered with an older one or a 404.
+   */
+  private firstRead = true;
   /** A read under way: resolved when a carried packet comes meanwhile. */
   private waiting: (() => void) | null = null;
   /** The packet the relays have not got yet. */
@@ -240,7 +246,8 @@ export class CarriedTransport implements PkarrTransport {
       // My packet is with members and not yet on the relays: the answer comes back the way it went, and a relay asked
       // now would only say it has nothing. The relays are read once that wait is over.
       if (this.pending && await Promise.race([carried, this.pending.ended]) === "carried") return this.take(null);
-      const read = this.inner.resolve(pubKeyZ32, options).then(packet => ({ packet }), (error: unknown) => ({ error }));
+      const fresh = this.firstRead && !options?.background ? { ...options, newest: true } : options;
+      const read = this.inner.resolve(pubKeyZ32, fresh).then(packet => { this.firstRead = false; return { packet }; }, (error: unknown) => ({ error }));
       const first = await Promise.race([read, carried]);
       if (first === "carried") return this.take(null);
       if ("error" in first) {
