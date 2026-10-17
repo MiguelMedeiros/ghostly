@@ -500,6 +500,28 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(asked()).toBeLessThanOrEqual(1 + GROUP_FILE_LIMITS.haveFrames);
   });
 
+  it("a member that keeps saying it holds a file it does not hold does not keep the holder left from being asked again", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, mallory], id } = await t.mesh(["alice", "bob", "mallory"]);
+    for (const p of [bob, mallory]) t.files.get(p)!.settings.autoDownloads = false;
+    const size = 600_000, cut = 256 * 1024;
+    // Alice's bytes to Bob stop past the first 256 KiB for a while, as when her upload pauses: Bob leaves her.
+    let paused = true;
+    t.hold = (from, to, frame) => paused && from === alice && to === bob && frame.t === "pf-data" && (frame.offset as number) >= cut;
+    const { messageId, meta } = await t.send(alice, id, pattern(size, 15));
+    await t.world.until(() => !!t.got(bob, id, messageId).message?.file && !!t.got(mallory, id, messageId).message?.file, 60_000);
+    await bob.groups.downloadFile(t.got(bob, id, messageId).message!.file!.id);
+    const resumed = t.world.now + 2 * GROUP_FILE_LIMITS.wantWaitMs;
+    // Mallory says she holds it every 10 s, and answers `gone` each time she is asked.
+    for (let i = 0; i < 60 && !t.done(bob, id, messageId); i++) {
+      if (t.world.now >= resumed) paused = false;
+      t.say(mallory, bob, id, { t: "group-have", g: id, ids: [messageId] });
+      await t.world.run(10_000);
+    }
+    expect(t.done(bob, id, messageId)).toBe(true);
+    expect(sha(t.got(bob, id, messageId).bytes!)).toBe(meta.d);
+  });
+
   /**
    * Alice's file held by Carol and Mallory, both heard by Bob (Mallory last, so asked first), Alice away; Mallory's app
    * offers Bob the file and sends its bytes only as `trickle` does, one at a time.
