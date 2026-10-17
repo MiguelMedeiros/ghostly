@@ -103,6 +103,7 @@ export function GroupEntityCard({ link, community, groupId, mine, from }: { link
   const out = known && !group && known.status !== "left" ? known : undefined;
   const again = community && (out?.status === "removed" || out?.status === "lost");
   const join = async () => {
+    if (busy) return;
     setError(null); setBusy(true);
     try {
       const { groupId: id } = await engine.call("joinGroupByLink", { link });
@@ -122,12 +123,12 @@ export function GroupEntityCard({ link, community, groupId, mine, from }: { link
         <p className="m-0" data-testid="entity-group-out">{out.statusReason ? problemLine(out.statusReason, t) : groupStatusText(out.status!, t)}</p>
         {!community && <p className="m-0" data-testid="entity-group-next">{t("chat.entity.deleteToJoin", { action: t("group.menu.forget") })}</p>}
         <div className="flex flex-wrap items-center gap-1.5">
-          {again && <button type="button" data-testid="entity-group-join" disabled={busy} className={cardButton} onClick={() => void join()}>{busy ? t("chat.entity.joining") : t("chat.entity.joinAgain")}</button>}
+          {again && <button type="button" data-testid="entity-group-join" aria-disabled={busy || undefined} aria-busy={busy || undefined} className={cardButton} onClick={() => void join()}>{busy ? t("chat.entity.joining") : t("chat.entity.joinAgain")}</button>}
           <button type="button" data-testid="entity-group-open" className={cardQuiet} onClick={() => nav.conversation(groupPath(out.id))}>{t("chat.entity.openGroup")}</button>{actions}
         </div>
       </> : <>
         <p className="m-0">{community ? t("chat.entity.communityHint") : t("chat.entity.groupHint")}</p>
-        <div className="flex flex-wrap items-center gap-1.5"><button type="button" data-testid="entity-group-join" disabled={busy} className={cardButton} onClick={() => void join()}>{busy ? t("chat.entity.joining") : t("chat.entity.joinGroup")}</button>{actions}</div>
+        <div className="flex flex-wrap items-center gap-1.5"><button type="button" data-testid="entity-group-join" aria-disabled={busy || undefined} aria-busy={busy || undefined} className={cardButton} onClick={() => void join()}>{busy ? t("chat.entity.joining") : t("chat.entity.joinGroup")}</button>{actions}</div>
       </>}
       {error && <Notice problem={error} className="m-0" ink />}
     </EntityCardFrame>
