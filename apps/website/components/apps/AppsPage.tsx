@@ -1,6 +1,7 @@
 import { IntentLink } from "@/components/site/IntentLink";
 import { Shell } from "@/components/site/Shell";
 import { APP_URL, SUBMIT_URL, apps as t } from "@/content/apps";
+import { ICON_DRAWN } from "@/lib/appIcon";
 import { appFingerprint } from "@/lib/store-core/appStatements";
 import type { StoreView } from "@/lib/storeRead";
 import { AppIcon } from "./AppIcon";
@@ -49,7 +50,7 @@ export function AppsPage({ store, readAt }: { store: StoreView; readAt: number }
                 {store.apps.map((app) => (
                   <li key={app.slug}>
                     <IntentLink className="ap-card" href={`/apps/${app.slug}`}>
-                      <AppIcon app={app} size={56} />
+                      <AppIcon app={app} size={ICON_DRAWN.card} lazy />
                       <span className="ap-card-text">
                         <span className="ap-card-title">{app.title}</span>
                         <span className="ap-card-tagline">{app.tagline}</span>

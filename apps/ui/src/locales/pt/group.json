@@ -31,6 +31,7 @@
     "communityConnecting": "Conectando ao grupo…",
     "communityNote": "Seu app se liga a um hub do grupo (o app de um membro que repassa), e os hubs repassam cada mensagem a todos. Quem esteve fora recebe o que perdeu quando voltar.",
     "connecting": "Conectando aos membros…",
+    "hubsNote": "Acima de 16 membros, seu app se conecta só a alguns: o admin e os hubs do grupo, apps de membros que repassam as mensagens aos demais. Um hub vê quem fala e quando, não o que é dito. Os links de grupo usam WebRTC, e Iroh ou HyperDHT com um membro cujo app não tem WebRTC (Ghostly Desktop no Linux). Um membro inacessível recebe o que perdeu quando voltar.",
     "label": "Conexão do grupo",
     "labelWith": "Conexão do grupo: {{state}}",
     "noWebrtc": "Grupos ainda não conectam neste app",
@@ -54,7 +55,7 @@
     "hint": "Você recebe um link para compartilhar: quem abrir entra. Todos no grupo leem tudo o que é enviado enquanto estão nele.",
     "kind": "Tipo de grupo",
     "private": "Privado",
-    "privateHint": "Até 32 pessoas, dos seus contatos ou do seu link, que funciona enquanto seu app estiver aberto. Todos se conectam a todos.",
+    "privateHint": "Até 32 pessoas, dos seus contatos ou do seu link, que funciona enquanto seu app estiver aberto. Até 16 se conectam diretamente entre si; acima disso, apps de membros que ficam ligados (hubs) repassam as mensagens.",
     "title": "Novo grupo"
   },
   "error": {
@@ -221,7 +222,7 @@
     "members": "Membros…",
     "rotate": "Renovar chaves"
   },
-  "readNote": "Todos no grupo podem ler tudo o que é enviado enquanto são membros. Quem é removido mantém o que já recebeu e não pode ler o que vem depois; quem entra depois não pode ler o que veio antes. As mensagens vão direto para cada membro; quem estava ausente recebe o que perdeu de qualquer membro que tenha (as últimas {{count}} mensagens do grupo) quando se encontrarem de novo.",
+  "readNote": "Todos no grupo podem ler tudo o que é enviado enquanto são membros. Quem é removido mantém o que já recebeu e não pode ler o que vem depois; quem entra depois não pode ler o que veio antes. As mensagens vão para cada membro; quem estava ausente recebe o que perdeu de qualquer membro que tenha (as últimas {{count}} mensagens do grupo) quando se encontrarem de novo.",
   "readNoteCommunity": "Qualquer pessoa com o link do grupo pode entrar, e qualquer membro pode deixar pessoas entrarem. Todos no grupo podem ler tudo o que é enviado enquanto são membros; quem é removido não pode ler o que vem depois, quem entra depois não pode ler o que veio antes. Membros que estavam ausentes recebem as últimas {{count}} mensagens de quem estiver lá quando voltarem.",
   "remove": {
     "body": "A pessoa não vai receber as novas mensagens do grupo.",
