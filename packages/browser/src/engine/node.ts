@@ -3237,8 +3237,9 @@ export class GhostlyNode implements EngineImplementation {
     if (delivery === "stream" || (delivery === "dht" && bytes <= DHT_TEXT_BYTES)) {
       const validationError = link.validateText(trimmed, timestamp, wireId, reply && pairedWireReply(reply));
       if (!validationError) {
-        await this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp, via: delivery === "dht" ? "pkarr" : "datalink", delivery: "sending", ...(preview && { preview }), ...answers });
-        await this.outboxFor(linkId).transmit(id);
+        // On its way from the moment its row is being stored: a text sent meanwhile finds it and goes after it.
+        await this.outboxFor(linkId).transmit(id, { storing: this.storeMessage({ linkId, id, wireId, text: trimmed, sender: "me", timestamp,
+          via: delivery === "dht" ? "pkarr" : "datalink", delivery: "sending", ...(preview && { preview }), ...answers }) });
         // The durable row carries delivery errors and an explicit retry action.
         return { error: null, messageId: id };
       }
@@ -3874,8 +3875,9 @@ export class GhostlyNode implements EngineImplementation {
       // Not live and nothing holds it: it waits here, with a cancel, and goes when the chat is live (WISP 500).
       if (this.chatStopped(live)) return refuse(this.chatStopped(live)!);
       live.files.wireIds.add(wireId);
-      void this.storeMessage({ linkId, id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, via: "datalink", file,
-        delivery: "waiting", deliveryError: "Sent when you are live.", ...answers });
+      // The chat's outbox sends it among the texts: told of it, so a text written after it looks for it.
+      void this.outboxFor(linkId).storing(this.storeMessage({ linkId, id: `me_${timestamp}`, text: fileMessageText(file), sender: "me", timestamp, via: "datalink", file,
+        delivery: "waiting", deliveryError: "Sent when you are live.", ...answers }));
       return;
     }
     if (!GhostlyNode.takesFiles(live.link)) return refuse("Connect to an updated peer to send files");
