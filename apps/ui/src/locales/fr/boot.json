@@ -12,6 +12,7 @@
   "otherTab": "Ghostly est déjà ouvert dans un autre onglet.",
   "otherTabHint": "Fermez-le et cet onglet prend le relais.",
   "reload": "Recharger",
+  "reloadUnreachable": "Impossible de joindre le serveur de Ghostly. Vérifiez votre connexion, puis rechargez.",
   "shared": "Envoyé à Ghostly dans votre autre onglet.",
   "sharedHint": "Choisissez la discussion là-bas. Vous pouvez fermer celui-ci.",
   "title": "Ghostly ne peut pas fonctionner dans ce navigateur",
