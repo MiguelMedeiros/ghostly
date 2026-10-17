@@ -73,13 +73,33 @@ describe("the chat's Apps with an app whose files are not on this device", () =>
     const open = screen.getByTestId("chat-app-open");
     await user.click(open);
     expect(open).toHaveAttribute("aria-busy", "true");
-    expect(open).toBeDisabled();
+    expect(open).toHaveAttribute("aria-disabled", "true");
     expect(within(open).getByTestId("button-spinner")).toBeInTheDocument();
     expect(open).toHaveTextContent("Open");
     await act(async () => { finish(); });
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(open).not.toHaveAttribute("aria-busy");
     expect(within(open).queryByTestId("button-spinner")).not.toBeInTheDocument();
+  });
+
+  it("Open pressed from the keyboard keeps the focus while it runs, so a refused start leaves it on Open", async () => {
+    // A focused button that turns disabled loses the focus to the page in a browser: the next Tab started over.
+    let refuse!: (error: Error) => void;
+    const opener = vi.fn(() => new Promise<void>((_, reject) => { refuse = reject; }));
+    setAppOpener(opener);
+    const { user } = await dialog();
+    const open = screen.getByTestId("chat-app-open");
+    open.focus();
+    await user.keyboard("{Enter}");
+    expect(open).toHaveAttribute("aria-busy", "true");
+    expect(open).toBeEnabled();
+    expect(open).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    expect(opener).toHaveBeenCalledTimes(1);
+    await act(async () => { refuse(new Error("needs-files: This app's files are not on this device yet")); });
+    expect(await screen.findByTestId("chat-apps-error")).toHaveTextContent("Its files are not on this device yet.");
+    expect(open).not.toHaveAttribute("aria-disabled");
+    expect(open).toHaveFocus();
   });
 
   it.each([{ status: "revoked" }, { status: "removed", by: [{ store: "k", name: "A store", reason: "", at: 1 }] }] as InstalledAppView["run"][])("a $status version stays Stopped, with Open off", async (taken) => {

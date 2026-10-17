@@ -465,6 +465,17 @@ describe("with the apps flag on", () => {
     expect(asked).toEqual([{ url: "http://example.com/github.com/app.ghostlyapp" }]);
   });
 
+  it("Enter in the field while Check runs reads the link once: the busy Check takes no second press", async () => {
+    const asked: unknown[] = [];
+    fakeEngine.on("appPreview", (params) => { asked.push(params); return new Promise<AppPreview>(() => {}); });
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    await user.type(screen.getByTestId("apps-add-url"), "https://github.com/ana/chess{Enter}");
+    await waitFor(() => expect(screen.getByTestId("apps-add-check")).toHaveAttribute("aria-busy", "true"));
+    await user.type(screen.getByTestId("apps-add-url"), "{Enter}");
+    await user.click(screen.getByTestId("apps-add-check"));
+    expect(asked).toEqual([{ url: "https://github.com/ana/chess" }]);
+  });
+
   it("a link edited while Check runs drops the old link's answer: no store or app of it shows, and Add store adds the new one", async () => {
     const OLD = "https://raw.githubusercontent.com/ana/old/HEAD/ghostly-store.json";
     const NEW = "https://raw.githubusercontent.com/ana/new/HEAD/ghostly-store.json";
@@ -587,7 +598,9 @@ describe("with the apps flag on", () => {
     const refresh = await screen.findByTestId("app-store-refresh");
     await user.click(refresh);
     expect(refresh).toHaveAttribute("aria-busy", "true");
-    expect(refresh).toBeDisabled();
+    expect(refresh).toHaveAttribute("aria-disabled", "true");
+    await user.click(refresh);
+    expect(fakeEngine.callsTo("appStoreRefresh")).toHaveLength(1);
     expect(within(refresh).getByTestId("button-spinner")).toBeInTheDocument();
     expect(refresh).toHaveTextContent("Refresh");
     await act(async () => { finish(); });
