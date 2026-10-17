@@ -80,11 +80,22 @@ export function versionWarning(daemon: unknown, cli: string): string | null {
  * Never fails, and has no deadline of its own: a daemon that does not answer is the command's own call to find out,
  * at the command's deadline, which closes the connection and ends this check with it. A deadline here ended every
  * command on a wedged daemon at 15 s with `unavailable` ("The daemon went away"), whatever its own `--timeout` said.
+ * A command with no deadline of its own waits for this check instead (15 s, session()), before it is sent.
  */
 async function warnVersion(client: DaemonClient): Promise<void> {
   const status = await client.call("status").catch(() => null) as { version?: unknown } | null;
   const warning = versionWarning(status?.version, VERSION);
   if (warning) process.stderr.write(warning + "\n");
+}
+
+/** Whether `promise` settles within `ms` (the timer keeps no process alive). */
+function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), ms);
+    timer.unref?.();
+    const settled = () => { clearTimeout(timer); resolve(true); };
+    promise.then(settled, settled);
+  });
 }
 
 /**
@@ -141,7 +152,7 @@ export function offlineCall(method: string, params: Record<string, unknown>): bo
 
 /** How long a daemon gets to answer before a command gives up: a read is in memory (15 s); a call that waits for the
  *  contact carries its own `--timeout` (or the daemon's default for it), plus a margin; anything else may take as long
- *  as it takes. */
+ *  as it takes, once the daemon has answered the version check sent ahead of it (session()). */
 const ANSWER_MS = 15_000;
 export function answerWithin(method: string, params: Record<string, unknown>): number | undefined {
   // A `--timeout` outside the daemon's range (1 to 3600 s, 86 400 for `chat wait` and `file wait`) is refused by the
@@ -174,7 +185,18 @@ async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
     // after 30 s, not 15; then every command gave up at the check's 15 s, whatever its own). `close` waits for the
     // check's answer: a daemon that answered the command answered the check sent before it.
     const warned = warnVersion(client);
-    return { mode: "daemon", call: (m, p) => client.call(m, p, { timeoutMs: answerWithin(m, (p ?? {}) as Record<string, unknown>) }), close: async () => { await warned; client.close(); } };
+    const call = async (m: string, p?: unknown): Promise<unknown> => {
+      const timeoutMs = answerWithin(m, (p ?? {}) as Record<string, unknown>);
+      // A call with no deadline of its own (a send, a rename, an invite) goes only once the check is answered: a daemon
+      // that has not answered `status` in 15 s does not answer, and the call, never written, cannot happen when it
+      // wakes (a daemon stopped with Ctrl+Z reads its socket again on SIGCONT). It used to wait for ever with no word.
+      if (timeoutMs === undefined && !await settlesWithin(warned, ANSWER_MS)) {
+        client.destroy();
+        throw new CliError("timeout", `The daemon did not answer in ${ANSWER_MS / 1000} s; nothing was done: \`ghostly daemon restart\` starts a fresh one`, { method: m });
+      }
+      return client.call(m, p, { timeoutMs });
+    };
+    return { mode: "daemon", call, close: async () => { await warned; client.close(); } };
   }
   const [{ openHost }, { callApi }] = await Promise.all([engineHost(), engineApi()]);
   const host = await openHost(g.paths, "one-shot", VERSION, options);

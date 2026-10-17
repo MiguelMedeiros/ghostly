@@ -230,7 +230,9 @@ Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage),
 5 (needs `--force`, `--yes` or `--confirm-real`). A daemon that does not answer a read or `daemon status` within 15
 seconds (`daemon status --timeout s` sets its own), or a command that waits (`chat wait`, `file wait`, `--wait`)
 within its `--timeout` (or the default, 60, 300 and 30 s) plus 10 seconds, is a timeout too (exit 4,
-`details.method`). `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
+`details.method`). Any other command (`send`, `react`, `invite create`, `settings set` and the like) is sent only
+once the daemon has answered `status`: one that has not in 15 seconds is a timeout as well, and the command was not
+sent, so the daemon does not act on it when it wakes. `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
 its `--timeout` (default 20 s) is ended with SIGTERM, and SIGKILL after as long again (on Windows the first ends it:
 there is no second). A daemon kept by a service manager (systemd, launchd) is restarted with the manager instead: it
 starts its own again, and the one `restart` started would race it for the profile.
