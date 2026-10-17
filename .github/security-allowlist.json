@@ -15,6 +15,9 @@
     { "package": "rustls", "id": "RUSTSEC-2026-0346", "until": "2026-10-28", "why": "Fixed in 0.23.46, which Cargo.lock takes. Left in native/transports/iroh-web/Cargo.lock only: taking it there means rebuilding the committed browser Iroh (node tools/scripts/build-iroh-web.mjs, needs the wasm32 target, a wasm32 clang and wasm-bindgen-cli 0.2.106). Debug output of session values: we never log them." },
     { "package": "rustls", "id": "RUSTSEC-2026-0347", "until": "2026-10-28", "why": "Same as RUSTSEC-2026-0346 (browser Iroh rebuild). ECH: iroh does not use it." },
     { "package": "rustls", "id": "RUSTSEC-2026-0348", "until": "2026-10-28", "why": "Same as RUSTSEC-2026-0346 (browser Iroh rebuild). Brotli certificate decompression: the browser build has no brotli crate." },
-    { "package": "rustls", "id": "RUSTSEC-2026-0349", "until": "2026-10-28", "why": "Same as RUSTSEC-2026-0346 (browser Iroh rebuild)." }
+    { "package": "rustls", "id": "RUSTSEC-2026-0349", "until": "2026-10-28", "why": "Same as RUSTSEC-2026-0346 (browser Iroh rebuild)." },
+    { "package": "zvariant", "id": "RUSTSEC-2026-0370", "until": "2026-11-30", "why": "Unmaintained, not vulnerable: merged into zbus 6.0.0 (2026-10-16). Linux D-Bus only, via zbus 5 in apps/desktop and in notify-rust, tauri-plugin-notification and tauri-plugin-single-instance, whose latest releases still require zbus 5. Move to zbus 6 when they do." },
+    { "package": "zbus_names", "id": "RUSTSEC-2026-0371", "until": "2026-11-30", "why": "Same as RUSTSEC-2026-0370 (merged into zbus 6)." },
+    { "package": "zvariant_derive", "id": "RUSTSEC-2026-0372", "until": "2026-11-30", "why": "Same as RUSTSEC-2026-0370 (merged into zbus 6)." }
   ]
 }
