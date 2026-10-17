@@ -697,6 +697,12 @@ describe("motion", () => {
     expect(css).toMatch(/\.ps\[data-paused\] \*, \.ps\[data-paused\] \{ animation-play-state: paused !important; \}/);
     expect(css).toMatch(/\.ps\[data-still\]\[data-stage="knocking"\] :is\(\.ps-route-up, \.ps-route-low\)/);
   });
+
+  it("in a right-to-left language the icon mirrors as the scene does: this side and the packet's start on the right", () => {
+    const css = readFileSync(join(fileURLToPath(import.meta.url), "../../../components/pairing/pairing-scene.css"), "utf8");
+    expect(css).toMatch(/:root\[dir="rtl"\] \.ps-svg[^{]*\{ transform: scaleX\(-1\); \}/);
+    expect(css).toMatch(/:root\[dir="rtl"\] \.pg[^{]*\{ transform: scaleX\(-1\); \}/);
+  });
 });
 
 describe("a chat that already delivers over the DHT ends its scene, whatever the engine's pairing still says", () => {
