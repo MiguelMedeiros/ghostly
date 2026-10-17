@@ -165,9 +165,11 @@
   margin-top: 10px; min-height: 40px; padding: 0 18px; border-radius: 10px; cursor: pointer;
   background: var(--ps-accent); color: var(--theme-panel-header); font-size: 13px; font-weight: 600;
 }
-.ps-retry:hover { background: var(--theme-accent-hover); }
-.ps-retry:focus-visible { outline: 2px solid var(--ps-accent); outline-offset: 2px; }
+.ps-retry:hover:not([aria-disabled="true"]) { background: var(--theme-accent-hover); }
+.ps-retry:focus-visible, .ps-label:focus-visible { outline: 2px solid var(--ps-accent); outline-offset: 2px; }
+.ps-label:focus:not(:focus-visible) { outline: none; }
 .ps-retry:disabled { opacity: 0.5; cursor: default; }
+.ps-retry[aria-busy="true"] { opacity: 0.5; cursor: progress; }
 
 /* The steps, in order, with the current one marked. */
 .ps-steps { display: flex; margin: 12px 0 0; padding: 0; list-style: none; }

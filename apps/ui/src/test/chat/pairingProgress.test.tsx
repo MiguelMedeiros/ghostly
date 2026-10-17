@@ -340,6 +340,47 @@ describe("the engine's own report (the pairing-progress contract)", () => {
     expect(await screen.findByText("Relay refused")).toBeInTheDocument();
   });
 
+  it("Try again pressed from the keyboard keeps the focus while it runs and after a refusal; a second press is ignored", async () => {
+    const { engine, user } = renderApp(<Pairing inviter />);
+    let refuse!: (error: Error) => void;
+    engine.on("connect", () => new Promise((_, reject) => { refuse = reject; }));
+    show(report({ stage: "failed", reason: "transport", retryable: true }), engine);
+    const button = screen.getByTestId("pairing-retry");
+    act(() => button.focus());
+    await user.keyboard("{Enter}");
+    // `aria-disabled`, not `disabled`: a disabled button drops the focus to the page in a real browser.
+    expect(button).toHaveTextContent("Trying again…");
+    expect(button).not.toBeDisabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("connect")).toHaveLength(1);
+    await act(async () => refuse(new Error("Relay refused")));
+    expect(await screen.findByText("Relay refused")).toBeInTheDocument();
+    expect(button).toHaveFocus();
+    expect(button).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("Try again that moves the stage on takes the focus to the stage's words, not the page", async () => {
+    const { engine, user } = renderApp(<Pairing inviter />);
+    engine.on("connect", () => undefined);
+    show(report({ stage: "failed", reason: "transport", retryable: true }), engine);
+    act(() => screen.getByTestId("pairing-retry").focus());
+    await user.keyboard("{Enter}");
+    show(report({ stage: "knocking", attempt: 2 }), engine);
+    expect(screen.queryByTestId("pairing-failure")).toBeNull();
+    expect(screen.getByTestId("pairing-stage-label")).toHaveFocus();
+  });
+
+  it("a failure that goes by itself leaves the focus where it is", () => {
+    const { engine } = renderApp(<><input data-testid="elsewhere" /><Pairing inviter /></>);
+    show(report({ stage: "failed", reason: "transport", retryable: true }), engine);
+    act(() => screen.getByTestId("elsewhere").focus());
+    show(report({ stage: "knocking", attempt: 2 }), engine);
+    expect(screen.getByTestId("elsewhere")).toHaveFocus();
+  });
+
   it("a failure retrying cannot fix: no Retry, ask for a new invite", () => {
     const { engine } = renderApp(<Pairing inviter />);
     show(report({ stage: "failed", reason: "expired" as PairingProgress["reason"], retryable: false }), engine);
