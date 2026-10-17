@@ -191,6 +191,33 @@ describe("a refused lock password in Add a device", () => {
     expect(screen.getByTestId("device-add-notice")).toHaveTextContent("This password could not be set up for moving the profile. Try again.");
     expect(engine.callsTo("deviceEnrollInvite")).toHaveLength(0);
   }, 30_000);
+
+  it("the card goes with the error it repeats: once the field is typed in again", async () => {
+    const { user } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    await user.type(screen.getByTestId("device-add-password"), "short");
+    await user.type(screen.getByTestId("device-add-password-again"), "short");
+    await user.click(screen.getByTestId("device-add-next"));
+    expect(await screen.findByTestId("device-add-notice")).toHaveTextContent("Use 8 characters or more.");
+    await user.keyboard("long enough");
+    expect(screen.queryByTestId("device-add-password-error")).toBeNull();
+    expect(screen.queryByTestId("device-add-notice")).toBeNull();
+  }, 30_000);
+
+  it("the code that comes next shows with no card from the refusal before it", async () => {
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    let refuse = true;
+    engine.on("deviceHandoffVerifier", () => { if (refuse) throw new Error("offline"); });
+    engine.on("deviceEnrollInvite", () => ({ role: "inviter", step: "waiting", code: "ghostly1zexample", expires: Math.floor(Date.now() / 1000) + 600 }));
+    await user.type(screen.getByTestId("device-add-password"), "long enough");
+    await user.type(screen.getByTestId("device-add-password-again"), "long enough");
+    await user.click(screen.getByTestId("device-add-next"));
+    expect(await screen.findByTestId("device-add-notice")).toHaveTextContent("This password could not be set up for moving the profile. Try again.");
+    // Next again, the engine answering this time: the code, and nothing over its status.
+    refuse = false;
+    await user.click(screen.getByTestId("device-add-next"));
+    expect(await screen.findByTestId("device-add-code")).toBeInTheDocument();
+    expect(screen.queryByTestId("device-add-notice")).toBeNull();
+  }, 30_000);
 });
 
 describe("the floating card", () => {
