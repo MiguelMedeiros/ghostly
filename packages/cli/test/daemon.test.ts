@@ -212,22 +212,29 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
 
   it("a listen whose reader leaves (`listen | head -n 1`) stops quietly with exit 0, through a daemon and on its own profile, which it frees", async () => {
     const piped = home("listen-head");
-    ok(await ghostly(["--home", piped, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    // A relay that takes its time, as on a loaded host: the poke's invite waits to be published after its event is out.
+    const slow = await localRelay(300), slowEnv = { ...env, GHOSTLY_PKARR_RELAYS: slow.url };
+    ok(await ghostly(["--home", piped, "settings", "set", "relays", JSON.stringify([slow.url])], { env: slowEnv }));
     for (const withDaemon of [true, false]) {
-      if (withDaemon) ok(await ghostly(["--home", piped, "daemon", "--detach"], { env }));
-      const listen = new Running(["--home", piped, "listen", "--since", "0"], env);
+      if (withDaemon) ok(await ghostly(["--home", piped, "daemon", "--detach"], { env: slowEnv }));
+      const listen = new Running(["--home", piped, "listen", "--since", "0"], slowEnv);
       try {
         await listen.waitFor(() => true);
         // The reader takes its one line and goes, as `head -n 1` does: the next event is written to a closed pipe.
         listen.child.stdout!.destroy();
-        ok(await ghostly(["--home", piped, "invite", "create", "--label", "poke"], { env }));
+        const poke = await ghostly(["--home", piped, "invite", "create", "--label", "poke"], { env: slowEnv });
+        // Through a daemon the poke is answered, whoever stopped reading. With none, the listen is the profile's daemon:
+        // the poke's own event stops it, and with it the connection the poke still waits on.
+        if (withDaemon || poke.code === 0) ok(poke);
+        else expect(error(poke, "unavailable", 1).message).toBe("The daemon went away");
         expect(await listen.exited(20_000), `${withDaemon ? "through a daemon" : "no daemon"}: ${listen.stderr}`).toBe(0);
         expect(listen.stderr).not.toContain("EPIPE");
         expect(lockOwner(profilePaths(piped, "default")) !== null).toBe(withDaemon);
       } finally {
         await listen.stop();
-        if (withDaemon) await ghostly(["--home", piped, "daemon", "stop"], { env });
+        if (withDaemon) await ghostly(["--home", piped, "daemon", "stop"], { env: slowEnv });
       }
     }
+    slow.server.close();
   });
 });
