@@ -97,7 +97,7 @@ The stamp does not stop a determined flood: a machine makes a few thousand a day
 
 ## Lifecycle
 
-**Making a link.** The owner's app makes a fresh link key, stores its seed in the profile, publishes the link record (`open`, 18 bits, `seen` empty) and shows the link and its QR. One link per profile at a time: making a new one turns the old one off.
+**Making a link.** The owner's app makes a fresh link key, stores its seed in the profile, publishes the link record (`open`, 18 bits, `seen` empty) and shows the link and its QR. One link per profile at a time: making a new one turns the old one off. What waits in Requests stays there, answerable until it ends: a request is under its asker's key and accepting it joins its invite, so nothing needs the old link.
 
 **Turning it off.** The app publishes `off` under the old key, keeps its seed only to republish `off` once a day while the app runs for 30 days, and reads its slots no more. A requester that finds `off` says "This contact link was turned off." and stops. After the 30 days the record fades; a requester then knocks into slots nobody reads, which costs only itself.
 
