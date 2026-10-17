@@ -13,7 +13,7 @@ import { Notice } from "../wallet/ui";
 import { Toast } from "../ui/Toast";
 import { useToast } from "../../hooks/useToast";
 import { FieldError } from "../ui/FieldError";
-import { focusToRetype } from "../../lib/focus";
+import { focusToRetype, keepFocusIn } from "../../lib/focus";
 import { DeviceDialog, Digits, InfoLine, Status, field, primaryButton, quietButton } from "./DeviceDialog";
 import { said } from "../../lib/notices";
 import { problemLine } from "../../lib/problemText";
@@ -68,6 +68,8 @@ export function AddDeviceDialog({ onClose }: { onClose(): void }) {
     }, () => {}), 500);
     return () => clearInterval(timer);
   }, [step]);
+  // The password form, They match or Try again went away with its step: the focus stays in the dialog.
+  useEffect(() => { if (step === "enroll") keepFocusIn(body.current); }, [step, view?.step, busy]);
   // Closed before it ended: the code is spent, and nothing was added.
   useEffect(() => () => { if (!ended.current) void engine.call("deviceEnrollCancel").catch(() => {}); }, []);
 
