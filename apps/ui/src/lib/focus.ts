@@ -15,3 +15,13 @@ export function focusToRetype(input: HTMLInputElement | null | undefined) {
   input.focus();
   input.select();
 }
+
+/**
+ * A step of a dialog replaced the control that had the focus (Next, They match, Add): the focus fell to the page, and
+ * the next Tab started from the top of it. It goes to `container`, the step's own content, instead.
+ */
+export function keepFocusIn(container: HTMLElement | null | undefined) {
+  if (!container) return;
+  const active = document.activeElement;
+  if (!active || active === document.body) container.focus({ preventScroll: true });
+}
