@@ -165,6 +165,18 @@ describe("authoredNote: what this device says about its own payments", () => {
     const btc = pay({ id: "req-00003", target: { method: "bitcoin", network: "bitcoin" } as PaymentView["target"] });
     expect(authoredNote(btc, atA, [btc])).not.toHaveProperty("x");
   });
+  it("a record's network says test money, and a federation's is Fedimint, named so", () => {
+    const lightning = pay({ id: "req-00004", invoice: "lnbc10u1ptest", mints: [], network: "testnet" });
+    expect(authoredNote(lightning, atA, [lightning])).toMatchObject({ r: "lightning", x: 1 });
+    expect(authoredNote({ ...lightning, network: "mainnet" }, atA, [lightning])).not.toHaveProperty("x");
+    const fedimint = pay({ id: "req-00005", federations: ["fed-test"], invoice: "lnbc10u1ptest", federation: "fed-test", network: "testnet" });
+    expect(authoredNote(fedimint, atA, [fedimint])).toMatchObject({ r: "fedimint", x: 1 });
+    // A contact's notes carry no network: the federation's, as this device joined it, says.
+    const networkOf = (id: string) => (id === "fed-test" ? "signet" : id === "fed-real" ? "bitcoin" : undefined);
+    const notes = pay({ id: "pay-00006", kind: "payment", direction: "in", state: "settled", federation: "fed-test" });
+    expect(authoredNote(notes, atA, [notes], undefined, undefined, networkOf)).toMatchObject({ r: "fedimint", x: 1 });
+    expect(authoredNote({ ...notes, federation: "fed-real" }, atA, [notes], undefined, undefined, networkOf)).not.toHaveProperty("x");
+  });
 });
 
 /** Two members' GroupPayments over a fake mesh: notes go on every edge; the group's history is a list. */

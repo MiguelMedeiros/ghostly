@@ -91,19 +91,26 @@ export function mergeGroupPay(current: GroupPayNote | undefined, frame: GroupPay
 /** Where a desk record sits in a group, if it does: the group, and the member at the other end (none for a request to all). */
 export interface Placement { groupId: string; me: string; peer?: string }
 
+const federationOf = (p: PaymentView): string | undefined => p.federation ?? p.federations?.[0];
 const railOf = (p: PaymentView): GroupPayRail =>
-  p.target ? (p.target.method === "cashu" ? "cashu" : p.target.method) : p.invoice && !p.mints?.length && !p.mint ? "lightning" : "cashu";
-const testOf = (p: PaymentView): boolean => p.target
-  ? (p.target.method === "cashu" ? p.target.network === "cashu-test" : p.target.method === "usdt" ? p.unit === "testusdt" : p.target.network !== "bitcoin")
-  : p.mint ? isWorthlessMint(p.mint) : p.mints?.length ? p.mints.every(isWorthlessMint) : false;
+  p.target ? (p.target.method === "cashu" ? "cashu" : p.target.method) : federationOf(p) ? "fedimint" : p.invoice && !p.mints?.length && !p.mint ? "lightning" : "cashu";
+/** Test money as the chat's bubble reads it (paymentIsTest): a target's chain, else the record's network, else a Fedimint federation's network, else its mints. */
+const testOf = (p: PaymentView, federationNetwork: (federation: string) => string | undefined): boolean => {
+  if (p.target) return p.target.method === "cashu" ? p.target.network === "cashu-test" : p.target.method === "usdt" ? p.unit === "testusdt" : p.target.network !== "bitcoin";
+  if (p.network) return p.network === "testnet";
+  const federation = federationOf(p);
+  if (federation) { const network = federationNetwork(federation); return !!network && network !== "bitcoin"; }
+  return p.mint ? isWorthlessMint(p.mint) : p.mints?.length ? p.mints.every(isWorthlessMint) : false;
+};
 
 /**
  * What this device says about one of its own payments in a group, or null when it says nothing (not a group's,
  * or nothing to say yet). `all` is every desk record, to find a request's payments and whether this device paid it.
  */
-export function authoredNote(p: PaymentView, at: Placement, all: readonly PaymentView[], current?: GroupPayNote, memberOf: (linkId: string) => string | undefined = () => undefined): GroupPayFrame | null {
+export function authoredNote(p: PaymentView, at: Placement, all: readonly PaymentView[], current?: GroupPayNote, memberOf: (linkId: string) => string | undefined = () => undefined,
+  federationNetwork: (federation: string) => string | undefined = () => undefined): GroupPayFrame | null {
   const base = { t: "group-pay" as const, g: at.groupId, id: paymentWireId(p.id), v: String(p.amount), u: p.unit, d: p.target?.method === "usdt" ? p.target.decimals ?? 6 : 0, r: railOf(p),
-    ...(testOf(p) ? { x: 1 as const } : {}), ...(p.memo ? { m: p.memo.slice(0, 140) } : {}), ...(p.ask ? { a: 1 as const } : {}), ts: p.createdAt };
+    ...(testOf(p, federationNetwork) ? { x: 1 as const } : {}), ...(p.memo ? { m: p.memo.slice(0, 140) } : {}), ...(p.ask ? { a: 1 as const } : {}), ts: p.createdAt };
   if (p.kind === "request" && p.direction === "out") {
     // Mine to be paid: open until paid, and who paid it when my wallet knows (ecash comes in on the payer's edge);
     // never from a member's claim, which is only its word.
@@ -148,6 +155,8 @@ export interface GroupPaymentsHost {
   messages(groupId: string): Promise<StoredMessage[]>;
   /** Writes (or rewrites) a line of the group's history. */
   putMessage(message: StoredMessage): Promise<void>;
+  /** The network of a federation this device joined ("bitcoin" for real money), for a record that names only its federation. */
+  federationNetwork?(federation: string): string | undefined;
 }
 
 export class GroupPayments {
@@ -194,7 +203,7 @@ export class GroupPayments {
       if (!at) continue;
       const notes = await this.load(at.groupId);
       const current = notes.get(paymentWireId(p.id));
-      const frame = authoredNote(p, at, all, current, linkId => this.host.edgeOf(linkId)?.member);
+      const frame = authoredNote(p, at, all, current, linkId => this.host.edgeOf(linkId)?.member, federation => this.host.federationNetwork?.(federation));
       if (!frame || JSON.stringify(frame) === JSON.stringify(current?.mine)) continue;
       const merged = mergeGroupPay(current, frame, at.me, membership(at.groupId)!.members) ?? current;
       if (!merged) continue;
