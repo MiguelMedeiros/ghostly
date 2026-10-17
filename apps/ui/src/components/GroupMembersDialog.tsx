@@ -107,7 +107,9 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
           <GroupAvatar picture={live.picture} size={56} testId="group-members-avatar" className="bg-accent/15" />
         </AvatarOpener>
         <div className="min-w-0">
-          {naming === null ? <h2 id={`${id}-title`} data-testid="group-members-name" className="truncate text-base font-semibold">{live.name}</h2>
+          {/* The group's and each person's name read in their own direction: a Latin name in Arabic is cut at its end. As
+              wide as the name, the title stays beside the picture whichever way the name runs. */}
+          {naming === null ? <h2 id={`${id}-title`} dir="auto" data-testid="group-members-name" className="w-fit max-w-full truncate text-base font-semibold">{live.name}</h2>
             : <form className="flex items-center gap-2" onSubmit={e => { e.preventDefault(); void rename(); }}>
               <h2 id={`${id}-title`} className="sr-only">{live.name}</h2>
               <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} ref={namingField.ref} value={naming} disabled={busy !== null}
@@ -151,8 +153,8 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
       <ul className="mt-1 max-h-40 space-y-1 overflow-y-auto" data-testid="group-invite-list">
         {contacts.map(link => {
           const pending = invited.has(link.id), can = !!link.groups && !pending && !full;
-          return <li key={link.id} data-testid="group-invite-contact" data-link={link.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5">
-            <span className="min-w-0 flex-1 truncate text-sm">{contactName(link)}</span>
+          return <li key={link.id} data-testid="group-invite-contact" data-link={link.id} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5">
+            <span dir="auto" className="min-w-0 truncate text-sm">{contactName(link)}</span>
             {pending ? <span className="text-xs text-text-muted">{t("group.members.invited")}</span>
               : !link.groups ? <span className="text-xs text-text-muted" title={t("group.members.needsBothHint")}>{link.dataLink === "open" ? t("group.members.needsUpdate") : t("group.members.notConnected")}</span>
               : <button disabled={!can || busy !== null} onClick={() => void run(link.id, () => engine.call("inviteToGroup", { groupId: live.id, linkId: link.id }))} data-testid="group-invite"
@@ -215,7 +217,7 @@ const MemberRow = memo(function MemberRow({ member: m, focused, viaHub, photo, m
     <MemberAvatar src={photo} name={myNick || memberName(m, t)} />
     {/* The name keeps room for about 16 characters: the badges and an admin's buttons go under it when the row is narrower (a phone, a long word in another language). */}
     <span className="contact-row min-w-[8.5rem] flex-1">
-      <span className="flex min-w-0 items-center gap-1.5 text-sm"><span className="min-w-0 truncate">{memberName(m, t)}</span>{!m.me && <ContactMarks peerKey={peerKey} testId="group-member-marks" />}{/* An unnamed member's name is its key already ("Member 3r69cg...d51a"): the key again was cut to one character on a phone. */}
+      <span className="flex min-w-0 items-center gap-1.5 text-sm"><span dir="auto" data-testid="group-member-name" className="min-w-0 truncate">{memberName(m, t)}</span>{!m.me && <ContactMarks peerKey={peerKey} testId="group-member-marks" />}{/* An unnamed member's name is its key already ("Member 3r69cg...d51a"): the key again was cut to one character on a phone. */}
         {(m.me || m.nick) && <span data-testid="group-member-key" className="min-w-0 shrink-[100] truncate font-mono text-[10px] text-text-muted">{publicKeyLabel(m.key)}</span>}</span>
       {!m.me && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{status}</span>}
     </span>
