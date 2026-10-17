@@ -464,6 +464,11 @@ impl LinkedFiles {
         }
         let mut added = Vec::with_capacity(picked.len());
         for (path, full) in picked {
+            // A file only, as `walk` keeps: opening a named pipe picked with the files waited for a writer for good,
+            // and every app's links with it.
+            if !fs::metadata(&full).is_ok_and(|meta| meta.is_file()) {
+                continue;
+            }
             // Opened, not only looked at: a file that cannot be read (another user's) is left out, as `walk` leaves
             // out a folder that cannot be, rather than listed as there and then `gone` on every read.
             let Ok(meta) = fs::File::open(&full).and_then(|file| file.metadata()) else {
@@ -899,6 +904,34 @@ mod tests {
         let listed = links.list("ghostly", APP).unwrap();
         assert_eq!(listed.len(), 2);
         assert!(listed.iter().all(|e| e.available));
+    }
+
+    /// A named pipe picked with the files: opening one waits for a writer, and every app's links waited with it.
+    #[cfg(unix)]
+    #[test]
+    fn a_named_pipe_picked_is_left_out_and_nothing_waits_on_it() {
+        let links = LinkedFiles::new(folder());
+        let root = films();
+        let pipe = root.join("Live.mp4");
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&pipe)
+            .status()
+            .unwrap()
+            .success());
+        let picked = picked_files(vec![root.join("Up.mp4"), pipe], &["mp4".to_string()]);
+        let (done, added) = std::sync::mpsc::channel();
+        let picker = links.clone();
+        std::thread::spawn(move || done.send(pick(&picker, picked)));
+        let added = added
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the pick waited on the pipe")
+            .unwrap();
+        assert_eq!(
+            added.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(),
+            ["Up.mp4"]
+        );
+        // The lock every app's links take is free again.
+        links.forget("ghostly", APP, "all").unwrap();
     }
 
     #[test]
