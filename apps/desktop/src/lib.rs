@@ -329,6 +329,11 @@ pub fn run() {
                 diagnostics::init(&dir);
             }
             notifications::install(app.handle());
+            #[cfg(target_os = "linux")]
+            {
+                let app = app.handle().clone();
+                exit_on_signals(move || app.exit(0));
+            }
             // Files sent and received in chats, one folder per profile.
             // The local apps each profile shares, allowed by the person in a native dialog: all `local_fetch` may reach.
             app.manage(local_access::LocalAccess::load(
@@ -507,6 +512,43 @@ fn hold_close(window: impl Closing) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(DEPART_MS)).await;
         window.close();
+    });
+}
+
+/// A request to quit from outside the app (a logout or a shutdown sends SIGTERM, a terminal Ctrl+C SIGINT, a closed
+/// terminal SIGHUP): the first one runs `quit`, the app's `app.exit`, so it leaves as its window's close makes it
+/// leave: the page says goodbye (`on_run_event`), the native connections close and the app's notifications leave the
+/// desktop's list. A second one ends the process at once. The handlers are in place when this returns.
+#[cfg(target_os = "linux")]
+fn exit_on_signals(quit: impl FnOnce() + Send + 'static) {
+    use tokio::signal::unix::{signal, SignalKind};
+    let signals = tauri::async_runtime::block_on(async {
+        Ok::<_, std::io::Error>((
+            signal(SignalKind::terminate())?,
+            signal(SignalKind::interrupt())?,
+            signal(SignalKind::hangup())?,
+        ))
+    });
+    let (mut term, mut int, mut hup) = match signals {
+        Ok(signals) => signals,
+        Err(error) => {
+            eprintln!("signals: a SIGTERM will end the app without its goodbye: {error}");
+            return;
+        }
+    };
+    tauri::async_runtime::spawn(async move {
+        let mut quit = Some(quit);
+        loop {
+            let kind = tokio::select! {
+                _ = term.recv() => SignalKind::terminate(),
+                _ = int.recv() => SignalKind::interrupt(),
+                _ = hup.recv() => SignalKind::hangup(),
+            };
+            match quit.take() {
+                Some(quit) => quit(),
+                None => std::process::exit(128 + kind.as_raw_value()),
+            }
+        }
     });
 }
 
@@ -1077,6 +1119,22 @@ mod tests {
             after >= Duration::from_millis(DEPART_MS),
             "the app exited {after:?} after the close"
         );
+    }
+
+    /// A logout, a shutdown or `kill <pid>` sends SIGTERM: the app is asked to exit (`app.exit`, where the page says
+    /// goodbye as on the window's close), not ended on the spot with all of that skipped.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_sigterm_asks_the_app_to_exit_as_its_window_s_close_does() {
+        let (asked, quit) = std::sync::mpsc::channel();
+        exit_on_signals(move || asked.send(()).unwrap());
+        let sent = std::process::Command::new("kill")
+            .args(["-TERM", &std::process::id().to_string()])
+            .status()
+            .unwrap();
+        assert!(sent.success());
+        quit.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the app was asked to exit");
     }
 
     #[test]
