@@ -31,6 +31,7 @@
     "communityConnecting": "Connecting to the group…",
     "communityNote": "Your app links to one of the group's hubs (members' apps that relay), and the hubs pass every message on to everyone. A member who was away gets what they missed when they are back.",
     "connecting": "Connecting to members…",
+    "hubsNote": "Past 16 members, your app links to a few members only: the admin and the group's hubs, members' apps that pass messages on to the rest. A hub sees who talks when, not what is said. Group links use WebRTC, and Iroh or HyperDHT with a member whose app has no WebRTC (Ghostly Desktop on Linux). A member who is not reachable gets what they missed when they are back.",
     "label": "Group connection",
     "labelWith": "Group connection: {{state}}",
     "noWebrtc": "Groups can't connect from this app yet",
@@ -54,7 +55,7 @@
     "hint": "You get a link to share: whoever opens it joins. Everyone in the group reads everything sent while they are in it.",
     "kind": "Kind of group",
     "private": "Private",
-    "privateHint": "Up to 32 people, from your contacts or your link, which works while your app is open. Everyone connects to everyone.",
+    "privateHint": "Up to 32 people, from your contacts or your link, which works while your app is open. Up to 16 connect to each other directly; past that, members' apps that stay on (hubs) pass messages on.",
     "title": "New group"
   },
   "error": {
@@ -221,7 +222,7 @@
     "members": "Members…",
     "rotate": "Rotate keys"
   },
-  "readNote": "Everyone in the group can read everything sent while they are a member. Someone removed keeps what they already received and cannot read what comes after; someone who joins later cannot read what came before. Messages go directly to each member; whoever was away gets what they missed from any member who has it (the group's last {{count}} messages) when they meet again.",
+  "readNote": "Everyone in the group can read everything sent while they are a member. Someone removed keeps what they already received and cannot read what comes after; someone who joins later cannot read what came before. Messages go to each member; whoever was away gets what they missed from any member who has it (the group's last {{count}} messages) when they meet again.",
   "readNoteCommunity": "Anyone with the group's link can join, and any member can let people in. Everyone in the group can read everything sent while they are a member; someone removed cannot read what comes after, someone who joins later cannot read what came before. Members who were away get the last {{count}} messages from whoever is there when they return.",
   "remove": {
     "body": "They won't get the group's new messages.",
