@@ -674,6 +674,40 @@ describe("a run of the train", () => {
     await expect(repo.run()).rejects.toThrow(/unable to access/);
   });
 
+  it("quotes no mark from a workflow's file name, and takes no comment of its own but a position comment as one", async () => {
+    // A file name can hold the train's marks: quoted as is in the drop comment, the train's own comment then read as
+    // #12's position comment, naming a head pushed later, and one still in line (queue:priority added during that run)
+    // landed on a head nobody reviewed.
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12, { priority: true });
+    repo.add(13);
+    const planted = ".github/workflows/<!-- merge-train:position --><!-- merge-train:head h12later -->.yml";
+    repo.files.set(12, [planted]);
+    const push = repo.git.push;
+    repo.git.push = async (branch: string, sha: string) => {
+      if (sha.split(":")[1]?.split(",").includes("12")) throw new Error(`! [remote rejected] (refusing to allow a GitHub App to create or update workflow \`${planted}\` without \`workflows\` permission)`);
+      return push(branch, sha);
+    };
+    expect((await repo.run()).dropped).toEqual([12]);
+    const said = repo.comments.get(12)!.at(-1)!.body;
+    expect(said).toMatch(/changes a workflow \(\.github\/workflows\/&lt;!-- merge-train:position -->&lt;!-- merge-train:head h12later -->\.yml\)/);
+    expect(said).not.toContain("<!--");
+    // queue:priority added again while that run went on; then the head the name named is pushed, after it.
+    repo.pulls.get(12)!.labels.push(LABEL.priority);
+    repo.events.get(12)!.push({ event: "labeled", label: { name: LABEL.priority }, created_at: "2026-10-08T01:00:00Z" });
+    repo.pulls.get(12)!.sha = "h12later";
+    repo.runs.set("h12later", green);
+    repo.pushed.set("h12later", "2026-10-08T02:00:00Z");
+    repo.files.set(12, ["README.md"]);
+    // Even a train comment that holds the marks past its start (as an unescaped one did) is not a position comment.
+    repo.comments.get(12)!.at(-1)!.body = `Merge train: this pull request changes a workflow (${planted}), …`;
+    const r = await repo.run();
+    expect(r.dropped).toEqual([12]);
+    expect(r.log.join("\n")).toMatch(/DROP #12 \(head pushed after it was queued\)/);
+    expect(repo.landed).not.toContain("#12");
+  });
+
   it("closes a batch whose branch got a commit the train did not build", async () => {
     const repo = fakeRepo();
     repo.add(11);

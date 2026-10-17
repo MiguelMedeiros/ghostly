@@ -38,7 +38,7 @@ describe.skipIf(process.platform === "win32")("sockets outside the profile", () 
     const file = join(root, "not-a-socket");
     writeFileSync(file, "");
     expect(ownSocket(file)).toBe(false);
-    expect(await connectDaemon(file, 200)).toBeNull();
+    expect(await connectDaemon({ socket: file, dir: root }, 200)).toBeNull();
     expect(ownSocket(join(root, "nothing"))).toBe(true);
     const socket = join(root, "s.sock");
     const server = createServer((s) => s.end());

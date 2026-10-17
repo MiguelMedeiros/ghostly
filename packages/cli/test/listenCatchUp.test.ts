@@ -45,7 +45,7 @@ async function served(name: string, hub: ReturnType<typeof countingHub>["hub"]) 
   const dir = join(root, name);
   mkdirSync(dir, { mode: 0o700 });
   const s = await serve({ ctx: { runtime: { paths: { dir, socket: join(dir, "daemon.sock") } }, hub } } as unknown as Host);
-  return { ...s, path: join(dir, "daemon.sock") };
+  return { ...s, address: { dir, socket: join(dir, "daemon.sock") } };
 }
 
 const turn = () => new Promise((resolve) => setImmediate(resolve));
@@ -56,10 +56,10 @@ describe.skipIf(process.platform === "win32")("a listen attached to the daemon t
     const { hub, counted } = countingHub(backlog);
     const s = await served("backlog", hub);
     try {
-      const client = await connectDaemon(s.path);
+      const client = await connectDaemon(s.address);
       const { seqs, handle } = slowHandler();
       // A hold far shorter than a catch-up of 1,000 events: hooks that keep taking events keep the connection.
-      const following = followDaemon(s.path, client!, handle, 0, 1);
+      const following = followDaemon(s.address, client!, handle, 0, 1);
       await following.subscribed;
       await expect.poll(() => seqs.length, { timeout: 20_000 }).toBe(backlog);
       expect(seqs).toEqual(Array.from({ length: backlog }, (_, i) => i + 1));
@@ -73,10 +73,10 @@ describe.skipIf(process.platform === "win32")("a listen attached to the daemon t
     const { hub, counted, listeners, emit } = countingHub(2 * MAX_BEHIND);
     const s = await served("ended", hub);
     try {
-      const client = await connectDaemon(s.path);
+      const client = await connectDaemon(s.address);
       let open!: () => void;
       const { seqs, handle } = slowHandler(new Promise<void>((resolve) => { open = resolve; }));
-      const following = followDaemon(s.path, client!, handle, 0);
+      const following = followDaemon(s.address, client!, handle, 0);
       await following.subscribed;
       // The hook hangs; meanwhile more than the daemon lets a client leave unread comes live (16 MB).
       while (handle.behind() < MAX_BEHIND) await turn();
@@ -97,10 +97,10 @@ describe.skipIf(process.platform === "win32")("a listen attached to the daemon t
     const { hub, counted, listeners } = countingHub(2 * MAX_BEHIND);
     const s = await served("held", hub);
     try {
-      const client = await connectDaemon(s.path);
+      const client = await connectDaemon(s.address);
       let open!: () => void;
       const { seqs, handle } = slowHandler(new Promise<void>((resolve) => { open = resolve; }));
-      const following = followDaemon(s.path, client!, handle, 0, 200);
+      const following = followDaemon(s.address, client!, handle, 0, 200);
       await following.subscribed;
       // The hook hangs: past the hold, the daemon no longer keeps a subscriber for it.
       while (handle.behind() < MAX_BEHIND) await turn();

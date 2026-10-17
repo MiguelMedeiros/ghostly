@@ -69,8 +69,8 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const messageRef = useRef<string | undefined>(undefined);
   /** What the now-playing bar shows of it, should it play on away from here. */
   const chat = usePlayingChat();
-  const trackRef = useRef({ title: file.name, from: "", chat });
-  trackRef.current = { title: file.name, from: playingFrom(sender === "me", t("chat.reply.you"), peerName, chat), chat };
+  const trackRef = useRef({ title: file.name, label: "", from: "", chat });
+  trackRef.current = { title: file.name, label: t("chat.audio.message"), from: playingFrom(sender === "me", t("chat.reply.you"), peerName, chat), chat };
   /** On screen: a stream that opens after the bubble went is let go at once. */
   const mounted = useRef(false);
   /** What the system's media controls call (lock screen, media keys): set on every render, below. */
@@ -216,7 +216,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
     resumeAt.current = clamped;
     if (audioRef.current && srcRef.current) audioRef.current.currentTime = clamped;
   };
-  mediaRef.current = { title: file.name, artist: sender === "me" ? t("chat.reply.you") : peerName, play: () => void play(), pause, seekTo: seek };
+  mediaRef.current = { title: t("chat.audio.message"), play: () => void play(), pause, seekTo: seek };
 
   const act = (action: FileAction) => {
     setActionError("");
@@ -375,7 +375,7 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
             messageRef.current = rootRef.current?.closest<HTMLElement>("[data-message-id]")?.dataset.messageId;
             // The lock screen and media keys drive the one playing now.
             const shown = mediaRef.current!;
-            claimMediaSession(file.id, { title: shown.title, artist: shown.artist, play: () => mediaRef.current?.play(), pause: () => mediaRef.current?.pause(), seekTo: (at) => mediaRef.current?.seekTo(at) });
+            claimMediaSession(file.id, { title: shown.title, play: () => mediaRef.current?.play(), pause: () => mediaRef.current?.pause(), seekTo: (at) => mediaRef.current?.seekTo(at) });
           }}
           onPause={() => { releasePlayback(file.id); mediaSessionState(file.id, "paused"); setPlayState((was) => (was === "playing" ? "paused" : was)); }}
           onEnded={() => { resumeAt.current = 0; forgetPosition(file.id); setPosition(0); unload(); setPlayState("idle"); }}

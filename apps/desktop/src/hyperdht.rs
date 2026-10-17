@@ -185,11 +185,16 @@ impl HyperState {
     }
 }
 
+/// The longest line the runtime may print (and `sidecar.mjs`'s `MAX_LINE`, the longest it reads). A frame is at most
+/// 60 KiB on the wire, and JSON writes a control character as `\u0001`: six bytes for one. A contact's frame of
+/// 60 KiB of them is a line of 360 KiB, which must not read as a runtime gone wrong (that stops every chat's endpoint).
+const MAX_LINE: usize = 512 * 1024;
+
 /// Everything the runtime prints, to the endpoint it names.
 async fn read(output: ChildStdout, routes: Routes, peers: Peers) {
     let mut output = BufReader::new(output).lines();
     while let Ok(Some(line)) = output.next_line().await {
-        if line.len() > 256 * 1024 {
+        if line.len() > MAX_LINE {
             break;
         }
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
@@ -976,6 +981,49 @@ mod runtime_tests {
         // The next endpoint starts it again.
         start(&app, 4).await.unwrap();
         assert_eq!(spawned(&app), 2);
+    }
+
+    /// A contact's frame of 60 KiB of control characters, six bytes each once written as JSON (a line of 360 KiB),
+    /// reaches the other end, and the runtime and every other endpoint stay up: it used to stop all of them.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_frame_json_makes_six_times_longer_stops_nothing() {
+        let app = app();
+        let (events_a, mut page_a) = page();
+        let (events_b, mut page_b) = page();
+        let a = paired_hyperdht_start(app.handle().clone(), app.state(), seed(1), events_a)
+            .await
+            .unwrap();
+        let b = paired_hyperdht_start(app.handle().clone(), app.state(), seed(2), events_b)
+            .await
+            .unwrap();
+        let c = start(&app, 3).await.unwrap();
+        let runtime = pid(&app).await.unwrap();
+        let connection = paired_hyperdht_connect(app.state(), a.id, b.descriptor.clone())
+            .await
+            .unwrap();
+        assert_eq!(next(&mut page_a).await["type"], "open");
+        let incoming = next(&mut page_b).await;
+
+        let text = "\u{1}".repeat(60 * 1024);
+        assert!(json!({ "text": text }).to_string().len() > 6 * 60 * 1024);
+        paired_hyperdht_send(app.state(), a.id, connection, 1, Some(text.clone()), None)
+            .await
+            .unwrap();
+        let frame = next(&mut page_b).await;
+        assert_eq!(
+            (&frame["type"], &frame["id"]),
+            (&json!("frame"), &incoming["id"])
+        );
+        assert_eq!(frame["text"].as_str(), Some(text.as_str()));
+        assert_eq!(
+            next(&mut page_a).await,
+            json!({"type":"sent", "id":connection, "seq":1})
+        );
+        assert_eq!(pid(&app).await, Some(runtime));
+        assert!(alive(runtime));
+        for id in [a.id, b.id, c.id] {
+            assert!(paired_hyperdht_address(app.state(), id).is_ok(), "{id}");
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

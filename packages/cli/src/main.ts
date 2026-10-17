@@ -3,7 +3,7 @@ import { connect } from "node:net";
 import { openSync, readFileSync, rmSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
-import { connectDaemon, type DaemonClient } from "./client";
+import { connectDaemon, isNotTheDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
 import { here } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
@@ -167,7 +167,7 @@ function waitsFor(method: string, params: Record<string, unknown>): number | und
 
 async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
   requireProfile(g);
-  const client = await connectDaemon(g.paths.socket);
+  const client = await connectDaemon(g.paths);
   if (client) {
     // The version check goes on the same connection as the command, ahead of it, not before it, and with no deadline
     // of its own: a daemon that does not answer costs the command its own deadline and nothing else (a read gave up
@@ -486,7 +486,7 @@ function backupPassphrase(file: unknown, missing = BACKUP_PASSPHRASE): string {
 
 async function runDaemon(g: Globals): Promise<void> {
   requireProfile(g);
-  if (await connectDaemon(g.paths.socket)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
+  if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
   const { keepServing, openHost, serve } = await engineHost();
   const host = await openHost(g.paths, "daemon", VERSION);
   let served: Awaited<ReturnType<typeof serve>>;
@@ -507,7 +507,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (!sub || ["status", "stop", "restart"].includes(sub)) noMoreThan(0, parsed.positionals, sub ? `daemon ${sub} [--timeout s]` : "daemon [--detach] [--timeout s]");
   if (sub === "status") {
     knownProfile(g);
-    const client = await connectDaemon(g.paths.socket);
+    const client = await connectDaemon(g.paths);
     // The socket, running or not: a program on the socket API (examples/*.mjs) finds it here. It is in the profile's
     // folder, or in /tmp/ghostly-<hash>/ when that path is too long for a socket, so a program cannot guess it.
     if (!client) { print({ running: false, profile: g.profile, socket: g.paths.socket }); return; }
@@ -517,7 +517,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (sub === "stop") {
     knownProfile(g);
     const stopFor = seconds(parsed, 20);
-    const client = await connectDaemon(g.paths.socket);
+    const client = await connectDaemon(g.paths);
     if (!client) throw new CliError("not_found", `No daemon runs profile ${g.profile}`);
     print({ stopped: true, pid: await stopDaemon(g, client, stopFor) });
     return;
@@ -525,7 +525,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (sub === "restart") {
     // The running one stops (if one runs), and this command's own code starts in the background.
     const stopFor = seconds(parsed, 20), startFor = seconds(parsed, 60);
-    const client = await connectDaemon(g.paths.socket);
+    const client = await connectDaemon(g.paths);
     // The version it ran is asked ahead of the stop, on the same connection, with no deadline of its own: cosmetic,
     // and the stop's deadline ends it (a deadline here, 15 s, closed the connection under a longer stop, which then
     // failed as `unavailable` and never reached the signals).
@@ -561,10 +561,16 @@ async function stopDaemon(g: Globals, client: DaemonClient, seconds: number): Pr
   let pid: number, answered = true;
   try { ({ pid } = await client.call("daemon.stop", {}, { timeoutMs: seconds * 1000 }) as { pid: number }); }
   catch (error) {
-    if (!(error instanceof CliError && error.code === "timeout")) throw error;
+    // What answers on the socket and does not prove it is the profile's daemon is told nothing: a daemon of an older
+    // release (it cannot prove it) is stopped as the process that holds the profile's lock, which only this user
+    // can write. With nobody holding it, what answers is not the daemon, and the refusal stands.
+    const refused = isNotTheDaemon(error);
+    if (!(error instanceof CliError && error.code === "timeout") && !refused) throw error;
     const holder = lockOwner(g.paths);
     if (holder === null) throw error;
-    process.stderr.write(`ghostly: the daemon (process ${holder}) did not answer daemon.stop in ${seconds} s: stopping it with SIGTERM\n`);
+    process.stderr.write(refused
+      ? `ghostly: what answers on the socket did not prove it is this profile's daemon (an older release's cannot): stopping the process that holds the profile (${holder}) with SIGTERM\n`
+      : `ghostly: the daemon (process ${holder}) did not answer daemon.stop in ${seconds} s: stopping it with SIGTERM\n`);
     pid = holder;
     answered = false;
     signal(pid, "SIGTERM");
@@ -608,7 +614,7 @@ function processAlive(pid: number): boolean {
 /** A daemon in the background, running this command's code, once its socket answers. */
 async function startDetached(g: Globals, seconds: number) {
   requireProfile(g);
-  if (await connectDaemon(g.paths.socket)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
+  if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
   // A one-shot command (or a listen) that opened the profile in process holds it: the child would only log that.
   heldBy(g);
   const log = openSync(g.paths.log, "a", 0o600);
@@ -626,7 +632,7 @@ async function startDetached(g: Globals, seconds: number) {
   while (child.exitCode === null && child.signalCode === null && !spawned.error) {
     const left = until - Date.now();
     if (left <= 0) break;
-    client = await connectDaemon(g.paths.socket, Math.min(500, left));
+    client = await connectDaemon(g.paths, Math.min(500, left));
     if (client) break;
     await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(200, until - Date.now()))));
   }
@@ -702,17 +708,17 @@ async function listenCommand(argv: string[]): Promise<void> {
     });
   };
   requireProfile(g);
-  const client = await connectDaemon(g.paths.socket);
+  const client = await connectDaemon(g.paths);
   if (client) await warnVersion(client);
   if (client) {
     // The subscription takes the connection: a chat's contact key is asked on a connection of its own.
     const handle = await start((m, p) => client.call(m, p), async (chat) => {
-      const c = await connectDaemon(g.paths.socket, 1000);
+      const c = await connectDaemon(g.paths, 1000);
       if (!c) return null;
       try { return ((await c.call("chat.get", { chat }, { timeoutMs: ANSWER_MS })) as { peer?: string }).peer || null; } finally { c.close(); }
     }).catch((error) => { client.close(); throw error; });
     // Followed until stopped, past a daemon restart and past a feed that fell behind (`followDaemon`).
-    const following = followDaemon(g.paths.socket, client, handle, since);
+    const following = followDaemon(g.paths, client, handle, since);
     const stop = () => { following.close(); process.exit(0); };
     onReaderGone(stop);
     await following.subscribed;
@@ -864,10 +870,10 @@ async function identityAddCommand(argv: string[]): Promise<void> {
     if (event.type === "identity.approval" || event.type === "identity.progress") process.stderr.write(JSON.stringify(event) + "\n");
   };
   requireProfile(g);
-  const client = await connectDaemon(g.paths.socket);
+  const client = await connectDaemon(g.paths);
   if (client) {
     await warnVersion(client);
-    const watcher = await connectDaemon(g.paths.socket);
+    const watcher = await connectDaemon(g.paths);
     await watcher?.subscribe(undefined, tell);
     try { print(await client.call("identity.add", params)); } finally { client.close(); watcher?.close(); }
     return;
@@ -944,7 +950,7 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   const parsed = parseArgs(argv, {}, idSlot({ args: ["call...?"] }));
   const g = globals(parsed);
   const ref = parsed.positionals.join(" ") || undefined;
-  const client = await connectDaemon(g.paths.socket);
+  const client = await connectDaemon(g.paths);
   if (!client) throw new CliError("unavailable", `No daemon runs profile ${g.profile}: calls need one (ghostly daemon --detach)`);
   let call: { call: string; audio: { socket: string; rate: number } | null };
   try { call = await client.call("call.get", ref ? { call: ref } : {}, { timeoutMs: ANSWER_MS }) as typeof call; } finally { client.close(); }

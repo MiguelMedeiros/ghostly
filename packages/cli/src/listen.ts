@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { CONTACT_KEY } from "./apiKit";
-import { connectDaemon, type DaemonClient } from "./client";
+import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { turnRef } from "./turnRefs";
@@ -359,7 +359,7 @@ export const PAUSE_HOLD_MS = 60_000;
  * last event taken.
  * `subscribed`: the first subscription's answer (a journal that cannot be replayed rejects it).
  */
-export function followDaemon(socket: string, client: DaemonClient, handle: EventHandler, since: number | undefined, holdMs = PAUSE_HOLD_MS): { subscribed: Promise<unknown>; close(): void } {
+export function followDaemon(address: DaemonAddress, client: DaemonClient, handle: EventHandler, since: number | undefined, holdMs = PAUSE_HOLD_MS): { subscribed: Promise<unknown>; close(): void } {
   let current: DaemonClient | null = client;
   let holding: ReturnType<typeof setTimeout> | undefined;
   const reconnect = (wait: number) => void (async () => {
@@ -367,7 +367,7 @@ export function followDaemon(socket: string, client: DaemonClient, handle: Event
       await new Promise((resolve) => setTimeout(resolve, wait));
       wait = 1000;
       if (current || feed.paused) return;
-      const next = await connectDaemon(socket, 1000);
+      const next = await connectDaemon(address, 1000);
       if (next) { current = next; await follow(next).catch(() => { if (current === next) current = null; }); }
     }
   })();

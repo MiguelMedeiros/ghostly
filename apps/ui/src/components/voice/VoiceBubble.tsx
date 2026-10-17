@@ -92,8 +92,8 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   const messageRef = useRef<string | undefined>(undefined);
   /** What the now-playing bar shows of it, should it play on away from here. */
   const chat = usePlayingChat();
-  const trackRef = useRef({ title: "", from: "", chat });
-  trackRef.current = { title: t("chat.voice.message"), from: playingFrom(sender === "me", t("chat.reply.you"), peerName, chat), chat };
+  const trackRef = useRef({ title: "", label: "", from: "", chat });
+  trackRef.current = { title: t("chat.voice.message"), label: t("chat.voice.message"), from: playingFrom(sender === "me", t("chat.reply.you"), peerName, chat), chat };
   const loadingRef = useRef<Promise<HTMLAudioElement | null> | null>(null);
   /** A play() is being started: its own rejection reports what went wrong, not the element's error event. */
   const startingRef = useRef(false);
@@ -280,8 +280,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   /** The lock screen and media keys drive the one playing now (through `mediaRef`, always this render's functions). */
   const claimSession = useCallback((audio: HTMLAudioElement) => {
     claimMediaSession(file.id, {
-      title: trackRef.current.title,
-      artist: trackRef.current.from,
+      title: trackRef.current.label,
       play: () => mediaRef.current?.play(),
       pause: () => mediaRef.current?.pause(),
       seekTo: (at) => mediaRef.current?.seekTo(at),

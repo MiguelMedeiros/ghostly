@@ -7,6 +7,7 @@ import { announceJoins } from "./announce";
 import { reportAppFrames } from "./appEvents";
 import { callApi, type ApiContext } from "./api";
 import { CallManager } from "./calls/manager";
+import { HELLO, newDaemonSecret, proof } from "./daemonProof";
 import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
 import { resumeHolds } from "./holds";
@@ -103,7 +104,8 @@ interface Request { id?: unknown; method?: unknown; params?: unknown }
 
 /**
  * The local control API over the profile's Unix socket (0600 in the 0700 profile folder): one JSON object per line
- * each way. `events.subscribe` turns a connection into a stream of `{"event": …}` lines.
+ * each way. `events.subscribe` turns a connection into a stream of `{"event": …}` lines. `daemon.hello` answers a
+ * client's nonce with the proof that this is the profile's daemon (`daemonProof.ts`).
  */
 export interface Served {
   server: Server;
@@ -121,11 +123,13 @@ export async function serve(host: Host): Promise<Served> {
   }
   // A socket file left by a daemon that died: the lock says nobody holds the profile, so it is stale.
   if (existsSync(path)) rmSync(path, { force: true });
+  // Written before the socket listens: a client reads it once something answered its hello.
+  const secret = newDaemonSecret(ctx.runtime.paths.dir);
   const sockets = new Set<Socket>();
   const server = createServer((socket) => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
-    connection(ctx, socket);
+    connection(ctx, socket, secret);
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -178,7 +182,10 @@ function ownerOnlyUmask(): (() => void) | null {
   } catch { return null; }
 }
 
-function connection(ctx: ApiContext, socket: Socket): void {
+/** A client's nonce: 16 to 64 bytes as lowercase hex, so the proof is over nothing but a nonce. */
+const NONCE = /^(?:[0-9a-f]{2}){16,64}$/;
+
+function connection(ctx: ApiContext, socket: Socket, secret: Buffer): void {
   const unsubscribes: (() => void)[] = [];
   // A replay raises the limit by what it wrote; once the client has read everything, it is MAX_UNREAD again.
   let limit = MAX_UNREAD;
@@ -204,6 +211,12 @@ function connection(ctx: ApiContext, socket: Socket): void {
     try { request = JSON.parse(line) as Request; } catch { write({ id: null, error: new CliError("bad_request", "Not JSON").toJSON() }); return; }
     const id = typeof request.id === "number" || typeof request.id === "string" ? request.id : null;
     if (typeof request.method !== "string") { write({ id, error: new CliError("bad_request", "method is required").toJSON() }); return; }
+    if (request.method === HELLO) {
+      const nonce = (request.params as { nonce?: unknown } | undefined)?.nonce;
+      if (typeof nonce !== "string" || !NONCE.test(nonce)) { write({ id, error: new CliError("bad_request", "daemon.hello takes a nonce: 16 to 64 bytes as lowercase hex").toJSON() }); return; }
+      write({ id, result: { proof: proof(secret, "daemon", nonce) } });
+      return;
+    }
     if (request.method === "events.subscribe") {
       // One stream per connection: a second would get every event again, and its replay would pass the bound once more.
       if (unsubscribes.length) { write({ id, error: new CliError("bad_request", "This connection is subscribed already: open another one for a new stream").toJSON() }); return; }
