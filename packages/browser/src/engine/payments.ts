@@ -568,6 +568,17 @@ export class PaymentDesk {
   }
 
   /**
+   * A Testnet invoice found in a chat message, paid from its card: the chat's contact is told as `sayPaid` does, with
+   * no request (it may be one from their Receive screen, held until a payer says it paid).
+   */
+  sayInvoicePaid(linkId: string, invoice: string): void {
+    const link = this.host.getLink(linkId);
+    const amount = decodeBolt11(invoice)?.amountSat;
+    if (!link || !amount) return;
+    void this.sendTo(link, { id: newId(), timestamp: Date.now(), amount: { value: String(amount), asset: UNIT }, endpoint: [ENDPOINT.bolt11, invoice.trim()] }).catch(() => {});
+  }
+
+  /**
    * Takes back ecash the peer never redeemed. If they did redeem it, the mint says so and the payment is settled.
    * Resolves to what came back of Cashu ecash (and the mint's fee for it); undefined when nothing did, or not Cashu.
    */
@@ -1039,6 +1050,7 @@ export class PaymentDesk {
    */
   private async receiveCheck(linkId: string, payment: Payment): Promise<void> {
     const link = this.host.getLink(linkId);
+    if (link && !payment.requestId && payment.endpoint[0] === ENDPOINT.bolt11) return this.receiveInvoicePaid(linkId, link, payment.endpoint[1]);
     const request = payment.requestId ? this.payments.get(payment.requestId) : undefined;
     if (!link || !request || request.kind !== "request" || request.direction !== "out" || !this.owns(request, linkId)) return;
     const rail = request.target ? request.target.method : request.invoice ? "lightning" : undefined;
@@ -1055,6 +1067,23 @@ export class PaymentDesk {
       else if (rail === "spark") await this.reconcileSparkReceipts();
       else await this.reconcileArkReceipts();
     } catch { /* the wallet could not be asked right now: the regular checks go on */ }
+  }
+
+  /**
+   * The contact says it paid an invoice of ours it found in the chat, with no request: a Receive-screen invoice is
+   * held on a test mint until then (StoredQuote `held`), and that one alone is let go. A request's invoice is spoken
+   * for by its own contact only (`receiveCheck`). Bounded: one look every 3 seconds per chat.
+   */
+  private async receiveInvoicePaid(linkId: string, link: PaymentLink, invoice: string): Promise<void> {
+    if (!link.allowsPayment("lightning")) return;
+    const now = Date.now();
+    if (now - (this.lastCheckFrom.get(`chat:${linkId}`) ?? 0) < 3_000) return;
+    this.lastCheckFrom.set(`chat:${linkId}`, now);
+    const wanted = invoice.trim().toLowerCase();
+    try {
+      const quote = (await this.wallet.quotes()).find((q) => q.held && !q.paymentId && q.invoice.toLowerCase() === wanted);
+      if (quote) await this.wallet.vouch(quote.invoice);
+    } catch { /* the wallet could not be asked right now: the invoice stays held until it expires */ }
   }
 
   /** A Lightning payment of a contact's request that was left pending (or unknown) settled. */

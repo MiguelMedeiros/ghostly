@@ -5328,13 +5328,19 @@ export class GhostlyNode implements EngineImplementation {
     return via === "cashu" ? this.wallet.quoteInvoice(invoice, n) : this.lightningCard(n, card).then((c) => c.quote(invoice));
   }
 
-  /** `confirmedReal`: the person confirmed a Mainnet payment as real money; without it one is refused. */
-  async walletPayQuote({ quote, mint, note, confirmedReal }: { quote: string; mint: string; note?: string; confirmedReal?: boolean }) {
+  /**
+   * `confirmedReal`: the person confirmed a Mainnet payment as real money; without it one is refused. `linkId` +
+   * `invoice`: the chat whose message held the invoice. Paid on Testnet, its contact is told (`sayInvoicePaid`): a test
+   * mint's invoice counts only on the payer's word.
+   */
+  async walletPayQuote({ quote, mint, note, confirmedReal, linkId, invoice }: { quote: string; mint: string; note?: string; confirmedReal?: boolean; linkId?: string; invoice?: string }) {
     // A quote of a Lightning card (each knows its own), or a melt quote the Cashu card asked the mints for.
     const network = WALLET_NETWORKS.find((n) => this.lightnings[n].withQuote(quote));
     const lightning = network && this.lightnings[network].withQuote(quote);
     assertConfirmedReal(network ?? mintNetwork(mint), confirmedReal);
-    return { paid: lightning ? await lightning.pay(quote, { note }) : await this.wallet.payQuote(quote, mint, note) };
+    const paid = lightning ? await lightning.pay(quote, { note }) : await this.wallet.payQuote(quote, mint, note);
+    if (paid && linkId && invoice && (network ?? mintNetwork(mint)) === "testnet") this.desk.sayInvoicePaid(linkId, invoice);
+    return { paid };
   }
 
   /** A Lightning address or LNURL (LUD-16, LUD-06): resolved here, in the engine, so every platform fetches the same way. */
