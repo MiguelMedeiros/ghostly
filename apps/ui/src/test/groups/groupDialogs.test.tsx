@@ -253,6 +253,43 @@ describe("GroupMembersDialog", () => {
     expect(within(screen.getByTestId("group-invite-contact")).getByText("Carol")).toHaveAttribute("dir", "auto");
   });
 
+  it("Invite from the keyboard keeps the focus: on the button while it runs, then on the contact's row, which says Invited", async () => {
+    const group = groupView({ status: "active", isAdmin: true, members });
+    const { user, engine } = members_(group, [paired({ id: "link-carol", label: "Carol" })]);
+    let done = () => {};
+    engine.on("inviteToGroup", () => new Promise<void>(resolve => { done = resolve; }));
+    const invite = screen.getByTestId("group-invite");
+    invite.focus();
+    await user.keyboard("{Enter}");
+    // Not disabled while it runs: that drops a keyboard's focus to the page. A second press does nothing.
+    expect(invite).not.toBeDisabled();
+    expect(invite).toHaveAttribute("aria-disabled", "true");
+    expect(invite).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("inviteToGroup")).toHaveLength(1);
+    act(() => fakeEngine.update({ groups: [{ ...group, invited: ["link-carol"] }] }));
+    done();
+    const row = screen.getByTestId("group-invite-contact");
+    await vi.waitFor(() => expect(row).toHaveFocus());
+    expect(row).toHaveTextContent("CarolInvited…");
+  });
+
+  it("Remove picture from the keyboard leaves the focus on Change picture's control, which stays", async () => {
+    const group = groupView({ status: "active", isAdmin: true, members, picture: "data:image/jpeg;base64,AA" });
+    const { user, engine } = members_(group);
+    let done = () => {};
+    engine.on("setGroupPicture", () => new Promise<void>(resolve => { done = resolve; }));
+    const remove = screen.getByTestId("group-picture-remove");
+    remove.focus();
+    await user.keyboard("{Enter}");
+    expect(remove).not.toBeDisabled();
+    expect(remove).toHaveAttribute("aria-disabled", "true");
+    act(() => fakeEngine.update({ groups: [{ ...group, picture: undefined }] }));
+    done();
+    await vi.waitFor(() => expect(screen.getByTestId("group-picture-input")).toHaveFocus());
+    expect(screen.queryByTestId("group-picture-remove")).not.toBeInTheDocument();
+  });
+
   it("names an unnamed contact by their key", () => {
     members_(groupView({ status: "active", isAdmin: true, members }), [paired({ id: "link-x", peerPubKeyZ32: "k".repeat(52) })]);
     expect(screen.getByTestId("group-invite-contact")).toHaveTextContent("Contact · kkkkkk");
