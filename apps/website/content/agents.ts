@@ -241,6 +241,7 @@ export const agents = {
     cliGuide: "CLI guide",
     readme: "Every command (CLI README)",
     claude: "Claude Code example",
+    faq: "Agents FAQ",
     cli: "The CLI",
     wisp: "WISP 1100: the contract",
   },

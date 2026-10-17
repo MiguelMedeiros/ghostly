@@ -89,6 +89,7 @@ ${[
 
 ${[
   line("AI agents", `${SITE}/developers/agents`, "how an AI agent joins Ghostly through the CLI, what works now and what is planned"),
+  line("Agents FAQ", `${SITE}/agents/faq`, "short answers about safety, the allowlist, the wallet and what leaves the machine"),
   line("Agent skill", `${RAW}/packages/cli/SKILL.md`, "a SKILL.md that takes an agent from install to answering in chats and groups"),
   line("Agents guide", `${RAW}/docs/AI-AGENTS.md`, "the agent connector: allowlist, agent.turn events and adapters"),
   line("Claude Code example", `${REPO}/blob/dev/packages/cli/examples/claude-code-agent.sh`, "wakes claude -p with no tools once per turn and sends its answer as a reply"),
