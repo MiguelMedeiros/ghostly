@@ -6825,6 +6825,8 @@ export class GhostlyNode implements EngineImplementation {
       open: () => !!live.link?.isDataLinkOpen,
       look: () => live.link?.look(),
       direct: payload => this.groups.directSignal(group, peer, linkId, payload),
+      // Started again (`restartEdge`): its packets are dated past the last one the edge signed before.
+      after: live.carried?.lastDated(),
     });
     const waiting = live.carried && this.groups.takeSignal(group, peer);
     if (waiting) live.carried!.accept(waiting);
