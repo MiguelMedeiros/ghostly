@@ -34,6 +34,8 @@ type PlayState = "idle" | "loading" | "playing" | "paused";
 
 const FORMATS: Record<string, string> = { "audio/webm": "WebM", "audio/ogg": "Ogg", "audio/mp4": "M4A", "audio/x-m4a": "M4A", "audio/mpeg": "MP3", "audio/aac": "AAC", "audio/wav": "WAV" };
 const formatOf = (mime: string) => FORMATS[mime.split(";")[0]!.trim().toLowerCase()] ?? (mime || "unknown");
+/** How often the waveform moves while it plays: as often as the time label does. The knob's glide (voice.css) lasts as long. */
+const PROGRESS_STEP_MS = 250;
 
 /** What went wrong, for whoever debugs the next failure: the console in dev builds, `data-error` always. */
 function describeFailure(what: string, error: unknown): string {
@@ -86,7 +88,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   const listenRef = useRef<AbortController | null>(null);
   const blobRef = useRef<Blob | null>(null);
   const urlsRef = useRef<string[]>([]);
-  const frameRef = useRef(0);
+  const stepRef = useRef(0);
   const positionRef = useRef(position);
   /** The message it is in, found when it starts: the bar's tap opens the chat there. */
   const messageRef = useRef<string | undefined>(undefined);
@@ -136,16 +138,19 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
     waveRef.current?.style.setProperty("--voice-progress", String(Math.min(1, Math.max(0, at / Math.max(0.001, seconds)))));
   }, [seconds]);
 
-  const stopFrames = () => cancelAnimationFrame(frameRef.current);
+  const stopSteps = () => clearInterval(stepRef.current);
+  /**
+   * The waveform follows the sound at the time label's pace, not every frame: each step is a style recalc and a
+   * layout of the page. The knob glides between steps on the compositor (voice.css, `.voice-wave-knob`).
+   */
   const followAudio = useCallback(() => {
-    stopFrames();
+    stopSteps();
     const tick = () => {
       const audio = audioRef.current;
-      if (!audio || audio.paused) return;
+      if (!audio || audio.paused) { stopSteps(); return; }
       showProgress(audio.currentTime);
-      frameRef.current = requestAnimationFrame(tick);
     };
-    frameRef.current = requestAnimationFrame(tick);
+    stepRef.current = window.setInterval(tick, PROGRESS_STEP_MS);
   }, [showProgress]);
 
   /** The recording decoded by Web Audio and played as WAV, when `<audio>` has no decoder for its own type. Once. */
@@ -169,7 +174,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
       mediaSessionPosition(file.id, audio.currentTime, seconds, audio.playbackRate);
     }, { signal });
     audio.addEventListener("ended", () => {
-      stopFrames();
+      stopSteps();
       releasePlayback(file.id);
       forgetPosition(file.id);
       setState("idle");
@@ -180,8 +185,8 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
       playNextVoice(rootRef.current);
     }, { signal });
     audio.addEventListener("pause", () => {
-      stopFrames();
-      // Where it stopped, not where the last frame drew it: it goes on from there, here or after the chat was away.
+      stopSteps();
+      // Where it stopped, not where the last step drew it: it goes on from there, here or after the chat was away.
       showProgress(audio.currentTime);
       setState((s) => (s === "playing" ? "paused" : s));
       mediaSessionState(file.id, "paused");
@@ -190,7 +195,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
       report("media element", audio.error);
       if (startingRef.current) return;
       // Broke off while playing.
-      stopFrames();
+      stopSteps();
       releasePlayback(file.id);
       setState("idle");
       giveUp(t("chat.voice.couldNotPlay"));
@@ -362,7 +367,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   useLayoutEffect(() => () => {
     turnRef.current += 1;
     wantedRef.current = false;
-    stopFrames();
+    stopSteps();
     listenRef.current?.abort();
     const audio = audioRef.current;
     const urls = urlsRef.current;
@@ -514,6 +519,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
             aria-valuenow={Math.round(position)}
             aria-valuetext={t("chat.media.positionOf", { position: formatVoiceDuration(position * 1000), duration: formatVoiceDuration(file.voice.duration) })}
             data-testid="voice-waveform"
+            data-gliding={state === "playing" || undefined}
             className={ready ? "cursor-pointer" : "opacity-50"}
             onPointerDown={onScrubStart}
             onPointerMove={onScrubMove}

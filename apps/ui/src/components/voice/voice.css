@@ -32,10 +32,22 @@
   color: var(--voice-fill, var(--color-accent-hover));
   clip-path: inset(0 calc((1 - var(--voice-progress)) * 100%) 0 0);
 }
+/*
+ * The knob is moved by a transform, in the track's width (cqw): a change of --voice-progress moves no layout.
+ * While it plays, the player steps the progress 4 times a second and the knob glides between steps on the
+ * compositor.
+ */
+.voice-wave-track {
+  position: absolute;
+  inset: 0;
+  container-type: inline-size;
+  pointer-events: none;
+}
 .voice-wave-knob {
   position: absolute;
   top: 50%;
-  left: calc(var(--voice-progress) * 100%);
+  left: 0;
+  transform: translateX(calc(var(--voice-progress) * 100cqw));
   width: 12px;
   height: 12px;
   margin: -6px 0 0 -6px;
@@ -43,6 +55,10 @@
   background: var(--voice-fill, var(--color-accent-hover));
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.12);
   pointer-events: none;
+}
+/* Not while dragged (the knob stays under the finger), nor with reduced motion. 250ms = PROGRESS_STEP_MS in VoiceBubble. */
+@media (prefers-reduced-motion: no-preference) {
+  .voice-wave[data-gliding]:not(:active) .voice-wave-knob { transition: transform 250ms linear; }
 }
 .voice-wave:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; border-radius: 4px; }
 
