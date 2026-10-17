@@ -28,6 +28,7 @@ export function SharePicker() {
 
   const hasFiles = !!share?.files.length;
   const leftOut = share?.leftOut ?? [];
+  const unread = share?.unread ?? [];
   const targets = useChatTargets();
   const preview = share ? shareText(share) : "";
 
@@ -50,6 +51,11 @@ export function SharePicker() {
           {leftOut.length > 0 && (
             <Notice tone="error" className="text-sm" testId="share-left-out"
               title={t("pwa.shareTooLarge", { names: leftOut.join(", ") })} next={t("pwa.shareTooLargeNext")} />
+          )}
+          {/* Files Android could not read (a revoked permission, a broken stream): named too, never dropped silently. */}
+          {unread.length > 0 && (
+            <Notice tone="error" className="text-sm" testId="share-unread"
+              title={t("pwa.shareUnread", { names: unread.join(", ") })} next={t("pwa.shareUnreadNext")} />
           )}
           {/* Nothing else came: no chat to pick. */}
           {!isEmptyShare(share) && (
