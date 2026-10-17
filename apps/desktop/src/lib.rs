@@ -5,6 +5,9 @@
 // plugin), and what Android hands the app (deep links, shares, notification taps, network changes).
 #[cfg(target_os = "android")]
 mod android;
+// The share another app made on Android, until the page takes it (built for tests on every host).
+#[cfg(any(target_os = "android", test))]
+mod android_share;
 #[cfg(desktop)]
 mod app_sandbox;
 #[cfg(desktop)]
