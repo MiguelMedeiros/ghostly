@@ -425,10 +425,11 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       return;
     }
     case "restore": {
-      const [file, name] = parsed.positionals;
-      if (!file || !name) throw new CliError("usage", "ghostly profile restore <file> <new profile> [--passphrase-file f] [--use]");
+      const [given, name] = parsed.positionals;
+      if (!given || !name) throw new CliError("usage", "ghostly profile restore <file> <new profile> [--passphrase-file f] [--use]");
       noMoreThan(2, parsed.positionals, "profile restore <file> <new profile> [--passphrase-file f] [--use]");
       // A backup made without a passphrase says so in its header: none is asked for, and the answer says it was not protected.
+      const file = here(given) as string;
       const { backupFileProtection, restoreProfile } = await import("./backup");
       const protection = await backupFileProtection(file);
       const paths = await restoreProfile(g.home, checkProfileName(name), file, protection === "none" ? undefined : backupPassphrase(parsed.options["passphrase-file"], RESTORE_PASSPHRASE));
@@ -680,7 +681,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   if (turns && types.length) throw new CliError("usage", "--turns takes the place of --type: a turn is a message received, or a group message that mentions you");
   checkTypes(types, (line) => process.stderr.write(line + "\n"));
   const from = (parsed.options.from as string[] | undefined) ?? [], groups = (parsed.options.group as string[] | undefined) ?? [];
-  const cursor = parsed.options.cursor as string | undefined;
+  const cursor = here(parsed.options.cursor);
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
   const since = (parsed.options.since as number | undefined) ?? readCursor(cursor);
