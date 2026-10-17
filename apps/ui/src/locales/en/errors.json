@@ -532,6 +532,7 @@
     "listenerReleased": "Paused for another chat. Open this chat to resume.",
     "noAddress": "Your contact's address for this transport isn't known yet",
     "noAddressNext": "Reconnect over WebRTC once to exchange it.",
+    "noAddressWait": "It comes once your contact opens this chat in their app.",
     "noOverlap": "Your transport choices don't match",
     "noOverlapNext": "Turn Fallback on, or choose the same transport on both sides.",
     "noneConnected": "No transport could connect",

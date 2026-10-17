@@ -532,6 +532,7 @@
     "listenerReleased": "已为另一个聊天暂停。打开此聊天即可恢复。",
     "noAddress": "尚不知道联系人在此传输方式上的地址",
     "noAddressNext": "先通过 WebRTC 重新连接一次以交换地址。",
+    "noAddressWait": "联系人在其应用中打开此聊天后即可获得。",
     "noOverlap": "你们的传输方式选择不一致",
     "noOverlapNext": "打开备用，或在两边选择相同的传输方式。",
     "noneConnected": "没有传输方式能连接",
