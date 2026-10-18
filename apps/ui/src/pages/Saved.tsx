@@ -3,6 +3,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { SavedMessage } from "@ghostly/browser/shared/types";
 import { PageHeader } from "../components/layout";
 import { SavedIcon } from "../components/saved/SavedIcon";
+import { focusLost } from "../lib/focus";
 import { useI18n } from "../contexts/I18nContext";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useChatTargets, type ChatTarget } from "../hooks/useChatTargets";
@@ -10,7 +11,6 @@ import { JUMP_TO } from "../hooks/useJumpTo";
 import { useMinuteClock } from "../hooks/useMinuteClock";
 import { setSaved, useSavedMessages, useSavedRead } from "../hooks/useSavedMessages";
 import { formatListTime, previewText } from "../lib/chatList";
-import { focusLost } from "../lib/focus";
 import { authorName, groupPath } from "../lib/groups";
 
 /*
