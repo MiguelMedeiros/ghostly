@@ -503,6 +503,12 @@
     "usdtReverted": "La transaction a été annulée",
     "usdtRevertedNext": "Aucun jeton n'a été envoyé ; le gas a été dépensé."
   },
+  "relayOnly": {
+    "keepsTurn": "Masquer mon IP a besoin de ce serveur TURN",
+    "keepsTurnNext": "Désactivez-le d'abord, puis retirez le serveur.",
+    "needsTurn": "Ajoutez d'abord un serveur TURN",
+    "needsTurnNext": "Enregistrez-en un ci-dessus, puis activez ceci."
+  },
   "relays": {
     "atLeastOne": "Saisissez au moins une adresse de relais",
     "notAddress": "Ce n'est pas une adresse de relais : {{address}}",

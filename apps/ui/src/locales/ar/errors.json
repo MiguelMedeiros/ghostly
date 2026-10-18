@@ -503,6 +503,12 @@
     "usdtReverted": "أُلغيت المعاملة",
     "usdtRevertedNext": "لم تُرسل أي رموز؛ وأُنفق الغاز."
   },
+  "relayOnly": {
+    "keepsTurn": "إخفاء IP يحتاج إلى خادم TURN هذا",
+    "keepsTurnNext": "أوقفه أولًا، ثم أزل الخادم.",
+    "needsTurn": "أضف خادم TURN أولًا",
+    "needsTurnNext": "احفظ واحدًا في الأعلى، ثم شغّل هذا."
+  },
   "relays": {
     "atLeastOne": "أدخل عنوان مرحّل واحدًا على الأقل",
     "notAddress": "ليس عنوان مرحّل: {{address}}",

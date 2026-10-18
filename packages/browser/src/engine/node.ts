@@ -1,5 +1,5 @@
 import { UsdtWallet, usdtMode } from "./paymentAdapters/usdtWallet";
-import { iceServerProblem, iceServerSetting } from "../shared/ice";
+import { iceServerProblem, iceServerSetting, relayOnlyProblem } from "../shared/ice";
 import type { UsdtPrepared } from "./paymentAdapters/usdt";
 import { ArkWallet, arkMode } from "./paymentAdapters/arkWallet";
 import { BarkWallet, barkMode } from "./paymentAdapters/barkWallet";
@@ -69,6 +69,7 @@ import {
   LIMITS,
   RELAY_POLL_INTERVALS,
   RTC_CONFIG,
+  contactRtcConfig,
   type DeviceKind,
   fromBase64Url,
   type TurnNetwork,
@@ -5952,6 +5953,13 @@ export class GhostlyNode implements EngineImplementation {
     // would leave this peer unreachable or without WebRTC.
     if (Array.isArray(settings.iceServers)) settings.iceServers = settings.iceServers.map(iceServerSetting);
     for (const server of settings.iceServers ?? []) { const problem = iceServerProblem(server); if (problem) throw new Error(problem); }
+    // "Hide my IP from contacts" needs the TURN server every connection to a contact then goes through: it is not
+    // turned on without one, and the one it has is not taken away while it is on.
+    if (settings.relayOnly !== undefined && typeof settings.relayOnly !== "boolean") throw new Error("relayOnly is on or off");
+    const relayOnlyBefore = this.settings.relayOnly === true;
+    if ((settings.relayOnly ?? relayOnlyBefore) && relayOnlyProblem(settings.iceServers ?? this.settings.iceServers)) {
+      throw new Error(settings.relayOnly ? "Add a TURN server first" : "Hide my IP from contacts needs a TURN server. Turn it off first");
+    }
     if (settings.avatar !== undefined && settings.avatar !== "" && typeof sanitizeAvatar(settings.avatar) !== "string") throw new Error("Use a small JPEG picture");
     if (settings.relays && (this.relays || this.transport.configure) && !settings.relays.some((relay) => normalizeRelayUrl(relay))) throw new Error("Enter at least one relay address (https://…)");
     if (settings.readRelays !== undefined && typeof settings.readRelays !== "boolean") throw new Error("readRelays is on or off");
@@ -5988,6 +5996,8 @@ export class GhostlyNode implements EngineImplementation {
     }
     this.settings = { ...this.settings, ...settings };
     if (!this.settings.irohRelays?.length) delete this.settings.irohRelays;
+    if (this.settings.relayOnly !== true) delete this.settings.relayOnly;
+    const relayOnlyChanged = (this.settings.relayOnly === true) !== relayOnlyBefore;
     // Pinned relays (`options.irohRelays`) stay whatever the setting says.
     if (irohRelaysChanged && !this.options.irohRelays?.length) void this.rehomeIroh();
     if (settings.relays) {
@@ -6074,7 +6084,7 @@ export class GhostlyNode implements EngineImplementation {
       this.startGroupEntries();
       this.prepareSpare(STARTUP_QUIET_MS);
       void this.did.publishNow().catch(() => {});
-    }
+    } else if (wasOnline && this.networkOn && relayOnlyChanged) await this.restartLinksForRelayOnly();
     if (wasOnline && !this.networkOn) this.stopGroupEntries();
     if (wasOnline && !this.networkOn) await this.hold.stop();
     // A profile with a device set: its standbys go through these relays and servers, and stay off with the network.
@@ -6171,6 +6181,15 @@ export class GhostlyNode implements EngineImplementation {
     const transport: PkarrTransport = this.options.transport ?? this.relays!;
     if (!transport.turnRead || !transport.turnPut) throw new Error("This app cannot read which device is active");
     return { turnRead: transport.turnRead.bind(transport), turnPut: transport.turnPut.bind(transport), ...(transport.turnWarm ? { turnWarm: transport.turnWarm.bind(transport) } : {}) };
+  }
+
+  /**
+   * The WebRTC configuration of a connection to a contact (a chat's data link, a group's edge): the profile's ICE
+   * servers, and only its TURN server while "Hide my IP from contacts" is on. The ICE servers a browser refuses are
+   * left out, as they always were.
+   */
+  private contactRtcConfig(): RTCConfiguration {
+    return contactRtcConfig({ iceServers: this.settings.iceServers.filter((server) => !iceServerProblem(server)), relayOnly: this.settings.relayOnly });
   }
 
   /** WebRTC with the person's ICE servers, where this engine has WebRTC. */
@@ -7076,8 +7095,7 @@ export class GhostlyNode implements EngineImplementation {
       // An entry session carries one admission and closes. The member's side always dials (the joiner's key is
       // drawn so), and the joiner's packet is already there: its offer goes in its first packet.
       ...(entry ? { oneShot: true, firstPublish: stored.groupEntry === "host" ? "after-first-poll" as const : "at-start" as const } : {}),
-      createPeerConnection: () =>
-        new RTCPeerConnection({ iceServers: [...(RTC_CONFIG.iceServers ?? []), ...this.settings.iceServers.filter((server) => !iceServerProblem(server))] }),
+      createPeerConnection: () => new RTCPeerConnection(this.contactRtcConfig()),
       localFetch: this.localFetch,
       getServices: () => [{ id: "chat", type: "chat" }],
       getHostedHttpService: () => undefined,
@@ -7259,6 +7277,24 @@ export class GhostlyNode implements EngineImplementation {
     if (live.stored.groupEntry) this.links.get(linkId)?.link?.expectPeer();
   }
 
+  /**
+   * "Hide my IP from contacts" was turned on or off: every chat and group edge starts over, so no connection made
+   * before keeps a direct path (a WebRTC one gathered with STUN, an Iroh or HyperDHT endpoint of this app's own) and
+   * the next ones follow the setting. No goodbye: the contacts see the chat back in a moment.
+   */
+  private async restartLinksForRelayOnly(): Promise<void> {
+    await Promise.allSettled([...this.links.values()].map(async (live) => {
+      const link = live.link;
+      live.carried?.stop();
+      live.link = null;
+      await link?.stop(false); await live.caps?.stop(); live.caps = undefined;
+      live.status = "offline";
+      live.dataLink = "idle";
+    }));
+    if (this.shuttingDown || !this.networkOn) return;
+    for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
+  }
+
   private startLink(linkId: string, messages: StoredMessage[]): void {
     const live = this.links.get(linkId);
     if (!live || live.link) return;
@@ -7373,8 +7409,7 @@ export class GhostlyNode implements EngineImplementation {
       lastSeenTimestamp,
       pollIntervals: this.pollIntervals,
       autoConnect: true,
-      createPeerConnection: () => this.chatPeer(
-        new RTCPeerConnection({ iceServers: [...(RTC_CONFIG.iceServers ?? []), ...this.settings.iceServers.filter((server) => !iceServerProblem(server))] })),
+      createPeerConnection: () => this.chatPeer(new RTCPeerConnection(this.contactRtcConfig())),
       localFetch: this.localFetch,
       getServices: () => stored.profile ? [{ id: "chat", type: "chat" }] : this.advertisedServices(stored.peerPubKeyZ32),
       // A paired contact learns only the apps granted to it, on the open session; nothing is published.
