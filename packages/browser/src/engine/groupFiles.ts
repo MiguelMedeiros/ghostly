@@ -245,7 +245,7 @@ interface Edge {
   /** Message ids to say in the next `group-have`, and the frames of it that went lately (`haveFrames` in `haveWindowMs`). */
   have: Set<string>;
   haveSent: RateWindow;
-  /** Its member's `group-have` frames taken lately: no more than it may send (`haveFrames` in `haveWindowMs`); past that, dropped. */
+  /** Its member's `group-have` frames taken lately: no more than `haveFramesTaken` in `haveWindowMs`, twice what it may send; past that, dropped. */
   haveTaken: RateWindow;
   /** Message ids its member asked for while this device served all it serves at once: said in a `group-have` once a slot frees. */
   busy: Set<string>;
@@ -540,7 +540,7 @@ export class GroupFileDesk {
       if (no) this.refused(groupId, peer, linkId, no.id, no.why);
     } else if (frame.t === GROUP_HAVE_FRAME) {
       const ids = readGroupHave(frame, groupId);
-      // Each one makes its member worth asking again: taken at the pace it may send them, not faster.
+      // Each one makes its member worth asking again: taken at about the pace it may send them, not much faster.
       if (ids && this.edge(groupId, peer, linkId).haveTaken.take()) this.heard(groupId, peer, ids);
     }
   }
@@ -955,7 +955,7 @@ export class GroupFileDesk {
     if (known) return known;
     const edge: Edge = { linkId, groupId, peer, files: undefined as unknown as ChatFiles, serving: new Map(), servedMoved: new Map(), taking: new Map(), ended: [], have: new Set(),
       haveSent: new RateWindow(GROUP_FILE_LIMITS.haveFrames, GROUP_FILE_LIMITS.haveWindowMs, () => this.deps.now()),
-      haveTaken: new RateWindow(GROUP_FILE_LIMITS.haveFrames, GROUP_FILE_LIMITS.haveWindowMs, () => this.deps.now()), busy: new Set(), gone: new Set() };
+      haveTaken: new RateWindow(GROUP_FILE_LIMITS.haveFramesTaken, GROUP_FILE_LIMITS.haveWindowMs, () => this.deps.now()), busy: new Set(), gone: new Set() };
     edge.files = new ChatFiles({
       // An offer names the group message it serves (`gm`), which a 1:1 chat never carries.
       send: frame => {
