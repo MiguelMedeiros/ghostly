@@ -48,6 +48,8 @@ export const EDIT_BUFFER_MS = 60_000;
 export const EDIT_BUFFER_MAX = 32;
 
 const ID = /^[A-Za-z0-9_-]{22}$/;
+/** A removal may name a file too (WISP 401 § Edits): its offer's id, as a file's id holds (`files.ts`). */
+const REMOVAL_ID = /^[A-Za-z0-9_-]{8,64}$/;
 
 /** One edit as it goes on the wire. */
 export interface WireEdit {
@@ -111,7 +113,7 @@ export function parseEditFrame(frame: Record<string, unknown>, now = Date.now())
   if (frame?.t !== EDIT_FRAME) return null;
   const { id, e, ts, m, rm } = frame;
   if (rm !== undefined && rm !== true) return null;
-  if (typeof id !== "string" || !ID.test(id) || typeof e !== "number" || !(rm ? validRemovalNumber(e) : cardEditNumber(e))) return null;
+  if (typeof id !== "string" || !(rm ? REMOVAL_ID : ID).test(id) || typeof e !== "number" || !(rm ? validRemovalNumber(e) : cardEditNumber(e))) return null;
   if (typeof ts !== "number" || !Number.isSafeInteger(ts) || ts <= 0) return null;
   if (!validEditMessage(m)) return null;
   if (rm) return { id, e, ts, m, rm };
@@ -124,7 +126,7 @@ export function parseEditFrame(frame: Record<string, unknown>, now = Date.now())
 /** The confirmation a `paired-edited` frame says, or null when it is malformed. */
 export function parseEditedFrame(frame: Record<string, unknown>): { id: string; e: number } | null {
   if (frame?.t !== EDITED_FRAME) return null;
-  return typeof frame.id === "string" && ID.test(frame.id) && validRemovalNumber(frame.e) ? { id: frame.id, e: frame.e } : null;
+  return typeof frame.id === "string" && REMOVAL_ID.test(frame.id) && validRemovalNumber(frame.e) ? { id: frame.id, e: frame.e } : null;
 }
 
 /**

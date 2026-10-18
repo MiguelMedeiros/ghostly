@@ -64,6 +64,12 @@ describe("paired-edit frames", () => {
     for (const bad of [{ ...base, rm: false }, { ...base, rm: 1 }, { ...base, rm: "true" }, { ...base, rm: null }, { ...base, e: 5_002 }, { ...base, e: 0 }, { ...base, m: "" }])
       expect(parseEditFrame(bad)).toBeNull();
     expect(parseEditedFrame({ t: "paired-edited", id: ID, e: 5_002 })).toBeNull();
+    // A file is named by its offer's id (Ghostly's are 16 characters): a removal may name one, an edit may not.
+    const file = "F".repeat(16);
+    expect(parse(editFrame(edit({ id: file, m: REMOVED_TEXT, rm: true })))).toEqual(edit({ id: file, m: REMOVED_TEXT, rm: true }));
+    expect(parse(editFrame(edit({ id: file })))).toBeNull();
+    expect(parseEditedFrame(JSON.parse(editedFrame(file, 1)))).toEqual({ id: file, e: 1 });
+    for (const id of ["F".repeat(7), "F".repeat(65), "F".repeat(15) + "!"]) expect(parse(editFrame(edit({ id, m: REMOVED_TEXT, rm: true })))).toBeNull();
   });
 
   it("keep a preview only for a link in the new text; a bad one drops, never the edit", () => {
