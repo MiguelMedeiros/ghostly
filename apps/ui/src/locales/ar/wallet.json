@@ -201,6 +201,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "انتهت صلاحية هذه الفاتورة: لا يمكن لأحد دفعها الآن.",
     "invoiceFor": "فاتورة بمبلغ {{amount}}",
     "makePrimary": "اجعلها الرئيسية",
     "mints": "دور السك",

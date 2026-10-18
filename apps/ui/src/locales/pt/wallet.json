@@ -201,6 +201,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "Esta fatura venceu: ninguém consegue pagá-la agora.",
     "invoiceFor": "Fatura de {{amount}}",
     "makePrimary": "Tornar principal",
     "mints": "Mints",
