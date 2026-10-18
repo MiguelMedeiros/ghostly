@@ -149,6 +149,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `invite join [<invite-or-link> \| -] [--label <name>]` | Join a chat (your own invite is refused). The invite comes from stdin when none is given or `-`, out of `ps` and the shell's history; on the command line the CLI warns |
 | `lightning default <card>`, `lightning rename <card> <name>` | Lightning cards: which receives by default |
 | `listen [--since seq] [--cursor file] [--type t]… [--turns] [--from <chat\|key>]… [--group <group>]… [--exec cmd] [--webhook url] [--print]` | The event stream; `--from` and `--group` an allowlist, `--turns` one `agent.turn` per message to answer ([Events](#events)) |
+| `message delete <chat\|group> <message> --everyone` | Deletes a message of yours for everyone (a text, a card, a file or a voice message; never a payment): it goes from this device at once and from every member's as the message's last edit, once they are back if they are away. An app from before this shows "🗑 Message removed" in its place. Without `--everyone`, only this device forgets it |
 | `message retry\|delete\|details <chat> <message>` | One message |
 | `pay <invoice\|address\|lnurl> [--amount sats] [--network n] [--max-fee sats] [--confirm-real]` | Pay over Lightning (Testnet unless `--network mainnet`) |
 | `payment list [--chat c]`, `payment check <chat> <payment>`, `payment reclaim <payment>` | Payments and requests |

@@ -12,13 +12,15 @@ const group = { id: "g1", name: "Crew", createdAt: 1, profile: "mesh", isAdmin: 
 const row = (linkId: string, id: string, fields: Partial<StoredMessage> = {}): StoredMessage => ({ linkId, id, text: "t " + id, sender: "peer", timestamp: 1, via: "datalink", ...fields });
 
 function fake() {
-  const rows: StoredMessage[] = [row("chat-one", "peer_1"), row("chat-one", "peer_2"), row("group:g1", "k:0:1"), row("chat-two", "me_fwd", { sender: "me", delivery: "sent" })];
+  const rows: StoredMessage[] = [row("chat-one", "peer_1"), row("chat-one", "peer_2"), row("group:g1", "k:0:1"), row("chat-two", "me_fwd", { sender: "me", delivery: "sent" }),
+    row("chat-one", "me_1", { sender: "me", wireId: "W1", delivery: "delivered" }), row("group:g1", "mine:0:2", { sender: "me" })];
   const node = {
     getState: () => ({ links: [link("chat-one", "Alice"), link("chat-two", "Bob")], groups: [group], settings: {}, transport: {} }) as unknown as EngineState,
     getMessages: vi.fn(async (linkId: string) => rows.filter((m) => m.linkId === linkId)),
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => rows.filter((m) => m.linkId === `group:${groupId}`)),
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
     deleteMessage: vi.fn(async () => {}),
+    removeMessage: vi.fn(async () => ({ error: null as string | null })),
     forwardMessages: vi.fn(async ({ to, messageIds }: { to: string[]; messageIds: string[] }) => ({ results: to.map(() => ({ messageIds: ["me_fwd"], sent: messageIds, error: null })) })),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
@@ -34,6 +36,26 @@ describe("delete", () => {
     await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "k:0:1" })).rejects.toMatchObject({ code: "not_found", message: "No message k:0:1 in this chat" });
     expect(node.deleteMessage).toHaveBeenCalledOnce();
     expect(whole()).toBe(0);
+  });
+});
+
+describe("delete --everyone", () => {
+  it("deletes a message of mine for everyone, in a chat (by its id or the one both sides know) or a group; never the contact's", async () => {
+    const { ctx, node } = fake();
+    const { COMMANDS, positionals } = await import("../src/commands");
+    const { parseArgs } = await import("../src/args");
+    const command = COMMANDS["message delete"]!;
+    const parsed = parseArgs(["Alice", "me_1", "--everyone"], command.options ?? {});
+    expect(command.params!(parsed, positionals(command, parsed.positionals))).toEqual({ chat: "Alice", message: "me_1", everyone: true });
+    expect(await callApi(ctx, "chat.delete", { chat: "Alice", message: "W1", everyone: true })).toEqual({ chat: "chat-one", deleted: "me_1", everyone: true });
+    expect(node.removeMessage).toHaveBeenCalledWith({ linkId: "chat-one", messageId: "me_1" });
+    expect(await callApi(ctx, "chat.delete", { chat: "Crew", message: "mine:0:2", everyone: true })).toEqual({ group: "g1", deleted: "mine:0:2", everyone: true });
+    expect(node.removeMessage).toHaveBeenLastCalledWith({ linkId: "group:g1", messageId: "mine:0:2" });
+    await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "peer_1", everyone: true })).rejects.toMatchObject({ code: "not_found", message: expect.stringMatching(/only your own/) });
+    // What the engine refuses (a payment, say) is said as such.
+    node.removeMessage.mockResolvedValueOnce({ error: "A payment, a request or a notice cannot be deleted for everyone", refused: true } as never);
+    await expect(callApi(ctx, "chat.delete", { chat: "Alice", message: "me_1", everyone: true })).rejects.toMatchObject({ code: "refused" });
+    expect(node.deleteMessage).not.toHaveBeenCalled();
   });
 });
 

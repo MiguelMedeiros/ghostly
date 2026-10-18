@@ -90,7 +90,12 @@ export const commands: Record<string, Command> = {
     args: ["invite?"], options: { label: { type: "string", description: "A name for the chat on this side" } },
     params: ({ options }, { invite }) => ({ invite, label: options.label }),
   },
-  "message delete": { method: "chat.delete", usage: "message delete <chat> <message>", summary: "Forget a message on this device (the contact keeps theirs)", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
+  "message delete": {
+    method: "chat.delete", usage: "message delete <chat> <message> [--everyone]",
+    summary: "Forget a message on this device (the contact keeps theirs); --everyone deletes one of yours, in a chat or a group, from every member's device",
+    args: ["chat", "message"], options: { everyone: { type: "boolean", description: "Delete a message of yours for everyone (a chat or a group)" } },
+    params: ({ options }, a) => ({ chat: a.chat, message: a.message, everyone: options.everyone === true }),
+  },
   "message details": { method: "chat.details", usage: "message details <chat> <message>", summary: "How a message travelled", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "message retry": { method: "chat.retry", usage: "message retry <chat> <message>", summary: "Send a failed message again", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "pin": {
