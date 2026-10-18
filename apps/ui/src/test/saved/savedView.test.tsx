@@ -27,10 +27,10 @@ const state = {
   groups: [groupView({ id: "g1", name: "Crew", status: "active", canSend: true, members: [{ key: "me-key", me: true, nick: "Me" }, { key: "hermes-key", me: false, nick: "Hermes" }] as never })],
 };
 
-function profile(rows: SavedMessage[], ui = <><Saved /><Where /></>) {
+function profile(rows: SavedMessage[], ui = <><Saved /><Where /></>, language?: "pt") {
   saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", messages: [], createdAt: 1_700_000_000_000, nick: "Alice" });
   let current = rows;
-  const rendered = renderApp(ui, { route: "/saved" });
+  const rendered = renderApp(ui, { route: "/saved", language });
   rendered.engine.on("savedMessages", () => current).on("saveMessage", (params) => {
     current = current.filter((s) => !(s.message.linkId === params.linkId && s.message.id === params.messageId));
     return { error: null };
@@ -57,6 +57,16 @@ describe("the Saved view", () => {
     // In a 1:1 chat the contact is the chat: named once.
     expect(within(theirs).queryByTestId("saved-author")).not.toBeInTheDocument();
     expect(within(theirs).getByTestId("saved-open")).toHaveAccessibleName("Open in Alice: the address");
+  });
+
+  it("says a voice message or a video in the app's language, not in the English the history keeps", async () => {
+    profile([
+      saved(message("link-1", "peer_1", { text: "🎤 Voice message (0:02)", file: { id: "f1", name: "voice.webm", size: 10, mime: "audio/webm", voice: { duration: 2_000, peaks: [] } } })),
+      saved(message("link-1", "peer_2", { text: "🎬 Video (0:07)", file: { id: "f2", name: "clip.mp4", size: 10, mime: "video/mp4", video: { duration: 7_000, width: 640, height: 360 } } })),
+      saved(message("link-1", "peer_3", { text: "📎 notes.pdf", file: { id: "f3", name: "notes.pdf", size: 10, mime: "application/pdf" } })),
+    ], undefined, "pt");
+    await waitFor(() => expect(texts()).toEqual(["🎤 Mensagem de voz (0:02)", "🎬 Vídeo (0:07)", "📎 notes.pdf"]));
+    expect(within(screen.getAllByTestId("saved-row")[0]).getByTestId("saved-open")).toHaveAccessibleName("Abrir em Alice: 🎤 Mensagem de voz (0:02)");
   });
 
   it("opens a message's chat on the message", async () => {
