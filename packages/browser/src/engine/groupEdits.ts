@@ -2,7 +2,7 @@ import {
   EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDIT_SEND_LIMIT, GROUP_EDIT_TEXT_BYTES, MAX_EDITS_PER_MESSAGE, RateWindow, STATUS_CARD_LIMITS, carryMentions, mentionsMember, heardTime, utf8Encode,
   type GroupEdit, type GroupMention, type StatusCard,
 } from "@ghostly/core";
-import { canEditInGroup, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
+import { canEditInGroup, canRemove, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
 import type { StoredMessage } from "../shared/types";
 import { CardEditPacer, EditBuffer } from "./edits";
 import { RESEND_POLICY } from "./outbox";
@@ -29,6 +29,11 @@ export interface GroupEditsHost {
   changed(chat: string, id: string): Promise<void> | void;
   /** My key in an active group, who is in it now, whether it is a community, and whether I am its admin. */
   membership(groupId: string): { me: string; members: ReadonlySet<string>; community: boolean; admin?: boolean } | undefined;
+  /**
+   * A member deleted its message for everyone (WISP 400 § Delete for everyone): it goes from this device with its file,
+   * and its id is kept so a copy that comes again stays gone. Also for a message not here yet.
+   */
+  remove(chat: string, id: string): Promise<void>;
   /** Says an edit to the group (a private group's: to member `to` alone, when given). An error when it could not go now. */
   send(groupId: string, edit: GroupEdit, to?: string): Promise<string | null>;
   /**
@@ -269,6 +274,12 @@ export class GroupEdits {
   private async take(groupId: string, membership: { me: string }, sender: string, edit: GroupEdit): Promise<"applied" | "stale" | "waiting" | "dropped"> {
     const chat = chatOf(groupId);
     const message = await this.find(chat, edit.id);
+    // A removal is final, whatever it numbers and whatever the message is (a file too): only the author's own.
+    if (edit.rm) {
+      if (message && (message.sender !== "peer" || message.member !== sender || !canRemove(message))) return "dropped";
+      await this.host.remove(chat, edit.id);
+      return "applied";
+    }
     if (!message) { this.buffer.hold(chat, { ...edit, sender }); return "waiting"; }
     // A card's update: paced per message, the highest number of those that came meanwhile applied when the time is up.
     if (edit.sc && message.member === sender && (message.edit?.seq ?? 0) < edit.e) {

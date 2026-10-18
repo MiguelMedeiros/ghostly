@@ -43,6 +43,14 @@ export function takesPeerEdit(message: Pick<StoredMessage, "sender" | "file" | "
 }
 
 /**
+ * A message its author may delete for everyone (WISP 400 § Delete for everyone), either side: a text, a card, a file or
+ * a voice message; never a payment or a request (a bearer token is not taken back), a notice or a group's line.
+ */
+export function canRemove(message: Pick<StoredMessage, "paymentId" | "event" | "groupPay" | "text">): boolean {
+  return !message.paymentId && !message.event && !message.groupPay && !JOIN_NOTICE.test(message.text);
+}
+
+/**
  * The message after edit `seq`, made at `at`: the new text (and the preview and the status card that came with it, or
  * none: each belongs to its version), the version it replaces kept in the history. A text that did not change adds no
  * version. A status card's update adds none either (WISP 405 · Status Cards): it replaces the card in place, and its

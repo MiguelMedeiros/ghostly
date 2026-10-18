@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DhtDelivery, EDIT_BUFFER_MS, EDIT_SEND_LIMIT, GhostLink, MAX_EDITS_PER_MESSAGE, createIdentity, createLink, createRelayPayload, dhtEditId, identityFromSeedB64, parseRelayPayload, readStatusCard, type IncomingMessage, type PairingState, type SignedPacket, type StatusCard, type WireEdit } from "@ghostly/core";
+import { DhtDelivery, EDIT_BUFFER_MS, EDIT_SEND_LIMIT, GhostLink, MAX_EDITS_PER_MESSAGE, REMOVED_TEXT, createIdentity, createLink, createRelayPayload, dhtEditId, identityFromSeedB64, parseRelayPayload, readStatusCard, type IncomingMessage, type PairingState, type SignedPacket, type StatusCard, type WireEdit } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { CARD_RESTORE_GAP_MS, EditBuffer, EditQueue } from "../src/engine/edits";
@@ -234,6 +234,42 @@ describe("the contact's edits", () => {
     // Nor mine, from this side.
     const sent = await t.node.sendMessage({ linkId: t.id, text: "hi" });
     expect(await t.node.editMessage({ linkId: t.id, messageId: sent.messageId!, text: "👋 Mallory joined" })).toMatchObject({ refused: true, error: expect.stringMatching(/join notice/) });
+  });
+
+  it("a removal takes their message off this device, confirmed, and nothing brings it back", async () => {
+    const t = await setup();
+    expect(await t.contact.sendMessage("🔄 Fix it", Date.now(), WIRE("E"))).toBeNull();
+    const row = await t.peerRow("🔄 Fix it");
+    t.onAttention.mockClear();
+    // Numbered past a text's hundred, without a card: a removal holds whatever its number.
+    expect(await t.contact.sendEdit({ id: WIRE("E"), e: 101, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("E"), 101]]));
+    expect((await t.messages()).find(m => m.id === row.id)).toBeUndefined();
+    expect(t.onAttention).not.toHaveBeenCalled();
+    // The same message again (republished, a hold, the DHT floor) and a later edit change nothing.
+    expect(await t.contact.sendMessage("🔄 Fix it", Date.now(), WIRE("E"))).toBeNull();
+    expect(await t.contact.sendEdit({ id: WIRE("E"), e: 5, ts: Date.now(), m: "back?" })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("E"), 101], [WIRE("E"), 5]]));
+    expect((await t.messages()).find(m => m.id === row.id)).toBeUndefined();
+  });
+
+  it("a removal before its message is kept at once: the message, when it comes, is taken as gone", async () => {
+    const t = await setup();
+    expect(await t.contact.sendEdit({ id: WIRE("F"), e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("F"), 1]]));
+    expect(await t.contact.sendMessage("never shown", Date.now(), WIRE("F"))).toBeNull();
+    expect(await t.contact.sendMessage("the next one", Date.now(), WIRE("G"))).toBeNull();
+    await t.peerRow("the next one");
+    expect((await t.messages()).map(m => m.text)).not.toContain("never shown");
+  });
+
+  it("a removal never takes one of my messages", async () => {
+    const t = await setup();
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "mine to keep" });
+    const mine = await t.row(sent.messageId!);
+    expect(await t.contact.sendEdit({ id: mine.wireId!, e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[mine.wireId, 1]]));
+    expect(await t.row(sent.messageId!)).toMatchObject({ text: "mine to keep" });
   });
 
   it("an edit of a message deleted here is confirmed and brings nothing back", async () => {

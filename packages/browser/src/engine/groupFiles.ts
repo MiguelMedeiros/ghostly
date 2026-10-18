@@ -356,6 +356,23 @@ export class GroupFileDesk {
     await this.stop(kept, keep);
   }
 
+  /**
+   * Its author deleted the message for everyone (WISP 400 § Delete for everyone): its file stops coming, nobody is
+   * asked for it, and what came of it goes from this device.
+   */
+  async forget(groupId: string, messageId: string): Promise<void> {
+    const key = `${groupId}\n${messageId}`, kept = this.kept.get(this.byMessage.get(key) ?? "");
+    if (!kept) return;
+    await this.stop(kept, false).catch(() => {});
+    this.kept.delete(kept.id);
+    this.byMessage.delete(key);
+    this.wants.delete(kept.id);
+    this.deps.transfers.delete(kept.id);
+    await kept.writing?.catch(() => {});
+    await this.deps.store.remove(kept.id).catch(() => {});
+    this.deps.changed();
+  }
+
   /** Automatic downloads were turned off: files chosen by themselves and not here yet stop coming, and wait for a Download. */
   async autoDownloadsOff(): Promise<void> {
     for (const kept of [...this.kept.values()]) if (kept.auto && !kept.asked && this.wants.has(kept.id)) await this.stop(kept, false);
