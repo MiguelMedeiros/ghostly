@@ -2,9 +2,10 @@ import {
   EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDIT_SEND_LIMIT, GROUP_EDIT_TEXT_BYTES, MAX_EDITS_PER_MESSAGE, RateWindow, STATUS_CARD_LIMITS, carryMentions, mentionsMember, heardTime, utf8Encode,
   type GroupEdit, type GroupMention, type StatusCard,
 } from "@ghostly/core";
-import { canEditInGroup, canRemove, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
+import { GROUP_MESSAGE_ID, canEditInGroup, canRemove, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
 import type { StoredMessage } from "../shared/types";
 import { CardEditPacer, EditBuffer } from "./edits";
+import { removalNumber, type Removal } from "./removals";
 import { RESEND_POLICY } from "./outbox";
 
 /*
@@ -34,6 +35,12 @@ export interface GroupEditsHost {
    * and its id is kept so a copy that comes again stays gone. Also for a message not here yet.
    */
   remove(chat: string, id: string): Promise<void>;
+  /**
+   * I deleted my message for everyone: it goes from this device as a member's removal does (`remove`), and from now on
+   * it reads as a row of mine whose edit is the removal (`removalRow`): pending until said, then said again to an edge
+   * that opens.
+   */
+  removeMine(chat: string, message: StoredMessage, removal: Removal): Promise<void>;
   /** Says an edit to the group (a private group's: to member `to` alone, when given). An error when it could not go now. */
   send(groupId: string, edit: GroupEdit, to?: string): Promise<string | null>;
   /**
@@ -59,6 +66,9 @@ export const GROUP_EDITS_HELD = 256;
 const RETRY_MS = 10_000;
 
 const chatOf = (groupId: string) => `group:${groupId}`;
+/** What a row of mine says to the group as its latest edit: a removal its fallback text alone (WISP 400 § Delete for everyone). */
+const said = (m: StoredMessage): GroupEdit => m.removed ? { id: m.id, e: m.edit!.seq, ts: m.edit!.at, m: m.text, rm: true }
+  : { id: m.id, e: m.edit!.seq, ts: m.edit!.at, m: m.text, ...(m.mentions?.length && { k: m.mentions }), ...(m.card && { sc: m.card }) };
 const resendKey = (groupId: string, member: string) => `${groupId}\n${member}`;
 
 export class GroupEdits {
@@ -135,6 +145,24 @@ export class GroupEdits {
     return { error: null, messageId };
   }
 
+  /**
+   * Deletes a message of mine for everyone (WISP 400 § Delete for everyone): gone here at once, and its removal said to
+   * the group as the message's last edit, at the pace of edits. A text, a card, a file or a voice message; never a
+   * payment, a note or an event line.
+   */
+  async removeMine(groupId: string, messageId: string): Promise<GroupEditResult> {
+    const refuse = (error: string) => ({ error, refused: true });
+    if (!this.host.membership(groupId)) return refuse("You are not in this group");
+    const chat = chatOf(groupId);
+    const message = typeof messageId === "string" ? await this.find(chat, messageId) : undefined;
+    if (!message || message.removed || message.sender !== "me" || !GROUP_MESSAGE_ID.test(message.id)) return refuse("Only your own messages can be deleted for everyone");
+    if (!canRemove(message)) return refuse("A payment, a request or a notice cannot be deleted for everyone");
+    await this.host.removeMine(chat, message, { id: message.id, e: removalNumber(message.edit?.seq), at: this.now(), pending: true });
+    if (this.host.message) this.told(groupId).set(messageId, ++this.tick);
+    await this.flush(groupId).catch(() => {});
+    return { error: null, messageId };
+  }
+
   /** Says my pending edits in a group, oldest first, at the pace allowed; what waits goes when the window has room. */
   flush(groupId: string): Promise<void> {
     const running = this.flushing.get(groupId);
@@ -158,7 +186,7 @@ export class GroupEdits {
       // Not said for as long as a message is tried: given up on, the text stays as it is here.
       if (now - edit.at >= RESEND_POLICY.windowMs) { await this.settle(chat, message.id, edit.seq); continue; }
       if (!pace.take()) { retry = Math.min(retry, pace.wait()); break; }
-      const error = await this.host.send(groupId, { id: message.id, e: edit.seq, ts: edit.at, m: message.text, ...(message.mentions?.length && { k: message.mentions }), ...(message.card && { sc: message.card }) });
+      const error = await this.host.send(groupId, said(message));
       if (error) { retry = Math.min(retry, RETRY_MS); continue; }
       await this.settle(chat, message.id, edit.seq);
     }
@@ -353,7 +381,7 @@ export class GroupEdits {
         return;
       }
       // One that cannot go (its epoch's key is gone) does not hold the others back.
-      await this.host.send(groupId, { id: m.id, e: m.edit!.seq, ts: m.edit!.at, m: m.text, ...(m.mentions?.length && { k: m.mentions }), ...(m.card && { sc: m.card }) }, to);
+      await this.host.send(groupId, said(m), to);
       // Heard only when the edge that took it is still the one that was open.
       if (open() !== edge) return;
       if (after(m)) this.heard.set(key, { at: m.edit!.at, id: m.id });

@@ -86,6 +86,40 @@ describe("editing my message", () => {
     expect(await t.node.editMessage({ linkId: t.id, messageId: mine.wireId!, text: "Done!" })).toMatchObject({ error: null, messageId: sent.messageId });
   });
 
+  it("deleting one for everyone takes it off here at once, tells the contact once as its last edit, and the confirmation ends it", async () => {
+    const t = await setup();
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "🔄 Task" });
+    await vi.waitFor(async () => expect((await t.row(sent.messageId!)).delivery).toBe("delivered"));
+    expect(await t.node.editMessage({ linkId: t.id, messageId: sent.messageId!, text: "🔄 Task, step 2" })).toMatchObject({ error: null });
+    const wireId = (await t.row(sent.messageId!)).wireId!;
+    await vi.waitFor(() => expect(t.contactEdits).toHaveLength(1));
+    expect(await t.node.removeMessage({ linkId: t.id, messageId: sent.messageId! })).toEqual({ error: null });
+    expect((await t.messages()).find(m => m.id === sent.messageId)).toBeUndefined();
+    await vi.waitFor(() => expect(t.contactEdits.slice(1)).toEqual([{ id: wireId, e: 2, ts: expect.any(Number), m: REMOVED_TEXT, rm: true }]));
+    // Confirmed: nothing of it is left to say, and it never comes back here.
+    await vi.waitFor(() => expect((t.node as unknown as { links: Map<string, { stored: { removals?: unknown[] } }> }).links.get(t.id)!.stored.removals).toEqual([]));
+    await vi.waitFor(async () => expect((await db.getLinks()).find(l => l.id === t.id)?.removals).toEqual([]));
+    expect(await t.node.removeMessage({ linkId: t.id, messageId: sent.messageId! })).toMatchObject({ refused: true });
+    expect(t.contactEdits).toHaveLength(2);
+  });
+
+  it("deleting for everyone refuses the contact's messages and payments; one that never left is only deleted here", async () => {
+    const t = await setup();
+    expect(await t.contact.sendMessage("theirs", Date.now(), WIRE("H"))).toBeNull();
+    const theirs = await t.peerRow("theirs");
+    expect(await t.node.removeMessage({ linkId: t.id, messageId: theirs.id })).toMatchObject({ refused: true, error: expect.stringMatching(/your own/) });
+    const paid: StoredMessage = { linkId: t.id, id: "me_paid", wireId: WIRE("P"), text: "💸 100 sats", sender: "me", timestamp: Date.now(), via: "datalink", delivery: "delivered", paymentId: "pay-1" };
+    await db.addMessage(paid);
+    expect(await t.node.removeMessage({ linkId: t.id, messageId: paid.id })).toMatchObject({ refused: true, error: expect.stringMatching(/payment/) });
+    const waiting: StoredMessage = { linkId: t.id, id: "me_waiting", wireId: WIRE("W"), text: "not yet", sender: "me", timestamp: Date.now(), via: "datalink", delivery: "waiting" };
+    await db.addMessage(waiting);
+    expect(await t.node.removeMessage({ linkId: t.id, messageId: waiting.id })).toEqual({ error: null });
+    expect((await t.messages()).find(m => m.id === waiting.id)).toBeUndefined();
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(t.contactEdits).toEqual([]);
+    expect((await t.messages()).find(m => m.id === theirs.id)).toBeDefined();
+  });
+
   it("an edit and its confirmation read the edited message, not the chat's whole history", async () => {
     const t = await setup();
     // As the CLI and the web app host it: the pages hear the rows that changed, not the whole history.
