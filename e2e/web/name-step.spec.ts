@@ -28,8 +28,9 @@ test("a new profile asks once what people should call it, and keeps the name", {
   await expect(input, "the field has the focus, ready to type").toBeFocused();
   await shot(page, "desktop");
   await input.fill("Casper");
-  await page.getByTestId("name-step-save").click();
+  await input.press("Enter");
   await expect(step).toBeHidden();
+  await expect(page.getByTestId("sidebar-new-chat"), "the focus goes on to New, not the page's body").toBeFocused();
   await openProfilePage(page);
   await expect(page.getByTestId("account-nickname")).toHaveValue("Casper");
   // Asked once.
@@ -56,6 +57,7 @@ test("on a phone, Skip keeps the anonymous label and is not asked again", { tag:
   await shot(page, "phone");
   await page.getByTestId("name-step-skip").click();
   await expect(step).toBeHidden();
+  await expect(page.getByTestId("sidebar-new-chat")).toBeFocused();
   await page.reload();
   await expect(page.getByTitle("New Chat")).toBeVisible();
   await expect(step).toHaveCount(0);
