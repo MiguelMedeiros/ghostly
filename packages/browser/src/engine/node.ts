@@ -1503,12 +1503,12 @@ export class GhostlyNode implements EngineImplementation {
 
   /**
    * A group's message deleted for everyone, by its author or by me: gone from this device with its file, and noted so a
-   * copy that comes again (a catch-up, a member handing it on) is not stored.
+   * copy that comes again (a catch-up, a member handing it on) is not stored. The replies here that quote it lose its line.
    */
   private async forgetGroupMessage(chat: string, id: string): Promise<void> {
     await this.groups.removed(chat.slice("group:".length), id);
     await db.deleteMessage(chat, id);
-    await this.messagesChanged(chat, [id]);
+    await this.messagesChanged(chat, [id, ...await this.forgetQuotes(chat, id, id)]);
     this.emitState();
   }
 
@@ -3457,7 +3457,7 @@ export class GhostlyNode implements EngineImplementation {
     // file and its transfer included, and at once when it is not here yet, so it is taken as gone when it comes.
     if (edit.rm) {
       const message = await db.getMessage(linkId, id);
-      if (!message || canRemove(message)) await this.forgetMessage(linkId, id);
+      if (!message || canRemove(message)) await this.forgetMessage(linkId, id, true);
       return true;
     }
     const message = await db.getMessage(linkId, id);
@@ -3879,11 +3879,11 @@ export class GhostlyNode implements EngineImplementation {
     const out = `${linkId}-out-`;
     const wireId = message.wireId ?? (message.file?.id.startsWith(out) ? message.file.id.slice(out.length) : undefined);
     // Never left this device: deleting it here is all there is.
-    if (!wireId || message.delivery === "waiting") { await this.forgetMessage(linkId, messageId); return { error: null }; }
+    if (!wireId || message.delivery === "waiting") { await this.forgetMessage(linkId, messageId, true); return { error: null }; }
     const removal: Removal = { id: messageId, wireId, e: removalNumber(message.edit?.seq), at: Date.now(), pending: true };
     live.stored = { ...live.stored, removals: withRemoval(live.stored.removals, removal) };
     await db.patchLink(linkId, { removals: live.stored.removals });
-    await this.forgetMessage(linkId, messageId);
+    await this.forgetMessage(linkId, messageId, true);
     const edits = this.editsFor(linkId);
     edits.edited(messageId);
     void edits.flush().catch(() => {});
@@ -3893,9 +3893,9 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * Forgets one message of a chat on this device, the bytes of its file and any transfer of it, and keeps its id so a
    * copy that comes again is not stored: a delete here, or the contact's own removal (WISP 400 § Delete for everyone),
-   * also of a message not here yet.
+   * also of a message not here yet. `removed`: deleted for everyone, so the replies here that quote it lose its line too.
    */
-  private async forgetMessage(linkId: string, messageId: string): Promise<void> {
+  private async forgetMessage(linkId: string, messageId: string, removed = false): Promise<void> {
     const live = this.links.get(linkId);
     if (!live) return;
     live.stored = {
@@ -3931,8 +3931,22 @@ export class GhostlyNode implements EngineImplementation {
     }
     await db.deleteMessage(linkId, messageId);
     live.lastMessageAt = (await db.getMessagePage(linkId, { limit: 1 })).messages[0]?.timestamp ?? 0;
-    await this.messagesChanged(linkId, [messageId]);
+    const quoting = removed ? await this.forgetQuotes(linkId, messageId, replyRef(message ?? { id: messageId, linkId })) : [];
+    await this.messagesChanged(linkId, [messageId, ...quoting]);
     this.emitState();
+  }
+
+  /**
+   * A message deleted for everyone leaves no line of it here (WISP 400 § Delete for everyone): the replies of the chat
+   * that quote it keep the quote's id and who wrote it, which say it was deleted, and lose its snippet. The chat is
+   * read whole: a removal is rare. The ids of the replies changed.
+   */
+  private async forgetQuotes(linkId: string, messageId: string, ref: string | undefined): Promise<string[]> {
+    const quotes = (reply: MessageReply | undefined) => !!reply && (reply.messageId === messageId || (ref !== undefined && reply.id === ref));
+    const ids = (await db.getMessages(linkId)).filter(m => quotes(m.replyTo) && (m.replyTo!.snippet || m.replyTo!.messageId !== messageId)).map(m => m.id);
+    if (!ids.length) return [];
+    await db.patchMessages(linkId, ids, m => quotes(m.replyTo) ? { replyTo: { ...m.replyTo!, snippet: "", messageId } } : null);
+    return ids;
   }
 
   /** Local id of a file we send: the id on the wire is ours too, but lives in its own key space. */
