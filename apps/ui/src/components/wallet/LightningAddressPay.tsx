@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { parseLightningDestination } from "@ghostly/core";
 import type { LightningAddressInfo, WalletPlatform } from "../../lib/platform";
 import { CASHU_MINT_SOURCE, holdsLess } from "../walletCardData";
 import { ConfirmRealMoney } from "../ConfirmRealMoney";
@@ -136,10 +137,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   );
 }
 
-/** The host that will be asked, from what was pasted: an address's domain, or an LNURL's host when it is plain (null: not plain). */
+/** The host that will be asked, read as the lookup reads it: an address's domain, or an LNURL's host, bech32 or plain (null: not readable). */
 function domainOf(text: string): string | null {
-  const at = text.lastIndexOf("@");
-  if (at > 0) return text.slice(at + 1);
-  const lnurlp = /^lnurlp:\/\/([^/?#]+)/i.exec(text.trim());
-  return lnurlp ? lnurlp[1] : null;
+  try { return parseLightningDestination(text)?.domain ?? null; } catch { return null; }
 }
