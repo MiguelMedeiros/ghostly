@@ -93,7 +93,7 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
    </Block>}
    <Row label={t("wallet.panel.autoRenewal")} hint={t("wallet.bark.renewalHint")}><span className="text-sm text-text-secondary">{t("wallet.panel.on")}</span></Row>
    {bark.terms && <Row label={t("wallet.bark.terms")} hint={t("wallet.bark.termsHint")}><a className="text-sm text-link underline" {...externalLinkProps(bark.terms)} data-testid="bark-terms">{t("wallet.bark.read")}</a></Row>}
-   <BackupRows name="Bark" busy={busy} run={run} canReplace={canReplace} focusFirst={backupNow && real}
+   <BackupRows name="Bark" busy={busy} running={running} run={run} canReplace={canReplace} focusFirst={backupNow && real}
     reveal={async () => (await wallet.barkBackup()).mnemonic} exportBackup={pw => wallet.barkExportBackup(pw)}
     restorePhrase={mnemonic => use(network, { provider: bark.provider, explorer: NETWORKS[network].explorer, mnemonic })} restoreFile={(text, pw) => wallet.barkRestoreBackup(text, pw)} />
    <Notice>{t("wallet.bark.phraseNote")}</Notice></>}
