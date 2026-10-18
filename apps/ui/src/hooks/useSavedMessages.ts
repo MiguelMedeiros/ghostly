@@ -42,8 +42,12 @@ function soon(): void {
   timer = setTimeout(() => { timer = null; if (stop) read(); }, SETTLE_MS);
 }
 
-/** The chats and groups there are: one going takes its saved messages with it. */
-const chatIds = (state: EngineState | null) => `${state?.links.map((l) => l.id).join(",") ?? ""}|${state?.groups.map((g) => g.id).join(",") ?? ""}`;
+/**
+ * The chats and groups there are: one going takes its saved messages with it. A set, since the engine orders groups by
+ * their last message: a message moving a group up the list changes nothing here.
+ */
+const chatIds = (state: EngineState | null) => new Set([...state?.links.map((l) => l.id) ?? [], ...state?.groups.map((g) => `group:${g.id}`) ?? []]);
+const sameIds = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.size === b.size && [...a].every((id) => b.has(id));
 
 function start(): () => void {
   let ids = chatIds(engine.state);
@@ -55,7 +59,7 @@ function start(): () => void {
   });
   const offState = engine.subscribe(() => {
     const next = chatIds(engine.state);
-    if (next === ids) return;
+    if (sameIds(next, ids)) return;
     ids = next;
     soon();
   });
