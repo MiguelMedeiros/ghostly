@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MoneyQr } from "./MoneyQr";
 import { formatPaymentAmount, parsePaymentAmount, type Bolt11Invoice, type PaymentReview as Review, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
 import { useWalletPlatform } from "../hooks/useServicesPlatform";
@@ -22,9 +22,10 @@ import { useAmountText } from "../hooks/useAmountText";
 import { problemText, type Problem } from "../lib/problemText";
 import { qrFits } from "../lib/qrFits";
 import { Notice } from "./ui/Notice";
+import { focusLost, working } from "../lib/focus";
 
 const button =
-  "px-3 py-1.5 max-md:min-h-11 bg-accent text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
+  "px-3 py-1.5 max-md:min-h-11 bg-accent text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress";
 const quiet = "px-3 py-1.5 max-md:min-h-11 bg-black/20 hover:bg-black/30 rounded-lg text-xs font-bold transition-colors cursor-pointer inline-flex items-center";
 const field = "w-full rounded-lg bg-black/20 px-2.5 py-1.5 text-[13px] text-text-primary placeholder:text-text-primary/50 outline-none focus-visible:outline-2 focus-visible:outline-accent";
 
@@ -172,12 +173,24 @@ function PayStep({ wallet, fixedAmount, unit, defaultFee, feeUnit, parse, prepar
   // Typed the person's way ("1.000,5" in Portuguese); `amount` and `fee` are what they mean, or "" while unclear.
   const amountField = useAmountText(amount, setAmount, t.language ?? "en", decimals, t);
   const feeField = useAmountText(fee, setFee, t.language ?? "en", feeDecimals, t);
+  // The form takes the place of Pay, and its first field takes the keys; Cancel (or the review's Close) gives them back
+  // to Pay. The review takes them itself. Not when they went somewhere else meanwhile.
+  const step = review ? "review" : open ? "form" : "closed";
+  const payButton = useRef<HTMLButtonElement>(null), form = useRef<HTMLDivElement>(null);
+  const shownStep = useRef(step);
+  useEffect(() => {
+    if (shownStep.current === step) return;
+    shownStep.current = step;
+    if (!focusLost()) return;
+    if (step === "form") form.current?.querySelector("input")?.focus({ preventScroll: true });
+    else if (step === "closed") payButton.current?.focus({ preventScroll: true });
+  }, [step]);
   if (review) return <div className="basis-full mt-1"><PaymentReview review={review} wallet={wallet} onClose={() => { setReview(null); setOpen(false); }} /></div>;
-  if (!open) return <button className={button} data-testid={`${testId}-pay`} onClick={() => setOpen(true)}>{t("payments.invoice.pay")}</button>;
+  if (!open) return <button ref={payButton} className={button} data-testid={`${testId}-pay`} onClick={() => setOpen(true)}>{t("payments.invoice.pay")}</button>;
   let value = NaN;
   try { value = parse(amount); } catch { /* not a number yet */ }
   return (
-    <div className="basis-full space-y-1.5" data-testid={`${testId}-pay-form`}>
+    <div ref={form} className="basis-full space-y-1.5" data-testid={`${testId}-pay-form`}>
       {fixedAmount === undefined && (
         <label className="block text-[12px]">{t("payments.formats.amount", { unit })}
           <input aria-label={t("payments.formats.amountAria", { unit })} inputMode="decimal" className={field} aria-invalid={amountField.hint ? true : undefined} value={amountField.text} onChange={(e) => amountField.change(e.target.value)} data-testid="money-pay-amount" />
@@ -190,9 +203,11 @@ function PayStep({ wallet, fixedAmount, unit, defaultFee, feeUnit, parse, prepar
       <div className="flex flex-wrap gap-1.5">
         <button
           className={button}
-          disabled={busy || !(value > 0) || !fee}
+          disabled={!(value > 0) || !fee}
+          {...working(busy)}
           data-testid="money-review"
           onClick={async () => {
+            if (busy) return;
             setBusy(true); setError(null);
             try { setReview(await prepare(value, Number(fee))); }
             catch (e) { setError(problemText(e, t)); }

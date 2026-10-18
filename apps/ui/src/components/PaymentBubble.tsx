@@ -18,6 +18,7 @@ import { formatAmount, formatTokenAmount } from "../lib/amount";
 import { useAmountText } from "../hooks/useAmountText";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+import { focusLost, working } from "../lib/focus";
 
 /** A mint as a person knows it: its own name, else its host (the full URL says nothing more to them). */
 const mintLabel = (m: { url: string; name: string }) => {
@@ -55,9 +56,20 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const lnCard = useState("");
   const [mint,setMint] = useState("");
   const [feeCap,setFeeCap] = useState<string|null>(null);
-  const [busy, setBusy] = useState(false);
+  /** What is under way: the button that started it is busy (it keeps the keys), the others wait, disabled. */
+  const [running, setRunning] = useState<"review" | "lightning" | "reclaim" | null>(null);
+  const busy = running !== null;
   const [error, setError] = useState<Problem | null>(null);
   const [external, setExternal] = useState(false);
+  // The Lightning review takes Review payment's place (disabled while it is open), and its first line takes the keys;
+  // Cancel gives them back to Review payment. Not when they went somewhere else meanwhile.
+  const lnLine = useRef<HTMLParagraphElement>(null), reviewButton = useRef<HTMLButtonElement>(null);
+  const lnOpen = !!lnReview, shownLn = useRef(lnOpen);
+  useEffect(() => {
+    if (shownLn.current === lnOpen) return;
+    shownLn.current = lnOpen;
+    if (focusLost()) (lnOpen ? lnLine.current : reviewButton.current)?.focus({ preventScroll: true });
+  }, [lnOpen]);
 
   // Feedback for what happens while you watch: a payment landing, a request coming in, a confirmation.
   const state = payment?.state;
@@ -80,15 +92,16 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
 
   if (!wallet || !payment) return <span className="text-[14.2px] leading-[19px]">{fallbackText}</span>;
 
-  const run = async (task: () => Promise<void>) => {
+  const run = async (task: () => Promise<void>, key: NonNullable<typeof running>) => {
+    if (busy) return;
     setError(null);
-    setBusy(true);
+    setRunning(key);
     try {
       await task();
     } catch (e) {
       setError(problemText(e, t));
     } finally {
-      setBusy(false);
+      setRunning(null);
     }
   };
 
@@ -133,7 +146,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
   const payLightning = (confirmedReal: boolean) => run(async () => {
     await payer.payRequest(peerPubKey, payment.id, { via: "lightning", maxFee: Number(feeInput), ...(confirmedReal ? { confirmedReal } : {}) });
     setLnReview(null); setLnConfirming(false);
-  });
+  }, "lightning");
   /** What another wallet can pay: the request's invoice, or the address it carries. Ecash-only requests have nothing to show. */
   const externalUri = (() => {
     // Only an invoice for exactly what the bubble shows (and, beside an address, of the address's network), like the
@@ -150,8 +163,8 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
     return null;
   })();
   const button =
-    "px-3 py-1.5 bg-accent text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed";
-  const quiet = "px-3 py-1.5 bg-black/20 hover:bg-black/30 rounded-lg text-xs font-bold transition-colors cursor-pointer";
+    "px-3 py-1.5 bg-accent text-on-accent rounded-lg text-xs font-bold hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress";
+  const quiet = "px-3 py-1.5 bg-black/20 hover:bg-black/30 rounded-lg text-xs font-bold transition-colors cursor-pointer data-[loading]:opacity-80 data-[loading]:cursor-progress";
 
   return (
     <div
@@ -197,18 +210,18 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
           <label className="text-xs">{tokenPayment?t("payments.bubble.maxGas"):t("payments.bubble.maxFee",{unit:sats})}<FeeCapInput label={tokenPayment?t("payments.bubble.maxGas"):t("payments.bubble.maxFee",{unit:sats})} value={feeInput} onChange={setFeeCap} decimals={tokenPayment?18:0}/></label>
           {lnReview && (
             <div data-testid="payment-review" className="rounded-lg bg-black/20 p-2 space-y-1 text-xs">
-              <p className="m-0 flex items-center gap-2">{t("payments.bubble.payOverLightning", { amount: formatAmount(payment.amount, t.language), unit: sats })}<NetworkTag network={network} testId="payment-lightning-network" /></p>
+              <p ref={lnLine} tabIndex={-1} className="m-0 flex items-center gap-2 focus:outline-none" data-testid="payment-lightning-line">{t("payments.bubble.payOverLightning", { amount: formatAmount(payment.amount, t.language), unit: sats })}<NetworkTag network={network} testId="payment-lightning-network" /></p>
               <p className="m-0 text-text-primary/75">{t("payments.bubble.through", { source: lnReview.source, fee: formatAmount(lnReview.fee, t.language), unit: sats })}</p>
               {lnOver && <p className="m-0 text-danger-ink" data-testid="payment-lightning-over">{t("payments.composer.tooMuch", { amount: formatAmount(lnHolds!, t.language), unit: sats })}</p>}
               {lnConfirming && !lnOver ? <ConfirmRealMoney what={t("payments.bubble.amountSats", { amount: formatAmount(payment.amount, t.language) })} busy={busy} onSend={() => payLightning(true)} onBack={() => setLnConfirming(false)} /> : (
                 <div className="flex gap-2">
-                  <button className={button} data-testid="payment-lightning-approve" disabled={busy || lnOver} onClick={() => network === "mainnet" ? setLnConfirming(true) : payLightning(false)}>{t("payments.bubble.approve")}</button>
+                  <button className={button} data-testid="payment-lightning-approve" disabled={lnOver} {...working(running === "lightning")} onClick={() => { if (busy) return; if (network === "mainnet") setLnConfirming(true); else void payLightning(false); }}>{t("payments.bubble.approve")}</button>
                   <button className={quiet} disabled={busy} onClick={() => setLnReview(null)}>{t("common.cancel")}</button>
                 </div>
               )}
             </div>
           )}
-          <button data-testid="payment-pay" className={button} disabled={busy || !feeInput || (!payment.target && !viaLightning && !selectedMint) || !!review || !!unfinished || !!lnReview} onClick={() => run(async () => {
+          <button ref={reviewButton} data-testid="payment-pay" className={button} {...working(running === "review")} disabled={(busy && running !== "review") || !feeInput || (!payment.target && !viaLightning && !selectedMint) || !!review || !!unfinished || !!lnReview} onClick={() => run(async () => {
             if (viaLightning) {
               // What the Lightning source would spend, shown before anything is asked of it.
               const quote = await payer.quoteInvoice(payment.invoice!);
@@ -220,8 +233,8 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
             }
             const target=payment.target ?? {method:"cashu" as const,network:mintNetwork(selectedMint!) === "testnet" ? "cashu-test" as const : "bitcoin" as const,provider:selectedMint!,asset:"BTC" as const,unit:"sat" as const,address:payment.id,expiresAt:Date.now()+15*60*1000};
             setReview(await onNet.preparePayment({target,amount:payment.amount,feeCap:tokenPayment?parsePaymentAmount(feeInput,18):Number(feeInput),payee:peerPubKey,linkId:payment.linkId,requestId:payment.id}));
-          })}>
-            {busy ? t("payments.bubble.preparing") : t("payments.bubble.review")}
+          }, "review")}>
+            {running === "review" ? t("payments.bubble.preparing") : t("payments.bubble.review")}
           </button>
           </>}
           {externalUri && (
@@ -238,7 +251,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
       )}
       {/* Ecash nobody picked up is still ours, whether it went out through a review or not. */}
       {(!payment.target || payment.target.method === "cashu" || payment.target.method === "fedimint") && !isRequest && outgoing && (payment.state === "pending" || payment.state === "failed") && (
-        <button className={`${quiet} mt-2`} disabled={busy} onClick={() => run(() => wallet.reclaim(payment.id))} title={t("payments.bubble.takeBackTitle")}>
+        <button className={`${quiet} mt-2`} {...working(running === "reclaim")} onClick={() => run(() => wallet.reclaim(payment.id), "reclaim")} title={t("payments.bubble.takeBackTitle")}>
           {t("payments.bubble.takeBack")}
         </button>
       )}
