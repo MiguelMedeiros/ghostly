@@ -110,6 +110,34 @@ describe("sending a status card", () => {
   });
 });
 
+describe("removing a card (WISP 405 § Removing a card)", () => {
+  const removal = (extra: Record<string, unknown> = {}) => ({ kind: "removed", id: "relay-rotation", of: "task", ...extra });
+
+  it("is an edit of the card's message: the contact gets the removal and its text", async () => {
+    const t = await setup();
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "", card: task() });
+    await vi.waitFor(async () => expect((await t.row(sent.messageId!)).delivery).toBe("delivered"));
+    expect(await t.node.editMessage({ linkId: t.id, messageId: sent.messageId!, text: "🗑 Task removed: Fix relay rotation", card: removal() })).toEqual({ error: null, messageId: sent.messageId });
+    expect(await t.row(sent.messageId!)).toMatchObject({ text: "🗑 Task removed: Fix relay rotation", card: removal(), edit: { seq: 1 } });
+    await vi.waitFor(() => expect(t.contactEdits.at(-1)).toMatchObject({ e: 1, m: "🗑 Task removed: Fix relay rotation", sc: removal() }));
+  });
+
+  it("never goes as a message of its own, and takes back only a card of mine of that kind and id", async () => {
+    const t = await setup();
+    const before = (await db.getMessages(t.id)).length;
+    expect(await t.node.sendMessage({ linkId: t.id, text: "", card: removal() })).toMatchObject({ refused: true, error: expect.stringMatching(/a removal is an edit of the card's message/) });
+    expect((await db.getMessages(t.id)).length).toBe(before);
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "", card: task() });
+    const text = await t.node.sendMessage({ linkId: t.id, text: "just words" });
+    for (const [messageId, card] of [[sent.messageId!, removal({ id: "another-task" })], [sent.messageId!, removal({ of: "routine" })], [text.messageId!, removal()]] as const)
+      expect(await t.node.editMessage({ linkId: t.id, messageId, text: "", card }), JSON.stringify(card)).toMatchObject({ refused: true, error: expect.stringMatching(/a removal takes back a task or routine of yours/) });
+    expect((await t.row(sent.messageId!)).card).toMatchObject({ kind: "task" });
+    // Taken back once, it is no task any more: a second removal has nothing to take back.
+    expect(await t.node.editMessage({ linkId: t.id, messageId: sent.messageId!, text: "", card: removal() })).toMatchObject({ error: null });
+    expect(await t.node.editMessage({ linkId: t.id, messageId: sent.messageId!, text: "", card: removal() })).toMatchObject({ refused: true });
+  });
+});
+
 describe("a card's updates on this side", () => {
   it("keep one card and no trail of versions, however many there are", async () => {
     const t = await setup();
