@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { SEPOLIA_TEST_USDT } from "@ghostly/core";
 import type { WalletNetwork, WalletPlatform, WalletState } from "../../lib/platform";
 import type { WalletRail } from "../walletCardTypes";
@@ -89,6 +89,7 @@ export function TestCoins({ rail, network, wallet, state }: { rail: WalletRail; 
   const [asking, setAsking] = useState(false);
   const [got, setGot] = useState<ReactNode>(null);
   const [error, setError] = useState<Problem | null>(null);
+  const get = useRef<HTMLButtonElement>(null);
   const faucet = faucetFor(rail, network, state);
   if (!faucet) return null;
   const ask = async () => {
@@ -108,14 +109,16 @@ export function TestCoins({ rail, network, wallet, state }: { rail: WalletRail; 
     <Section title={t("wallet.testCoins.title")} testId="test-coins">
       {faucet.kind === "ask" ? <>
         <Row label={label} hint={faucetHint(t, faucet)}>
-          <Button data-testid="test-coins-get" disabled={asking || !!faucet.needs} aria-busy={asking || undefined} onClick={() => void ask()}>{asking ? t("wallet.testCoins.asking") : t("wallet.testCoins.get")}</Button>
+          {/* Busy, not disabled, while it asks: a disabled button drops the keys to the page, and they stay there when
+              the faucet refuses. Retry goes with the error it sits by, so it hands the keys to this button. */}
+          <Button ref={get} data-testid="test-coins-get" disabled={!!faucet.needs} loading={asking} onClick={() => void ask()}>{asking ? t("wallet.testCoins.asking") : t("wallet.testCoins.get")}</Button>
         </Row>
         {faucet.needs && <Block><Notice tone="warning" testId="test-coins-needs">{fillNodes(t("wallet.testCoins.gas"), { link: <a className="underline" {...externalLinkProps(faucet.needs.url)}>{t("wallet.testCoins.gasLink")}</a> })}</Notice></Block>}
         {got && <Block><Notice tone="success" testId="test-coins-result">{got}</Notice></Block>}
         {error && <Block>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <Notice problem={error} testId="test-coins-error" />
-            <Button data-testid="test-coins-retry" disabled={asking} onClick={() => void ask()}>{t("wallet.testCoins.retry")}</Button>
+            <Button data-testid="test-coins-retry" onClick={() => { get.current?.focus(); void ask(); }}>{t("wallet.testCoins.retry")}</Button>
           </div>
         </Block>}
       </> : (
