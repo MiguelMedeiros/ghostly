@@ -3525,7 +3525,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!queue) {
       queue = new EditQueue({
         read: () => db.getMessages(linkId),
-        row: id => db.getMessage(linkId, id),
+        rows: ids => db.getMessagesById(linkId, ids),
         ready: () => {
           const live = this.links.get(linkId), link = live?.link;
           return !!link && (link.supportsEdits || (link.textDelivery === "dht" && this.takesDhtEdits(live)));
