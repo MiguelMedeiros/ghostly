@@ -1,0 +1,10 @@
+{
+  "empty": "Aucun message enregistré",
+  "emptyHint": "Enregistrez un message depuis son menu ⋮ pour le retrouver ici. Les messages enregistrés restent sur cet appareil.",
+  "noText": "Message",
+  "open": "Ouvrir dans {{chat}} : {{text}}",
+  "rowLabel": "Messages enregistrés, {{count}}",
+  "title": "Messages enregistrés",
+  "unsave": "Retirer des enregistrés",
+  "you": "Vous"
+}

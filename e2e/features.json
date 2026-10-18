@@ -1247,6 +1247,7 @@
     "{apps/ui/src/lib/forward.ts,apps/ui/src/components/chat/ForwardDialog.tsx,apps/ui/src/hooks/useForwarding.tsx,packages/browser/src/engine/forwards.ts}": ["chat.forward","chat.forward.files"],
     "{apps/ui/src/lib/navigation.ts,apps/ui/src/hooks/useAppNavigation.ts}": ["*"],
     "{apps/ui/src/lib/replies.ts,apps/ui/src/components/chat/ReplyQuote.tsx,packages/browser/src/shared/replies.ts}": ["chat.replies","groups.replies"],
+    "{apps/ui/src/pages/Saved.tsx,apps/ui/src/components/saved/**,apps/ui/src/hooks/useSavedMessages.ts}": ["chat.saved","app.navigation","app.mobile-layout"],
     "{docs/**,**/*.md,LICENSE,preview-screenshots.png,screenshots/**}": [],
     "{packages/browser/src/engine/edits.ts,packages/browser/src/shared/edits.ts}": ["chat.edit","chat.edit.wire","groups.edit"],
     "{tools/scripts/**,.github/**,apps/website/**,integrations/**}": [],
