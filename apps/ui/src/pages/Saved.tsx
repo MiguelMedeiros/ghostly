@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { SavedMessage } from "@ghostly/browser/shared/types";
 import { PageHeader } from "../components/layout";
@@ -9,9 +9,11 @@ import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useChatTargets, type ChatTarget } from "../hooks/useChatTargets";
 import { JUMP_TO } from "../hooks/useJumpTo";
 import { useMinuteClock } from "../hooks/useMinuteClock";
+import { useSameValue } from "../hooks/useSameValue";
 import { setSaved, useSavedMessages, useSavedRead } from "../hooks/useSavedMessages";
 import { filePreview, formatListTime, previewText } from "../lib/chatList";
 import { authorName, groupPath } from "../lib/groups";
+import { sameValue } from "../lib/sameValue";
 
 /*
  * Saved messages: the messages this profile saved, from all its chats and groups, the last saved first. Kept on this
@@ -27,7 +29,7 @@ interface SavedRow { saved: SavedMessage; chat: string; path?: string; author: s
 const rowKey = ({ message }: SavedMessage) => `${message.linkId}\n${message.id}`;
 
 export function Saved() {
-  const { t, language } = useI18n();
+  const { t } = useI18n();
   const nav = useAppNavigation();
   const pageRef = useRef<HTMLDivElement>(null);
   const now = useMinuteClock(pageRef);
@@ -36,15 +38,18 @@ export function Saved() {
   const targets = useChatTargets();
   const groups = useSyncExternalStore(subscribeEngine, engineGroups);
 
-  const rows = useMemo(() => {
+  // The engine sends its chats and groups anew on every state (up to 20 a second while a file moves): the rows stay the
+  // same ones while what they show does, and a row is drawn again only when its own content changes (`SavedItem`).
+  const rows = useSameValue(useMemo(() => {
     const byTarget = new Map<string, ChatTarget>(targets.flatMap((target) => target.target ? [[target.target, target]] : []));
+    const byGroup = new Map(groups?.map((g) => [`group:${g.id}`, g]));
     return saved.flatMap((s): SavedRow[] => {
       const { message } = s, target = byTarget.get(message.linkId);
       // A voice message or a video in this app's language, as the chat list says it: the history keeps it in English.
       const text = filePreview(message.file, t) ?? (previewText(message.text, t) || message.file?.name || t("saved.noText"));
       if (message.linkId.startsWith("group:")) {
         // A group this device cannot write in is not a target of a forward, and still has its saved messages.
-        const group = groups?.find((g) => `group:${g.id}` === message.linkId);
+        const group = byGroup.get(message.linkId);
         if (!group) return [];
         const author = message.sender === "me" ? t("saved.you") : message.member ? authorName(group, message.member, t) : group.name;
         return [{ saved: s, chat: group.name || t("group.chat.unnamed"), path: groupPath(group.id), author, text }];
@@ -52,7 +57,7 @@ export function Saved() {
       if (!target) return [];
       return [{ saved: s, chat: target.name, path: target.path, author: message.sender === "me" ? t("saved.you") : target.name, text }];
     });
-  }, [saved, targets, groups, t]);
+  }, [saved, targets, groups, t]));
 
   // An unsave takes its row, and the button with the focus, away: the focus goes to the row now in its place (the one
   // before it at the end), or to the empty list, not to the page.
@@ -67,12 +72,12 @@ export function Saved() {
     const opens = listRef.current?.querySelectorAll<HTMLElement>("[data-testid=saved-open]");
     (opens?.length ? opens[Math.min(gone.index, opens.length - 1)] : emptyRef.current)?.focus();
   }, [rows]);
-  const unsave = (row: SavedRow, index: number) => {
+  const unsave = useCallback((row: SavedRow, index: number) => {
     unsaved.current = { key: rowKey(row.saved), index };
     void setSaved(row.saved.message.linkId, row.saved.message.id, true);
-  };
+  }, []);
 
-  const open = (row: SavedRow) => { if (row.path) nav.conversation(row.path, { [JUMP_TO]: row.saved.message.id }); };
+  const open = useCallback((row: SavedRow) => { if (row.path) nav.conversation(row.path, { [JUMP_TO]: row.saved.message.id }); }, [nav]);
 
   return (
     <div ref={pageRef} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-chat-bg" data-testid="saved-page">
@@ -85,29 +90,35 @@ export function Saved() {
         </div>
       ) : (
         <ul ref={listRef} data-testid="saved-list" aria-label={t("saved.title")} className="m-0 flex-1 list-none divide-y divide-border overflow-y-auto p-0">
-          {rows.map((row, index) => {
-            const { message } = row.saved;
-            const time = formatListTime(message.timestamp, now, language, t);
-            return (
-              <li key={rowKey(row.saved)} data-testid="saved-row" data-message-id={message.id} className="flex items-stretch">
-                <button type="button" data-testid="saved-open" onClick={() => open(row)} aria-label={t("saved.open", { chat: row.chat, text: row.text })}
-                  className="flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5 px-4 py-2.5 text-start hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent max-md:min-h-14">
-                  <span className="flex min-w-0 items-baseline gap-2 text-xs text-text-muted">
-                    <bdi data-testid="saved-chat" className="min-w-0 truncate font-medium text-text-secondary">{row.chat}</bdi>
-                    {row.author !== row.chat && <bdi data-testid="saved-author" className="min-w-0 truncate">{row.author}</bdi>}
-                    <span className="ms-auto shrink-0 tabular-nums">{time}</span>
-                  </span>
-                  <bdi data-testid="saved-text" className="line-clamp-2 text-sm text-text-primary">{row.text}</bdi>
-                </button>
-                <button type="button" data-testid="saved-unsave" onClick={() => unsave(row, index)} aria-label={t("saved.unsave")} title={t("saved.unsave")}
-                  className="grid w-12 shrink-0 cursor-pointer place-items-center text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent">
-                  <SavedIcon size={18} filled />
-                </button>
-              </li>
-            );
-          })}
+          {rows.map((row, index) => <SavedItem key={rowKey(row.saved)} row={row} index={index} now={now} onOpen={open} onUnsave={unsave} />)}
         </ul>
       )}
     </div>
   );
 }
+
+/** One saved message, drawn again only when what it shows changes, by content (`sameValue`), or the minute does. */
+const SavedItem = memo(function SavedItem({ row, index, now, onOpen, onUnsave }: {
+  row: SavedRow; index: number; now: number; onOpen(row: SavedRow): void; onUnsave(row: SavedRow, index: number): void;
+}) {
+  const { t, language } = useI18n();
+  const { message } = row.saved;
+  const time = formatListTime(message.timestamp, now, language, t);
+  return (
+    <li data-testid="saved-row" data-message-id={message.id} className="flex items-stretch">
+      <button type="button" data-testid="saved-open" onClick={() => onOpen(row)} aria-label={t("saved.open", { chat: row.chat, text: row.text })}
+        className="flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5 px-4 py-2.5 text-start hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent max-md:min-h-14">
+        <span className="flex min-w-0 items-baseline gap-2 text-xs text-text-muted">
+          <bdi data-testid="saved-chat" className="min-w-0 truncate font-medium text-text-secondary">{row.chat}</bdi>
+          {row.author !== row.chat && <bdi data-testid="saved-author" className="min-w-0 truncate">{row.author}</bdi>}
+          <span className="ms-auto shrink-0 tabular-nums">{time}</span>
+        </span>
+        <bdi data-testid="saved-text" className="line-clamp-2 text-sm text-text-primary">{row.text}</bdi>
+      </button>
+      <button type="button" data-testid="saved-unsave" onClick={() => onUnsave(row, index)} aria-label={t("saved.unsave")} title={t("saved.unsave")}
+        className="grid w-12 shrink-0 cursor-pointer place-items-center text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent">
+        <SavedIcon size={18} filled />
+      </button>
+    </li>
+  );
+}, sameValue);
