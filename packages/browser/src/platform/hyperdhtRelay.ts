@@ -228,25 +228,29 @@ function attach(socket: SecretSocket, channels: Set<RelayedChannel>): Promise<Bo
     if (socket.opened) void socket.opened.then(ok => { if (ok) opened(); else reject(new Error("Noise handshake failed")); });
     else socket.once("open", opened);
     socket.on("data", (chunk: Uint8Array) => {
-      const joined = new Uint8Array(buffer.length + chunk.length);
-      joined.set(buffer); joined.set(chunk, buffer.length);
-      buffer = joined;
-      while (buffer.length >= 4) {
-        const word = new DataView(buffer.buffer, buffer.byteOffset, 4).getUint32(0);
+      // Frames are read by offset and only the partial one left is kept (a copy, once per chunk), as on the
+      // Desktop: copying the rest of the buffer per frame made a burst of tiny frames cost quadratic time.
+      let joined = chunk;
+      if (buffer.length) {
+        joined = new Uint8Array(buffer.length + chunk.length);
+        joined.set(buffer); joined.set(chunk, buffer.length);
+      }
+      let offset = 0;
+      while (joined.length - offset >= 4) {
+        const word = new DataView(joined.buffer, joined.byteOffset + offset, 4).getUint32(0);
         const binary = word >= BINARY, length = word % BINARY;
         // A binary frame before the preface is another protocol.
         if (length === 0 || length > MAX_FRAME || (binary && !prefaced)) { fail(new Error("Invalid frame length")); return; }
-        if (buffer.length < 4 + length) break;
+        if (joined.length - offset < 4 + length) break;
+        const payload = joined.subarray(offset + 4, offset + 4 + length);
+        offset += 4 + length;
         if (binary) {
-          const message = buffer.slice(4, 4 + length);
-          buffer = buffer.slice(4 + length);
-          if (!channel.receive(message)) { fail(new Error("Receive queue exceeded")); return; }
+          if (!channel.receive(new Uint8Array(payload))) { fail(new Error("Receive queue exceeded")); return; }
           continue;
         }
         let text: string;
-        try { text = decoder.decode(buffer.subarray(4, 4 + length)); }
+        try { text = decoder.decode(payload); }
         catch { fail(new Error("Invalid UTF-8 frame")); return; }
-        buffer = buffer.slice(4 + length);
         if (!prefaced) {
           if (text !== PREFACE) { fail(new Error("Unexpected application protocol")); return; }
           prefaced = true; clearTimeout(timer);
@@ -254,6 +258,7 @@ function attach(socket: SecretSocket, channels: Set<RelayedChannel>): Promise<Bo
             identities: [hex(socket.publicKey), hex(socket.remotePublicKey)].sort() as [string, string] } });
         } else if (!channel.receive(text)) { fail(new Error("Receive queue exceeded")); return; }
       }
+      buffer = new Uint8Array(joined.subarray(offset));
     });
   });
 }
