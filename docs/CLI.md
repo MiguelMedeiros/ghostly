@@ -275,7 +275,9 @@ ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}
   tag chips, parts stacked under their task); older apps ignore them. Updates merge, at
   most one per card every 2.5 s ([WISP 405 · Status Cards](wisps/405-status-cards.md)). A routine the same way:
   `ghostly routine send <chat|group> --name "…" --schedule "every day 01:00" --next <date>`, then
-  `ghostly routine update <chat|group> <routine> --run ok` after each run.
+  `ghostly routine update <chat|group> <routine> --run ok` after each run. `ghostly task remove <chat|group> <task>` (or
+  `routine remove`) takes a card back: it goes from the chat and the Tasks board of everyone in it.
+  `ghostly task remove --all` lists every task and routine card you sent, and `--all --yes` takes them all back.
 - A bot's usage: `ghostly usage send <chat> --label Claude --left 62 --window "5 h" --resets <date>` (or `--all` for
   every 1:1 chat). People see a small meter on the chat's row and in its header, amber under 20%, red under 5%. The
   first report sends the card and later ones edit it in place; each report is whole. Where a Claude Code bot reads its

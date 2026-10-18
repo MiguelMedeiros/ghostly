@@ -1,0 +1,1 @@
+The headless CLI takes cards back: `task remove` and `routine remove` edit every message of the card into a removed card, and `task remove --all --yes` does it for every task and routine the bot sent. No field and no rule on the wire changed.

@@ -18,7 +18,7 @@ const LOCAL_WRITES = ["chat remove", "chat rename", "identity cancel", "service 
 const ONLINE = [
   "profile picture",
   "button press", "button update", "chat connect", "chat disconnect", "chat transport", "chat verify", "chat wait",
-  "forward", "invite create", "invite join", "message delete", "message retry", "pin", "react", "routine send", "routine update", "task send",
+  "forward", "invite create", "invite join", "message delete", "message retry", "pin", "react", "routine remove", "routine send", "routine update", "task remove", "task send",
   "task update", "typing", "usage send",
   "group accept", "group admin", "group create", "group decline", "group forget", "group hub", "group invite", "group join", "group leave",
   "group link", "group picture", "group react", "group remove", "group rename", "group rotate", "group typing",

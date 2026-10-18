@@ -1,4 +1,4 @@
-import { STATUS_CARD_LIMITS, cardLine, checkStatusCard, randomBytes, toBase64Url, type StatusCard } from "@ghostly/core";
+import { STATUS_CARD_LIMITS, cardLine, checkStatusCard, randomBytes, removedCardText, toBase64Url, type RemovableKind, type RoutineCard, type StatusCard, type TaskCard } from "@ghostly/core";
 import type { StoredMessage } from "@ghostly/browser/shared/types";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 import { bool, chatOrGroup, node, num, oneOf, state, str, type ApiContext, type Method, type Params } from "./apiKit";
@@ -292,6 +292,78 @@ export async function flushCardUpdates(ctx: ApiContext): Promise<void> {
   await Promise.all(waiting.map((pace) => pace.flushed));
 }
 
+/** An update still waiting for its time on this message goes nowhere: the card is being taken back. */
+function dropPace(ctx: ApiContext, key: string): void {
+  const pace = paces.get(ctx)?.get(key);
+  if (!pace?.timer) return;
+  clearTimeout(pace.timer);
+  pace.timer = undefined; pace.next = undefined; pace.flush = undefined;
+}
+
+/** A card of mine to take back: its chat or group (`group:<id>`), its message, and the card it carries now. */
+type Carried = { linkId: string; messageId: string; card: TaskCard | RoutineCard };
+
+const where = (linkId: string) => (linkId.startsWith("group:") ? { group: linkId.slice("group:".length) } : { chat: linkId });
+
+/**
+ * Every message of mine that carries a task or a routine, from the engine's index of card messages (never the chats'
+ * histories), in one chat or group when `linkId` is given, of one kind and id when `kind`/`id` are.
+ */
+async function myCards(ctx: ApiContext, filter: { linkId?: string; kind?: RemovableKind; id?: string }): Promise<Carried[]> {
+  const rows = await node(ctx).statusCardIndex();
+  return rows.flatMap((row) => row.sender === "me" && (row.card.kind === "task" || row.card.kind === "routine")
+    && (filter.linkId === undefined || row.linkId === filter.linkId) && (filter.kind === undefined || row.card.kind === filter.kind) && (filter.id === undefined || row.card.id === filter.id)
+    ? [{ linkId: row.linkId, messageId: row.id, card: row.card }] : []);
+}
+
+/**
+ * Takes a card back (WISP 405 § Removing a card): its message edited into a removed card, its text saying what went.
+ * An update of it still waiting for its time is dropped first, so it never brings the card back.
+ */
+async function removeOne(ctx: ApiContext, carried: Carried): Promise<void> {
+  const { linkId, messageId, card } = carried;
+  dropPace(ctx, `${linkId}\n${messageId}`);
+  carriersOf(ctx).delete(carrierKey(linkId, card.kind, card.id));
+  const removal: StatusCard = { kind: "removed", id: card.id, of: card.kind };
+  const result = await node(ctx).editMessage({ linkId, messageId, text: removedCardText(card.kind, card.kind === "task" ? card.title : card.name), card: removal });
+  if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
+}
+
+/**
+ * `task remove` / `routine remove`: one card of mine in a chat or group, every message of it (a card sent again under
+ * its id is one card, and an older message would stand for it again). `all` (`task remove --all`): every task and
+ * routine of mine, in that chat or group or everywhere; it only lists them unless `yes` is given.
+ */
+async function removeCards(ctx: ApiContext, params: Params, kind: RemovableKind): Promise<Record<string, unknown>> {
+  const ref = str(params, "chat");
+  const target = ref === undefined ? undefined : chatOrGroup(ctx, ref);
+  if (!bool(params, "all")) {
+    if (!target) throw new CliError("bad_request", "chat is required");
+    const id = str(params, kind, true);
+    const found = await myCards(ctx, { linkId: target.linkId, kind, id });
+    if (!found.length) throw new CliError("not_found", `No ${kind} ${JSON.stringify(id)} of yours in this ${target.group ? "group" : "chat"}`);
+    for (const carried of found) await removeOne(ctx, carried);
+    return answer(target, kind, id, found.at(-1)!.messageId, { removed: found.length, messageIds: found.map((c) => c.messageId) });
+  }
+  if (kind !== "task") throw new CliError("bad_request", "--all is task remove's: it takes every task and routine of yours");
+  if (str(params, "task")) throw new CliError("bad_request", "Name a task or give --all, not both");
+  const found = await myCards(ctx, { linkId: target?.linkId });
+  const cards = found.map((c) => ({ ...where(c.linkId), kind: c.card.kind, id: c.card.id, title: c.card.kind === "task" ? c.card.title : c.card.name, messageId: c.messageId }));
+  if (!bool(params, "yes")) return { dryRun: true, cards, count: cards.length };
+  // A card that refuses is said (its `{code, message}`), not fatal, unless every card refused: then nothing was removed.
+  const removed: typeof cards = [], failed: { card: typeof cards[number]; error: CliError }[] = [];
+  for (const [i, carried] of found.entries()) {
+    try { await removeOne(ctx, carried); removed.push(cards[i]!); }
+    catch (error) { failed.push({ card: cards[i]!, error: asCliError(error) }); }
+  }
+  const refusals = failed.map((f) => ({ ...f.card, error: f.error.toJSON() }));
+  if (failed.length && !removed.length) {
+    const codes = new Set(failed.map((f) => f.error.code));
+    throw new CliError(codes.size === 1 ? failed[0]!.error.code : "refused", `No card was removed: ${failed.map((f) => `${f.card.kind} ${f.card.id}: ${f.error.message}`).join("; ")}`, { failed: refusals });
+  }
+  return { dryRun: false, removed, count: removed.length, ...(failed.length && { failed: refusals }) };
+}
+
 /** A usage card's fields: all of them are said again by each report, so one not given goes from the card. */
 const USAGE_FIELDS = ["left", "used", "limit", "label", "account", "window", "resetsAt", "updatedAt", "windows"] as const;
 
@@ -355,6 +427,10 @@ export const STATUS_CARD_METHODS: Record<string, Method> = {
   "task.send": (ctx, params) => sendCard(ctx, params, "task"),
   /** A task's update: the fields given, merged over its latest state, paced one per `CARD_UPDATE_GAP_MS`. */
   "task.update": (ctx, params) => updateCard(ctx, params, "task"),
+  /** WISP 405 § Removing a card: a task of mine taken back, every message of it; `all` lists (or, with `yes`, takes back) every task and routine. */
+  "task.remove": (ctx, params) => removeCards(ctx, params, "task"),
+  /** A routine of mine taken back, as a task. */
+  "routine.remove": (ctx, params) => removeCards(ctx, params, "routine"),
   /** A routine card (its schedule, state, runs); `run` records one. */
   "routine.send": (ctx, params) => sendCard(ctx, params, "routine"),
   /** A routine's update, as a task's; `run` records a run as its last and the newest of its recent ones. */

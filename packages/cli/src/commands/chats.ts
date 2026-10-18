@@ -108,6 +108,12 @@ export const commands: Record<string, Command> = {
     args: ["chat", "message", "emoji...?"], options: { remove: { type: "boolean", description: "Take your reaction back" } },
     params: ({ options }, a) => ({ chat: a.chat, message: a.message, emoji: a.emoji, remove: options.remove === true }),
   },
+  "routine remove": {
+    method: "routine.remove", usage: "routine remove <chat|group> <routine>",
+    summary: "Take back a routine card you sent: it goes from the chat and the Tasks views of everyone in it (every message of it)",
+    args: ["chat", "routine"],
+    params: (_, a) => ({ chat: a.chat, routine: a.routine }),
+  },
   "routine send": {
     method: "routine.send", usage: "routine send <chat|group> --name <name> --schedule \"every day 01:00\" [--cron \"0 1 * * *\"] [--state active|paused] [--next <time>] [--run ok|failed|skipped[:summary]] [--link url]... [--id id] [--json json|-|file] [--force] [--wait none|sent|delivered] [--timeout s]",
     summary: "Send a routine card (something a bot runs on a schedule: its last run and the next) to a chat or group",
@@ -121,6 +127,23 @@ export const commands: Record<string, Command> = {
     args: ["chat", "routine"],
     options: { ...routineOptions, wait: { type: "string", description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" }, timeout: groupWait.timeout },
     params: ({ options }, a) => ({ chat: a.chat, routine: a.routine, card: routineFields(options), run: runOf(options.run), text: options.text, force: options.force === true, wait: options.wait, timeout: options.timeout }),
+  },
+  "task remove": {
+    method: "task.remove", usage: "task remove <chat|group> <task> | --all [<chat|group>] [--yes]",
+    summary: "Take back a task card you sent: it goes from the chat and the Tasks views of everyone in it; --all lists every task and routine of yours (in one chat or group, or everywhere) and --yes takes them back",
+    args: ["chat?", "task?"],
+    options: {
+      all: { type: "boolean", description: "Every task and routine card you sent, in the chat or group named or everywhere: a list only, unless --yes" },
+      yes: { type: "boolean", description: "With --all: take them back" },
+    },
+    params: ({ options }, given) => {
+      // Optional words fill from the last: one given alone is the chat (`--all <chat>`), not a task.
+      const a = given.chat === undefined ? { chat: given.task, task: undefined } : given;
+      if (options.all !== true && (!a.chat || !a.task)) throw new CliError("usage", "Name a chat or group and a task, or give --all: ghostly task remove <chat|group> <task> | --all [<chat|group>] [--yes]");
+      if (options.all === true && a.task) throw new CliError("usage", "Name a task or give --all, not both: ghostly task remove <chat|group> <task> | --all [<chat|group>] [--yes]");
+      if (options.yes === true && options.all !== true) throw new CliError("usage", "--yes goes with --all: a task named is taken back at once");
+      return { chat: a.chat, task: a.task, all: options.all === true, yes: options.yes === true };
+    },
   },
   "task send": {
     method: "task.send", usage: "task send <chat|group> --title <title> [--status s] [--progress n | --steps a/b] [--step \"...\"] [--item state:text]... [--pr-url url --pr-number n --additions n --deletions n --files n --pr-state s --pr-checks c] [--branch b] [--tag label]... [--parent task] [--link url]... [--id id] [--json json|-|file] [--force] [--wait none|sent|delivered] [--timeout s]",

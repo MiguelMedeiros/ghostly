@@ -42,6 +42,8 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
       return { error: null, messageId };
     }),
     groupTaken: vi.fn(() => 1),
+    statusCardIndex: vi.fn(async () => [...rows.values()].flat().flatMap((m) => m.card?.kind === "task" || m.card?.kind === "routine" || m.card?.kind === "usage"
+      ? [{ linkId: m.linkId, id: m.id, card: m.card, sender: m.sender, timestamp: m.timestamp }] : [])),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
   return { ctx, node, rows: of, store };
@@ -421,6 +423,100 @@ describe("routines", () => {
     expect(card.lastRun.summary).toBe("run 11");
     expect(card.runs.map(r => r.summary)).toEqual(Array.from({ length: 10 }, (_, i) => `run ${11 - i}`));
     await expect(callApi(ctx, "routine.update", { chat: "Coordinator", routine: "nightly", card: { state: "sleeping" } })).rejects.toMatchObject({ code: "bad_request", message: /state is one of/ });
+  });
+});
+
+describe("task remove and routine remove (WISP 405 § Removing a card)", () => {
+  const edits = (node: ReturnType<typeof fake>["node"]) => node.editMessage.mock.calls.map(([call]) => call as { linkId: string; messageId: string; text: string; card: StatusCard });
+
+  it("read a task or --all from the command line, and refuse what names neither or both", () => {
+    expect(params("task remove", ["Coordinator", "relay-rotation"])).toEqual({ chat: "Coordinator", task: "relay-rotation", all: false, yes: false });
+    expect(params("task remove", ["--all"])).toEqual({ chat: undefined, task: undefined, all: true, yes: false });
+    expect(params("task remove", ["g1", "--all", "--yes"])).toEqual({ chat: "g1", task: undefined, all: true, yes: true });
+    expect(params("routine remove", ["g1", "bughunt"])).toEqual({ chat: "g1", routine: "bughunt" });
+    expect(() => params("task remove", ["Coordinator"])).toThrow(/Name a chat or group and a task, or give --all/);
+    expect(() => params("task remove", ["Coordinator", "t1", "--all"])).toThrow(/not both/);
+    expect(() => params("task remove", ["Coordinator", "t1", "--yes"])).toThrow(/--yes goes with --all/);
+  });
+
+  it("edit every message of mine that carries the task into its removal, with a text that names it", async () => {
+    const { ctx, node, rows } = fake();
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Fix relay rotation" } });
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "other", title: "Other" } });
+    // The same card sent again as a new message: an older one would stand for its id again if it stayed.
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Fix relay rotation, again" } });
+    const result = await callApi(ctx, "task.remove", { chat: "Coordinator", task: "t1" }) as Record<string, unknown>;
+    expect(result).toEqual({ chat: "chat-one", task: "t1", messageId: "me_3", removed: 2, messageIds: ["me_1", "me_3"] });
+    expect(edits(node)).toEqual([
+      { linkId: "chat-one", messageId: "me_1", text: "🗑 Task removed: Fix relay rotation", card: { kind: "removed", id: "t1", of: "task" } },
+      { linkId: "chat-one", messageId: "me_3", text: "🗑 Task removed: Fix relay rotation, again", card: { kind: "removed", id: "t1", of: "task" } },
+    ]);
+    expect(rows("chat-one").map((m) => m.card?.kind)).toEqual(["removed", "task", "removed"]);
+    // Taken back, it is no task of mine any more: neither an update nor a second removal finds it.
+    await expect(callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { progress: 5 } })).rejects.toMatchObject({ code: "not_found" });
+    await expect(callApi(ctx, "task.remove", { chat: "Coordinator", task: "t1" })).rejects.toMatchObject({ code: "not_found", message: /No task "t1" of yours in this chat/ });
+  });
+
+  it("take back a routine in a group, and never someone else's card or one of another kind", async () => {
+    const { ctx, node, rows } = fake();
+    await callApi(ctx, "routine.send", { chat: "Sala de Máquinas", card: { id: "bughunt", name: "Nightly bug hunt", schedule: "every day 01:00" } });
+    const theirs = (checkStatusCard({ kind: "routine", id: "theirs", name: "Theirs", schedule: "daily", state: "active" }) as { card: StatusCard }).card;
+    rows("group:g1").push({ linkId: "group:g1", id: "peer_1", text: "x", sender: "peer", timestamp: 1, via: "datalink", card: theirs } as StoredMessage);
+    await expect(callApi(ctx, "task.remove", { chat: "Sala de Máquinas", task: "bughunt" })).rejects.toMatchObject({ code: "not_found" });
+    await expect(callApi(ctx, "routine.remove", { chat: "Sala de Máquinas", routine: "theirs" })).rejects.toMatchObject({ code: "not_found" });
+    expect(await callApi(ctx, "routine.remove", { chat: "Sala de Máquinas", routine: "bughunt" })).toMatchObject({ group: "g1", routine: "bughunt", removed: 1 });
+    expect(edits(node)).toEqual([{ linkId: "group:g1", messageId: "me_1", text: "🗑 Routine removed: Nightly bug hunt", card: { kind: "removed", id: "bughunt", of: "routine" } }]);
+  });
+
+  it("drop an update still waiting for its time, so it never brings the card back", async () => {
+    const { ctx, node, rows } = fake("daemon");
+    vi.useFakeTimers();
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "Fix" } });
+    expect(await callApi(ctx, "task.update", { chat: "Coordinator", task: "t1", card: { progress: 10 } })).toMatchObject({ queued: true });
+    await callApi(ctx, "task.remove", { chat: "Coordinator", task: "t1" });
+    await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS * 2);
+    await flushCardUpdates(ctx);
+    expect(node.editMessage).toHaveBeenCalledTimes(1);
+    expect(rows("chat-one")[0]!.card).toEqual({ kind: "removed", id: "t1", of: "task" });
+  });
+
+  it("--all lists every task and routine of mine, here or everywhere, and takes them back only with --yes", async () => {
+    const { ctx, node, rows } = fake();
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "One" } });
+    await callApi(ctx, "routine.send", { chat: "Coordinator", card: { id: "r1", name: "Nightly", schedule: "every day 01:00" } });
+    await callApi(ctx, "task.send", { chat: "Sala de Máquinas", card: { id: "t2", title: "Two" } });
+    await callApi(ctx, "usage.send", { chat: "Coordinator", card: { left: 50 } });
+    const listed = await callApi(ctx, "task.remove", { all: true }) as { dryRun: boolean; count: number; cards: unknown[] };
+    expect(listed).toEqual({ dryRun: true, count: 3, cards: [
+      { chat: "chat-one", kind: "task", id: "t1", title: "One", messageId: "me_1" },
+      { chat: "chat-one", kind: "routine", id: "r1", title: "Nightly", messageId: "me_2" },
+      { group: "g1", kind: "task", id: "t2", title: "Two", messageId: "me_3" },
+    ] });
+    expect(node.editMessage).not.toHaveBeenCalled();
+    // One chat only: the group's task stays.
+    expect(await callApi(ctx, "task.remove", { chat: "Coordinator", all: true, yes: true })).toMatchObject({ dryRun: false, count: 2 });
+    expect(rows("group:g1")[0]!.card?.kind).toBe("task");
+    expect(rows("chat-one").map((m) => m.card?.kind)).toEqual(["removed", "removed", "usage"]);
+    expect(await callApi(ctx, "task.remove", { all: true, yes: true })).toMatchObject({ count: 1, removed: [{ group: "g1", id: "t2" }] });
+    expect(await callApi(ctx, "task.remove", { all: true })).toEqual({ dryRun: true, count: 0, cards: [] });
+  });
+
+  it("--all says a card that refused and goes on; with every card refused, the call fails", async () => {
+    const { ctx, node } = fake();
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t1", title: "One" } });
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t2", title: "Two" } });
+    node.editMessage.mockImplementationOnce(async () => ({ error: "This message was edited 5000 times, the most one takes.", refused: true } as never));
+    const result = await callApi(ctx, "task.remove", { all: true, yes: true }) as { count: number; failed: { id: string; error: { code: string } }[] };
+    expect(result.count).toBe(1);
+    expect(result.failed).toMatchObject([{ id: "t1", error: { code: "refused" } }]);
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { id: "t3", title: "Three" } });
+    node.editMessage.mockImplementationOnce(async () => ({ error: "No such chat", refused: true } as never)).mockImplementationOnce(async () => ({ error: "No such chat", refused: true } as never));
+    await expect(callApi(ctx, "task.remove", { all: true, yes: true })).rejects.toMatchObject({ code: "refused", message: /No card was removed: task t1: .*task t3/ });
+  });
+
+  it("--all is task remove's alone", async () => {
+    const { ctx } = fake();
+    await expect(callApi(ctx, "routine.remove", { all: true })).rejects.toMatchObject({ code: "bad_request", message: /--all is task remove's/ });
   });
 });
 
