@@ -4,6 +4,37 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.4.2
+
+### Fixed
+
+**Wallets**
+
+- The Cashu and Lightning cards' buttons (Create invoice, Pay, Add, Copy backup, a mint's Remove) and Send real money, pressed from the keyboard, keep the focus while they run and after a refusal. Before, they turned disabled while they ran, which put the focus back at the top of the page. Cancel on a mint's Remove question now goes back to that mint's Remove, and once a mint is added or removed the focus goes to the field that adds one.
+- The chat's money cards, used from the keyboard, keep the focus while they run and after a refusal: a Lightning invoice's Pay, an ecash token's Redeem, a request's Review payment and Approve, Take it back, a payment review's Approve, Cancel and Check, and the Review of a pasted Bitcoin, Ark or USDT address. Before, each one turned disabled while it ran, which put the focus back at the top of the page. Each step that takes a button's place now takes the focus too: an invoice's quote, Paid, Redeemed, the review of a request paid over Lightning, and a pasted address's payment form. Cancel goes back to the button that opened the step.
+
+**CLI**
+
+- `ghostly file save --dir <folder>` (or `--path <folder>/<name>`) with a folder that is not there names the folder (`No such file or folder: <folder>`), and a path that is a file says `<path> is a file, not a folder`. Before, it said `No such file or folder: <folder>/<name>`, as if the received file were gone.
+- `ghostly file send <chat> <path>` answers the message's `messageId`, as a file sent to a group and `send` already did, so a bot can delete the file for everyone, react to it, pin it or quote it without looking for its row in `chat history`.
+- A message deleted on a CLI profile (by you, or by a contact deleting theirs for everyone) takes its events out of the event journal without reading the whole journal as text: the journal is searched for the message and read from its first event on, and one it no longer names is not written again. With 10,000 events, deleting a recent message held the daemon 27 ms, now 9 ms, and one change that deletes 2,000 messages 11.6 s, now 80 ms.
+- A message deleted on this device, or deleted for everyone by its author, no longer stays in the CLI's event journal inside the replies that quoted it: `listen --since`, `events` and an agent turn's `untrusted.replyTo` replay those replies with `found: false, deleted: true` and an empty `snippet`, as history says.
+- `ghostly chat history` and `group history` no longer say a reply's original is found, with its text, once that original is gone (deleted on this device, or deleted for everyone by its author): the reply's `replyTo` reads `found: false, deleted: true` with an empty `snippet`, as the apps show "Original message deleted".
+- `ghostly listen --webhook` whose bridge answers a 4xx or a redirect says the bridge, what it answered and that the event is passed for good (`the webhook at http://127.0.0.1:8080/hook answered 404: event 95 (message.received) passed, not taken …`), not only "the webhook did not take event 95": a wrong path or a missing token now shows in the log.
+
+**Groups**
+
+- In a private group, a member that told you it did not have a file yet and then says it has it is asked for it again, also when its messages arrive at uneven delays. Before, a slightly late message could make the next one get dropped, and the file then never came from that member while you stayed connected.
+
+**Identities**
+
+- A contact's identity marks in the chat list are drawn again only when the contact's identities change. Before, every row's marks were drawn again on every change in the app, up to 20 times a second while a file moved: with 100 contacts of three identities each, 56 ms of work each time, now 11 ms.
+
+**Website**
+
+- Pages of the website no longer load the script of the "page not found" scene, about 21 KB each. It loads only when a page is not found.
+- The website's text pages (privacy, terms, CLI, WISPs, roadmap, brand, the agents FAQ) load about 122 KB less JavaScript. They no longer load the home page's animation library for the footer ghost, whose eyes never move.
+
 ## 1.4.1
 
 ### Security
