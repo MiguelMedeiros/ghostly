@@ -257,10 +257,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (!tested) {
       const newer = await supersededBy({ sha: process.env.GITHUB_SHA, api }).catch((e) => {
         console.log(`::notice::Could not read whether dev moved past this commit (${e.message}): everything runs`);
-        return null;
+        return undefined;
       });
       if (newer) console.log(`::notice::No green pull request run has this tree, but dev moved past it: ${newer} tests a tree that holds it`);
-      else console.log("No green pull request run has this tree, and it is still dev's head: everything runs");
+      else if (newer === null) console.log("No green pull request run has this tree, and dev has not moved past it: everything runs");
       superseded = Boolean(newer);
     }
   } else if (!process.argv.includes("--all")) {
