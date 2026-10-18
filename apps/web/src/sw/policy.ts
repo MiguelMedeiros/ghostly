@@ -113,7 +113,12 @@ export interface SharedItem {
   text: string;
   url: string;
   files: File[];
+  /** Files left out as too large, by name (`""`: not known, a body over `MAX_SHARE_BYTES` is never read). */
+  leftOut?: string[];
 }
+
+/** A share too large to read: nothing of it comes, and the picker says a file was too large. */
+export const TOO_LARGE_SHARE: SharedItem = { title: "", text: "", url: "", files: [], leftOut: [""] };
 
 /** Most files one share brings; larger shares keep their first ones. */
 export const MAX_SHARED_FILES = 32;

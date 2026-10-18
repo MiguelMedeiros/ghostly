@@ -27,6 +27,7 @@
   "shareTitle": "分享到…",
   "shareTooLarge": "太大,无法在这里分享:{{names}}",
   "shareTooLargeNext": "打开一个聊天,用 + → 文档 发送。",
+  "shareTooLargeUnnamed": "太大,无法在这里分享",
   "shareUnread": "无法读取:{{names}}",
   "shareUnreadNext": "从原来的应用再分享一次,或打开一个聊天,用 + → 文档 发送。",
   "shareWaiting": "正在接收分享的内容...",

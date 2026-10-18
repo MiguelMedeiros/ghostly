@@ -7,6 +7,7 @@
   },
   "audio": {
     "cantPlay": "Questo dispositivo non può riprodurre questo audio ({{format}}). Scaricalo per ascoltarlo.",
+    "message": "Audio",
     "pause": "Metti in pausa l'audio",
     "play": "Riproduci audio",
     "position": "Posizione nell'audio",

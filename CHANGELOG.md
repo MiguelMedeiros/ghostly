@@ -4,6 +4,184 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.3.10
+
+### Security
+
+- Chat: a picture sent inside a text, a picture link and a Wayback Machine GIF are drawn only when their own bytes say a size a picture file may have (at most 50 megapixels and 16,384 pixels a side); larger ones show as text or as their link. The app now reads a Wayback Machine GIF itself and checks it first, so in the web app and the extension, where the archive lets no other page read it, a Retro GIF shows as its link. Desktop shows it as before.
+
+### Fixed
+
+**Apps**
+
+- Checking apps for updates, on each visit to the Apps page, reads only the first 4 KiB of each app's source to see its version instead of 64 KiB, and reads more only when an app's details are longer than that.
+
+**CLI**
+
+- A CLI daemon no longer stops answering for seconds or minutes when it reads many things from its store at once (a long outbox, a large group, an import). Its store started those reads one at a time and checked each against all the others: 5,000 reads with a write among them held the daemon for 36 s, and now take tens of milliseconds.
+
+**Devices**
+
+- Adding a device, the focus stays in the dialog after Next, Add and They match. It fell to the page, so the next Tab started from the top of it and a screen reader lost its place.
+- Add a device, Use here and Take over open with the focus in the password field. It was on Close, so a password typed straight away went nowhere, and its first space closed the dialog.
+
+**Everywhere**
+
+- After "What should people call you?" on a first start, Save, Skip or Escape leave the keyboard focus on New. Before, it fell to the page itself, so a keyboard or screen reader user started again from the top.
+
+## 1.3.9
+
+### For users
+
+**Everywhere**
+
+- A third default Pkarr relay, `pkarr.miguelmedeiros.dev`, beside the two Pubky relays, so finding a contact goes on when one of them fails. It allows only 10 requests a minute, so Ghostly sends it at most half of those. If you never changed your relays in Settings, Network, you get it on the next start; a list of your own stays as it is.
+
+## 1.3.8
+
+### Security
+
+- CLI: `chat pay` and `chat request` refuse a memo that looks like a recovery phrase, a private key or a Cashu token unless `--force`, as `send` does; `ghostly engine` checks payment memos and group file captions the same way.
+
+### Fixed
+
+**Chats**
+
+- In a chat, ↻ on a voice message, video or file that did not go, Join group on an invite card and Load on a Nostr card keep the focus while they run, as the play buttons do: pressed from the keyboard, they left it on the page, so after a refusal Space scrolled the chat.
+- Forward's Send, pressed from the keyboard, keeps the focus while the forward runs: when a chat refused it, the focus was left on the page, so Enter did nothing and Send was back only through the search field and every chat.
+
+**Chat**
+
+- After the app starts again, a chat whose first connection attempt fails at once tries again 3 seconds later, not 40 seconds later. Before, that chat came back about 40 seconds after the others. While a chat waits before its next attempt, it also stops reading the contact every 0.7 seconds, because those reads could not connect it any sooner: 45 reads in that wait went down to a few.
+- An open chat no longer puts its whole history together again on every update from the engine (several a second while a file or voice message moves). It does so only when a message or a connection line changes, so long chats use less CPU.
+- In Arabic, the chat header's pairing icon now mirrors like the pairing scene under it: you on the right, and the moving dot going the same way.
+- A chat that was live on Iroh when the app quit or crashed comes back in about 3 s when Iroh's relay is out of reach at the restart, over HyperDHT, instead of 20 to 23 s: the app waited 10 s for its Iroh to start, then 8 s more before it tried HyperDHT. It now tries the contact's other direct connections while it waits.
+- A chat whose invite someone else used first still says "Someone else joined with this invite first" after a reload or an app restart, and when the app learns it only once the chat was on the DHT. Before, such a chat could come back as a working chat "On DHT · retrying live", waiting for a contact who was paired with someone else.
+- A chat moved back to WebRTC a moment after leaving it (Iroh or HyperDHT tried, then WebRTC again) no longer sometimes takes 28 s to get there: the contact's app, closing the WebRTC session the chat had left, also closed the new one it was answering, and the move gave up and waited for its next try. Now it goes in about 3 s every time.
+
+**Everywhere**
+
+- CLI: a bot serving a mini-app no longer loses the other chats' events from its event journal. Each frame the contact's app sent was written there, and at the app's allowed rate the journal was full in about 20 seconds, so `listen --since` or `--cursor` after a short stop answered `events.gap` instead of the texts other contacts sent. `app.opened`, `app.message` and `app.closed` now go to live listeners only and are never replayed.
+- CLI: `group history` and `listen` name a member in a group's own lines once their name is known. A line written before the name came kept "Member a4w9nb5y joined" for good, though the same row's `nick` said "Bob"; it now reads "Bob joined", as the app shows it.
+- CLI: `listen --webhook` no longer loses the events that come while its bridge is down. Each event was tried three times over about 3.5 seconds and then passed, the `--cursor` moved past it, so a bridge restarting for longer never got the events of that time, a restarted listener neither. A bridge that is not answering (connection refused, a timeout, a 5xx) now holds the stream: the event is tried again, up to a minute apart, until the bridge takes it, and stderr says so once. An event the bridge refuses with a 4xx is still passed.
+- In Portuguese, the lines shown while a new chat is on the DHT and the notes of a chat from a v0.4 code are now in Brazilian Portuguese like the rest of the app, instead of European Portuguese.
+- A chat live over Iroh or HyperDHT whose contact's app crashes and comes back without that transport (its Iroh relay out of reach, for one) is live again over WebRTC in seconds, not after a minute. Your app still held the old, dead session and closed the contact's new WebRTC connection as soon as it opened.
+
+**Groups**
+
+- In a new community, people opening its link one after another are let in within seconds again, and nobody's admission is undone, when the relays are slow to list the first member's app. Before, the first person let in could start answering the link too: the next joiner waited about two minutes, and two people let in at once by different members could see one of them dropped ("is no longer a member", then "joined" again), with what that person wrote in between never reaching the other.
+- Leaving a group, or deleting one you are in, from the keyboard puts the focus on the chat list's next row, or on New after the last, as deleting a chat does. It was left on the page, so a screen reader said nothing and the next Tab started from the top.
+- In Arabic (or any right-to-left language), a group's or a person's name written in Latin letters that is too long for its place is cut at its end, as in English, in the group's header, the chat list and the group's members dialog. It was cut at its start ("…airro Vila Madalena"), so two groups or members whose names start alike could not be told apart.
+
+**Website**
+
+- Once an hour, a visit to ghostly.tools no longer waits while the site checks every app on its apps pages again. The site checks the store once when it starts, since the store cannot change until the next build.
+
+## 1.3.7
+
+### Security
+
+- Chats: a voice message or an audio file playing shows on the lock screen and in the system's media controls as "Voice message" or "Audio" from Ghostly, like every notice, no longer with the contact's name or the file's name. Locking the app pauses what plays, and the system's controls let go of it.
+- Groups: a member that says it holds a group file it does not hold can no longer keep another member's download from finishing.
+- Groups: a member can no longer make a payment request or payment appear in another member's name.
+- Shared web apps: a contact can no longer reach paths outside the shared one on servers that ignore `;` parameters or decode twice.
+- Desktop: a contact can no longer stop HyperDHT in every chat at once with one message made of control characters.
+- Desktop: a video or audio file played before a reload or a profile switch is no longer served under the link the page before got: a new page starts with none, and a file plays again only by a link that page asks for.
+- Desktop on Windows: a contact's app can no longer open browser tabs to your computer or local network, and opens at most 20 links per window.
+- CLI: a Cashu request can no longer be paid twice by `chat pay-request` and then approving a review made before it.
+- Wallet: test sats received as Fedimint notes are no longer reported as a Mainnet payment by `ghostly payment list` and the `payment.created` and `payment.updated` events.
+- Merge train: only the train's own comment that starts with its position mark counts as a pull request's position comment, and file names in its drop comment are escaped, so a workflow file's name can no longer make the train take a later, unreviewed head.
+
+## 1.3.6
+
+### Security
+
+- Chats: a file larger than 25 MiB from a contact is always asked about before it is stored, whatever the contact's app. A modified app that left out the newer file transfer could have files up to 100 MiB stored without the question.
+
+### Fixed
+
+**Apps**
+
+- An app card from a contact with no name says "Contact · 1kwb54 opened it here", and its install screen "Sent by Contact · 1kwb54", as the chat calls them, instead of "Anonymous".
+- Apps → Add: a link corrected while Check runs no longer gets the old link's answer. Before, the old link's store showed under the new link and Add store added the old store (or the old link's install screen opened).
+
+**Everywhere**
+
+- A private group member whose network lets no direct connection through (a VPN, a firewall that drops UDP) reaches the other members over Iroh's relay a few seconds after a connection to them fails, as its 1:1 chats do. Before, each connection to a member waited for WebRTC to give up first, 15 seconds to a minute and a half, so a member who turned a VPN on had its group messages held all that while.
+
+**Chat**
+
+- Joining with an invite someone else used first, the pairing says "Ask your contact for a new one" once, not a second time on the line under it.
+- A press on a bot's buttons with no `once` button among them no longer reads the chat's whole history: it costs what a plain reply does, however long the chat (a full read is about 100 ms at 10,000 messages on the CLI daemon). Pressing a contact's buttons already worked this way.
+
+### For developers
+
+- The website's Docker image builds again from a clean cache. Its lockfile kept a package (`@napi-rs/wasm-runtime` 1.2.0) whose peers nothing in it met, so `npm ci` on Node 26 asked the registry to settle them and stopped on "Missing: @emnapi/core@ from lock file" when that answer did not come. A test now runs the site's `npm ci` offline, which passes only when the lockfile settles everything by itself.
+
+## 1.3.5
+
+### Fixed
+
+**Devices**
+
+- Add a device: once a refused password is typed again, or the next step comes, the card that said why goes too. It no longer says "Use 8 characters or more." over the code's "Waiting for your other device" on a phone.
+
+**Apps**
+
+- Opening an app's install screen again while it is still downloading waits for that download instead of starting a second one on the same connection, and a store whose signature file cannot be read stops downloading its list at once.
+- Opening the Apps page no longer downloads every store's whole list of apps, and each app's revocation list, again when they have not changed: the browser asks the host whether they changed and gets an empty answer when they have not. A changed list still arrives at once.
+- Adding a store from Apps → Add no longer downloads and checks its whole list of apps a second time when you press Add store: it takes the list the preview just read, so on a slow connection you wait for it only once.
+
+**CLI**
+
+- A message whose first word is a dash and one character, such as `send bob -1` or `send bob -5 degrees`, is still refused but now says to put `--` before text that starts with a dash, as longer words like `-ph` already did.
+
+**Everywhere**
+
+- A profile on several devices no longer reads a device that is away (a phone closed for the day) every 4 seconds for the first ten minutes after each start. That took half of a relay's minute per away device while your chats were reconnecting. Its link is now read every 30 seconds from the start, the same as after those ten minutes: 150 reads in that window went down to 20. A device that comes back is still connected within a minute.
+- On a phone on its side or in a short window, a menu with no room above or below its button stays on the screen and scrolls: a chat's ⋮ menu ran off the bottom edge, Delete chat half cut.
+
+**Groups**
+
+- In a group, members who have been away for a while are no longer looked for every 4 seconds for the first ten minutes after each start, as if they had just been invited. With 16 members of a 32-member group away, that asked the relays for about 240 requests a minute while your chats were reconnecting. They are now read at the group's slower pace from the start, the same as after those ten minutes: about 18 a minute. A member who was just added is still looked for quickly.
+- A group's file you fetch from a member with a slow upload (a phone on mobile data) now moves to the author or another member as soon as one says it is free, going on from what already came. It used to stay with the slow member for the whole file: up to a minute or two for a file the rest of the group had in seconds.
+- A private group past 16 members no longer says each member is a direct link from your app: its connection details say your app links to the admin and the group's hubs, which pass messages on and see who talks when, not what is said. New group says members connect directly only up to 16, and the joined line no longer says messages go directly.
+
+**Chat**
+
+- A long chat whose recent messages carry link previews or many edits (a news bot's, an agent's progress messages) no longer slows down every message that arrives. The copy of a chat the page keeps for its first moment now stays as small as any chat's; the previews and edits still come back from the chat's full history.
+
+**Wallets**
+
+- An ecash token card whose token was already spent reads Redeemed when you tap Redeem, instead of showing the mint's "already spent" error. After the update to 1.3.3, tokens you had redeemed on 1.3.2 offered Redeem again, and Redeem then failed with that error.
+
+**Website**
+
+- The apps pages no longer download each app's icon at the size its publisher made it (up to 1024 px and 256 KB) to draw it at 56 px. The site now serves it at the size the page draws it for your screen, about 1 or 2 KB per app, and the cards on the apps list load their icons only as they come near the screen.
+- On a tablet in landscape, a reader who scrolls past a chapter's last step before the home page has finished loading keeps that step on screen, its title where it was, instead of landing on its picture with the title gone.
+
+## 1.3.4
+
+### Security
+
+- Chats: in a chat where both apps send files the newer way, a file sent the old way is refused, so a contact can no longer skip the question asked above 25 MiB or the check for free space.
+- Desktop: a contact's web app window closes when the Ghostly page starts again (a profile switch or a reload) and when the profile locks, and the page no longer answers it.
+- Desktop: the updater is built without the archive extractor it never needed (updates are installers, AppImages and macOS archives), which removes the `zip` crate and its known flaws (RUSTSEC-2026-0367, RUSTSEC-2026-0368, RUSTSEC-2026-0369).
+- CLI: `ghostly engine sendMessage`, `sendGroupMessage`, `editMessage` and `forwardMessages` refuse a text that looks like a recovery phrase, a private key or a Cashu token, as `send` does, unless given `--force`.
+- Releases: the merge train holds a run when another pull request from the same branch has more events, or the branch more pull requests, than it reads.
+
+### Fixed
+
+**Identities**
+
+- A click on Load profile, Load follows or Load notes on a contact's Nostr card no longer does nothing when it lands while the card is still turning over: the buttons wait for the turn to end, as Check again does.
+- Loading a Nostr profile, follow list or notes checks each event's signature once, not once for every relay that sends it: with eight relays, Load notes did eight times the work.
+
+### For developers
+
+- CLI: `engine.call` refuses (`confirm`) `sendMessage`, `sendGroupMessage`, `editMessage` and `forwardMessages` with secret-looking text unless the request says `"force": true` (`ghostly engine … --force`).
+- Desktop updates: `latest.json` points only at what the updater installs as it is (the macOS `.app.tar.gz`, the AppImage, the Windows `-setup.exe` or `.msi`), never at a zipped archive.
+
 ## 1.3.3
 
 ### Security

@@ -1,4 +1,4 @@
-import { type Command, net, card, memo, confirmReal, sats, pairs } from "./shared";
+import { type Command, net, card, memo, confirmReal, force, sats, pairs } from "./shared";
 
 /** Wallets and payments: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
@@ -8,9 +8,9 @@ export const commands: Record<string, Command> = {
     params: ({ options }, a) => ({ chat: a.chat, method: a.method, on: options.off !== true, networks: typeof options.networks === "string" ? options.networks.split(",").map((n) => n.trim()).filter(Boolean) : undefined }),
   },
   "chat pay": {
-    method: "chat.pay", usage: "chat pay <chat> <sats> [--memo t] [--network testnet] [--confirm-real]", summary: "Send ecash to a contact (Mainnet needs --confirm-real)",
-    args: ["chat", "amount"], options: { memo, network: net, "confirm-real": confirmReal },
-    params: ({ options }, a) => ({ chat: a.chat, amount: sats(a.amount), memo: options.memo, network: options.network, confirmReal: options["confirm-real"] === true }),
+    method: "chat.pay", usage: "chat pay <chat> <sats> [--memo t] [--network testnet] [--confirm-real] [--force]", summary: "Send ecash to a contact (Mainnet needs --confirm-real)",
+    args: ["chat", "amount"], options: { memo, network: net, "confirm-real": confirmReal, force },
+    params: ({ options }, a) => ({ chat: a.chat, amount: sats(a.amount), memo: options.memo, network: options.network, confirmReal: options["confirm-real"] === true, force: options.force === true }),
   },
   "chat pay-request": {
     method: "chat.payRequest", usage: "chat pay-request <chat> <payment> [--via lightning] [--max-fee sats] [--card <id>] [--confirm-real]", summary: "Pay a contact's request",
@@ -18,9 +18,9 @@ export const commands: Record<string, Command> = {
     params: ({ options }, a) => ({ chat: a.chat, payment: a.payment, via: options.via, maxFee: options["max-fee"], card: options.card, confirmReal: options["confirm-real"] === true }),
   },
   "chat request": {
-    method: "chat.request", usage: "chat request <chat> <sats> [--memo t] [--method m] [--rail cashu|lightning] [--network testnet] [--card <id>]", summary: "Ask a contact to pay",
-    args: ["chat", "amount"], options: { memo, method: { type: "string", description: "cashu, arkade, usdt, bitcoin, spark, …" }, rail: { type: "string", description: "cashu or lightning" }, network: net, card },
-    params: ({ options }, a) => ({ chat: a.chat, amount: sats(a.amount), memo: options.memo, method: options.method, rail: options.rail, network: options.network, card: options.card }),
+    method: "chat.request", usage: "chat request <chat> <sats> [--memo t] [--method m] [--rail cashu|lightning] [--network testnet] [--card <id>] [--force]", summary: "Ask a contact to pay",
+    args: ["chat", "amount"], options: { memo, method: { type: "string", description: "cashu, arkade, usdt, bitcoin, spark, …" }, rail: { type: "string", description: "cashu or lightning" }, network: net, card, force },
+    params: ({ options }, a) => ({ chat: a.chat, amount: sats(a.amount), memo: options.memo, method: options.method, rail: options.rail, network: options.network, card: options.card, force: options.force === true }),
   },
   "lightning default": { method: "lightning.default", usage: "lightning default <card> [--network testnet]", summary: "The Lightning card that receives by default", args: ["card"], options: { network: net }, params: ({ options }, { card: c }) => ({ card: c, network: options.network }) },
   "lightning rename": { method: "lightning.rename", usage: "lightning rename <card> <name...> [--network testnet]", summary: "Name a Lightning card", args: ["card", "name..."], options: { network: net }, params: ({ options }, a) => ({ card: a.card, name: a.name, network: options.network }) },

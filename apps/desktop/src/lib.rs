@@ -118,6 +118,7 @@ macro_rules! commands {
             clipboard::read_clipboard_text,
             clipboard::read_pasted_bytes,
             commands::bitcoind_rpc,
+            commands::close_service_windows,
             commands::create_keypair,
             commands::decrypt_text,
             commands::diagnostic_log,
@@ -426,10 +427,16 @@ fn on_page_load<R: tauri::Runtime>(
 }
 
 /// The native listeners of the page before this one: stopped, their eight places free (`TransportState::page_started`);
-/// its apps' file dialogs: let go. The app windows it opened close (`app_sandbox::page_started`).
+/// its apps' file dialogs: let go. The app windows it opened close (`app_sandbox::page_started`), and so do the
+/// windows of its contacts' apps (`viewer::close_all`): the page there now would answer them for another profile.
+/// The tokens it got to play stored files stop serving them (`StreamGrants::close_all`).
 #[cfg(desktop)]
 fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     app_sandbox::page_started(app);
+    viewer::close_all(app);
+    if let Some(grants) = app.try_state::<file_stream::StreamGrants>() {
+        grants.close_all();
+    }
     if let Some(transports) = app.try_state::<paired_transport::TransportState>() {
         transports.page_started();
     }
@@ -991,6 +998,64 @@ mod tests {
         )
         .unwrap();
         assert_eq!(key.as_str().unwrap().len(), 43);
+    }
+
+    /// A contact's app window opened by the page before this one (another profile, or the same one before a reload)
+    /// is served nothing more: the page there now would carry its requests over its own chat with that contact.
+    #[test]
+    fn a_new_page_closes_the_contacts_app_windows_the_page_before_opened() {
+        let app = app();
+        let peer = "a".repeat(52);
+        viewer::open(
+            app.handle(),
+            peer.clone(),
+            "atlas".into(),
+            "ybndrfg8ejkmcpqx".into(),
+            "Atlas".into(),
+            None,
+        )
+        .unwrap();
+        let url = format!("{}://atlas.{peer}.ybndrfg8ejkmcpqx/", viewer::SCHEME);
+        let serve = || {
+            let request = tauri::http::Request::builder()
+                .uri(url.as_str())
+                .body(Vec::new())
+                .unwrap();
+            tauri::async_runtime::block_on(viewer::handle(
+                app.handle().clone(),
+                "svc-0".into(),
+                request,
+            ))
+            .status()
+        };
+        // Bound: the request goes to the page, which nobody here answers.
+        assert_eq!(serve(), tauri::http::StatusCode::GATEWAY_TIMEOUT);
+        page_started(app.handle());
+        assert_eq!(serve(), tauri::http::StatusCode::FORBIDDEN);
+    }
+
+    /// A stored file the page before this one played (another profile's, or the same one before a reload) is served
+    /// no more under its token: that page never closed it, and the page there now did not ask for it.
+    #[test]
+    fn a_new_page_closes_the_file_stream_tokens_the_page_before_got() {
+        let app = app();
+        let dir = std::env::temp_dir().join(format!("ghostly-page-stream-{}", std::process::id()));
+        let files = file_store::FileStore::new(dir.clone());
+        files.append("a", "f", 0, &[1, 2, 3]).unwrap();
+        app.manage(file_stream::StreamGrants::default());
+        let grants = app.state::<file_stream::StreamGrants>();
+        let token = grants.open(&files, "a", "f", "video/mp4").unwrap();
+        let serve = || {
+            let request = tauri::http::Request::builder()
+                .uri(format!("{}://localhost/{token}", file_stream::SCHEME))
+                .body(Vec::new())
+                .unwrap();
+            file_stream::respond(&files, &grants, "main", &request).status()
+        };
+        assert_eq!(serve(), tauri::http::StatusCode::OK);
+        page_started(app.handle());
+        assert_eq!(serve(), tauri::http::StatusCode::NOT_FOUND);
+        std::fs::remove_dir_all(dir).ok();
     }
 
     /// The Ghostly window closed on Linux or Windows ends the app. By the exit, Tauri has dropped the window and its

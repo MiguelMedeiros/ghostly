@@ -29,6 +29,8 @@ export function SharePicker() {
   const hasFiles = !!share?.files.length;
   const leftOut = share?.leftOut ?? [];
   const unread = share?.unread ?? [];
+  // A name may not be known (the web app's worker never reads a body that is too large): then it says so without one.
+  const leftOutNames = leftOut.filter(Boolean);
   const targets = useChatTargets();
   const preview = share ? shareText(share) : "";
 
@@ -47,10 +49,10 @@ export function SharePicker() {
         <p className="text-sm text-text-muted" data-testid="share-none">{waited ? t("pwa.shareNone") : t("pwa.shareWaiting")}</p>
       ) : (
         <>
-          {/* Files too large to bring in (Android's share) were left out: the picker names them, and how to send them. */}
+          {/* Files too large to bring in were left out: the picker names them, and how to send them. */}
           {leftOut.length > 0 && (
             <Notice tone="error" className="text-sm" testId="share-left-out"
-              title={t("pwa.shareTooLarge", { names: leftOut.join(", ") })} next={t("pwa.shareTooLargeNext")} />
+              title={leftOutNames.length ? t("pwa.shareTooLarge", { names: leftOutNames.join(", ") }) : t("pwa.shareTooLargeUnnamed")} next={t("pwa.shareTooLargeNext")} />
           )}
           {/* Files Android could not read (a revoked permission, a broken stream): named too, never dropped silently. */}
           {unread.length > 0 && (

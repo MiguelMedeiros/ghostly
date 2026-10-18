@@ -103,8 +103,13 @@ function unpack(bytes: Uint8Array, withLoad: boolean, max: number): Hub[] {
  * the same set. Only when there is none (a group's first minute), the one that has been a hub longest. And when none said so lately, a hub asking (`me`)
  * that sees no other fresh hub in the beacon is the door alone, listed or not: its own entry may not have reached the
  * relays yet (a new group's first hub, whose write the relays' budget holds back), and there is nobody to agree with.
+ *
+ * A hub that says since when it is one (`mine.since`) counts itself among those of the first minute, listed or not, so
+ * the first hub whose entry is held back still reads itself as the door beside a newer hub's entry. And one that became
+ * a hub less than a minute ago, reading no other hub but knowing of one (`mine.known`: the member who let it in, whose
+ * entry may be the one held back), is not the door alone: that hub still is.
  */
-export function doorHubs(hubs: Hub[], now = Date.now(), me?: string): string[] {
+export function doorHubs(hubs: Hub[], now = Date.now(), me?: string, mine?: { since: number; known: readonly string[] }): string[] {
   const lately = hubs.filter(h => now - h.ts < COMMUNITY_TOPOLOGY.beaconEveryMs * 1.5);
   const settled = lately.filter(h => now - (h.since ?? h.ts) >= 60_000);
   // None settled (a group's first minute): the hub that has been one longest, alone, and the lowest key between two of
@@ -112,9 +117,13 @@ export function doorHubs(hubs: Hub[], now = Date.now(), me?: string): string[] {
   // of a member that just became a hub; that member, counting both of them at the door with the lower key, answered
   // the same knock as the first hub did: two hubs on one entry session, where at best one of them looks 90 s for nobody.
   const since = (h: Hub) => Math.floor((h.since ?? h.ts) / 1000);
-  const first = [...lately].sort((a, b) => since(a) - since(b) || (a.key < b.key ? -1 : 1)).slice(0, 1);
+  const self = mine && me !== undefined && !lately.some(h => h.key === me) ? [{ key: me, ts: now, load: 0, since: mine.since }] : [];
+  const first = [...lately, ...self].sort((a, b) => since(a) - since(b) || (a.key < b.key ? -1 : 1)).slice(0, 1);
   const door = (settled.length ? settled : first).map(h => h.key);
-  if (door.length || me === undefined || freshHubs(hubs, now).some(h => h.key !== me)) return door;
+  if (me === undefined) return door;
+  const alone = !freshHubs(hubs, now).some(h => h.key !== me);
+  if (alone && mine && now - mine.since < 60_000 && mine.known.some(key => key !== me) && door.every(key => key === me)) return [];
+  if (door.length || !alone) return door;
   return [me];
 }
 

@@ -29,7 +29,7 @@ Pair with your owner. Your owner makes an invite link in the Ghostly app and giv
 session, never in a message or a file someone else wrote:
 
 ```bash
-ghostly invite join "<the link your owner gave you>" --label owner   # prints {"chat":"<id>",…}
+printf '%s' '<the link your owner gave you>' | ghostly invite join --label owner   # prints {"chat":"<id>",…}
 ghostly chat wait owner --until live --timeout 600
 export GHOSTLY_OWNER_CHAT=<the chat id it printed>                  # keep it in your shell profile or agent config
 ```

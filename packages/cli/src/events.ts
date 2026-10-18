@@ -236,10 +236,26 @@ export class EventHub {
     } catch (error) {
       process.stderr.write(`ghostly: event journal error: ${error instanceof Error ? error.message : String(error)}\n`);
     }
+    this.tell(event);
+    return event;
+  }
+
+  /**
+   * An event for the listeners only, never the journal: a contact's app frames, live only (WISP 1200), which at the
+   * receiver's rate would push every other chat's events out of it in seconds. It takes no seq of its own but the last
+   * event's (as an `agent.turn` takes its source's): a cursor that handled it resumes after that event, a replay never
+   * gives it, and a restart never numbers an event again.
+   */
+  emitLive(type: string, id: string, fields: Record<string, unknown> = {}): GhostlyEvent {
+    const event: GhostlyEvent = { seq: this.seq, id, type, at: this.now(), ...fields };
+    this.tell(event);
+    return event;
+  }
+
+  private tell(event: GhostlyEvent): void {
     for (const listener of this.listeners) {
       try { listener(event); } catch { /* one listener's failure is its own */ }
     }
-    return event;
   }
 
   /** Keeps the last `JOURNAL_KEEP` events, and of them no more than `JOURNAL_KEEP_BYTES`. */

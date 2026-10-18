@@ -1,5 +1,5 @@
 import { createLink } from "@ghostly/core";
-import { chat, connect, expect, link, say, test, WAYBACK, type Peer } from "../support/fixtures";
+import { chat, connect, expect, GIF, link, say, test, WAYBACK, type Peer } from "../support/fixtures";
 
 /**
  * Scrolled up in a chat, the contact's new messages do not move the view: Bob keeps reading where he was and a "↓ 3 new"
@@ -71,7 +71,9 @@ test("scrolled up, new messages keep the view and a pill counts them", { tag: ["
  */
 
 /** A picture 320 × 240, served late: it lays out after the chat has opened at its bottom. */
-const PICTURE = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240"><rect width="320" height="240" fill="#7c5cff"/></svg>`;
+const PICTURE = Buffer.from(GIF);
+PICTURE.writeUInt16LE(320, 6);
+PICTURE.writeUInt16LE(240, 8);
 
 test("a long chat with pictures and videos opens again on its last message", { tag: ["@feature:chat.scroll"] }, async ({ peer }) => {
   test.setTimeout(2 * 60_000);
@@ -79,7 +81,7 @@ test("a long chat with pictures and videos opens again on its last message", { t
   let served = 0;
   await bob.context.route(WAYBACK, async route => {
     await new Promise(done => setTimeout(done, 150 + (served++ % 5) * 120));
-    await route.fulfill({ status: 200, contentType: "image/svg+xml", body: PICTURE });
+    await route.fulfill({ status: 200, contentType: "image/gif", body: PICTURE });
   });
 
   const chats = [createLink().mine, createLink().mine];
@@ -118,7 +120,7 @@ test("a long chat with pictures and videos opens again on its last message", { t
     await atBottom();
     await expect(last).toBeInViewport({ ratio: 1 });
     // Every picture near the bottom has come in and laid out, and the view is still on the last message.
-    await expect.poll(() => chat(bob).locator("img[src*='web.archive.org']").evaluateAll(imgs =>
+    await expect.poll(() => chat(bob).getByTestId("picture-link").evaluateAll(imgs =>
       imgs.filter(img => img.getBoundingClientRect().bottom > 0 && !(img as HTMLImageElement).complete).length)).toBe(0);
     await atBottom();
   }
@@ -154,10 +156,17 @@ test("a long chat with pictures and videos opens again on its last message", { t
 
 interface Frame { sw: number; cw: number; sh: number; ch: number; top: number; rows: number }
 
+/** Frames in a row the list must keep its sizes and scroll position for to count as settled. */
+const STILL_FRAMES = 5;
+
 /**
  * Seeds a chat of `count` messages straight into storage and opens it. A chat this side joined long ago: its "joined"
  * went out then, so opening it adds no row (one that never said it adds "joined the chat" once its link is up, after
  * the count below had passed or not).
+ * Then waits for the list to settle: rows not drawn yet take a typical height (index.css's content-visibility) and get
+ * their own one frame after they come near the view, a row or two after the count passed. The list gets shorter under
+ * a view held at its bottom, which lowers its scrollTop with no move on screen, and the frames sampled after it would
+ * read that as the view going back up.
  */
 async function seedChat(p: Peer, count: number) {
   const mine = createLink().mine;
@@ -174,6 +183,18 @@ async function seedChat(p: Peer, count: number) {
     location.hash = `/chat/${id}`;
   }, { mine, count });
   await expect(chat(p).locator("[data-message-id]")).toHaveCount(count);
+  await p.page.evaluate(still => new Promise<void>(settled => {
+    const list = document.querySelector<HTMLElement>("[data-message-list]")!;
+    let last = "";
+    let same = 0;
+    const tick = () => {
+      const now = `${list.scrollHeight} ${list.clientHeight} ${list.scrollTop}`;
+      same = now === last ? same + 1 : 0;
+      last = now;
+      if (same >= still) settled(); else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }), STILL_FRAMES);
 }
 
 /**

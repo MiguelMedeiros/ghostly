@@ -88,7 +88,8 @@ export const PACKAGES_READ_FROM_SITE = [
   // packages/cli's agentDocs test: every command the agents guide (and its prompt) and the agents page teach.
   "docs/AI-AGENTS.md",
   "apps/website/content/agents.ts",
-  // packages/browser's websiteStore test: the store pages' reader, its copy of core's, the build's reader and the test store.
+  // packages/browser's websiteStore and websiteStoreOnce tests: the store pages' store and reader, its copy of core's, the build's reader and the test store.
+  "apps/website/lib/store.ts",
   "apps/website/lib/storeRead.ts",
   "apps/website/lib/appsGate.ts",
   "apps/website/lib/latestRelease.ts",

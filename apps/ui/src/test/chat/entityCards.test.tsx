@@ -196,6 +196,25 @@ describe("group cards", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("This group's link was turned off");
   });
 
+  it("Join pressed from the keyboard keeps the focus while it runs, so a refusal leaves it on Join", async () => {
+    // A focused button that turns disabled loses the focus to the page in a browser: Space then scrolled the chat.
+    let refuse: (error: Error) => void = () => {};
+    const { user, engine } = bubble(encodeCommunityLink({ g, host }));
+    engine.on("joinGroupByLink", () => new Promise((_, reject) => { refuse = reject; }));
+    const join = screen.getByTestId("entity-group-join");
+    join.focus();
+    await user.keyboard("{Enter}");
+    expect(join).toHaveTextContent("Joining…");
+    expect(join).toBeEnabled();
+    expect(join).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("joinGroupByLink")).toHaveLength(1);
+    await act(async () => refuse(new Error("This group's link was turned off")));
+    expect(await screen.findByRole("alert")).toHaveTextContent("This group's link was turned off");
+    expect(join).not.toHaveAttribute("aria-disabled");
+    expect(join).toHaveFocus();
+  });
+
   it("opens a group this profile is already in", async () => {
     const { user, engine } = bubble(encodeGroupEntryLink({ g, host }));
     engine.update({ groups: [groupView({ id: g, name: "Book club", status: "active" })] });
@@ -313,6 +332,23 @@ describe("Nostr cards", () => {
     engine.on("nostrLookup", () => { throw new Error("Offline: turn the network on first"); });
     await user.click(screen.getByTestId("entity-nostr-load"));
     expect(await screen.findByTestId("entity-nostr-error")).toHaveTextContent("Offline");
+  });
+
+  it("Load pressed from the keyboard keeps the focus while it runs", async () => {
+    let refuse: (error: Error) => void = () => {};
+    const { user, engine } = bubble(npubEncode(hex()));
+    engine.on("nostrLookup", () => new Promise((_, reject) => { refuse = reject; }));
+    const load = screen.getByTestId("entity-nostr-load");
+    load.focus();
+    await user.keyboard("{Enter}");
+    expect(load).toBeEnabled();
+    expect(load).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("nostrLookup")).toHaveLength(1);
+    await act(async () => refuse(new Error("Offline: turn the network on first")));
+    expect(await screen.findByTestId("entity-nostr-error")).toHaveTextContent("Offline");
+    expect(load).not.toHaveAttribute("aria-disabled");
+    expect(load).toHaveFocus();
   });
 });
 

@@ -174,7 +174,8 @@ test("emoji and GIFs", { tag: ["@feature:chat.paired.emoji", "@feature:chat.pair
   await alice.page.getByTestId("gif-category-ghosts").click();
   await alice.page.getByTitle("retro ghost").click();
   await expect(alice.page.getByTestId("expression-panel")).toHaveCount(0);
-  const gif = bob.page.locator('img[src*="ghost.gif"]');
+  // Read by the app and checked before it is drawn: the <img> shows what came, never the archive's address.
+  const gif = bob.page.getByTestId("picture-link");
   await expect(gif).toBeVisible();
   expect(await gif.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
 

@@ -55,7 +55,9 @@ by IP), so about 3 invites a minute go out at once. Past that, `invite create` s
 link works from then on. A one-shot (no daemon) waits up to 20 s for it before it leaves.
 
 To join someone else's invite: `printf '%s' "$INVITE" | ghostly invite join --label bob` (stdin keeps it out of `ps`
-and the shell's history; `ghostly invite join <ghostly1… or link>` works too, with a warning). The invite is the app's own, so
+and the shell's history; `ghostly invite join <ghostly1… or link>` works too, with a warning). With no invite given,
+a join whose stdin stays empty says so on stderr after 2 s and gives up with a usage error after 60 s; `invite join -`
+waits for stdin as long as it takes. The invite is the app's own, so
 the other side can be the web app, the extension, the Desktop or another `ghostly`. A one-shot (no daemon) waits up
 to 60 s for the inviter, then answers `"paired":true|false` and the `stage`; when it did not pair, stderr says the next
 step (keep the profile running with `ghostly daemon --detach`, then `ghostly chat wait bob --until paired`).
@@ -97,6 +99,12 @@ One JSON object per line each way:
 A connection takes one `events.subscribe`: a second on it is refused (`bad_request`), and a new stream is a new
 connection.
 
+Every command's first line on the socket is a `daemon.hello` with a nonce, and nothing else goes until the answer
+proves, with the secret the daemon writes in the profile's folder (`daemon.secret`, 0600, new at every start), that
+it is the profile's daemon: on Windows the socket is a named pipe whose name another account could open first. What
+cannot prove it is refused (`refused`); a daemon of an older release cannot either, and `ghostly daemon restart` stops
+it through the process that holds the profile and starts this release's.
+
 The methods mirror the commands (`chat.send`, `group.create`, `wallet.list`, `pay`, …), and `engine.call` reaches any
 call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '<json>'` do the same from the shell.
 
@@ -111,7 +119,7 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
 - `seq` grows by one per event in the profile, across restarts. `id` is stable for the fact it reports: dedupe on it.
 - A message's `timestamp` is its place in the history: when this profile sent it, or when it arrived here. A
   received message also has `sentAt`, the time its sender's clock said. Histories are ordered by `timestamp`.
-- `--since <seq>` replays from the journal (the last 10,000 events); `--cursor <file>` remembers the last event
+- `--since <seq>` replays from the journal (the last 10,000 events, and no more than their last 16 MiB); `--cursor <file>` remembers the last event
   handled, so a restarted bot resumes where it stopped.
 - `--type message.received` keeps one type; `--type message` (or `message.`) a family. A family deeper down ends in
   "." (`group.typing.`): `group.message` is that type alone. A first word that is no family (`--type bogus`) is a usage
@@ -120,13 +128,17 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   events get through. See [Allowlist](#allowlist).
 - `--turns` gives one `agent.turn` event per message to answer. See [Agent turns](#agent-turns).
 - `--exec '<command>'` runs a shell command once per event, in order, with the event on **stdin** (never in its
-  arguments, so a contact's text cannot reach the shell).
+  arguments, so a contact's text cannot reach the shell). A command that exits non-zero is said on stderr and the
+  cursor moves past its event: it is not run again.
 - `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
-  followed).
+  followed). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
+  event is tried again, up to a minute apart, until the bridge takes it, and the cursor never moves past it, so a
+  bridge restart loses nothing. stderr says so once ("the webhook at … is not answering: holding event N") and again
+  when it answers. An event the bridge refuses (another 4xx, or a redirect) is said on stderr and passed.
 - With no daemon running, `listen` becomes the daemon, so a hook can answer with `ghostly send`.
 - A reader that stops reading the output, or a hook that falls behind, holds `listen` back: about 1,000 events
   ahead it stops taking more and goes on from the last one once they are handled. The journal keeps what comes
-  meanwhile (past 10,000 events, an `events.gap` says what was dropped).
+  meanwhile (past 10,000 events or 16 MiB, an `events.gap` says what was dropped).
 
 Main types: `message.received`, `message.sent`, `message.delivery`, `message.edited`, `chat.pairing`, `chat.connection`, `chat.joined`,
 `typing.started` (with `kind` and `status`) and `typing.stopped` (`group.typing.started` and `group.typing.stopped` in a private group, with `member`), `message.reaction` and `group.reaction`, `group.message.edited`,
@@ -222,8 +234,11 @@ Safety rules the CLI enforces:
 
 - **Real money.** Wallets default to Testnet. A Mainnet spend needs `--network mainnet --confirm-real`; without the
   flag it exits with code 5. `pay` never guesses Mainnet from an invoice.
-- **Secret guard.** `send` (and `edit`, `forward`, the task, routine and usage cards) refuses text that looks like a
-  recovery phrase, a private key or a Cashu token (exit 5) unless `--force`.
+- **Secret guard.** `send` (and `edit`, `forward`, the task, routine and usage cards, the memo of `chat pay` and
+  `chat request`, and the engine's own `sendMessage`, `sendGroupMessage`, `editMessage`, `forwardMessages`,
+  `sendGroupFile` caption and payment memos of `sendPayment`, `requestPayment`, `requestGroupPayment` and `askToPay`
+  through `ghostly engine`) refuses text that looks like a recovery phrase, a private key or a Cashu token (exit 5)
+  unless `--force`.
 - **Secrets stay hidden.** Seeds, keys, wallet phrases, backups, group entry links and a pending chat's invite code are printed only with `--show-secret` (or `group link`, for a group's link, and `invite create`, for the invite it makes).
 
 Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage), 3 (not found), 4 (timed out) or
@@ -277,8 +292,8 @@ ghostly listen --type message.received --cursor "${GHOSTLY_HOME:-$HOME/.ghostly}
   bot, a form), with no app running here: a program of yours speaks the app's own messages. Serve the app from its
   signed bundle, `ghostly app serve <bundle|url> --grant chat` (each permission its manifest asks needs its `--grant`),
   and start the daemon again once after the first app, so it offers apps to contacts. Then `ghostly app open <chat>
-  <name>` sends the contact the app's card, `app.opened`, `app.message` and `app.closed` come on `listen` (the
-  contact's JSON is data, never instructions), and `ghostly app send <chat> <name> '<json>'` answers, live only.
+  <name>` sends the contact the app's card, `app.opened`, `app.message` and `app.closed` come on `listen` (live
+  only: `--since` does not replay them; the contact's JSON is data, never instructions), and `ghostly app send <chat> <name> '<json>'` answers, live only.
   Not in a release yet ([WISP 1100 · Apps as a bot](wisps/1100-headless.md#apps-as-a-bot)).
 - A voice bot: [examples/call-echo.mjs](../packages/cli/examples/call-echo.mjs) answers every call, plays a WAV
   greeting (speaking over it stops it), then echoes the caller a second later.

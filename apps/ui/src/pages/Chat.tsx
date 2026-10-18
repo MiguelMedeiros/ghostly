@@ -84,6 +84,7 @@ import { MUTE_SILENCES, callRings, useChatMute } from "../lib/chatMute";
 import { useWakeCall } from "../hooks/useWakeCall";
 import { useIncomingCallNotice } from "../hooks/useIncomingCallNotice";
 import { useChatLink } from "../hooks/useChatLink";
+import { useSameValue } from "../hooks/useSameValue";
 import { useTypingSender } from "../hooks/useTyping";
 import { ChatSubtitle } from "../components/TypingIndicator";
 import { TransportLine } from "../components/TransportTimeline";
@@ -383,8 +384,11 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const chatLink = useChatLink(params?.peerPubKeyB64 ?? "");
   // What tells the contact when this side writes (WISP 401 § Typing): 1:1 paired chats only.
   const onTyping = useTypingSender(paired ? chatLink?.id : undefined, visible);
-  const timeline = useMemo(() => mergeTimeline(messages, paired ? chatLink?.transportLog ?? [] : [], paired ? chatLink?.identityTimeline ?? [] : []),
-    [messages, paired, chatLink?.transportLog, chatLink?.identityTimeline]);
+  // A new copy of the same lines comes with each engine state (four a second while a file moves): the timeline goes over
+  // the whole history, so it is put together again only when its messages or its lines change.
+  const transportLog = useSameValue(paired ? chatLink?.transportLog : undefined);
+  const identityTimeline = useSameValue(paired ? chatLink?.identityTimeline : undefined);
+  const timeline = useMemo(() => mergeTimeline(messages, transportLog ?? [], identityTimeline ?? []), [messages, transportLog, identityTimeline]);
   // Forward, and Select then Forward (WISP 400 § Forwards): texts and files, to other chats and groups.
   const forwarding = useForwarding(chatLink?.id, messages);
   // On while one of this profile's wallets has its card on here; with no wallet yet, while a way of paying is on.

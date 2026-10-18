@@ -1,6 +1,6 @@
 import {
   clearMissed, createContactLink, encodeContactLink, endedRequests, identityFromSeedB64, inboxRecord, inviteLink, knockSlotIdentity, linkRecords, newInbox, openRequest,
-  planKnocks, readKnockSlot, settleRequest, takeRequest, turnOff, KNOCK_SLOTS, type ContactRequest, type GhostRecord, type Identity, type InboxState,
+  planKnocks, readKnockSlot, settleRequest, takeRequest, turnOff, KNOCK_SLOTS, MAX_WAITING, type ContactRequest, type GhostRecord, type Identity, type InboxState,
 } from "@ghostly/core";
 import { STORES, store, wrap } from "../shared/idb";
 import type { ContactLinkView, ContactRequestView } from "../shared/types";
@@ -157,7 +157,7 @@ export class ContactLinks {
     };
   }
 
-  /** Makes the profile's link, turning the one before off: one link per profile at a time. */
+  /** Makes the profile's link, turning the one before off: one link per profile at a time. Requests keeps what waits. */
   create(): Promise<ContactLinkView> {
     return this.serial(() => this.make());
   }
@@ -167,8 +167,13 @@ export class ContactLinks {
     const deviceKey = newDeviceKey();
     const now = Date.now();
     const retired = this.retire(now);
+    // What waits in Requests stays: each request is under its asker's key and accepted by joining its invite, so nothing
+    // needs the old link, and its asker already saw it arrive.
+    const waiting = this.stored.current?.inbox.waiting.filter(w => w.expires > now) ?? [];
+    const requests = this.stored.current?.requests?.filter(r => waiting.some(w => w.key === r.key)) ?? [];
+    const inbox = { ...newInbox(now), waiting, state: waiting.length >= MAX_WAITING ? "busy" as const : "open" as const };
     await this.save({
-      current: { seed: { sealed: await sealSeed(made.seedB64, deviceKey), deviceKey }, linkKeyZ32: made.linkKeyZ32, createdAt: now, inbox: newInbox(now) },
+      current: { seed: { sealed: await sealSeed(made.seedB64, deviceKey), deviceKey }, linkKeyZ32: made.linkKeyZ32, createdAt: now, inbox, ...(requests.length ? { requests } : {}) },
       retired,
     });
     this.host.emit();

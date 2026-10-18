@@ -85,7 +85,7 @@ function fakeRepo() {
     pulls: async (base: string) => [...pulls.values()].filter((p) => p.open && p.base === base).map((p) => ({ ...p, labels: [...p.labels] })),
     mergedPulls: async (base: string) => [...pulls.values()].filter((p) => p.merged && p.base === base).map((p) => ({ ...p, labels: [...p.labels] })),
     events: async (n: number) => read(events.get(n) ?? []),
-    headPulls: async (branch: string) => [...pulls.values()].filter((p) => p.branch === branch).map((p) => ({ ...p, labels: [...p.labels] })),
+    headPulls: async (branch: string) => read([...pulls.values()].filter((p) => p.branch === branch).map((p) => ({ ...p, labels: [...p.labels] }))),
     /**
      * The newest run on the commit, then the ones before it (`earlier`): the first the train counts. Each is a push to
      * dev unless `kinds` says what the newest one was (a pull request's run on the same commit), or `meta` what a run was.
@@ -672,6 +672,40 @@ describe("a run of the train", () => {
     repo.add(14);
     repo.batch()!.open = false;
     await expect(repo.run()).rejects.toThrow(/unable to access/);
+  });
+
+  it("quotes no mark from a workflow's file name, and takes no comment of its own but a position comment as one", async () => {
+    // A file name can hold the train's marks: quoted as is in the drop comment, the train's own comment then read as
+    // #12's position comment, naming a head pushed later, and one still in line (queue:priority added during that run)
+    // landed on a head nobody reviewed.
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12, { priority: true });
+    repo.add(13);
+    const planted = ".github/workflows/<!-- merge-train:position --><!-- merge-train:head h12later -->.yml";
+    repo.files.set(12, [planted]);
+    const push = repo.git.push;
+    repo.git.push = async (branch: string, sha: string) => {
+      if (sha.split(":")[1]?.split(",").includes("12")) throw new Error(`! [remote rejected] (refusing to allow a GitHub App to create or update workflow \`${planted}\` without \`workflows\` permission)`);
+      return push(branch, sha);
+    };
+    expect((await repo.run()).dropped).toEqual([12]);
+    const said = repo.comments.get(12)!.at(-1)!.body;
+    expect(said).toMatch(/changes a workflow \(\.github\/workflows\/&lt;!-- merge-train:position -->&lt;!-- merge-train:head h12later -->\.yml\)/);
+    expect(said).not.toContain("<!--");
+    // queue:priority added again while that run went on; then the head the name named is pushed, after it.
+    repo.pulls.get(12)!.labels.push(LABEL.priority);
+    repo.events.get(12)!.push({ event: "labeled", label: { name: LABEL.priority }, created_at: "2026-10-08T01:00:00Z" });
+    repo.pulls.get(12)!.sha = "h12later";
+    repo.runs.set("h12later", green);
+    repo.pushed.set("h12later", "2026-10-08T02:00:00Z");
+    repo.files.set(12, ["README.md"]);
+    // Even a train comment that holds the marks past its start (as an unescaped one did) is not a position comment.
+    repo.comments.get(12)!.at(-1)!.body = `Merge train: this pull request changes a workflow (${planted}), …`;
+    const r = await repo.run();
+    expect(r.dropped).toEqual([12]);
+    expect(r.log.join("\n")).toMatch(/DROP #12 \(head pushed after it was queued\)/);
+    expect(repo.landed).not.toContain("#12");
   });
 
   it("closes a batch whose branch got a commit the train did not build", async () => {
@@ -2237,6 +2271,43 @@ describe("a green pull request run that is not the pull request's own", () => {
     Object.assign(auto.pulls.get(22)!, { base: "dev", closedAt: "2026-10-08T02:30:00Z" });
     auto.events.set(22, [{ event: "automatic_base_change_succeeded", created_at: "2026-10-08T02:20:00Z" }]);
     expect((await auto.run()).merged).toEqual([]);
+  });
+
+  it("nor when that pull request's base change is past the events it reads: it counts as moved", async () => {
+    const repo = sharedHead(false);
+    Object.assign(repo.pulls.get(22)!, { base: "dev", closedAt: "2026-10-08T02:30:00Z" });
+    repo.events.set(22, [...Array.from({ length: 1000 }, () => ({ event: "mentioned", created_at: "2026-10-08T00:10:00Z" })), { event: "base_ref_changed", created_at: "2026-10-08T02:20:00Z" }]);
+    const r = await repo.run();
+    expect(r.merged).toEqual([]);
+    expect(repo.landed).toEqual([]);
+    expect(r.log.join("\n")).toMatch(/#21: a green CI run on h21 is not its own \(#22 from the same head into another base ran it too\)/);
+  });
+
+  it("nor when its branch has more pull requests than it reads: one past them may be into another base", async () => {
+    const repo = sharedHead(false);
+    const sibling = repo.pulls.get(22)!;
+    repo.pulls.delete(22);
+    for (let n = 100; n < 1099; n++) repo.pulls.set(n, { ...sibling, number: n, base: "dev", closedAt: "2026-10-08T00:30:00Z" });
+    repo.pulls.set(2000, { ...sibling, number: 2000 });
+    const r = await repo.run();
+    expect(r.merged).toEqual([]);
+    expect(repo.landed).toEqual([]);
+    expect(r.log.join("\n")).toMatch(/#21: a green CI run on h21 is not its own \(its branch has more pull requests than the train reads/);
+    repo.earlier.delete("h21");
+    await repo.run();
+    expect(repo.comments.get(21)![0].body).toMatch(/Waiting: its branch has more pull requests than the train reads \(1000\)/);
+  });
+
+  it("reads a branch's pull requests as cut short when they fill every page (REST)", async () => {
+    const pull = (number: number) => ({ number, title: "x", body: "", draft: false, head: { sha: "abc", ref: "fix-21", repo: { full_name: "o/r" } }, base: { ref: "dev" }, labels: [], created_at: "", state: "closed", closed_at: "" });
+    const fetchImpl = async (url: string) => {
+      const p = Number(url.match(/page=(\d+)/)![1]);
+      return { status: 200, ok: true, headers: new Headers({ "x-ratelimit-remaining": "4000" }), text: async () => JSON.stringify(Array.from({ length: 100 }, (_, i) => pull(p * 100 + i))) };
+    };
+    const gh = restLayer("t", "o/r", { fetchImpl, wait: async () => {} });
+    const read = await gh.headPulls("fix-21");
+    expect(read).toHaveLength(1000);
+    expect(read.truncated).toBe(true);
   });
 
   it("lands on its own run made after that pull request was closed, or before it was opened", async () => {

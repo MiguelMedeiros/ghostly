@@ -27,8 +27,12 @@ function takenBackWords(group: GroupView, t: Translate): { title: string; next: 
     : { title: name ? t("group.chat.takenBackUnknown", { name }) : t("group.chat.takenBackUnknownNoName"), next: t("group.chat.takenBackNextUnknown") };
 }
 
+/** The open button of this group's row in the chat list, if it is there. */
+const rowOpen = (groupId: string) =>
+  [...document.querySelectorAll<HTMLElement>('[data-testid="group-row"]')].find(row => row.dataset.group === groupId)?.querySelector<HTMLElement>('[data-testid="group-row-open"]') ?? null;
+
 /** The open button of the chat list's row after this group's, if there is one. */
-function rowAfter(groupId: string): HTMLElement | null {
+export function rowAfter(groupId: string): HTMLElement | null {
   const rows = [...document.querySelectorAll<HTMLElement>('[data-testid="chat-row"], [data-testid="group-row"]')];
   const at = rows.findIndex(row => row.dataset.group === groupId);
   return at < 0 ? null : rows[at + 1]?.querySelector<HTMLElement>('[data-testid$="-row-open"]') ?? null;
@@ -39,7 +43,7 @@ function rowAfter(groupId: string): HTMLElement | null {
  * delete dialog's. It was left on the page's body. While the list is still hidden behind the page (a phone, before
  * home shows), the focus does not take: tried again on the next frames, as long as nothing else took it.
  */
-function focusPastRow(next: HTMLElement | null, pressed: Element | null, frames = 60) {
+export function focusPastRow(next: HTMLElement | null, pressed: Element | null, frames = 60) {
   const lost = document.activeElement === null || document.activeElement === document.body || document.activeElement === pressed;
   if (!lost) return;
   const target = next?.isConnected ? next : document.querySelector<HTMLElement>('[data-testid="sidebar-new-chat"]');
@@ -51,8 +55,9 @@ function focusPastRow(next: HTMLElement | null, pressed: Element | null, frames 
  * Accept or Decline, from the invitation's row or its own page. Accept needs the inviter's chat live, which takes a
  * moment after the app opens: why the last answer did not go is said for a few seconds, since a click that did nothing
  * and said nothing looked broken. `onDeclined`: what follows a Decline that went. `returnFocus`: where the focus goes
- * once Accept went, on the page, where the buttons go with the answer and left it on the page's body. A Decline that
- * takes the invitation away (its row, or its page going home) hands the focus to the next row of the list.
+ * once Accept went, on the page, where the buttons go with the answer and left it on the page's body; without it (a
+ * chat list row), the row's open button. A Decline that takes the invitation away (its row, or its page going home)
+ * hands the focus to the next row of the list.
  */
 export function useInvitationAnswer(group: GroupView, onDeclined?: () => void, returnFocus?: RefObject<HTMLElement | null>) {
   const { t } = useI18n();
@@ -76,7 +81,10 @@ export function useInvitationAnswer(group: GroupView, onDeclined?: () => void, r
         if (next !== undefined) focusPastRow(next, pressed);
       }
       // Only if the focus is still on the button (or already dropped with it): the user may have gone on elsewhere.
-      else if (document.activeElement === pressed || document.activeElement === document.body) returnFocus?.current?.focus();
+      // From the chat list (no returnFocus), the row's own open button: the row stays, its buttons go.
+      else if (document.activeElement === pressed || document.activeElement === document.body) {
+        (returnFocus ? returnFocus.current : rowOpen(group.id))?.focus();
+      }
     } catch (error) {
       const away = /not connected/i.test(error instanceof Error ? error.message : String(error));
       const contact = group.invitation?.contact;

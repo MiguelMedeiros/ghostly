@@ -164,6 +164,28 @@ describe("the Forward to… picker", () => {
     expect(screen.getByTestId("forward-error")).not.toHaveTextContent("You are offline");
   });
 
+  it("Send pressed from the keyboard keeps the focus while it runs, so a refusal leaves it on Send", async () => {
+    // A focused button that turns disabled loses the focus to the page in a browser: after a refusal Enter did nothing,
+    // and Send was back only through the search field and every row.
+    type Results = { results: { to: string; messageIds: string[]; error: string | null }[] };
+    let answer: (value: Results) => void = () => {};
+    fakeEngine.on("forwardMessages", () => new Promise<Results>(resolve => { answer = resolve; }));
+    const { user } = open([message()]);
+    await user.click(screen.getAllByTestId("forward-target")[0]!);
+    const send = screen.getByTestId("forward-send");
+    send.focus();
+    await user.keyboard("{Enter}");
+    expect(send).toBeEnabled();
+    expect(send).toHaveAttribute("aria-disabled", "true");
+    expect(send).toHaveAttribute("aria-busy", "true");
+    await user.keyboard("{Enter}");
+    expect(fakeEngine.callsTo("forwardMessages")).toHaveLength(1);
+    await act(async () => answer({ results: [{ to: "link-ana", messageIds: [], error: "You are offline" }] }));
+    expect(screen.getByTestId("forward-error")).toHaveTextContent("Ana: You are offline");
+    expect(send).not.toHaveAttribute("aria-disabled");
+    expect(send).toHaveFocus();
+  });
+
   it("after a chat refused, says where it went, and Send again goes only to the chats that refused", async () => {
     let refuse = true;
     fakeEngine.on("forwardMessages", ({ to }: { to: string[] }) => ({ results: to.map(t => ({ to: t, messageIds: t === "link-bo" && refuse ? [] : ["me_1"], error: t === "link-bo" && refuse ? "You are offline" : null })) }));

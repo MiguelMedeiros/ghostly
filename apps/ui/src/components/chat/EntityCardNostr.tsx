@@ -33,6 +33,7 @@ export function NostrEntityCard({ code, pointer }: { code: string; pointer: Nost
   const profile = pointer.type === "profile";
 
   const load = async () => {
+    if (busy) return;
     setError(""); setBusy(true);
     try {
       const found = await engine.call("nostrLookup", pointer.type === "profile"
@@ -70,7 +71,7 @@ export function NostrEntityCard({ code, pointer }: { code: string; pointer: Nost
           {profile ? t("chat.entity.loadKeyHint", { relays: relayNames(relays) }) : t("chat.entity.loadNoteHint", { relays: relayNames(relays) })}
           {pointer.relays.length > 0 && ` ${t("chat.entity.codeRelays")}`}
         </p>}
-      <button type="button" data-testid="entity-nostr-load" disabled={busy} className={cardQuiet} onClick={() => void load()}>
+      <button type="button" data-testid="entity-nostr-load" aria-disabled={busy || undefined} aria-busy={busy || undefined} className={cardQuiet} onClick={() => void load()}>
         {busy ? t("chat.entity.loading") : result ? t("chat.menu.refresh") : profile ? t("chat.entity.loadProfile") : t("chat.entity.loadNote")}
       </button>
       {error && <p role="alert" data-testid="entity-nostr-error" className="m-0 text-danger-ink">{error}</p>}

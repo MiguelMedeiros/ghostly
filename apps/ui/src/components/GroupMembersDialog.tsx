@@ -25,6 +25,9 @@ import { initial } from "../lib/initial";
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
 
+/** The focus fell to the page: what had it went away. */
+const focusLost = () => !document.activeElement || document.activeElement === document.body;
+
 /** What the admin says about a member as a hub (WISP 902 · Group Mesh § Hubs): up to their app, always, or never. */
 const HUB_ROLES = ["auto", "pin", "exclude"] as const;
 
@@ -68,12 +71,41 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
   // The name being typed, while the admin renames the group; null otherwise. The engine cleans it and says what it refuses.
   const [naming, setNaming] = useState<string | null>(null);
   const namingField = useGroupNameField(naming ?? "", setNaming);
+  // A rename saved or let go hands the focus back to Rename: the field it was in is gone, and the page would have it.
+  const renameButton = useRef<HTMLButtonElement>(null), backToRename = useRef(false);
+  const endNaming = () => { backToRename.current = true; setNaming(null); };
+  useEffect(() => {
+    if (naming !== null || !backToRename.current) return;
+    backToRename.current = false;
+    if (focusLost()) renameButton.current?.focus();
+  }, [naming]);
   const rename = async () => {
+    if (busy !== null) return;
     const name = naming ?? "";
-    if (name.trim() === live.name) { setNaming(null); return; }
+    if (name.trim() === live.name) { endNaming(); return; }
     // Nothing visible in it: Save is off, and Enter does nothing either.
     if (!groupName(name)) return;
-    await run("rename", async () => { await engine.call("renameGroup", { groupId: live.id, name }); setNaming(null); });
+    await run("rename", async () => { await engine.call("renameGroup", { groupId: live.id, name }); endNaming(); });
+  };
+  // Change picture's file field: where the focus goes once Remove, gone with the picture, has done its work.
+  const pictureInput = useRef<HTMLInputElement>(null);
+  const removePicture = () => {
+    if (busy !== null) return;
+    const from = document.activeElement;
+    void run("picture", async () => {
+      await engine.call("setGroupPicture", { groupId: live.id, picture: null });
+      if (document.activeElement === from || focusLost()) pictureInput.current?.focus();
+    });
+  };
+  // A contact just invited: their row, which says so in place of the Invite that had the focus.
+  const inviteList = useRef<HTMLUListElement>(null);
+  const invite = (linkId: string) => {
+    if (busy !== null) return;
+    const from = document.activeElement;
+    void run(linkId, async () => {
+      await engine.call("inviteToGroup", { groupId: live.id, linkId });
+      if (document.activeElement === from || focusLost()) inviteList.current?.querySelector<HTMLElement>(`[data-link="${CSS.escape(linkId)}"]`)?.focus();
+    });
   };
   // Contacts: paired chats, minus members and pending invitations. Those without groups are shown, and say why.
   const contacts = (state?.links ?? []).filter(l => l.profile && !live.memberLinks[l.id]);
@@ -107,28 +139,31 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
           <GroupAvatar picture={live.picture} size={56} testId="group-members-avatar" className="bg-accent/15" />
         </AvatarOpener>
         <div className="min-w-0">
-          {naming === null ? <h2 id={`${id}-title`} data-testid="group-members-name" className="truncate text-base font-semibold">{live.name}</h2>
+          {/* The group's and each person's name read in their own direction: a Latin name in Arabic is cut at its end. As
+              wide as the name, the title stays beside the picture whichever way the name runs. */}
+          {naming === null ? <h2 id={`${id}-title`} dir="auto" data-testid="group-members-name" className="w-fit max-w-full truncate text-base font-semibold">{live.name}</h2>
             : <form className="flex items-center gap-2" onSubmit={e => { e.preventDefault(); void rename(); }}>
               <h2 id={`${id}-title`} className="sr-only">{live.name}</h2>
-              <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} ref={namingField.ref} value={naming} disabled={busy !== null}
-                onChange={namingField.onChange} onCompositionStart={namingField.onCompositionStart} onCompositionEnd={namingField.onCompositionEnd} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setNaming(null); } }}
-                className="min-w-0 flex-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-sm focus:border-accent focus:outline-none" />
-              <button type="submit" data-testid="group-rename-save" disabled={busy !== null || !groupName(naming)}
-                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{t("group.rename.save")}</button>
-              <button type="button" data-testid="group-rename-cancel" onClick={() => setNaming(null)} className="text-xs text-text-muted hover:text-text-primary">{t("group.rename.cancel")}</button>
+              {/* While the engine renames, the field is read-only and Save does nothing: disabled, they would drop the focus to the page. */}
+              <input autoFocus data-testid="group-rename-input" aria-label={t("group.rename.label")} ref={namingField.ref} value={naming} readOnly={busy !== null}
+                onChange={namingField.onChange} onCompositionStart={namingField.onCompositionStart} onCompositionEnd={namingField.onCompositionEnd} onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); endNaming(); } }}
+                className="min-w-0 flex-1 rounded-md border border-border bg-surface-alt px-2 py-1 text-sm focus:border-accent focus:outline-none read-only:opacity-60" />
+              <button type="submit" data-testid="group-rename-save" disabled={!groupName(naming)} aria-disabled={busy !== null || undefined}
+                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40">{t("group.rename.save")}</button>
+              <button type="button" data-testid="group-rename-cancel" onClick={endNaming} className="text-xs text-text-muted hover:text-text-primary">{t("group.rename.cancel")}</button>
             </form>}
           <p className="text-xs text-text-muted">{live.members.length === 1 ? t("group.chat.memberOne") : t("group.chat.memberCount", { count: live.members.length })}{live.epoch !== undefined && <> · {t("group.members.epoch", { epoch: live.epoch })}</>}{live.status && live.status !== "active" && <> · {groupStatusText(live.status, t)}</>}</p>
           {/* Only the admin changes the name and the picture: cropped square and redrawn small here, before anything leaves the app. */}
           {live.isAdmin && live.status === "active" && <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-            {naming === null && <button type="button" data-testid="group-rename" disabled={busy !== null} title={t("group.rename.hint")} onClick={() => setNaming(live.name)}
-              className="text-xs font-medium text-accent hover:underline disabled:opacity-40">{t("group.rename.action")}</button>}
-            <label className={`cursor-pointer text-xs font-medium text-accent hover:underline ${busy !== null ? "pointer-events-none opacity-40" : ""}`}>
+            {naming === null && <button ref={renameButton} type="button" data-testid="group-rename" aria-disabled={busy !== null || undefined} title={t("group.rename.hint")} onClick={() => { if (busy === null) setNaming(live.name); }}
+              className="text-xs font-medium text-accent hover:underline aria-disabled:opacity-40">{t("group.rename.action")}</button>}
+            <label className={`cursor-pointer rounded text-xs font-medium text-accent hover:underline has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent ${busy !== null ? "pointer-events-none opacity-40" : ""}`}>
               {live.picture ? t("group.members.changePicture") : t("group.members.addPicture")}
-              <input data-testid="group-picture-input" type="file" accept="image/*" className="sr-only" disabled={busy !== null}
-                onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void run("picture", async () => engine.call("setGroupPicture", { groupId: live.id, picture: await avatarFromFile(file, MAX_GROUP_PICTURE_LENGTH) })); }} />
+              <input ref={pictureInput} data-testid="group-picture-input" type="file" accept="image/*" className="sr-only" disabled={busy !== null && busy !== "picture"}
+                onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file && busy === null) void run("picture", async () => engine.call("setGroupPicture", { groupId: live.id, picture: await avatarFromFile(file, MAX_GROUP_PICTURE_LENGTH) })); }} />
             </label>
-            {live.picture && <button type="button" data-testid="group-picture-remove" disabled={busy !== null} onClick={() => void run("picture", () => engine.call("setGroupPicture", { groupId: live.id, picture: null }))}
-              className="text-xs text-text-muted hover:text-danger disabled:opacity-40">{t("group.members.removePicture")}</button>}
+            {live.picture && <button type="button" data-testid="group-picture-remove" aria-disabled={busy !== null || undefined} onClick={removePicture}
+              className="text-xs text-text-muted hover:text-danger aria-disabled:opacity-40">{t("group.members.removePicture")}</button>}
           </div>}
         </div>
       </div>
@@ -148,15 +183,16 @@ export function GroupMembersDialog({ group, onClose, focusKey, returnFocus }: { 
       {full && <p data-testid="group-invite-full" className="mt-1 text-sm text-text-muted">{live.invited.length > 0
         ? t("group.members.fullInvited", { max: MAX_GROUP_MEMBERS, invited: live.invited.length }) : t("group.link.full", { count: MAX_GROUP_MEMBERS })}</p>}
       {contacts.length === 0 && <p className="mt-1 text-sm text-text-muted">{t("group.members.noContacts")}</p>}
-      <ul className="mt-1 max-h-40 space-y-1 overflow-y-auto" data-testid="group-invite-list">
+      <ul ref={inviteList} className="mt-1 max-h-40 space-y-1 overflow-y-auto" data-testid="group-invite-list">
         {contacts.map(link => {
           const pending = invited.has(link.id), can = !!link.groups && !pending && !full;
-          return <li key={link.id} data-testid="group-invite-contact" data-link={link.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5">
-            <span className="min-w-0 flex-1 truncate text-sm">{contactName(link)}</span>
+          // The row takes the focus from its Invite once the invitation went, and says "Invited…" in its place.
+          return <li key={link.id} tabIndex={-1} data-testid="group-invite-contact" data-link={link.id} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+            <span dir="auto" className="min-w-0 truncate text-sm">{contactName(link)}</span>
             {pending ? <span className="text-xs text-text-muted">{t("group.members.invited")}</span>
               : !link.groups ? <span className="text-xs text-text-muted" title={t("group.members.needsBothHint")}>{link.dataLink === "open" ? t("group.members.needsUpdate") : t("group.members.notConnected")}</span>
-              : <button disabled={!can || busy !== null} onClick={() => void run(link.id, () => engine.call("inviteToGroup", { groupId: live.id, linkId: link.id }))} data-testid="group-invite"
-                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40">{t("group.members.inviteAction")}</button>}
+              : <button disabled={!can} aria-disabled={busy !== null || undefined} onClick={() => invite(link.id)} data-testid="group-invite"
+                className="rounded bg-accent px-2.5 py-1 text-xs font-semibold text-panel-header hover:bg-accent-hover disabled:opacity-40 aria-disabled:opacity-40">{t("group.members.inviteAction")}</button>}
           </li>;
         })}
       </ul>
@@ -215,7 +251,7 @@ const MemberRow = memo(function MemberRow({ member: m, focused, viaHub, photo, m
     <MemberAvatar src={photo} name={myNick || memberName(m, t)} />
     {/* The name keeps room for about 16 characters: the badges and an admin's buttons go under it when the row is narrower (a phone, a long word in another language). */}
     <span className="contact-row min-w-[8.5rem] flex-1">
-      <span className="flex min-w-0 items-center gap-1.5 text-sm"><span className="min-w-0 truncate">{memberName(m, t)}</span>{!m.me && <ContactMarks peerKey={peerKey} testId="group-member-marks" />}{/* An unnamed member's name is its key already ("Member 3r69cg...d51a"): the key again was cut to one character on a phone. */}
+      <span className="flex min-w-0 items-center gap-1.5 text-sm"><span dir="auto" data-testid="group-member-name" className="min-w-0 truncate">{memberName(m, t)}</span>{!m.me && <ContactMarks peerKey={peerKey} testId="group-member-marks" />}{/* An unnamed member's name is its key already ("Member 3r69cg...d51a"): the key again was cut to one character on a phone. */}
         {(m.me || m.nick) && <span data-testid="group-member-key" className="min-w-0 shrink-[100] truncate font-mono text-[10px] text-text-muted">{publicKeyLabel(m.key)}</span>}</span>
       {!m.me && <span className="block truncate text-[11px] text-text-muted" data-testid="group-member-status">{status}</span>}
     </span>

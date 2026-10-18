@@ -175,6 +175,8 @@ export function fedimintNotesDigest(notes: string): string {
 /** A wallet for both networks (tests, older callers), or one per network. */
 type Each<T extends object> = T | PerNetwork<T>;
 /** The distinct wallets of a per-network set (one object may stand for both). */
+/** A federation's wallet network; one whose network is not known holds test sats (never read as real money). */
+const fedimintNetwork = (network: string | undefined): WalletNetwork => network === "bitcoin" ? "mainnet" : "testnet";
 const distinct = <T>(each: PerNetwork<T>): T[] => [...new Set(WALLET_NETWORKS.map((n) => each[n]))];
 /**
  * Every payment this device keeps, with the copy of them the pages get. The copy is made again only after a payment
@@ -1412,7 +1414,8 @@ export class PaymentDesk {
     const spelled = digestHex(notes.trim());
     const before = [...this.payments.values()].find((p) => (p.notesDigest === digest || p.notesDigest === spelled) && p.direction === "in" && p.kind === "payment");
     if (before) { link.sendPaymentResult({ id: payment.id, ok: false, error: before.state === "failed" ? before.error ?? "These notes were already redeemed" : "These notes were already received" }); return; }
-    await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: payment.requestId, federation: found.federation, token: notes, notesDigest: digest });
+    // The federation's network, read as the chat line reads it (unknown is test sats): every reader of the record says the same.
+    await this.save({ id: payment.id, linkId, kind: "payment", direction: "in", amount, unit: UNIT, memo: payment.memo, state: "pending", createdAt: payment.timestamp, requestId: payment.requestId, federation: found.federation, token: notes, notesDigest: digest, network: fedimintNetwork(network) });
     await this.finishRedeem(this.payments.get(payment.id)!);
   }
 
@@ -1451,7 +1454,7 @@ export class PaymentDesk {
     }
     // Written once the federation took the notes (as Cashu's once the mint took the ecash); the same id on a retry.
     if (state) {
-      const test = fedimint.federation(payment.federation)?.network !== "bitcoin";
+      const test = fedimintNetwork(fedimint.federation(payment.federation)?.network) === "testnet";
       await this.host.storeMessage({ linkId: payment.linkId, id: `peer_${payment.createdAt}`, text: `⚡ ${payment.amount.toLocaleString()} ${test ? "test sats" : "sats"} on Fedimint`, sender: "peer", timestamp: payment.createdAt, via: "datalink", paymentId: id });
     }
     if (state !== "done") return;
@@ -1467,6 +1470,11 @@ export class PaymentDesk {
   /** At start: incoming notes an interruption left unredeemed are redeemed now. */
   async resumeFedimint(): Promise<void> {
     for (const payment of [...this.payments.values()]) {
+      // Received before the record carried its network (1.3.6 and older): its federation's, once the wallet knows it.
+      if (payment.kind === "payment" && payment.direction === "in" && payment.federation && !payment.network && !payment.target) {
+        const network = this.fedimintOf(payment.federation)?.federation(payment.federation)?.network;
+        if (network) await this.save({ ...this.current(payment), network: fedimintNetwork(network) }).catch(() => {});
+      }
       if (payment.kind === "payment" && payment.direction === "in" && payment.state === "pending" && payment.token && payment.federation) await this.finishRedeem(payment).catch(() => {});
     }
   }

@@ -52,6 +52,21 @@ describe("a contact link's limits (WISP 8xx)", () => {
     expect(planKnocks(L, first.inbox, [k], NOW + HOUR).read).toEqual([k.key]);
   });
 
+  it("counts every request read in the hour, taken or not: fresh keys with no request do not read past 12 an hour", () => {
+    let state = inbox();
+    let reads = 0;
+    // A poll every 15 s for an hour, each with 12 fresh keys that published nothing.
+    for (let at = NOW; at < NOW + HOUR; at += 15_000) {
+      const plan = planKnocks(L, state, Array.from({ length: NEW_PER_HOUR }, () => knock(undefined, at)), at);
+      reads += plan.read.length;
+      state = plan.inbox;
+    }
+    expect(reads).toBe(NEW_PER_HOUR);
+    const later = NOW + HOUR;
+    const k = knock(undefined, later);
+    expect(planKnocks(L, state, [k], later).read).toEqual([k.key]);
+  });
+
   it("goes busy at 32 waiting, counts who tried without reading them, and opens again below 24", () => {
     let state = inbox();
     for (let hour = 0; state.waiting.length < MAX_WAITING; hour++) {

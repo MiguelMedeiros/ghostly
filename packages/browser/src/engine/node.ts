@@ -24,7 +24,7 @@ import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers
 import type { EngineApi } from "../shared/rpc";
 import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
 import { chatAppId, isAppRef, isAppVersion, publicKeyFromZ32, type AppFrameEvent, type AppSendError } from "@ghostly/core";
-import { GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, readGroupFileMeta } from "@ghostly/core";
+import { FILE_LIMITS, GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, readGroupFileMeta } from "@ghostly/core";
 import { IdentityProofs } from './identities';
 import { X401Credentials } from './x401';
 import { setOwnDidSource } from '../proofs/ownDid';
@@ -734,6 +734,9 @@ export class GhostlyNode implements EngineImplementation {
   private transfersRestored = false;
   /** `start` has loaded the groups (EngineState.groupsLoaded). */
   private groupsLoaded = false;
+  /** Settles as `start` has loaded the groups: a group's history reads as stored from then on (`EngineServer.handle`). */
+  private groupsLoadedNow!: () => void;
+  readonly groupsRead = new Promise<void>((resolve) => { this.groupsLoadedNow = resolve; });
   private readonly feedbackStartedAt = Date.now();
   private readonly feedbackIds = new Set<string>();
   private walletFeedbackReady = false;
@@ -1788,6 +1791,7 @@ export class GhostlyNode implements EngineImplementation {
     // Groups know their edges from the links above, and may add or drop some before anything dials.
     await this.groups.load(this.limitedMode);
     this.groupsLoaded = true;
+    this.groupsLoadedNow();
     this.emitState();
     for (const stored of links) {
       if (stored.group) continue;
@@ -3089,6 +3093,8 @@ export class GhostlyNode implements EngineImplementation {
     this.nostrSocial.forgetLink(linkId);
     this.hold.forgetLink(linkId);
     this.fileDesk.drop(linkId);
+    // A chat made for a contact link request: deleting it takes the request back.
+    void this.contactAsks.forgetChat(linkId).catch(() => {});
     // Its wake-up target and token go with the row: this chat can no longer wake the contact, nor be woken. The
     // contact still has the subscription, so the app replaces it.
     this.wakeLimiter.reset(linkId);
@@ -3306,8 +3312,10 @@ export class GhostlyNode implements EngineImplementation {
     if (!original) return message;
     const resolved: StoredMessage = { ...message, replyTo: { ...replyToOriginal(original, reply.id), ...(reply.member && !original.member && { member: reply.member }), ...(reply.button && { button: reply.button }) } };
     // A press on one of my buttons (WISP 406 · Message Buttons), when it is still open for this person. The history
-    // only says whether this person already answered, so it is read when there is a press to check.
-    const press = buttonPress(resolved, original, []) && buttonPress(resolved, original, history ?? await db.getMessages(message.linkId));
+    // only says whether this person already answered with a `once` button, so it is read when there is such a press
+    // to check: a bot's buttons with no `once` among them take each press as a plain reply costs, however long the chat.
+    const pressed = buttonPress(resolved, original, []);
+    const press = pressed && messageButtons(original)?.buttons.some(b => b.once) ? buttonPress(resolved, original, history ?? await db.getMessages(message.linkId)) : pressed;
     return press ? { ...resolved, press } : resolved;
   }
 
@@ -3517,7 +3525,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!queue) {
       queue = new EditQueue({
         read: () => db.getMessages(linkId),
-        row: id => db.getMessage(linkId, id),
+        rows: ids => db.getMessagesById(linkId, ids),
         ready: () => {
           const live = this.links.get(linkId), link = live?.link;
           return !!link && (link.supportsEdits || (link.textDelivery === "dht" && this.takesDhtEdits(live)));
@@ -4146,6 +4154,10 @@ export class GhostlyNode implements EngineImplementation {
     // A known id could only be a replay or an attempt to pass for a file we already have.
     if (files.wireIds.has(wire.id)) return "duplicate file id";
     if (files.receivedBytes + wire.size > LIMITS.maxStoredIncomingBytesPerPeer) return "no room for more files";
+    // files/2 cannot ask the person (WISP 501): it takes only what files/3 would take without asking. Every Ghostly app
+    // lists files/3, so a larger file here comes from an app that left it out to skip the question.
+    if (wire.size > FILE_LIMITS.askAboveBytes) return "file too large without files/3";
+    if (files.receivedBytes + this.fileDesk.autoTaken(linkId) + wire.size > FILE_LIMITS.autoAcceptBytesPerPeer) return "no more files without asking";
     // Said on the floor first and sent whole now (files/2 names its message by the sender's time): the bubble that
     // waited for it goes, so the file shows once.
     const said = this.fileDesk.takeAnnounced(linkId, wire.id);
@@ -5559,7 +5571,7 @@ export class GhostlyNode implements EngineImplementation {
         if(!request || request.linkId!==params.linkId || request.direction!=="in" || request.state!=="pending" || request.amount!==params.amount)throw new Error("Payment review does not match the authenticated request");
         if(params.target.method!=="cashu" ? JSON.stringify(request.target)!==JSON.stringify(params.target) : !!request.target || params.target.address!==request.id || !request.mints?.includes(params.target.provider))throw new Error("Selected method or mint does not match the authenticated request");
         // A failed payment still holding its token was not taken back yet: the contact may still redeem it.
-        if(request.lightningPending || this.desk.records().some(p=>p.kind==="payment" && p.requestId===request.id && p.linkId===params.linkId && p.state!=="reclaimed" && (p.state!=="failed" || !!p.token)))throw engineError("requestPaymentInFlight");
+        if(request.lightningPending || this.requestPaidHere(request.id, params.linkId))throw engineError("requestPaymentInFlight");
         const asked=paymentNetwork(request);
         if(asked!==paying)throw new Error(crossNetwork(paying, asked));
       } else if(params.target.method!=="cashu" || !payee || params.target.address!==payee)throw new Error("Destination does not match the authenticated peer");
@@ -5569,6 +5581,13 @@ export class GhostlyNode implements EngineImplementation {
     if(params.target.method==="fedimint" && !params.requestId)throw new Error("Fedimint ecash is paid on a contact's request in a chat");
     const memo=typeof params.memo==="string" ? params.memo.trim().slice(0,140) || undefined : undefined;
     return this.paymentCoordinator.prepare(params.target,params.amount,params.feeCap,{payee:params.payee,linkId:params.linkId,requestId:params.requestId,memo});
+  }
+  /**
+   * A payment of mine for this request is out, or failed with its ecash not taken back yet (the contact may still
+   * redeem it): paying the request again would pay it twice.
+   */
+  private requestPaidHere(requestId: string, linkId: string): boolean {
+    return this.desk.records().some(p=>p.kind==="payment" && p.requestId===requestId && p.linkId===linkId && p.state!=="reclaimed" && (p.state!=="failed" || !!p.token));
   }
   /** The wallets of a review's network read again after it moved money. */
   private async refreshNetwork(review: PaymentReview) {
@@ -5586,6 +5605,8 @@ export class GhostlyNode implements EngineImplementation {
       if (intent.review.requestId) {
         const request = this.desk.payment(intent.review.requestId);
         if (!request || request.state !== "pending" || request.lightningPending) throw engineError("requestNotAwaiting");
+        // Paid since this review was made (`chat pay-request`, ecash waiting on the contact's answer): it would pay twice.
+        if (this.requestPaidHere(request.id, intent.review.linkId)) throw engineError("requestPaymentInFlight");
       }
       // Reach the contact first, as preparing does: until the chat is live again (after a restart, say), its ways of
       // paying are not known, and Cashu would read as off.
@@ -5666,7 +5687,19 @@ export class GhostlyNode implements EngineImplementation {
    * `network`: the card chosen to pay; a request of the other network is refused, nothing spent. `card`: the Lightning card
    * that pays; absent, the network's default one. `confirmedReal`: required on Mainnet.
    */
-  payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?: WalletNetwork; confirmedReal?: boolean; card?: string }) {
+  async payRequest(params: { linkId: string; paymentId: string; via?: "lightning"; maxFee?: number; network?: WalletNetwork; confirmedReal?: boolean; card?: string }) {
+    // A review made for this open request could still be approved once this paid it, and pay it twice (a Cashu review
+    // reserves no ecash). One still pending is cancelled first, so no Approve sends it; one approved or sent may
+    // hold money, and nothing is paid here. A request that names where to pay (`target`) is paid only through its
+    // review, and the desk refuses it below: its review is left alone.
+    const request = this.desk.payment(params.paymentId);
+    if (request?.kind === "request" && request.direction === "in" && request.linkId === params.linkId && request.state === "pending" && !request.target) {
+      for (const { review } of await intentRepository.list()) {
+        if (review.requestId !== request.id || review.linkId !== params.linkId || review.state === "failed" || review.state === "cancelled") continue;
+        if (review.state === "pending" && await this.paymentCoordinator.cancel(review.id).then(() => true, () => false)) continue;
+        throw engineError("requestHasPayment");
+      }
+    }
     return this.desk.payRequest(params);
   }
 
@@ -6831,6 +6864,8 @@ export class GhostlyNode implements EngineImplementation {
       open: () => !!live.link?.isDataLinkOpen,
       look: () => live.link?.look(),
       direct: payload => this.groups.directSignal(group, peer, linkId, payload),
+      // Started again (`restartEdge`): its packets are dated past the last one the edge signed before.
+      after: live.carried?.lastDated(),
     });
     const waiting = live.carried && this.groups.takeSignal(group, peer);
     if (waiting) live.carried!.accept(waiting);
@@ -6951,6 +6986,11 @@ export class GhostlyNode implements EngineImplementation {
         // wait minutes of backoff while the member is there. The edge goes on over a native transport for this run, as
         // one whose WebRTC connected nothing does.
         onAnswersRefused: () => { void this.edgeWithoutRtc(linkId); },
+        // This side's offer was answered and connected nothing in a few seconds (`RACE_ANSWERED_MS`): there is no direct
+        // path, as a chat's race takes it. Waiting for ICE to give up (15 s in Chromium, the attempt's 90 s where it never
+        // says `failed`) held a member behind a VPN, and its group messages, that long, where its chats went on over Iroh's
+        // relay in seconds (2026-10-16). Not evidence about this device's network (`directPath`): the member's may block.
+        onRtcStalled: () => { void this.edgeWithoutRtc(linkId); },
         onDataLinkState: state => {
           traceJoin(group, `link.${state}`, { role });
           // The last moment the member was reachable on it: when it opens, and when it stops being open.
@@ -7070,6 +7110,8 @@ export class GhostlyNode implements EngineImplementation {
       ? resumeHere(this.transportLogOf(live), this.transportsHere(), stored.peerTransports ?? live.caps?.peer?.transports) : {};
     // The DHT delivery view the pages last heard of (`onDhtDelivery`).
     let dhtShown: string | undefined;
+    // Whether the chat's invite was taken from this side, as last heard (`onDhtDelivery`).
+    let wasTaken = false;
     live.link = new GhostLink({
       paymentMethods: stored.paymentMethods,
       paymentNetworks: this.chatNetworks(stored),
@@ -7182,6 +7224,12 @@ export class GhostlyNode implements EngineImplementation {
         onDhtDelivery: view => {
           if (stored.profile && !stored.group) void this.outboxes.get(linkId)?.flush().catch(() => {}).then(() => this.editQueues.get(linkId)?.flush()).catch(() => {});
           this.observeTransport(linkId);
+          // The invite was not taken after all: the chat takes back the listeners it gave up (`takenFromUs`).
+          const taken = !!live.link?.takenFromUs;
+          if (taken !== wasTaken) {
+            wasTaken = taken;
+            if (!taken && live.stored.deliveryMode !== "dht" && this.keepsNativeEndpoints(linkId, live.stored)) void this.ensureNativeEndpoints(linkId);
+          }
           // Every read of the mailbox says so: the pages hear only of one that changed what the chat shows.
           const shown = JSON.stringify(view);
           if (shown !== dhtShown) { dhtShown = shown; this.emitState(); }
@@ -7395,6 +7443,7 @@ export class GhostlyNode implements EngineImplementation {
           return held.digest;
         },
         onFileIncoming: (file) => this.receiveFile(linkId, file),
+        onFileRoom: async () => (await fileBytes()).room(),
         onFileProgress: (id, transferred, direction) =>
           this.fileProgress(this.localFileId(linkId, id, direction), transferred),
         onFileComplete: (id, direction) =>
@@ -7674,7 +7723,8 @@ export class GhostlyNode implements EngineImplementation {
   private async startNativeEndpoint(linkId: string, expected: GhostLink | null | undefined, key: NativeTransport,
     factory: (seedB64: string) => Promise<NativeEndpoint>, inUse: boolean): Promise<"no-slot" | "failed" | false> {
     const live = this.links.get(linkId), link = live?.link;
-    if (this.shuttingDown || !live?.stored.profile || live.stored.deliveryMode === "dht" || !link || link !== expected) return false;
+    // Nor a chat whose invite someone else used first: its listener is on the joiner's key every copy derives (`takenFromUs`).
+    if (this.shuttingDown || !live?.stored.profile || live.stored.deliveryMode === "dht" || !link || link !== expected || link.takenFromUs) return false;
     // A group's link runs them only where one side has no WebRTC (`keepsGroupNative`).
     const group = !!live.stored.group;
     if (group && !this.keepsGroupNative(live.stored)) return false;
@@ -7738,7 +7788,7 @@ export class GhostlyNode implements EngineImplementation {
       const starting = factory(seed);
       const endpoint = await Promise.race([starting, this.stopping]);
       if (!endpoint) { void starting.then((late) => late.close(), () => {}); return false; }
-      if (this.shuttingDown || live.stored.deliveryMode === "dht" || live.link !== link || !this.links.has(linkId)) { await endpoint.close(); return false; }
+      if (this.shuttingDown || live.stored.deliveryMode === "dht" || live.link !== link || !this.links.has(linkId) || link.takenFromUs) { await endpoint.close(); return false; }
       link.registerEndpoint(endpoint);
       delete live.transportErrors[key];
       // The record says how to dial it, so a contact whose WebRTC never connects can try it (WISP 03).

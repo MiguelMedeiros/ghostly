@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { CONTACT_KEY } from "./apiKit";
+import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
 import { CliError, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { turnRef } from "./turnRefs";
@@ -25,6 +26,8 @@ export interface ListenOptions {
   allow?: Allowlist;
   /** `--turns`: only agent turns, as `agent.turn` events. */
   turns?: boolean;
+  /** The first wait before a webhook is tried again (500 ms), doubled each time up to a minute. */
+  retryMs?: number;
 }
 
 /**
@@ -231,16 +234,37 @@ function runExec(command: string, event: GhostlyEvent): Promise<number> {
   });
 }
 
-async function post(url: URL, event: GhostlyEvent): Promise<boolean> {
-  for (let attempt = 0; attempt < 3; attempt++) {
+/** The longest wait between two tries of a webhook that is not answering. */
+const RETRY_MAX_MS = 60_000;
+
+/**
+ * Posts one event; resolves true once the bridge took it, false when it refused it (a 4xx or a redirect, three times).
+ * A bridge that is not there (refused connection, timeout, 5xx, 408, 429) has not handled the event: it is tried again,
+ * waiting up to a minute between tries, for as long as it takes, so the cursor never moves past it. Before, three tries
+ * in 3.5 s and the cursor moved on: a bridge restarting for longer lost every event of the time it was down, for good.
+ */
+async function post(url: URL, event: GhostlyEvent, retryMs: number): Promise<boolean> {
+  let wait = retryMs, holding = false;
+  for (let attempt = 0; ; attempt++) {
+    let down = true;
     try {
       // A redirect is not followed: it would post the event to wherever it points, off this machine too.
       const response = await fetch(url, { method: "POST", redirect: "manual", headers: { "content-type": "application/json", "x-ghostly-event": event.type, "x-ghostly-seq": String(event.seq) }, body: JSON.stringify(event), signal: AbortSignal.timeout(10_000) });
-      if (response.ok) return true;
-    } catch { /* retried */ }
-    await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+      void response.body?.cancel().catch(() => {});
+      if (response.ok) {
+        if (holding) process.stderr.write(`ghostly: the webhook at ${url.href} answers again: event ${event.seq} taken\n`);
+        return true;
+      }
+      down = response.status >= 500 || response.status === 408 || response.status === 429;
+    } catch { /* not there: tried again */ }
+    if (!down && attempt >= 2) return false;
+    if (down && attempt >= 2 && !holding) {
+      holding = true;
+      process.stderr.write(`ghostly: the webhook at ${url.href} is not answering: holding event ${event.seq} (${event.type}) until it does\n`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, wait));
+    wait = Math.min(wait * 2, RETRY_MAX_MS);
   }
-  return false;
 }
 
 /** Events given to a handler and not handled yet: what `listen` holds in memory. */
@@ -277,10 +301,11 @@ export function eventHandler(options: ListenOptions): EventHandler {
         const code = await runExec(options.exec, event);
         if (code !== 0) process.stderr.write(`ghostly: --exec exited ${code} on event ${event.seq} (${event.type})\n`);
       }
-      if (webhook && !(await post(webhook, event))) process.stderr.write(`ghostly: the webhook did not take event ${event.seq} (${event.type})\n`);
+      if (webhook && !(await post(webhook, event, options.retryMs ?? 500))) process.stderr.write(`ghostly: the webhook did not take event ${event.seq} (${event.type})\n`);
       // An output whose reader stopped holds the next event here, not one more line in its buffer per event.
       if (full) await options.drained?.();
-      // A failed handler still moves the cursor: one poisonous event must not stop the stream. The failure is on stderr.
+      // A failed hook (an --exec exiting non-zero, an event the webhook refused) still moves the cursor: one poisonous
+      // event must not stop the stream. The failure is on stderr. A webhook not answering never gets here (`post`).
       if (options.cursor) writeCursor(options.cursor, event.seq);
     }).catch((error: unknown) => {
       try {
@@ -297,7 +322,7 @@ export const MAX_BEHIND = 1_000;
 
 /**
  * Bounds what a listener holds when its output or hooks fall behind (a stdout reader that hung, a slow --exec): past
- * `MAX_BEHIND` events not handled it stops taking events (`pause`: the subscription closes) and drops what still
+ * `MAX_BEHIND` events not handled it stops taking events (`pause`: the subscription stops reading) and drops what still
  * arrives; once every event taken is handled, `resume` opens it again after the last one taken. The daemon's journal
  * keeps what came meanwhile (and says `events.gap` past what it keeps), so a consumer that hangs for a day does not
  * grow the listener by the day's traffic.
@@ -319,4 +344,51 @@ export class Feed {
     this.pause();
     void this.handle.idle().then(() => { this.held = false; this.resume(this.since); });
   };
+}
+
+/** How long a feed that fell behind keeps its connection to the daemon open, unread, while its hooks take no event (`followDaemon`). */
+export const PAUSE_HOLD_MS = 60_000;
+
+/**
+ * Follows a daemon's events into `handle` until `close`; a daemon that restarts is picked up again after the last event
+ * seen. A feed that falls behind stops reading the connection, not closes it: what the daemon sent meanwhile (a replay
+ * written whole) is read on resume, so a catch-up reads the journal once, not once per pause. A connection the daemon
+ * ended meanwhile (past what it lets a client leave unread) is opened again after the last event taken.
+ * A feed whose hooks take no event for `holdMs` (`PAUSE_HOLD_MS`: a hook that hung) ends the connection, as a full one
+ * does, so the daemon does not keep a replay and what came live for it while it hangs; resume opens it again after the
+ * last event taken.
+ * `subscribed`: the first subscription's answer (a journal that cannot be replayed rejects it).
+ */
+export function followDaemon(address: DaemonAddress, client: DaemonClient, handle: EventHandler, since: number | undefined, holdMs = PAUSE_HOLD_MS): { subscribed: Promise<unknown>; close(): void } {
+  let current: DaemonClient | null = client;
+  let holding: ReturnType<typeof setTimeout> | undefined;
+  const reconnect = (wait: number) => void (async () => {
+    while (!current && !feed.paused) {
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      wait = 1000;
+      if (current || feed.paused) return;
+      const next = await connectDaemon(address, 1000);
+      if (next) { current = next; await follow(next).catch(() => { if (current === next) current = null; }); }
+    }
+  })();
+  // A hook still taking events (a slow --exec) keeps the connection; one that took none for `holdMs` lets it go.
+  const hold = (behind: number) => {
+    holding = setTimeout(() => {
+      if (handle.behind() < behind) return hold(handle.behind());
+      const c = current; current = null; c?.destroy();
+    }, holdMs);
+  };
+  const feed = new Feed(handle, since, () => {
+    current?.pause();
+    hold(handle.behind());
+  }, () => {
+    clearTimeout(holding);
+    if (current) current.resume(); else reconnect(0);
+  });
+  const follow = (c: DaemonClient) => c.subscribe(feed.since, feed.take, () => {
+    if (current !== c) return;
+    current = null;
+    reconnect(1000);
+  });
+  return { subscribed: follow(client), close: () => { clearTimeout(holding); current?.close(); } };
 }

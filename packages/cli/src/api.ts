@@ -11,7 +11,7 @@ import {
 import { FILE_METHODS } from "./files";
 import { checkShownName } from "./profiles";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
-import { STATUS_CARD_METHODS } from "./statusCards";
+import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
 import { HOLD_MAX_MINUTES, holdChat, holdOf, releaseHold } from "./holds";
 import { endTyping, keepOneShot, keepTyping, sayTyping } from "./typing";
@@ -676,6 +676,7 @@ const METHODS: Record<string, Method> = {
     const wrong = (why: string, rawError?: string) => new CliError("bad_request", `${method} takes ${takes || "no parameters"}: ${why} (ghostly engine --list --verbose)`, { takes, ...(rawError ? { rawError } : {}) });
     const problem = engineParamsProblem(method, args);
     if (problem) throw wrong(problem);
+    if (args && ENGINE_SENDS.has(method) && !bool(params, "force")) await guardEngineSend(ctx, method, args);
     if (method === "getMessages") return node(ctx).getMessages(str(args ?? {}, "linkId", true));
     if (method === "getState") return state(ctx);
     // Someone chose the chat on screen: an invite's mark no longer clears it.
@@ -705,6 +706,30 @@ async function clearProfile(ctx: ApiContext): Promise<{ cleared: { chats: number
   if (ctx.mode !== "daemon" || !ctx.stop) return { cleared };
   setTimeout(() => ctx.stop!(), 10);
   return { cleared, stopped: true };
+}
+
+/**
+ * The engine's calls that send a text this side writes (a message, a file's caption, a payment's memo): `engine.call`
+ * runs the secret guard of `send`, `edit` and `forward` on them too (docs/CLI.md § Safety), so a raw call is no way around it. `force: true` (`--force`) sends it.
+ */
+const ENGINE_SENDS: ReadonlySet<string> = new Set([
+  "sendMessage", "sendGroupMessage", "editMessage", "forwardMessages", "sendGroupFile",
+  // A payment's memo reaches the contact as a message's text does (`chat pay` and `chat request` guard it too).
+  "sendPayment", "requestPayment", "requestGroupPayment", "askToPay",
+]);
+
+async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
+  let texts: unknown = [args.text, args.card, args.caption, args.memo];
+  if (method === "forwardMessages") {
+    const ids = Array.isArray(args.messageIds) ? args.messageIds.filter((id): id is string => typeof id === "string") : [];
+    const linkId = args.linkId;
+    texts = typeof linkId === "string" && linkId ? await Promise.all(ids.map(async (id) => {
+      const message = await node(ctx).getMessage(linkId, id);
+      return message && !message.file ? message.text : null;
+    })) : [];
+  }
+  const secret = secretIn(texts);
+  if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; call ${method} with --force if you mean to`, { kind: secret.kind });
 }
 
 /** Reacts to a message of a chat or a group (`group:<id>`): `emoji`, or `remove` for "" (WISP 400 § Reactions). */

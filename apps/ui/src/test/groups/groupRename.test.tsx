@@ -49,6 +49,37 @@ describe("renaming a group in the app", () => {
     expect(engine.callsTo("renameGroup")).toEqual([]);
   });
 
+  it("keeps the keyboard's focus: in the field while the engine renames, then on Rename, saved or cancelled", async () => {
+    fakeEngine.update({ groups: [admin({ name: "Friends" })] });
+    const { user, engine } = renderApp(<GroupMembersDialog group={admin({ name: "Friends" })} onClose={() => {}} />);
+    let done = () => {};
+    engine.on("renameGroup", () => new Promise<void>(resolve => { done = resolve; }));
+    screen.getByTestId("group-rename").focus();
+    await user.keyboard("{Enter}");
+    await user.keyboard(" and more{Enter}");
+    // While it runs: nothing to type or press again, and nothing disabled (a disabled field drops the focus to the page).
+    const input = screen.getByTestId("group-rename-input");
+    await waitFor(() => expect(engine.callsTo("renameGroup")).toHaveLength(1));
+    expect(input).toHaveAttribute("readonly");
+    expect(input).not.toBeDisabled();
+    expect(input).toHaveFocus();
+    expect(screen.getByTestId("group-rename-save")).not.toBeDisabled();
+    expect(screen.getByTestId("group-rename-save")).toHaveAttribute("aria-disabled", "true");
+    done();
+    await waitFor(() => expect(screen.getByTestId("group-rename")).toHaveFocus());
+    // Escape in the field, and Cancel, give it back to Rename too.
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("group-rename-input")).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.getByTestId("group-rename")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await user.tab();
+    await user.tab();
+    expect(screen.getByTestId("group-rename-cancel")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("group-rename")).toHaveFocus();
+  });
+
   it("says what the engine refused, in the app's words, and keeps what was typed", async () => {
     fakeEngine.update({ groups: [admin()] });
     const { user, engine } = renderApp(<GroupMembersDialog group={admin()} onClose={() => {}} />);
@@ -58,6 +89,8 @@ describe("renaming a group in the app", () => {
     await user.type(screen.getByTestId("group-rename-input"), "Book club{Enter}");
     expect(await screen.findByRole("alert")).toHaveTextContent("Type a name with letters or emoji" + "Up to 64 characters, on one line.");
     expect(screen.getByTestId("group-rename-input")).toBeInTheDocument();
+    expect(screen.getByTestId("group-rename-input")).toHaveFocus();
+    expect(screen.getByTestId("group-rename-input")).not.toHaveAttribute("readonly");
   });
 
   it.each([["a zero-width space", "\u200B"], ["a direction mark", "\u202E"]])("keeps Save off for a name with nothing visible in it (%s)", async (_, name) => {

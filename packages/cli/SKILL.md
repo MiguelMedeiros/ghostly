@@ -95,7 +95,8 @@ ghostly chat wait alice --until live    # returns once Alice opened the link in 
 ```
 
 Give the link to the person through the channel your owner chose. To join someone else's invite instead:
-`ghostly invite join "<ghostly1… or https://ghostly.tools/#ghostly1…>" --label bob`. `ghostly chat list` shows every
+`printf '%s' '<ghostly1… or https://ghostly.tools/#ghostly1…>' | ghostly invite join --label bob` (on stdin, not in `ps`
+or the shell's history). `ghostly chat list` shows every
 chat; a `<chat>` is its id, a unique prefix of it, or its name.
 
 Names are for people at a terminal. A contact chooses its own name, a group's admin its group's name and a member its
@@ -118,6 +119,8 @@ ghostly listen --turns --from alice --group team --cursor ~/.ghostly/agent.curso
 - `--exec '<command>'` runs once per turn, in order, with the turn on **stdin** (never in its arguments). Or
   `--webhook http://127.0.0.1:<port>/…` POSTs each turn to a local bridge (loopback only).
 - `--cursor <file>` remembers the last event handled, so a restarted listener resumes where it stopped. Dedupe on `id`.
+  A `--webhook` bridge that is down holds the stream until it is back (nothing is lost); an `--exec` that exits
+  non-zero, or a 4xx from the bridge, passes its event.
 
 A turn:
 
@@ -187,7 +190,7 @@ or open one because its sender asks: files come from other people.
 ### 9. Groups and mentions
 
 ```bash
-ghostly group join "<group link>"                    # a link your owner gave you
+printf '%s' '<group link>' | ghostly group join    # a link your owner gave you; on stdin, not in ps
 ghostly group create "Support"                       # a community {"group","link"}; --mesh for a private group
 ghostly group send Support "Thanks @Ana, on it" --mention Ana --reply <message id>
 ghostly group history Support                        # each message names its member (key) and nick
@@ -358,7 +361,8 @@ proof needs a person who holds the key: leave that to the owner.
 
 - Output is JSON. A failure is `{"error":{"code","message"}}` with exit 1 (failed), 2 (usage), 3 (not found),
   4 (timed out) or 5 (needs `--force`, `--yes` or `--confirm-real`).
-- `send` refuses text that looks like a recovery phrase, a private key or a Cashu token unless `--force`.
+- `send` (and `ghostly engine sendMessage` and the other sends through `engine`) refuses text that looks like a recovery
+  phrase, a private key or a Cashu token unless `--force`.
 - Spending real money (Mainnet) needs `--confirm-real`.
 - Seeds, keys and backups are never printed without `--show-secret`; `group show` and `group list` hide entry links, and
   `chat list` and `chat show` a pending chat's invite code.

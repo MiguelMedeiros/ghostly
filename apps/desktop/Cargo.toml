@@ -1,6 +1,6 @@
 [package]
 name = "ghostly"
-version = "1.3.3"
+version = "1.3.10"
 edition = "2021"
 
 # The app is a library (src/lib.rs) that src/main.rs runs on Desktop; Android and iOS load it as a shared or static
@@ -52,7 +52,9 @@ tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net", "
 
 # Desktop only (Android and iOS have neither): the updater plugin, and the system clipboard.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-updater = "2"
+# Without its `zip` feature: the updates we publish are an installer (Windows `-setup.exe`), an AppImage and a macOS
+# `.app.tar.gz` (tar is always on for macOS), never an archive to unpack (tools/scripts/updater-manifest.mjs).
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 # `image-data`: a picture on the clipboard, for a paste of files (clipboard.rs).
 arboard = { version = "3.6.1", default-features = false, features = ["image-data", "wayland-data-control"] }
 

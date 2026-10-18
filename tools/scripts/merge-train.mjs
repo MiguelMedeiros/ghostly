@@ -266,6 +266,7 @@ export function waiting(pr) {
   if (pr.ci === "success" || pr.fast === "success") return null;
   if (pr.fast === "failure") return "CI Success (draft) is red on its last commit and CI Success has not passed on it yet";
   if (pr.shared?.length) return `another pull request from its branch (${pr.shared.map((o) => `#${o.number} into \`${o.base}\`${o.moved ? ", its base changed" : ""}`).join(", ")}) ran CI on the same commit with that base's ci.yml; close it and, ten minutes later, push a new commit`;
+  if (pr.crowded) return `its branch has more pull requests than the train reads (${PAGES_READ * 100}), so one into another base may have run CI on the same commit; open a new pull request from a new branch`;
   if (pr.retargeted) return "its green CI run on its last commit ran before its base was changed; push a new commit, or close and reopen it, for a run against this base";
   if (pr.misplanned) return "the green CI run on its last commit skipped jobs that its changes need (a run planned for another base); run CI on it again";
   return "CI Success has not passed on its last commit yet";
@@ -370,6 +371,12 @@ export function positionText(base, pr, place, batch, head = pr.sha, alone = null
 }
 
 /** The head a pull request had when the train first saw it queued (the reviewed one), from its position comment. */
+/**
+ * Whether a comment is the train's position comment: its own, and starting with the mark (as `positionText` writes
+ * it). Not any of its comments that holds the mark: another text of its own may quote a pull request's.
+ */
+const isPosition = (c, login) => c.user?.login === login && (c.body ?? "").startsWith(POSITION);
+
 export const queuedHead = (sticky) => sticky?.body?.match(HEAD)?.[1] ?? null;
 
 const newCommitsText = (what) =>
@@ -420,8 +427,9 @@ export const noSkip = (text) => text.replace(SKIP_CI, "($1)");
 /** GitHub's refusal of a push whose commits change a workflow, by a token without the `workflows` permission. */
 const WORKFLOW_PUSH_REFUSED = /without `?workflows`? permission/;
 
+// A file name may hold any text, the train's marks too: `<` is escaped (as for titles in `batchBody`) so none forms.
 const workflowText = (base, workflows) =>
-  `Merge train: this pull request changes a workflow (${workflows.join(", ")}), and the queue app may not push a branch that does (its token has no \`workflows\` permission), so it left the line: the rest of the line goes on without it. It lands by hand into \`${base}\`, or once the app is given that permission (then remove \`queue:failed\`).`;
+  `Merge train: this pull request changes a workflow (${workflows.map((f) => f.replaceAll("<", "&lt;")).join(", ")}), and the queue app may not push a branch that does (its token has no \`workflows\` permission), so it left the line: the rest of the line goes on without it. It lands by hand into \`${base}\`, or once the app is given that permission (then remove \`queue:failed\`).`;
 
 const conflictText = (base, reason) =>
   reason === "empty"
@@ -482,9 +490,16 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   const sharing = new Map();
   const siblings = async (p) => {
     if (!sharing.has(p.number)) {
-      const others = (await gh.headPulls(p.branch)).filter((o) => o.number !== p.number);
-      for (const o of others) if (o.base === base) o.moved = (await gh.events(o.number)).some((e) => BASE_CHANGES.has(e.event));
-      sharing.set(p.number, others.filter((o) => o.base !== base || o.moved));
+      const pulls = await gh.headPulls(p.branch);
+      const others = pulls.filter((o) => o.number !== p.number);
+      // Events that fill every page may hide a base change past them: such a pull request counts as moved.
+      for (const o of others) {
+        if (o.base !== base) continue;
+        const events = await gh.events(o.number);
+        o.moved = !!events.truncated || events.some((e) => BASE_CHANGES.has(e.event));
+      }
+      // Nor do pull requests past the ones read tell: one of them may be into another base.
+      sharing.set(p.number, Object.assign(others.filter((o) => o.base !== base || o.moved), { truncated: !!pulls.truncated }));
     }
     return sharing.get(p.number);
   };
@@ -506,8 +521,11 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         p.retargeted = true;
       } else {
         const made = Date.parse(run.created_at);
-        p.shared = (await siblings(p)).filter((o) => openAt(o, made));
-        if (p.shared.length) why = `${p.shared.map((o) => `#${o.number}`).join(", ")} from the same head into another base ran it too`;
+        const others = await siblings(p);
+        p.shared = others.filter((o) => openAt(o, made));
+        p.crowded = others.truncated;
+        if (p.crowded) why = `its branch has more pull requests than the train reads, so one into another base may have run it`;
+        else if (p.shared.length) why = `${p.shared.map((o) => `#${o.number}`).join(", ")} from the same head into another base ran it too`;
       }
     }
     if (why) say(`#${p.number}: a green CI run on ${p.sha.slice(0, 12)} is not its own (${why}), so it does not count.`);
@@ -534,7 +552,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const greenAt = p.ci === "success" ? gateDoneAt(jobs, "CI Success") : p.fast === "success" ? gateDoneAt(drafts, DRAFT_GATE) : null;
     p.boardableAt = greenAt && Date.parse(greenAt) > Date.parse(p.queuedAt) ? greenAt : p.queuedAt;
     const said = await gh.comments(p.number);
-    p.sticky = said.find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
+    p.sticky = said.find((c) => isPosition(c, login));
     // GitHub lists both oldest first, and anyone may comment: past what the train reads, its own position comment (the
     // reviewed head) or the latest `queue` may be missing. That is a doubt, not "none yet": it waits, and gets no new comment.
     if (events.truncated) p.unread = "events";
@@ -756,7 +774,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         before++;
         // That run may have stopped before the labels and the position comment went.
         for (const l of Object.values(LABEL)) if (was.labels.includes(l)) await w.removeLabel(s.number, l);
-        const sticky = (await gh.comments(s.number)).find((c) => c.user?.login === login && (c.body ?? "").includes(POSITION));
+        const sticky = (await gh.comments(s.number)).find((c) => isPosition(c, login));
         if (sticky) await w.deleteComment(sticky.id);
       }
     }
@@ -1035,7 +1053,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     // branch into another base made): its CI reads "none", so each run would rebase and push it again for good while
     // nobody behind it moves. It waits in line, as `waiting` says, and the next one goes. (A base changed in flight
     // needs no more: its mark's base is not the new tip, so it is rebased onto it, and that run counts.)
-    const refused = (p) => p.unread || (p.ci !== "success" && p.ci !== "failure" && p.shared?.length);
+    const refused = (p) => p.unread || (p.ci !== "success" && p.ci !== "failure" && (p.shared?.length || p.crowded));
     const lone = line().find((p) => p.alone?.sha === p.sha && canGoAlone(p) && !refused(p));
     if (lone) inFlight = await flyAlone(lone);
   }
@@ -1228,7 +1246,10 @@ export function restLayer(token, repo, { budget = 100, wait = (ms) => new Promis
     epicBranches: async () => (await must("GET", "/git/matching-refs/heads/epic/")).map((r) => r.ref.replace("refs/heads/", "")),
     events: (n) => all(`/issues/${n}/events`),
     /** Every pull request from this repository's branch `branch`, open or closed, into any base. */
-    headPulls: async (branch) => (await all(`/pulls?state=all&head=${encodeURIComponent(`${repo.split("/")[0]}:${branch}`)}`)).map(pull),
+    headPulls: async (branch) => {
+      const list = await all(`/pulls?state=all&head=${encodeURIComponent(`${repo.split("/")[0]}:${branch}`)}`);
+      return Object.assign(list.map(pull), list.truncated ? { truncated: true } : {});
+    },
     /**
      * The jobs of CI's own run on a commit (its latest attempt; see `ciRun`), or none when CI has no run there. A token
      * that may not read Actions (a queue app without "Actions: read") gets the commit's check runs from GitHub Actions

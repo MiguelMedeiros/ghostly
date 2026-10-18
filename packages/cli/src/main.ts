@@ -3,7 +3,7 @@ import { connect } from "node:net";
 import { openSync, readFileSync, rmSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
-import { connectDaemon, type DaemonClient } from "./client";
+import { connectDaemon, isNotTheDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
 import { here } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
@@ -11,7 +11,7 @@ import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import type { RuntimeOptions } from "./runtime/engine";
-import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, readCursor } from "./listen";
+import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, readCursor } from "./listen";
 import { format } from "node:util";
 import { secretsFromStdin, secretValuesWarning } from "./secretInput";
 import {
@@ -168,7 +168,7 @@ function waitsFor(method: string, params: Record<string, unknown>): number | und
 
 async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
   requireProfile(g);
-  const client = await connectDaemon(g.paths.socket);
+  const client = await connectDaemon(g.paths);
   if (client) {
     // The version check goes on the same connection as the command, ahead of it, not before it, and with no deadline
     // of its own: a daemon that does not answer costs the command its own deadline and nothing else (a read gave up
@@ -205,9 +205,9 @@ export async function oneShotJoinWait(s: Pick<Session, "call">, result: Record<s
   return { answer, note: `Not paired yet: the inviter's app is offline. It pairs when both are online: keep this profile running (ghostly daemon --detach), then ghostly chat wait ${ref} --until paired` };
 }
 
-async function readStdin(): Promise<string> {
+async function readStdin(onData?: () => void): Promise<string> {
   const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  for await (const chunk of process.stdin) { onData?.(); chunks.push(chunk as Buffer); }
   return Buffer.concat(chunks).toString("utf8");
 }
 
@@ -239,7 +239,7 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   }],
   ["settings get [--show-secret]", "The profile's settings", { "show-secret": o("boolean", "Show credentials too") }],
   ["settings set <key> <json-value>", "Change one: relays, irohRelays, hyperdhtRelay, readRelays, iceServers, publicProfiles, online, shareProfile, sendTyping, autoDownloads, serveFiles, nick"],
-  ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups") }],
+  ["engine <method> [json-params | -] [--confirm-real] [--show-secret] [--yes] [--force]", "Any call of the app's engine, with its own parameters (engine --list --verbose names them)", { "confirm-real": o("boolean", "Confirm a Mainnet (real money) spend"), "show-secret": o("boolean", "Print a call's secrets"), yes: o("boolean", "Confirm a call that deletes chats or groups"), force: o("boolean", "Send a text that looks like a secret") }],
   ["engine --list [--verbose]", "The engine's calls", { verbose: o("boolean", "With what each call takes: { linkId, label }, ? for an optional one") }],
   ["call pipe [<chat|call>]", "A call's audio on stdin/stdout: raw s16le mono PCM at the call's rate (e.g. with sox or ffmpeg)"],
   ["identity add <provider> [subject] [--signer id] [--field name=value]... [--days n]", "Make an identity proof (a tool's or a published one finishes with identity complete)", {
@@ -487,7 +487,7 @@ function backupPassphrase(file: unknown, missing = BACKUP_PASSPHRASE): string {
 
 async function runDaemon(g: Globals): Promise<void> {
   requireProfile(g);
-  if (await connectDaemon(g.paths.socket)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
+  if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
   const { keepServing, openHost, serve } = await engineHost();
   const host = await openHost(g.paths, "daemon", VERSION);
   let served: Awaited<ReturnType<typeof serve>>;
@@ -508,7 +508,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (!sub || ["status", "stop", "restart"].includes(sub)) noMoreThan(0, parsed.positionals, sub ? `daemon ${sub} [--timeout s]` : "daemon [--detach] [--timeout s]");
   if (sub === "status") {
     knownProfile(g);
-    const client = await connectDaemon(g.paths.socket);
+    const client = await connectDaemon(g.paths);
     // The socket, running or not: a program on the socket API (examples/*.mjs) finds it here. It is in the profile's
     // folder, or in /tmp/ghostly-<hash>/ when that path is too long for a socket, so a program cannot guess it.
     if (!client) { print({ running: false, profile: g.profile, socket: g.paths.socket }); return; }
@@ -518,7 +518,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (sub === "stop") {
     knownProfile(g);
     const stopFor = seconds(parsed, 20);
-    const client = await connectDaemon(g.paths.socket);
+    const client = await connectDaemon(g.paths);
     if (!client) throw new CliError("not_found", `No daemon runs profile ${g.profile}`);
     print({ stopped: true, pid: await stopDaemon(g, client, stopFor) });
     return;
@@ -526,7 +526,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (sub === "restart") {
     // The running one stops (if one runs), and this command's own code starts in the background.
     const stopFor = seconds(parsed, 20), startFor = seconds(parsed, 60);
-    const client = await connectDaemon(g.paths.socket);
+    const client = await connectDaemon(g.paths);
     // The version it ran is asked ahead of the stop, on the same connection, with no deadline of its own: cosmetic,
     // and the stop's deadline ends it (a deadline here, 15 s, closed the connection under a longer stop, which then
     // failed as `unavailable` and never reached the signals).
@@ -562,10 +562,16 @@ async function stopDaemon(g: Globals, client: DaemonClient, seconds: number): Pr
   let pid: number, answered = true;
   try { ({ pid } = await client.call("daemon.stop", {}, { timeoutMs: seconds * 1000 }) as { pid: number }); }
   catch (error) {
-    if (!(error instanceof CliError && error.code === "timeout")) throw error;
+    // What answers on the socket and does not prove it is the profile's daemon is told nothing: a daemon of an older
+    // release (it cannot prove it) is stopped as the process that holds the profile's lock, which only this user
+    // can write. With nobody holding it, what answers is not the daemon, and the refusal stands.
+    const refused = isNotTheDaemon(error);
+    if (!(error instanceof CliError && error.code === "timeout") && !refused) throw error;
     const holder = lockOwner(g.paths);
     if (holder === null) throw error;
-    process.stderr.write(`ghostly: the daemon (process ${holder}) did not answer daemon.stop in ${seconds} s: stopping it with SIGTERM\n`);
+    process.stderr.write(refused
+      ? `ghostly: what answers on the socket did not prove it is this profile's daemon (an older release's cannot): stopping the process that holds the profile (${holder}) with SIGTERM\n`
+      : `ghostly: the daemon (process ${holder}) did not answer daemon.stop in ${seconds} s: stopping it with SIGTERM\n`);
     pid = holder;
     answered = false;
     signal(pid, "SIGTERM");
@@ -609,7 +615,7 @@ function processAlive(pid: number): boolean {
 /** A daemon in the background, running this command's code, once its socket answers. */
 async function startDetached(g: Globals, seconds: number) {
   requireProfile(g);
-  if (await connectDaemon(g.paths.socket)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
+  if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
   // A one-shot command (or a listen) that opened the profile in process holds it: the child would only log that.
   heldBy(g);
   const log = openSync(g.paths.log, "a", 0o600);
@@ -627,7 +633,7 @@ async function startDetached(g: Globals, seconds: number) {
   while (child.exitCode === null && child.signalCode === null && !spawned.error) {
     const left = until - Date.now();
     if (left <= 0) break;
-    client = await connectDaemon(g.paths.socket, Math.min(500, left));
+    client = await connectDaemon(g.paths, Math.min(500, left));
     if (client) break;
     await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(200, until - Date.now()))));
   }
@@ -703,38 +709,20 @@ async function listenCommand(argv: string[]): Promise<void> {
     });
   };
   requireProfile(g);
-  const client = await connectDaemon(g.paths.socket);
+  const client = await connectDaemon(g.paths);
   if (client) await warnVersion(client);
   if (client) {
     // The subscription takes the connection: a chat's contact key is asked on a connection of its own.
     const handle = await start((m, p) => client.call(m, p), async (chat) => {
-      const c = await connectDaemon(g.paths.socket, 1000);
+      const c = await connectDaemon(g.paths, 1000);
       if (!c) return null;
       try { return ((await c.call("chat.get", { chat }, { timeoutMs: ANSWER_MS })) as { peer?: string }).peer || null; } finally { c.close(); }
     }).catch((error) => { client.close(); throw error; });
-    // Followed until stopped; a daemon that restarts is picked up again after the last event seen, and so is the
-    // subscription the feed closed while the output or the hooks fell behind.
-    let current: DaemonClient | null = client;
-    const reconnect = (wait: number) => void (async () => {
-      while (!current && !feed.paused) {
-        await new Promise((resolve) => setTimeout(resolve, wait));
-        wait = 1000;
-        if (current || feed.paused) return;
-        const next = await connectDaemon(g.paths.socket, 1000);
-        if (next) { current = next; await follow(next).catch(() => { if (current === next) current = null; }); }
-      }
-    })();
-    const feed = new Feed(handle, since, () => { const c = current; current = null; c?.destroy(); }, () => reconnect(0));
-    const follow = async (c: DaemonClient) => {
-      await c.subscribe(feed.since, feed.take, () => {
-        if (current !== c) return;
-        current = null;
-        reconnect(1000);
-      });
-    };
-    const stop = () => { current?.close(); process.exit(0); };
+    // Followed until stopped, past a daemon restart and past a feed that fell behind (`followDaemon`).
+    const following = followDaemon(g.paths, client, handle, since);
+    const stop = () => { following.close(); process.exit(0); };
     onReaderGone(stop);
-    await follow(client);
+    await following.subscribed;
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
     return;
@@ -773,7 +761,7 @@ async function listenCommand(argv: string[]): Promise<void> {
 }
 
 async function engineCommand(argv: string[]): Promise<void> {
-  const parsed = parseArgs(argv, { "confirm-real": { type: "boolean", description: "" }, "show-secret": { type: "boolean", description: "" }, yes: { type: "boolean", description: "" }, list: { type: "boolean", description: "" }, verbose: { type: "boolean", description: "" } });
+  const parsed = parseArgs(argv, { "confirm-real": { type: "boolean", description: "" }, "show-secret": { type: "boolean", description: "" }, yes: { type: "boolean", description: "" }, force: { type: "boolean", description: "" }, list: { type: "boolean", description: "" }, verbose: { type: "boolean", description: "" } });
   const g = globals(parsed);
   pretty = g.pretty;
   if (parsed.options.list) {
@@ -796,7 +784,7 @@ async function engineCommand(argv: string[]): Promise<void> {
   const confirmReal = parsed.options["confirm-real"] === true;
   if (confirmReal && params && typeof params === "object") (params as Record<string, unknown>).confirmedReal = true;
   const yes = parsed.options.yes === true;
-  let result = await withSession(g, (s) => s.call("engine.call", { method, params, confirmReal, yes }), { offline: ENGINE_READS.includes(method) });
+  let result = await withSession(g, (s) => s.call("engine.call", { method, params, confirmReal, yes, force: parsed.options.force === true }), { offline: ENGINE_READS.includes(method) });
   if (method === "getState" && !showSecret && result && typeof result === "object") {
     const { hideStateSecrets } = await engineApi();
     result = hideStateSecrets(result as Parameters<typeof hideStateSecrets>[0]);
@@ -883,10 +871,10 @@ async function identityAddCommand(argv: string[]): Promise<void> {
     if (event.type === "identity.approval" || event.type === "identity.progress") process.stderr.write(JSON.stringify(event) + "\n");
   };
   requireProfile(g);
-  const client = await connectDaemon(g.paths.socket);
+  const client = await connectDaemon(g.paths);
   if (client) {
     await warnVersion(client);
-    const watcher = await connectDaemon(g.paths.socket);
+    const watcher = await connectDaemon(g.paths);
     await watcher?.subscribe(undefined, tell);
     try { print(await client.call("identity.add", params)); } finally { client.close(); watcher?.close(); }
     return;
@@ -934,7 +922,7 @@ async function tableCommand(name: string, argv: string[]): Promise<void> {
   }
   // Before stdin adds its own: only the --value names came on the command line.
   const lineValues = command.method === "wallet.create" ? Object.keys((params.values as Record<string, string> | undefined) ?? {}) : [];
-  const secretWarning = await secretsFromStdin(command.method, params, readStdin, process.stdin.isTTY === true);
+  const secretWarning = await secretsFromStdin(command.method, params, readStdin, process.stdin.isTTY === true, (note) => process.stderr.write(`ghostly: ${note}\n`));
   if (secretWarning) process.stderr.write(`ghostly: ${secretWarning}\n`);
   const result = await withSession(g, async (s) => {
     if (lineValues.length) {
@@ -963,7 +951,7 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   const parsed = parseArgs(argv, {}, idSlot({ args: ["call...?"] }));
   const g = globals(parsed);
   const ref = parsed.positionals.join(" ") || undefined;
-  const client = await connectDaemon(g.paths.socket);
+  const client = await connectDaemon(g.paths);
   if (!client) throw new CliError("unavailable", `No daemon runs profile ${g.profile}: calls need one (ghostly daemon --detach)`);
   let call: { call: string; audio: { socket: string; rate: number } | null };
   try { call = await client.call("call.get", ref ? { call: ref } : {}, { timeoutMs: ANSWER_MS }) as typeof call; } finally { client.close(); }

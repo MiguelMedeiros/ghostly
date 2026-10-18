@@ -1392,9 +1392,17 @@ export class Communities {
    * communities while its 30 chats signaled got back into them one at a time, 4 to 10 minutes, one not at all in 16: its
    * entry went unwritten, the other hubs took it for gone (`hubDead`) and its members asked them (bug hunt, 2026-10-14).
    * Not a hub alone in the beacon: nobody carries the group without it, and its door's looks stay background ones.
+   *
+   * Alone as my last reading of the beacon said, and only while that reading is fresh. One that aged out says nothing of
+   * now: judged by my clock against it, every hub it listed went stale, and I was alone. An app back from a restart as a
+   * member of a community whose hubs did not list it read the beacon once (its way back); its edge stayed down while its
+   * other links took its relays' budget, its reading aged out, it stepped up as a hub "alone", and its readings and its
+   * entry went as background looks the relays held: it never read the beacon again, nobody listed it, and it was not
+   * back in that community in 10 minutes (bug hunt, 2026-10-17).
    */
   private wayBack(groupId: string, live: Live): boolean {
-    if (live.hub && !freshHubs(this.hubs(live), this.now()).some(h => h.key !== live.session.myKey)) return false;
+    const read = live.beaconAt, now = this.now();
+    if (live.hub && now - read < COMMUNITY_TOPOLOGY.beaconFreshMs && !freshHubs(this.hubs(live), read).some(h => h.key !== live.session.myKey)) return false;
     return ![...this.host.edges(groupId).values()].some(id => this.host.linkReady(id, 2));
   }
 
@@ -1436,7 +1444,10 @@ export class Communities {
     // reads the beacon (a closed app stays listed until its entry goes stale; a new hub waits a minute). A hub
     // with no other in sight is the door at once, before its own entry is listed: a new group's first hub, whose
     // beacon write waited for the relays' budget while another group's link signaled, answered no knock for a minute.
-    const hubs = doorHubs(this.hubs(live), now, s.myKey);
+    // Not a hub of a few seconds that knows of another (the one that let it in, whose entry may be the one held back):
+    // both at the door alone answered the same knocks, and two joiners let in by each forked the chain.
+    const known = [...live.seenHubs.keys()].filter(key => key !== s.myKey && this.recentHub(live, key) && !this.gone(live, key));
+    const hubs = doorHubs(this.hubs(live), now, s.myKey, { since: live.hubSince, known });
     if (!hubs.includes(s.myKey)) return;
     const door = [...hubs].sort()[0], doorSig = [...hubs].sort().join(",");
     // Just became the door (the one before went): whatever knocked meanwhile, in any record.

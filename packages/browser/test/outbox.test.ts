@@ -388,7 +388,7 @@ describe("a chat with many queued messages and the contact away", () => {
     const send = vi.fn(async () => null);
     const box = new Outbox(store, send, 20_000, undefined, { resender: { ready: () => ready } });
     await box.recover();
-    return { rows, read, send, box };
+    return { rows, read, get, send, box };
   }
 
   it("reads the chat's history once per check, not once per older message it looks at", async () => {
@@ -399,6 +399,78 @@ describe("a chat with many queued messages and the contact away", () => {
     expect(send).not.toHaveBeenCalled();
     expect(rows.every(r => r.delivery === "queued")).toBe(true);
     expect(read.mock.calls.length, "a whole-history read per check, not per message looked at").toBeLessThanOrEqual(n);
+    await box.stop();
+  });
+
+  it("waiting for an away contact costs one look at the chat per backoff step, not one read per pair of texts", async () => {
+    const n = 300, { rows, read, get, send, box } = await many(n, false);
+    // Every step of the backoff, then two more of its last one.
+    for (const step of [...RESEND_POLICY.backoffMs, 300_000, 300_000]) {
+      read.mockClear();
+      get.mockClear();
+      await vi.advanceTimersByTimeAsync(step);
+      expect(send).not.toHaveBeenCalled();
+      expect(read.mock.calls.length, `whole-chat reads after ${step} ms`).toBeLessThanOrEqual(1);
+      expect(get.mock.calls.length, `one-message reads after ${step} ms`).toBe(0);
+    }
+    expect(rows.every(r => r.delivery === "queued")).toBe(true);
+    await box.stop();
+  });
+
+  it("texts written one after the other to an away contact share their checks from the first backoff step on", async () => {
+    const { rows, read, get, send, box } = await many(0, false);
+    for (let i = 0; i < 300; i++) {
+      const wireId = `w${String(i).padStart(21, "0")}`;
+      // As the engine keeps a text the chat cannot carry now.
+      rows.push({ linkId: "many", id: `me_${wireId}`, wireId, text: `m${i}`, sender: "me", timestamp: Date.now(), via: "datalink", delivery: "waiting" });
+      await box.wait(`me_${wireId}`, "Sent when your contact is reachable.");
+      // As a bot writes them over the socket, a few milliseconds apart.
+      await vi.advanceTimersByTimeAsync(9);
+    }
+    expect(rows.every(r => r.delivery === "waiting")).toBe(true);
+    for (const step of RESEND_POLICY.backoffMs) {
+      read.mockClear();
+      get.mockClear();
+      await vi.advanceTimersByTimeAsync(step);
+      expect(read.mock.calls.length + get.mock.calls.length, `store reads after ${step} ms`).toBeLessThanOrEqual(1);
+    }
+    expect(send).not.toHaveBeenCalled();
+    await box.stop();
+  });
+
+  it("a text written while hundreds wait for the away contact does not read each of them again", async () => {
+    const n = 300, { rows, read, get, send, box } = await many(n, false);
+    const wireId = `w${String(n).padStart(21, "0")}`;
+    rows.push({ linkId: "many", id: `me_${wireId}`, wireId, text: "new", sender: "me", timestamp: n + 1, via: "pkarr", delivery: "sending" });
+    read.mockClear();
+    get.mockClear();
+    await box.transmit(`me_${wireId}`);
+    expect(send).not.toHaveBeenCalled();
+    expect(rows[n].delivery,"it waits behind the older ones").toBe("waiting");
+    expect(read.mock.calls.length + get.mock.calls.length, "store reads for one new text").toBeLessThanOrEqual(2);
+    await box.stop();
+  });
+
+  it("the oldest goes first once the chat can carry text again, after rounds of waiting", async () => {
+    let ready = false;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const rows: StoredMessage[] = Array.from({ length: 20 }, (_, i) => {
+      const wireId = `w${String(i).padStart(21, "0")}`;
+      return { linkId: "many", id: `me_${wireId}`, wireId, text: `m${i}`, sender: "me", timestamp: i + 1, via: "pkarr", delivery: "queued" };
+    });
+    const store = { read: async () => rows.map(row => ({ ...row })), get: async (id: string) => { const row = rows.find(r => r.id === id); return row && { ...row }; },
+      update: async (id: string, delivery: NonNullable<StoredMessage["delivery"]>, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>) => {
+        const row = rows.find(r => r.id === id);
+        if (row && row.delivery !== "delivered") Object.assign(row, extra, { delivery, deliveryError: error });
+      } };
+    const sent: string[] = [];
+    const box = new Outbox(store, async m => { sent.push(m.text!); return null; }, 20_000, undefined, { resender: { ready: () => ready } });
+    await box.recover();
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs[0] + RESEND_POLICY.backoffMs[1]);
+    ready = true;
+    // No flush: the next backoff step finds the chat able to carry them.
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs[2]);
+    expect(sent).toEqual(rows.map(r => r.text));
     await box.stop();
   });
 

@@ -91,8 +91,10 @@ export function planKnocks(linkKeyZ32: string, inbox: InboxState, knocks: Contac
   const taken = next.taken.filter(t => now - t < HOUR_MS);
   // Only the last hour's reads hold anything back: older ones are dropped, so a flood of keys leaves nothing behind.
   next = { ...next, reads: Object.fromEntries(Object.entries(next.reads).filter(([, at]) => now - at < HOUR_MS)) };
-  // Never more than the hour leaves, nor more than the room left under `MAX_WAITING`.
-  const room = Math.min(NEW_PER_HOUR - taken.length, MAX_WAITING - next.waiting.length);
+  // Never more than the hour leaves, nor more than the room left under `MAX_WAITING`. Every read counts, taken or not:
+  // a key that published no request costs the owner a read all the same.
+  const hourReads = Math.max(taken.length, Object.keys(next.reads).length);
+  const room = Math.min(NEW_PER_HOUR - hourReads, MAX_WAITING - next.waiting.length);
   const read: string[] = [];
   let publish = next.bits !== inbox.bits;
   const keys = [...new Set(knocks.filter(k => knockHolds(linkKeyZ32, k, next.bits, now)).map(k => k.key))];

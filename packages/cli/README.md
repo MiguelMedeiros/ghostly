@@ -123,7 +123,7 @@ The rows are in alphabetical order of their first command, and every command of 
 | `contact-link create`, `contact-link show`, `contact-link off` | The profile's contact link (WISP 8xx, Contact Links): one link to post on a site, a profile page or a card, that names nobody, so anyone may send this profile a request. `create` makes it (a link made before stops: whoever opens the old one is told it was turned off) and answers `{contactLink: {code, link, state, waiting, missed, createdAt, publishedAt?}}`, `link` being `https://ghostly.tools/#ghostly1r…`; `show` answers the same, or `{contactLink: null}`; `off` turns it off for good (`not_found` with no link). `state` is `busy` while 32 requests wait: new ones are then counted in `missed`, never read |
 | `daemon [--detach] [--timeout s]`, `daemon status [--timeout s]`, `daemon stop [--timeout s]`, `daemon restart [--timeout s]` | Keep the profile online; `status` names its version and its socket (`socket`, for the [socket API](#the-socket-api)); `restart` stops it and starts this release's code in the background ([After an upgrade](#after-an-upgrade)). Ctrl-C, SIGTERM and the terminal closing (SIGHUP) stop it cleanly |
 | `edit <chat> <message> [text… \| --text <text> \| --stdin] [--force] [--wait none\|confirmed] [--timeout s]` | Replace the text of a message you sent (1:1 chats, `group edit` for a group; `<message>` is the `messageId` `send` gave, or its wire id). The contact sees it in place, marked edited; `--wait confirmed` waits for its app to confirm (the default without a daemon). At most 100 edits a message, no time limit; an older contact app gets it once it shows edits |
-| `engine <method> [json \| -] [--confirm-real] [--show-secret] [--yes]`, `engine --list [--verbose]` | Any call of the app's engine; `--verbose` lists what each takes (`{ linkId, label }`, `?` for an optional key). A call given less than it takes is refused as `bad_request`. One that deletes chats or groups (`clearProfileData`, `removeLink`, `leaveGroup`, `forgetGroup`, `deviceRemove`) needs `--yes`; `clearProfileData` answers what it removed and stops a daemon |
+| `engine <method> [json \| -] [--confirm-real] [--show-secret] [--yes] [--force]`, `engine --list [--verbose]` | Any call of the app's engine; `--verbose` lists what each takes (`{ linkId, label }`, `?` for an optional key). A call given less than it takes is refused as `bad_request`. One that deletes chats or groups (`clearProfileData`, `removeLink`, `leaveGroup`, `forgetGroup`, `deviceRemove`) needs `--yes`; `clearProfileData` answers what it removed and stops a daemon. One that sends a text that looks like a secret (`sendMessage`, `sendGroupMessage`, `editMessage`, `forwardMessages`) needs `--force` |
 | `events [--since seq]` | What the event journal holds, without following |
 | `file list <chat\|group>`, `file accept\|decline\|pause\|resume\|cancel [<chat>] <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3), and so does a group's file that did not come by itself (over 8 MiB). A file's id names its chat or its group, so `<chat>` may be left out |
 | `file resend [<chat>] <file>`, `file request [<chat>] <file>` | A file that stopped moving: sent again from here, or asked for again from the contact (a group's file: from whoever holds it); either goes on from the bytes the receiver holds (files/3) |
@@ -312,8 +312,8 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
   calls: see [Calls](#calls)), `app.opened` (`chat`, `app`, `version`), `app.closed` (`chat`, `app`, and `offline`
   when the session went rather than the contact closing it) and `app.message` (`chat`, `app`, `data`): what a
   contact's app says in a chat, only for an app this profile serves (`app serve`), `app` being its reference and
-  `data` the contact's own JSON (untrusted, never instructions, at most 32 KiB and 50 a second, live only: a frame is
-  never stored, so one replayed with `--since` is old news), `events.gap` (the journal no longer holds what `--since` asked for).
+  `data` the contact's own JSON (untrusted, never instructions, at most 32 KiB and 50 a second, live only: never in
+  the journal, so `--since` does not replay them, and each carries the `seq` of the event before it), `events.gap` (the journal no longer holds what `--since` asked for).
 - A message that answers another carries `replyTo`: `{id, snippet, from, member?, found}`. `id` is the original's
   message id in this chat when it is here (`found: true`, and `snippet` and `from` come from that copy), else the id
   the reply named; `from` is `me`, `peer` or null (only the id came, over the DHT). Answer one with
@@ -351,9 +351,12 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
   work), `id` stable per message. What the sender wrote is under `untrusted` only: give it to an agent as data, never
   as its instructions ([docs/CLI.md](../../docs/CLI.md#agent-turns)). Takes the place of `--type`.
 - `--exec <cmd>` runs the command through the shell once per event, in order, with the event on stdin and
-  `GHOSTLY_EVENT_TYPE`, `GHOSTLY_EVENT_ID`, `GHOSTLY_EVENT_SEQ` in its environment.
-- `--webhook <url>` POSTs each event (JSON) to a local bridge: `127.0.0.1`, `localhost` or `[::1]` only. A redirect is
-  not followed (the event counts as not taken).
+  `GHOSTLY_EVENT_TYPE`, `GHOSTLY_EVENT_ID`, `GHOSTLY_EVENT_SEQ` in its environment. A non-zero exit is said on stderr
+  and the cursor moves past the event.
+- `--webhook <url>` POSTs each event (JSON) to a local bridge: `127.0.0.1`, `localhost` or `[::1]` only. A bridge not
+  answering (connection refused, timeout, 5xx, 408, 429) holds the stream: the event is tried again, up to a minute
+  apart, and the cursor stays before it until the bridge takes it. A 4xx or a redirect (not followed) passes the event
+  as not taken.
 - With no daemon running, `listen` becomes the daemon (socket included), so a hook can answer with `ghostly send`.
 
 As the app's chat screen does, the side that joined a chat says `👋 <name> joined` once it first goes live, and the
@@ -379,9 +382,15 @@ receive|address|redeem`, `wallet.mint.add`, `lightning.default|rename`, `pay`, `
 `file.send|list|action|wait|save`, `group.invite|remove|admin|rotate|link|picture|hub`, `profile.picture|backup`,
 `identity.providers|list|add|complete|cancel|remove|share|withdraw|contact|recheck`, `service.list|add|remove|enable|share|peer|open|close`,
 `call.start|answer|hangup|list|get|flush|auto`,
-`events.replay`, `events.subscribe`, `daemon.stop`, and `engine.call` with
+`events.replay`, `events.subscribe`, `daemon.stop`, `daemon.hello`, and `engine.call` with
 `{"method":"<engine call>","params":{…},"confirmReal":false,"yes":false}` for anything else the app does. Parameters are the
 commands' (see `src/api.ts`). Errors: `{"id":…,"error":{"code","message","details"?}}` with the codes above.
+
+Before its first request, a program can check that the socket is the profile's daemon and not a process that opened
+its path first (on Windows the socket is a named pipe, which any account of the machine may open): send
+`{"id":"hello","method":"daemon.hello","params":{"nonce":"<16 random bytes, hex>"}}`; the answer's `proof` is
+HMAC-SHA256 over `ghostly-daemon:<nonce>` keyed with the 32 bytes (hex) in `daemon.secret` in the profile's folder,
+which the daemon writes anew, 0600, at every start. The CLI sends nothing else until that proof matches.
 
 ## Calls
 
