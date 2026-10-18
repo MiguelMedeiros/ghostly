@@ -59,4 +59,13 @@ describe("file send in one millisecond", () => {
     await callApi(ctx, "file.send", { chat: "Alice", path });
     expect(sent[1]).toBeGreaterThan(sent[0]!);
   });
+
+  it("answers the message's id, the row the engine names after that time", async () => {
+    sent.length = 0;
+    const path = join(dir, "named.txt");
+    writeFileSync(path, "named");
+    const answer = await callApi(ctx, "file.send", { chat: "Alice", path }) as { chat: string; messageId: string; file: { id: string } };
+    // What `message delete --everyone`, `react`, `pin` and `--reply` take, as a group's file and `send` answer it.
+    expect(answer).toMatchObject({ chat: "chat-burst", messageId: `me_${sent[0]}` });
+  });
 });
