@@ -7667,10 +7667,13 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * Whether the chat goes live only over a native transport: this app has no WebRTC, or its contact has none (its record
    * lists no `webrtc/1`). Not known yet (no record read) counts as only natively, as a chat before its first record must.
+   * So does every chat while this device's own attempts say its network blocks direct connections (`directPath`, a VPN
+   * that drops UDP): WebRTC carries none there, and a chat with a contact that has WebRTC was left with no listener
+   * behind eight chats with contacts that have none, down for as long as the VPN was on.
    */
   private reachedOnlyNatively(live: LiveLink): boolean {
     const theirs = live.stored.capsState?.peer?.transports ?? live.stored.peerTransports;
-    return typeof RTCPeerConnection === "undefined" || !theirs || !theirs.includes("webrtc/1");
+    return typeof RTCPeerConnection === "undefined" || !theirs || !theirs.includes("webrtc/1") || this.directPath.blocked;
   }
 
   /** `inUse`: a text is going or coming in the chat now, which counts as the chat on screen does for taking a listener. */
