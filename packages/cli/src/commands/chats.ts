@@ -91,7 +91,7 @@ export const commands: Record<string, Command> = {
     params: ({ options }, { invite }) => ({ invite, label: options.label }),
   },
   "message delete": {
-    method: "chat.delete", usage: "message delete <chat> <message> [--everyone]",
+    method: "chat.delete", usage: "message delete <chat|group> <message> [--everyone]",
     summary: "Forget a message on this device (the contact keeps theirs); --everyone deletes one of yours, in a chat or a group, from every member's device",
     args: ["chat", "message"], options: { everyone: { type: "boolean", description: "Delete a message of yours for everyone (a chat or a group)" } },
     params: ({ options }, a) => ({ chat: a.chat, message: a.message, everyone: options.everyone === true }),
