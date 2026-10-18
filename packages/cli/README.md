@@ -239,7 +239,8 @@ service manager instead.
 
 `send` and `group send` refuse text that looks like a recovery phrase, a private key (nsec, WIF, xprv, 64 hex
 characters named as a key) or a Cashu token (money anyone who reads it can take), with exit `5`, unless `--force`;
-so do `edit`, `forward`, `button update --text` and the task, routine and usage cards (any text on the card).
+so do `edit`, `forward`, `button update --text`, the task, routine and usage cards (any text on the card) and the
+memo of `chat pay` and `chat request`.
 It is the app's own detector.
 
 ### Real money
@@ -298,14 +299,14 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
   waiting, resolving, on-dht, live, …), `chat.connection` (`live`, `transport`), `typing.started` (with `kind` and, when given, `status`; again when either changes) and `typing.stopped` (the contact is writing, or stopped: a message, a stop, or 6 s of silence), `chat.joined` (the contact's app
   announced itself; not a message), `chat.announced`, `message.received` (`message.nick`: the name the contact gave), `message.sent`, `message.delivery`
   (`delivery`: sending, queued, waiting, held, sent, delivered, failed), `message.edited` (a text changed in place, the
-  contact's or mine: once per edit number, with `edits` and the message as it is now; `group.message.edited` in a group), `message.deleted`, `group.created`,
+  contact's or mine: once per edit number, with `edits` and the message as it is now; `group.message.edited` in a group), `message.deleted` (`{chat, messageId}`: a message gone from this device, deleted here or for everyone by its author; `group.deleted` with `group` in a group), `group.created`,
   `group.status`, `group.members` (`joined`, `left`), `group.typing.started` (`member`, `kind`, and `status` when given; again when either changes) and `group.typing.stopped` (`member`: a member of a private group is writing, or stopped), `group.message` (`message.member` is the author's key,
   `message.nick` their name from the roster; `message.mentioned` when it names this profile), `group.mentioned`
   (`{group, messageId, message}`: a mention of this profile learned after the message's `group.message`, which said
   none: a copy another member handed on without it, completed by the author's, or an edit that names this profile; once), `group.sent`, `group.event`, `file.offered` (a file over 25 MiB waits for `file accept`),
   `file.stage`, `file.done`, `file.failed` (each with `chat`, or `group` for a group's file, `file`, `messageId`), `chat.held` and
   `chat.released` (`chat disconnect --hold`), `identity.received` and `identity.status` (what a contact
-  showed, as checked here), `identity.approval` and `identity.progress` (a signer waits on a link or a code), `group.deleted`, `group.removed`, `payment.created` and
+  showed, as checked here), `identity.approval` and `identity.progress` (a signer waits on a link or a code), `group.deleted` (`{group, messageId}`: a group's message deleted, not the group), `group.removed`, `payment.created` and
   `payment.updated` (`payment`: id, chat, kind request|payment, direction in|out, amount, memo, state pending|
   settled|failed, network, method), `call.incoming`, `call.outgoing`, `call.connected` and `call.ended` (voice
   calls: see [Calls](#calls)), `app.opened` (`chat`, `app`, `version`), `app.closed` (`chat`, `app`, and `offline`
