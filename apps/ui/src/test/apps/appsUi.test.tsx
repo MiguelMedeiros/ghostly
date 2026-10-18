@@ -842,6 +842,32 @@ describe("with the apps flag on", () => {
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
     expect(await screen.findByTestId("app-card-title")).toHaveAttribute("dir", "auto");
   });
+
+  // A title may have 40 characters: cut as one text with the version, a phone showed no version at all.
+  const LONG = "Schachweltmeisterschaftsvorbereitungsapp";
+  const BETA = "1.2.0-beta.12";
+
+  it("a card with a long title cuts the title alone and keeps the version whole after it", async () => {
+    fakeEngine.on("appList", () => []);
+    const card: AppCard = { ...CARD, title: LONG, version: BETA };
+    renderApp(<MessageBubble message={cardMessage({ card, text: statusCardText(card) })} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    const title = await screen.findByTestId("app-card-title");
+    expect(title).toHaveTextContent(`${LONG} ${BETA}`);
+    expect(within(title).getByText(LONG)).toHaveClass("truncate", "min-w-0");
+    expect(within(title).getByText(BETA)).toHaveClass("shrink-0", "whitespace-nowrap");
+    expect(within(title).getByText(LONG)).not.toContainElement(within(title).getByText(BETA));
+  });
+
+  it("an installed app with a long title cuts the title alone in its row and keeps the version whole after it", async () => {
+    fakeEngine.on("appList", () => [installed({ title: LONG, version: BETA })]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
+    renderApp(<Apps />, { route: "/apps" });
+    const row = await screen.findByTestId("installed-app");
+    expect(within(row).getByText(LONG)).toHaveClass("truncate", "min-w-0");
+    expect(within(row).getByText(BETA)).toHaveClass("shrink-0", "whitespace-nowrap");
+    expect(within(row).getByText(LONG)).not.toContainElement(within(row).getByText(BETA));
+    // Still the details button's description, as before.
+    expect(within(row).getByRole("button", { name: `${LONG}: details` })).toHaveAccessibleDescription(new RegExp(`^${BETA.replace(/\./g, "\\.")}`));
+  });
 });
 
 describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
