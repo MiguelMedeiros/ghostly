@@ -123,7 +123,7 @@ describe("a member's catch-up answer goes a slice at a time", { timeout: 120_000
     expect(run.mostWaiting).toBeLessThanOrEqual(2 * GROUP_LIMITS.catchUpSlice);
   });
 
-  it("each slice goes once the member's app handled the last; a newer answer takes the place of the rest", async () => {
+  it("each slice goes once the member's app handled the last; a newer answer goes after the rest, without the frames still queued", async () => {
     const { alice, bob, sync } = await busyGroup(30);
     // The answer as it went before: all at once.
     const whole: GroupEdgeFrame[] = [];
@@ -146,15 +146,16 @@ describe("a member's catch-up answer goes a slice at a time", { timeout: 120_000
     waits.shift()!();
     await vi.waitFor(() => expect(sent).toHaveLength(3 * slice));
     expect(sent).toEqual(whole.slice(0, 3 * slice));
-    // Bob's sync again (its edge opened again): the new answer takes the place of what is left of the first.
+    // Bob's sync again (its edge opened again): the new answer goes after what is left of the first, without the
+    // frames still queued there; what went already goes again.
     await sender.handle(bob.myKey, sync);
     expect(sent).toHaveLength(3 * slice);
-    while (sent.length < 3 * slice + whole.length) {
+    while (sent.length < whole.length + 3 * slice) {
       await vi.waitFor(() => expect(waits.length).toBeGreaterThan(0));
       waits.shift()!();
       await sleep(0);
     }
-    expect(sent).toEqual([...whole.slice(0, 3 * slice), ...whole]);
+    expect(sent).toEqual([...whole, ...whole.slice(0, 3 * slice)]);
     // Nothing is asked after the last slice: the one before it is the only question left.
     await sleep(20);
     expect(waits.length).toBeLessThanOrEqual(1);
