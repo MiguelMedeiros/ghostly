@@ -262,6 +262,7 @@ A chat may have a **timer**: new messages in it disappear from both devices afte
 - **Which messages.** Only those sent after the timer was set. Each message keeps the timer it was sent under (`ttl`, a duration in seconds), also after the timer changes or is turned off. A reader applies the shorter of the message's `ttl` and its own setting.
 - **When the clock starts.** For one's own message, when it is sent. For a contact's, when it is first shown (its chat open on screen, the app in front), so nothing disappears unread; an unread message still goes 4 weeks after it arrived. A headless app ([1100](1100-headless.md)) shows nothing, so its clock starts on arrival. Each side counts on its own clock: no deadline ever compares two clocks.
 - **What goes.** What a delete here forgets ([Delete for everyone](#delete-for-everyone)): the text and its versions, a link preview, a card, reactions, a file's bytes and a download in progress, a held copy and a file's offer on the floor, the chat list's line, search and the Tasks panel. A reply's quote of it says "Original message deleted", and the quoted line (`s`) is blanked on this device. A pinned message unpins. A notification of it is closed.
+- **Transport rows and call lines.** Made while a timer is on, they go after the same time, counted from when they were made ([TRANSPORT-INCREMENT](TRANSPORT-INCREMENT.md): the rows follow a timer); so does their connection history. The timer's own lines stay.
 - **Forwards.** A message under a timer can be forwarded; the copy follows the timer of the chat it goes to.
 - **Money.** A payment's bubble goes once it is settled or failed, a request's once it is answered, withdrawn or expired: a bearer token or a waiting request is never lost with a bubble. The wallet's history and proofs stay.
 - **Late copies.** A swept message's id is kept for 8 days (longer than a hold's 7 days, the outbox's week and the floor's minutes), at most 10,000 per chat, apart from the 500 tombstones. A late copy, edit or reaction for it is confirmed and dropped.
@@ -289,6 +290,7 @@ A chat may have a **timer**: new messages in it disappear from both devices afte
 12. No default timer for new chats in 1.5.
 13. The home screen and the site's copy stay as they are: the timer is off by default and per chat.
 14. Groups come after 1:1 chats, in a later slice.
+15. Transport rows and call lines made under a timer go after the same time; the timer's own lines stay.
 
 ## Forwards
 
