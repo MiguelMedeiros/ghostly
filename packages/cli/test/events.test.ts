@@ -378,6 +378,38 @@ describe("the event stream", () => {
   });
 
   /**
+   * A reply keeps its own events, but not the text of an original deleted since, here or for everyone by its author:
+   * the journal says what history says ("Original message deleted"). Before, `listen --since` and `events` gave the
+   * deleted text again inside each reply that quoted it, also as an agent turn's `untrusted.replyTo.snippet`.
+   */
+  it("a message deleted takes its text out of the replies that quoted it, in a chat and a group", async () => {
+    const path = join(dir, "quoted.jsonl");
+    const { h } = await hub("quoted.jsonl");
+    h.baseline(state([link("c1")], [{ id: "g1", status: "active", members: [{ key: "ana" }] }]), new Map());
+    const quote = (messageId: string, snippet: string) => ({ replyTo: { id: "wire-" + messageId, snippet, from: "me" as const, messageId } });
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "me_1", { sender: "me", text: "SECRET-QUOTED" }), message("c1", "p1", { text: "an answer", ...quote("me_1", "SECRET-QUOTED") }), message("c1", "p2", { text: "another", ...quote("me_2", "kept quote") })], deleted: [] });
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [message("c1", "p1", { text: "an answer, edited", edit: { seq: 1, at: 2 }, ...quote("me_1", "SECRET-QUOTED") } as never)], deleted: [] });
+    h.sink.post({ kind: "message-changes", linkId: "group:g1", messages: [message("group:g1", "mine:1:0", { sender: "me", text: "SECRET-GROUP" }), message("group:g1", "ana:1:0", { member: "ana", text: "seen", ...quote("mine:1:0", "SECRET-GROUP") })], deleted: [] });
+    const journal = () => readFileSync(path, "utf8") + JSON.stringify(h.replay(0));
+    expect(journal()).toContain("SECRET-QUOTED");
+    h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["me_1"] });
+    h.sink.post({ kind: "message-changes", linkId: "group:g1", messages: [], deleted: ["mine:1:0"] });
+    expect(journal()).not.toContain("SECRET-QUOTED");
+    expect(journal()).not.toContain("SECRET-GROUP");
+    // The replies stay, each saying its original is deleted, as history does; a quote of one still here is untouched.
+    const replay = h.replay(0);
+    const replyOf = (id: string) => replay.filter((e) => (e.message as { id?: string } | undefined)?.id === id).map((e) => [e.type, (e.message as { replyTo: unknown }).replyTo]);
+    expect(replyOf("p1")).toEqual([
+      ["message.received", { id: "me_1", snippet: "", from: "me", found: false, deleted: true }],
+      ["message.edited", { id: "me_1", snippet: "", from: "me", found: false, deleted: true }],
+    ]);
+    expect(replyOf("ana:1:0")).toEqual([["group.message", { id: "mine:1:0", snippet: "", from: "me", found: false, deleted: true }]]);
+    expect(replyOf("p2")).toEqual([["message.received", { id: "me_2", snippet: "kept quote", from: "me", found: true }]]);
+    expect(toTurn(replay.find((e) => e.type === "message.received" && (e.message as { id: string }).id === "p1")!)!.untrusted.replyTo).toEqual({ id: "me_1", snippet: "" });
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  /**
    * A deletion is synchronous work on the daemon's one thread: each read the whole journal as text and tried every id
    * on every line (25 ms a message at 10,000 events, 12 s for 2,000 ids in one change), a contact's delete for everyone
    * included. Counted here as the journal's bytes made into text, and as the time of one long change.
