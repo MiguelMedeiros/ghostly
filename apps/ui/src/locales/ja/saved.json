@@ -4,6 +4,7 @@
   "noText": "メッセージ",
   "open": "{{chat}} で開く: {{text}}",
   "rowLabel": "保存したメッセージ、{{count}} 件",
+  "save": "保存",
   "title": "保存したメッセージ",
   "unsave": "保存を解除",
   "you": "あなた"

@@ -4,6 +4,7 @@
   "noText": "Messaggio",
   "open": "Apri in {{chat}}: {{text}}",
   "rowLabel": "Messaggi salvati, {{count}}",
+  "save": "Salva",
   "title": "Messaggi salvati",
   "unsave": "Rimuovi dai salvati",
   "you": "Tu"

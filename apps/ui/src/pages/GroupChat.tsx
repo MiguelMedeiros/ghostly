@@ -61,6 +61,7 @@ import { paymentWireId } from "@ghostly/browser/shared/paymentIds";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
 import { Notice } from "../components/ui/Notice";
+import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
 import { Spinner } from "../components/wallet/ui";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
@@ -463,6 +464,8 @@ export function GroupChat() {
   const knock = rosterGroup?.invitation?.viaLink ? rosterGroup.invitation.stage ?? (rosterGroup.invitation.admin ? "admitted" : "knocked") : undefined;
   // Timed from the knock: a group kept here, knocking to get back in, was created long before it.
   const knockedLong = usePast(knock === "knocked" ? rosterGroup!.invitation!.since ?? rosterGroup!.createdAt : undefined, LONG_KNOCK_MS);
+  // Saved messages: kept on this device, never sent; the Saved view lists them. A hook: before the returns below.
+  const savedHere = useSavedIn(`group:${groupId}`);
   if (!state) return null;
   const back = <button onClick={nav.up} className="md:hidden w-11 h-11 flex items-center justify-center text-text-secondary rounded-full active:bg-surface-hover cursor-pointer shrink-0" title={t("common.back")} aria-label={t("common.back")} data-testid="chat-back">
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="rtl:-scale-x-100"><path d="M15 19l-7-7 7-7" /></svg>
@@ -522,7 +525,8 @@ export function GroupChat() {
       onDeleteForEveryone={m.sender === "me" && GROUP_MESSAGE_ID.test(m.id) && canRemove(m) && group.canSend
         ? () => { void engine.call("removeMessage", { linkId: `group:${groupId}`, messageId: m.id }).catch(() => {}); } : undefined}
       onReact={replyTarget(m, true) && group.canSend ? emoji => react(m.id, emoji) : undefined} reactionName={reactionName}
-      onPin={canPin && replyTarget(m, true) ? () => pinMessage(m.id, replyTarget(m, true) === group.pin?.id) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id} />;
+      onPin={canPin && replyTarget(m, true) ? () => pinMessage(m.id, replyTarget(m, true) === group.pin?.id) : undefined} pinned={!!group.pin && replyTarget(m, true) === group.pin.id}
+      onSave={m.event ? undefined : () => void setSaved(`group:${groupId}`, m.id, savedHere.has(m.id)).catch(() => {})} saved={savedHere.has(m.id)} />;
   // A first join through a link has the page to itself (the card). Someone removed from a community who opened its link
   // again still has the group as it was kept here: its history stays in the page, and the wait is a line above it.
   const joiningByLink = !!group.invitation?.viaLink && !group.status;

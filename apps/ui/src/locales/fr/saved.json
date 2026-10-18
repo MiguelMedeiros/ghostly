@@ -4,6 +4,7 @@
   "noText": "Message",
   "open": "Ouvrir dans {{chat}} : {{text}}",
   "rowLabel": "Messages enregistrés, {{count}}",
+  "save": "Enregistrer",
   "title": "Messages enregistrés",
   "unsave": "Retirer des enregistrés",
   "you": "Vous"
