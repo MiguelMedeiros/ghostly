@@ -4,6 +4,31 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.3.10
+
+### Security
+
+- Chat: a picture sent inside a text, a picture link and a Wayback Machine GIF are drawn only when their own bytes say a size a picture file may have (at most 50 megapixels and 16,384 pixels a side); larger ones show as text or as their link. The app now reads a Wayback Machine GIF itself and checks it first, so in the web app and the extension, where the archive lets no other page read it, a Retro GIF shows as its link. Desktop shows it as before.
+
+### Fixed
+
+**Apps**
+
+- Checking apps for updates, on each visit to the Apps page, reads only the first 4 KiB of each app's source to see its version instead of 64 KiB, and reads more only when an app's details are longer than that.
+
+**CLI**
+
+- A CLI daemon no longer stops answering for seconds or minutes when it reads many things from its store at once (a long outbox, a large group, an import). Its store started those reads one at a time and checked each against all the others: 5,000 reads with a write among them held the daemon for 36 s, and now take tens of milliseconds.
+
+**Devices**
+
+- Adding a device, the focus stays in the dialog after Next, Add and They match. It fell to the page, so the next Tab started from the top of it and a screen reader lost its place.
+- Add a device, Use here and Take over open with the focus in the password field. It was on Close, so a password typed straight away went nowhere, and its first space closed the dialog.
+
+**Everywhere**
+
+- After "What should people call you?" on a first start, Save, Skip or Escape leave the keyboard focus on New. Before, it fell to the page itself, so a keyboard or screen reader user started again from the top.
+
 ## 1.3.9
 
 ### For users
