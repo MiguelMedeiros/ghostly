@@ -1,7 +1,7 @@
 import { utf8Encode } from "./bytes";
 import { MEMBER_KEY } from "./groupCommits";
 import { MENTION_LIMITS, validMentions, type GroupMention } from "./groupMentions";
-import { validEditNumber } from "./pairedEdits";
+import { validEditNumber, validRemovalNumber } from "./pairedEdits";
 import { cardEditNumber, readStatusCard, type StatusCard } from "./statusCards";
 
 /**
@@ -19,6 +19,10 @@ import { cardEditNumber, readStatusCard, type StatusCard } from "./statusCards";
  *
  * `sc` is the status card of this version (WISP 405 · Status Cards); an edit with one may be numbered up to
  * `STATUS_CARD_LIMITS.edits`, one without only up to `MAX_EDITS_PER_MESSAGE`.
+ *
+ * A removal (WISP 400 § Delete for everyone) is an edit with `rm: true` and a fallback text, nothing else beside it,
+ * numbered up to `MAX_REMOVAL_NUMBER`: in a mesh group's box as `{ "text", "rm": true }`, in a community's frame beside
+ * `text`. A `rm` other than `true` is no edit.
  *
  * Older apps drop both: a mesh session ignores a `t` it does not know, a community app the `x` frames it does not know.
  */
@@ -38,6 +42,8 @@ export interface GroupEdit {
   k?: GroupMention[];
   /** The status card of this version (WISP 405 · Status Cards). */
   sc?: StatusCard;
+  /** The author deleted the message for everyone: `m` is only a fallback. */
+  rm?: true;
 }
 
 /** An edit as a group hands it to the engine: `sender` is the member it is authenticated as. */
@@ -69,6 +75,7 @@ export function validEditText(text: unknown): text is string {
 
 /** The `x` frame a community edit travels as. */
 export function communityEditFrame(edit: GroupEdit): Record<string, unknown> {
+  if (edit.rm) return { t: COMMUNITY_EDIT_FRAME, id: edit.id, v: edit.e, ts: edit.ts, text: edit.m, rm: true };
   return { t: COMMUNITY_EDIT_FRAME, id: edit.id, v: edit.e, ts: edit.ts, text: edit.m, ...(edit.k?.length ? { m: edit.k } : {}), ...(edit.sc ? { sc: edit.sc } : {}) };
 }
 
@@ -79,9 +86,11 @@ export function communityEditFrame(edit: GroupEdit): Record<string, unknown> {
  */
 export function parseCommunityEdit(frame: Record<string, unknown>, sender: string): GroupEdit | null {
   if (frame?.t !== COMMUNITY_EDIT_FRAME) return null;
-  const { id, v, ts, text } = frame;
-  if (typeof id !== "string" || communityMessageAuthor(id) !== sender || !cardEditNumber(v)) return null;
+  const { id, v, ts, text, rm } = frame;
+  if (rm !== undefined && rm !== true) return null;
+  if (typeof id !== "string" || communityMessageAuthor(id) !== sender || typeof v !== "number" || !(rm ? validRemovalNumber(v) : cardEditNumber(v))) return null;
   if (typeof ts !== "number" || !Number.isSafeInteger(ts) || ts <= 0 || !validEditText(text)) return null;
+  if (rm) return { id, e: v, ts, m: text, rm };
   const sc = frame.sc === undefined ? undefined : readStatusCard(frame.sc);
   if (!validEditNumber(v) && !sc) return null;
   const k = validMentions(frame.m, text, false);

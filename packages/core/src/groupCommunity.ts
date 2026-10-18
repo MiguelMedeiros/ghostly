@@ -15,7 +15,7 @@ import { readForwarded } from "./forwards";
 import { cardEditNumber, readStatusCard, statusCardBytes, type StatusCard } from "./statusCards";
 import { readGroupFileMeta, type GroupFileMeta } from "./groupFiles";
 import { communityEditFrame, communityMessageAuthor, validEditText } from "./groupEdits";
-import { RateWindow, validEditNumber } from "./pairedEdits";
+import { RateWindow, validEditNumber, validRemovalNumber } from "./pairedEdits";
 import { CATCH_UP_PAUSE_MS, CATCH_UP_SLICE, CatchUpAnswers, type CatchUpHandled } from "./catchUp";
 import {
   encodeGroupMetaBody, groupDisplayName, groupMetaBody, groupMetaChange, groupMetaNewer, groupMetaPicture, groupMetaToHand, keepPastGroupMeta, nextGroupMetaRevision, groupMetaTag, groupName, openGroupMeta, parseGroupMetaFrame, parseGroupMetaTag, signGroupMeta, verifyGroupMetaSignature, wrapGroupMeta,
@@ -1290,15 +1290,16 @@ export class CommunitySession {
    * to the current epoch, but with a text's room rather than an application frame's, since it carries a whole text.
    * The nick is left out when the text leaves no room for it.
    */
-  sendEdit(edit: { id: string; v: number; ts: number; text: string; mentions?: readonly GroupMention[]; card?: StatusCard }, nick?: string, now = Date.now()): Promise<{ id: string } | { error: string }> {
+  sendEdit(edit: { id: string; v: number; ts: number; text: string; mentions?: readonly GroupMention[]; card?: StatusCard; remove?: boolean }, nick?: string, now = Date.now()): Promise<{ id: string } | { error: string }> {
     return this.serialize(async () => {
       if (!this.isMember) return { error: this.state.statusReason ?? "You are not in this group" };
       if (communityMessageAuthor(edit.id) !== this.myKey) return { error: "Only your own messages can be edited" };
-      if (!(edit.card ? cardEditNumber(edit.v) : validEditNumber(edit.v))) return { error: "This message was edited too many times" };
+      if (!(edit.remove ? validRemovalNumber(edit.v) : edit.card ? cardEditNumber(edit.v) : validEditNumber(edit.v))) return { error: "This message was edited too many times" };
       const text = edit.text.trim();
       if (!validEditText(text)) return { error: text ? "Message exceeds 16 KiB" : "An edit cannot be empty" };
-      const named = validMentions(wireMentions(edit.mentions ?? []), text, false);
-      const frame = communityEditFrame({ id: edit.id, e: edit.v, ts: edit.ts, m: text, k: named, ...(edit.card && { sc: edit.card }) });
+      const named = edit.remove ? [] : validMentions(wireMentions(edit.mentions ?? []), text, false);
+      // A removal (WISP 400 § Delete for everyone) carries its fallback text alone.
+      const frame = communityEditFrame({ id: edit.id, e: edit.v, ts: edit.ts, m: text, k: named, ...(edit.card && !edit.remove && { sc: edit.card }), ...(edit.remove && { rm: true as const }) });
       // What a message's box holds (`isMessageFrame`): the text's bound and a little more.
       const room = COMMUNITY_LIMITS.textBytes + 256, clean = sanitizeNick(nick);
       const size = (withNick: boolean) => utf8Encode(JSON.stringify(withNick && clean ? { x: frame, nick: clean } : { x: frame })).length;
