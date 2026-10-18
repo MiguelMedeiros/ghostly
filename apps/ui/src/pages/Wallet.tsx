@@ -25,13 +25,13 @@ import { NETWORK_NAME } from "../components/wallet/names";
 import { dealCard } from "../components/wallet/motion";
 import { Button } from "../components/wallet/ui";
 import { NetworkTag } from "../components/NetworkTag";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { useWalletPlatform } from "../hooks/useServicesPlatform";
 import { useI18n } from "../contexts/I18nContext";
 import { Page, PageAction } from "../components/layout";
 import { focusInPlace } from "../lib/focus";
 import { navOnly } from "../lib/navigation";
 import { playCue } from "../lib/cues";
-import type { WalletInstanceView, WalletNetwork, WalletPlatform, WalletState } from "../lib/platform";
+import { servicesPlatform, type WalletInstanceView, type WalletNetwork, type WalletPlatform, type WalletState } from "../lib/platform";
 
 const CARD_KEY = "ghostly-wallet-card";
 /** The card chosen last in this tab: a wallet's id, or (a tab from before wallets had networks) a rail. */
@@ -59,8 +59,8 @@ const backupFirst = (made: WalletInstanceView) => made.network === "mainnet" && 
  */
 export function Wallet() {
   const { t } = useI18n();
-  const platform = useServicesPlatform();
-  const wallet = platform?.wallet;
+  // The page draws again when the wallets change, not on every engine state (a file moving, a chat, a call).
+  const wallet = useWalletPlatform();
   const state = wallet?.getState();
   const cards = state ? walletCards(state, { t }) : [];
   // The tab chosen on this visit; before that, the one shown last on this device while it has wallets (another
@@ -164,7 +164,7 @@ export function Wallet() {
       <PageAction label={t("sidebar.new")} title={t("wallet.page.create")} testId="wallet-add" onClick={() => setCreating(cards.length && !firstRun ? network : "testnet")} />
     )}>
       <div ref={page} className="space-y-6">
-        {platform?.notice && <p className="px-3 py-2 rounded-lg bg-yellow-500/10 text-warn-ink text-xs" data-testid="platform-notice">{platform.notice}</p>}
+        {servicesPlatform?.notice && <p className="px-3 py-2 rounded-lg bg-yellow-500/10 text-warn-ink text-xs" data-testid="platform-notice">{servicesPlatform.notice}</p>}
         {wallet && state?.setup && <WalletSetupStatus wallet={wallet} setup={state.setup} showProgress={!cards.length} />}
         {!wallet || !state ? <p className="text-text-muted text-sm">{t("wallet.page.unavailable")}</p> : (!cards.length && state.setup?.running && !firstRun) ? null : !cards.length || firstRun ? (
           <FirstWallet wallet={wallet} offers={state.offers} onNew={() => setCreating("testnet")} onStart={() => setFirstRun(true)} onMade={(id) => { setFirstRun(false); select(id); setDealt(id); }} />
