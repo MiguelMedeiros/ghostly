@@ -37,6 +37,19 @@ describe("delete", () => {
     expect(node.deleteMessage).toHaveBeenCalledOnce();
     expect(whole()).toBe(0);
   });
+
+  it("a group named without --everyone says it is a group and how its message is deleted, not \"No chat\"", async () => {
+    const { ctx, node } = fake();
+    for (const chat of ["Crew", "g1"])
+      await expect(callApi(ctx, "chat.delete", { chat, message: "mine:0:2" })).rejects.toMatchObject({
+        code: "not_found", message: `"${chat}" is a group, not a chat: ghostly message delete ${chat} mine:0:2 --everyone`, details: { group: "g1" },
+      });
+    // A name no chat and no group has stays the chat's own error.
+    await expect(callApi(ctx, "chat.delete", { chat: "Nobody", message: "mine:0:2" })).rejects.toMatchObject({ code: "not_found", message: 'No chat "Nobody"' });
+    expect(node.deleteMessage).not.toHaveBeenCalled();
+    const { COMMANDS } = await import("../src/commands");
+    expect(COMMANDS["message delete"]!.usage).toBe("message delete <chat|group> <message> [--everyone]");
+  });
 });
 
 describe("delete --everyone", () => {
