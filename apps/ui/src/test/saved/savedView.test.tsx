@@ -88,6 +88,25 @@ describe("the Saved view", () => {
     await waitFor(() => expect(texts()).toEqual(["text peer_2"]));
   });
 
+  it("after an unsave from the keyboard, the focus goes to the next row, the one before it at the end, then to the empty list", async () => {
+    const { user } = profile([saved(message("link-1", "peer_1")), saved(message("link-1", "peer_2")), saved(message("link-1", "peer_3"))]);
+    const opens = () => screen.getAllByTestId("saved-open");
+    await screen.findAllByTestId("saved-row");
+    within(screen.getAllByTestId("saved-row")[1]).getByTestId("saved-unsave").focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(texts()).toEqual(["text peer_1", "text peer_3"]));
+    expect(opens()[1]).toHaveFocus();
+    // The last row: the one before it.
+    within(screen.getAllByTestId("saved-row")[1]).getByTestId("saved-unsave").focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(texts()).toEqual(["text peer_1"]));
+    expect(opens()[0]).toHaveFocus();
+    // The only one: the empty list says so, and has the focus.
+    within(screen.getByTestId("saved-row")).getByTestId("saved-unsave").focus();
+    await user.keyboard("{Enter}");
+    expect(await screen.findByTestId("saved-empty")).toHaveFocus();
+  });
+
   it("shows an edit's latest text when the chat changes, and says when nothing is saved", async () => {
     const m = message("link-1", "peer_1", { text: "before" });
     const { set, engine } = profile([saved(m)]);
