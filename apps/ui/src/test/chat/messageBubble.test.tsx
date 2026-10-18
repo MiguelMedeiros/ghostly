@@ -95,6 +95,24 @@ describe("MessageBubble: pictures", () => {
     expect(image(container)!.getAttribute("style")).toContain("pixelated");
   });
 
+  it("draws a Wayback Machine GIF in its own box before it decodes, and at once when its chat opens again", async () => {
+    const url = "https://web.archive.org/web/http://geocities.com/ghost/1.gif";
+    const fetched = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(new Uint8Array(heads.gif(320, 240)) as BodyInit, { status: 200 }));
+    vi.spyOn(URL, "createObjectURL").mockImplementation(() => "blob:http://localhost/gif-2");
+    const first = bubble({ text: url });
+    const drawn = await screen.findByTestId("picture-link");
+    // The box its bytes say, before the picture decodes: nothing under it moves when it does (happy-dom keeps no
+    // min()/max() width, so only its ratio is seen here).
+    expect(drawn.style.aspectRatio).toBe("320 / 240");
+    first.unmount();
+    // Drawn again (a chat opened again, a row scrolled back): the picture is there in the first frame, read once.
+    const { container } = bubble({ text: url });
+    expect(screen.queryByTestId("picture-link-reading")).not.toBeInTheDocument();
+    expect(image(container)).toHaveAttribute("src", "blob:http://localhost/gif-2");
+    expect(image(container)!.style.aspectRatio).toBe("320 / 240");
+    expect(fetched).toHaveBeenCalledTimes(1);
+  });
+
   it("falls back to the link for a Wayback Machine GIF whose header declares too many pixels", async () => {
     const url = "https://web.archive.org/web/20091027000000/http://www.geocities.com/area51/huge.gif";
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(new Uint8Array(heads.gif(65535, 65535)) as BodyInit, { status: 200 }));

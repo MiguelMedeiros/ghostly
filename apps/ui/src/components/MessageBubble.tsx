@@ -9,7 +9,7 @@ import { MessageBoundary } from "./MessageBoundary";
 import { MessageDetailsPanel } from "./MessageDetailsPanel";
 import { VoiceBubble } from "./voice/VoiceBubble";
 import { VideoBubble } from "./video/VideoBubble";
-import { IMAGE_LIMITS, imageSize, isPlayableAudioType, isPlayableVideoType, previewable, shownTime } from "@ghostly/core";
+import { IMAGE_LIMITS, imageSize, isPlayableAudioType, isPlayableVideoType, previewable, shownTime, type ImageMeta } from "@ghostly/core";
 import { AudioBubble } from "./audio/AudioBubble";
 import { InvoiceBubble } from "./InvoiceBubble";
 import { findMoney } from "../lib/money";
@@ -43,7 +43,7 @@ import { DeliveryStatus } from "./chat/DeliveryStatus";
 import { forwardedLabel } from "../lib/forward";
 import { PinIcon } from "./PinIcon";
 import { copyText } from "../lib/shareLink";
-import { pictureLinkUrl } from "../lib/pictureLink";
+import { pictureLinkRead, pictureLinkUrl, type PictureRead } from "../lib/pictureLink";
 import { SenderAvatar, type MessageAuthor } from "./chat/SenderAvatar";
 import { useMemberText } from "../contexts/MemberColorsContext";
 import { AppCardView } from "./apps/AppCardView";
@@ -341,6 +341,13 @@ const autoLoads = (url: string) => (DATA_IMAGE_SAFE_RE.test(url) && previewableD
  * so the app reads those and checks their size first (lib/pictureLink.ts), as any picture link's.
  */
 const needsNoClick = (url: string) => autoLoads(url) || isWaybackGif(url);
+/**
+ * A read picture's box before it is decoded, as the <img>'s classes size it once it is (at most 330 px and 72% of the
+ * window wide, 330 px high, at least 120 px wide): a picture that lays out late moves nothing under it.
+ */
+const linkPictureBox = ({ width, height }: ImageMeta): React.CSSProperties => ({
+  width: `max(120px, min(${width}px, 330px, 72vw, ${(330 * width) / height}px))`, height: "auto", aspectRatio: `${width} / ${height}`,
+});
 const hostOf = (url: string) => { try { return new URL(url).host; } catch { return "picture"; } };
 
 function isOnlyEmojis(text: string): boolean {
@@ -841,18 +848,21 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // No shell's policy lets the page load a picture from any address but the GIF sources': the app reads the others
   // itself, once asked (my own at once), and the bubble shows what came (lib/pictureLink.ts).
   const readHere = picture !== null && !autoLoads(picture) && (isMe || revealed || needsNoClick(picture)) ? picture : null;
-  const [pictureRead, setPictureRead] = useState<{ link: string; url: string } | null>(null);
+  const [pictureRead, setPictureRead] = useState<{ link: string; read: PictureRead } | null>(null);
   useEffect(() => {
     if (!readHere) return;
     let shown = true;
-    void pictureLinkUrl(readHere).then((url) => {
+    void pictureLinkUrl(readHere).then((read) => {
       if (!shown) return;
-      if (url) setPictureRead({ link: readHere, url });
+      if (read) setPictureRead({ link: readHere, read });
       else setImgError(true);
     });
     return () => { shown = false; };
   }, [readHere]);
-  const pictureSrc = picture === null ? null : autoLoads(picture) ? picture : pictureRead?.link === picture ? pictureRead.url : null;
+  // Read before (the chat opened again, the row drawn again): in the first frame, so nothing above a remembered place
+  // grows after the view went back there.
+  const linkPicture = readHere === null ? undefined : pictureRead?.link === readHere ? pictureRead.read : pictureLinkRead(readHere);
+  const pictureSrc = picture === null ? null : autoLoads(picture) ? picture : linkPicture?.url ?? null;
   const download = message.file && !isSystem
     ? {
       file: message.file, name: downloadName(message.file, message.timestamp), sender: isMe ? "me" as const : "peer" as const,
@@ -1150,8 +1160,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
                 src={pictureSrc}
                 alt=""
                 data-testid="picture-link"
-                className={`rounded-[4px] max-w-[min(330px,72vw)] min-w-[120px] max-h-[330px] object-contain block ${pictureLoaded === message.text.trim() ? "" : "min-h-[120px] bg-black/10"}`}
-                style={isWaybackGif(message.text.trim()) ? { imageRendering: "pixelated" } : undefined}
+                className={`rounded-[4px] max-w-[min(330px,72vw)] min-w-[120px] max-h-[330px] object-contain block ${pictureLoaded === message.text.trim() ? "" : linkPicture ? "bg-black/10" : "min-h-[120px] bg-black/10"}`}
+                style={{ ...(linkPicture && linkPictureBox(linkPicture)), ...(isWaybackGif(message.text.trim()) && { imageRendering: "pixelated" }) }}
                 loading="lazy"
                 onLoad={() => setPictureLoaded(message.text.trim())}
                 onError={() => setImgError(true)}
