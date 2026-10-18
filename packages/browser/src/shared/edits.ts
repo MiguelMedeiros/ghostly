@@ -25,7 +25,7 @@ export function canEdit(message: Pick<StoredMessage, "sender" | "linkId" | "wire
 }
 
 /** A group message's id: `<sender>:<epoch>:<seq>` in a private group, `<sender>:<epoch>:<commit>:<seq>` in a community. */
-const GROUP_MESSAGE_ID = /^[a-z0-9]{52}:\d+:(?:[0-9a-f]{16}:)?\d+$/;
+export const GROUP_MESSAGE_ID = /^[a-z0-9]{52}:\d+:(?:[0-9a-f]{16}:)?\d+$/;
 
 /** A text of mine in a group (WISP 902 § Edits): one the group carried under its id, not a payment, a note or an event line. */
 export function canEditInGroup(message: Pick<StoredMessage, "sender" | "linkId" | "id" | "file" | "paymentId" | "event" | "groupPay">): boolean {

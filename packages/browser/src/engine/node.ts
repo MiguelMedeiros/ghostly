@@ -188,6 +188,7 @@ import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOrigi
 import { buttonPress, buttonsState, messageButtons } from "../shared/buttons";
 import { canEdit, canRemove, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
 import { CardEditPacer, EditBuffer, EditQueue } from "./edits";
+import { patchRemoval, removalNumber, removalRow, withRemoval, type Removal } from "./removals";
 import { ENGLISH_REMOVAL, removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
 import { mintAwaiting, walletAwaiting } from "./walletAwaiting";
 import type { WalletRemoval } from "../shared/walletRemoval";
@@ -1471,27 +1472,48 @@ export class GhostlyNode implements EngineImplementation {
    * Never a new message: no sound, no unread.
    */
   private readonly groupEdits = new GroupEdits({
-    messages: chat => db.getMessages(chat),
-    history: chat => this.edgeOpenHistory(chat),
-    message: (chat, id) => db.getMessage(chat, id),
-    patch: (chat, id, change) => db.patchMessage(chat, id, change),
+    // My removals on their way read as rows of mine with the removal as their edit (`engine/removals.ts`).
+    messages: async chat => [...await db.getMessages(chat), ...this.groupRemovalRows(chat)],
+    history: async chat => [...await this.edgeOpenHistory(chat), ...this.groupRemovalRows(chat)],
+    message: async (chat, id) => await db.getMessage(chat, id) ?? this.groupRemovalRows(chat).find(m => m.id === id),
+    patch: async (chat, id, change) => {
+      const groupId = chat.slice("group:".length), patched = patchRemoval(this.groups.removals(groupId), id, change, chat);
+      if (!patched) return db.patchMessage(chat, id, change);
+      await this.groups.setRemovals(groupId, patched.list);
+      return patched.row;
+    },
     changed: (chat, id) => this.messagesChanged(chat, [id]),
     membership: groupId => {
       const membership = this.membership(groupId);
       return membership && { ...membership, community: this.groups.isCommunityGroup(groupId), admin: !!this.groups.views().find(g => g.id === groupId)?.isAdmin };
     },
     send: (groupId, edit, to) => this.groups.sendEdit(groupId, edit, to),
-    remove: async (chat, id) => {
-      await this.groups.removed(chat.slice("group:".length), id);
-      await db.deleteMessage(chat, id);
-      await this.messagesChanged(chat, [id]);
-      this.emitState();
+    remove: (chat, id) => this.forgetGroupMessage(chat, id),
+    removeMine: async (chat, message, removal) => {
+      const groupId = chat.slice("group:".length);
+      await this.groups.setRemovals(groupId, withRemoval(this.groups.removals(groupId), removal));
+      await this.forgetGroupMessage(chat, message.id);
     },
     edge: (groupId, member) => {
       const link = this.links.get(this.memberEdges(groupId).get(member) ?? "")?.link;
       return link?.supportsGroupVersion(1) ? link : undefined;
     },
   });
+
+  /**
+   * A group's message deleted for everyone, by its author or by me: gone from this device with its file, and noted so a
+   * copy that comes again (a catch-up, a member handing it on) is not stored.
+   */
+  private async forgetGroupMessage(chat: string, id: string): Promise<void> {
+    await this.groups.removed(chat.slice("group:".length), id);
+    await db.deleteMessage(chat, id);
+    await this.messagesChanged(chat, [id]);
+    this.emitState();
+  }
+
+  private groupRemovalRows(chat: string): StoredMessage[] {
+    return this.groups.removals(chat.slice("group:".length)).map(r => removalRow(chat, r));
+  }
 
   /** A community member's edit, signed by them: of their own message, and only while they are a member. */
   private async receiveCommunityEdit(groupId: string, sender: string, frame: Record<string, unknown>): Promise<void> {
@@ -3551,9 +3573,14 @@ export class GhostlyNode implements EngineImplementation {
   private editsFor(linkId: string): EditQueue {
     let queue = this.editQueues.get(linkId);
     if (!queue) {
+      // My removals on their way read as rows of mine with an edit pending (`engine/removals.ts`).
+      const removals = () => this.links.get(linkId)?.stored.removals ?? [];
       queue = new EditQueue({
-        read: () => db.getMessages(linkId),
-        rows: ids => db.getMessagesById(linkId, ids),
+        read: async () => [...await db.getMessages(linkId), ...removals().map(r => removalRow(linkId, r))],
+        rows: async ids => {
+          const found = await db.getMessagesById(linkId, ids);
+          return found.map((row, i) => { const removal = row ? undefined : removals().find(r => r.id === ids[i]); return row ?? (removal && removalRow(linkId, removal)); });
+        },
         ready: () => {
           const live = this.links.get(linkId), link = live?.link;
           return !!link && (link.supportsEdits || (link.textDelivery === "dht" && this.takesDhtEdits(live)));
@@ -3567,6 +3594,14 @@ export class GhostlyNode implements EngineImplementation {
         },
         receiptMs: () => this.links.get(linkId)?.link?.isDataLinkOpen ? 20_000 : DHT_MESSAGE_TTL,
         settle: async (messageId, seq) => {
+          // A removal confirmed (or given up on): nothing of it is left to say.
+          const live = this.links.get(linkId), removal = live?.stored.removals?.find(r => r.id === messageId);
+          if (live && removal) {
+            if (removal.e !== seq) return;
+            live.stored = { ...live.stored, removals: live.stored.removals!.filter(r => r.id !== messageId) };
+            await db.patchLink(linkId, { removals: live.stored.removals });
+            return;
+          }
           const updated = await db.patchMessage(linkId, messageId, current => {
             if (!current.edit?.pending || current.edit.seq !== seq) return null;
             const { pending: _done, ...edit } = current.edit;
@@ -3819,6 +3854,33 @@ export class GhostlyNode implements EngineImplementation {
 
   deleteMessage({ linkId, messageId }: { linkId: string; messageId: string }): void {
     void this.forgetMessage(linkId, messageId);
+  }
+
+  /**
+   * Deletes a message of mine for everyone (WISP 400 § Delete for everyone): it goes from this device at once, as a delete
+   * here does, and its removal goes to the contact as the message's last edit, said again until confirmed, live only.
+   * One that never left is only deleted. Never a payment, a request or a notice. A group's goes through `GroupEdits`.
+   */
+  async removeMessage({ linkId, messageId }: { linkId: string; messageId: string }): Promise<{ error: string | null; refused?: boolean }> {
+    const refuse = (error: string) => ({ error, refused: true });
+    if (linkId.startsWith("group:")) return this.groupEdits.removeMine(linkId.slice("group:".length), messageId);
+    const live = this.links.get(linkId);
+    if (!live?.stored.profile || live.stored.group) return refuse("Only a chat with a contact deletes a message for everyone");
+    const message = await db.getMessage(linkId, messageId);
+    if (!message || message.sender !== "me") return refuse("Only your own messages can be deleted for everyone");
+    if (!canRemove(message)) return refuse("A payment, a request or a notice cannot be deleted for everyone");
+    const out = `${linkId}-out-`;
+    const wireId = message.wireId ?? (message.file?.id.startsWith(out) ? message.file.id.slice(out.length) : undefined);
+    // Never left this device: deleting it here is all there is.
+    if (!wireId || message.delivery === "waiting") { await this.forgetMessage(linkId, messageId); return { error: null }; }
+    const removal: Removal = { id: messageId, wireId, e: removalNumber(message.edit?.seq), at: Date.now(), pending: true };
+    live.stored = { ...live.stored, removals: withRemoval(live.stored.removals, removal) };
+    await db.patchLink(linkId, { removals: live.stored.removals });
+    await this.forgetMessage(linkId, messageId);
+    const edits = this.editsFor(linkId);
+    edits.edited(messageId);
+    void edits.flush().catch(() => {});
+    return { error: null };
   }
 
   /**
