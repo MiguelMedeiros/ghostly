@@ -27,6 +27,8 @@
   "connecting": "connecting",
   "createdHere": "You created this chat",
   "deleteArrivingFileHint": "Deleted only here. The file stops arriving; your contact sees it cancelled.",
+  "deleteForEveryone": "Delete for everyone",
+  "deleteForEveryoneHint": "Deleted from your contact's or the group's devices too. An app from before this shows \"Message removed\" instead; a copy someone saved stays theirs.",
   "deleteMessage": "Delete message",
   "deleteMessageHint": "Deleted only here. Your contact keeps their copy.",
   "deleteSendingFileHint": "Deleted only here. Sending stops; your contact won't get the file.",

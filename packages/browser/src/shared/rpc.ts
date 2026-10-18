@@ -190,6 +190,11 @@ export interface EngineApi {
   messageDetails(params: { linkId: string; messageId: string }): MessageDetailsView | null;
   /** Forgets one message and the bytes of the file it carried. Nothing is sent: the peer keeps its copy. */
   deleteMessage(params: { linkId: string; messageId: string }): void;
+  /**
+   * Deletes a message of mine for everyone (WISP 400 § Delete for everyone): gone here at once, and from every member's
+   * device as its last edit. A chat's or a group's (`group:<id>`); refused for someone else's, a payment or a notice.
+   */
+  removeMessage(params: { linkId: string; messageId: string }): { error: string | null; refused?: boolean };
   /** Link secrets, for a UI that keeps its own session list in the same profile. */
   exportLinks(): { deliveryMode?: DeliveryMode; profile?: "paired-chat/1"; seedB64: string; peerPubKeyZ32: string; encKeyB64: string; createdAt: number; inviteCode?: string; label?: string }[];
   /** Sends a file whose bytes the caller already put in the `files` store. Progress shows up in `transfers`. */

@@ -143,6 +143,14 @@ function editableText(message: ChatMessage): boolean {
   return message.sender === "me" && !!message.ref && message.id === `me_${message.ref}` && !message.file && !message.paymentId && !message.systemEvent && !message.callEvent && !message.card;
 }
 
+/**
+ * A message of mine this chat can delete for everyone (WISP 400 § Delete for everyone): one that went to the contact (a
+ * text, a card, a file or a voice message), not a payment, a request, a notice or a call line, nor one still waiting.
+ */
+function removableForEveryone(message: ChatMessage): boolean {
+  return message.sender === "me" && !!message.ref && message.delivery !== "waiting" && !message.paymentId && !message.systemEvent && !message.callEvent;
+}
+
 export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnlock = false }: ChatProps) {
   const nav = useAppNavigation();
   const { t, language } = useI18n();
@@ -341,6 +349,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     },
     [deleteMessage, platform, peerKey],
   );
+
+  /** Deletes a message of mine for everyone: the engine sends its removal, and the chat's copy goes once it took it. */
+  const removeForEveryone = (messageId: string) => {
+    if (!chatLink) return;
+    void engine.call("removeMessage", { linkId: chatLink.id, messageId }).then(result => { if (!result.error) deleteMessage(messageId); }).catch(() => {});
+  };
 
   const wallet = platform?.wallet;
   const walletState = wallet?.getState() ?? null;
@@ -972,6 +986,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 peerNick={contactNick}
                 contactName={isAnonymous ? "" : shownName}
                 onDelete={() => forgetMessage(row.message.id)}
+                onDeleteForEveryone={paired && chatLink && removableForEveryone(row.message) ? () => removeForEveryone(row.message.id) : undefined}
                 // Only a paired chat carries replies; a compatibility chat's contact would see the text alone.
                 onReply={paired && replyTarget(row.message) ? () => { setEditing(null); setReplyingTo(row.message); } : undefined}
                 onEdit={paired && chatLink && editableText(row.message) ? () => { setReplyingTo(null); setEditing(row.message); } : undefined}

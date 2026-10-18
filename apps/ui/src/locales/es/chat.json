@@ -27,6 +27,8 @@
   "connecting": "conectando",
   "createdHere": "Creaste este chat",
   "deleteArrivingFileHint": "Se elimina solo aquí. El archivo deja de llegar; tu contacto verá el envío cancelado.",
+  "deleteForEveryone": "Eliminar para todos",
+  "deleteForEveryoneHint": "Se elimina también en los dispositivos de tu contacto o del grupo. Una app anterior muestra \"Mensaje eliminado\" en su lugar; una copia que alguien guardó sigue siendo suya.",
   "deleteMessage": "Eliminar mensaje",
   "deleteMessageHint": "Se elimina solo aquí. Tu contacto conserva su copia.",
   "deleteSendingFileHint": "Se elimina solo aquí. El envío se detiene; tu contacto no recibirá el archivo.",
