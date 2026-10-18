@@ -122,7 +122,7 @@ describe("call signals", () => {
     expect(signal.ss).toEqual([1001234567, 4294967295]);
     expect(signal.c).toEqual([
       "842163049 1 udp 2122260223 3f6b2a9e-1b7c-4b1d-9c3e-0d2f6f6f7a11.local 54400 typ host",
-      "3345412921 1 udp 1686052607 203.0.113.7 61000 typ srflx raddr 0.0.0.0 rport 0",
+      "3345412921 1 udp 1686052607 203.0.113.7 61000 typ srflx",
     ]);
 
     const rebuilt = buildSdpFromSignal(signal);
@@ -186,9 +186,23 @@ describe("call signals", () => {
     const signal = parseCallSignal(signalFrom(linux, "o"), NOW)!;
     expect(signal.c).toEqual([
       "2519499965 1 udp 2130706431 192.168.215.2 58888 typ host",
-      "2052316515 1 udp 1694498815 203.0.113.9 51670 typ srflx raddr 192.168.215.2 rport 58888",
+      "2052316515 1 udp 1694498815 203.0.113.9 51670 typ srflx",
     ]);
     expect(signal.ss).toEqual([1, 2]);
+  });
+
+  it("leaves every related address out of a compatibility chat's signal, IPv4 too: it names an interface of the sender's", () => {
+    const sdp = [
+      "a=ice-ufrag:YMMd", "a=ice-pwd:fpzBkrMsIRuhHekXupyTDFopKaWShAFt",
+      "a=candidate:1 1 udp 2130706431 10.8.0.2 58888 typ host",
+      "a=candidate:2 1 udp 1694498815 203.0.113.9 51670 typ srflx raddr 192.168.1.20 rport 58889 generation 0",
+    ].join("\r\n") + "\r\n";
+    const { c } = extractParamsFromSdp(sdp);
+    expect(c).toEqual([
+      "1 1 udp 2130706431 10.8.0.2 58888 typ host",
+      "2 1 udp 1694498815 203.0.113.9 51670 typ srflx generation 0",
+    ]);
+    expect(c!.every((line) => !/ r(addr|port) /.test(` ${line} `))).toBe(true);
   });
 
   it("carries an Opus payload type other than 111 (Firefox offers it as 109)", () => {
@@ -206,7 +220,7 @@ describe("call signals", () => {
     // Firefox ends a host line at `typ host` too: its (mDNS) host candidate goes with the reflexive one.
     expect(signal.c).toEqual([
       "0 1 udp 2122252543 9a1c2f47-5d2e-4e0a-8f7b-1c2d3e4f5a6b.local 50001 typ host",
-      "1 1 udp 1686052863 198.51.100.4 50001 typ srflx raddr 0.0.0.0 rport 0",
+      "1 1 udp 1686052863 198.51.100.4 50001 typ srflx",
     ]);
     expect(buildSdpFromSignal(signal)).toContain("a=candidate:1 1 udp 1686052863 198.51.100.4 50001 typ srflx");
   });
