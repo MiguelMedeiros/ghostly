@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EDIT_RECEIVE_LIMIT, EDIT_SEND_LIMIT, REMOVED_TEXT, createIdentity, parseCommunityEdit, type GroupEdit } from "@ghostly/core";
 import { GROUP_EDITS_HELD, GROUP_EDIT_CATCH_UP, GROUP_EDIT_RESEND, GROUP_EDIT_RESEND_WINDOW_MS, GroupEdits, type GroupEditsHost } from "../src/engine/groupEdits";
+import { removalRow } from "../src/engine/removals";
 import type { StoredMessage } from "../src/shared/types";
 import { CommunityWorld, type Peer } from "./communityWorld";
 // covers: groups.edit, groups.protocol.edits
@@ -11,8 +12,14 @@ import { CommunityWorld, type Peer } from "./communityWorld";
  */
 
 /** A member's rows, patched in place as the engine's database does; a removal deletes one, as the engine does. */
-function rows(messages: StoredMessage[], removed: string[] = []): Pick<GroupEditsHost, "messages" | "patch" | "remove"> {
+function rows(messages: StoredMessage[], removed: string[] = []): Pick<GroupEditsHost, "messages" | "patch" | "remove" | "removeMine"> {
   return {
+    // As the engine does: my message goes, and its removal reads as a row of mine with the removal as its edit.
+    removeMine: async (chat, message, removal) => {
+      removed.push(message.id);
+      const at = messages.findIndex(m => m.linkId === chat && m.id === message.id);
+      if (at >= 0) messages.splice(at, 1, removalRow(chat, removal));
+    },
     remove: async (chat, id) => {
       removed.push(id);
       const at = messages.findIndex(m => m.linkId === chat && m.id === id);
@@ -82,6 +89,27 @@ describe("GroupEdits on its own", () => {
     await edits.edit("g1", mine(0).id, "Working: 1 of 3");
     await edits.flush("g1");
     expect(sent).toHaveLength(1);
+  });
+
+  it("deletes mine for everyone: gone here, said to the group as its last edit, and again to an edge that opens", async () => {
+    const card = { kind: "task" as const, id: "t", title: "T", status: "running" as const };
+    const removed: string[] = [];
+    const { edits, sent, messages, tick } = setup([{ ...mine(0, "🔄 T"), card, edit: { seq: 7, at: 5, history: [] } }, bobs(0)], [me, bob, carol], removed);
+    expect(await edits.removeMine("g1", mine(0).id)).toEqual({ error: null, messageId: mine(0).id });
+    expect(removed).toEqual([mine(0).id]);
+    expect(sent).toEqual([{ edit: { id: mine(0).id, e: 8, ts: 1_000_000, m: REMOVED_TEXT, rm: true } }]);
+    expect(messages[0]).toMatchObject({ removed: true, edit: { seq: 8 } });
+    expect(messages[0].edit).not.toHaveProperty("pending");
+    // Carol's edge opens: she hears it too.
+    tick(1_000);
+    await edits.resend("g1", carol);
+    expect(sent.slice(1)).toEqual([{ edit: { id: mine(0).id, e: 8, ts: 1_000_000, m: REMOVED_TEXT, rm: true }, to: carol }]);
+    // Not again, and never someone else's or a payment.
+    expect(await edits.removeMine("g1", mine(0).id)).toMatchObject({ refused: true });
+    expect(await edits.removeMine("g1", bobs(0).id)).toMatchObject({ refused: true });
+    messages.push({ ...mine(1, "💸 5 sats"), paymentId: "p" });
+    expect(await edits.removeMine("g1", mine(1).id)).toMatchObject({ refused: true, error: expect.stringMatching(/payment/) });
+    edits.stop();
   });
 
   it("refuses what is not mine to edit, empty, too long, or edited too often", async () => {
@@ -368,6 +396,29 @@ describe("GroupEdits on its own", () => {
     for (const m of [alice, bob, carol]) m.edits.stop();
   });
 
+  it("a private group: a member away while the author deletes its card for everyone has it gone when its edge opens", async () => {
+    const world = new CommunityWorld();
+    const alice = member(world, "alice"), bob = member(world, "bob"), carol = member(world, "carol");
+    const id = await alice.peer.groups.create("Machines", "mesh");
+    const link = await alice.peer.groups.enableLink(id);
+    for (const m of [bob, carol]) await m.peer.groups.joinByLink(link);
+    await world.until(() => [bob, carol].every(m => world.member(m.peer, id) && world.view(m.peer, id)!.members.length === 3), 10 * 60_000);
+    await world.until(() => [alice, bob, carol].every(m => world.view(m.peer, id)!.members.filter(x => !x.me).every(x => x.online)), 5 * 60_000);
+    const card = { kind: "task" as const, id: "task-1", title: "Task 1", status: "running" as const };
+    const { messageId } = await bob.peer.groups.send(id, "🔄 Task 1", [], undefined, undefined, card);
+    await world.until(() => [alice, carol].every(m => !!textOf(m.peer, messageId!)), 60_000);
+    carol.peer.online = false;
+    await world.run(5_000);
+    expect(await bob.edits.removeMine(id, messageId!)).toMatchObject({ error: null });
+    await world.until(() => !textOf(alice.peer, messageId!), 60_000);
+    expect(textOf(carol.peer, messageId!)).toBe("🔄 Task 1");
+    carol.peer.online = true;
+    // Nobody asks: Bob's side of the edge coming up says it again.
+    await world.until(() => !textOf(carol.peer, messageId!), 3 * 60_000);
+    expect(bob.peer.messages.filter(m => !m.event && !m.removed)).toEqual([]);
+    for (const m of [alice, bob, carol]) m.edits.stop();
+  });
+
   it("a community: a member away while the author removes its message never sees it after the catch-up", async () => {
     const world = new CommunityWorld();
     const alice = member(world, "alice"), bob = member(world, "bob"), carol = member(world, "carol");
@@ -416,6 +467,11 @@ function member(world: CommunityWorld, name: string, old = false): { peer: Peer;
       await peer.groups.removed(chat.slice("group:".length), id);
       const at = peer.messages.findIndex(m => m.linkId === chat && m.id === id);
       if (at >= 0) peer.messages.splice(at, 1);
+    },
+    removeMine: async (chat, message, removal) => {
+      await peer.groups.removed(chat.slice("group:".length), message.id);
+      const at = peer.messages.findIndex(m => m.linkId === chat && m.id === message.id);
+      if (at >= 0) peer.messages.splice(at, 1, removalRow(chat, removal));
     },
     changed: () => {},
     membership: groupId => {

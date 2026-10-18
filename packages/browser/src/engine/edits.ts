@@ -194,7 +194,9 @@ export class EditQueue {
       if (pace > 0) { next = Math.min(next, now + pace); break; }
       if (!this.pace.take()) break;
       const receiptMs = typeof this.deps.receiptMs === "function" ? this.deps.receiptMs() : this.deps.receiptMs ?? 20_000;
-      const error = await this.deps.send({ id: message.wireId!, e: edit.seq, ts: edit.at, m: message.text, ...(message.preview && { pv: message.preview }), ...(message.card && { sc: message.card }) }, message);
+      // A removal of mine (WISP 400 § Delete for everyone) carries its fallback text alone.
+      const error = await this.deps.send(message.removed ? { id: message.wireId!, e: edit.seq, ts: edit.at, m: message.text, rm: true }
+        : { id: message.wireId!, e: edit.seq, ts: edit.at, m: message.text, ...(message.preview && { pv: message.preview }), ...(message.card && { sc: message.card }) }, message);
       // This one cannot go now (too long for the DHT, its message not confirmed yet): the others still may.
       if (error) continue;
       if (edit.restore) this.restoredAt = now;
