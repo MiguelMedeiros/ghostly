@@ -1,0 +1,10 @@
+{
+  "empty": "No saved messages",
+  "emptyHint": "Save a message from its ⋮ menu to find it here. Saved messages stay on this device.",
+  "noText": "Message",
+  "open": "Open in {{chat}}: {{text}}",
+  "rowLabel": "Saved messages, {{count}}",
+  "title": "Saved messages",
+  "unsave": "Unsave",
+  "you": "You"
+}
