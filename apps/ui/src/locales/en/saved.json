@@ -4,6 +4,7 @@
   "noText": "Message",
   "open": "Open in {{chat}}: {{text}}",
   "rowLabel": "Saved messages, {{count}}",
+  "save": "Save",
   "title": "Saved messages",
   "unsave": "Unsave",
   "you": "You"

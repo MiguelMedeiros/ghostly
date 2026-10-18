@@ -114,6 +114,7 @@ import { usePageShown } from "../hooks/usePageShown";
 import { clearChatNotification } from "../lib/notifications";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { showChatOnScreen } from "../lib/appBadge";
+import { setSaved, useSavedIn } from "../hooks/useSavedMessages";
 import { problemText, type Problem, problemLine } from "../lib/problemText";
 
 /** What a call captures from: the devices the profile chose, read when it asks. */
@@ -395,6 +396,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const chatPeer = platform?.getPeer(params?.peerPubKeyB64 ?? "");
   // The chat's link as the engine shows it: its transport lines in the timeline.
   const chatLink = useChatLink(params?.peerPubKeyB64 ?? "");
+  // Saved messages: kept on this device, never sent; the Saved view lists them.
+  const savedHere = useSavedIn(chatLink?.id);
   // What tells the contact when this side writes (WISP 401 § Typing): 1:1 paired chats only.
   const onTyping = useTypingSender(paired ? chatLink?.id : undefined, visible);
   // A new copy of the same lines comes with each engine state (four a second while a file moves): the timeline goes over
@@ -999,6 +1002,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 onReact={paired && replyTarget(row.message) ? emoji => react(row.message.id, emoji) : undefined}
                 onPin={paired && replyTarget(row.message) ? () => pinMessage(row.message.id, replyTarget(row.message) === pin?.id) : undefined}
                 pinned={!!pin && replyTarget(row.message) === pin.id}
+                onSave={chatLink?.id ? () => void setSaved(chatLink.id, row.message.id, savedHere.has(row.message.id)).catch(() => {}) : undefined}
+                saved={savedHere.has(row.message.id)}
                 reactionName={reactionName}
                 highlight={search.highlight(row.message.id)}
                 {...forwarding.rowProps(row.message)}

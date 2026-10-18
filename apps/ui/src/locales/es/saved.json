@@ -4,6 +4,7 @@
   "noText": "Mensaje",
   "open": "Abrir en {{chat}}: {{text}}",
   "rowLabel": "Mensajes guardados, {{count}}",
+  "save": "Guardar",
   "title": "Mensajes guardados",
   "unsave": "Quitar de guardados",
   "you": "Tú"

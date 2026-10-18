@@ -4,6 +4,7 @@
   "noText": "消息",
   "open": "在 {{chat}} 中打开：{{text}}",
   "rowLabel": "已保存的消息，{{count}} 条",
+  "save": "保存",
   "title": "已保存的消息",
   "unsave": "取消保存",
   "you": "你"
