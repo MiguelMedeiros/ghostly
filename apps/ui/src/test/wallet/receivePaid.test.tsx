@@ -64,4 +64,36 @@ describe("Receive's invoice reads paid only when it is paid", () => {
       expect(shown()).toEqual({ said: expect.stringMatching(/1,000 (test )?sats received/), invoice: false });
     });
   }
+
+  // The paid line takes the invoice's place: a screen reader hears it, and the focus that was in the invoice goes to Done,
+  // then back to the amount, never to the page.
+  it("says received to a screen reader, and keeps the focus from the invoice's Copy to Done to the amount", async () => {
+    const MINT = TEST_MINTS[0];
+    const view = await showInvoice(at("testnet", MINT, 5_000, []));
+    // A live region is heard only when it was there before its text: it waits, empty, beside the invoice.
+    const status = screen.queryByRole("status");
+    await view.user.tab();
+    expect(document.activeElement?.closest("[data-testid=wallet-invoice]")).not.toBeNull();
+    const paid: Tx = { id: "tx-ours", timestamp: Date.now() + 1, mint: MINT, kind: "lightning-in", amount: 1_000, fee: 0, quote: "our-quote" };
+    view.rerender(card(at("testnet", MINT, 6_000, [paid])));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Done" }));
+    expect(status).not.toBeNull();
+    expect(screen.getByRole("status")).toBe(status);
+    expect(status).toHaveTextContent(/1,000 test sats received/);
+    await view.user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(screen.getByTestId("wallet-receive-amount"));
+    expect(status).toHaveTextContent("");
+  });
+
+  it("leaves the focus where it went meanwhile", async () => {
+    const MINT = TEST_MINTS[0];
+    const view = await showInvoice(at("testnet", MINT, 5_000, []));
+    const elsewhere = document.createElement("button");
+    document.body.append(elsewhere);
+    elsewhere.focus();
+    const paid: Tx = { id: "tx-ours", timestamp: Date.now() + 1, mint: MINT, kind: "lightning-in", amount: 1_000, fee: 0, quote: "our-quote" };
+    view.rerender(card(at("testnet", MINT, 6_000, [paid])));
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
+  });
 });

@@ -64,7 +64,7 @@ const shortFee = (t: Translate, ppk: number, testnet: boolean) => (ppk === 0 ? t
 export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = false }: { wallet: WalletPlatform; state: WalletState; rail: "cashu" | "lightning"; onOpenCashu: () => void; focusAmount?: boolean }) {
   const { t } = useI18n();
   const [action, setAction] = useState<Action>("receive");
-  // The amount takes the focus when the person chose this wallet (`focusAmount`) or chose Receive here.
+  // The amount takes the focus when the person chose this wallet (`focusAmount`), chose Receive here or pressed Done.
   const [actionChosen, setActionChosen] = useState(false);
   const { busy, running, error, setError, run } = useRun();
   const [amount, setAmount] = useState("");
@@ -152,6 +152,12 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
     setRemovingMint(null);
   };
 
+  // The paid line takes the invoice's place in turn: the focus that was in the invoice goes to Done (Done, then, to the amount).
+  const doneButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (invoicePaid && (!document.activeElement || document.activeElement === document.body)) doneButton.current?.focus();
+  }, [invoicePaid]);
+
   const choose = (next: Action) => { setAction(next); setActionChosen(true); setError(""); setNotice(""); setInvoice(null); setQuote(null); setConfirming(false); };
 
   return (
@@ -197,13 +203,15 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
 
         {action === "receive" && (
           <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
+            {/* Heard only when it was there before its text: it waits, empty, while the invoice shows. */}
+            <p role="status" className="sr-only">{invoicePaid ? t("wallet.cashu.received", { amount: formatAmount(Number(amount), t.language), unit }) : ""}</p>
             {invoicePaid ? (
               <div className="text-center py-3 space-y-3">
                 <svg width="56" height="56" viewBox="0 0 56 56" className="mx-auto text-accent animate-check-ring" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="28" cy="28" r="25" /><polyline points="16 29 25 38 41 20" className="animate-check-draw" />
                 </svg>
-                <p className="text-accent text-sm font-semibold" data-testid="wallet-paid">{t("wallet.cashu.received", { amount: formatAmount(Number(amount), t.language), unit })}</p>
-                <Button onClick={() => { setInvoice(null); setAmount(""); }}>{t("wallet.lightning.done")}</Button>
+                <p className="text-accent text-sm font-semibold" data-testid="wallet-paid" aria-hidden="true">{t("wallet.cashu.received", { amount: formatAmount(Number(amount), t.language), unit })}</p>
+                <Button ref={doneButton} onClick={() => { setInvoice(null); setAmount(""); setActionChosen(true); }}>{t("wallet.lightning.done")}</Button>
               </div>
             ) : invoice && invoiceExpired ? (
               <div className="space-y-3">
