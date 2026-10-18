@@ -682,12 +682,14 @@ function MessageMenu({ onDelete, onDeleteForEveryone, onDetails, onReply, onEdit
         </MenuItem>}
       </Menu>
       {confirmed && (
-        <Menu open={!!confirm} onClose={() => setConfirm(null)} anchorRef={ref} testId="message-delete-menu" align={side} prefer="up" portal within={MESSAGE_LIST} label={t(confirm === "everyone" ? "chat.deleteForEveryone" : "chat.deleteMessage")}>
+        <Menu open={!!confirm} onClose={() => setConfirm(null)} anchorRef={ref} testId="message-delete-menu" align={side} prefer="up" portal within={MESSAGE_LIST} focusFirst label={t(confirm === "everyone" ? "chat.deleteForEveryone" : "chat.deleteMessage")}>
           <div className="px-3 py-2 md:w-[210px]">
             <p className="m-0 mb-2 whitespace-normal text-[11px] leading-snug text-text-muted">{deleteHint}</p>
             <div className="flex items-center justify-end gap-2">
+              {/* Rows of the menu: Cancel takes the focus as it opens (Enter at once never deletes), the arrow keys move. */}
               <button
                 type="button"
+                data-menu-item
                 onClick={() => setConfirm(null)}
                 className="px-2 py-0.5 rounded border border-border bg-surface-hover text-text-muted text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
               >
@@ -695,6 +697,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, onDetails, onReply, onEdit
               </button>
               <button
                 type="button"
+                data-menu-item
                 data-testid="message-delete-confirm"
                 onClick={() => {
                   setConfirm(null);
