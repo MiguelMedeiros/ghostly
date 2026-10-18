@@ -24,7 +24,7 @@ export const Waveform = forwardRef<HTMLDivElement, { peaks: number[]; knob?: boo
       <div ref={ref} dir="ltr" className={`voice-wave ${className}`} {...rest}>
         <Bars peaks={peaks} className="voice-wave-base" />
         <Bars peaks={peaks} className="voice-wave-fill" />
-        {knob && <span className="voice-wave-knob" />}
+        {knob && <span className="voice-wave-track"><span className="voice-wave-knob" /></span>}
       </div>
     );
   },
