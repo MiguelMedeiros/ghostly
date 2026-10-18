@@ -14,6 +14,8 @@ import { PaymentDesk } from "../src/engine/payments";
 import { paymentNetwork } from "../src/engine/paymentAdapters/walletInstances";
 import type { CashuWallet } from "../src/engine/wallet";
 import { STORES, openDb, store, transact, wrap } from "../src/shared/idb";
+import { dropDataKey, setDataKey } from "../src/engine/dataKey";
+import { isSealedField } from "../src/shared/profileKey";
 import type { StoredPayment } from "../src/shared/types";
 import { FakeFedimintSdk, type FakeFederation } from "./helpers/fakeFedimint";
 // covers: wallet.fedimint.join, wallet.fedimint.notes, wallet.fedimint.backup, wallet.fedimint.mainnet, payments.fedimint.chat, payments.fedimint.lightning, wallet.lightning.fedimint
@@ -112,6 +114,25 @@ describe("the Fedimint wallet", () => {
     await again.ensureReady();
     expect(again.view.federations.map((f) => f.name)).toEqual(["Regtest federation", "Second"]);
     expect(again.view.federations.every((f) => f.status === "ready")).toBe(true);
+  });
+
+  it("under the profile's data key, the mnemonic is version 2 with no device key, and the federations open again (WISP 04)", async () => {
+    setDataKey(await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]));
+    try {
+      const w = await wallet();
+      await w.join(federation.invite);
+      await w.stop();
+      const [{ mnemonic }] = [...fake.databases.values()];
+      const saved = await wrap((await store(STORES.settings, "readonly")).get("fedimintWallet-testnet")) as Record<string, unknown>;
+      expect(isSealedField(saved.seed)).toBe(true);
+      expect(saved).not.toHaveProperty("deviceKey");
+      expect(JSON.stringify(saved)).not.toContain(mnemonic);
+      const again = await wallet();
+      await again.ensureReady();
+      expect(again.view.federations.map((f) => f.status)).toEqual(["ready"]);
+      expect((await again.backup()).mnemonic).toBe(mnemonic);
+      await again.stop();
+    } finally { dropDataKey(); }
   });
 
   it("hands notes over and takes them back; notes someone redeemed cannot be taken back", async () => {

@@ -8,7 +8,8 @@ import { walletKey } from './walletNetworks';
 import { viewNews } from './viewNews';
 import { STORES, store, transact, wrap } from '../../shared/idb';
 import type { UsdtAdapter, UsdtConfig } from './usdt';
-import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from './persistence';
+import { intentRepository, sealSeed, unsealSeed, type EncryptedSeed } from './persistence';
+import { openRecordSecret, recordSealer, type RecordSecret } from '../dataKey';
 import type { SavedIntent } from './coordinator';
 
 export interface UsdtWalletView {
@@ -26,8 +27,15 @@ export const DEFAULT_USDT = {network:'ethereum',provider:USDT_PUBLIC_RPC.ethereu
 export const TESTNET_USDT = {network:'sepolia',provider:USDT_PUBLIC_RPC.sepolia,token:SEPOLIA_TEST_USDT} as const satisfies Omit<UsdtCreate,'password'|'mnemonic'>;
 /** Ethereum carries real USDT; Sepolia and a local chain carry worthless test tokens. */
 export const usdtMode=(network:UsdtConfig['network']):WalletMode=>network==='ethereum'?'mainnet':'testnet';
-/** A wallet with a device key opens by itself; one sealed with a password (older profiles) waits for it. */
-interface SavedWallet {config:UsdtConfig;seed:EncryptedSeed;deviceKey?:string}
+/**
+ * A wallet with a device key opens by itself, and so does one sealed under the profile's data key (`automatic`, with
+ * no device key); one sealed with a password (older profiles) waits for it and keeps it.
+ */
+interface SavedWallet {config:UsdtConfig;seed:RecordSecret;deviceKey?:string;automatic?:true}
+const opensAlone=(saved?:SavedWallet)=>!!saved&&(!!saved.deviceKey||!!saved.automatic);
+/** A seed is bound to its wallet's own key (`usdtWallet-mode-<network>`), and stays so once that wallet is retired. */
+const SEED='usdt.seed';
+const seedAt=(key:string)=>({store:STORES.settings,key,field:SEED});
 /** The defaults a new wallet of this network is made with, in one click. */
 export const usdtDefaults=(network:WalletNetwork)=>network==='testnet'?TESTNET_USDT:DEFAULT_USDT;
 /** The USDT wallet of one network: Mainnet's and Testnet's are both open at once, each under its own key. */
@@ -47,7 +55,7 @@ export class UsdtWallet {
   constructor(readonly network:WalletNetwork,private changed:(viewChanged?:boolean)=>void) {this.key=walletKey('usdtWallet',network);}
   /** Creating, replacing and restoring never interleave: two of them could each think the profile is empty. */
   private serial<T>(run:()=>Promise<T>):Promise<T> {const next=this.queue.then(run,run);this.queue=next.catch(()=>{});return next;}
-  async start() {this.saved=await wrap<SavedWallet|undefined>((await store(STORES.settings,'readonly')).get(this.key));this.view={...this.view,configured:!!this.saved,automatic:!!this.saved?.deviceKey,...this.saved?.config,locked:true};}
+  async start() {this.saved=await wrap<SavedWallet|undefined>((await store(STORES.settings,'readonly')).get(this.key));this.view={...this.view,configured:!!this.saved,automatic:opensAlone(this.saved),...this.saved?.config,locked:true};}
   /**
    * Opens the wallet when it needs no password; `create`: makes the default one first when there is none. Retries
    * while the RPC is unreachable.
@@ -59,12 +67,12 @@ export class UsdtWallet {
     return this.startReady(create);
   }
   private startReady(create:boolean):Promise<void> {return this.readying??=this.ready(create).finally(()=>{this.readying=undefined;});}
-  private needsReady(create:boolean) {return !this.stopped&&(this.saved?!!this.saved.deviceKey&&!this.adapter:create);}
+  private needsReady(create:boolean) {return !this.stopped&&(this.saved?opensAlone(this.saved)&&!this.adapter:create);}
   private async ready(create:boolean) {
     clearTimeout(this.retry);
     try {
       if(!this.saved){if(create)await this.createDefault();}
-      else if(this.saved.deviceKey && !this.adapter)await this.serial(()=>this.stopped?Promise.resolve():this.unlock());
+      else if(opensAlone(this.saved) && !this.adapter)await this.serial(()=>this.stopped?Promise.resolve():this.unlock());
     } catch(error) {
       if(this.stopped||error instanceof ModeChanged)return;
       this.view={...this.view,error:`Connecting to Ethereum… ${error instanceof Error?error.message:''}`.trim()};this.changed();
@@ -85,12 +93,12 @@ export class UsdtWallet {
     if(usdtMode(params.network)!==this.network)throw new WrongNetworkError(usdtMode(params.network),`${params.network==='ethereum'?'Ethereum':params.network} is a ${networkLabel(usdtMode(params.network))} network: this is the ${networkLabel(this.network)} USDT wallet`);
     const mnemonic=params.mnemonic?.trim() || generateMnemonic(wordlist);
     if(!validateMnemonic(mnemonic,wordlist))throw new Error('Invalid recovery phrase');
-    const deviceKey=params.password?undefined:newDeviceKey();
-    const seed=await sealSeed(mnemonic,params.password??deviceKey!);
+    // A seed sealed with a password the person chose keeps that password (WISP 04, Encrypted profile).
+    const sealed=params.password?{seed:await sealSeed(mnemonic,params.password)}:await this.sealAlone(mnemonic);
     const {UsdtAdapter}=await loadUsdt();
     const config=await this.gate.within(UsdtAdapter.inspect({network:params.network,chainId:params.network==='ethereum'?1:EVM_TEST_CHAINS[params.network],provider:params.provider.replace(/\/$/,''),token:params.token}));
     const replaced=this.saved && await this.retirable('This USDT wallet already has funds or payments; it will not be replaced');
-    const saved:SavedWallet={config,seed,deviceKey};
+    const saved:SavedWallet={config,...sealed};
     const epoch=++this.epoch;
     let adapter:UsdtAdapter|undefined;
     try {adapter=await this.gate.within(UsdtAdapter.connect(config,mnemonic),a=>a.dispose());await this.save(saved,replaced||undefined);}
@@ -98,7 +106,7 @@ export class UsdtWallet {
     this.saved=saved;
     // The new chain at once: until its first balance is read (a slow RPC can take a minute), the card must not go on
     // showing the wallet it replaced, its chain or its address.
-    this.view={configured:true,locked:true,automatic:!!deviceKey,...config,balance:'0',gasBalance:'0'};
+    this.view={configured:true,locked:true,automatic:opensAlone(saved),...config,balance:'0',gasBalance:'0'};
     if(epoch!==this.epoch){await adapter!.dispose();this.changed();return;}
     this.adapter=adapter;this.changed();await this.refresh();
   }
@@ -107,9 +115,8 @@ export class UsdtWallet {
     refuseAway(`usdt:${this.network}`, "USDT");
     if(!this.saved)throw new Error('Create a USDT wallet first');
     if(this.adapter)return;
-    const key=this.saved.deviceKey??password;
-    if(!key)throw new Error('Enter the USDT wallet password');
-    const epoch=++this.epoch;const mnemonic=await unsealSeed(this.saved.seed,key);const {UsdtAdapter}=await loadUsdt();const adapter=await this.gate.within(UsdtAdapter.connect(this.saved.config,mnemonic),a=>a.dispose());
+    if(!opensAlone(this.saved)&&!password)throw new Error('Enter the USDT wallet password');
+    const epoch=++this.epoch;const mnemonic=await this.openSeed(this.saved,password);const {UsdtAdapter}=await loadUsdt();const adapter=await this.gate.within(UsdtAdapter.connect(this.saved.config,mnemonic),a=>a.dispose());
     if(epoch!==this.epoch){await adapter.dispose();return;}
     this.adapter=adapter;await this.refresh();
   }
@@ -130,7 +137,7 @@ export class UsdtWallet {
   async refresh() {
     clearTimeout(this.timer);const adapter=this.adapter;if(!adapter)return;
     const before=this.view;
-    try {const address=await this.gate.within(adapter.address()),balances=await this.gate.within(adapter.balances());if(adapter!==this.adapter)return;this.view={configured:true,locked:false,read:true,automatic:!!this.saved?.deviceKey,...adapter.config,address,...balances};}
+    try {const address=await this.gate.within(adapter.address()),balances=await this.gate.within(adapter.balances());if(adapter!==this.adapter)return;this.view={configured:true,locked:false,read:true,automatic:opensAlone(this.saved),...adapter.config,address,...balances};}
     catch(error) {if(error instanceof ModeChanged||adapter!==this.adapter)return;this.view={...this.view,error:'RPC unavailable. Balance may be stale.'};}
     // Every 8 s: a read that says what the view already did is no news for the wallet view (`changed(false)`).
     this.changed(viewNews(before,this.view));if(this.adapter)this.timer=setTimeout(()=>void this.refresh(),8000);
@@ -139,7 +146,15 @@ export class UsdtWallet {
   async getTestTokens():Promise<string> {const hash=await this.require().mintTestTokens();void this.refresh();return hash;}
   require() {if(!this.adapter)throw new Error('Unlock your USDT wallet or wait for it to connect');return this.adapter;}
   target() {return this.require().target();}
-  async reveal(password?:string) {if(!this.saved)throw new Error('No USDT wallet');return unsealSeed(this.saved.seed,this.saved.deviceKey??password??'');}
+  async reveal(password?:string) {if(!this.saved)throw new Error('No USDT wallet');return this.openSeed(this.saved,password);}
+  /** A seed that opens by itself: beside its device key, or under the profile's data key (version 2, `automatic`). */
+  private async sealAlone(mnemonic:string):Promise<Omit<SavedWallet,'config'>> {
+    const sealer=recordSealer({store:STORES.settings,key:this.key});
+    const seed=await sealer.seal(mnemonic,SEED);
+    return sealer.beside.deviceKey?{seed,deviceKey:sealer.beside.deviceKey}:{seed,automatic:true};
+  }
+  /** The phrase: by itself when the wallet opens alone, else with the password it was sealed with. */
+  private openSeed(saved:SavedWallet,password?:string) {return opensAlone(saved)?openRecordSecret(saved.seed,saved.deviceKey,seedAt(this.key)):unsealSeed(saved.seed as EncryptedSeed,password??'');}
   /** The backup file is always sealed with a password the person chooses, even for a wallet that opens by itself. */
   async exportBackup(password:string) {
     if(!this.saved)throw new Error('No USDT wallet to back up');
@@ -158,8 +173,7 @@ export class UsdtWallet {
     if(usdtMode(payload.config.network)!==this.network)throw new WrongNetworkError(usdtMode(payload.config.network),`This backup is a ${networkLabel(usdtMode(payload.config.network))} USDT wallet`);
     const config=await (await loadUsdt()).UsdtAdapter.inspect(payload.config);
     if(config.codeHash!==payload.config.codeHash||config.decimals!==payload.config.decimals||payload.intents.some(i=>i.review.method!=='usdt'||i.review.chainId!==config.chainId||i.review.token?.toLowerCase()!==config.token.toLowerCase()))throw new Error('Backup token or network mismatch');
-    const deviceKey=newDeviceKey();
-    const saved:SavedWallet={config,seed:await sealSeed(payload.mnemonic,deviceKey),deviceKey};
+    const saved:SavedWallet={config,...await this.sealAlone(payload.mnemonic)};
     const replaced=this.saved && await this.retirable('Restore into a fresh profile or an unused wallet; this wallet will not be replaced');
     await this.save(saved,replaced||undefined,payload.intents.map(intent=>({...intent,review:{...intent.review,state:['pending','submitted','unknown'].includes(intent.review.state)?'unknown':intent.review.state}})));
     this.saved=saved;this.view={configured:true,locked:true,automatic:true,...config,balance:'0',gasBalance:'0'};this.changed();

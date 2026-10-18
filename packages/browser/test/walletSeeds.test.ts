@@ -13,6 +13,8 @@ import { WrongNetworkError } from "../src/engine/paymentAdapters/modeGate";
 import { intentRepository, sealSeed } from "../src/engine/paymentAdapters/persistence";
 import type { SavedIntent } from "../src/engine/paymentAdapters/coordinator";
 import { STORES, store, transact, wrap } from "../src/shared/idb";
+import { dropDataKey, openRecordSecret, setDataKey } from "../src/engine/dataKey";
+import { isSealedField } from "../src/shared/profileKey";
 import { FakeBarkServer } from "./helpers/fakeBark";
 import { phraseLeaks, TEST_PHRASE } from "./helpers/phraseLeaks";
 // covers: wallet.ready, wallet.mode, wallet.usdt.create, wallet.usdt.backup, wallet.ark.create, wallet.ark.backup, wallet.bark.backup
@@ -398,5 +400,122 @@ describe("the Bark wallet's seed", () => {
     expect(restored.mnemonic).toBe(mnemonic);
     expect(restored.config.walletId, "a fresh local database").not.toBe("w-old");
     expect(leaks(mnemonic, wallet.view)).toEqual([]);
+  });
+});
+
+describe("the seeds under the profile's data key (WISP 04, Encrypted profile)", () => {
+  const record = async (key: string) => wrap<Record<string, unknown>>((await store(STORES.settings, "readonly")).get(key));
+  const dataKey = () => crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+  beforeEach(async () => { setDataKey(await dataKey()); });
+  afterEach(() => { dropDataKey(); });
+
+  it("an Ark wallet that opens by itself holds a version 2 seed, no device key, and still opens by itself", async () => {
+    const wallet = new ArkWallet("mainnet", () => {}); await wallet.start(); await wallet.ensureReady(true);
+    const mnemonic = connected(ArkadeAdapter.connect);
+    await wallet.stop();
+    const saved = await record("arkWallet-mode-mainnet");
+    expect(isSealedField(saved.seed)).toBe(true);
+    expect(saved).not.toHaveProperty("deviceKey");
+    expect(saved.automatic).toBe(true);
+    expect(leaks(mnemonic, saved)).toEqual([]);
+
+    const reopened = new ArkWallet("mainnet", () => {}); await reopened.start();
+    expect(reopened.view).toMatchObject({ configured: true, locked: true, automatic: true });
+    await reopened.ensureReady();
+    expect(reopened.view).toMatchObject({ locked: false, automatic: true });
+    expect(connected(ArkadeAdapter.connect)).toBe(mnemonic);
+    expect((await reopened.backup()).mnemonic).toBe(mnemonic);
+    await reopened.stop();
+  });
+
+  it("an Ark wallet sealed with a password the person chose keeps that password", async () => {
+    const wallet = new ArkWallet("mainnet", () => {}); await wallet.start();
+    await wallet.create({ ...DEFAULT_ARK, password: PASSWORD });
+    const mnemonic = connected(ArkadeAdapter.connect);
+    await wallet.stop();
+    const saved = await record("arkWallet-mode-mainnet");
+    expect(saved.seed).toMatchObject({ version: 1 });
+    expect(saved.deviceKey).toBeUndefined();
+    expect(saved).not.toHaveProperty("automatic");
+
+    const reopened = new ArkWallet("mainnet", () => {}); await reopened.start(); await reopened.ensureReady();
+    expect(reopened.view).toMatchObject({ locked: true, automatic: false });
+    await expect(reopened.unlock()).rejects.toThrow("Enter the Ark wallet password");
+    await reopened.unlock(PASSWORD);
+    expect((await reopened.backup(PASSWORD)).mnemonic).toBe(mnemonic);
+    await reopened.stop();
+  });
+
+  it("an Ark wallet retired by a restore keeps a seed that opens under its wallet's key, and the restored one opens", async () => {
+    const wallet = new ArkWallet("mainnet", () => {}); await wallet.start(); await wallet.ensureReady(true);
+    const first = connected(ArkadeAdapter.connect);
+    const CONFIG = { network: "bitcoin", provider: DEFAULT_ARK.provider, explorer: DEFAULT_ARK.explorer, serverKey: fx.info.signerPubkey, walletId: "w-old" };
+    const mnemonic = generateMnemonic(wordlist);
+    await wallet.restoreBackup(await backupFile("ghostly-ark-encrypted", encodeBackup({ format: "ghostly-ark", version: 1, sdk: "0.4.74", createdAt: 0, mnemonic, config: CONFIG, database: { version: 3, stores: [] }, intents: [] })), CHOSEN);
+    const retired = await record((await settingsKeys()).find((k) => k.startsWith("arkWallet-retired-"))!);
+    expect(isSealedField(retired.seed)).toBe(true);
+    expect(await openRecordSecret(retired.seed as never, undefined, { store: STORES.settings, key: "arkWallet-mode-mainnet", field: "ark.seed" })).toBe(first);
+    expect(await record("arkWallet-mode-mainnet")).toMatchObject({ automatic: true });
+    await wallet.ensureReady();
+    expect(connected(ArkadeAdapter.connect)).toBe(mnemonic);
+    await wallet.stop();
+  });
+
+  it("a USDT wallet that opens by itself holds a version 2 seed, no device key, and still opens and reveals its phrase", async () => {
+    const wallet = new UsdtWallet("mainnet", () => {}); await wallet.start(); await wallet.ensureReady(true);
+    const mnemonic = connected(UsdtAdapter.connect);
+    await wallet.stop();
+    const saved = await record("usdtWallet-mode-mainnet");
+    expect(isSealedField(saved.seed)).toBe(true);
+    expect(saved).not.toHaveProperty("deviceKey");
+    expect(saved.automatic).toBe(true);
+
+    const reopened = new UsdtWallet("mainnet", () => {}); await reopened.start();
+    expect(reopened.view).toMatchObject({ configured: true, automatic: true });
+    await reopened.ensureReady();
+    expect(reopened.view).toMatchObject({ locked: false, automatic: true });
+    expect(connected(UsdtAdapter.connect)).toBe(mnemonic);
+    expect(await reopened.reveal()).toBe(mnemonic);
+    await reopened.stop();
+  });
+
+  it("a USDT wallet with a password keeps it, and one made before the profile had a key keeps opening", async () => {
+    const locked = new UsdtWallet("testnet", () => {}); await locked.start();
+    await locked.create({ network: "sepolia", provider: "https://rpc.example", token: "0xtoken", password: PASSWORD });
+    expect((await record("usdtWallet-mode-testnet")).seed).toMatchObject({ version: 1 });
+    await locked.stop();
+    const reopened = new UsdtWallet("testnet", () => {}); await reopened.start();
+    expect(reopened.view.automatic).toBe(false);
+    await expect(reopened.unlock()).rejects.toThrow("Enter the USDT wallet password");
+    await reopened.unlock(PASSWORD);
+    await reopened.stop();
+
+    dropDataKey();
+    const before = new UsdtWallet("mainnet", () => {}); await before.start(); await before.ensureReady(true);
+    const mnemonic = connected(UsdtAdapter.connect);
+    await before.stop();
+    setDataKey(await dataKey());
+    const after = new UsdtWallet("mainnet", () => {}); await after.start(); await after.ensureReady();
+    expect(after.view).toMatchObject({ locked: false, automatic: true });
+    expect(await after.reveal()).toBe(mnemonic);
+    expect(typeof (await record("usdtWallet-mode-mainnet")).deviceKey, "version 1 stays until the migration").toBe("string");
+    await after.stop();
+  });
+
+  it("a Bark wallet holds a version 2 seed and no device key, and opens again", async () => {
+    const server = new FakeBarkServer();
+    const make = () => new BarkWallet("testnet", vi.fn(), async () => server.sdk());
+    const wallet = make(); await wallet.start(); await wallet.ensureReady(true);
+    const { mnemonic } = await wallet.backup();
+    await wallet.stop();
+    const saved = await record("barkWallet-mode-testnet");
+    expect(isSealedField(saved.seed)).toBe(true);
+    expect(saved).not.toHaveProperty("deviceKey");
+    expect(leaks(mnemonic, saved)).toEqual([]);
+
+    const reopened = make(); await reopened.start(); await reopened.ensureReady();
+    expect(reopened.view.locked).toBe(false);
+    expect((await reopened.backup()).mnemonic).toBe(mnemonic);
+    await reopened.stop();
   });
 });

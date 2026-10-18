@@ -7,7 +7,8 @@ import type { WalletMode } from "../../shared/mints";
 import { ModeChanged, ModeGate, WrongNetworkError, networkLabel } from "./modeGate";
 import { walletKey } from "./walletNetworks";
 import { viewNews } from "./viewNews";
-import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
+import { intentRepository, sealSeed, unsealSeed } from "./persistence";
+import { openRecordSecret, recordSealer, type RecordSecret } from "../dataKey";
 import { forgetBreez, loadBreezSdk, type BreezSdkModule } from "./providers/breezSdk";
 import { breezDatabaseInUse, breezDatabasesFor } from "./providers/breezDatabases";
 import { SPARK_INVOICE_SECS, SparkAdapter, type SparkHistoryEntry } from "./spark";
@@ -28,7 +29,10 @@ export interface SparkWalletView {
   history?: SparkHistoryEntry[];
   error?: string;
 }
-interface StoredSpark { network: SparkNetwork; seed: EncryptedSeed; deviceKey: string; apiKey?: EncryptedSeed; createdAt: number }
+/** `deviceKey`: the one key of a version 1 phrase and API key; sealed under the profile's data key, there is none. */
+interface StoredSpark { network: SparkNetwork; seed: RecordSecret; deviceKey?: string; apiKey?: RecordSecret; createdAt: number }
+/** Each secret is bound to its wallet's own key (`sparkWallet-mode-<network>`), and stays so once that wallet is retired. */
+const SEED = "spark.seed", API_KEY = "spark.apiKey";
 export interface SparkCreate { network: SparkNetwork; mnemonic?: string; apiKey?: string }
 
 export const SPARK_MAINNET_NEEDS_KEY = "Spark on Mainnet needs a Breez API key (free, from Breez). Mainnet moves real bitcoin.";
@@ -103,8 +107,7 @@ export class SparkWallet {
     try {
       // Opened before it is saved: a key Breez refuses, or no Spark at all, leaves nothing behind.
       adapter = await this.gate.within(SparkAdapter.connect({ network: params.network, mnemonic, apiKey }, this.sdk), (a) => a.close());
-      const deviceKey = newDeviceKey();
-      const saved: StoredSpark = { network: params.network, seed: await sealSeed(mnemonic, deviceKey), deviceKey, apiKey: apiKey ? await sealSeed(apiKey, deviceKey) : undefined, createdAt: Date.now() };
+      const saved = await this.sealed(params.network, mnemonic, apiKey);
       await this.save(saved, replaced || undefined);
       this.saved = saved;
     } catch (error) {
@@ -122,8 +125,14 @@ export class SparkWallet {
   }
   private async secrets() {
     const saved = this.saved!;
-    return { mnemonic: await unsealSeed(saved.seed, saved.deviceKey), apiKey: saved.apiKey ? await unsealSeed(saved.apiKey, saved.deviceKey) : undefined };
+    return { mnemonic: await this.unseal(saved, saved.seed, SEED), apiKey: saved.apiKey ? await this.unseal(saved, saved.apiKey, API_KEY) : undefined };
   }
+  /** Sealed as the profile wants them now: the phrase and the API key beside one device key, or each under its data key. */
+  private async sealed(network: SparkNetwork, mnemonic: string, apiKey?: string): Promise<StoredSpark> {
+    const sealer = recordSealer({ store: STORES.settings, key: this.key });
+    return { network, seed: await sealer.seal(mnemonic, SEED), ...sealer.beside, apiKey: apiKey ? await sealer.seal(apiKey, API_KEY) : undefined, createdAt: Date.now() };
+  }
+  private unseal(saved: StoredSpark, secret: RecordSecret, field: string) { return openRecordSecret(secret, saved.deviceKey, { store: STORES.settings, key: this.key, field }); }
 
   /**
    * The Breez database this wallet's SDK keeps on this device for this profile (the one it opened, else the one this
@@ -206,11 +215,10 @@ export class SparkWallet {
     if (!SPARK_NETWORKS.includes(payload.network)) throw new Error("Unsupported Spark network in backup");
     if (sparkMode(payload.network) !== this.network) throw new WrongNetworkError(sparkMode(payload.network), `This backup is a ${networkLabel(sparkMode(payload.network))} Spark wallet`);
     if (payload.intents.some((i) => i.review.method !== "spark" || i.review.network !== payload.network)) throw new Error("Backup payments do not match its wallet");
-    const key = apiKey?.trim() || (this.saved?.apiKey ? await unsealSeed(this.saved.apiKey, this.saved.deviceKey) : undefined);
+    const key = apiKey?.trim() || (this.saved?.apiKey ? await this.unseal(this.saved, this.saved.apiKey, API_KEY) : undefined);
     if (payload.network === "bitcoin" && !key) throw new Error(SPARK_MAINNET_NEEDS_KEY);
     const replaced = this.saved && await this.retirable("Restore into a fresh profile or an unused wallet; this wallet will not be replaced");
-    const deviceKey = newDeviceKey();
-    const saved: StoredSpark = { network: payload.network, seed: await sealSeed(payload.mnemonic, deviceKey), deviceKey, apiKey: key ? await sealSeed(key, deviceKey) : undefined, createdAt: Date.now() };
+    const saved = await this.sealed(payload.network, payload.mnemonic, key);
     await this.save(saved, replaced || undefined, payload.intents.map((intent) => ({ ...intent, review: { ...intent.review, state: ["pending", "submitted", "unknown"].includes(intent.review.state) ? "unknown" : intent.review.state } })));
     this.saved = saved; this.view = this.idle(saved); this.changed();
   }); }

@@ -6,7 +6,8 @@ import { store, STORES, transact, wrap } from "../../shared/idb";
 import type { WalletMode } from "../../shared/mints";
 import { fedimintDatabase, loadFedimintSdk, type FederationInfo, type FedimintClient, type FedimintOperation, type FedimintSdk, type RedeemState, type SpendState } from "./fedimintSdk";
 import { ModeChanged, ModeGate, WrongNetworkError } from "./modeGate";
-import { intentRepository, newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
+import { intentRepository, sealSeed, unsealSeed } from "./persistence";
+import { openRecordSecret, recordSealer, type RecordSecret } from "../dataKey";
 
 /**
  * The Fedimint wallet of a profile: federations joined with an invite code, per network, each holding ecash
@@ -25,7 +26,8 @@ export interface StoredFederation extends Omit<FederationInfo, "federationId"> {
   invite: string;
   joinedAt: number;
 }
-interface StoredFedimint { seed: EncryptedSeed; deviceKey: string; federations: StoredFederation[] }
+/** `deviceKey`: the key of a version 1 mnemonic; one sealed under the profile's data key has none. */
+interface StoredFedimint { seed: RecordSecret; deviceKey?: string; federations: StoredFederation[] }
 
 export interface FedimintFederationView extends Omit<StoredFederation, "database" | "invite"> {
   /** Sats (the client counts msats; what is below a sat is not shown). */
@@ -67,6 +69,13 @@ export const NOTES_REFUND_SECS = 7 * 24 * 60 * 60;
 const MAX_SATS = 10_000_000;
 export const fedimintMode = (network: BitcoinNetwork): WalletMode => network === "bitcoin" ? "mainnet" : "testnet";
 const key = (mode: WalletMode) => `fedimintWallet-${mode}`;
+/** The mnemonic is bound to its wallet's own key, and stays so once that wallet is retired. */
+const seedAt = (mode: WalletMode) => ({ store: STORES.settings, key: key(mode), field: "fedimint.seed" });
+/** Sealed as the profile wants it now: beside a device key, or under its data key. */
+async function sealMnemonic(mnemonic: string, mode: WalletMode): Promise<Pick<StoredFedimint, "seed" | "deviceKey">> {
+  const { field, ...at } = seedAt(mode), sealer = recordSealer(at);
+  return { seed: await sealer.seal(mnemonic, field), ...sealer.beside };
+}
 const sats = (msats: number) => Math.floor(msats / 1000);
 export function assertFedimintAmount(amount: number) {
   if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error("Enter an amount in sats");
@@ -154,7 +163,7 @@ export class FedimintWallet {
     if (!opening) {
       opening = (async () => {
         try {
-          const mnemonic = await unsealSeed(this.saved!.seed, this.saved!.deviceKey);
+          const mnemonic = await this.mnemonic(this.saved!);
           const sdk = await this.sdk();
           // Restored from a profile backup (the records came, the client's files did not): joined again, recovering.
           const client = await this.gate.within((await sdk.exists(federation.database))
@@ -252,7 +261,7 @@ export class FedimintWallet {
     if (saved.federations.some((f) => f.id === info.federationId)) throw engineError("fedimintAlreadyJoined");
     if (saved.federations.length >= MAX_FEDERATIONS) throw new Error(`At most ${MAX_FEDERATIONS} federations per wallet`);
     const database = fedimintDatabase(crypto.randomUUID());
-    const mnemonic = await unsealSeed(saved.seed, saved.deviceKey);
+    const mnemonic = await this.mnemonic(saved);
     // Joined once before on this profile (left, then joined again): the same keys, so it must recover.
     const again = recover || (await this.retiredIds()).includes(info.federationId);
     let client: FedimintClient | undefined;
@@ -279,12 +288,12 @@ export class FedimintWallet {
   }); }
 
   private async newSeed(): Promise<StoredFedimint> {
-    const deviceKey = newDeviceKey();
-    const saved: StoredFedimint = { seed: await sealSeed(generateMnemonic(wordlist), deviceKey), deviceKey, federations: [] };
+    const saved: StoredFedimint = { ...await sealMnemonic(generateMnemonic(wordlist), this.network), federations: [] };
     await transact([STORES.settings], (stores) => { stores[STORES.settings].put(saved, key(this.network)); });
     this.saved = saved;
     return saved;
   }
+  private mnemonic(saved: StoredFedimint) { return openRecordSecret(saved.seed, saved.deviceKey, seedAt(this.network)); }
   private async retiredIds(): Promise<string[]> {
     const keys = await wrap<IDBValidKey[]>((await store(STORES.settings, "readonly")).getAllKeys());
     const retired = keys.filter((k): k is string => typeof k === "string" && k.startsWith(`fedimintRetired-${this.network}-`));
@@ -490,7 +499,7 @@ export class FedimintWallet {
 
   async backup(): Promise<{ mnemonic: string; federations: { id: string; name?: string; invite: string }[] }> {
     if (!this.saved) throw new Error("No Fedimint wallet to back up: join a federation first");
-    return { mnemonic: await unsealSeed(this.saved.seed, this.saved.deviceKey), federations: this.saved.federations.map((f) => ({ id: f.id, name: f.name, invite: f.invite })) };
+    return { mnemonic: await this.mnemonic(this.saved), federations: this.saved.federations.map((f) => ({ id: f.id, name: f.name, invite: f.invite })) };
   }
   /**
    * The mnemonic and the federations' invite codes, sealed with a password the person chooses. The ecash itself is
@@ -526,8 +535,7 @@ export class FedimintWallet {
     await this.serial(async () => {
       if (this.saved?.federations.length) throw new Error("Restore into a Fedimint wallet that has joined no federation yet; this one will not be replaced");
       if (this.saved) await transact([STORES.settings], (stores) => { stores[STORES.settings].put(this.saved!, `fedimintWallet-retired-${this.network}-${Date.now()}`); });
-      const deviceKey = newDeviceKey();
-      const saved: StoredFedimint = { seed: await sealSeed(phrase, deviceKey), deviceKey, federations: [] };
+      const saved: StoredFedimint = { ...await sealMnemonic(phrase, this.network), federations: [] };
       await transact([STORES.settings], (stores) => { stores[STORES.settings].put(saved, key(this.network)); });
       this.saved = saved;
     });

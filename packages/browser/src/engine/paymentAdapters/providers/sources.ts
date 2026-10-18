@@ -1,22 +1,23 @@
 import { STORES, store, transact, wrap } from "../../../shared/idb";
 import type { WalletMode } from "../../../shared/mints";
 import { ModeChanged, ModeGate } from "../modeGate";
-import { newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "../persistence";
+import { openRecordSecret, recordSealer, type RecordSecret } from "../../dataKey";
 import { requireTurn } from "../away";
 import { describeProvider, networkMode, offeredIn, redact, sourceProblem, type ProviderDescriptor, type ProviderDescriptorView, type ProviderHost, type ProviderKind, type ProviderNetwork, type ProviderSettings, type SourceProblem } from "./types";
 
 /**
  * What is stored for a source, under `<kind>Source-<mode>` (or `<kind>Source-<mode>-<key>`, one Lightning card of
- * several) in the settings store: never in the Settings object (which the UI sees), and its secrets sealed with a
- * device key, like the Ark and USDT seeds.
+ * several) in the settings store: never in the Settings object (which the UI sees), and its secrets sealed like the
+ * Ark and USDT seeds (`dataKey.ts`): with a device key beside them, or under the profile's data key with none.
  */
 interface StoredSource {
   providerId: string;
   config: Record<string, string>;
-  secrets?: EncryptedSeed;
+  secrets?: RecordSecret;
   deviceKey?: string;
   savedAt: number;
 }
+const SECRETS = "providerSource.secrets";
 
 /** The last balance a source read, under `<kind>SourceSeen-<mode>`: shown while it reconnects after a restart. */
 interface SeenBalance { providerId: string; balance?: number; unconfirmed?: number; at: number }
@@ -173,11 +174,17 @@ export class ProviderSources<P extends Connectable> {
 
   async start() { await this.load(this.mode); this.view = this.idle(); }
 
+  /** Where this source is stored, and what its secrets are bound to. */
+  private get storageKey() { return sourceKey(this.options.kind, this.mode, this.options.key); }
+  private async unsealed(stored: StoredSource): Promise<Record<string, string>> {
+    return stored.secrets ? JSON.parse(await openRecordSecret(stored.secrets, stored.deviceKey, { store: STORES.settings, key: this.storageKey, field: SECRETS })) as Record<string, string> : {};
+  }
+
   /** One saved secret of the source (a handoff asks whether an LND card pins its certificate, and a Breez phrase), or undefined. */
   async secret(name: string): Promise<string | undefined> {
     const stored = this.stored;
     if (!stored?.secrets) return undefined;
-    const secrets = JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? "")) as Record<string, unknown>;
+    const secrets: Record<string, unknown> = await this.unsealed(stored);
     const value = secrets[name];
     return typeof value === "string" && value ? value : undefined;
   }
@@ -221,7 +228,7 @@ export class ProviderSources<P extends Connectable> {
     const signal = this.controller.signal;
     let secrets: Record<string, string> = {};
     try {
-      if (this.stored?.secrets) secrets = JSON.parse(await unsealSeed(this.stored.secrets, this.stored.deviceKey ?? "")) as Record<string, string>;
+      if (this.stored?.secrets) secrets = await this.unsealed(this.stored);
       const { provider, network, alias } = await this.open(descriptor, { config: this.stored?.config ?? {}, secrets });
       this.descriptor = descriptor; this.provider = provider; this.secrets = secrets;
       this.failures = 0; this.failingSince = undefined;
@@ -297,8 +304,7 @@ export class ProviderSources<P extends Connectable> {
       return JSON.stringify(keys) === JSON.stringify(Object.keys(b).sort()) && keys.every((k) => a[k] === b[k]);
     };
     if (!same(stored.config, settings.config)) return false;
-    const secrets = stored.secrets ? JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? "")) as Record<string, string> : {};
-    return same(secrets, settings.secrets);
+    return same(await this.unsealed(stored), settings.secrets);
   }
 
   /**
@@ -321,8 +327,7 @@ export class ProviderSources<P extends Connectable> {
         if (!value && !field.optional) throw new Error(`Enter ${field.label.toLowerCase()}`);
         if (value) config[field.name] = value; else delete config[field.name];
       }
-      const secrets = stored.secrets ? JSON.parse(await unsealSeed(stored.secrets, stored.deviceKey ?? "")) as Record<string, string> : {};
-      const settings: ProviderSettings = { config, secrets };
+      const settings: ProviderSettings = { config, secrets: await this.unsealed(stored) };
       descriptor.validate?.(settings, this.mode);
       await this.apply(descriptor, settings, true);
     }));
@@ -352,9 +357,9 @@ export class ProviderSources<P extends Connectable> {
     const controller = new AbortController();
     try { opened = await this.open(descriptor, settings, controller); }
     catch (error) { throw error instanceof ModeChanged ? error : new Error(`Could not connect to ${descriptor.label}: ${redact(error, settings.secrets)}`); }
-    const deviceKey = newDeviceKey();
+    const sealer = recordSealer({ store: STORES.settings, key: this.storageKey });
     const stored: StoredSource = { providerId, config: settings.config, savedAt: Date.now(),
-      ...(Object.keys(settings.secrets).length ? { secrets: await sealSeed(JSON.stringify(settings.secrets), deviceKey), deviceKey } : {}) };
+      ...(Object.keys(settings.secrets).length ? { secrets: await sealer.seal(JSON.stringify(settings.secrets), SECRETS), ...sealer.beside } : {}) };
     // The default with nothing to configure is what an empty mode already uses: nothing to store.
     const plain = providerId === this.options.defaultId && !Object.keys(settings.config).length && !stored.secrets;
     // Another wallet's last balance is not this one's.

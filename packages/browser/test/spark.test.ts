@@ -11,6 +11,8 @@ import { PaymentCoordinator } from "../src/engine/paymentAdapters/coordinator";
 import { WrongNetworkError } from "../src/engine/paymentAdapters/modeGate";
 import { intentRepository } from "../src/engine/paymentAdapters/persistence";
 import { STORES, openDb, store, transact, wrap } from "../src/shared/idb";
+import { dropDataKey, setDataKey } from "../src/engine/dataKey";
+import { isSealedField } from "../src/shared/profileKey";
 import { FakeBreezNetwork, type FakeBreezWallet } from "./helpers/fakeBreez";
 import { phraseLeaks, TEST_PHRASE } from "./helpers/phraseLeaks";
 // covers: wallet.spark.mainnet-key, wallet.spark.create, wallet.spark.send, wallet.spark.backup, wallet.spark.lightning, wallet.spark.storage, payments.chat.reconcile
@@ -246,6 +248,29 @@ describe("the Spark wallet", () => {
     expect(JSON.stringify(await wrap((await store(STORES.settings, "readonly")).get("sparkWallet-mode-mainnet")))).not.toContain("the-breez-key");
     expect((await wallet.backup()).apiKey).toBe("the-breez-key");
     await wallet.stop();
+  });
+
+  it("under the profile's data key, the phrase and the API key are version 2 with no device key, and open again (WISP 04)", async () => {
+    setDataKey(await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]));
+    try {
+      const wallet = make("mainnet");
+      vi.mocked(generateMnemonic).mockReturnValueOnce(TEST_PHRASE);
+      await wallet.start();
+      await wallet.create({ network: "bitcoin", apiKey: "the-breez-key" });
+      await wallet.stop();
+      const saved = await wrap((await store(STORES.settings, "readonly")).get("sparkWallet-mode-mainnet")) as Record<string, unknown>;
+      expect(isSealedField(saved.seed)).toBe(true);
+      expect(isSealedField(saved.apiKey)).toBe(true);
+      expect(saved).not.toHaveProperty("deviceKey");
+      expect(phraseLeaks(JSON.stringify(saved))).toEqual([]);
+      expect(JSON.stringify(saved)).not.toContain("the-breez-key");
+      const again = make("mainnet");
+      await again.start(); await again.ensureReady();
+      expect(again.view).toMatchObject({ configured: true, locked: false, network: "bitcoin" });
+      expect(net.connects.at(-1)).toMatchObject({ network: "mainnet", apiKey: "the-breez-key" });
+      expect(await again.backup()).toEqual({ mnemonic: TEST_PHRASE, network: "bitcoin", apiKey: "the-breez-key" });
+      await again.stop();
+    } finally { dropDataKey(); }
   });
 
   it("a wallet holding money or payments is never replaced; an empty one is archived, not deleted", async () => {

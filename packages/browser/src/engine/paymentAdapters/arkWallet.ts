@@ -4,7 +4,8 @@ import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { arkAddressPrefix, validatePaymentTarget, type PaymentTarget } from "@ghostly/core";
 import { deleteDatabase, store, STORES, transact, wrap } from "../../shared/idb";
 import type { ArkadeAdapter, ArkConfig } from "./arkade";
-import { newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
+import { sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
+import { openRecordSecret, recordSealer, type RecordSecret } from "../dataKey";
 import { snapshotArkDatabase,restoreArkDatabase,encodeBackup,decodeBackup,type ArkDatabaseSnapshot } from "./backup";
 import type { SavedIntent } from "./coordinator";
 import type { WalletNetwork } from "@ghostly/core";
@@ -16,8 +17,15 @@ import { viewNews } from "./viewNews";
 export interface ArkWalletView { configured:boolean; locked:boolean; read?:true; automatic?:boolean; network?:ArkConfig["network"]; provider?:string; address?:string; boardingAddress?:string; incoming?:number; balance:number; recoverable?:number; sweeping?:number; small?:number;
   /** When the first coin still spendable expires (ms), unless it is renewed first; absent with no coin or no expiry known (WISP 06 § Wallets that stay home). */
   expiresAt?:number; error?:string }
-/** A wallet with a device key opens by itself; one sealed with a password (older profiles) waits for it. */
-interface StoredArk {config:ArkConfig;seed:EncryptedSeed;deviceKey?:string}
+/**
+ * A wallet with a device key opens by itself, and so does one sealed under the profile's data key (`automatic`, with
+ * no device key); one sealed with a password (older profiles) waits for it and keeps it.
+ */
+interface StoredArk {config:ArkConfig;seed:RecordSecret;deviceKey?:string;automatic?:true}
+const opensAlone=(saved?:StoredArk)=>!!saved&&(!!saved.deviceKey||!!saved.automatic);
+/** A seed is bound to its wallet's own key (`arkWallet-mode-<network>`), and stays so once that wallet is retired. */
+const SEED="ark.seed";
+const seedAt=(key:string)=>({store:STORES.settings,key,field:SEED});
 export interface ArkCreate {network:ArkConfig["network"];provider:string;explorer:string;password?:string;mnemonic?:string}
 /** The Ark SDK, a large part of the app: loaded once an Ark wallet is made, opened or restored, not with the engine. */
 const loadArkade=()=>import("./arkade");
@@ -51,7 +59,7 @@ export class ArkWallet {
   constructor(readonly network:WalletNetwork,private changed:(viewChanged?:boolean)=>void) {this.key=walletKey("arkWallet",network);}
   /** Creating, replacing and restoring never interleave: two of them could each think the profile is empty. */
   private serial<T>(run:()=>Promise<T>):Promise<T>{const next=this.queue.then(run,run);this.queue=next.catch(()=>{});return next;}
-  async start() {this.saved=await wrap<StoredArk|undefined>((await store(STORES.settings,"readonly")).get(this.key));this.view={configured:!!this.saved,locked:true,automatic:!!this.saved?.deviceKey,balance:0,network:this.saved?.config.network,provider:this.saved?.config.provider};}
+  async start() {this.saved=await wrap<StoredArk|undefined>((await store(STORES.settings,"readonly")).get(this.key));this.view={configured:!!this.saved,locked:true,automatic:opensAlone(this.saved),balance:0,network:this.saved?.config.network,provider:this.saved?.config.provider};}
   /**
    * Opens the wallet when it needs no password; `create`: makes the default one first when there is none. Retries
    * while the provider is unreachable.
@@ -64,13 +72,13 @@ export class ArkWallet {
     return this.startReady(create);
   }
   private startReady(create:boolean):Promise<void> {return this.readying??=this.ready(create).finally(()=>{this.readying=undefined;});}
-  private needsReady(create:boolean) {return !this.stopped&&(this.saved?!!this.saved.deviceKey&&!this.adapter:create);}
+  private needsReady(create:boolean) {return !this.stopped&&(this.saved?opensAlone(this.saved)&&!this.adapter:create);}
   private async ready(create:boolean) {
     clearTimeout(this.retry);
     try {
       await requireTurn();
       if(!this.saved){if(create)await this.createDefault();}
-      else if(this.saved.deviceKey && !this.adapter)await this.serial(()=>this.stopped?Promise.resolve():this.unlock());
+      else if(opensAlone(this.saved) && !this.adapter)await this.serial(()=>this.stopped?Promise.resolve():this.unlock());
     } catch(error) {
       if(this.stopped||error instanceof ModeChanged)return;
       this.view={...this.view,error:`Connecting to Ark… ${error instanceof Error?error.message:""}`.trim()};this.changed();
@@ -94,17 +102,17 @@ export class ArkWallet {
     checkProviders(params.network,params.provider,params.explorer);
     const mnemonic=params.mnemonic?.trim() || generateMnemonic(wordlist);
     if(!validateMnemonic(mnemonic,wordlist))throw new Error("Invalid recovery phrase");
-    const deviceKey=params.password?undefined:newDeviceKey();
-    const seed=await sealSeed(mnemonic,params.password??deviceKey!);
+    // A seed sealed with a password the person chose keeps that password (WISP 04, Encrypted profile).
+    const sealed=params.password?{seed:await sealSeed(mnemonic,params.password)}:await this.sealAlone(mnemonic);
     const info=await this.gate.within(new RestArkProvider(params.provider).getInfo());
     if(info.network!==params.network)throw new Error(`That Ark provider runs on ${info.network}, not ${params.network}`);
     const config:ArkConfig={network:params.network,provider:params.provider.replace(/\/$/,""),explorer:params.explorer.replace(/\/$/,""),serverKey:info.signerPubkey,walletId:crypto.randomUUID()};
     const replaced=this.saved && await this.retirable("This Ark wallet already has funds or payments; it will not be replaced");
-    const saved:StoredArk={config,seed,deviceKey};
+    const saved:StoredArk={config,...sealed};
     let adapter:ArkadeAdapter|undefined;
     try {adapter=await this.gate.within(ArkadeAdapter.connect(config,mnemonic),a=>a.dispose());await this.save(saved,replaced||undefined);}
     catch(error){await adapter?.dispose();if(replaced)void this.ensureReady();throw error;}
-    this.saved=saved;this.adapter=adapter;this.view={configured:true,locked:false,automatic:!!deviceKey,balance:0,network:config.network,provider:config.provider};this.changed();
+    this.saved=saved;this.adapter=adapter;this.view={configured:true,locked:false,automatic:opensAlone(saved),balance:0,network:config.network,provider:config.provider};this.changed();
     // Made: its addresses and balance come in the background. A slow explorer must not hold up the creation.
     void this.refresh().catch(error=>console.warn("Ark refresh:",error instanceof Error?error.message:error));
   }
@@ -113,9 +121,8 @@ export class ArkWallet {
     refuseAway(`arkade:${this.network}`, "Ark");
     if(!this.saved)throw new Error("Create or restore an Ark wallet first");
     if(this.adapter)return;
-    const key=this.saved.deviceKey??password;
-    if(!key)throw new Error("Enter the Ark wallet password");
-    const mnemonic=await unsealSeed(this.saved.seed,key);
+    if(!opensAlone(this.saved)&&!password)throw new Error("Enter the Ark wallet password");
+    const mnemonic=await this.openSeed(this.saved,password);
     const {ArkadeAdapter}=await loadArkade();
     this.adapter=await this.gate.within(ArkadeAdapter.connect(this.saved.config,mnemonic),a=>a.dispose());await this.refresh();
   }
@@ -138,7 +145,15 @@ export class ArkWallet {
     }).finally(()=>this.gate.resume());
   }
   async lock() {clearTimeout(this.timer);clearTimeout(this.retry);const adapter=this.adapter;this.adapter=undefined;this.view={...this.view,locked:true,address:undefined};this.changed();await adapter?.dispose();}
-  async backup(password?:string) {if(!this.saved)throw new Error("No Ark wallet to back up");return {mnemonic:await unsealSeed(this.saved.seed,this.saved.deviceKey??password??""),config:this.saved.config};}
+  async backup(password?:string) {if(!this.saved)throw new Error("No Ark wallet to back up");return {mnemonic:await this.openSeed(this.saved,password),config:this.saved.config};}
+  /** A seed that opens by itself: beside its device key, or under the profile's data key (version 2, `automatic`). */
+  private async sealAlone(mnemonic:string):Promise<Omit<StoredArk,"config">> {
+    const sealer=recordSealer({store:STORES.settings,key:this.key});
+    const seed=await sealer.seal(mnemonic,SEED);
+    return sealer.beside.deviceKey?{seed,deviceKey:sealer.beside.deviceKey}:{seed,automatic:true};
+  }
+  /** The phrase: by itself when the wallet opens alone, else with the password it was sealed with. */
+  private openSeed(saved:StoredArk,password?:string) {return opensAlone(saved)?openRecordSecret(saved.seed,saved.deviceKey,seedAt(this.key)):unsealSeed(saved.seed as EncryptedSeed,password??"");}
   /** The backup file is always sealed with a password the person chooses, even for a wallet that opens by itself. */
   async exportBackup(password:string):Promise<string> {
     if(password.length<12)throw new Error("Use at least 12 characters for the backup password");
@@ -160,8 +175,7 @@ export class ArkWallet {
     if(arkMode(config.network)!==this.network)throw new WrongNetworkError(arkMode(config.network),`This backup is a ${networkLabel(arkMode(config.network))} Ark wallet`);
     checkProviders(config.network,config.provider,config.explorer);
     if(payload.intents.some(i=>i.review.method!=="arkade" || i.review.provider!==config.provider || i.review.network!==config.network))throw new Error("Backup intents do not match its wallet");
-    const deviceKey=newDeviceKey();
-    const saved:StoredArk={config,seed:await sealSeed(payload.mnemonic,deviceKey),deviceKey};
+    const saved:StoredArk={config,...await this.sealAlone(payload.mnemonic)};
     const replaced=this.saved && await this.retirable("Restore into a fresh profile or an unused wallet; this wallet will not be replaced");
     await restoreArkDatabase(config.walletId,payload.database);
     await this.save(saved,replaced||undefined,payload.intents.map(intent=>{
@@ -194,7 +208,7 @@ export class ArkWallet {
     if(this.adapter!==adapter)return;
     const balancesRead=this.view.read||!failed.some((what)=>what==="balance"||what==="incoming"||what==="recoverable");
     const before=this.view;
-    this.view={configured:true,locked:false,...(balancesRead?{read:true as const}:{}),automatic:!!this.saved?.deviceKey,network:adapter.config.network,provider:adapter.config.provider,address,boardingAddress,incoming,balance,recoverable,sweeping,small,...(expiresAt!==undefined?{expiresAt}:{}),
+    this.view={configured:true,locked:false,...(balancesRead?{read:true as const}:{}),automatic:opensAlone(this.saved),network:adapter.config.network,provider:adapter.config.provider,address,boardingAddress,incoming,balance,recoverable,sweeping,small,...(expiresAt!==undefined?{expiresAt}:{}),
       error:failed.length?`Could not read the ${failed.join(", ")} from the Ark provider. Last values may be stale.`:undefined};
     // Every 10 s: a read that says what the view already did is no news for the wallet view (`changed(false)`).
     this.changed(viewNews(before,this.view));
