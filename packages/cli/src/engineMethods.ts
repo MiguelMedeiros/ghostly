@@ -174,6 +174,8 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   groupMessages: "{ groupId }",
   messagePage: "{ linkId, limit?, before? }",
   statusCardIndex: "",
+  saveMessage: "{ linkId, messageId, remove? }",
+  savedMessages: "",
   leaveGroup: "{ groupId }",
   removeGroupMember: "{ groupId, key }",
   makeGroupAdmin: "{ groupId, key }",

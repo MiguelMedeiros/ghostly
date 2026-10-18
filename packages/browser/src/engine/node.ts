@@ -112,6 +112,7 @@ import {
   pacer,
 } from "@ghostly/core";
 import type { AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
+import { SavedMessages } from "./saved";
 import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, type StoredFile } from "../shared/idb";
 import { Apps, type AppDataExport, type AppDataExportText, type AppFileAt, type AppCheckResult, type AppPreview, type AppRunEntry, type AppRunStatus, type AppSource, type AppStorePreview, type AppStoreSummary, type BuiltInAppOffer, type InstalledAppView } from "./apps";
 import { boundedAppFetch } from "./appFetch";
@@ -153,6 +154,7 @@ import type {
   MessageDetailsView,
   MessageFile,
   CardIndexRow,
+  SavedMessage,
   MessagePage,
   MessageReply,
   ReactionNote,
@@ -2496,6 +2498,16 @@ export class GhostlyNode implements EngineImplementation {
     const from = await db.getMessage(linkId, before);
     if (!from) throw new Error(`No message ${before}`);
     return db.getMessagePage(linkId, { limit, before: from });
+  }
+
+  /** Saves a message on this device, or unsaves it (`engine/saved.ts`): nothing is sent. */
+  saveMessage(params: { linkId: string; messageId: string; remove?: boolean }): Promise<{ error: string | null }> {
+    return this.saved.save(params);
+  }
+
+  /** This profile's saved messages, the last saved first, each as it is now. */
+  savedMessages(): Promise<SavedMessage[]> {
+    return this.saved.list();
   }
 
   async statusCardIndex(): Promise<CardIndexRow[]> {
@@ -6025,6 +6037,7 @@ export class GhostlyNode implements EngineImplementation {
   private counterFloor = 0;
   /** Groups whose admin work is off on this device since a forced takeover or a restore. */
   private groupAdminOff = new Set<string>();
+  private readonly saved = new SavedMessages(() => this.emitState());
 
   /**
    * Raises the counters a copy from older state must raise, once (`devices/raise.ts`): the raise a forced takeover wrote
