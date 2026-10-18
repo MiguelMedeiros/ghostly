@@ -40,14 +40,16 @@ export class CatchUpAnswers<F> {
 
   /**
    * The first two slices go now, the rest without holding the group's other frames back. A newer answer to the same
-   * member takes the place of what is left of the last; a frame the edge did not take ends it (the member asks again
-   * when its edge opens).
+   * member goes after what is left of the last, without the frames still queued there (the same objects: a store's);
+   * it took their place before, and left out what the member's `have` said it held: a live frame of an author raises
+   * it above that author's frames still queued, which were lost for good. A frame the edge did not take ends the answer
+   * (the member asks again when its edge opens).
    */
   handOut(to: string, frames: F[]): void {
     const handled = this.hooks.handled;
     if (!handled) { for (const frame of frames) this.hooks.send(to, frame); return; }
     const going = this.going.get(to);
-    if (going) { going.splice(0, going.length, ...frames); return; }
+    if (going) { const queued = new Set(going); going.push(...frames.filter(frame => !queued.has(frame))); return; }
     const rest = [...frames], told: Promise<CatchUpHandled>[] = [];
     const ask = () => handled(to).catch(() => false as const);
     const next = () => {
