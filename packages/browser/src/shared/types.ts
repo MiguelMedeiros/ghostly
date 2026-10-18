@@ -1264,6 +1264,12 @@ export interface Settings {
   /** Extra ICE servers (typically TURN) on top of the built-in STUN set. */
   iceServers: IceServerSetting[];
   /**
+   * "Hide my IP from contacts" (WISP 100 § Relay only): no direct path to a contact. The Desktop offers contacts
+   * neither its own Iroh nor its own HyperDHT (HyperDHT goes through `hyperdhtRelay`, as in a browser); its own
+   * devices keep them. Absent means off.
+   */
+  relayOnly?: boolean;
+  /**
    * The Iroh relays a browser build homes on (WISP 102, relay only): a page cannot send UDP, so every Iroh
    * packet goes through one. Absent or empty means the defaults (n0's public relays, as the desktop app's).
    */
@@ -1271,7 +1277,7 @@ export interface Settings {
   /**
    * The HyperDHT relay (wss://) this browser reaches the HyperDHT through, so paired chats can use HyperDHT
    * (WISP 103) beside WebRTC. Empty: none. Absent means the default (shared/hyperdhtRelay.ts). The Desktop
-   * runs HyperDHT itself and ignores it.
+   * runs HyperDHT itself and ignores it, except toward contacts while `relayOnly` is on.
    */
   hyperdhtRelay?: string;
   /** Cashu mints this peer holds ecash at and accepts ecash from. The first is where invoices are created. */
