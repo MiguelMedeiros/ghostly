@@ -2,7 +2,7 @@ import { GhostlyHttpError, fromBase64, toBase64 } from "@ghostly/core";
 import type { EngineServer, EngineClientSink } from "@ghostly/browser/engine/server";
 import { createPeerServer } from "@ghostly/browser/devices/peer";
 import type { PeerServer } from "@ghostly/browser/devices/linkOnly";
-import type { RpcRequest } from "@ghostly/browser/shared/rpc";
+import type { ClientMessage } from "@ghostly/browser/shared/rpc";
 import { setDatabaseName } from "@ghostly/browser/shared/idb";
 import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwitch";
 import { UI_PORT, type EngineStatus, type HttpRequestReply, type RuntimeMessage } from "./messages";
@@ -17,6 +17,13 @@ import { fromOwnPage } from "./shared/sender";
 const VIEWER_MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 /** How long a peer being replaced gets to say goodbye to its contacts before its document closes. */
 const STOP_GRACE_MS = 3_000;
+/**
+ * Each chat's newest rows a page gets when it connects (`EngineServer.attach`'s `newest`), not its whole history: this
+ * port carries JSON, and every chat's whole history went across to each tab opened or reloaded (about 20 MiB for 50
+ * chats of 2,000 messages). Twice what a page keeps of a chat (`STORED_MESSAGES`, 200): a chat that got fewer than 200
+ * while no tab showed it needs nothing more. A page asks for the rest of a chat it shows whole.
+ */
+const ATTACH_NEWEST = 400;
 
 /**
  * The local profile this document runs as, read once: a switch closes the document and starts another
@@ -61,9 +68,17 @@ chrome.runtime.onConnect.addListener((port) => {
   // `appPreview`'s `icon`) need another shape before the extension runs apps. The extension is out of phase 1.
   const client: EngineClientSink = { post: (message) => port.postMessage(message) };
   // Listeners go on at once, so nothing a page sends while the peer waits for its lock is lost.
-  withPeer((s) => s.attach(client));
+  withPeer((s) => {
+    const engine = engineOf(s);
+    if (engine) engine.attach(client, undefined, { newest: ATTACH_NEWEST });
+    else s.attach(client);
+  });
   port.onDisconnect.addListener(() => withPeer((s) => s.detach(client)));
-  port.onMessage.addListener((request: RpcRequest) => withPeer((s) => void s.handle(client, request)));
+  port.onMessage.addListener((request: ClientMessage) => withPeer((s) => {
+    // A chat's whole history the page asked for; a device that is not the active one has none.
+    if (request?.kind === "history") void engineOf(s)?.history(client, request.linkId);
+    else void s.handle(client, request);
+  }));
 });
 
 /** The engine, or null on a device that is not the active one for this profile: nothing there serves a contact's app. */
