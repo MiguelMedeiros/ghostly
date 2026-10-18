@@ -575,6 +575,18 @@ export interface RpcRequest<M extends EngineMethod = EngineMethod> {
   params: Params<M>;
 }
 
+/**
+ * A client asks for a chat's or group's whole history: the server sends it to that client alone as a `messages` event,
+ * in order with what changes in it. Not an engine call: nothing answers it but that event.
+ */
+export interface HistoryRequest {
+  kind: "history";
+  linkId: string;
+}
+
+/** What a client sends the server. */
+export type ClientMessage = RpcRequest | HistoryRequest;
+
 export interface RpcResponse {
   kind: "response";
   id: number;
@@ -610,7 +622,11 @@ export interface AttentionEvent {
 export type EngineEvent =
   | { kind: "attention"; event: AttentionEvent }
   | { kind: "state"; state: EngineState }
-  | { kind: "messages"; linkId: string; messages: StoredMessage[] }
+  /**
+   * A chat's or group's history, whole; with `more`, only its newest page (a client attached with `newest`), the older
+   * rows not sent: the client asks for them (`HistoryRequest`).
+   */
+  | { kind: "messages"; linkId: string; messages: StoredMessage[]; more?: true }
   /** What changed in a history the client was sent whole already (`applyMessageChanges`): only those rows. */
   | ({ kind: "message-changes"; linkId: string } & MessageChanges)
   | { kind: "call-signal"; linkId: string; signal: string }
