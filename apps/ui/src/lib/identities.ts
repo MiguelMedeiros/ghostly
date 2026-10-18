@@ -12,6 +12,7 @@ import type { Language } from "./settings";
 import { formatAt } from "./time";
 import type { ChatSession } from "./types";
 import { english } from "./english";
+import { sameValue } from "./sameValue";
 import { useEngineState as usePlainEngineState } from "./engineState";
 import type { Translate } from "../contexts/I18nContext";
 
@@ -27,6 +28,23 @@ export const useEngineState = () => {
   useSyncExternalStore(subscribeProviders, identityProvidersLoaded);
   return usePlainEngineState();
 };
+
+const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
+
+/**
+ * What `select` reads of the engine's state, for what draws identities, drawn again only when that changes by content
+ * (the engine sends its state anew on every change) or when the identity providers load. A chat list draws one per
+ * row (ContactMarks): on the whole state, every row's marks were drawn again on every engine state.
+ */
+export function useEngineValue<T>(select: (state: typeof engine.state) => T): T {
+  useSyncExternalStore(subscribeProviders, identityProvidersLoaded);
+  const last = useRef<T | undefined>(undefined);
+  return useSyncExternalStore(subscribeEngine, () => {
+    const now = select(engine.state);
+    if (!sameValue(now, last.current)) last.current = now;
+    return last.current as T;
+  });
+}
 
 const identityProvider = (id: string) => loadedIdentityProviders().find(p => p.id === id);
 
