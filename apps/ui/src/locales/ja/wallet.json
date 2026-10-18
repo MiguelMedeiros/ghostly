@@ -201,6 +201,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "このインボイスは期限切れです。もう誰も支払えません。",
     "invoiceFor": "{{amount}} のインボイス",
     "makePrimary": "メインにする",
     "mints": "ミント",
