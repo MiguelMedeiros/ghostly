@@ -1,3 +1,4 @@
+import type { Locator } from "@playwright/test";
 import { chat, expect, test, type Peer } from "../support/fixtures";
 import { pair } from "../support/paired";
 import { composerRow } from "../support/composer";
@@ -35,6 +36,23 @@ async function closeApp(peer: Peer): Promise<void> {
 /** The bundle's own requests: none while it is read from the build. */
 const bundles = (asked: string[]) => asked.filter((url) => url.split(/[?#]/)[0]!.endsWith("/app.ghostlyapp"));
 
+/** Whether `words`, the start of a text in `line`, are all in sight on it: not cut off at either of its edges. */
+function inSight(line: Locator, words: string): Promise<boolean> {
+  return line.evaluate((el, words) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const at = node.textContent!.indexOf(words);
+      if (at < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, at + words.length);
+      const box = range.getBoundingClientRect(), clip = (node.parentElement as HTMLElement).getBoundingClientRect(), own = el.getBoundingClientRect();
+      return box.left >= Math.max(own.left, clip.left) - 1 && box.right <= Math.min(own.right, clip.right) + 1;
+    }
+    return false;
+  }, words);
+}
+
 test("Chess is on the Apps page of a new profile; its first open asks what it may do and downloads nothing; removed, it stays removed", { tag: ["@feature:apps.built-in"] }, async ({ peer }) => {
   const ana = await peer("ana");
   const asked = await withBuiltIns(ana);
@@ -52,13 +70,7 @@ test("Chess is on the Apps page of a new profile; its first open asks what it ma
   // What the row is there to say is in sight at that width, not cut off behind the tagline (toContainText passes on hidden text).
   const hint = row.getByTestId("built-in-app-hint");
   await expect(hint).toHaveText(/^Comes with Ghostly · /);
-  expect(await hint.evaluate((el) => {
-    const words = document.createRange();
-    words.setStart(el.firstChild!, 0);
-    words.setEnd(el.firstChild!, "Comes with Ghostly".length);
-    const box = words.getBoundingClientRect(), own = el.getBoundingClientRect();
-    return box.left >= own.left - 1 && box.right <= own.right + 1;
-  })).toBe(true);
+  expect(await inSight(hint, "Comes with Ghostly")).toBe(true);
   expect(await ana.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await ana.page.setViewportSize(wide);
 
@@ -115,6 +127,22 @@ test("Remove on a built-in app never opened takes it off the list for good", { t
   await ana.page.reload();
   await expect(ana.page.getByTestId("apps-none")).toBeVisible();
   expect(asked).toEqual([]);
+});
+
+test("in Arabic on a phone, Chess's row keeps Comes with Ghostly whole and its English tagline from its start", { tag: ["@feature:apps.built-in", "@feature:app.i18n"] }, async ({ peer }) => {
+  const ana = await peer("ana", { mobile: true, viewport: { width: 375, height: 700 } });
+  await withBuiltIns(ana);
+  await ana.page.evaluate(() => {
+    const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "ar" }));
+  });
+  await ana.page.reload();
+  await ana.page.goto("/#/apps");
+  const hint = ana.page.getByTestId("built-in-app").getByTestId("built-in-app-hint");
+  await expect(hint).toHaveText(/^يأتي مع Ghostly · Play chess/);
+  // One run of text cut its start off: "… chess with a contact, live in your chat يأتي مع", without "Ghostly · Play".
+  expect(await inSight(hint, "يأتي مع Ghostly")).toBe(true);
+  expect(await inSight(hint, "Play chess")).toBe(true);
 });
 
 test("opened from a chat's Apps, Chess runs with the contact, whose card of it opens from their own build", { tag: ["@feature:apps.built-in", "@feature:apps.chat.card"] }, async ({ peer }) => {

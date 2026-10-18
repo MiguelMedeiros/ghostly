@@ -76,7 +76,7 @@ describe("the Forward to… picker", () => {
   function Where() {
     return <p data-testid="where">{useLocation().pathname}</p>;
   }
-  const open = (messages: ChatMessage[], from = "link-bo", language?: "pt") => renderApp(<Routes>
+  const open = (messages: ChatMessage[], from = "link-bo", language?: "pt" | "ar") => renderApp(<Routes>
     <Route path="/here" element={<ForwardDialog from={from} messages={messages} onClose={() => {}} />} />
     <Route path="*" element={<Where />} />
   </Routes>, { route: "/here", language });
@@ -89,6 +89,31 @@ describe("the Forward to… picker", () => {
     expect(names()).toEqual(["Friends"]);
     await user.type(screen.getByTestId("forward-search"), "x");
     expect(screen.getByTestId("forward-none")).toHaveTextContent("No chat by that name");
+  });
+
+  it("does not read the chats again on an engine change while it is open, only when one changes", async () => {
+    open([message()]);
+    await screen.findByText("Ana");
+    const parse = JSON.parse;
+    let reads = 0;
+    const spy = vi.spyOn(JSON, "parse").mockImplementation((text: string, reviver?: Parameters<typeof JSON.parse>[1]) => {
+      if (typeof text === "string" && text.includes('"peerPubKeyB64"') && text.includes('"messages"')) reads++;
+      return parse(text, reviver);
+    });
+    try {
+      // The engine changes many times a second during a call or a file transfer: the picker must not re-read the chats.
+      for (let i = 0; i < 5; i++) act(() => fakeEngine.setState(engineState({
+        links: [linkView({ id: "link-ana", peerPubKeyZ32: "peer-ana" }), linkView({ id: "link-bo", peerPubKeyZ32: "peer-bo" })],
+        groups: [groupView({ id: "g1", name: "Friends", lastMessageAt: 2_000 + i }), groupView({ id: "g2", name: "Readers", canSend: false })],
+      })));
+      expect(reads).toBe(0);
+      // A chat changes (here its name): the list reads it once and shows the change.
+      act(() => { chat("chat-ana", "peer-ana", "Ana II", 3_000); window.dispatchEvent(new Event("session-updated")); });
+      await screen.findByText("Ana II");
+      expect(reads).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("offers the groups for a file too (WISP 503), and forwards it there", async () => {
@@ -178,6 +203,144 @@ describe("the Forward to… picker", () => {
     expect(fakeEngine.callsTo("forwardMessages").map(c => (c as { to: string[] }).to)).toEqual([["link-ana", "link-bo"], ["link-bo"]]);
   });
 
+  // Send again forwarded the part a chat got already a second time, and a group's 9th file on could never go: every
+  // Send again posted files 1-8 again and hit the pace at the 9th (agents#1082).
+  it("says how much of it a chat got, and Send again sends that chat only the rest", async () => {
+    const all = [message({ id: "a", text: "dinner at eight", timestamp: 1 }), message({ id: "b", text: "📎 pic.png", file: PICTURE, timestamp: 2 })];
+    let full = true;
+    fakeEngine.on("forwardMessages", ({ to, messageIds }: { to: string[]; messageIds: string[] }) => ({ results: to.map(t => {
+      const sent = t === "link-ana" && full ? messageIds.filter(id => id === "a") : messageIds;
+      return { to: t, messageIds: sent.map(id => `me_${id}`), sent, error: sent.length < messageIds.length ? "Not enough space on this device" : null };
+    }) }));
+    const { user } = open(all, "link-1");
+    const rows = screen.getAllByTestId("forward-target");
+    await user.click(rows[0]!);
+    await user.click(rows[2]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(screen.getByTestId("forward-error")).toHaveTextContent("Ana (1 of 2 sent): Not enough space on this device");
+    expect(screen.getByTestId("forward-chosen")).toHaveTextContent(/^Ana$/);
+    full = false;
+    await user.click(screen.getByTestId("forward-send"));
+    expect(fakeEngine.callsTo("forwardMessages")).toEqual([
+      { linkId: "link-1", messageIds: ["a", "b"], to: ["link-ana", "link-bo"] },
+      { linkId: "link-1", messageIds: ["b"], to: ["link-ana"] },
+    ]);
+    expect(screen.queryByTestId("forward-error")).toBeNull();
+  });
+
+  // In one Arabic string a Latin name's end punctuation went to the line's side: "Ana!" read "!Ana", and the chosen names
+  // ran in English order. Each name is isolated, as in the rows above.
+  it("keeps each chat's name in its own direction in an Arabic line", async () => {
+    chat("chat-ana", "peer-ana", "Ana!", 3_000);
+    chat("chat-bo", "peer-bo", "Bo?", 1_000);
+    const all = [message({ id: "a", timestamp: 1 }), message({ id: "b", timestamp: 2 })];
+    fakeEngine.on("forwardMessages", ({ to, messageIds }: { to: string[]; messageIds: string[] }) => ({ results: to.map(t => {
+      const sent = t === "link-ana" ? ["a"] : t === "group:g1" ? messageIds : [];
+      return { to: t, messageIds: sent.map(id => `me_${id}`), sent, error: sent.length < messageIds.length ? "You are offline" : null };
+    }) }));
+    const { user } = open(all, "link-1", "ar");
+    const rows = screen.getAllByTestId("forward-target");
+    for (const row of rows) await user.click(row);
+    const isolated = (id: string) => [...screen.getByTestId(id).querySelectorAll("bdi")].map(b => b.textContent);
+    expect(isolated("forward-chosen")).toEqual(["Ana!", "Friends", "Bo?"]);
+    await user.click(screen.getByTestId("forward-send"));
+    const lines = within(screen.getByTestId("forward-error")).getAllByRole("listitem");
+    expect(lines.map(line => line.querySelector("bdi")?.textContent)).toEqual(["Ana!", "Bo?"]);
+    expect(lines[0]).toHaveTextContent("Ana! (أُرسل 1 من 2): ");
+    expect(isolated("forward-sent")).toEqual(["Friends"]);
+    expect(screen.getByTestId("forward-sent")).toHaveTextContent(/^أُرسل إلى Friends$/);
+    expect(isolated("forward-chosen")).toEqual(["Ana!", "Bo?"]);
+    expect(screen.getByTestId("forward-chosen")).toHaveTextContent(/^Ana!, Bo\?$/);
+  });
+
+  // Send again sends one call per set of owed messages: a chat that got everything was called with none, which the engine
+  // refuses ("No message to forward"), and that one refusal, in English with no name, hid what the other call delivered.
+  it("a chat that got everything, ticked again, is not sent anything again nor called with nothing", async () => {
+    const all = [message({ id: "a", text: "dinner at eight", timestamp: 1 }), message({ id: "b", text: "📎 pic.png", file: PICTURE, timestamp: 2 })];
+    let offline = true;
+    fakeEngine.on("forwardMessages", ({ to, messageIds }: { to: string[]; messageIds: string[] }) => {
+      if (!messageIds.length) throw new Error("No message to forward");
+      return { results: to.map(t => t === "link-bo" && offline
+        ? { to: t, messageIds: [], sent: [], error: "You are offline" }
+        : { to: t, messageIds: messageIds.map(id => `me_${id}`), sent: messageIds, error: null }) };
+    });
+    const { user } = open(all, "link-1", "pt");
+    const rows = screen.getAllByTestId("forward-target");
+    await user.click(rows[0]!);
+    await user.click(rows[2]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(screen.getByTestId("forward-sent")).toHaveTextContent("Enviado para Ana");
+    await user.click(rows[0]!);
+    offline = false;
+    await user.click(screen.getByTestId("forward-send"));
+    expect(fakeEngine.callsTo("forwardMessages")).toEqual([
+      { linkId: "link-1", messageIds: ["a", "b"], to: ["link-ana", "link-bo"] },
+      { linkId: "link-1", messageIds: ["a", "b"], to: ["link-bo"] },
+    ]);
+    expect(screen.queryByTestId("forward-error")).toBeNull();
+  });
+
+  it("a call that is refused keeps what the other calls delivered, and says the refusal under its chats' names", async () => {
+    chat("chat-cy", "peer-cy", "Cy", 2_500);
+    fakeEngine.update({ links: ["ana", "bo", "cy"].map(n => linkView({ id: `link-${n}`, peerPubKeyZ32: `peer-${n}` })) });
+    const all = [message({ id: "a", text: "dinner at eight", timestamp: 1 }), message({ id: "b", text: "📎 pic.png", file: PICTURE, timestamp: 2 })];
+    let first = true;
+    fakeEngine.on("forwardMessages", ({ to, messageIds }: { to: string[]; messageIds: string[] }) => {
+      if (first) {
+        first = false;
+        // Ana gets the text, the picture finds no room; Cy is offline.
+        return { results: to.map(t => t === "link-ana"
+          ? { to: t, messageIds: ["me_a"], sent: ["a"], error: "Not enough space on this device" }
+          : { to: t, messageIds: [], sent: [], error: "You are offline" }) };
+      }
+      // The text was deleted from this chat meanwhile: a call that names it is refused whole.
+      if (messageIds.includes("a")) throw new Error("That message is not in this chat");
+      return { results: to.map(t => ({ to: t, messageIds: messageIds.map(id => `me_${id}`), sent: messageIds, error: null })) };
+    });
+    const { user } = open(all, "link-1", "pt");
+    const row = (name: string) => screen.getAllByTestId("forward-target").find(r => r.textContent?.includes(name))!;
+    await user.click(row("Ana"));
+    await user.click(row("Cy"));
+    await user.click(screen.getByTestId("forward-send"));
+    await user.click(screen.getByTestId("forward-send"));
+    const said = screen.getByTestId("forward-error");
+    expect(said).toHaveTextContent(/^Cy: Essa mensagem não está mais nesta conversa/);
+    expect(said).not.toHaveTextContent("That message");
+    expect(screen.getByTestId("forward-sent")).toHaveTextContent("Enviado para Ana");
+    expect(screen.getByTestId("forward-chosen")).toHaveTextContent(/^Cy$/);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(fakeEngine.callsTo("forwardMessages")).toEqual([
+      { linkId: "link-1", messageIds: ["a", "b"], to: ["link-ana", "link-cy"] },
+      { linkId: "link-1", messageIds: ["b"], to: ["link-ana"] },
+      { linkId: "link-1", messageIds: ["a", "b"], to: ["link-cy"] },
+      { linkId: "link-1", messageIds: ["a", "b"], to: ["link-cy"] },
+    ]);
+  });
+
+  // The engine's line for a copy that found no room on this device, however the storage said it (engine/forwards.ts
+  // forwardError): IndexedDB, the OPFS worker, Desktop's io error. Said in the app's language, never as sent.
+  it.each([
+    "Not enough space on this device (QuotaExceededError)",
+    "Not enough space on this device (QuotaExceededError: This device has no space left for the file)",
+    "Not enough space on this device (No space left on device (os error 28))",
+  ])("says a copy found no room in the app's language: %s", async (error) => {
+    fakeEngine.on("forwardMessages", ({ to }: { to: string[] }) => ({ results: to.map(t => ({ to: t, messageIds: [], error })) }));
+    const { user } = open([message({ text: "", file: PICTURE })], "link-bo", "pt");
+    await user.click(screen.getAllByTestId("forward-target")[0]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(screen.getByTestId("forward-error")).toHaveTextContent("Ana: Não há espaço suficiente neste dispositivo. Libere espaço e tente de novo.");
+    expect(screen.queryByTestId("where")).toBeNull();
+  });
+
+  it("never takes an empty error for a success", async () => {
+    fakeEngine.on("forwardMessages", ({ to }: { to: string[] }) => ({ results: to.map(t => ({ to: t, messageIds: [], error: "" })) }));
+    const { user } = open([message({ text: "", file: PICTURE })], "link-bo", "pt");
+    await user.click(screen.getAllByTestId("forward-target")[0]!);
+    await user.click(screen.getByTestId("forward-send"));
+    expect(screen.getByTestId("forward-error")).toHaveTextContent("Ana: Algo deu errado");
+    expect(screen.queryByTestId("where")).toBeNull();
+  });
+
   it("asks before forwarding text that looks like a seed, as typing it would", async () => {
     expect(forwardSecret([message({ text: SEED })])).toMatchObject({ kind: "mnemonic" });
     fakeEngine.on("forwardMessages", ({ to }: { to: string[] }) => ({ results: to.map(t => ({ to: t, messageIds: [], error: null })) }));
@@ -233,8 +396,16 @@ describe("choosing several", () => {
     const { user } = renderApp(<Timeline messages={messages} />);
     await user.click(screen.getAllByTestId("message-options")[0]!);
     await user.click(screen.getByTestId("message-select-start"));
-    act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
+    // An Escape something else answered (a menu, a field) is not the choice's.
+    const spent = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    spent.preventDefault();
+    act(() => { window.dispatchEvent(spent); });
+    expect(screen.getByTestId("select-bar")).toBeInTheDocument();
+    // The one that ends it is spent: a notice at the top that also answers Escape stays.
+    const escape = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    act(() => { window.dispatchEvent(escape); });
     expect(screen.queryByTestId("select-bar")).toBeNull();
+    expect(escape.defaultPrevented).toBe(true);
     await user.click(screen.getAllByTestId("message-options")[0]!);
     await user.click(screen.getByTestId("message-select-start"));
     await user.click(screen.getByTestId("select-cancel"));

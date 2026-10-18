@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CATCH_UP_SLACK_MS, messageAttention } from "../src/engine/attention";
+import { CATCH_UP_GAP_MS, CATCH_UP_SLACK_MS, messageAttention } from "../src/engine/attention";
 import type { StoredMessage } from "../src/shared/types";
 // covers: app.attention.sounds
 
@@ -53,5 +53,15 @@ describe("messageAttention", () => {
     // The same late message in a chat with nothing newer is the newest thing there: it is news.
     expect(messageAttention("message", row({ timestamp: old }), at())).toMatchObject({ type: "message" });
     expect(messageAttention("message", row({ timestamp: old }), at({ newest: old - 1 }))).toMatchObject({ type: "message" });
+  });
+
+  it("a group's catch-up handed oldest first: past its first message, what was written well before it came is quiet, mentions too", () => {
+    const old = NOW - 5 * 60_000;
+    // Each newer than the newest here, so the rule above never applies: the last old one came a moment ago.
+    expect(messageAttention("message", row({ timestamp: old, mentioned: true }), at({ newest: old - 1, lateAt: NOW - 500 }))).toBeNull();
+    expect(messageAttention("message", row({ timestamp: NOW - CATCH_UP_SLACK_MS - 1 }), at({ lateAt: NOW - CATCH_UP_GAP_MS + 1 }))).toBeNull();
+    // Its last minute is news, and so is an old one long after the last (a member's clock behind, talking live).
+    expect(messageAttention("message", row({ timestamp: NOW - 30_000, mentioned: true }), at({ lateAt: NOW - 500 }))).toEqual({ type: "message", mention: true });
+    expect(messageAttention("message", row({ timestamp: old }), at({ lateAt: NOW - CATCH_UP_GAP_MS }))).toMatchObject({ type: "message" });
   });
 });

@@ -68,6 +68,10 @@ requests, tips and "balance" in a chat, with test coins: [examples/payment-bot.m
 A Claude Code agent on `listen --turns` with an allowlist (it will not start without one), "thinking" while it works
 and `send --reply` for its answer: [examples/claude-code-agent.sh](examples/claude-code-agent.sh).
 
+Agents: [skills/ghostly](skills/ghostly) is a skill for an AI coding agent (Claude Code first) that talks to its
+owner over Ghostly: `listen`, `say` (with buttons), `status` and `react`, in `sh`, and only the owner's chat gives it
+orders.
+
 ## Profiles
 
 Each profile is a folder, `~/.ghostly/profiles/<name>/` (0700; files 0600), with its own chats, keys and wallets.
@@ -84,7 +88,10 @@ waits until the message went out. Bots should run the daemon: a one-shot is offl
 
 Every command prints one JSON object on stdout. A failure prints `{"error":{"code","message"}}` and exits with:
 `1` failed (the engine or the network refused), `2` usage, `3` not found, `4` timed out, `5` needs a confirmation
-(`--force`, `--yes`, `--confirm-real`). A `<chat>` is its id, a unique prefix of it, or its name; a `<group>` too.
+(`--force`, `--yes`, `--confirm-real`). A daemon that does not answer a read or `daemon status` within 15 seconds, or
+a command that waits (`chat wait`, `file wait`, `--wait`) within its `--timeout` plus 10, is a timeout too (`4`,
+`details.method`); `ghostly daemon restart` is the way out ([docs/CLI.md](../../docs/CLI.md#what-it-does)). A `<chat>` is
+its id, a unique prefix of it, or its name; a `<group>` too.
 
 The rows are in alphabetical order of their first command, and every command of `ghostly help` has one
 (`test/readme.test.ts` checks both).
@@ -113,9 +120,9 @@ The rows are in alphabetical order of their first command, and every command of 
 | `chat transport <chat> <auto\|dht\|webrtc\|iroh\|hyperdht>` | What carries the chat |
 | `chat verify <chat> --code <code>` | Mark the contact verified after comparing the codes out of band |
 | `chat wait <chat> [--until live\|text\|paired] [--timeout s]` | Wait for a chat to go live, carry text, or see its contact. Live means a session that exists now, in this run of the daemon: a chat that was live before a restart counts once its contact answers again |
-| `daemon [--detach] [--timeout s]`, `daemon status`, `daemon stop [--timeout s]`, `daemon restart [--timeout s]` | Keep the profile online; `status` names its version and its socket (`socket`, for the [socket API](#the-socket-api)); `restart` stops it and starts this release's code in the background ([After an upgrade](#after-an-upgrade)). Ctrl-C, SIGTERM and the terminal closing (SIGHUP) stop it cleanly |
+| `daemon [--detach] [--timeout s]`, `daemon status [--timeout s]`, `daemon stop [--timeout s]`, `daemon restart [--timeout s]` | Keep the profile online; `status` names its version and its socket (`socket`, for the [socket API](#the-socket-api)); `restart` stops it and starts this release's code in the background ([After an upgrade](#after-an-upgrade)). Ctrl-C, SIGTERM and the terminal closing (SIGHUP) stop it cleanly |
 | `edit <chat> <message> [text… \| --text <text> \| --stdin] [--force] [--wait none\|confirmed] [--timeout s]` | Replace the text of a message you sent (1:1 chats, `group edit` for a group; `<message>` is the `messageId` `send` gave, or its wire id). The contact sees it in place, marked edited; `--wait confirmed` waits for its app to confirm (the default without a daemon). At most 100 edits a message, no time limit; an older contact app gets it once it shows edits |
-| `engine <method> [json \| -] [--confirm-real] [--show-secret] [--force]`, `engine --list` | Any call of the app's engine |
+| `engine <method> [json \| -] [--confirm-real] [--show-secret] [--yes] [--force]`, `engine --list [--verbose]` | Any call of the app's engine; `--verbose` lists what each takes (`{ linkId, label }`, `?` for an optional key). A call given less than it takes is refused as `bad_request`. One that deletes chats or groups (`clearProfileData`, `removeLink`, `leaveGroup`, `forgetGroup`, `deviceRemove`) needs `--yes`; `clearProfileData` answers what it removed and stops a daemon. One that sends a text that looks like a secret (`sendMessage`, `sendGroupMessage`, `editMessage`, `forwardMessages`) needs `--force` |
 | `events [--since seq]` | What the event journal holds, without following |
 | `file list <chat\|group>`, `file accept\|decline\|pause\|resume\|cancel [<chat>] <file>` | Transfers; a file over 25 MiB waits for `file accept` (files/3), and so does a group's file that did not come by itself (over 8 MiB). A file's id names its chat or its group, so `<chat>` may be left out |
 | `file resend [<chat>] <file>`, `file request [<chat>] <file>` | A file that stopped moving: sent again from here, or asked for again from the contact (a group's file: from whoever holds it); either goes on from the bytes the receiver holds (files/3) |
@@ -167,6 +174,8 @@ The rows are in alphabetical order of their first command, and every command of 
 | `wallet list [--network n]` | Wallets and balances, and what `wallet create` can make on each network |
 | `wallet receive <sats>`, `wallet address <type>`, `wallet redeem [<token>]`, `wallet history` | Receive, and what came and went. `wallet redeem` reads the token from stdin when none is given, which keeps it out of `ps` and the shell's history |
 | `wallet remove <type> [--network n] [--card id] [--accept-loss]` | Refused while it holds money or waits for some, unless `--accept-loss` |
+| `x401 credential add <file\|-> [--label name]`, `x401 credential list [--show-secret]`, `x401 credential remove <id>` | x401 credentials ([WISP 3xx](../../docs/wisps/3xx-x401.md), a draft: test credentials only): keep an issued SD-JWT VC bound to a key from `x401 key new` (a label is up to 80 characters on one line), list them (claim paths; values only with `--show-secret`), remove one with its key. Never shared with contacts |
+| `x401 key new` | A fresh P-256 holder key, one per credential: give its public JWK to the issuer. The 8 newest keys wait for a credential; a ninth drops the oldest (`dropped` names it) |
 
 Help: `ghostly help` lists every command; `ghostly help file` (or `ghostly file --help`) a group; `ghostly help file
 save` (or `ghostly file save --help`) one command, with its options. `-h` works too, except after `--`.
@@ -372,7 +381,7 @@ receive|address|redeem`, `wallet.mint.add`, `lightning.default|rename`, `pay`, `
 `identity.providers|list|add|complete|cancel|remove|share|withdraw|contact|recheck`, `service.list|add|remove|enable|share|peer|open|close`,
 `call.start|answer|hangup|list|get|flush|auto`,
 `events.replay`, `events.subscribe`, `daemon.stop`, `daemon.hello`, and `engine.call` with
-`{"method":"<engine call>","params":{…},"confirmReal":false}` for anything else the app does. Parameters are the
+`{"method":"<engine call>","params":{…},"confirmReal":false,"yes":false}` for anything else the app does. Parameters are the
 commands' (see `src/api.ts`). Errors: `{"id":…,"error":{"code","message","details"?}}` with the codes above.
 
 Before its first request, a program can check that the socket is the profile's daemon and not a process that opened

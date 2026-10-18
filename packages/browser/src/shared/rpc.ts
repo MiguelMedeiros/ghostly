@@ -209,7 +209,7 @@ export interface EngineApi {
    * Forwards messages of a chat (or `group:<id>`) to up to 5 chats and groups (WISP 400 § Forwards): new messages of
    * mine with a hop count, files from the bytes here. Each target says which messages it got and its first problem.
    */
-  forwardMessages(params: { linkId: string; messageIds: string[]; to: string[] }): { results: { to: string; messageIds: string[]; error: string | null }[] };
+  forwardMessages(params: { linkId: string; messageIds: string[]; to: string[] }): { results: { to: string; messageIds: string[]; sent?: string[]; error: string | null }[] };
   /**
    * files/3: answers an offer (`accept`, `decline`), or pauses, resumes or cancels a transfer, either way. A group's file
    * (`linkId` `group:<id>`) takes `accept` and `request`: it is asked for (Download), or asked for again.
@@ -250,7 +250,7 @@ export interface EngineApi {
   walletQuoteInvoice(params: { invoice: string; via?: "cashu"; network?:WalletNetwork; card?: string }): { quote: string; mint: string; amount: number; feeReserve: number; source?: string };
   /** `note`: what the payment was for, kept with the wallet's own record of it (a Lightning address, for one). */
   /** `confirmedReal`: required to pay a quote of a Mainnet wallet (real money), refused without it. */
-  walletPayQuote(params: { quote: string; mint: string; note?: string; confirmedReal?: true }): { paid: boolean };
+  walletPayQuote(params: { quote: string; mint: string; note?: string; confirmedReal?: true; linkId?: string; invoice?: string }): { paid: boolean };
   /** Reads a Lightning address or LNURL and fetches what it asks for. Its domain learns of the request. */
   lnurlResolve(params: { text: string; network?:WalletNetwork }): LnurlView;
   /** The invoice for `amount` sats from a resolved address, checked before it is quoted. */

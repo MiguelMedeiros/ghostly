@@ -2,7 +2,8 @@ import { spawn } from "node:child_process";
 import { accessSync, constants, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { CONTACT_KEY } from "./apiKit";
-import { CliError } from "./errors";
+import { connectDaemon, type DaemonAddress, type DaemonClient } from "./client";
+import { CliError, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import { turnRef } from "./turnRefs";
 
@@ -133,7 +134,9 @@ export function checkWebhook(url: string): URL {
 
 export function readCursor(path: string | undefined): number | undefined {
   if (!path || !existsSync(path)) return undefined;
-  const value = Number(readFileSync(path, "utf8").trim());
+  let text: string;
+  try { text = readFileSync(path, "utf8"); } catch (error) { throw localFileError(error, path) ?? error; }
+  const value = Number(text.trim());
   return Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
@@ -319,7 +322,7 @@ export const MAX_BEHIND = 1_000;
 
 /**
  * Bounds what a listener holds when its output or hooks fall behind (a stdout reader that hung, a slow --exec): past
- * `MAX_BEHIND` events not handled it stops taking events (`pause`: the subscription closes) and drops what still
+ * `MAX_BEHIND` events not handled it stops taking events (`pause`: the subscription stops reading) and drops what still
  * arrives; once every event taken is handled, `resume` opens it again after the last one taken. The daemon's journal
  * keeps what came meanwhile (and says `events.gap` past what it keeps), so a consumer that hangs for a day does not
  * grow the listener by the day's traffic.
@@ -341,4 +344,51 @@ export class Feed {
     this.pause();
     void this.handle.idle().then(() => { this.held = false; this.resume(this.since); });
   };
+}
+
+/** How long a feed that fell behind keeps its connection to the daemon open, unread, while its hooks take no event (`followDaemon`). */
+export const PAUSE_HOLD_MS = 60_000;
+
+/**
+ * Follows a daemon's events into `handle` until `close`; a daemon that restarts is picked up again after the last event
+ * seen. A feed that falls behind stops reading the connection, not closes it: what the daemon sent meanwhile (a replay
+ * written whole) is read on resume, so a catch-up reads the journal once, not once per pause. A connection the daemon
+ * ended meanwhile (past what it lets a client leave unread) is opened again after the last event taken.
+ * A feed whose hooks take no event for `holdMs` (`PAUSE_HOLD_MS`: a hook that hung) ends the connection, as a full one
+ * does, so the daemon does not keep a replay and what came live for it while it hangs; resume opens it again after the
+ * last event taken.
+ * `subscribed`: the first subscription's answer (a journal that cannot be replayed rejects it).
+ */
+export function followDaemon(address: DaemonAddress, client: DaemonClient, handle: EventHandler, since: number | undefined, holdMs = PAUSE_HOLD_MS): { subscribed: Promise<unknown>; close(): void } {
+  let current: DaemonClient | null = client;
+  let holding: ReturnType<typeof setTimeout> | undefined;
+  const reconnect = (wait: number) => void (async () => {
+    while (!current && !feed.paused) {
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      wait = 1000;
+      if (current || feed.paused) return;
+      const next = await connectDaemon(address, 1000);
+      if (next) { current = next; await follow(next).catch(() => { if (current === next) current = null; }); }
+    }
+  })();
+  // A hook still taking events (a slow --exec) keeps the connection; one that took none for `holdMs` lets it go.
+  const hold = (behind: number) => {
+    holding = setTimeout(() => {
+      if (handle.behind() < behind) return hold(handle.behind());
+      const c = current; current = null; c?.destroy();
+    }, holdMs);
+  };
+  const feed = new Feed(handle, since, () => {
+    current?.pause();
+    hold(handle.behind());
+  }, () => {
+    clearTimeout(holding);
+    if (current) current.resume(); else reconnect(0);
+  });
+  const follow = (c: DaemonClient) => c.subscribe(feed.since, feed.take, () => {
+    if (current !== c) return;
+    current = null;
+    reconnect(1000);
+  });
+  return { subscribed: follow(client), close: () => { clearTimeout(holding); current?.close(); } };
 }

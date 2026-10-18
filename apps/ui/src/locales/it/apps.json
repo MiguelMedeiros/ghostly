@@ -76,6 +76,17 @@
     "tooLarge": "Troppo grande.",
     "unlistedVersion": "Il link contiene una versione che questo store non elenca ancora."
   },
+  "files": {
+    "allow": "Consenti",
+    "askAgain": "{{app}} chiede di leggere di nuovo «{{name}}»",
+    "askAgainMore": "{{app}} chiede di leggere di nuovo «{{name}}» e altri {{count}}",
+    "askFiles": "{{app}} chiede di leggere dei file",
+    "askFolder": "{{app}} chiede di leggere una cartella",
+    "chooseFiles": "Scegli i file",
+    "chooseFolder": "Scegli una cartella",
+    "notNow": "Non ora",
+    "note": "Non viene copiato nulla: {{app}} legge ciò che scegli, su questo dispositivo."
+  },
   "install": {
     "equivocation": "Esistono due versioni {{sequence}} diverse. Ghostly ha tenuto quella che hai.",
     "fetching": "Controllo dell'app…",
@@ -91,6 +102,8 @@
     "notListed": "In nessuno dei tuoi store",
     "perm": {
       "chat": "Parlare con la stessa app dal lato del tuo contatto",
+      "files": "Leggere i file e le cartelle che scegli, e condividerli con il tuo contatto nella chat",
+      "filesInfo": "Solo ciò che scegli, mai il resto del tuo dispositivo. L'app del tuo contatto può leggere ciò che condivide finché l'avete aperta entrambi.",
       "internet": "Usare internet",
       "internetInfo": "L'app e i server con cui parla possono sapere il tuo indirizzo IP e cosa fai nell'app.",
       "name": "Vedere il tuo nome in questa chat",

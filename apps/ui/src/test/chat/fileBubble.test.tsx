@@ -174,9 +174,9 @@ describe("FileBubble: files/3", () => {
     expect(screen.queryByTestId("file-request")).toBeNull();
     lost.unmount();
     show({ state: "failed", direction: "in", transferred: 0, size: 10, retry: true, error: "Every copy of this file arrived damaged and was deleted. Ask for it again later." });
-    expect(screen.getByTestId("file-status")).toHaveTextContent(/^Did not arrive$/);
+    expect(screen.getByTestId("file-status")).toHaveTextContent(/^The file arrived damaged$/);
     fireEvent.click(screen.getByTestId("file-why"));
-    expect(screen.getByTestId("file-why-text")).toHaveTextContent("arrived damaged");
+    expect(screen.getByTestId("file-why-text")).toHaveTextContent(/^Ask the group for it again later\.$/);
     expect(screen.getByTestId("file-request")).toHaveAttribute("title", "Asks the group's members for it again, those whose copy came damaged too.");
     fireEvent.click(screen.getByTestId("file-request"));
     await waitFor(() => expect(last(fakeEngine.callsTo("fileAction"))).toEqual({ linkId: "chat1", fileId: "chat1-in-abc", action: "request" }));

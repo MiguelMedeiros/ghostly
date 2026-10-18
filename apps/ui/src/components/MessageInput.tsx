@@ -22,7 +22,7 @@ import { LinkPreviewDraftCard } from "./composer/LinkPreviewDraft";
 import { EditBar, ReplyBar } from "./chat/ReplyQuote";
 import { useLinkPreviewDraft } from "../hooks/useLinkPreviewDraft";
 import { AttachmentSheet } from "./composer/AttachmentSheet";
-import { dragHasFiles, droppedFiles, pastedFiles, pasteNamesFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
+import { dragHasFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformPastedFiles } from "../lib/pastedFiles";
 import { onShareChange, peekShareFor, shareFiles, shareText, takeShareFor, type IncomingShare } from "../lib/incomingShare";
 import { fitFieldHeight } from "./composer/fieldHeight";
 import { useComposition } from "../hooks/useComposition";
@@ -122,6 +122,9 @@ interface Outgoing { words: string; named: GroupMention[]; preview?: LinkPreview
 const DEFAULT_MAX = 500;
 const TOAST_DURATION = 5_000;
 
+/** The same file on disk, picked again: a picker gives a new File each time. */
+const fileKey = (file: File) => `${file.name}\n${file.size}\n${file.lastModified}`;
+
 /**
  * The chat's composer, laid out as WhatsApp's: [+] [emoji/GIF] [message] in one rounded field, and the mic (send
  * once there is text) beside it. The + opens what else can go into the chat (a payment, an identity, shared services, a
@@ -172,6 +175,7 @@ export function MessageInput({
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState(() => draftId ? getSessionDraft(draftId) : "");
+  const textRef = useRef(text); textRef.current = text;
   const [toast, setToast] = useState<string | null>(null);
   /** `caption`: the guard asks about a pasted file's caption, not the draft. */
   const [secret, setSecret] = useState<{ finding: SecretFinding; caption?: string } | null>(null);
@@ -180,6 +184,12 @@ export function MessageInput({
   /** A paste the platform is reading: one at a time, and said on screen (the sheet opens only once every byte is here). */
   const [reading, setReading] = useState(false);
   const readingRef = useRef(false);
+  /**
+   * Files on their way, until the chat has them: said on screen (a group's large file is copied and hashed for seconds
+   * before anything shows), and one picked again meanwhile is not sent twice (a group keeps both for good).
+   */
+  const [preparing, setPreparing] = useState<File[]>([]);
+  const preparingKeys = useRef(new Set<string>());
   const [dragging, setDragging] = useState<HTMLElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -367,7 +377,8 @@ export function MessageInput({
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
-    if (value.length <= Math.max(maxLength, 16_384)) {
+    // A draft over the cap (a share, words given back after a failed send) takes every edit that shortens it.
+    if (value.length <= Math.max(maxLength, 16_384, text.length)) {
       setText(value);
       // Editing a sent message is not writing a new one.
       if (!edit) onTyping?.(value.trim() !== "");
@@ -382,16 +393,23 @@ export function MessageInput({
     if (textareaRef.current) fitFieldHeight(textareaRef.current);
   };
 
-  const handleEmojiSelect = (emoji: string) => {
-    const input = textareaRef.current;
-    const start = input?.selectionStart ?? text.length, end = input?.selectionEnd ?? text.length;
-    const next = text.slice(0, start) + emoji + text.slice(end);
-    if (next.length > Math.max(maxLength, 16_384)) return;
-    caretRef.current = start + emoji.length;
+  /** Words into the draft at the caret; false where the draft cannot take them. */
+  const insertText = (words: string): boolean => {
+    const input = textareaRef.current, draft = textRef.current;
+    const start = input?.selectionStart ?? draft.length, end = input?.selectionEnd ?? draft.length;
+    const next = draft.slice(0, start) + words + draft.slice(end);
+    if (next.length > Math.max(maxLength, 16_384)) return false;
+    caretRef.current = start + words.length;
     setText(next);
     onTyping?.(true);
+    return true;
+  };
+  const insertRef = useRef(insertText); insertRef.current = insertText;
+
+  const handleEmojiSelect = (emoji: string) => {
+    if (!insertText(emoji)) return;
     // On a phone the keyboard would cover the panel: the field takes the focus only on a wide screen.
-    if (!phone) input?.focus({ preventScroll: true });
+    if (!phone) textareaRef.current?.focus({ preventScroll: true });
   };
 
   const handleGifSelect = async (url: string) => {
@@ -427,11 +445,23 @@ export function MessageInput({
   /** One after the other, as + → Document sends them; the first that cannot go stops the rest. False then. */
   const sendChosen = async (chosen: File[]): Promise<boolean> => {
     if (!onSendFile || disabled || fileUnavailable) return false;
-    for (const file of chosen) {
-      const err = await onSendFile(file);
-      if (err) { showToast(err); return false; }
+    // The same file picked again (another File, the same name, size and date) while the first is still on its way.
+    const fresh = chosen.filter((file) => !preparingKeys.current.has(fileKey(file)));
+    fresh.forEach((file) => preparingKeys.current.add(fileKey(file)));
+    try {
+      for (const file of fresh) {
+        setPreparing((was) => [...was, file]);
+        const err = await onSendFile(file).finally(() => {
+          preparingKeys.current.delete(fileKey(file));
+          if (mounted.current) setPreparing((was) => was.filter((other) => other !== file));
+        });
+        if (err) { showToast(err); return false; }
+      }
+      return true;
+    } finally {
+      // The first that cannot go stops the rest: they can be picked again.
+      fresh.forEach((file) => preparingKeys.current.delete(fileKey(file)));
     }
-    return true;
   };
 
   const sendFiles = (files: FileList | null, input: HTMLInputElement) => {
@@ -462,13 +492,17 @@ export function MessageInput({
   /**
    * A paste's files to the sheet. True when the paste was taken; false leaves it to the field: no files, or a rich
    * copy, is text as it always was. A paste that showed nothing at all asks the platform (a webview may keep copied
-   * files or a picture from the page).
+   * files or a picture from the page), and so does a browser's copied picture: its address, if it came with one, goes
+   * into the draft when the platform finds no picture (`intoDraft`: the paste was aimed at the draft's field).
    */
-  const takePaste = (data: DataTransfer | null): boolean => {
+  const takePaste = (data: DataTransfer | null, intoDraft = false): boolean => {
     if (locked || edit) return false;
     const files = pastedFiles(data);
     if (files) return offerFiles(files);
-    if (!onSendFile || disabled || !pasteShowsNothing(data)) return false;
+    if (!onSendFile || disabled) return false;
+    const plain = data?.getData("text/plain") ?? "";
+    const picture = pasteIsPictureOnly(data) && (intoDraft || !plain);
+    if (!picture && !pasteShowsNothing(data)) return false;
     // Ctrl+V again while the first is read would read the same clipboard beside it: every file twice on the sheet.
     if (readingRef.current) return true;
     const read = platformPastedFiles();
@@ -483,14 +517,15 @@ export function MessageInput({
       ended();
       // Read to its end where files cannot go any more (an edit began meanwhile): said, as a paste never read is.
       if (found.length) { if (!offerRef.current(found)) showToast(t("errors.files.pasteLate")); }
-      else if (named) showToast(t("errors.files.pasteUnreadable"));
+      else if (picture && plain) { if (!insertRef.current(plain)) showToast(t("errors.files.pasteUnreadable")); }
+      else if (named || picture) showToast(t("errors.files.pasteUnreadable"));
     }, (error: unknown) => { ended(); showToast(problemLine(error, t)); });
     return true;
   };
   const takeRef = useRef(takePaste); takeRef.current = takePaste;
 
   const handlePaste = (e: ClipboardEvent) => {
-    if (takePaste(e.clipboardData)) e.preventDefault();
+    if (takePaste(e.clipboardData, true)) e.preventDefault();
   };
 
   /** A caption goes as a message of its own after the files, through the same checks as the draft. */
@@ -523,13 +558,23 @@ export function MessageInput({
       if (!waiting || (waiting.files.length && !canAttach && !fileUnavailable)) return;
       const share = takeShareFor(draftId)!;
       const shared = shareText(share);
-      if (shared) setText((was) => (was.trim() ? `${was}\n${shared}` : shared));
-      if (share.files.length) offerSharedRef.current(share);
+      // Longer than the field takes, or than one message can be once in the draft (counted in bytes, as Send counts):
+      // whole, as a text file on the sheet, where files can go.
+      const draft = textRef.current;
+      const joined = draft.trim() ? `${draft}\n${shared}` : shared;
+      const bytes = new TextEncoder().encode(joined.trim()).length;
+      const tooLong = joined.length > Math.max(maxLength, 16_384) || (!!maxBytes && bytes > maxBytes) || (!!textBytes && bytes > textBytes);
+      const asFile = !!shared && tooLong && canAttach;
+      if (shared && !asFile) setText((was) => (was.trim() ? `${was}\n${shared}` : shared));
+      if (asFile) {
+        const file = new File([shared], `${t("composer.sharedTextFile")}.txt`, { type: "text/plain" });
+        offerSharedRef.current({ ...share, read: async () => [file, ...await shareFiles(share)] });
+      } else if (share.files.length) offerSharedRef.current(share);
       else if (!touchOnly()) textareaRef.current?.focus();
     };
     take();
     return onShareChange(take);
-  }, [draftId, canAttach, fileUnavailable]);
+  }, [draftId, canAttach, fileUnavailable, maxLength, maxBytes, textBytes, t]);
 
   // A paste where no field has the focus (the chat's messages clicked last) still brings its files here: to the chat
   // on screen only. Every loaded chat's composer is mounted, and the document has one paste for all of them.
@@ -660,12 +705,19 @@ export function MessageInput({
       {t("composer.pasteReading")}
     </p>
   );
+  const preparingLine = preparing.length > 0 && !locked && (
+    <p role="status" data-testid="file-preparing" className="m-0 flex items-center gap-2 text-[13px] text-text-secondary animate-fade-in">
+      <span aria-hidden="true" className="inline-block size-4 shrink-0 animate-spin rounded-full border-2 border-accent border-e-transparent motion-reduce:animate-none" />
+      <span className="min-w-0 truncate">{t("composer.filePreparing", { name: preparing[0]!.name })}</span>
+    </p>
+  );
 
   return (
     <div ref={composerRef} data-composer className="@container/composer bg-panel-header px-3 max-md:px-2 py-2 composer-safe shrink-0 relative">
-      {(toastBox || readingLine) && !sheetOpen && (
+      {(toastBox || readingLine || preparingLine) && !sheetOpen && (
         <div className="absolute bottom-full left-4 right-4 mb-2 z-50 flex flex-col gap-2">
           {readingLine && <div className="self-start bg-panel-header border border-border rounded-lg px-3 py-2 shadow-lg">{readingLine}</div>}
+          {preparingLine && <div className="self-start max-w-full bg-panel-header border border-border rounded-lg px-3 py-2 shadow-lg">{preparingLine}</div>}
           {toastBox && <div role="alert" className="animate-fade-in">{toastBox}</div>}
         </div>
       )}

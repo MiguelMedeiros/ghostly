@@ -331,15 +331,17 @@ test("voice messages: on a phone the recorder's hint stays on the screen in a lo
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("lang", /^es/);
 
-  // A tap on the mic with a finger: the hint says how it works (on a loaded runner the tap can last long enough to be
-  // a hold too short to send, whose hint says it too).
-  const box = (await mic(page).boundingBox())!;
-  const finger = { pointerId: 7, pointerType: "touch", isPrimary: true, button: 0, buttons: 1, clientX: box.x + box.width / 2, clientY: box.y + box.height / 2 };
-  await mic(page).dispatchEvent("pointerdown", finger);
-  await mic(page).dispatchEvent("pointerup", { ...finger, buttons: 0 });
+  // A tap on the mic with a finger: the hint says how it works. Down and up in one go: sent one by one, a loaded runner
+  // put 350 ms and more between them, a hold long enough to record and send a voice message instead.
+  await mic(page).evaluate((button) => {
+    const box = button.getBoundingClientRect();
+    const finger = { pointerId: 7, pointerType: "touch", isPrimary: true, button: 0, bubbles: true, cancelable: true, composed: true, clientX: box.x + box.width / 2, clientY: box.y + box.height / 2 };
+    button.dispatchEvent(new PointerEvent("pointerdown", { ...finger, buttons: 1 }));
+    button.dispatchEvent(new PointerEvent("pointerup", { ...finger, buttons: 0 }));
+  });
   const hint = page.getByTestId("voice-hint");
-  await expect(hint).toHaveText(/Mantén pulsado para grabar, suelta para enviar$/);
-  // Its longest line, in the same box whichever came: a hold between 300 and 400 ms is too fine a timing to ask for.
+  await expect(hint).toHaveText("Mantén pulsado para grabar, suelta para enviar");
+  // Its longest line, in the same box: a hold between 300 and 400 ms, which shows it, is too fine a timing to ask for.
   const edges = await hint.evaluate((element) => {
     element.textContent = "Demasiado corto. Mantén pulsado para grabar, suelta para enviar";
     const box = element.getBoundingClientRect();

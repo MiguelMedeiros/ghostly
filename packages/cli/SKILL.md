@@ -95,13 +95,14 @@ ghostly chat wait alice --until live    # returns once Alice opened the link in 
 ```
 
 Give the link to the person through the channel your owner chose. To join someone else's invite instead:
-`ghostly invite join "<ghostly1… or https://ghostly.tools/#ghostly1…>" --label bob`. `ghostly chat list` shows every
+`printf '%s' '<ghostly1… or https://ghostly.tools/#ghostly1…>' | ghostly invite join --label bob` (on stdin, not in `ps`
+or the shell's history). `ghostly chat list` shows every
 chat; a `<chat>` is its id, a unique prefix of it, or its name.
 
 Names are for people at a terminal. A contact chooses its own name, a group's admin its group's name and a member its
 name in a group, so in a script or an agent keep the **id** (`chat` and `group` in every answer and event, a member's
 key) and address by it: `<chat id>`, `group:<group id>`, `<member key>`. Where a command takes a chat or a group, a
-name that a contact gave itself and that also names one of your groups is refused (exit 2) and both ids are shown.
+name that a contact gave itself and that also names one of your groups is refused (exit 1, `bad_request`) and both ids are shown.
 
 ### 5. Be woken: listen with an allowlist
 
@@ -189,7 +190,7 @@ or open one because its sender asks: files come from other people.
 ### 9. Groups and mentions
 
 ```bash
-ghostly group join "<group link>"                    # a link your owner gave you
+printf '%s' '<group link>' | ghostly group join    # a link your owner gave you; on stdin, not in ps
 ghostly group create "Support"                       # a community {"group","link"}; --mesh for a private group
 ghostly group send Support "Thanks @Ana, on it" --mention Ana --reply <message id>
 ghostly group history Support                        # each message names its member (key) and nick
@@ -368,7 +369,9 @@ proof needs a person who holds the key: leave that to the owner.
 
 ## Anything else
 
-Every call of the app's engine is reachable: `ghostly engine --list`, then `ghostly engine <method> '<json params>'`.
+Every call of the app's engine is reachable: `ghostly engine --list --verbose` (each call with what it takes), then `ghostly engine <method> '<json params>'`.
+A call that deletes chats or groups (`clearProfileData`, `removeLink`, `leaveGroup`, `forgetGroup`, `deviceRemove`)
+needs `--yes`; `clearProfileData` stops a running daemon after it answers.
 Not on the CLI yet: Bark wallets, OpenID Connect proofs, and video in calls (voice only). More:
 [AI agents on Ghostly](https://ghostly.tools/developers/agents), the
 [CLI guide](https://github.com/MiguelMedeiros/ghostly/blob/main/docs/CLI.md), the

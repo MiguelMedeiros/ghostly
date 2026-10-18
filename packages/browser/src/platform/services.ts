@@ -78,6 +78,20 @@ function preparingChanged(force = false): void {
   for (const listener of preparingListeners) listener();
 }
 
+/** A copy that stopped for want of room: the origin's quota, the OPFS worker's, or the disk's (Desktop). */
+function noRoom(error: unknown): boolean {
+  return (error as { name?: string })?.name === "QuotaExceededError" || /quota|space|full/i.test(error instanceof Error ? error.message : String(error));
+}
+/**
+ * A file being sent copied into this device, its failure said in the app's words (lib/errorText.ts): no room, or the
+ * file could not be read (changed on disk after the pick, gone, a storage that stopped), the system's reason kept.
+ */
+async function copying<T>(copy: Promise<T>): Promise<T> {
+  try { return await copy; } catch (error) {
+    throw new Error(noRoom(error) ? "Not enough space on this device to send it" : `Could not read the file: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+}
+
 /**
  * Saves bytes kept in memory (a small received file, a voice message made MP3 here) through the system's save
  * dialog where files are real files (Desktop): a copy staged next to them, saved, and removed only once the save
@@ -190,7 +204,10 @@ function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform 
     bitcoinReconfigureSource: (values) => engine.call("bitcoinReconfigureSource", { values, ...(network?{network}:{}) }),
     bitcoinReceiveAddress: () => engine.call("bitcoinReceiveAddress", on),
     bitcoinRefresh: () => engine.call("bitcoinRefresh", on),
-    payQuote: async (quote, mint, note, confirmedReal) => (await engine.call("walletPayQuote", { quote, mint, note, ...(confirmedReal ? { confirmedReal: true as const } : {}) })).paid,
+    payQuote: async (quote, mint, note, confirmedReal, chat) => {
+      const linkId = chat && engine.linkByPeer(chat.peerPubKey)?.id;
+      return (await engine.call("walletPayQuote", { quote, mint, note, ...(confirmedReal ? { confirmedReal: true as const } : {}), ...(chat && linkId ? { linkId, invoice: chat.invoice } : {}) })).paid;
+    },
     resolveLightningAddress: (text) => engine.call("lnurlResolve", { text, ...(network?{network}:{}) }),
     lightningAddressInvoice: (id, amount, comment) => engine.call("lnurlInvoice", { id, amount, comment, ...(network?{network}:{}) }),
     async checkPayment(peerPubKeyZ32, paymentId) {
@@ -375,9 +392,9 @@ export const servicesPlatform: ServicesPlatform | null = {
     const transfer = { state: "transferring" as const, transferred: 0, size: file.size };
     if (source.size <= SMALL_FILE_BYTES) {
       // Its digest from the bytes in hand (a recording in memory): sending never has to read the stored copy back whole.
-      const digest = await blobDigest(source);
+      const digest = await copying(blobDigest(source));
       keepJustSent(file.id, new Blob([source], { type: file.mime }));
-      await fileStore.put({ id: file.id, linkId: link.id, blob: source, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer });
+      await copying(fileStore.put({ id: file.id, linkId: link.id, blob: source, digest, createdAt: timestamp, direction: "out", wireId, metadata, transfer }));
       try {
         await engine.call("sendFile", { linkId: link.id, file, timestamp, ...(replyTo && { replyTo }) });
       } catch (error) {
@@ -444,13 +461,15 @@ export const servicesPlatform: ServicesPlatform | null = {
     const timestamp = Date.now();
     const metadata = { name: file.name, size: file.size, mime, timestamp, voice: file.voice, video: file.video, image: file.image };
     const record = { id: file.id, linkId: `group:${groupId}`, createdAt: timestamp, direction: "out" as const, metadata, transfer: { state: "transferring" as const, transferred: 0, size: file.size } };
-    if (source.size <= SMALL_FILE_BYTES) {
-      keepJustSent(file.id, new Blob([source], { type: mime }));
-      await fileStore.put({ ...record, blob: source, digest: await blobDigest(source) });
-    } else {
-      const bytes = await fileBytes();
-      await fileStore.put({ ...record, bytes: bytes.kind, digest: await bytes.stage(file.id, source) });
-    }
+    await copying((async () => {
+      if (source.size <= SMALL_FILE_BYTES) {
+        keepJustSent(file.id, new Blob([source], { type: mime }));
+        await fileStore.put({ ...record, blob: source, digest: await blobDigest(source) });
+      } else {
+        const bytes = await fileBytes();
+        await fileStore.put({ ...record, bytes: bytes.kind, digest: await bytes.stage(file.id, source) });
+      }
+    })());
     const result = await engine.call("sendGroupFile", { groupId, file, ...(options?.replyTo && { replyTo: options.replyTo }) })
       .catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error), messageId: undefined }));
     if (result.error) {

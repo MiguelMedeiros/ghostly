@@ -48,6 +48,8 @@ describe("changelog fragments", () => {
     expect(fragment("### For users", "- x").problems[0]).toMatch(/without #/);
     expect(fragment("A / B / C", "- x").problems[0]).toMatch(/section/);
     expect(fragment("For users / Chat", "- a — b").problems[0]).toMatch(/dashes/);
+    expect(fragment("Fixed / Chats", "- x").problems).toEqual(['docs/changelog/unreleased/x.md: the group is written "Chat", not "Chats"']);
+    expect(fragment("Fixed / Wallet", "- x").problems[0]).toMatch(/"Wallets", not "Wallet"/);
   });
 
   it("adds items at the end of their group, of their heading, or in a new one", () => {

@@ -265,7 +265,9 @@ const opened: GhostLink[] = [];
 /** One side's link, as the engine opens it for a chat never paired (node.ts `startLink` + the joiner's `expectPeer`). */
 export function open(side: Side, pkarr: MemoryPkarr, options: { active?: boolean; pollIntervals?: PollIntervals; dht?: boolean; credentials?: PairingCredentials; dhtState?: DhtDeliveryState;
   /** A group's entry session opens its links so (node.ts `startEdge`); a Linux Desktop's have no WebRTC (`rtcAvailable`). */
-  link?: Pick<GhostLinkOptions, "oneShot" | "firstPublish" | "rtcAvailable">; onDataLinkState?: (state: DataLinkState) => void } = {}): Opened {
+  link?: Pick<GhostLinkOptions, "oneShot" | "firstPublish" | "rtcAvailable">; onDataLinkState?: (state: DataLinkState) => void;
+  /** The app's relay client, for links of one app: each opens its own by default. */
+  transport?: PkarrTransport } = {}): Opened {
   const progress: PairingProgress[] = [], pinned: string[] = [];
   const received: Opened["received"] = [], receipts: string[] = [], states: PairingState[] = [];
   // The key the invite named, as the engine passes it (node.ts `expectedPeerKey: stored.peerParticipationKeyZ32`).
@@ -281,7 +283,7 @@ export function open(side: Side, pkarr: MemoryPkarr, options: { active?: boolean
     }, trustOnFirstUse: true },
     dht: options.dht ? { state: result.dhtState, save: async state => { result.dhtState = state; } } : undefined,
     pairingProgress: side.old ? undefined : { role: side.role, startedAt: side.createdAt },
-    transport: pkarr.transport(),
+    transport: options.transport ?? pkarr.transport(),
     pollIntervals: options.pollIntervals ?? DHT_POLL_INTERVALS,
     autoConnect: true,
     ...options.link,

@@ -468,12 +468,14 @@ export class PaymentDesk {
   }
 
   /**
-   * Why a token cannot pay a request to the group, checked before anything is redeemed: already paid, or it would
-   * not settle it (too little, a mint the request did not name). Undefined when it can.
+   * Why a token cannot pay a request to the group, checked before anything is redeemed: already paid, another member's
+   * ecash for it still being redeemed (the mint has not answered), or it would not settle it (too little, a mint the
+   * request did not name). Undefined when it can.
    */
-  private refuseForGroup(request: StoredPayment, payment: Payment): string | undefined {
+  private async refuseForGroup(request: StoredPayment, payment: Payment): Promise<string | undefined> {
     if (request.state !== "pending") return "Already paid by another member of the group";
-    const token = this.wallet.inspect?.(payment.endpoint[1]);
+    if (await this.wallet.redeemingFor?.(request.id)) return "Another member of the group is paying it";
+    const token = await this.wallet.inspect?.(payment.endpoint[1]);
     if (token && token.kind === "token" && (token.amount < request.amount || !(request.mints ?? []).includes(token.mint)))
       return "This ecash does not pay the request: the amount or the mint differs";
     return undefined;
@@ -565,6 +567,17 @@ export class PaymentDesk {
   private sayPaid(link: PaymentLink | null, request: StoredPayment): void {
     if (!link || !request.invoice || paymentNetwork(request) !== "testnet") return;
     void this.sendTo(link, { id: newId(), timestamp: Date.now(), requestId: request.id, amount: { value: String(request.amount), asset: UNIT }, endpoint: [ENDPOINT.bolt11, request.invoice] }).catch(() => {});
+  }
+
+  /**
+   * A Testnet invoice found in a chat message, paid from its card: the chat's contact is told as `sayPaid` does, with
+   * no request (it may be one from their Receive screen, held until a payer says it paid).
+   */
+  sayInvoicePaid(linkId: string, invoice: string): void {
+    const link = this.host.getLink(linkId);
+    const amount = decodeBolt11(invoice)?.amountSat;
+    if (!link || !amount) return;
+    void this.sendTo(link, { id: newId(), timestamp: Date.now(), amount: { value: String(amount), asset: UNIT }, endpoint: [ENDPOINT.bolt11, invoice.trim()] }).catch(() => {});
   }
 
   /**
@@ -784,7 +797,7 @@ export class PaymentDesk {
 
   onPayment(linkId: string, payment: Payment): Promise<void> {
     // Payments of one request to a group, from several members, one after the other: the first settles it, the
-    // others then find it paid and are refused before anything is redeemed.
+    // others then find it paid, or still being redeemed when the mint did not answer, and are refused before anything is redeemed.
     const key = payment.requestId && this.payments.get(payment.requestId)?.group ? `request:${payment.requestId}` : payment.id;
     const running = this.receiving.get(key);
     // Serialise even a collision from a different link, then re-check ownership.
@@ -820,7 +833,7 @@ export class PaymentDesk {
       link?.sendPaymentResult({ id: payment.id, ok: false, error: "Cashu is off in this chat" });
       return;
     }
-    const inspected = this.wallet.inspect?.(payment.endpoint[1]);
+    const inspected = await this.wallet.inspect?.(payment.endpoint[1]);
     // Ecash the network check cannot read (a `cashu:` prefix, say) is refused unredeemed, never let through unchecked.
     if (payment.endpoint[0] === ENDPOINT.cashu && inspected !== undefined && inspected?.kind !== "token") {
       link.sendPaymentResult({ id: payment.id, ok: false, error: "That is not a valid ecash token" });
@@ -832,7 +845,7 @@ export class PaymentDesk {
     }
     const forGroup = payment.requestId ? this.payments.get(payment.requestId) : undefined;
     if (forGroup?.group && forGroup.kind === "request" && forGroup.direction === "out" && this.owns(forGroup, linkId)) {
-      const refused = this.refuseForGroup(forGroup, payment);
+      const refused = await this.refuseForGroup(forGroup, payment);
       // Not redeemed either: the member takes it back.
       if (refused) { link.sendPaymentResult({ id: payment.id, ok: false, error: refused }); return; }
     }
@@ -1039,6 +1052,7 @@ export class PaymentDesk {
    */
   private async receiveCheck(linkId: string, payment: Payment): Promise<void> {
     const link = this.host.getLink(linkId);
+    if (link && !payment.requestId && payment.endpoint[0] === ENDPOINT.bolt11) return this.receiveInvoicePaid(linkId, link, payment.endpoint[1]);
     const request = payment.requestId ? this.payments.get(payment.requestId) : undefined;
     if (!link || !request || request.kind !== "request" || request.direction !== "out" || !this.owns(request, linkId)) return;
     const rail = request.target ? request.target.method : request.invoice ? "lightning" : undefined;
@@ -1055,6 +1069,23 @@ export class PaymentDesk {
       else if (rail === "spark") await this.reconcileSparkReceipts();
       else await this.reconcileArkReceipts();
     } catch { /* the wallet could not be asked right now: the regular checks go on */ }
+  }
+
+  /**
+   * The contact says it paid an invoice of ours it found in the chat, with no request: a Receive-screen invoice is
+   * held on a test mint until then (StoredQuote `held`), and that one alone is let go. A request's invoice is spoken
+   * for by its own contact only (`receiveCheck`). Bounded: one look every 3 seconds per chat.
+   */
+  private async receiveInvoicePaid(linkId: string, link: PaymentLink, invoice: string): Promise<void> {
+    if (!link.allowsPayment("lightning")) return;
+    const now = Date.now();
+    if (now - (this.lastCheckFrom.get(`chat:${linkId}`) ?? 0) < 3_000) return;
+    this.lastCheckFrom.set(`chat:${linkId}`, now);
+    const wanted = invoice.trim().toLowerCase();
+    try {
+      const quote = (await this.wallet.quotes()).find((q) => q.held && !q.paymentId && q.invoice.toLowerCase() === wanted);
+      if (quote) await this.wallet.vouch(quote.invoice);
+    } catch { /* the wallet could not be asked right now: the invoice stays held until it expires */ }
   }
 
   /** A Lightning payment of a contact's request that was left pending (or unknown) settled. */

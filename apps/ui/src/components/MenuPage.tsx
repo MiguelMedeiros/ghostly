@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState, useSyncExternalStore, type ComponentType } from "react";
 import { useT } from "../contexts/I18nContext";
+import { reloadIfServed } from "../lib/reloadIfServed";
 
 /**
  * A page of the menu, loaded the first time it is opened: the first screen (the chat list) does not wait for them.
@@ -42,8 +43,9 @@ export function menuPage<P extends object>(load: () => Promise<ComponentType<P>>
 function PageNotLoaded({ again, retried }: { again: () => Promise<void>; retried: boolean }) {
   const t = useT();
   const [busy, setBusy] = useState(false);
-  // Chromium keeps a failed import for as long as the page lives, so there "Try again" cannot bring the file: once it
-  // has failed, Reload is offered beside it. Firefox and Safari ask the server again.
+  // A browser that keeps a failed import for as long as the page lives (older Chromium builds did) cannot bring
+  // the file with "Try again": once it has failed, Reload is offered beside it. Chromium 156, Firefox and Safari ask
+  // the server again.
   const [failedAgain, setFailedAgain] = useState(retried);
   const retry = async (button: HTMLButtonElement) => {
     if (busy) return;
@@ -62,11 +64,8 @@ function PageNotLoaded({ again, retried }: { again: () => Promise<void>; retried
   const reload = async () => {
     if (busy) return;
     setBusy(true);
-    // Only into a page the server answers for: a reload with no connection leaves the browser's own error page, and
-    // no app at all.
-    try {
-      if ((await fetch(location.pathname, { method: "HEAD", cache: "no-store" })).ok) { location.reload(); return; }
-    } catch { /* no connection yet: the notice stays */ }
+    // Only into a page the server answers for; with no connection yet the notice stays.
+    await reloadIfServed();
     setBusy(false);
   };
   const button = "px-4 py-2 rounded-lg text-sm font-semibold cursor-pointer aria-disabled:opacity-60 aria-disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-chat-bg";

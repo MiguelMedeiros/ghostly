@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { ENGINE_ERRORS, engineText, type EngineErrorCode } from "@ghostly/core";
 import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/errorText";
 import { english } from "../../lib/english";
+import { problemText } from "../../lib/problemText";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES } from "./locales";
 
@@ -42,7 +43,18 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This message was edited 100 times, the most one takes.", "packages/browser/src/engine/node.ts", "This message was edited ${most} times, the most one takes."],
   ["That message is not in this chat, or cannot be replied to", "packages/browser/src/engine/node.ts"],
   ["That message cannot be replied to", "packages/browser/src/engine/node.ts"],
+  ["That message is not in this chat", "packages/browser/src/engine/node.ts"],
+  ["No message to forward", "packages/browser/src/engine/node.ts"],
   ["There is no room left on this device for a new chat", "apps/ui/src/lib/storage.ts"],
+  // Any engine call whose storage write the browser refused for want of space (engine/server.ts): Chromium's message is empty.
+  ["Not enough space on this device (QuotaExceededError)", `${BROWSER}/shared/idb.ts`, "Not enough space on this device ("],
+  ["Not enough space on this device (QuotaExceededError: The quota has been exceeded.)", `${BROWSER}/shared/idb.ts`, "Not enough space on this device ("],
+  ["Not enough space on this device (No space left on device (os error 28))", `${BROWSER}/engine/forwards.ts`, "Not enough space on this device ("],
+  // A part that loads on demand whose file did not come (offline before the worker kept it, or a deploy replaced it under
+  // an open tab): the browser's own words, Chromium's, WebKit's and Firefox's. The part written there is the load.
+  ["Failed to fetch dynamically imported module: https://app.ghostly.tools/assets/index-AbC123.js", `${BROWSER}/engine/wallet.ts`, 'import("@cashu/cashu-ts")'],
+  ["Importing a module script failed.", `${BROWSER}/engine/paymentAdapters/providers/nwcProvider.ts`, 'await import("./nwc")'],
+  ["error loading dynamically imported module: https://app.ghostly.tools/assets/bitcoind-AbC123.js", `${BROWSER}/engine/paymentAdapters/providers/bitcoindProvider.ts`, 'await import("./bitcoind")'],
   ["Someone else joined with this invite first. Ask your contact for a new one.", "packages/core/src/ghostlink.ts"],
   ["Chat has been burned", "packages/browser/src/platform/useChat.ts"],
   ["No transport both apps allow is available yet", `${CORE}/ghostlink.ts`],
@@ -55,6 +67,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Transport change cancelled", `${CORE}/ghostlink.ts`],
   ["Transport preferences do not overlap. Enable fallback or choose the same supported transport on both sides.", `${CORE}/transportSwitch.ts`],
   ["Peer native address unavailable; reconnect WebRTC once to exchange endpoints", `${CORE}/ghostlink.ts`],
+  ["Peer native address unavailable; the contact's app has not given it yet", `${CORE}/ghostlink.ts`],
   ["Native connection limit reached", "native/transports/hyperdht/endpoint.mjs"],
   ["HyperDHT handshake timed out", "native/transports/hyperdht/endpoint.mjs"],
   ["Noise handshake failed", "native/transports/hyperdht/endpoint.mjs"],
@@ -150,6 +163,9 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Could not store the file: The stored copy is gone", `${CORE}/chatFiles.ts`, "Could not store the file: "],
   ["Your contact could not take this file", `${CORE}/chatFiles.ts`],
   ["That file is too large (max 64 MB).", `${BROWSER}/platform/services.ts`, "That file is too large (max "],
+  // A file forwarded that is still arriving here, or whose bytes are gone (a copy of mine that failed, "Not sent").
+  ["The file has not arrived yet", `${BROWSER}/engine/forwards.ts`],
+  ["The file is not on this device any more", `${BROWSER}/engine/forwards.ts`],
   ["That is not a valid mint URL", CODES],
   ["Mints must use https", CODES],
   ["Enter an amount in sats", `${BROWSER}/engine/wallet.ts`],
@@ -192,6 +208,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["A Lightning payment for this request is still pending", `${BROWSER}/engine/payments.ts`],
   ["You already paid this request", `${BROWSER}/engine/payments.ts`],
   ["Already paid by another member of the group", `${BROWSER}/engine/payments.ts`],
+  ["Another member of the group is paying it", `${BROWSER}/engine/payments.ts`],
   ["The payment was refused", `${BROWSER}/engine/payments.ts`],
   // A refused send's review once its ecash came back (refusedLine): what came back, less what the mint kept.
   ["Refused: Already paid by another member of the group. 98 sats came back; the mint kept 2 as its fee.", `${BROWSER}/engine/payments.ts`, " came back; the mint kept ${back.fee} as its fee."],
@@ -234,9 +251,11 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["An edit cannot be empty", `${CORE}/groupSession.ts`],
   ["Too long to edit in this group", `${CORE}/groupCommunity.ts`],
   ["Only the admin can invite", `${BROWSER}/engine/groups.ts`],
+  ["Managing this group is off on this device. Turn on Manage groups from this device first.", `${CORE}/groupCommits.ts`],
   ["This contact is already a member", `${BROWSER}/engine/groups.ts`],
   ["A group holds 32 members at most", `${BROWSER}/engine/groups.ts`, " members at most"],
-  ["Connect to this contact first. Their app needs groups (an updated Ghostly).", `${BROWSER}/engine/groups.ts`],
+  ["This contact is not connected right now. Invite them when they are online.", `${BROWSER}/engine/groups.ts`],
+  ["Their app does not take part in groups: they need an updated Ghostly first.", `${BROWSER}/engine/groups.ts`],
   ["The contact who invited you is not connected. Try again when they are.", `${BROWSER}/engine/groups.ts`],
   ["You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first.", `${BROWSER}/engine/groups.ts`],
   ["Nobody in the group is connected right now to take your leave. Try again in a moment.", `${BROWSER}/engine/community.ts`],
@@ -251,6 +270,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["This link names a private group of yours, not a community", `${BROWSER}/engine/groups.ts`],
   ["Go online to join a group", `${BROWSER}/engine/node.ts`],
   ["Only the admin can change the members of this group", `${CORE}/groupSession.ts`],
+  ["Only the admin can renew the group's secret", `${CORE}/groupSession.ts`],
   ["Only the admin can do that", `${CORE}/groupCommunity.ts`],
   ["Make someone else the admin before leaving", `${CORE}/groupSession.ts`],
   ["Only the admin can change the group's picture", `${CORE}/groupSession.ts`],
@@ -267,6 +287,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["You sent many files to this group just now. Wait a minute.", `${BROWSER}/engine/groupFiles.ts`, "You sent many files to this group just now. Wait ${minutes > 1 ? `${minutes} minutes` : \"a minute\"}."],
   ["You sent many files to this group just now. Wait 7 minutes.", `${BROWSER}/engine/groupFiles.ts`, "You sent many files to this group just now. Wait ${minutes > 1 ? `${minutes} minutes` : \"a minute\"}."],
   ["Not enough space on this device for this file", `${BROWSER}/engine/groupFiles.ts`],
+  ["Every copy of this file arrived damaged and was deleted. Ask for it again later.", `${BROWSER}/engine/groupFiles.ts`],
   ["An empty file cannot go to a group", `${BROWSER}/platform/services.ts`],
   ["This app takes no group files", `${BROWSER}/engine/groups.ts`],
   ["A group takes files of up to 100.0 MB", `${BROWSER}/engine/node.ts`, "A group takes files of up to "],
@@ -495,10 +516,87 @@ describe("errors in the app's language", () => {
       title: "Não há espaço suficiente neste dispositivo", next: "Libere espaço e escolha o arquivo de novo." });
   });
 
+  it.each(LANGUAGES)("a storage that is full when a group is made or a text sent says so and what to do in %s, its name behind the ⓘ", (language) => {
+    const t = translators[language];
+    const raw = "Not enough space on this device (QuotaExceededError)";
+    expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.app.noRoom"), next: t("errors.app.noRoomNext"), detail: raw });
+    expect(problemText(new Error(raw), t).title).not.toBe(t("errors.generic"));
+  });
+
+  it.each(LANGUAGES)("a forward's copy Desktop's disk had no room for says so in %s, the system's English behind the ⓘ", (language) => {
+    const t = translators[language];
+    const raw = "Not enough space on this device (No space left on device (os error 28))";
+    expect(problemText(new Error(raw), t)).toEqual({ tone: "error", title: t("errors.app.noRoom"), next: t("errors.app.noRoomNext"), detail: raw });
+  });
+
+  it("Windows' full disk, as the Desktop's file store says it (file_store.rs io_text), reads as no room on a forward and on a file received", () => {
+    const pt = translators.pt;
+    const windows = "No space left on device: Não há espaço suficiente no disco. (os error 112)";
+    const forward = `Not enough space on this device (${windows})`;
+    expect(problemText(new Error(forward), pt)).toEqual({ tone: "error", title: pt("errors.app.noRoom"), next: pt("errors.app.noRoomNext"), detail: forward });
+    const received = `Could not store the file: ${windows}`;
+    expect(knownErrorParts(received, pt)).toMatchObject({ title: pt("errors.files.noRoomHere"), next: pt("errors.files.noRoomHereNext") });
+  });
+
+  it("a storage that is full says the same with the browser's own message, and reads in English as a sentence and its next step", () => {
+    const raw = "Not enough space on this device (QuotaExceededError: The quota has been exceeded.)";
+    expect(problemText(new Error(raw), english)).toEqual({ tone: "error", title: "Not enough space on this device", next: "Free some space, then try again.", detail: raw });
+  });
+
+  it("a picked file that changed on disk before its copy says it cannot be read and what to do, not the browser's English", () => {
+    const pt = translators.pt;
+    const changed = "Could not read the file: The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired.";
+    expect(knownErrorParts(changed, pt)).toEqual({ title: "Não foi possível ler o arquivo", next: "Envie de novo ou escolha o arquivo outra vez.", detail: changed });
+  });
+
+  it("a group's file every holder served damaged says so, and that the group is asked again, not a contact", () => {
+    const damaged = "Every copy of this file arrived damaged and was deleted. Ask for it again later.";
+    expect(knownErrorParts(damaged, translators.pt)).toEqual({ title: "O arquivo chegou danificado", next: "Peça de novo ao grupo mais tarde." });
+    expect(knownErrorParts(damaged, english)).toEqual({ title: "The file arrived damaged", next: "Ask the group for it again later." });
+  });
+
+  it("a forward refused for a file still arriving or no longer here says why and what to do, in the language", () => {
+    const pt = translators.pt;
+    expect(knownErrorParts("The file has not arrived yet", pt)).toEqual({ title: "Ainda não recebido", next: "Espere ele chegar e encaminhe depois." });
+    expect(knownErrorParts("The file has not arrived yet", english)).toEqual({ title: "Not received yet", next: "Wait until it has arrived, then forward it." });
+    expect(knownErrorParts("The file is not on this device any more", pt)).toEqual({ title: "Este arquivo não está neste dispositivo", next: "Envie de onde você o tem." });
+    expect(knownErrorParts("The file is not on this device any more", english)).toEqual({ title: "This file is not on this device", next: "Send it from where you have it." });
+  });
+
   it("an action refused in limited mode says why and what to do, in the language", () => {
     const refused = new Error("Ghostly could not check which device is active yet. This works once it can.");
     expect(knownErrorParts(refused, translators.pt)).toEqual({ title: "Não foi possível verificar qual dispositivo está ativo", next: "Isso volta a funcionar quando a verificação der certo. Confira sua conexão." });
     expect(knownErrorParts(refused, english)).toEqual({ title: "Can't check which device is active", next: "This works once the check does. Check your connection." });
+  });
+
+  it("an Invite or a Remove on a device where managing the group is off points at the group's Turn on, in the language", () => {
+    const off = new Error("Managing this group is off on this device. Turn on Manage groups from this device first.");
+    expect(knownErrorParts(off, english)).toEqual({ title: "Managing this group is off on this device", next: "Turn it on first: Manage groups from this device, on the group's page." });
+    expect(knownErrorParts(off, translators.pt)?.title).toBe("Gerenciar este grupo está desligado neste dispositivo");
+  });
+
+  it("an Invite to a contact whose app is only closed says to invite them once online, not to update", () => {
+    const away = new Error("This contact is not connected right now. Invite them when they are online.");
+    expect(knownErrorParts(away, english)).toEqual({ title: "This contact is offline", next: "Invite them when they're online." });
+    expect(knownErrorParts(away, translators.pt)).toEqual({ title: "Este contato está offline", next: "Convide quando ele estiver online." });
+    const old = new Error("Their app does not take part in groups: they need an updated Ghostly first.");
+    expect(knownErrorParts(old, english)).toEqual({ title: "Their app needs an update first", next: "Their app needs groups (an updated Ghostly)." });
+  });
+
+  it("a contact's unknown native address with no WebRTC between the two apps says it comes from them, not to reconnect over WebRTC", () => {
+    const withRtc = new Error("Peer native address unavailable; reconnect WebRTC once to exchange endpoints");
+    expect(knownErrorParts(withRtc, english)?.next).toBe("Reconnect over WebRTC once to exchange it.");
+    const noRtc = new Error("Peer native address unavailable; the contact's app has not given it yet");
+    expect(knownErrorParts(noRtc, english)).toEqual({ title: "Your contact's address for this transport isn't known yet", next: "It comes once your contact opens this chat in their app.", detail: noRtc.message });
+    expect(knownErrorParts(noRtc, translators.pt)?.next).toBe("Chega quando o contato abrir esta conversa no app.");
+  });
+
+  it("a part of Ghostly that did not load is said in the language, not in the browser's English", () => {
+    const pt = translators.pt;
+    for (const raw of ["Failed to fetch dynamically imported module: https://app.ghostly.tools/assets/index-AbC123.js", "Importing a module script failed.", "error loading dynamically imported module: https://app.ghostly.tools/assets/x.js"]) {
+      expect(problemText(new TypeError(raw), pt)).toEqual({ tone: "error", title: "Uma parte do Ghostly não carregou.", next: "Verifique sua conexão e tente de novo. Se continuar falhando, recarregue o Ghostly.", detail: raw });
+    }
+    expect(errorText(new TypeError("Importing a module script failed."), english)).toBe("Part of Ghostly did not load. Check your connection, then try again. If it still fails, reload Ghostly.");
   });
 
   it("each rule has a sample, so none stops matching unseen", () => {

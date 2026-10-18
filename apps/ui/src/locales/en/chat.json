@@ -177,6 +177,7 @@
     "messages": "{{count}} messages",
     "noChats": "No chats yet",
     "noMatch": "No chat by that name",
+    "partial": "{{sent}} of {{count}} sent",
     "pick": "Pick up to {{count}}",
     "search": "Search chats",
     "select": "Select",
@@ -275,6 +276,11 @@
     "retry": "Send again"
   },
   "noMessages": "No messages",
+  "nowPlaying": {
+    "close": "Stop and close",
+    "label": "Now playing",
+    "open": "Show in the chat"
+  },
   "offline": "offline",
   "online": "online",
   "options": "Options",

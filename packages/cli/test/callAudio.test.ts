@@ -480,6 +480,32 @@ describe("a call's audio through Opus", () => {
     }
   });
 
+  for (const rate of [48000, 16000] as const) {
+    it(`conceals a packet lost on the way at ${rate} Hz, not 20 ms of silence (a click) in what the program gets`, async () => {
+      const stack = await loadCallStack();
+      if (typeof stack === "string") throw new Error(stack);
+      const frames: Buffer[] = [];
+      let listener: (p: Buffer) => void = () => {};
+      const audio = new CallAudio({
+        rate, payloadType: 111, ssrc: 1, encoder: stack.opus(rate), decoder: stack.opus(rate), onFrame: (f) => frames.push(f),
+        track: { send: () => {}, onPacket: (l) => { listener = l; } },
+      });
+      // The contact's side: a steady tone; packet 20 never arrives, nor 30 and 31.
+      const encoder = stack.opus(rate), writer = new RtpWriter(2, 111);
+      for (let k = 0; k < 50; k++) {
+        const packet = writer.packet(encoder.encode(tone(440, rate, 20, 0.3, (k * rate) / 50), rate / 50));
+        if (k !== 20 && k !== 30 && k !== 31) listener(packet);
+      }
+      // A frame handed on for each one, lost or not, and every one of them the tone (Opus settles in a few).
+      expect(frames.length).toBe(50);
+      const levels = frames.map(level);
+      expect(Math.min(...levels.slice(5)), `levels ${levels.slice(15, 35).map((x) => x.toFixed(3))}`).toBeGreaterThan(0.05);
+      expect(dominantHz(Buffer.concat(frames.slice(18, 34)), rate)).toBeCloseTo(440, -1);
+      audio.stop();
+      encoder.delete?.();
+    });
+  }
+
   it("stops sending the program's audio the moment it is flushed", async () => {
     const { a, b, heard } = await pair(48000);
     a.queue.push(tone(440, 48000, 3000));

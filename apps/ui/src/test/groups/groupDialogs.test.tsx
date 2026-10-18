@@ -7,6 +7,7 @@ import { GroupMembersDialog } from "../../components/GroupMembersDialog";
 import { NewGroupDialog } from "../../components/NewGroupDialog";
 import { fakeEngine, groupView, linkView } from "../fakeEngine";
 import { renderApp } from "../render";
+import { compose } from "../ime";
 import { publicKeyLabel } from "../../lib/publicKeyLabel";
 
 // covers: groups.create, groups.invite, groups.remove-member, groups.admin-change, groups.link.enable, groups.link.replace, groups.hubs
@@ -252,6 +253,43 @@ describe("GroupMembersDialog", () => {
     expect(within(screen.getByTestId("group-invite-contact")).getByText("Carol")).toHaveAttribute("dir", "auto");
   });
 
+  it("Invite from the keyboard keeps the focus: on the button while it runs, then on the contact's row, which says Invited", async () => {
+    const group = groupView({ status: "active", isAdmin: true, members });
+    const { user, engine } = members_(group, [paired({ id: "link-carol", label: "Carol" })]);
+    let done = () => {};
+    engine.on("inviteToGroup", () => new Promise<void>(resolve => { done = resolve; }));
+    const invite = screen.getByTestId("group-invite");
+    invite.focus();
+    await user.keyboard("{Enter}");
+    // Not disabled while it runs: that drops a keyboard's focus to the page. A second press does nothing.
+    expect(invite).not.toBeDisabled();
+    expect(invite).toHaveAttribute("aria-disabled", "true");
+    expect(invite).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("inviteToGroup")).toHaveLength(1);
+    act(() => fakeEngine.update({ groups: [{ ...group, invited: ["link-carol"] }] }));
+    done();
+    const row = screen.getByTestId("group-invite-contact");
+    await vi.waitFor(() => expect(row).toHaveFocus());
+    expect(row).toHaveTextContent("CarolInvited…");
+  });
+
+  it("Remove picture from the keyboard leaves the focus on Change picture's control, which stays", async () => {
+    const group = groupView({ status: "active", isAdmin: true, members, picture: "data:image/jpeg;base64,AA" });
+    const { user, engine } = members_(group);
+    let done = () => {};
+    engine.on("setGroupPicture", () => new Promise<void>(resolve => { done = resolve; }));
+    const remove = screen.getByTestId("group-picture-remove");
+    remove.focus();
+    await user.keyboard("{Enter}");
+    expect(remove).not.toBeDisabled();
+    expect(remove).toHaveAttribute("aria-disabled", "true");
+    act(() => fakeEngine.update({ groups: [{ ...group, picture: undefined }] }));
+    done();
+    await vi.waitFor(() => expect(screen.getByTestId("group-picture-input")).toHaveFocus());
+    expect(screen.queryByTestId("group-picture-remove")).not.toBeInTheDocument();
+  });
+
   it("names an unnamed contact by their key", () => {
     members_(groupView({ status: "active", isAdmin: true, members }), [paired({ id: "link-x", peerPubKeyZ32: "k".repeat(52) })]);
     expect(screen.getByTestId("group-invite-contact")).toHaveTextContent("Contact · kkkkkk");
@@ -489,6 +527,67 @@ describe("NewGroupDialog", () => {
     expect(input).toHaveValue(family.repeat(9));
     await user.type(input, "{Enter}");
     expect(engine.callsTo("createGroup")).toEqual([{ name: family.repeat(9), profile: "community" }]);
+  });
+
+  // Cutting the new value's end dropped the name's last character, threw the caret to the end and cut the rest of what
+  // was typed there (agents#1097). A full name takes nothing more at the caret, and keeps its end and the caret.
+  it("typing into the middle of a full name adds nothing there and keeps its end and the caret; a paste keeps what fits", async () => {
+    const { user } = open();
+    const input = screen.getByTestId("new-group-name") as HTMLInputElement;
+    const full = "Weekend trip to the mountains with the whole family and friends!";
+    expect([...full]).toHaveLength(MAX_GROUP_NAME_LENGTH);
+    await user.paste(full);
+    await user.type(input, "long ", { initialSelectionStart: 8, initialSelectionEnd: 8 });
+    expect(input).toHaveValue(full);
+    expect(input.selectionStart).toBe(8);
+    // Room for four: a paste of more keeps its first four, at the caret.
+    await user.clear(input);
+    await user.paste(full.slice(4));
+    input.setSelectionRange(0, 0);
+    await user.paste("Our wonderful ");
+    expect(input).toHaveValue(`Our ${full.slice(4)}`);
+    expect(input.selectionStart).toBe(4);
+    // Over a selection, what fits takes its place.
+    input.setSelectionRange(0, 3);
+    await user.paste("Their");
+    expect(input).toHaveValue(`The ${full.slice(4)}`);
+  });
+
+  // A refused keystroke was let into the field and then taken out by script, which empties the browser's undo history:
+  // Ctrl+Z then undid nothing (agents#1154). Refused before it goes in, the field is never written and keeps it.
+  it("refuses a keystroke into a full name before it reaches the field, so the field is never rewritten", async () => {
+    const { user } = open();
+    const input = screen.getByTestId("new-group-name") as HTMLInputElement;
+    await user.paste("x".repeat(MAX_GROUP_NAME_LENGTH - 1));
+    await user.keyboard("A");
+    const inputs = vi.fn(), refused: boolean[] = [];
+    input.addEventListener("input", inputs);
+    input.addEventListener("beforeinput", e => refused.push(e.defaultPrevented));
+    await user.type(input, "B", { initialSelectionStart: 10, initialSelectionEnd: 10 });
+    await user.keyboard("C");
+    expect(refused).toEqual([true, true]);
+    expect(inputs).not.toHaveBeenCalled();
+    expect(input).toHaveValue(`${"x".repeat(MAX_GROUP_NAME_LENGTH - 1)}A`);
+    expect(input.selectionStart).toBe(10);
+    // Room made, a keystroke goes in as before.
+    await user.keyboard("{Backspace}D");
+    expect(input).toHaveValue(`${"x".repeat(9)}D${"x".repeat(MAX_GROUP_NAME_LENGTH - 11)}A`);
+  });
+
+  // A name with one character left took the reading's first kana and kept it: "に", not "日本" nor nothing (agents#1153).
+  it("leaves a word composed with an IME whole while it is composed, then takes it whole if it fits, else nothing", async () => {
+    const { user } = open();
+    const input = screen.getByTestId("new-group-name") as HTMLInputElement;
+    const seen: string[] = [];
+    await user.paste("x".repeat(MAX_GROUP_NAME_LENGTH - 1));
+    compose(input, ["に", "にほ", "日本"], value => seen.push(value.slice(MAX_GROUP_NAME_LENGTH - 1)));
+    expect(seen).toEqual(["に", "にほ", "日本"]);
+    expect(input).toHaveValue("x".repeat(MAX_GROUP_NAME_LENGTH - 1));
+    expect(input.selectionStart).toBe(MAX_GROUP_NAME_LENGTH - 1);
+    // Two left: the word goes in.
+    await user.keyboard("{Backspace}");
+    compose(input, ["に", "にほ", "日本"]);
+    expect(input).toHaveValue(`${"x".repeat(MAX_GROUP_NAME_LENGTH - 2)}日本`);
   });
 
   it("stops a name at the bytes the group takes too", async () => {

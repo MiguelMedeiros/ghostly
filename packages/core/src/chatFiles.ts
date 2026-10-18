@@ -34,13 +34,26 @@ import { parseVoiceMeta } from "./voice";
 export const FILE_LIMITS = {
   /** Bytes in one `pf-data` frame: a frame stays far below the 60 KiB a session carries. */
   chunkBytes: 16 * 1024,
-  /** Bytes a sender has sent and not seen confirmed: throughput is this per round trip. */
+  /** Bytes a sender has sent and not seen confirmed, at most: throughput is this per round trip. */
   windowBytes: 1024 * 1024,
   /**
-   * Bytes all of a chat's files have sent and not seen confirmed, together. Three files' windows at once were 3 MiB, and
+   * Bytes all of a chat's files have sent and not seen confirmed, together, at most. Three files' windows at once were 3 MiB, and
    * as base64 text past what a session's receive queue holds (`SESSION_RECEIVE_PENDING`, 3.75 MiB).
    */
   chatWindowBytes: 2 * 1024 * 1024,
+  /**
+   * What a chat's files have in flight is sized by the path (`ChatFiles.paced`), down to this. A fixed 1 MiB on a 5 Mbit/s
+   * uplink queued 1.8 s ahead of every text, ring and hang-up of the sender's in that chat, and of its voice in a call.
+   */
+  minWindowBytes: 64 * 1024,
+  /** How much longer than the shortest round trip seen a confirm may take, by the queue the files keep on the path. */
+  queueMs: 50,
+  /**
+   * A shortest round trip no confirm has come close to for this long is measured again, with the queue drained
+   * (`ChatFiles.paced`). A path that got longer mid-session (another route, a relay) read as a queue for good before, and
+   * held the window at its floor: 0.5 MiB/s where the same path from the start gave 8 MiB/s.
+   */
+  baseProbeMs: 10_000,
   /** A receiver asks its person before taking a file larger than this. */
   askAboveBytes: 25 * 1024 * 1024,
   /** Files taken without asking, per contact, while stored. Past it, every file is asked about. */
@@ -218,6 +231,8 @@ interface Outgoing {
   timer?: ReturnType<typeof setTimeout>;
   /** A pump that paused on a refused frame starts again. */
   wake?: ReturnType<typeof setTimeout>;
+  /** Chunks sent and not confirmed yet, in order: where each ended, when it went, and the chat's bytes in flight then. */
+  sends: { end: number; at: number; flight: number; generation: number }[];
 }
 
 interface Incoming {
@@ -308,6 +323,14 @@ export class ChatFiles {
   private readonly held = new Set<Entry>();
   private attached = false;
   private peerRoomValue: number | null = null;
+  /** Bytes the chat's files may have in flight on this session: sized by the path, from the confirms (`paced`). */
+  private window: number = FILE_LIMITS.minWindowBytes;
+  /** The shortest round trip of a chunk to its confirm on this session: the path without a queue. */
+  private baseRtt = Infinity;
+  /** When a confirm last came close to `baseRtt`, or a probe measured it. */
+  private baseAt = 0;
+  /** The path's own round trip is being measured: one chunk in flight from `since`, until one sent then is confirmed. */
+  private probe?: { since: number; window: number };
 
   constructor(private readonly host: ChatFilesHost) {}
 
@@ -317,7 +340,7 @@ export class ChatFiles {
   restore(records: FileTransferRecord[]): void {
     for (const record of records) {
       const entry: Entry = { record: { ...record } };
-      if (record.direction === "out") entry.out = { next: record.confirmed, sent: 0, generation: 0 };
+      if (record.direction === "out") entry.out = { next: record.confirmed, sent: 0, generation: 0, sends: [] };
       else entry.in = { written: record.confirmed, stored: record.confirmed, acked: record.confirmed, checkpointed: record.confirmed, writing: Promise.resolve() };
       this.entries.set(key(record.direction, record.id), entry);
     }
@@ -362,6 +385,11 @@ export class ChatFiles {
   attach(): void {
     this.attached = true;
     this.peerRoomValue = null;
+    // Another session may be another path.
+    this.window = FILE_LIMITS.minWindowBytes;
+    this.baseRtt = Infinity;
+    this.baseAt = 0;
+    this.probe = undefined;
     void this.sayRoom();
     this.sweep();
     for (const entry of this.entries.values()) {
@@ -411,7 +439,7 @@ export class ChatFiles {
     if (this.entries.has(key("out", file.id))) throw new Error("File transfer already active");
     const entry: Entry = {
       record: { id: file.id, direction: "out", file, state: "queued", confirmed: 0, since: this.now(), ...(digest && { digest }) },
-      out: { next: 0, sent: 0, generation: 0 },
+      out: { next: 0, sent: 0, generation: 0, sends: [] },
     };
     this.entries.set(key("out", file.id), entry);
     this.changed(entry);
@@ -471,7 +499,39 @@ export class ChatFiles {
   }
 
   private shouldPump(entry: Entry): boolean {
-    return this.fileMayPump(entry) && this.inFlight() < FILE_LIMITS.chatWindowBytes;
+    return this.fileMayPump(entry) && this.inFlight() < (this.probe ? FILE_LIMITS.chunkBytes : this.window);
+  }
+
+  /**
+   * A confirm came for a chunk sent at `sentAt` with `flight` bytes in flight then: the window becomes what keeps the path
+   * busy with no more than `FILE_LIMITS.queueMs` of queue on it (delay-based, as LEDBAT). Throughput is about
+   * flight / rtt, so flight × (base + queueMs) / rtt: it grows while confirms come about as fast as they can, and shrinks
+   * when they slow down because the files queue on a slow uplink, ahead of everything else the sender says there.
+   * The base is measured again once no confirm has come close to it for `FILE_LIMITS.baseProbeMs`: with one chunk in
+   * flight, so the queue drains first and a slow link's own queue never passes for a longer path.
+   */
+  private paced(sentAt: number, flight: number): void {
+    const now = this.now(), rtt = Math.max(1, now - sentAt);
+    if (this.probe) {
+      // Sent before the probe: it waited behind the queue the probe lets drain.
+      if (sentAt < this.probe.since) return;
+      this.baseRtt = rtt;
+      this.baseAt = now;
+      this.window = this.probe.window;
+      this.probe = undefined;
+      return;
+    }
+    if (rtt - this.baseRtt < FILE_LIMITS.queueMs / 2) this.baseAt = now;
+    this.baseRtt = Math.min(this.baseRtt, rtt);
+    if (now - this.baseAt > FILE_LIMITS.baseProbeMs) {
+      this.probe = { since: now, window: this.window };
+      return;
+    }
+    // No queue to speak of yet: twice as much per round trip at least, as a long fast path needs many to fill.
+    const fits = Math.max((flight * (this.baseRtt + FILE_LIMITS.queueMs)) / rtt, rtt - this.baseRtt < FILE_LIMITS.queueMs / 2 ? 2 * flight : 0);
+    // Little was in flight (a file starting or ending): that says nothing about a larger window being too large.
+    const window = flight < this.window / 2 ? Math.max(this.window, fits) : fits;
+    this.window = Math.min(FILE_LIMITS.chatWindowBytes, Math.max(FILE_LIMITS.minWindowBytes, Math.round(window)));
   }
 
   /** Bytes this chat's files sent and have not seen confirmed. */
@@ -522,6 +582,8 @@ export class ChatFiles {
         out.next = offset + chunk.length;
         out.sent += chunk.length;
         this.moving.add(entry);
+        if (out.sends[out.sends.length - 1]?.generation !== generation) out.sends.length = 0;
+        out.sends.push({ end: out.next, at: this.now(), flight: this.inFlight(), generation });
       }
     } catch (error) {
       if (generation === out.generation) {
@@ -895,6 +957,10 @@ export class ChatFiles {
       case "pf-got": {
         if (!isInt(frame.offset) || frame.offset <= record.confirmed || frame.offset > out.next) return;
         record.confirmed = frame.offset;
+        // The last chunk this confirms says how long the path took (one sent before a resync says nothing).
+        let sample: Outgoing["sends"][number] | undefined;
+        while (out.sends.length && out.sends[0].end <= frame.offset) sample = out.sends.shift();
+        if (sample?.generation === out.generation) this.paced(sample.at, sample.flight);
         this.changed(outgoing, true);
         this.wakeHeld();
         if (record.confirmed === record.file.size) void this.sendSum(outgoing);
@@ -922,7 +988,7 @@ export class ChatFiles {
     record.error = error;
     record.pausedBy = record.waitingFor = undefined;
     if (entry.out) {
-      entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.block = undefined; entry.out.source = undefined;
+      entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.block = undefined; entry.out.source = undefined; entry.out.sends.length = 0;
       this.moving.delete(entry); this.held.delete(entry);
     }
     if (entry.in) {
@@ -1006,7 +1072,7 @@ export class ChatFiles {
     // The digest is taken again from the source: the one sent last time may be what was wrong.
     Object.assign(record, { state: "queued", confirmed: 0, error: undefined, digest: undefined, since: this.now() });
     clearTimeout(entry.out!.timer); clearTimeout(entry.out!.wake);
-    entry.out = { next: 0, sent: 0, generation: entry.out!.generation + 1 };
+    entry.out = { next: 0, sent: 0, generation: entry.out!.generation + 1, sends: [] };
     this.changed(entry);
     if (this.attached) this.announce(entry);
   }

@@ -234,6 +234,23 @@ describe("sending files", () => {
     expect(await services.getFile(file.id)).toBeNull();
   });
 
+  it("a file whose copy into this device fails says it in the app's words, the system's reason kept, to a chat and to a group", async () => {
+    withLinks(chat({ id: "copy-link" }));
+    engine.answers = { groupFileCheck: {}, sendGroupFile: { messageId: "m" } };
+    // Picked, then changed on disk before it was read: what Chromium answers, in English in every language.
+    const changed = new DOMException("The requested file could not be read, typically due to permission problems that have occurred after a reference to a file was acquired.", "NotReadableError");
+    const picked = () => ({ name: "notes.txt", size: 5, type: "text/plain", slice: () => ({ arrayBuffer: () => Promise.reject(changed) }) }) as unknown as File;
+    await expect(services.sendFile("peer-1", picked())).rejects.toThrow(`Could not read the file: ${changed.message}`);
+    await expect(services.sendGroupFile!("g1", picked())).rejects.toThrow(`Could not read the file: ${changed.message}`);
+    // The origin's storage full.
+    const put = vi.spyOn(fileStore, "put").mockRejectedValue(new DOMException("The quota has been exceeded.", "QuotaExceededError"));
+    try {
+      await expect(services.sendFile("peer-1", new File(["hello"], "a.txt"))).rejects.toThrow(/^Not enough space on this device to send it$/);
+      await expect(services.sendGroupFile!("g1", new File(["hello"], "a.txt"))).rejects.toThrow(/^Not enough space on this device to send it$/);
+    } finally { put.mockRestore(); }
+    expect(engine.calls.map(([method]) => method)).toEqual(["groupFileCheck", "groupFileCheck"]);
+  });
+
   it("retries only a file this device sent, on a chat that still takes files", async () => {
     await fileStore.put({ id: "in-file", linkId: "link-1", blob: new Blob(["x"]), createdAt: 1, direction: "in", metadata: { name: "a", size: 1, mime: "text/plain", timestamp: 1 } });
     await fileStore.put({ id: "out-file", linkId: "link-1", blob: new Blob(["x"]), createdAt: 1, direction: "out", metadata: { name: "a", size: 1, mime: "text/plain", timestamp: 3 } });

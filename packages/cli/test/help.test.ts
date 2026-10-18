@@ -54,6 +54,9 @@ describe("help", () => {
     expect((await ghostly(["frobnicate", "--help"])).code).toBe(2);
     const whole = await ghostly(["help"]);
     expect(whole.stdout).toContain("Usage: ghostly <command>");
+    // Its last line sends the reader somewhere an npm install has: the docs page and the README beside this CLI.
+    expect(whole.stdout.trimEnd().split("\n").pop()).toContain("https://ghostly.tools/cli");
+    expect(whole.stdout).not.toContain("packages/cli/");
   });
 
   it("a group's first word alone, or with a word it does not take, names the group's commands", async () => {
@@ -81,6 +84,7 @@ describe("help", () => {
       [["settings", "frob"], "Unknown command: settings frob: ghostly settings takes get or set (ghostly help settings)"],
       [["daemon", "frob"], "Unknown command: daemon frob: ghostly daemon takes status, stop or restart (ghostly help daemon)"],
       [["help", "profile", "frob"], `Unknown command: profile frob: ghostly profile takes ${profile} (ghostly help profile)`],
+      [["help", "x401", "key", "frob"], "Unknown command: x401 key frob: ghostly x401 key takes new (ghostly help x401 key)"],
       [["wallet", "frob", "--help"], expect.stringMatching(/^Unknown command: wallet frob: ghostly wallet takes .*\bfaucet\b.* \(ghostly help wallet\)$/)],
     ] as const) {
       const result = await ghostly([...args]);

@@ -177,6 +177,7 @@
     "messages": "{{count}} messaggi",
     "noChats": "Ancora nessuna chat",
     "noMatch": "Nessuna chat con questo nome",
+    "partial": "{{sent}} di {{count}} inviati",
     "pick": "Scegline fino a {{count}}",
     "search": "Cerca chat",
     "select": "Seleziona",
@@ -275,6 +276,11 @@
     "retry": "Invia di nuovo"
   },
   "noMessages": "Nessun messaggio",
+  "nowPlaying": {
+    "close": "Interrompi e chiudi",
+    "label": "In riproduzione",
+    "open": "Mostra nella chat"
+  },
   "offline": "offline",
   "online": "online",
   "options": "Opzioni",

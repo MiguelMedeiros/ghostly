@@ -52,4 +52,29 @@ describe("a contact who is no longer a member", () => {
     expect(view.members.find(m => m.key === after)?.nick).toBe("Bob");
     expect(view.formerNames).toEqual({ [before]: "Bob" });
   });
+
+  it("back with a new member key, can leave over the same chat", async () => {
+    // The chat stays under the old key too: the leave over it took the old key, removed nobody, and was confirmed.
+    const groups = new Map<string, StoredGroup>();
+    const store: GroupStore = { getGroups: async () => [...groups.values()], putGroup: async g => { groups.set(g.id, structuredClone(g)); }, deleteGroup: async id => { groups.delete(id); }, getMessages: async () => [] };
+    const sent: unknown[] = [];
+    const host: GroupsHost = {
+      sendOnLink: (_link, frame) => { sent.push(frame); }, linkReady: () => true, contactName: () => "Bob", edges: () => new Map(), openEdge: async () => "edge", closeEdge: async () => {},
+      edgeNick: () => undefined, openEntry: async () => "entry", entries: () => new Map(), publish: async () => {}, resolve: async () => null, storeMessage: async () => {}, emit: () => {},
+    };
+    const alice = new Groups(host, store);
+    const groupId = await alice.create("Ghosts", "mesh");
+    await alice.invite(groupId, "chat-ab");
+    const [before, after] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
+    await alice.handleContactFrame("chat-ab", { t: "group-accept", g: groupId, key: before });
+    await alice.remove(groupId, before);
+    await alice.invite(groupId, "chat-ab");
+    await alice.handleContactFrame("chat-ab", { t: "group-accept", g: groupId, key: after });
+    expect(alice.views()[0].members.map(m => m.key)).toContain(after);
+    sent.length = 0;
+    await alice.handleContactFrame("chat-ab", { t: "group-leave", g: groupId });
+    expect(alice.views()[0].members.map(m => m.key)).not.toContain(after);
+    expect(alice.views()[0].members).toHaveLength(1);
+    expect(sent).toContainEqual({ t: "group-removed", g: groupId });
+  });
 });

@@ -69,7 +69,8 @@ export function useOutsideDismiss(ref: RefObject<HTMLElement | null>, open: bool
       }
       beganOutside = false;
     };
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !blocked() && !e.defaultPrevented) callback.current(); };
+    // The Escape that closes it is spent: a notice that also answers Escape stays.
+    const key = (e: KeyboardEvent) => { if (e.key === "Escape" && !blocked() && !e.defaultPrevented) { e.preventDefault(); callback.current(); } };
     document.addEventListener("pointerdown", down); document.addEventListener("pointerup", up); document.addEventListener("keydown", key);
     return () => {const index=layers.indexOf(ref); if(index>=0) layers.splice(index,1);document.removeEventListener("pointerdown", down);document.removeEventListener("pointerup", up);document.removeEventListener("keydown", key);};
   }, [open, ref, anchorRef]);
@@ -166,7 +167,7 @@ export function useTabTrap(ref: RefObject<HTMLElement | null>, on = true) {
  * Tab and Shift+Tab go round `root`'s own controls, and a Tab from the page's body goes into it. Focus in a layer of
  * its own (a select's list, a menu drawn over the page) keeps its Tab.
  */
-function keepTabInside(e: KeyboardEvent, root: HTMLElement | null) {
+export function keepTabInside(e: KeyboardEvent, root: HTMLElement | null) {
   if (e.key !== "Tab" || e.defaultPrevented || !root) return;
   const active = document.activeElement;
   const inside = !!active && root.contains(active);

@@ -23,6 +23,7 @@ test("llms.txt follows the convention: an H1, a summary, then sections of links"
   for (const section of ["Ghostly", "How it works", "Developers", "WISPs", "CLI", "AI agents", "Optional"]) assert.match(index, new RegExp(`^## ${section}$`, "m"));
   for (const row of index.split("\n").filter((l) => l.startsWith("- "))) assert.match(row, /^- \[[^\]]+\]\(https:\/\/[^)\s]+\)(: \S.*)?$/, row);
   assert.ok(index.includes(`(${SITE}/developers/agents)`), "the AI agents page");
+  assert.ok(index.includes(`(${SITE}/agents/faq)`), "the Agents FAQ");
   assert.ok(index.includes("/packages/cli/SKILL.md)"), "the agent skill");
 });
 

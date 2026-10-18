@@ -23,7 +23,9 @@
     "takenBack": "{{contact}} retiró la invitación a {{name}}",
     "takenBackNext": "Pide a {{contact}} una nueva invitación o el enlace del grupo.",
     "takenBackNextUnknown": "Pide al admin del grupo una nueva invitación o el enlace del grupo.",
+    "takenBackNoName": "{{contact}} retiró la invitación al grupo",
     "takenBackUnknown": "Se retiró la invitación a {{name}}",
+    "takenBackUnknownNoName": "Se retiró la invitación al grupo",
     "unnamed": "Un grupo"
   },
   "connection": {

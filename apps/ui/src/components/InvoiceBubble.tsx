@@ -81,11 +81,10 @@ function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId
         ) : (
           <>
             <span className="text-accent me-1">⚡</span>
-            {/* One run, isolated: in a right-to-left page the number and a Latin unit were one bidi run, the unit glued to it. */}
-            <bdi>
-              <span className="text-[22px] font-semibold" data-testid="money-amount">{formatAmount(amount, t.language)}</span>
-              <span className="text-text-primary/65 text-xs ms-1">{unit === "sat" ? "sats" : unit}</span>
-            </bdi>
+            {/* Only the number isolated: in a right-to-left page a Latin unit beside it was one run with it, glued to it,
+                and one isolate around both read "تجريبية sats 250,000". The unit stays in the line's direction. */}
+            <bdi className="text-[22px] font-semibold" data-testid="money-amount">{formatAmount(amount, t.language)}</bdi>
+            <span className="text-text-primary/65 text-xs ms-1">{unit === "sat" ? "sats" : unit}</span>
           </>
         )}
       </p>
@@ -122,7 +121,8 @@ function relativeExpiry(t: Translate, expiresAt: number, now: number): string {
   return t("payments.invoice.expiresDays", { n: Math.round(left / 86400) });
 }
 
-function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: boolean; off: boolean }) {
+/** `peerPubKey`: the chat the invoice is in, told once it is paid (a test mint's invoice counts only on the payer's word). */
+function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invoice; mine: boolean; off: boolean; peerPubKey?: string }) {
   const { t } = useI18n();
   const all = useServicesPlatform()?.wallet;
   // Paid by the Lightning wallet of the invoice's network: a test invoice never meets real money. An invoice on
@@ -171,7 +171,7 @@ function LightningCard({ invoice, mine, off }: { invoice: Bolt11Invoice; mine: b
   const pay = (payable: { quote: string; mint: string; id: string }, confirmedReal: boolean) =>
     run(async () => {
       try {
-        if (!(await wallet!.payQuote(payable.quote, payable.mint, undefined, confirmedReal))) {
+        if (!(await wallet!.payQuote(payable.quote, payable.mint, undefined, confirmedReal, peerPubKey ? { peerPubKey, invoice: invoice.invoice } : undefined))) {
           // Pending at the mint: the wallet settles it, or gives the sats back, on its own.
           setQuote(null);
           setConfirming(false);
@@ -393,8 +393,8 @@ export function InvoiceBubble({ money, mine, peerPubKey }: { money: MoneyInText;
     <>
       {money.rest && <p className="text-[14.2px] leading-[19px] wrap-break-word whitespace-pre-wrap m-0 mb-1.5">{money.rest}</p>}
       <Fragment key={whatItPays(money)}>
-        {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} off={off} />
-          : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={!!allowed && !allowed.lightning} />} />}
+        {money.type === "lightning" ? <LightningCard invoice={money.invoice} mine={mine} off={off} peerPubKey={peerPubKey} /> : money.type === "lnurl" ? <LightningAddressCard destination={money.destination} mine={mine} off={off} /> : money.type === "cashu" ? <CashuCard value={money.value} mine={mine} off={off} />
+          : <MoneyFormatsBubble money={money} mine={mine} off={off} renderLightning={(invoice) => <LightningCard invoice={invoice} mine={mine} off={!!allowed && !allowed.lightning} peerPubKey={peerPubKey} />} />}
       </Fragment>
       {off && !mine && <p className="text-[11px] text-text-primary/65 mt-1" data-testid="money-off">{t("payments.invoice.methodOff", { method: method === "bitcoin" ? t("payments.invoice.onchainBitcoin") : METHOD_NAME[method] })}</p>}
     </>

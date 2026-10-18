@@ -724,7 +724,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     // a fresh secret. A picture that is not a JPEG is refused before the engine is asked.
     const fixtures = join(import.meta.dirname, "../../../e2e/support/avatar-fixtures");
     ok(await as(alice, "group", "picture", "Bot crew", join(fixtures, "avatar.jpg")));
-    error(await as(bob, "group", "picture", "Bot crew", join(fixtures, "avatar.jpg")), "engine", 1);
+    error(await as(bob, "group", "picture", "Bot crew", join(fixtures, "avatar.jpg")), "refused", 1);
     error(await as(alice, "group", "picture", "Bot crew", join(fixtures, "avatar.png")), "bad_request", 1);
     const reset = ok(await as(alice, "group", "link", "Bot crew", "--reset"));
     expect(reset.link).toBeTruthy();

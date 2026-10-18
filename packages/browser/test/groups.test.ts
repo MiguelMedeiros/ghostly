@@ -28,6 +28,8 @@ class World {
   readonly pkarr = new Map<string, GhostRecord[]>();
   /** contact chat id → [owner, other owner]: the same chat has one id on each side here, for simplicity. */
   readonly chats = new Map<string, [string, string]>();
+  /** Contact chats that are up, with an app on the other end that announced no groups. */
+  readonly withoutGroups = new Set<string>();
   private pending: Promise<unknown>[] = [];
 
   /** The other end of an entry session, when both sides opened it. */
@@ -71,6 +73,7 @@ class World {
         this.pending.push(target.groups.handleEdgeFrame(edge.state.id, myKey(edge.state), frame));
       },
       linkReady: linkId => this.chats.has(linkId) || !!edges.get(linkId)?.open || (entries.has(linkId) && !!this.counterpart(entries.get(linkId)!)),
+      linkOpen: linkId => this.chats.has(linkId) || this.withoutGroups.has(linkId),
       contactName: linkId => this.chats.has(linkId) ? `contact:${linkId}` : undefined,
       edges: groupId => new Map([...edges.entries()].filter(([, e]) => e.state.id === groupId).map(([id, e]) => [e.peer, id])),
       openEdge: async (state, peer, expectPeer) => { const id = `edge:${name}:${peer.slice(0, 6)}`; edges.set(id, { peer, state, open: true, expectPeer }); return id; },
@@ -167,12 +170,15 @@ describe("group engine: admission over a contact chat, edges from the roster", (
     expect(await world.peers.get("bob")!.store.getGroups()).toEqual([]);
   });
 
-  it("refuses to invite what it cannot: a contact without groups, a member twice, or as a non-admin", async () => {
+  it("refuses to invite what it cannot: a contact offline or without groups, a member twice, or as a non-admin", async () => {
     const world = new World();
     const alice = world.add("alice");
     await alice.load();
     const groupId = await alice.create("Ghosts", "mesh");
-    await expect(alice.invite(groupId, "chat-nobody")).rejects.toThrow(/updated Ghostly/);
+    // A contact whose app is only closed is not told to update: it is invited once it is online.
+    await expect(alice.invite(groupId, "chat-nobody")).rejects.toThrow("This contact is not connected right now. Invite them when they are online.");
+    world.withoutGroups.add("chat-old");
+    await expect(alice.invite(groupId, "chat-old")).rejects.toThrow("Their app does not take part in groups: they need an updated Ghostly first.");
     world.chats.set("chat-ab", ["alice", "bob"]);
     const bob = world.add("bob"); await bob.load();
     await alice.invite(groupId, "chat-ab"); await world.settle();

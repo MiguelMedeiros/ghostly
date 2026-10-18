@@ -99,7 +99,7 @@ describe.skipIf(process.platform === "win32")("a listener that is not this profi
       const seen = await impostor(socket, answer);
       const client = await connectDaemon({ dir, socket }, 1_000);
       expect(client, what).not.toBeNull();
-      const failure = await client!.call("chat.send", { chat: "bob", text: "a secret plan" }).catch((e: unknown) => e) as CliError;
+      const failure = await client!.call("chat.send", { chat: "bob", text: "a secret plan" }, { timeoutMs: 2_000 }).catch((e: unknown) => e) as CliError;
       expect(failure, what).toBeInstanceOf(CliError);
       expect(failure.code, what).toBe("refused");
       expect(failure.message, what).toContain("ghostly daemon restart");
@@ -117,7 +117,7 @@ describe.skipIf(process.platform === "win32")("a listener that is not this profi
       // The listener knows the secret here: only the file's place and mode can tell it is not the daemon's.
       const seen = await impostor(socket, (line) => ({ id: line.id, result: { proof: proof(secret, "daemon", line.params?.nonce ?? "") } }));
       const client = await connectDaemon({ dir, socket }, 1_000);
-      const failure = await client!.call("status", {}).catch((e: unknown) => e) as CliError;
+      const failure = await client!.call("status", {}, { timeoutMs: 2_000 }).catch((e: unknown) => e) as CliError;
       expect(failure.code, mode).toBe("refused");
       expect(methods(seen.lines), mode).toEqual(["daemon.hello"]);
       await new Promise<void>((resolve) => seen.server.close(() => resolve()));

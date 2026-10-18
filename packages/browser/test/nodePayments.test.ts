@@ -609,6 +609,21 @@ describe("the Cashu wallet and Lightning", () => {
     expect(node.getState().wallet.networks?.testnet.lightning).toMatchObject({ providerId: CASHU_MINT_SOURCE });
   });
 
+  it("an invoice paid from its card in a chat: on Testnet the chat is told it was paid, on Mainnet nothing more is said", async () => {
+    const { node } = track(engine());
+    const said = vi.spyOn(node["desk"], "sayInvoicePaid").mockImplementation(() => {});
+    const cashuPay = vi.spyOn(node["wallet"], "payQuote").mockResolvedValueOnce(true).mockResolvedValueOnce(false).mockResolvedValue(true);
+    const invoice = fakeInvoice(25, new Uint8Array(32).fill(9));
+    await node.walletPayQuote({ quote: "melt", mint: TEST_MINT, linkId: "l1", invoice });
+    expect(said).toHaveBeenCalledExactlyOnceWith("l1", invoice);
+    // Still pending at the mint: not paid yet, nothing said.
+    await node.walletPayQuote({ quote: "melt", mint: TEST_MINT, linkId: "l1", invoice });
+    await node.walletPayQuote({ quote: "melt", mint: "https://mint.minibits.cash/Bitcoin", confirmedReal: true, linkId: "l1", invoice });
+    await node.walletPayQuote({ quote: "melt", mint: TEST_MINT });
+    expect(cashuPay).toHaveBeenCalledTimes(4);
+    expect(said).toHaveBeenCalledOnce();
+  });
+
   it("keeps each network's history apart, counts test sats waiting while the page shows Mainnet, and chimes once per new receipt", async () => {
     const { node, view, events } = track(engine());
     node["settings"].mints = ["https://real.example", TEST_MINT];

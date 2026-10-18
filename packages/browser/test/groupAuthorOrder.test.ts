@@ -96,6 +96,30 @@ describe("a member's messages in a private group, in the order that member wrote
   });
 });
 
+describe("a member's older message is stored where it goes, when it can", () => {
+  const order = () => new GroupAuthorOrder({ placeAgain: async () => {} }, id => `group:${id}`);
+  const row = (sender: string, seq: number) => ({ sender, epoch: 1, seq, id: `${sender}${seq}` });
+
+  it("just above the first placed of those its author wrote after it", () => {
+    const o = order();
+    o.placed("g", { ...row("b", 1), at: 0 });
+    for (const seq of [169, 170]) o.placed("g", { ...row("a", seq), at: 0 });
+    expect(o.above("g", row("a", 137))).toBe("a169");
+    o.placed("g", { ...row("a", 137), at: 0 }, "a169");
+    expect(o.above("g", row("a", 138))).toBe("a169");
+    expect(o.above("g", row("a", 105))).toBe("a137");
+    expect(o.above("g", row("a", 171))).toBeUndefined();
+    expect(o.above("g", row("a", 169))).toBeUndefined();
+  });
+
+  it("not when another member's came after that one: everyone's handed on in the order written, it goes after theirs", () => {
+    const o = order();
+    o.placed("g", { ...row("a", 3), at: 0 });
+    o.placed("g", { ...row("b", 1), at: 0 });
+    expect(o.above("g", row("a", 1))).toBeUndefined();
+  });
+});
+
 describe("a member's rows wait for that member's catch-up", () => {
   it("while older ones are on their way nothing moves; once they all came, every row moves once", async () => {
     const missing = new Set(["a"]);
@@ -180,5 +204,34 @@ describe("the engine places a group's rows again", () => {
     transaction.mockRestore();
     expect(writes).toHaveLength(1);
     expect((await db.getMessages(linkId)).map(m => m.id)).toEqual(["b1", ...ids]);
+  });
+});
+
+describe("the engine stores a member's older message above a later one of theirs", () => {
+  type Placing = { placeAbove(linkId: string, id: string): Promise<number | undefined>; storeNewMessage(message: StoredMessage, straight?: boolean, place?: number): Promise<boolean> };
+  const engine = () => new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn(), onMessageChanges: vi.fn() }, { automaticWallets: false }) as unknown as Placing;
+  const said = (linkId: string, id: string) => ({ linkId, id, text: id, sender: "peer" as const, member: "a", timestamp: 500, via: "datalink" as const });
+
+  it("in the order they come, each below the last and above the later one; what comes next still goes to the end", async () => {
+    const node = engine();
+    const linkId = "group:above";
+    await db.addMessage({ linkId, id: "b1", text: "b1", sender: "peer", member: "b", timestamp: 1000, sentAt: 900, via: "datalink" });
+    await db.addMessage({ linkId, id: "a9", text: "a9", sender: "peer", member: "a", timestamp: 5000, sentAt: 900, via: "datalink" });
+    for (const id of ["a7", "a8"]) expect(await node.storeNewMessage(said(linkId, id), false, await node.placeAbove(linkId, "a9"))).toBe(true);
+    expect(await node.storeNewMessage(said(linkId, "a6"), false, await node.placeAbove(linkId, "a7"))).toBe(true);
+    await node.storeNewMessage(said(linkId, "b2"));
+    const rows = await db.getMessages(linkId);
+    expect(rows.map(m => m.id)).toEqual(["b1", "a6", "a7", "a8", "a9", "b2"]);
+    // The time each shows is still the one its sender said.
+    expect(rows.find(m => m.id === "a7")!.sentAt).toBe(500);
+  });
+
+  it("no place where the two rows are a millisecond apart, nor above a row that is not there", async () => {
+    const node = engine();
+    const linkId = "group:no-room";
+    await db.addMessage({ linkId, id: "b1", text: "b1", sender: "peer", member: "b", timestamp: 1000, sentAt: 900, via: "datalink" });
+    await db.addMessage({ linkId, id: "a9", text: "a9", sender: "peer", member: "a", timestamp: 1001, sentAt: 900, via: "datalink" });
+    expect(await node.placeAbove(linkId, "a9")).toBeUndefined();
+    expect(await node.placeAbove(linkId, "gone")).toBeUndefined();
   });
 });

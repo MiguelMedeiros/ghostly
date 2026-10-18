@@ -80,6 +80,29 @@ describe("a private group catches up a member from whoever is there", { timeout:
     expect(new Set(world.texts(dave, id)).size).toBe(world.texts(dave, id).length);
   });
 
+  it("a member back gets what an author wrote before someone joined while it was away, though the author wrote 32 more since", async () => {
+    const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
+    const [alice, , , dave] = peers;
+    dave.online = false;
+    await world.run(2_000);
+    for (let i = 0; i < 40; i++) await alice.groups.send(id, `alice before ${i}`);
+    await world.run(2_000);
+    // Erin's join starts a new epoch: Alice's last 32 are all of it, so her own answer shows Dave nothing of the one before.
+    const erin = world.add("erin");
+    await erin.groups.joinByLink(await alice.groups.enableLink(id));
+    await world.until(() => world.view(erin, id)?.members.length === 5, 5 * 60_000, 1000);
+    for (let i = 0; i < 40; i++) await alice.groups.send(id, `alice after ${i}`);
+    await world.run(2_000);
+    const back = world.now;
+    world.reopen(dave);
+    const has = (when: string) => world.texts(dave, id).filter(t => t.startsWith(`alice ${when} `)).length;
+    await world.until(() => has("before") === 40 && has("after") === 40, 10 * 60_000, 1000,
+      () => `dave has ${has("before")} of 40 before Erin joined, ${has("after")} of 40 after`);
+    // Asked of Bob or Carol ten seconds after (`MESH_GAP_AGAIN_MS`), not of Erin, who was let in after them.
+    expect(world.now - back).toBeLessThanOrEqual(2 * MESH_GAP_AGAIN_MS);
+    expect(new Set(world.texts(dave, id)).size).toBe(world.texts(dave, id).length);
+  });
+
   it("a member back after 200 messages of one author gets them in about a minute, not 32 a gossip turn", async () => {
     const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
     const [alice, , , dave] = peers;
@@ -105,13 +128,13 @@ describe("a private group catches up a member from whoever is there", { timeout:
     for (const { to, at } of syncs) expect(syncs.filter(s => s.to === to && s.at > at - 60_000 && s.at <= at).length).toBeLessThanOrEqual(8);
   });
 
-  it("a member back with all its edges up at once gets 256 of one author in about a minute, though the gossip turn asks the author", async () => {
+  it("a member back with all its edges up at once gets 256 of one author in about a minute, though it tells the author first", async () => {
     const { world, peers, id } = await meshOf(["alice", "bob", "carol", "dave"]);
     const dave = peers[3]!;
     const syncs: { to: string; at: number }[] = [];
     world.drop = (from, to, frame) => { if (from === dave && frame.t === "group-sync") syncs.push({ to: to.name, at: world.now }); return false; };
-    // A restarted app's first gossip turn asks the same member each time (its turns start over): the second time, that
-    // member is the author, whatever its key made it.
+    // A restarted app tells the same member first each time (its edges open in the same order), and asks it for the
+    // others: the second time, that member is the author, whatever its key made it.
     let author = peers[0]!, asked = "";
     for (let round = 0; round < 2; round++) {
       dave.online = false;
@@ -125,10 +148,9 @@ describe("a private group catches up a member from whoever is there", { timeout:
       await world.until(() => world.texts(dave, id).filter(mine).length === 256, 10 * 60_000, 1000,
         () => `round ${round}: dave has ${world.texts(dave, id).filter(mine).length} of 256`);
       const took = world.now - back;
-      // The syncs as the edges open (at 1 s) ask for nothing yet; the gossip turn's comes next.
-      asked = syncs.find(s => s.at - back >= 2_000)?.to ?? "";
+      asked = syncs[0]?.to ?? "";
       // The author's answer (its last 32) shows the 224 below them: another member is asked ten seconds later, not a gossip turn.
-      expect(took, `round ${round}, the gossip turn asked ${asked}`).toBeLessThan(MESH_GOSSIP_MS + 3 * MESH_GAP_AGAIN_MS);
+      expect(took, `round ${round}, told ${asked} first`).toBeLessThan(MESH_GOSSIP_MS + 3 * MESH_GAP_AGAIN_MS);
       author = peers.find(p => p.name === asked) ?? author;
     }
     expect(asked).toBe(author.name);

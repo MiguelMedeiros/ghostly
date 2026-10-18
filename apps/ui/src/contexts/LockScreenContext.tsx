@@ -13,7 +13,7 @@ import { activeProfileId } from "../lib/profiles";
 import { takeUnlockHandover } from "../lib/lockHandover";
 import { stopRunningApps } from "../lib/apps/open";
 import { closeServiceWindows } from "../lib/serviceWindows";
-import { pauseForLock } from "../lib/voicePlayback";
+import { pauseForLock } from "../lib/nowPlaying";
 
 interface LockScreenContextValue {
   isLocked: boolean;

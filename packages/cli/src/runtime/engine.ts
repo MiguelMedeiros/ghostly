@@ -251,6 +251,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   // Files sent and received are real files in the profile's folder, as on the Desktop.
   const [{ registerFileBytes }, { NodeFileBytes }] = await Promise.all([import("@ghostly/browser/shared/fileBytes"), import("./fileBytes")]);
   registerFileBytes("native", async () => new NodeFileBytes(paths.files), true);
+  // Files a profile took as Blobs in their records (held files, up to 1.3.0) go there too, and leave the snapshot.
+  if (await (await import("./blobFiles")).moveBlobFiles()) await store.compact();
   const [{ EngineServer }, { createHyperEndpoint }] = await Promise.all([
     import("@ghostly/browser/engine/server"),
     import("../../../../native/transports/hyperdht/endpoint.mjs"),
@@ -302,7 +304,7 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   return {
     paths, server, store, webrtc, callsUnavailable, apps,
     close: () => (closing ??= (async () => {
-      await server.node.shutdown().catch(() => {});
+      await server.node.shutdown({ quitting: true }).catch(() => {});
       await mainline?.destroy().catch(() => {});
       await store.close();
     })()),

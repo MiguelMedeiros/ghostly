@@ -1,6 +1,5 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import Link from "next/link";
 import GithubSlugger from "github-slugger";
 import { Shell } from "@/components/site/Shell";
 import { IntentLink } from "@/components/site/IntentLink";
@@ -242,20 +241,20 @@ export async function ReaderPage({ reference, requested }: { reference: Referenc
               </div>
               <nav className="reader-pager" aria-label="Continue reading">
                 {prev && (
-                  <Link href={`/wisps/${prev.slug}`} className="reader-pager-prev">
+                  <IntentLink href={`/wisps/${prev.slug}`} className="reader-pager-prev">
                     <small>← {t.prev}</small>
                     <span>
                       <span className="mono">{prev.number}</span> {prev.name}
                     </span>
-                  </Link>
+                  </IntentLink>
                 )}
                 {next && (
-                  <Link href={`/wisps/${next.slug}`} className="reader-pager-next">
+                  <IntentLink href={`/wisps/${next.slug}`} className="reader-pager-next">
                     <small>{t.next} →</small>
                     <span>
                       <span className="mono">{next.number}</span> {next.name}
                     </span>
-                  </Link>
+                  </IntentLink>
                 )}
               </nav>
               <IntentLink className="link-arrow" href={"/wisps"}>

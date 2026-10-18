@@ -63,6 +63,19 @@ export function profileOpenFailure(error: unknown): ProfileOpenFailure {
   return { reason: "failed", supportedVersion: DB_VERSION, ...(detail ? { detail } : {}) };
 }
 
+/**
+ * A failed call as the client hears it (engine/server.ts): the error's message. Only the message travels, so a storage
+ * write the browser refused for want of space (Chromium's QuotaExceededError has an empty message) says so, its name
+ * kept for the ⓘ.
+ */
+export function errorLine(error: unknown): string {
+  if ((error as { name?: unknown } | null)?.name === "QuotaExceededError") {
+    const message = error instanceof Error ? error.message.trim() : "";
+    return `Not enough space on this device (QuotaExceededError${message ? `: ${message}` : ""})`;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** How long an open that another window blocks may wait for that window to let go before it is said to be blocked. */
 export const OPEN_TIMINGS = { blockedMs: 10_000 };
 
@@ -275,11 +288,12 @@ export const PROFILE_STORES = [STORES.links, STORES.messages, STORES.files, STOR
 /**
  * Records of the settings store that belong to the profile, not to a wallet: its DID and its key, its identity proofs
  * with their keys and revocations, its own Nostr data, the public profiles it read, the built-in mini-apps it removed
- * (`BUILT_IN_APPS_KEY` of `engine/apps.ts`). A list of what goes rather than of what stays, on purpose: every other
- * record of that store is a wallet's (seeds, configuration, pending operations), and a wallet record a newer version
- * adds must never be deleted by mistake.
+ * (`BUILT_IN_APPS_KEY` of `engine/apps.ts`), its x401 credentials and their keys (`engine/x401.ts`), its contact links
+ * (`engine/contactLinks.ts`) and the requests it sent through others' (`engine/contactAsks.ts`). A list of what goes
+ * rather than of what stays, on purpose: every other record of that store is a wallet's (seeds, configuration, pending
+ * operations), and a wallet record a newer version adds must never be deleted by mistake.
  */
-export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "nostrSocial", "publicProfiles", "appBuiltIns"] as const;
+export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "nostrSocial", "publicProfiles", "appBuiltIns", "x401Credentials", "contactLinks", "contactAsks"] as const;
 
 /**
  * The fields of the peer's `settings` record that are a wallet's, kept by "Clear all data": the mint list, the first-run
@@ -451,6 +465,40 @@ export const fileStore = {
       };
     });
     return ids;
+  },
+  /** The id of every stored file whose bytes are a Blob in its record. */
+  async blobIds(): Promise<string[]> {
+    const files = await store(STORES.files, "readonly"), ids: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const request = files.openCursor();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return resolve();
+        if ((cursor.value as StoredFile).blob) ids.push(String(cursor.key));
+        cursor.continue();
+      };
+    });
+    return ids;
+  },
+  /**
+   * A file whose Blob was copied to file storage (`kind`, under its id): its record without the Blob from now on. Written
+   * back without the Blob it read, so not what WebKit loses (see above); what changed about it since (`fileState`) stays.
+   * False when the record is gone or holds no Blob any more: the copy is the caller's to remove.
+   */
+  async movedToBytes(id: string, kind: NonNullable<StoredFile["bytes"]>): Promise<boolean> {
+    let moved = false;
+    await transact([STORES.files], stores => {
+      const read = stores[STORES.files].get(id);
+      read.onsuccess = () => {
+        const record = read.result as StoredFile | undefined;
+        if (!record?.blob) return;
+        const { blob: _blob, ...rest } = record;
+        stores[STORES.files].put({ ...rest, bytes: kind } satisfies StoredFile);
+        moved = true;
+      };
+    });
+    return moved;
   },
   async delete(id: string): Promise<void> {
     await transact([STORES.files, STORES.fileState], stores => {

@@ -21,7 +21,7 @@ import { CardTime, StatusCardView } from "./chat/StatusCard";
 import { STATUS_TONE, cardLabel, showsCard, type ShownCard } from "../lib/statusCards";
 import { engine } from "@ghostly/browser/platform/engine";
 import { playCue, useCueChat } from "../lib/cues";
-import { downloadFile, downloadName, downloadState, Unconverted, type DownloadFormat } from "../lib/fileDownload";
+import { ConverterNotLoaded, downloadFile, downloadName, downloadState, Unconverted, type DownloadFormat } from "../lib/fileDownload";
 import { canRetryFile, fileHeld, fileNeverSent } from "../lib/fileStatus";
 import { holdFull, rawError, SAVE_REFUSED } from "../lib/errorText";
 import { problemText, type Problem } from "../lib/problemText";
@@ -477,8 +477,8 @@ const cancelIcon = (
 function DownloadItem({ file, name, sender, format = "original", onDone }: { file: ChatFile; name: string; sender: "me" | "peer"; format?: DownloadFormat; onDone: () => void }) {
   const { t } = useI18n();
   const { platform, transfer, restoring } = useTransfer(file.id);
-  const [problem, setProblem] = useState<"missing" | "left-out" | "unconverted" | "unsaved" | null>(null);
-  // The system's own words for a refused save, in the row's hover text.
+  const [problem, setProblem] = useState<"missing" | "left-out" | "unconverted" | "unloaded" | "unsaved" | null>(null);
+  // The system's own words for a refused save (or the next step for a converter that did not load), in the row's hover text.
   const [refusal, setRefusal] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const mounted = useRef(true);
@@ -487,6 +487,7 @@ function DownloadItem({ file, name, sender, format = "original", onDone }: { fil
   const reason = problem === "missing" ? t("chat.message.downloadMissing")
     : problem === "left-out" ? t("chat.file.notInBackup")
     : problem === "unconverted" ? t("chat.message.downloadUnconverted")
+    : problem === "unloaded" ? t("errors.app.partNotLoaded")
     : problem === "unsaved" ? t("chat.message.downloadUnsaved")
     : state === "preparing" ? t("chat.message.downloadPreparing")
     : state === "restoring" ? t("common.loading")
@@ -506,9 +507,15 @@ function DownloadItem({ file, name, sender, format = "original", onDone }: { fil
         if (mounted.current) setProblem(held === "left-out" ? "left-out" : "missing");
       })
       // Bytes gone resolve `missing`; a rejection is the save refused where it was to be (Android's picker, a folder the
-      // desktop cannot write to, a full disk): it can be saved again, somewhere else.
+      // desktop cannot write to, a full disk): it can be saved again, somewhere else. A converter whose file did not
+      // load can be tried again too, once the connection is back; the browser's words for it stay out of the row.
       .catch((error: unknown) => {
         if (!mounted.current) return;
+        if (error instanceof ConverterNotLoaded) {
+          setProblem("unloaded");
+          setRefusal(t("app.pageNotLoaded.hint"));
+          return;
+        }
         const unconverted = error instanceof Unconverted;
         setProblem(unconverted ? "unconverted" : "unsaved");
         setRefusal(unconverted || SAVE_REFUSED.test(rawError(error)) ? null : rawError(error));
@@ -516,7 +523,7 @@ function DownloadItem({ file, name, sender, format = "original", onDone }: { fil
       .finally(() => { if (mounted.current) setBusy(false); });
   };
   return (
-    <MenuItem testId={format === "mp3" ? "message-download-mp3" : "message-download"} onClick={run} disabled={!platform || (!!reason && problem !== "unsaved")} hint={reason}
+    <MenuItem testId={format === "mp3" ? "message-download-mp3" : "message-download"} onClick={run} disabled={!platform || (!!reason && problem !== "unsaved" && problem !== "unloaded")} hint={reason}
       title={reason && refusal ? `${reason}\n${refusal}` : reason ?? name}
       data={{ "data-download-state": problem ?? (busy ? "busy" : state) }} icon={downloadIcon}>
       {t(format === "mp3" ? "chat.message.downloadMp3" : "chat.message.download")}

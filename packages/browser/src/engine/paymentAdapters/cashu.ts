@@ -1,4 +1,3 @@
-import { isMintOperationError } from '@cashu/cashu-ts';
 import { engineError, engineText, type PaymentAdapter, type PaymentReview, type PaymentTarget } from '@ghostly/core';
 import { mintNetwork } from '../../shared/mints';
 import type { CashuWallet, CashuPrepared } from '../wallet';
@@ -38,7 +37,7 @@ export class CashuAdapter implements PaymentAdapter<CashuPrepared> {
    // Saved with the intent when the coordinator records the unknown outcome: the swap may still reach the mint for a while.
    prepared.attemptEndedAt=Date.now();
    // A refusal, and the mint says why: the ecash it was to spend was spent somewhere else. The payment ends here.
-   if(persist && isMintOperationError(error) && await this.wallet.reviewedCashuSpentElsewhere(prepared).catch(()=>false))return this.spentElsewhere(prepared,persist);
+   if(persist && (await import('@cashu/cashu-ts')).isMintOperationError(error) && await this.wallet.reviewedCashuSpentElsewhere(prepared).catch(()=>false))return this.spentElsewhere(prepared,persist);
    throw error;
   }
   await persist?.();

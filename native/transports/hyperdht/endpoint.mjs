@@ -38,7 +38,10 @@ function held(socket) {
 export async function createHyperEndpoint(seed, options = {}) {
   if (!(seed instanceof Uint8Array) || seed.length !== 32) throw new Error('Invalid HyperDHT seed')
   const keyPair = DHT.keyPair(Buffer.from(seed))
-  const node = new DHT({ ...options, keyPair })
+  // A chat's listener is a DHT client for good: an adaptive node turns persistent after ~20 min wherever its UDP port is
+  // reachable, and then joins the routing table and keeps strangers' records and values. Ephemeral, it still listens
+  // (announced through other nodes) and holepunches.
+  const node = new DHT({ ...options, keyPair, ephemeral: true })
   const channels = new Set()
   let stopped = false
   let incomingHandler = null

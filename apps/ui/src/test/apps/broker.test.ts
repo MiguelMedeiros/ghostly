@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { MINI_APP_LIMITS } from "@ghostly/core/miniApp";
-import { BROKER_REQUESTS, createBroker, STOP_REQUESTS_PER_SECOND, isJsonValue, jsonValueOf, runnerFor, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
+import { BROKER_REQUESTS, createBroker, PICK_AFTER_CANCEL_MS, STOP_REQUESTS_PER_SECOND, isJsonValue, jsonValueOf, runnerFor, type AppLaunch, type AppStopReason } from "../../lib/apps/broker";
 import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 
 // covers: apps.web-sandbox
@@ -163,7 +163,7 @@ describe("requests", () => {
   it("the whole API and nothing more: an unknown type is refused", async () => {
     const { run, ask } = setup();
     run();
-    expect(BROKER_REQUESTS).toEqual(["context", "file", "storage.get", "storage.set", "storage.delete", "storage.keys", "chat.send", "close"]);
+    expect(BROKER_REQUESTS).toEqual(["context", "file", "storage.get", "storage.set", "storage.delete", "storage.keys", "chat.send", "files.pick", "files.list", "files.read", "files.forget", "close"]);
     for (const type of ["start", "app_broker", "eval", "storage.clear", "chat.peer", "__proto__"]) expect(await ask(type)).toMatchObject({ ok: false, error: "unknown-type" });
   });
 
@@ -532,4 +532,217 @@ it("asks the engine as the version it runs: every call goes to the platform of i
   await vi.waitFor(() => expect(bound.calls.map((c) => c.op)).toEqual(expect.arrayContaining(["chat.open", "storage.set", "chat.send"])));
   expect(digests).toEqual(["digest-7"]);
   expect(platform.calls).toEqual([]);
+});
+
+describe("linked files (WISP 1200 · Linked files)", () => {
+  const bytes = (n: number, fill = 7) => new Uint8Array(n).fill(fill);
+
+  it("are only for an app granted `files`, in a client that keeps them", async () => {
+    const { ask, run, host } = setup();
+    run();
+    for (const [type, args] of [["files.pick", []], ["files.list", []], ["files.read", ["a".repeat(22), { offset: 0, length: 1 }]], ["files.forget", ["all"]]] as const) {
+      expect(await ask(type, [...args])).toMatchObject({ ok: false, error: "not-allowed" });
+    }
+    expect(host.calls.some((c) => c.op.startsWith("files."))).toBe(false);
+    const granted = setup({ permissions: ["chat", "files"] });
+    delete (granted.host as { linkedFiles?: unknown }).linkedFiles;
+    granted.run();
+    expect(await granted.ask("files.list")).toMatchObject({ ok: false, error: "not-allowed" });
+  });
+
+  it("pick asks the person through the client, keeps the links per app, and list gives them back", async () => {
+    const { ask, run, host } = setup({ permissions: ["files"], title: "Cinema" });
+    run();
+    host.nextPick = [{ path: "Films/Up.mp4", bytes: bytes(10), modified: 5 }, { path: "Films/Up.srt", bytes: bytes(3) }];
+    const picked = await ask("files.pick", [{ folder: true, accept: ["mp4", "srt"] }]);
+    expect(picked).toMatchObject({ ok: true, value: [{ path: "Films/Up.mp4", size: 10, modified: 5, available: true }, { path: "Films/Up.srt", size: 3 }] });
+    expect(host.calls.find((c) => c.op === "files.pick")).toEqual({ op: "files.pick", ref: REF, key: "folder mp4,srt" });
+    expect(await ask("files.list")).toMatchObject({ ok: true, value: [{ path: "Films/Up.mp4" }, { path: "Films/Up.srt" }] });
+    // Another app keeps none of them.
+    expect(await host.linkedFiles!.list("other/app", "Other")).toEqual([]);
+  });
+
+  it("pick: the person picked nothing is `cancelled`, and options other than the call's are refused", async () => {
+    const { ask, run, host } = setup({ permissions: ["files"] });
+    run();
+    expect(await ask("files.pick")).toMatchObject({ ok: false, error: "cancelled" });
+    for (const options of [{ folder: "yes" }, { accept: "mp4" }, { accept: [".mp4"] }, { accept: ["MP4"] }, { accept: Array.from({ length: MINI_APP_LIMITS.filesAccept + 1 }, (_, i) => `e${i}`) }, [true], 1]) {
+      expect(await ask("files.pick", [options]), JSON.stringify(options)).toMatchObject({ ok: false, error: "bad-request" });
+    }
+    expect(host.calls.filter((c) => c.op === "files.pick")).toHaveLength(1);
+  });
+
+  it("pick: one at a time, while the person is still deciding", async () => {
+    const { ask, run, host } = setup({ permissions: ["files"] });
+    run();
+    let decide!: () => void;
+    const pick = host.linkedFiles!.pick;
+    host.linkedFiles!.pick = (...a) => new Promise((resolve, reject) => { decide = () => pick(...a).then(resolve, reject); });
+    host.nextPick = [{ path: "a.mp4", bytes: bytes(1) }];
+    const first = ask("files.pick");
+    await vi.waitFor(() => expect(decide).toBeTypeOf("function"));
+    expect(await ask("files.pick")).toMatchObject({ ok: false, error: "too-fast" });
+    decide();
+    expect(await first).toMatchObject({ ok: true });
+  });
+
+  it("pick and list: the client's sheet is told when the app stops, so it goes with the app", async () => {
+    const { run, host, broker } = setup({ permissions: ["files"] });
+    run();
+    const signals: (AbortSignal | undefined)[] = [];
+    host.linkedFiles!.pick = (_ref, _title, _options, signal) => { signals.push(signal); return new Promise(() => {}); };
+    host.linkedFiles!.list = (_ref, _title, signal) => { signals.push(signal); return new Promise(() => {}); };
+    // Asked, and left waiting on the person: neither is ever answered.
+    broker.message({ id: 1, type: "files.pick", args: [] });
+    broker.message({ id: 2, type: "files.list", args: [] });
+    await vi.waitFor(() => expect(signals).toHaveLength(2));
+    expect(signals.map((s) => s?.aborted)).toEqual([false, false]);
+    broker.stop("closed");
+    expect(signals.map((s) => s?.aborted)).toEqual([true, true]);
+  });
+
+  it("pick: after the person cancels, the app waits before it may ask again", async () => {
+    const { ask, run, host, clock } = setup({ permissions: ["files"] });
+    run();
+    expect(await ask("files.pick")).toMatchObject({ ok: false, error: "cancelled" });
+    // Asking again at once would put the picker back in front of the person each time they close it.
+    expect(await ask("files.pick")).toMatchObject({ ok: false, error: "too-fast" });
+    clock.t += PICK_AFTER_CANCEL_MS - 1;
+    expect(await ask("files.pick")).toMatchObject({ ok: false, error: "too-fast" });
+    expect(host.calls.filter((c) => c.op === "files.pick")).toHaveLength(1);
+    clock.t += 1;
+    host.nextPick = [{ path: "a.mp4", bytes: bytes(1) }];
+    expect(await ask("files.pick")).toMatchObject({ ok: true });
+    // A pick that answered holds nothing off.
+    expect(await ask("files.pick")).toMatchObject({ ok: false, error: "cancelled" });
+    expect(host.calls.filter((c) => c.op === "files.pick")).toHaveLength(3);
+  });
+
+  it("read: a range of a linked file as an ArrayBuffer, handed over, by an id the client gave", async () => {
+    const { ask, run, host, posted } = setup({ permissions: ["files"] });
+    run();
+    const data = Uint8Array.from({ length: 100 }, (_, i) => i);
+    host.nextPick = [{ path: "film.mp4", bytes: data }];
+    const id = ((await ask("files.pick")).value as { id: string }[])[0]!.id;
+    const answer = await ask("files.read", [id, { offset: 10, length: 5 }]);
+    expect(new Uint8Array(answer.value as ArrayBuffer)).toEqual(Uint8Array.from([10, 11, 12, 13, 14]));
+    expect(posted.find((p) => p.message === answer)!.transfer).toEqual([answer.value]);
+    // The end of the file: fewer bytes.
+    expect((await ask("files.read", [id, { offset: 98, length: 50 }])).value).toHaveProperty("byteLength", 2);
+    expect(host.calls.filter((c) => c.op === "files.read").every((c) => c.ref === REF)).toBe(true);
+  });
+
+  it("read: the host's copy is handed over as it is, not copied again; a view on a larger buffer is copied", async () => {
+    const { ask, run, host } = setup({ permissions: ["files"] });
+    run();
+    host.nextPick = [{ path: "film.mp4", bytes: Uint8Array.from({ length: 100 }, (_, i) => i) }];
+    const id = ((await ask("files.pick")).value as { id: string }[])[0]!.id;
+    const whole = new Uint8Array([1, 2, 3]);
+    vi.spyOn(host.linkedFiles!, "read").mockResolvedValueOnce(whole);
+    expect((await ask("files.read", [id, { offset: 0, length: 3 }])).value).toBe(whole.buffer);
+    const shared = new Uint8Array([9, 4, 5, 6, 9]);
+    vi.spyOn(host.linkedFiles!, "read").mockResolvedValueOnce(shared.subarray(1, 4));
+    const part = (await ask("files.read", [id, { offset: 0, length: 3 }])).value as ArrayBuffer;
+    expect(part).not.toBe(shared.buffer);
+    expect(new Uint8Array(part)).toEqual(new Uint8Array([4, 5, 6]));
+  });
+
+  it("read: bad ids and ranges are refused before the client reads; a changed or gone file says so", async () => {
+    const { ask, run, host } = setup({ permissions: ["files"] });
+    run();
+    host.nextPick = [{ path: "film.mp4", bytes: bytes(100) }];
+    const id = ((await ask("files.pick")).value as { id: string }[])[0]!.id;
+    for (const args of [["../etc/passwd", { offset: 0, length: 1 }], [id], [id, { offset: -1, length: 1 }], [id, { offset: 0, length: 0 }], [id, { offset: 0.5, length: 1 }], [id, { offset: 2 ** 53, length: 1 }]]) {
+      expect(await ask("files.read", args), JSON.stringify(args)).toMatchObject({ ok: false, error: "bad-request" });
+    }
+    expect(await ask("files.read", [id, { offset: 0, length: MINI_APP_LIMITS.filesReadBytes + 1 }])).toMatchObject({ ok: false, error: "too-large" });
+    expect(host.calls.filter((c) => c.op === "files.read")).toHaveLength(0);
+    host.linked.get(REF)!.get(id)!.bytes = bytes(101);
+    expect(await ask("files.read", [id, { offset: 0, length: 1 }])).toMatchObject({ ok: false, error: "changed" });
+    host.linked.get(REF)!.get(id)!.bytes = null;
+    expect(await ask("files.read", [id, { offset: 0, length: 1 }])).toMatchObject({ ok: false, error: "gone" });
+    expect(await ask("files.read", ["b".repeat(22), { offset: 0, length: 1 }])).toMatchObject({ ok: false, error: "gone" });
+  });
+
+  it("read shares `file`'s 16 MiB a second", async () => {
+    const { ask, run, host, clock } = setup({ permissions: ["files"] });
+    run();
+    host.nextPick = [{ path: "big.bin", bytes: bytes(MINI_APP_LIMITS.fileBytesPerSecond) }];
+    const id = ((await ask("files.pick")).value as { id: string }[])[0]!.id;
+    host.files.set(REF, new Map([["board.svg", bytes(MINI_APP_LIMITS.fileBytesPerSecond - 1)]]));
+    expect(await ask("file", ["board.svg"])).toMatchObject({ ok: true });
+    expect(await ask("files.read", [id, { offset: 0, length: 1 }])).toMatchObject({ ok: true });
+    expect(await ask("files.read", [id, { offset: 0, length: 1 }])).toMatchObject({ ok: false, error: "too-fast" });
+    clock.t += 1000;
+    expect(await ask("files.read", [id, { offset: 0, length: 1 }])).toMatchObject({ ok: true });
+  });
+
+  it("list shares the 16 MiB a second too: 100 000 links answer once a second, not 50 times", async () => {
+    // Each answer of 100 000 library-like paths (95 characters) is about 17 MB as JSON: 50 a second made the page copy
+    // 758 MB a second.
+    const { ask, run, host, broker, posted, clock } = setup({ permissions: ["files"] });
+    run();
+    const entries = Array.from({ length: MINI_APP_LIMITS.filesEntries }, (_, i) => ({ id: "a".repeat(22), path: `Music/Artist ${i % 500}/Album ${i % 40}/${String(i).padStart(6, "0")} A song with a long enough title.flac`.padEnd(95, "x"), size: 30_000_000, modified: 1_790_000_000_000, available: true }));
+    host.linkedFiles!.list = async () => entries;
+    host.files.set(REF, new Map([["board.svg", bytes(1)]]));
+    clock.t += 1_001;
+    const lists = Array.from({ length: MINI_APP_LIMITS.requestsPerSecond - 1 }, (_, i) => 1_000 + i);
+    for (const id of lists) broker.message({ id, type: "files.list", args: [] });
+    await vi.waitFor(() => expect(posted.filter((p) => lists.includes(p.message.id as number))).toHaveLength(lists.length));
+    const answers = posted.filter((p) => lists.includes(p.message.id as number)).map((p) => p.message);
+    expect(answers.filter((a) => a.ok === true)).toHaveLength(1);
+    expect(answers.filter((a) => a.error === "too-fast")).toHaveLength(lists.length - 1);
+    // The list spent what `file` and `files.read` may still answer that second.
+    expect(await ask("file", ["board.svg"])).toMatchObject({ ok: false, error: "too-fast" });
+    clock.t += 1_000;
+    expect(await ask("files.list")).toMatchObject({ ok: true });
+  });
+
+  it("list: a small one is counted too, by its bytes", async () => {
+    const { ask, run, host } = setup({ permissions: ["files"] });
+    run();
+    host.nextPick = [{ path: "Films/Up.mp4", bytes: bytes(1) }];
+    await ask("files.pick");
+    host.files.set(REF, new Map([["big.bin", bytes(MINI_APP_LIMITS.fileBytesPerSecond - 50)], ["board.svg", bytes(1)]]));
+    expect(await ask("file", ["big.bin"])).toMatchObject({ ok: true });
+    // Under the budget when it starts: answered whole, and it passes the budget.
+    expect(await ask("files.list")).toMatchObject({ ok: true, value: [{ path: "Films/Up.mp4" }] });
+    expect(await ask("file", ["board.svg"])).toMatchObject({ ok: false, error: "too-fast" });
+  });
+
+  it("forget drops one link, or all of the app's", async () => {
+    const { ask, run, host } = setup({ permissions: ["files"] });
+    run();
+    host.nextPick = [{ path: "a.mp4", bytes: bytes(1) }, { path: "b.mp4", bytes: bytes(1) }];
+    const [a] = (await ask("files.pick")).value as { id: string }[];
+    expect(await ask("files.forget", [a!.id])).toEqual({ id: expect.any(Number), ok: true });
+    expect(((await ask("files.list")).value as unknown[])).toHaveLength(1);
+    expect(await ask("files.forget", ["all"])).toMatchObject({ ok: true });
+    expect(await ask("files.list")).toMatchObject({ ok: true, value: [] });
+    expect(await ask("files.forget", ["../x"])).toMatchObject({ ok: false, error: "bad-request" });
+  });
+
+  // 50 forgets at once each took the Desktop's one writing lock on a thread of its own: another app's pick waited
+  // seconds (agents#1033). The host is asked for the next only once the one before answered.
+  it("forget: an app's forgets go to the host one at a time, in order", async () => {
+    const { ask, run, host, broker, posted } = setup({ permissions: ["files"] });
+    run();
+    host.nextPick = Array.from({ length: 5 }, (_, i) => ({ path: `${i}.mp4`, bytes: bytes(1) }));
+    const ids = ((await ask("files.pick")).value as { id: string }[]).map((e) => e.id);
+    let busy = 0, most = 0;
+    const order: string[] = [];
+    const forget = host.linkedFiles!.forget;
+    host.linkedFiles!.forget = async (ref, id) => {
+      most = Math.max(most, ++busy);
+      order.push(id);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      busy--;
+      return forget(ref, id);
+    };
+    ids.forEach((id, i) => broker.message({ id: 2_000 + i, type: "files.forget", args: [id] }));
+    await vi.waitFor(() => expect(posted.filter((p) => (p.message.id as number) >= 2_000)).toHaveLength(ids.length));
+    expect(posted.filter((p) => (p.message.id as number) >= 2_000).every((p) => p.message.ok === true)).toBe(true);
+    expect(most).toBe(1);
+    expect(order).toEqual(ids);
+  });
 });

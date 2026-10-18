@@ -124,16 +124,37 @@ export function firstOfBurst(chat: string, now = Date.now()): boolean {
  * sooner than MESSAGE_BURST_MS. Another chat's still shows, which a notification is for. Marks it shown when it may.
  */
 const noticeAt = new Map<string, number>();
-export function firstNoticeOfBurst(chat: string, now = Date.now()): boolean {
-  if (inBurst(noticeAt.get(chat), now)) return false;
-  noticeAt.delete(chat);
-  noticeAt.set(chat, now);
-  if (noticeAt.size > 256) noticeAt.delete(noticeAt.keys().next().value as string);
+export const firstNoticeOfBurst = (chat: string, now = Date.now()) => firstIn(noticeAt, chat, now);
+
+/**
+ * Mentions of me in one chat that come together (a member names me 30 times in 9 s) are one sound and one notification
+ * too, in a burst of their own: the first is heard inside a burst of plain messages, the next ones that soon are not.
+ */
+const mentionAt = new Map<string, number>();
+const mentionNoticeAt = new Map<string, number>();
+function firstIn(at: Map<string, number>, chat: string, now: number): boolean {
+  if (inBurst(at.get(chat), now)) return false;
+  at.delete(chat);
+  at.set(chat, now);
+  if (at.size > 256) at.delete(at.keys().next().value as string);
   return true;
 }
+/** Whether a mention's sound for `chat` may play now, and if so, marks it played. */
+export const firstMentionOfBurst = (chat: string, now = Date.now()) => firstIn(mentionAt, chat, now);
+/** Whether a mention's system notification for `chat` may show now, and if so, marks it shown. */
+export const firstMentionNoticeOfBurst = (chat: string, now = Date.now()) => firstIn(mentionNoticeAt, chat, now);
+
+/**
+ * Reactions to my messages that come together in one chat (25 members react at once, one keeps changing theirs) are one
+ * system notification too, in a burst of their own: a message of that chat still shows.
+ */
+const reactionNoticeAt = new Map<string, number>();
+export const firstReactionNoticeOfBurst = (chat: string, now = Date.now()) => firstIn(reactionNoticeAt, chat, now);
 
 /** Forgets what played (tests). */
-export function resetCues(): void { lastPlayed.clear(); playedKeys.length = 0; burstAt.clear(); anyBurstAt = undefined; noticeAt.clear(); }
+export function resetCues(): void {
+  lastPlayed.clear(); playedKeys.length = 0; burstAt.clear(); anyBurstAt = undefined; noticeAt.clear(); mentionAt.clear(); mentionNoticeAt.clear(); reactionNoticeAt.clear();
+}
 
 /** The chat on screen, as the mute store names it, for cues played from inside its messages (a spoiler, a delete). */
 export const CueChat = createContext<string | undefined>(undefined);

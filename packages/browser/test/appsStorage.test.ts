@@ -195,7 +195,7 @@ describe("storage", () => {
     const rows = await storageRows() as { key: string; value: string; size: number }[];
     const own = rows.filter((r) => r.key);
     expect(JSON.parse(rows.find((r) => !r.key)!.value)).toEqual({ rows: 10_001, keyBytes: own.reduce((n, r) => n + r.key.length, 0), size: own.reduce((n, r) => n + r.size, 0) });
-  });
+  }, 30_000); // 10,000 rows seeded and counted in fake-indexeddb: about 3 s on an idle host, over 5 s on a loaded runner.
 
   it("a kept count that disagrees with the rows (an older client wrote some) is counted again", async () => {
     const { store, app } = await installed();

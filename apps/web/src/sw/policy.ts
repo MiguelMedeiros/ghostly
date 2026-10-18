@@ -65,7 +65,8 @@ export function classify(request: RequestLike, origin: string, precached: Readon
   // Precached files are stored under their bare path; a query string makes it another request.
   if (url.search) return "pass";
   if (precached.has(path)) return "precache";
-  if (path.startsWith("/assets/") && !path.includes("..")) return "asset";
+  // A source map is for the devtools, not the app: never kept, and its 404 after a deploy says nothing to the page.
+  if (path.startsWith("/assets/") && !path.includes("..") && !path.endsWith(".map")) return "asset";
   return "pass";
 }
 
@@ -94,13 +95,30 @@ export function precacheMode(path: string): "default" | "reload" {
   return path.startsWith("/assets/") ? "default" : "reload";
 }
 
+/**
+ * What the worker does with the server's answer for a hashed file it did not precache. `store`: the whole file, this
+ * origin's, kept for next time. `gone`: the server no longer has it (a 404 under `/assets/`, whose names carry a digest
+ * of their content, means a deploy replaced this build), so the open pages are told to look for the new version now.
+ * `pass`: anything else (a range, a server error, a cross-origin opaque answer), left alone.
+ */
+export function assetAnswer(response: { status: number; type: string }): "store" | "gone" | "pass" {
+  if (response.type !== "basic") return "pass";
+  if (response.status === 200) return "store";
+  return response.status === 404 ? "gone" : "pass";
+}
+
 /** A shared item as the manifest's `share_target` params name it. */
 export interface SharedItem {
   title: string;
   text: string;
   url: string;
   files: File[];
+  /** Files left out as too large, by name (`""`: not known, a body over `MAX_SHARE_BYTES` is never read). */
+  leftOut?: string[];
 }
+
+/** A share too large to read: nothing of it comes, and the picker says a file was too large. */
+export const TOO_LARGE_SHARE: SharedItem = { title: "", text: "", url: "", files: [], leftOut: [""] };
 
 /** Most files one share brings; larger shares keep their first ones. */
 export const MAX_SHARED_FILES = 32;

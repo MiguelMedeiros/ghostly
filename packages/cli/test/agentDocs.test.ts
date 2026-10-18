@@ -8,12 +8,15 @@ import { ghostly } from "./support/cli";
  * What an AI agent is taught (SKILL.md, the prompt and the guide in docs/AI-AGENTS.md, the /developers/agents page)
  * names only commands and flags this CLI has: an agent runs them as written. Every `ghostly <command>` in a code block,
  * an inline code span or the prompt is looked up in `ghostly help`, and each `--flag` after it in that command's help.
+ * A secret (an invite, a group's link, a token) comes on stdin: as an argument the CLI warns that it shows in `ps`.
  */
 
 const ROOT = resolve(import.meta.dirname, "../../..");
-const DOCS = ["packages/cli/SKILL.md", "docs/AI-AGENTS.md", "apps/website/content/agents.ts"];
+const DOCS = ["packages/cli/SKILL.md", "packages/cli/skills/ghostly/SKILL.md", "docs/AI-AGENTS.md", "apps/website/content/agents.ts"];
 const GLOBAL = ["--profile", "--home", "--pretty", "--help", "--version"];
 const WORD = /^[a-z][a-z-]*$/;
+/** Commands whose secret shows in `ps` and the shell's history when given as an argument: taught on stdin only. */
+const ON_STDIN = ["invite join", "group join", "wallet redeem"];
 
 /** The words that name a command in a usage line, up to its first argument or option. */
 const commandWords = (usage: string) => {
@@ -70,6 +73,10 @@ describe("what an agent is taught", { timeout: 180_000 }, async () => {
           const known = await flags(name);
           for (const [flag] of call.matchAll(/(?<![\w-])--[a-z][a-z-]*/g))
             expect(known.has(flag) || GLOBAL.includes(flag), `${doc}: ghostly ${name} has no ${flag} ("ghostly ${call}")`).toBe(true);
+          if (ON_STDIN.includes(name)) {
+            const arg = ` ${call.slice(name.length)}`.split(/\s--/)[0].trim();
+            expect(arg === "" || arg === "-", `${doc}: "ghostly ${call}" puts a secret on the command line; teach it on stdin`).toBe(true);
+          }
           checked++;
         }
       }

@@ -658,6 +658,8 @@ export interface WalletTx {
   amount: number;
   fee: number;
   note?: string;
+  /** `lightning-in`: the mint quote of the invoice paid, so the invoice on screen knows it is the one. Absent on older records. */
+  quote?: string;
 }
 
 /** The kinds of wallet a profile can have: each is one card of the deck, on one network. */
@@ -1475,6 +1477,47 @@ export interface PublicGraphView {
 export interface PublicPostImageView { src?: string; miss?: string; hosts: string[]; width?: number; height?: number }
 
 /** The profile's did:dht (WISP 310-did-dht): its own key, public to everyone, never tied to a chat. */
+/** A request in Requests (WISP 8xx): what the asker said. The name is what it typed, unverified. */
+export interface ContactRequestView {
+  /** The asker key. */
+  id: string;
+  name: string;
+  text: string;
+  receivedAt: number;
+  /** When it ends unanswered. */
+  expires: number;
+}
+
+/** A request this profile sent through someone's contact link (WISP 8xx), shown on the chat made for it. */
+export interface ContactAskView {
+  chatId: string;
+  /**
+   * `sending`, `knocking`: on its way. `seen`: it arrived; the owner accepts it or nothing is said. `off`: the link was
+   * turned off. `ended`: no answer in seven days.
+   */
+  state: "sending" | "knocking" | "seen" | "off" | "ended";
+  expires: number;
+}
+
+/** The profile's contact link (WISP 8xx): what the owner shows and shares. */
+export interface ContactLinkView {
+  /** `ghostly1r…` */
+  code: string;
+  /** `https://ghostly.tools/#ghostly1r…` */
+  link: string;
+  createdAt: number;
+  /** `busy`: too many requests wait; new ones are counted, not read. */
+  state: "open" | "busy";
+  /** Requests waiting in Requests. */
+  waiting: number;
+  /** How many people tried while the link was busy, since the owner last looked; never their names. */
+  missed: number;
+  /** When the link record last went out. */
+  publishedAt?: number;
+  /** Why the last publish failed. */
+  error?: string;
+}
+
 export interface ProfileDidView {
   /** `did:dht:…` */
   id: string;
@@ -1729,6 +1772,12 @@ export interface EngineState {
   identityProofs: IdentityProofView[];
   /** This profile's public DID. Absent until the engine has loaded it. */
   did?: ProfileDidView;
+  /** This profile's contact link, when it has one. */
+  contactLink?: ContactLinkView;
+  /** The requests its contact link took, newest first. */
+  contactRequests?: ContactRequestView[];
+  /** The requests this profile sent through others' contact links. */
+  contactAsks?: ContactAskView[];
   /** The Nostr social layer: the person's own keys' data and the effective settings. */
   nostr: NostrSocialState;
   /** Private groups and pending invitations (WISP 900). */

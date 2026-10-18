@@ -17,7 +17,7 @@ import type { LightningCardView } from "@ghostly/browser/engine/paymentAdapters/
 import type { BitcoinView } from "@ghostly/browser/engine/paymentAdapters/providers/bitcoinService";
 import type { BackupReminders } from "@ghostly/browser/shared/backupReminder";
 import type { AppFrameEvent, AppSendError, DataLinkState, ServiceAd, PairingState, TransportWait } from "@ghostly/core";
-import type { MiniAppJson } from "@ghostly/core/miniApp";
+import type { MiniAppJson, MiniAppLinkedFile } from "@ghostly/core/miniApp";
 import type { ChatFile } from "./types";
 
 /**
@@ -169,6 +169,8 @@ export interface WalletTransaction {
   /** What this movement cost, exactly. */
   fee: number;
   note?: string;
+  /** `lightning-in`: the mint quote of the invoice paid (what `receiveLightning` returned as `quote`). */
+  quote?: string;
 }
 
 export interface WalletState {
@@ -355,13 +357,15 @@ export interface WalletPlatform {
   /** The primary mint (first in the list) is where Lightning invoices are created. */
   setPrimaryMint(url: string): Promise<void>;
   /** An invoice from the bound Lightning card (else the default for receiving); `via: "cashu"` asks the Cashu mints. */
-  receiveLightning(amount: number, via?: "cashu"): Promise<{ invoice: string; expiresAt: number | null; paymentHash?: string; source?: string }>;
+  receiveLightning(amount: number, via?: "cashu"): Promise<{ quote?: string; invoice: string; expiresAt: number | null; paymentHash?: string; source?: string }>;
   quoteInvoice(invoice: string, via?: "cashu"): Promise<{ quote: string; mint: string; amount: number; feeReserve: number; source?: string }>;
   /**
    * True when paid, false while the payment is pending (or its answer lost). Throws when the sats did not leave. `note`: what it was for, kept with the wallet's record.
    * `confirmedReal`: the person confirmed a Mainnet payment as real money; the engine refuses one without it.
+   * `chat`: the invoice was in a message of this contact's chat; paid on Testnet, they are told (a test mint's invoice
+   * counts only on the payer's word).
    */
-  payQuote(quote: string, mint: string, note?: string, confirmedReal?: boolean): Promise<boolean>;
+  payQuote(quote: string, mint: string, note?: string, confirmedReal?: boolean, chat?: { peerPubKey: string; invoice: string }): Promise<boolean>;
   /**
    * Reads a Lightning address (`name@domain`) or an LNURL and fetches what it asks for. The address's
    * domain learns of the request: say so before calling.
@@ -461,6 +465,27 @@ export interface AppsPlatform {
     /** The contact's app as last heard: open (its version) or not. Heard since the client started, before any app ran. */
     peer(linkId: string, app: string): { version: string } | null;
   };
+  /** Linked files, where this client keeps them; absent where it cannot, and `files.*` is then `not-allowed`. */
+  linkedFiles?: LinkedFilesHost;
+}
+
+/**
+ * Files the person picks for an app (WISP 1200 · Linked files), kept by the client as links, never copies, per app.
+ * Its refusals are thrown as `"<code>: words"`: `cancelled`, `changed`, `gone`, `too-large`, `too-fast`.
+ */
+export interface LinkedFilesHost {
+  /**
+   * Asks the person with the client's own sheet and picker, then keeps links to what was picked. `signal` aborts when
+   * the app stops: its sheet goes with it, and the pick is `cancelled`. A dialog the client cannot take back (Desktop's)
+   * keeps nothing, and the app gets no other one until it is answered (`too-fast`).
+   */
+  pick(ref: string, title: string, options: { folder: boolean; accept: string[] }, signal?: AbortSignal): Promise<MiniAppLinkedFile[]>;
+  /** Every link the app keeps; where the browser must be asked again to read kept ones, the person is asked once (a sheet that goes on `signal`, as pick's). */
+  list(ref: string, title: string, signal?: AbortSignal): Promise<MiniAppLinkedFile[]>;
+  /** Bytes from `offset`, at most `length`: fewer at the end of the file. A copy the caller owns, which the broker hands to the app (transferred). */
+  read(ref: string, id: string, offset: number, length: number): Promise<Uint8Array>;
+  /** One link, or all of the app's with "all". */
+  forget(ref: string, id: string): Promise<void>;
 }
 
 /** An installed app's entry, ready for the runner (the engine's `appEntry`). */

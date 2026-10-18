@@ -1,0 +1,1 @@
+A member keeps the first leave mark (`group-left`) it takes for a leave and drops any other for the same leave, neither taken nor handed on. A committer could sign its mark again and again, each a new signature that every hub relayed and every member saved, and a lower one hid the leaver's earlier lines after the fact.

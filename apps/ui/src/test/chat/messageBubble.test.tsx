@@ -284,15 +284,19 @@ describe("MessageBubble: money in a message", () => {
     expect(within(card).getByTestId("money-amount")).toHaveTextContent("2,100");
   });
 
-  it("lays out an invoice's memo by its own direction, and keeps its amount and unit in one isolated run", () => {
+  it("lays out an invoice's memo by its own direction, and isolates its number alone, its unit in the line's direction", () => {
     // In Arabic the card's lines took the page's direction: "1 cup coffee" read "cup coffee 1", and "sats" was glued to
-    // the number. The memo is whoever made the invoice's text, in any script, as a message's text is.
+    // the number. The memo is whoever made the invoice's text, in any script, as a message's text is. One isolate
+    // around the number and its unit took the direction of "sats": «تجريبية sats 250,000» from the right.
     bubble({ text: REGTEST_INVOICE });
     const card = screen.getByTestId("invoice-bubble");
     expect(within(card).getByText("1 cup coffee")).toHaveAttribute("dir", "auto");
     const amount = within(card).getByTestId("money-amount");
-    expect(amount.parentElement!.tagName).toBe("BDI");
-    expect(amount.parentElement!.lastElementChild).toHaveTextContent(/sats/);
+    expect(amount.tagName).toBe("BDI");
+    const unit = amount.nextElementSibling!;
+    expect(unit).toHaveTextContent(/sats/);
+    expect(unit.parentElement!.tagName).toBe("P");
+    expect(unit.parentElement).not.toHaveAttribute("dir");
   });
 
   it("keeps the words around an invoice above its card", () => {

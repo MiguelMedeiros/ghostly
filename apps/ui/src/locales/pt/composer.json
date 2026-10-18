@@ -23,6 +23,7 @@
   "emojiCategories": "Categorias de emoji",
   "emojiNotLoading": "Os emoji não puderam ser carregados.",
   "expressions": "Emoji e GIFs",
+  "filePreparing": "Preparando {{name}}…",
   "gif": "GIF",
   "gifCategories": "Categorias de GIF",
   "gifCategory": {
@@ -69,6 +70,7 @@
   "services": "Serviços compartilhados",
   "servicesNeedApp": "Precisa da extensão ou do app desktop do Ghostly",
   "servicesShared": "{{count}} compartilhado(s) nesta conversa",
+  "sharedTextFile": "Texto compartilhado",
   "skinTone": "Tom de pele",
   "takePhoto": "Tirar foto",
   "tooLong": "Longo demais para enviar ({{count}} caracteres, o limite é {{max}}).",

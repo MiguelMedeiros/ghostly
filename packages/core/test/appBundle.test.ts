@@ -85,6 +85,7 @@ async function build(): Promise<Vectors> {
   }, [ENTRY, file("icon.png", ICON), file("screenshots/1.png", SCREENSHOT), file("screenshots/2.jpg", fill(32, 7)), file("data/openings.json", "[\"e4\",\"d4\"]")], publisher)).bytes);
   addValid("every bound at its limit: 64 files, a 128-byte path, a 256 KiB icon of 1024 × 1024, 8 screenshots, the longest texts and 8 sources", (await buildAppBundle({ ...DRAFT, ...LIMIT_FIELDS }, limitFiles(), publisher)).bytes);
   addValid("an app that asks for the internet", (await buildAppBundle({ ...DRAFT, permissions: ["internet"] }, [ENTRY], publisher)).bytes);
+  addValid("an app that asks for files the person picks", (await buildAppBundle({ ...DRAFT, permissions: ["chat", "files"] }, [ENTRY], publisher)).bytes);
   addValid("a version with no permission and the proprietary licence", (await buildAppBundle({ ...DRAFT, permissions: [], license: "proprietary" }, [ENTRY], publisher)).bytes);
   const big = await largest();
   addValid("a whole bundle of exactly 16 MiB", big);

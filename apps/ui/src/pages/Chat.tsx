@@ -26,6 +26,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { InviteCard } from "../components/InviteCard";
 import { LinkQrDialog } from "../components/chat/LinkQrDialog";
 import { ChatConnection } from "../components/ChatConnection";
+import { focus } from "../lib/connection";
 import { PairingScene } from "../components/pairing/PairingScene";
 import { usePairingProgress } from "../hooks/usePairingProgress";
 import { contactArrived } from "../lib/pairingProgress";
@@ -56,6 +57,7 @@ import { PeerServices } from "../components/PeerServices";
 import { formatFileSize } from "../lib/format";
 import { playSound, startRinging } from "../lib/sounds";
 import { CueChat } from "../lib/cues";
+import { NowPlayingChat, pauseForCall } from "../lib/nowPlaying";
 import { useServicesPlatform } from "../hooks/useServicesPlatform";
 import {
   isSessionPinned,
@@ -241,6 +243,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   useEffect(() => {
     const before = previousCallState.current;
     previousCallState.current = callState;
+    // A call starting (placed, or answered) pauses a voice message or audio file that plays, here or held by the app.
+    const quiet = (state: string) => state === "idle" || state === "incoming" || state === "ended";
+    if (!quiet(callState) && quiet(before)) pauseForCall();
     // A muted chat still rings (lib/chatMute.ts, MUTE_SILENCES).
     if (callState === "incoming") return callRings(sessionId) ? startRinging("ring") : undefined;
     if (callState === "offering") return startRinging("ringback");
@@ -426,7 +431,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const [showMute, setShowMute] = useState(false);
   const [showFolders, setShowFolders] = useState(false);
   const [showTechInfo, setShowTechInfo] = useState(false);
-  const labelInputRef = useRef<HTMLInputElement>(null);
+  const labelInputRef = useRef<HTMLInputElement>(null), nameRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -561,6 +566,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const shown = shownContactName({ nickname: chatLabel, face, nick: contactNick, fallback: t("common.unnamedContact", { key: contactTag(params?.peerPubKeyB64 ?? "") }) });
   const isAnonymous = shown.from === "key";
   const shownName = shown.name;
+  // What the now-playing bar names, for a voice message from here that plays on in another chat.
+  const playingChat = useMemo(() => ({ path: chatPath(sessionId), name: shownName, contact: true }), [sessionId, shownName]);
   // While locked, the lock screen shows who calls, as this chat shows them, and nothing else of it (WISP 601 § Locked).
   useRingOnLockScreen(params && callState === "incoming" ? {
     id: sessionId, name: shownName, named: !isAnonymous, peerPubKey: params.peerPubKeyB64, photo: face?.photo,
@@ -649,6 +656,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   return (
     // The chat's column, and beside it (over it when narrow) the contact's identities: the page is their container.
     <CueChat.Provider value={sessionId}>
+    <NowPlayingChat.Provider value={playingChat}>
     <div className="chat-pane flex-1 h-full">
     {/* A message that comes while the chat is open, read out once to a screen reader. */}
     <MessageAnnouncer chat={sessionId} messages={messages} nameOf={() => shownName} active={visible} />
@@ -723,7 +731,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 onKeyDown={(e) => {
                   if (labelComposition.composing(e)) return;
                   if (e.key === "Enter") saveLabel();
-                  if (e.key === "Escape") setIsEditingLabel(false);
+                  // Spent: a notice at the top that also answers Escape stays.
+                  if (e.key === "Escape") { e.preventDefault(); setIsEditingLabel(false); }
+                  // Done from the keyboard: the focus goes back to the name, not to the page. A click elsewhere keeps its own.
+                  if (e.key === "Enter" || e.key === "Escape") setTimeout(() => nameRef.current?.focus(), 0);
                 }}
                 onBlur={saveLabel}
                 placeholder={t("chat.setName")}
@@ -732,9 +743,12 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
               />
             ) : (
               <div className="flex items-center gap-1.5 max-md:gap-1 min-w-0">
-              <p
+              {/* The one way to rename the chat: a button, so the keyboard reaches it too. */}
+              <button
+                type="button"
+                ref={nameRef}
                 onClick={startEditLabel}
-                className={`group/name text-[15px] font-normal m-0 leading-tight truncate cursor-pointer hover:text-accent transition-colors ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
+                className={`group/name min-w-0 text-start text-[15px] font-normal m-0 leading-tight truncate cursor-pointer rounded hover:text-accent transition-colors ${focus} ${isAnonymous ? "text-text-muted italic" : "text-text-primary"}`}
                 title={t("chat.setNameHint")}
               >
                 {/* With no name, the word alone: the start of their key ("Contact · 1kwb54" elsewhere) is on the line
@@ -750,13 +764,14 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                     strokeWidth="2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    className="inline ms-1.5 text-text-muted opacity-0 group-hover/name:opacity-100 max-md:hidden"
+                    aria-hidden="true"
+                    className="inline ms-1.5 text-text-muted opacity-0 group-hover/name:opacity-100 group-focus-visible/name:opacity-100 max-md:hidden"
                   >
                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                   </svg>
                 )}
-              </p>
+              </button>
               {paired && !phoneHeader && <IdentityStack peerKey={params.peerPubKeyB64} name={shownName} open={showIdentities} onOpen={() => { setIdentityCard(undefined); setShowIdentities(open => !open); }}
                 footer={face ? t("chat.shownWith", { provider: face.providerName, key: truncatedPeerKey }) : undefined} />}
               {compat && <span data-testid="compat-chat" title={t("chat.compat.hint")}
@@ -1184,6 +1199,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         card={identityCard} onClose={() => setShowIdentities(false)} />
     )}
     </div>
+    </NowPlayingChat.Provider>
     </CueChat.Provider>
   );
 }

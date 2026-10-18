@@ -5,7 +5,7 @@ import { ghostly } from "./support/cli";
 // covers: headless.cli
 
 /** The words that name a command in a usage line, up to its first argument or option (as main.ts reads them). */
-const WORD = /^[a-z][a-z-]*$/;
+const WORD = /^[a-z][a-z0-9-]*$/;
 const commandWords = (usage: string) => {
   const words: string[] = [];
   for (const word of usage.split(" ")) {

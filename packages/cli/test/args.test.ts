@@ -378,4 +378,17 @@ describe("errors", () => {
     expect(asCliError(new GhostlyHttpError("unreachable", "Could not connect to the peer")).toJSON()).toEqual({ code: "unavailable", message: "Could not connect to the peer" });
     expect(asCliError(new GhostlyHttpError("closed", "Connection closed")).code).toBe("engine");
   });
+
+  // A member's admin-only group commands and an invitation already answered were `engine` (exit 1), the code for the
+  // engine failing: a bot could not tell "you are not allowed" from a crash. The engine's own words, as thrown.
+  it("say a group refusal as refused, and an invite into a community as a wrong request", () => {
+    for (const message of [
+      "Only the admin can rename the group", "Only the admin can change the members of this group", "Only the admin can renew the group's secret",
+      "Only the admin can share a link to the group", "Only the admin can invite", "Only the admin can choose the group's hubs",
+      "Only the admin can change the group's picture", "Only the admin can replace or turn off the group's link", "Only the admin can do that",
+      "No invitation to accept", "No invitation to decline",
+    ]) expect(asCliError(new Error(message)).toJSON(), message).toEqual({ code: "refused", message });
+    const community = "Share the group's link with them: anyone who opens it joins";
+    expect(asCliError(new Error(community)).toJSON()).toEqual({ code: "bad_request", message: community });
+  });
 });

@@ -76,6 +76,17 @@
     "tooLarge": "Too large.",
     "unlistedVersion": "The link holds a version this store has not listed yet."
   },
+  "files": {
+    "allow": "Allow",
+    "askAgain": "{{app}} asks to read “{{name}}” again",
+    "askAgainMore": "{{app}} asks to read “{{name}}” and {{count}} more again",
+    "askFiles": "{{app}} asks to read files",
+    "askFolder": "{{app}} asks to read a folder",
+    "chooseFiles": "Choose files",
+    "chooseFolder": "Choose a folder",
+    "notNow": "Not now",
+    "note": "Nothing is copied: {{app}} reads what you pick, on this device."
+  },
   "install": {
     "equivocation": "Two different versions {{sequence}} exist. Ghostly kept the one you have.",
     "fetching": "Checking the app…",
@@ -91,6 +102,8 @@
     "notListed": "Not in any of your stores",
     "perm": {
       "chat": "Talk to the same app on your contact's side",
+      "files": "Read the files and folders you pick, and share them with your contact in the chat",
+      "filesInfo": "Only what you pick, never the rest of your device. Your contact's app can read what it shares while you both have it open.",
       "internet": "Use the internet",
       "internetInfo": "The app and the servers it talks to can learn your IP address and what you do in it.",
       "name": "See your name in this chat",

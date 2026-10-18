@@ -5,6 +5,9 @@
 // plugin), and what Android hands the app (deep links, shares, notification taps, network changes).
 #[cfg(target_os = "android")]
 mod android;
+// The share another app made on Android, until the page takes it (built for tests on every host).
+#[cfg(any(target_os = "android", test))]
+mod android_share;
 #[cfg(desktop)]
 mod app_sandbox;
 #[cfg(desktop)]
@@ -33,6 +36,7 @@ mod hyperdht;
 #[cfg(desktop)]
 mod keep_awake;
 mod link_preview;
+mod linked_files;
 mod lnd;
 mod local_access;
 mod local_fetch;
@@ -178,6 +182,11 @@ macro_rules! commands {
             hyperdht::paired_hyperdht_start,
             hyperdht::paired_hyperdht_stop,
             keep_awake::keep_awake,
+            linked_files::linked_files_forget,
+            linked_files::linked_files_list,
+            linked_files::linked_files_pick,
+            linked_files::linked_files_pick_cancel,
+            linked_files::linked_files_read,
             native_call::native_call_accept,
             native_call::native_call_answer,
             native_call::native_call_camera,
@@ -328,6 +337,10 @@ pub fn run() {
             app.manage(local_access::LocalAccess::load(
                 app.path().app_data_dir()?.join("local-services.json"),
             ));
+            // Files and folders the person picked for an app: links (paths), never copies, one folder per profile.
+            app.manage(linked_files::LinkedFiles::new(
+                app.path().app_data_dir()?.join("linked"),
+            ));
             let files = file_store::FileStore::new(app.path().app_data_dir()?.join("files"));
             files.keep_private();
             files.remove_staged_saves();
@@ -416,9 +429,9 @@ fn on_page_load<R: tauri::Runtime>(
     }
 }
 
-/// The native listeners of the page before this one: stopped, their eight places free (`TransportState::page_started`).
-/// The app windows it opened close (`app_sandbox::page_started`), and so do the windows of its contacts' apps
-/// (`viewer::close_all`): the page there now would answer them for another profile.
+/// The native listeners of the page before this one: stopped, their eight places free (`TransportState::page_started`);
+/// its apps' file dialogs: let go. The app windows it opened close (`app_sandbox::page_started`), and so do the
+/// windows of its contacts' apps (`viewer::close_all`): the page there now would answer them for another profile.
 /// The tokens it got to play stored files stop serving them (`StreamGrants::close_all`).
 #[cfg(desktop)]
 fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
@@ -432,6 +445,10 @@ fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
     if let Some(hyperdht) = app.try_state::<hyperdht::HyperState>() {
         hyperdht.page_started();
+    }
+    // Its apps' file dialogs, still on screen: they keep nothing (`LinkedFiles::page_started`).
+    if let Some(links) = app.try_state::<linked_files::LinkedFiles>() {
+        links.page_started();
     }
 }
 
@@ -506,7 +523,8 @@ fn hold_close(window: impl Closing) {
 /// - Any other exit the loop is asked for (`app.exit`): held for `DEPART_MS` while the page says goodbye, then let
 ///   through.
 /// - Every exit, those or a quit that nothing can hold (Cmd+Q and `quit` on macOS end the process
-///   from `applicationWillTerminate`): the native connections close, so each contact sees its close.
+///   from `applicationWillTerminate`): the native connections close, so each contact sees its close, and on Linux
+///   the app's notifications go from the desktop's list (`notifications::exit`).
 fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
     match event {
         tauri::RunEvent::ExitRequested { code, api, .. } => {
@@ -531,6 +549,7 @@ fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
             tauri::async_runtime::block_on(
                 transports.shutdown(std::time::Duration::from_millis(CLOSE_MS)),
             );
+            notifications::exit();
             // Ghostly launched again while this app was leaving: that launch starts now, a window of its own.
             #[cfg(target_os = "linux")]
             single_instance::relaunch(app);

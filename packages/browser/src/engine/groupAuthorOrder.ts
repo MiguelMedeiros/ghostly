@@ -15,11 +15,19 @@ export const AUTHOR_ORDER_ROWS = 576;
 export const AUTHOR_ORDER_SETTLE_MS = 15_000;
 /** How long a member's rows wait at most, however their catch-up goes on: well within the rows followed. */
 export const AUTHOR_ORDER_WAIT_MAX_MS = AUTHOR_ORDER_WINDOW_MS / 2;
+/**
+ * How far at most, in places of the history (milliseconds), below a member's later row an older one of theirs is
+ * stored (`GroupsHost.placeAbove`): twice the page a catch-up asks for (`GROUP_LIMITS.miss`), so a page's rows follow
+ * one another below the row and the next page still finds room above them.
+ */
+export const AUTHOR_ORDER_ROOM = 64;
 
 interface Placed { sender: string; epoch: number; seq: number; id: string; at: number }
+/** A row followed, and `n`: when it came, among the rows of its group (one stored `above` came after those below it). */
+type Followed = Placed & { n: number };
 
 /** Whether `a` was written after `b` by the same member: a later epoch, or a higher number in the same one. */
-function after(a: Placed, b: Placed): boolean {
+function after(a: Pick<Placed, "epoch" | "seq">, b: Pick<Placed, "epoch" | "seq">): boolean {
   return a.epoch > b.epoch || (a.epoch === b.epoch && a.seq > b.seq);
 }
 
@@ -27,14 +35,17 @@ function after(a: Placed, b: Placed): boolean {
  * A member's messages in a private group in the order that member wrote them (WISP 400, requirement 10, and WISP 902
  * § Catch-up). A message is placed where it arrives. When one comes of a member whose later messages were placed here
  * moments ago (two catch-up answers raced: the author's own newest 32 and another member's hand-on of the older ones),
- * those later ones are placed again below it, in the order they were written, and the lines that came after them before
- * the older one (another member's, mine) go along below them, in their order: a reply to the newest stays below it. A
- * row only ever moves down, so nobody else's lines change order. While messages of that member are still missing
- * (`missing`), the rows wait for them, so each row moves about once in a whole catch-up.
+ * it is stored just above the first of them where the history has room there (`above`): the author's newest stays
+ * the last while the older pages come. Where it has none, those later ones are placed again below it, in the order
+ * they were written, and the lines that came after them before the older one (another member's, mine) go along below
+ * them, in their order: a reply to the newest stays below it. A row only ever moves down, so nobody else's lines change
+ * order. While messages of that member are still missing (`missing`), the rows wait for them, so each row moves about
+ * once in a whole catch-up.
  */
 export class GroupAuthorOrder {
   /** Per group: the members' rows followed, in the order they are placed in the history. */
-  private readonly rows = new Map<string, Placed[]>();
+  private readonly rows = new Map<string, Followed[]>();
+  private came = 0;
   /** Per group: the members with a row placed above an older one of theirs, since when, and when their last row came. */
   private readonly due = new Map<string, Map<string, { since: number; last: number }>>();
   private readonly running = new Set<string>();
@@ -42,14 +53,36 @@ export class GroupAuthorOrder {
   constructor(private readonly host: Pick<GroupsHost, "placeAgain">, private readonly linkOf: (groupId: string) => string,
     private readonly missing: (groupId: string, sender: string) => boolean = () => false) {}
 
-  /** A member's message was stored in the group's history, new: `at` is when, on the engine's clock. */
-  placed(groupId: string, row: Placed): void {
+  /**
+   * The row a member's message about to be stored goes just above: the first placed of those that member wrote after
+   * it, when nobody else's came after that one (a hand-on of everyone's older messages brings them in the order they
+   * were written: the message goes after those). None when nothing they wrote later was placed here, or another's
+   * came since: it goes where it comes.
+   */
+  above(groupId: string, row: Omit<Placed, "at">): string | undefined {
+    const rows = this.rows.get(groupId) ?? [];
+    if (rows.some(r => r.id === row.id)) return undefined;
+    const at = rows.findIndex(r => r.sender === row.sender && after(r, row));
+    return at >= 0 && rows.slice(at).every(r => r.sender === row.sender) ? rows[at].id : undefined;
+  }
+
+  /**
+   * A member's message was stored in the group's history, new: `at` is when, on the engine's clock. `above`: the row
+   * it was stored just above, as `above` named it; else it went to the end.
+   */
+  placed(groupId: string, row: Placed, above?: string): void {
     if (!this.host.placeAgain) return;
     const rows = (this.rows.get(groupId) ?? []).filter(r => r.at > row.at - AUTHOR_ORDER_WINDOW_MS).slice(-(AUTHOR_ORDER_ROWS - 1));
-    rows.push(row);
+    const at = above === undefined ? -1 : rows.findIndex(r => r.id === above);
+    const followed = { ...row, n: ++this.came };
+    if (at >= 0) rows.splice(at, 0, followed);
+    else rows.push(followed);
     this.rows.set(groupId, rows);
     let due = this.due.get(groupId);
-    if (!due?.has(row.sender) && !rows.some(r => r.sender === row.sender && after(r, row))) return;
+    const first = rows.slice(0, at >= 0 ? at : -1).findIndex(r => r.sender === row.sender && after(r, row));
+    if (!due?.has(row.sender) && first < 0) return;
+    // The rows to place again, and those that go along: followed as if they came now, while they wait for the rest.
+    if (first >= 0) for (const r of rows.slice(first)) r.at = Math.max(r.at, row.at);
     if (!due) this.due.set(groupId, (due = new Map()));
     due.set(row.sender, { since: due.get(row.sender)?.since ?? row.at, last: row.at });
     if (!this.missing(groupId, row.sender)) void this.run(groupId, row.at);
@@ -96,19 +129,20 @@ export class GroupAuthorOrder {
           const ids = new Set(newer.map(r => r.id));
           // The others' rows (mine too) that came after the first of them, before any older one of the member's,
           // follow them in their order: written below those rows (a reply to the newest), they stay below them. Those
-          // that came with the older ones were written among them, and stay.
+          // that came with the older ones were written among them, and stay. Read in the order they came: an older one
+          // stored just above came after the rows below it.
           const first = rows.findIndex(r => ids.has(r.id));
-          let end = rows.length;
-          for (let i = first + 1, top = rows[first]!; i < rows.length; i++) {
-            if (rows[i]!.sender !== sender) continue;
-            if (after(top, rows[i]!)) { end = i; break; }
-            top = rows[i]!;
+          let end = Infinity, top = rows[first]!;
+          for (const r of rows.filter(r => r.n > rows[first]!.n).sort((a, b) => a.n - b.n)) {
+            if (r.sender !== sender) continue;
+            if (after(top, r)) { end = r.n; break; }
+            top = r;
           }
-          const followers = rows.slice(first, end).filter(r => r.sender !== sender);
+          const followers = rows.slice(first).filter(r => r.sender !== sender && r.n < end);
           for (const r of followers) ids.add(r.id);
           const moved = [...newer, ...followers];
           // Placed as if they came now: followed for as long as one that came now, through a long catch-up.
-          this.rows.set(groupId, [...rows.filter(r => !ids.has(r.id)), ...moved.map(r => ({ ...r, at: Math.max(r.at, now) }))]);
+          this.rows.set(groupId, [...rows.filter(r => !ids.has(r.id)), ...moved.map(r => ({ ...r, at: Math.max(r.at, now), n: ++this.came }))]);
           await this.host.placeAgain!(this.linkOf(groupId), moved.map(r => r.id)).catch(() => {});
         }
       }

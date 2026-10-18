@@ -23,6 +23,7 @@
   "emojiCategories": "表情类别",
   "emojiNotLoading": "无法加载表情。",
   "expressions": "表情和 GIF",
+  "filePreparing": "正在准备 {{name}}…",
   "gif": "GIF",
   "gifCategories": "GIF 类别",
   "gifCategory": {
@@ -69,6 +70,7 @@
   "services": "共享服务",
   "servicesNeedApp": "需要 Ghostly 浏览器扩展或桌面应用",
   "servicesShared": "此聊天中已分享 {{count}} 个",
+  "sharedTextFile": "共享的文本",
   "skinTone": "肤色",
   "takePhoto": "拍照",
   "tooLong": "内容过长，无法发送（{{count}} 个字符，上限为 {{max}}）。",

@@ -42,7 +42,7 @@ describe("the bundles this build carries", () => {
   it("the build reads a bundle only at a commit, from jsDelivr or the same commit on GitHub, and tells it by its digest", () => {
     expect(sourcesOf(BUILT_IN_APPS[0]!.url)).toEqual([
       BUILT_IN_APPS[0]!.url,
-      "https://raw.githubusercontent.com/MiguelMedeiros/ghostly-chess/c665ab194478145fd9b9a4777e6c0d1893969649/app.ghostlyapp",
+      "https://raw.githubusercontent.com/MiguelMedeiros/ghostly-chess/0cbf1acc8fd7a03848f4e2a68cbec8854767ceaa/app.ghostlyapp",
     ]);
     for (const moving of ["https://cdn.jsdelivr.net/gh/ana/chess@main/app.ghostlyapp", "https://raw.githubusercontent.com/ana/chess/HEAD/app.ghostlyapp", "https://example.com/app.ghostlyapp"]) {
       expect(() => sourcesOf(moving), moving).toThrow("pinned to a commit");

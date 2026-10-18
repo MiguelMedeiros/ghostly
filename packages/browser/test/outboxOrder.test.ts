@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Outbox, type Resender } from "../src/engine/outbox";
+import { Outbox, RESEND_POLICY, type Resender } from "../src/engine/outbox";
 import type { StoredMessage } from "../src/shared/types";
 // covers: chat.order, chat.paired.offline-send, chat.waiting
 
@@ -107,12 +107,11 @@ describe("a chat's messages go out in the order they were written", () => {
   it("a link that says it is open a moment before it carries text: the first messages are not left behind", async () => {
     // Seen with two apps: the look began as the session opened, found the first three not ready, and sent from the
     // fourth on; the three went at the next look, after the later ones.
-    let live = false;
-    const c = chat([1, 2, 3, 4, 5, 6].map(n => row(n, "waiting")), async () => null, { ready: () => live });
+    let live = false, looking = false;
+    // The link carries text from the moment the fourth message is looked at: between two steps of the same look.
+    const c = chat([1, 2, 3, 4, 5, 6].map(n => row(n, "waiting")), async () => null, { ready: m => { if (looking && m.text === "m4") live = true; return live; } });
     await c.box.recover();
-    // The link carries text from the moment the fourth message's row is read: between two steps of the same look.
-    c.hooks.reads = 0;
-    c.hooks.read = n => { if (n === 5) live = true; };
+    looking = true;
     await c.box.flush({ reopened: true });
     expect(c.sent).toEqual(["m1", "m2", "m3", "m4", "m5", "m6"]);
     await c.box.stop();
@@ -275,6 +274,28 @@ describe("a file that waits for the live link goes in its place among the texts"
     live.open = true;
     await vi.advanceTimersByTimeAsync(5_000);
     expect(c.said).toEqual(["f1", "m2"]);
+    await c.box.stop();
+  });
+
+  it("a link that closes under the look its own check asked for: the file is asked again by itself, not only by the next look", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const said: string[] = [];
+    let asked = 0, drops = 1;
+    // The file's check comes due first. The link says it is open a moment before it carries text, so the text before
+    // the file is passed by, then goes as the file is found able to go, and the link closes under that send.
+    const c = chat([file(2), row(1, "queued")], async m => { said.push(m.text); if (drops-- > 0) void c.box.disconnected(); return null; }, {
+      ready: m => !!m.file || asked++ > 0,
+      sendFile: async message => { said.push(message.text); delete c.rows.find(m => m.id === message.id)!.delivery; },
+    });
+    await c.box.recover();
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs[0]);
+    expect(said[0]).toBe("m1");
+    expect(c.rows[0].delivery).toBe("waiting");
+    // No look since reaches the file (the text's own check reads up to its timestamp): the file's own check sends it
+    // once the link is back, as the text's sends the text.
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs[1] * 2);
+    expect(said.filter(t => t.startsWith("f"))).toEqual(["f2"]);
+    expect(c.rows[0].delivery).toBeUndefined();
     await c.box.stop();
   });
 

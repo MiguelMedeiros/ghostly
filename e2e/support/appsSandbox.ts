@@ -231,6 +231,7 @@ function netProbes(P: any) {
     try { await forged.storage.set("report-probe", { ref: P.victim }); r.storageSet = "ok"; } catch (e: any) { r.storageSet = "refused: " + e.message; }
     try { r.context = await G.context(); } catch (e: any) { r.context = "refused: " + e.message; }
     try { await G.chat.send({ hello: 1 }); r.chatSend = "sent"; } catch (e: any) { r.chatSend = "refused: " + e.message; }
+    try { r.filesList = JSON.stringify(await G.files.list()); } catch (e: any) { r.filesList = "refused: " + e.message; }
     report.done = true;
     await G.storage.set("report", JSON.parse(JSON.stringify(report)));
   })();
@@ -347,10 +348,11 @@ function fileFloodApp() {
     let ok = 0;
     const refused: string[] = [];
     for (let second = 0; second < 3; second++) {
-      const started = Date.now();
       const answers = await Promise.allSettled(Array.from({ length: 50 }, () => G.file("big.bin")));
       for (const a of answers as any[]) { if (a.status === "fulfilled") ok++; else refused.push(a.reason.message); }
-      await new Promise((r) => setTimeout(r, Math.max(0, 1050 - (Date.now() - started))));
+      // The host counts a second from when it starts a read, which can be well after the app asked on a loaded host:
+      // waited from the last answer, every read it counted is over a second old when the next 50 go.
+      await new Promise((r) => setTimeout(r, 1050));
     }
     await G.storage.set("report", { ok, refused: [...new Set(refused)] });
   })();

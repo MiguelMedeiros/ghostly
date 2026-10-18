@@ -35,11 +35,16 @@ export function followAppVisibility(listen: ListenWith, doc: Document = document
   }).catch(() => {});
 }
 
-/** A share from another app as Rust hands it over: its text, and its files on the paste shelf, by token. */
+/**
+ * A share from another app as Rust hands it over: its text, its files on the paste shelf, by token, and the names of
+ * those Android did not copy, too large to bring in (`leftOut`) or not read (`unread`).
+ */
 interface Shared {
   title: string;
   text: string;
   files: { token: string; name: string | null; size: number; mime: string | null }[];
+  leftOut?: string[];
+  unread?: string[];
 }
 
 /**
@@ -118,7 +123,8 @@ function withinPasteTotal<T extends { size: number }>(files: T[]): T[] {
 /**
  * "Share to Ghostly" from another app: taken when the app starts (a share can be what started it) and whenever Rust
  * says one arrived. The page shows the Share to… picker, as the web app's share target does, from the files' names
- * and sizes; their bytes are read into the page, as a paste's, only when the chat picked takes them. A share taken
+ * and sizes; their bytes are read into the page, as a paste's, only when the chat picked takes them. At most a paste's
+ * size in all: a file that would pass it is left out, and named, as are those Android did not copy. A share taken
  * later wins over one that waits. Once read (or none of it taken, or a later share took its place before it was
  * read), the share's copies in the app's cache go (`incoming_share_done`): the page holds what it needs.
  */
@@ -128,7 +134,10 @@ export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
   const take = async () => {
     const shared = await invoke<Shared | null>("incoming_share_take");
     if (!shared) return;
-    const clips: ClipboardFile[] = withinPasteTotal(shared.files)
+    const taken = withinPasteTotal(shared.files);
+    const leftOut = [...shared.leftOut ?? [], ...shared.files.filter((file) => !taken.includes(file)).map((file) => file.name ?? "")];
+    const unread = shared.unread ?? [];
+    const clips: ClipboardFile[] = taken
       .map(({ token, ...file }) => ({
         ...file,
         read: async (offset: number, length: number) => {
@@ -150,6 +159,8 @@ export function takeIncomingShares(invoke: Invoke, listen: Listen): void {
       text: shared.text,
       url: "",
       files,
+      ...(leftOut.length > 0 && { leftOut }),
+      ...(unread.length > 0 && { unread }),
       read: async () => {
         // Being read: a later share no longer lets these go under it; they go when the read ends.
         if (letGo === done) letGo = null;

@@ -15,7 +15,7 @@ import { AddAppDialog } from "../../components/apps/AddAppDialog";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { UpdateProvider } from "../../contexts/UpdateContext";
 import { Settings } from "../../pages/Settings";
-import { setAppOpener } from "../../lib/apps/open";
+import { setAppOpener, setLinkedFiles } from "../../lib/apps/open";
 import { appsAvailable, forgetAppsAvailable, webKitAppLeak } from "../../lib/apps/flag";
 import { forgetInstalledApps } from "../../lib/apps/installed";
 import type { ChatMessage } from "../../lib/types";
@@ -385,6 +385,23 @@ describe("with the apps flag on", () => {
     expect(fakeEngine.callsTo("appUpdateAccept")).toEqual([]);
   });
 
+  it("says what the files permission lets the app do, never its bare name, here and on an update that adds it", async () => {
+    const files: AppPreview["asks"] = ["chat", "files"];
+    fakeEngine.on("appPreview", () => preview({ asks: files, manifest: { ...preview().manifest, permissions: files } }));
+    const { user, unmount } = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
+    const line = await screen.findByTestId("app-permission-files");
+    expect(line).toHaveTextContent("Read the files and folders you pick, and share them with your contact in the chat");
+    await user.click(within(line).getByTestId("app-permission-files-info"));
+    expect(screen.getByTestId("app-permission-files-text")).toHaveTextContent("Only what you pick");
+    unmount();
+
+    fakeEngine.on("appUpdateAccept", () => installed()).on("appList", () => []);
+    renderApp(<InstalledAppDialog onClose={() => {}} onOpen={() => {}}
+      app={installed({ pending: { sequence: 8, version: "1.3.0", added: ["files"] } })} />);
+    const update = await screen.findByTestId("app-update");
+    expect(within(update).getByTestId("app-permission-files")).toHaveTextContent("Read the files and folders you pick");
+  });
+
   it("says in Safari, and only there, that an app can still contact other servers", async () => {
     const safari = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
     vi.spyOn(navigator, "userAgent", "get").mockReturnValue(safari);
@@ -446,6 +463,17 @@ describe("with the apps flag on", () => {
     await user.click(screen.getByTestId("apps-add-check"));
     expect(await screen.findByTestId("apps-add-error")).toHaveTextContent("Apps come only from GitHub (raw.githubusercontent.com) or jsDelivr at a commit.");
     expect(asked).toEqual([{ url: "http://example.com/github.com/app.ghostlyapp" }]);
+  });
+
+  it("Enter in the field while Check runs reads the link once: the busy Check takes no second press", async () => {
+    const asked: unknown[] = [];
+    fakeEngine.on("appPreview", (params) => { asked.push(params); return new Promise<AppPreview>(() => {}); });
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    await user.type(screen.getByTestId("apps-add-url"), "https://github.com/ana/chess{Enter}");
+    await waitFor(() => expect(screen.getByTestId("apps-add-check")).toHaveAttribute("aria-busy", "true"));
+    await user.type(screen.getByTestId("apps-add-url"), "{Enter}");
+    await user.click(screen.getByTestId("apps-add-check"));
+    expect(asked).toEqual([{ url: "https://github.com/ana/chess" }]);
   });
 
   it("a link edited while Check runs drops the old link's answer: no store or app of it shows, and Add store adds the new one", async () => {
@@ -560,6 +588,26 @@ describe("with the apps flag on", () => {
     expect(within(row).queryByTestId("installed-app-open")).not.toBeInTheDocument();
   });
 
+  it("Refresh shows it is working until the store is read: a turning ring, busy, no second click", async () => {
+    let finish: () => void = () => {};
+    const store = { key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json", preloaded: false,
+      name: "Ghostly", kind: "curated" as const, sequence: 1, expires: 2_000_000_000, expired: false, fetchedAt: 1, apps: [], removed: [] };
+    fakeEngine.on("appList", () => []).on("appStoreList", () => [store]).on("appCheckUpdates", () => [])
+      .on("appStoreRefresh", () => new Promise<typeof store[]>((resolve) => { finish = () => resolve([store]); }));
+    const { user } = renderApp(<Apps />, { route: "/apps" });
+    const refresh = await screen.findByTestId("app-store-refresh");
+    await user.click(refresh);
+    expect(refresh).toHaveAttribute("aria-busy", "true");
+    expect(refresh).toHaveAttribute("aria-disabled", "true");
+    await user.click(refresh);
+    expect(fakeEngine.callsTo("appStoreRefresh")).toHaveLength(1);
+    expect(within(refresh).getByTestId("button-spinner")).toBeInTheDocument();
+    expect(refresh).toHaveTextContent("Refresh");
+    await act(async () => { finish(); });
+    await waitFor(() => expect(refresh).not.toHaveAttribute("aria-busy"));
+    expect(within(refresh).queryByTestId("button-spinner")).not.toBeInTheDocument();
+  });
+
   it("reads the installed apps again after the engine's own update check, so a stopped version shows stopped", async () => {
     let run: InstalledAppView["run"] = { status: "ok" };
     fakeEngine.on("appList", () => [installed({ run })]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
@@ -588,8 +636,13 @@ describe("with the apps flag on", () => {
     expect(screen.getByTestId("app-store-line")).toHaveTextContent("In Ghostly");
     await user.click(screen.getByTestId("app-uninstall-open"));
     expect(screen.getByTestId("app-uninstall")).toHaveTextContent("Export the data first");
+    // The files people picked for it go with it; the files themselves are not touched.
+    const forgot: string[] = [];
+    setLinkedFiles({ pick: async () => [], list: async () => [], read: async () => new Uint8Array(0), forget: async (ref, id) => { forgot.push(`${ref} ${id}`); } });
     await user.click(screen.getByTestId("app-uninstall-confirm"));
     expect(fakeEngine.callsTo("appUninstall")).toEqual([{ ref: REF }]);
+    await waitFor(() => expect(forgot).toEqual([`${REF} all`]));
+    setLinkedFiles(null);
     expect(fetches).toEqual([]);
   });
 
@@ -652,7 +705,7 @@ describe("with the apps flag on", () => {
     const { user } = renderApp(<Apps />, { route: "/apps" });
     const row = await screen.findByTestId("installed-app");
     expect(within(row).getByText(title)).toHaveAttribute("dir", "auto");
-    expect(within(row).getByTestId("installed-app-hint")).toHaveAttribute("dir", "auto");
+    expect(within(within(row).getByTestId("installed-app-hint")).getByText("Play chess with a contact")).toHaveAttribute("dir", "auto");
     expect(screen.getByText(unread)).toHaveAttribute("dir", "auto");
     expect(screen.getByText("Ghostly")).toHaveAttribute("dir", "auto");
     expect(screen.getByText("Snake")).toHaveAttribute("dir", "auto");
@@ -662,6 +715,36 @@ describe("with the apps flag on", () => {
     expect(within(details).getByRole("heading", { name: title })).toHaveAttribute("dir", "auto");
     expect(within(details).getByText("Play chess with a contact")).toHaveAttribute("dir", "auto");
     expect(within(details).getByText("Chess for two.")).toHaveAttribute("dir", "auto");
+  });
+
+  it("breaks a publisher's or a store's word with no space anywhere, so on a phone it pushes no screen sideways (nor cuts it off in Arabic)", async () => {
+    // 80 characters, a tagline's limit, with nowhere to break: a link, a German compound, a name in Latin letters.
+    const long = `https://example.com/${"a".repeat(60)}`;
+    const wraps = (el: HTMLElement) => expect(el.className).toContain("[overflow-wrap:anywhere]");
+    fakeEngine.on("appPreview", () => preview({ manifest: { ...preview().manifest, tagline: long, description: `${long}2` } }));
+    const install = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
+    const sheet = await screen.findByTestId("app-install");
+    await within(sheet).findByText(long);
+    wraps(within(sheet).getByText(long));
+    wraps(within(sheet).getByText(`${long}2`));
+    install.unmount();
+
+    const app = installed({ title: long, tagline: `${long}3`, description: `${long}4` });
+    const details = renderApp(<InstalledAppDialog app={app} onClose={() => {}} onOpen={() => {}} />);
+    wraps(within(screen.getByTestId("app-details")).getByText(`${long}3`));
+    wraps(within(screen.getByTestId("app-details")).getByText(`${long}4`));
+    await details.user.click(screen.getByTestId("app-uninstall-open"));
+    wraps(within(screen.getByTestId("app-uninstall")).getByRole("heading"));
+    details.unmount();
+
+    fakeEngine.on("appStorePreview", () => ({ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json",
+      name: `${long}5`, description: `${long}6`, kind: "curated", sequence: 1, expires: 2_000_000_000, expired: false, apps: 1 }));
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    await user.type(screen.getByTestId("apps-add-url"), "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json");
+    await user.click(screen.getByTestId("apps-add-check"));
+    const store = await screen.findByTestId("apps-add-store");
+    wraps(within(store).getByText(`${long}5`));
+    wraps(within(store).getByText(`${long}6`));
   });
 
   it("a store's apps show without a tap when it is the only store or lists a few; a long list beside others waits behind its name, which says it opens", async () => {
@@ -759,6 +842,32 @@ describe("with the apps flag on", () => {
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
     expect(await screen.findByTestId("app-card-title")).toHaveAttribute("dir", "auto");
   });
+
+  // A title may have 40 characters: cut as one text with the version, a phone showed no version at all.
+  const LONG = "Schachweltmeisterschaftsvorbereitungsapp";
+  const BETA = "1.2.0-beta.12";
+
+  it("a card with a long title cuts the title alone and keeps the version whole after it", async () => {
+    fakeEngine.on("appList", () => []);
+    const card: AppCard = { ...CARD, title: LONG, version: BETA };
+    renderApp(<MessageBubble message={cardMessage({ card, text: statusCardText(card) })} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    const title = await screen.findByTestId("app-card-title");
+    expect(title).toHaveTextContent(`${LONG} ${BETA}`);
+    expect(within(title).getByText(LONG)).toHaveClass("truncate", "min-w-0");
+    expect(within(title).getByText(BETA)).toHaveClass("shrink-0", "whitespace-nowrap");
+    expect(within(title).getByText(LONG)).not.toContainElement(within(title).getByText(BETA));
+  });
+
+  it("an installed app with a long title cuts the title alone in its row and keeps the version whole after it", async () => {
+    fakeEngine.on("appList", () => [installed({ title: LONG, version: BETA })]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
+    renderApp(<Apps />, { route: "/apps" });
+    const row = await screen.findByTestId("installed-app");
+    expect(within(row).getByText(LONG)).toHaveClass("truncate", "min-w-0");
+    expect(within(row).getByText(BETA)).toHaveClass("shrink-0", "whitespace-nowrap");
+    expect(within(row).getByText(LONG)).not.toContainElement(within(row).getByText(BETA));
+    // Still the details button's description, as before.
+    expect(within(row).getByRole("button", { name: `${LONG}: details` })).toHaveAccessibleDescription(new RegExp(`^${BETA.replace(/\./g, "\\.")}`));
+  });
 });
 
 describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
@@ -822,6 +931,17 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     await waitFor(() => expect(screen.getByTestId("installed-app-open")).toHaveFocus());
   });
 
+  it("its row's line keeps Ghostly's words apart from the tagline, which reads in its own direction (an English tagline in Arabic)", async () => {
+    engineWith({ installed: false, removed: false });
+    renderApp(<Apps />, { route: "/apps", language: "ar" });
+    const hint = within(await screen.findByTestId("built-in-app")).getByTestId("built-in-app-hint");
+    const tagline = within(hint).getByText("Play chess with a contact");
+    expect(tagline).toHaveAttribute("dir", "auto");
+    expect(tagline).toHaveClass("truncate");
+    expect(tagline.textContent).toBe("Play chess with a contact");
+    expect(hint).toHaveTextContent("يأتي مع Ghostly · Play chess with a contact");
+  });
+
   it("Cancel on its first open installs nothing, and it stays offered", async () => {
     engineWith({ installed: false, removed: false });
     const { user } = renderApp(<Apps />, { route: "/apps" });
@@ -868,6 +988,8 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     const { user } = renderApp(<Apps />, { route: "/apps" });
     const row = await screen.findByTestId("installed-app");
     expect(within(row).getByTestId("installed-app-hint")).toHaveTextContent("Unknown publisher · Play chess with a contact");
+    // The tagline reads in its own direction, apart from Ghostly's words.
+    expect(within(row).getByText("Play chess with a contact")).toHaveAttribute("dir", "auto");
     await user.click(within(row).getByRole("button", { name: "Chess: details" }));
     const details = await screen.findByTestId("app-details");
     expect(within(details).getByTestId("app-publisher-name")).toHaveTextContent("Unknown publisher");

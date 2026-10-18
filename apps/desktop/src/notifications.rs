@@ -141,19 +141,32 @@ pub async fn native_clear_notification(id: String) -> Result<(), String> {
 }
 
 /// The page starts: the message notifications an earlier one left go, but those posted as `keep`. Android keeps them
-/// after the app's process ends; the page kept its chats' tags, and the rest it cannot replace or open. Elsewhere,
-/// nothing.
+/// after the app's process ends, and the Linux app's after its page loads again; the page kept its chats' tags, and
+/// the rest it cannot replace or open. Elsewhere, nothing.
 #[tauri::command]
 pub async fn native_clear_notifications(keep: Option<Vec<String>>) -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
         crate::android::cancel_notifications(&keep.unwrap_or_default()).await
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "linux")]
+    {
+        tauri::async_runtime::spawn_blocking(move || linux::clear_all(&keep.unwrap_or_default()))
+            .await
+            .map_err(|_| "Notification delivery unavailable".to_string())
+    }
+    #[cfg(not(any(target_os = "android", target_os = "linux")))]
     {
         let _ = keep;
         Ok(())
     }
+}
+
+/// The app exits: on Linux its notifications still in the desktop's list go, as the next app can neither replace,
+/// close nor open them (it knows none of their numbers). Elsewhere the system keeps them, or they go by themselves.
+pub fn exit() {
+    #[cfg(target_os = "linux")]
+    linux::exit();
 }
 
 /// The page's id of the notification last tapped, taken: the page asks once it listens for `notification-open`, as
@@ -488,6 +501,11 @@ mod linux {
                     state.shown.iter().find(|(_, _, ours)| ours == id)?;
                 (shown_by.clone()?, *server_id)
             };
+            (self.server()? == shown_by).then_some(server_id)
+        }
+
+        /// The notification server there is now, by its unique name on the bus.
+        fn server(&self) -> Option<OwnedUniqueName> {
             let owner = self
                 .connection
                 .call_method(
@@ -498,8 +516,44 @@ mod linux {
                     &SERVER,
                 )
                 .ok()?;
-            let owner: OwnedUniqueName = owner.body().deserialize().ok()?;
-            (owner == shown_by).then_some(server_id)
+            owner.body().deserialize().ok()
+        }
+
+        /// Takes back every notification of ours but those of `keep`, all at once, and waits for no longer than
+        /// `within`. Those whose call the server has not answered yet stay: their number is not known.
+        pub(super) fn clear_all(&self, keep: &[String], within: Duration) -> zbus::Result<()> {
+            let gone: VecDeque<Shown> = {
+                let mut state = self.state.lock().unwrap();
+                let (gone, kept) = std::mem::take(&mut state.shown)
+                    .into_iter()
+                    .partition(|(_, _, ours)| !keep.contains(ours));
+                state.shown = kept;
+                gone
+            };
+            if gone.is_empty() {
+                return Ok(());
+            }
+            let server = self.server();
+            let server_ids: Vec<u32> = gone
+                .into_iter()
+                .filter(|(shown_by, _, _)| shown_by.is_some() && *shown_by == server)
+                .map(|(_, server_id, _)| server_id)
+                .collect();
+            let (answered, answer) = mpsc::channel();
+            let connection = self.connection.inner().clone();
+            tauri::async_runtime::spawn(async move {
+                let closed = futures_util::future::join_all(
+                    server_ids
+                        .iter()
+                        .map(|server_id| close(&connection, *server_id)),
+                )
+                .await;
+                let _ = answered.send(closed.into_iter().find(Result::is_err).unwrap_or(Ok(())));
+            });
+            match answer.recv_timeout(within) {
+                Ok(answer) => answer,
+                Err(_) => Ok(()),
+            }
         }
 
         /// Shown again under the same `id` (a chat's next messages), it takes the place of the one still there.
@@ -728,6 +782,18 @@ mod linux {
             }
         }
 
+        /// Every notification of ours goes but those of `keep`: nothing before the first was shown from here.
+        pub(super) fn clear_all(&self, keep: &[String], within: Duration) {
+            let Some(notifier) = self.current.lock().unwrap().clone() else {
+                return;
+            };
+            if let Err(error) = notifier.clear_all(keep, within) {
+                if !matches!(error, zbus::Error::MethodError(..)) {
+                    self.let_go(&notifier);
+                }
+            }
+        }
+
         /// A connection that broke is not kept: its listener ends with it once its last call is done, and the next
         /// notification connects again. One that took its place already stays.
         fn let_go(&self, notifier: &Arc<Notifier>) {
@@ -785,6 +851,18 @@ mod linux {
 
     pub fn clear(id: &str) {
         NOTIFIERS.clear(id);
+    }
+
+    /// A page started: what the one before it showed goes, but its chats' (`keep`), which it replaces and closes
+    /// as its own.
+    pub fn clear_all(keep: &[String]) {
+        NOTIFIERS.clear_all(keep, ANSWER_WITHIN);
+    }
+
+    /// The app exits: a notification it leaves in the desktop's list, the next app could neither replace, close
+    /// nor open. A server answers in milliseconds; the exit waits no longer than this for one that does not.
+    pub fn exit() {
+        NOTIFIERS.clear_all(&[], Duration::from_millis(500));
     }
 
     #[cfg(test)]
@@ -911,10 +989,13 @@ mod linux {
 
         /// A chat's notifications used to pile up in the desktop's list, each burst a new one, and none was taken
         /// back. Now a chat has one, which its next burst replaces, and reading the chat closes it.
+        /// `show` returns at the server's first answer, before the call's task marks the chat as answered: a burst
+        /// right after it can still go as that task's replacement, after `show` returned. So the list is read once
+        /// the server has worked through it.
         #[test]
         fn a_chat_has_one_notification_until_it_is_read() {
             let bus = Bus::start();
-            let listed: Arc<Mutex<Vec<(u32, String)>>> = Arc::default();
+            let listed: Listed = Arc::default();
             let _server = bus
                 .connect()
                 .name(SERVER)
@@ -924,39 +1005,26 @@ mod linux {
                 .build()
                 .unwrap();
             let notifier = Notifier::new(bus.connect(), |_| {}).unwrap();
-            let listed = || listed.lock().unwrap().clone();
 
             notifier.show("chat-a", "first burst").unwrap();
             notifier.show("chat-b", "another chat").unwrap();
             notifier.show("chat-a", "second burst").unwrap();
             notifier.show("chat-a", "third burst").unwrap();
-            assert_eq!(
-                listed(),
-                [
-                    (1, "third burst".to_string()),
-                    (2, "another chat".to_string())
-                ]
-            );
+            settled(&listed, &[(1, "third burst"), (2, "another chat")]);
 
             // Read in the app: only that chat's goes, and once.
             notifier.clear("chat-a").unwrap();
-            assert_eq!(listed(), [(2, "another chat".to_string())]);
+            settled(&listed, &[(2, "another chat")]);
             notifier.clear("chat-a").unwrap();
             notifier.clear("never-shown").unwrap();
-            assert_eq!(listed(), [(2, "another chat".to_string())]);
+            settled(&listed, &[(2, "another chat")]);
 
             // Its next message is a new notification, which replaces none of another chat's.
             notifier.show("chat-a", "after it was read").unwrap();
-            assert_eq!(
-                listed(),
-                [
-                    (2, "another chat".to_string()),
-                    (3, "after it was read".to_string())
-                ]
-            );
+            settled(&listed, &[(2, "another chat"), (3, "after it was read")]);
             notifier.clear("chat-b").unwrap();
             notifier.clear("chat-a").unwrap();
-            assert_eq!(listed(), []);
+            settled(&listed, &[]);
         }
 
         /// The click the issue measured as lost: the server offers the body as the `default` action, and its
@@ -1366,6 +1434,49 @@ mod linux {
             // And reading the chats takes them both back.
             notifiers.clear("chat-a");
             notifiers.clear("chat-b");
+            settled(&listed, &[]);
+        }
+
+        /// A page that loaded again knew none of what the one before it showed, and an app that exited left its
+        /// notifications in the desktop's list: reading their chat closed none, the next message added a second
+        /// one, a click opened nothing. Now a page's start takes back all but its chats' (which it replaces and
+        /// closes as its own), and the app's exit takes back all.
+        #[test]
+        fn a_page_start_and_the_exit_leave_none_the_app_cannot_take_back() {
+            let bus = Bus::start();
+            let listed: Listed = Arc::default();
+            let _server = bus
+                .connect()
+                .name(SERVER)
+                .unwrap()
+                .serve_at(PATH, Listing(Arc::clone(&listed), 0, Freezer::default()))
+                .unwrap()
+                .build()
+                .unwrap();
+            let notifiers = Notifiers::default();
+            let show = |id: &str, body: &str| {
+                assert!(notifiers.show(|| Notifier::new(bus.connect(), |_| {}), id, body));
+            };
+            // Nothing shown yet: nothing to take back, and no connection made for it.
+            notifiers.clear_all(&[], ANSWER_WITHIN);
+            show("chat-a", "chat a");
+            show("chat-b", "chat b");
+            show("call-1", "Incoming call");
+            settled(
+                &listed,
+                &[(1, "chat a"), (2, "chat b"), (3, "Incoming call")],
+            );
+
+            // The next page kept chat-a's tag only.
+            notifiers.clear_all(&["chat-a".to_string()], ANSWER_WITHIN);
+            settled(&listed, &[(1, "chat a")]);
+            show("chat-a", "chat a again");
+            settled(&listed, &[(1, "chat a again")]);
+            show("chat-b", "chat b again");
+            settled(&listed, &[(1, "chat a again"), (4, "chat b again")]);
+
+            // The app exits.
+            notifiers.clear_all(&[], Duration::from_millis(500));
             settled(&listed, &[]);
         }
     }

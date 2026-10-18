@@ -1,0 +1,1 @@
+Every member keeps the newest admin `pin` frame beside its store of 256 frames, and hands it in its answer to a `group-sync`, before the stored frames and under the same checks, once the store no longer holds it. A member away while more than 256 frames went by was handed neither the pin nor an unpin, and kept the bar it had for good. Nothing changes on the wire.

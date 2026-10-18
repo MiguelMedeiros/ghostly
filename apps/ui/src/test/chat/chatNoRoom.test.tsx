@@ -1,11 +1,16 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { createChatInvite } from "@ghostly/core";
+import { useRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Root } from "../../Root";
+import { MessageBubble } from "../../components/MessageBubble";
+import { useOutsideDismiss } from "../../hooks/useDismiss";
+import { useForwarding } from "../../hooks/useForwarding";
 import { Home } from "../../pages/Home";
 import { NO_ROOM_FOR_CHAT, ensureSession, listSessions } from "../../lib/storage";
+import type { ChatMessage } from "../../lib/types";
 import { readInvite } from "../../lib/url";
-import { renderApp } from "../render";
+import { AppProviders, renderApp } from "../render";
 
 // covers: invite.link, invite.code, chat.paired.storage
 
@@ -105,5 +110,66 @@ describe("on a full localStorage", () => {
     act(() => { close.focus(); close.click(); });
     expect(screen.queryByTestId("chat-not-stored")).toBeNull();
     expect(document.activeElement).toBe(newChat);
+  }, 60_000);
+
+  it("an Escape that closes a menu closes only that, and one typed in a field leaves the focus there", async () => {
+    /** A popover that closes on outside clicks and Escape, as the chat's ⋮ menu does, and a message field. */
+    function Page() {
+      const [open, setOpen] = useState(false);
+      const ref = useRef<HTMLDivElement>(null);
+      useOutsideDismiss(ref, open, () => setOpen(false));
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Options</button>
+          {open && <div ref={ref} data-testid="popover"><button type="button">Pin</button></div>}
+          <textarea aria-label="Message" />
+        </>
+      );
+    }
+    render(<><Root /><Page /></>);
+    const newChat = await screen.findByTestId("sidebar-new-chat");
+    fill();
+    act(() => { newChat.focus(); newChat.click(); });
+    await screen.findByTestId("chat-not-stored", undefined, { timeout: 5_000 });
+    const escape = () => act(() => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+
+    act(() => screen.getByRole("button", { name: "Options" }).click());
+    const pin = screen.getByRole("button", { name: "Pin" });
+    act(() => pin.focus());
+    escape();
+    expect(screen.queryByTestId("popover")).toBeNull();
+    expect(screen.getByTestId("chat-not-stored")).toBeInTheDocument();
+
+    const field = screen.getByRole("textbox", { name: "Message" });
+    act(() => field.focus());
+    escape();
+    expect(document.activeElement).toBe(field);
+  }, 60_000);
+
+  it("an Escape that ends a choice of messages started after the notice ends only the choice", async () => {
+    const messages: ChatMessage[] = [{ id: "a", text: "first", sender: "peer", timestamp: 1 }, { id: "b", text: "second", sender: "peer", timestamp: 2 }];
+    function Timeline() {
+      const forwarding = useForwarding("link-bo", messages);
+      return <>{messages.map((m) => <MessageBubble key={m.id} message={m} peerPubKey="peer" {...forwarding.rowProps(m)} />)}{forwarding.bar}</>;
+    }
+    render(<><Root /><AppProviders><Timeline /></AppProviders></>);
+    const newChat = await screen.findByTestId("sidebar-new-chat");
+    fill();
+    // The notice comes first, so its listener is on the window before the choice's.
+    act(() => { newChat.focus(); newChat.click(); });
+    await screen.findByTestId("chat-not-stored", undefined, { timeout: 5_000 });
+    act(() => screen.getAllByTestId("message-options")[0]!.click());
+    act(() => screen.getByTestId("message-select-start").click());
+    expect(screen.getByTestId("select-bar")).toBeInTheDocument();
+    const escape = async () => {
+      act(() => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    };
+
+    await escape();
+    expect(screen.queryByTestId("select-bar")).toBeNull();
+    expect(screen.getByTestId("chat-not-stored")).toBeInTheDocument();
+    await escape();
+    expect(screen.queryByTestId("chat-not-stored")).toBeNull();
   }, 60_000);
 });

@@ -18,6 +18,7 @@ import {
   WATCH_PEER_MS,
   DEPARTED_READ_MS,
   UNUSED_INVITE_WAIT_MAX_MS,
+  countUnusedInvite,
   type LinkSessionEvents,
   type LinkSessionOptions,
 } from "../src/link";
@@ -642,6 +643,8 @@ describe("LinkSession poll pacing", () => {
 
   it("reads an invite nobody used less often once no longer awaited, and at the background pace once its contact shows", async () => {
     const { a, b } = pair({ invite: () => true }, { getServices: () => [{ id: "atlas", type: "http" }] });
+    // Among enough other unused invites of the app that their count asks for the longest wait.
+    for (let i = 0; i < 29; i++) countUnusedInvite(a.transport, {}, true);
     a.s.start();
     await settle();
     vi.setSystemTime(NOW + 3 * AWAITING_PEER_MS);
@@ -845,6 +848,41 @@ describe("LinkSession poll pacing", () => {
     a.s.pollNow();
     await settle();
     expect(last()?.departed).toBeUndefined();
+    await a.s.stop(false);
+    await b.s.stop(false);
+  });
+
+  it("says its reads are a resume's back after a restart, until one is answered (a group edge's go on the relays' floor)", async () => {
+    const { a, b } = pair({ resumed: true, firstPublish: "after-first-poll" }, { getServices: () => [] });
+    b.s.start();
+    await settle();
+    const last = () => (a.transport.resolve.mock.calls.at(-1) as unknown[] | undefined)?.[1] as { resume?: boolean } | undefined;
+    // The relays' budget holds the first read back: the next one still waits on it.
+    a.transport.failResolve = new DiscoveryBudgetError(1_000);
+    a.s.start();
+    await settle();
+    expect(last()?.resume).toBe(true);
+    a.transport.failResolve = null;
+    a.s.pollNow();
+    await settle();
+    expect(last()?.resume).toBe(true);
+    expect(a.s.peerPresence.online).toBe(true);
+    // Answered: from then on a read is the contact's like any other.
+    a.s.pollNow();
+    await settle();
+    expect(last()?.resume).toBeUndefined();
+    await a.s.stop(false);
+    await b.s.stop(false);
+  });
+
+  it("never says so when it was not live when the app last ran", async () => {
+    const { a, b } = pair({}, { getServices: () => [] });
+    b.s.start();
+    a.s.start();
+    await settle();
+    a.s.pollNow();
+    await settle();
+    expect(a.transport.resolve.mock.calls.every((call) => !((call as unknown[])[1] as { resume?: boolean } | undefined)?.resume)).toBe(true);
     await a.s.stop(false);
     await b.s.stop(false);
   });

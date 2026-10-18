@@ -98,26 +98,26 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
           {!store && (
             <div className="flex justify-end gap-2 pt-2">
               <Button onClick={onClose}>{t("common.cancel")}</Button>
-              <Button type="submit" variant="primary" data-testid="apps-add-check" disabled={busy || !url.trim()}>{busy ? t("apps.add.checking") : t("apps.add.check")}</Button>
+              <Button type="submit" variant="primary" data-testid="apps-add-check" disabled={!url.trim()} loading={busy}>{busy ? t("apps.add.checking") : t("apps.add.check")}</Button>
             </div>
           )}
         </form>
         {store && (
           <div className="space-y-3" data-testid="apps-add-store">
             <div className="bg-surface rounded-xl px-4 py-3 space-y-1">
-              <p dir="auto" className="text-sm text-text-primary">{store.name}</p>
+              <p dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{store.name}</p>
               <p className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
                 <span>{store.kind === "indexed" ? t("apps.store.indexed") : t("apps.store.curated")}</span>
                 <span>{t(store.apps === 1 ? "apps.store.countOne" : "apps.store.count", { count: store.apps })}</span>
                 <Fingerprint value={store.fingerprint} />
               </p>
-              {store.description && <p dir="auto" className="text-xs text-text-secondary whitespace-pre-line">{store.description}</p>}
+              {store.description && <p dir="auto" className="text-xs text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{store.description}</p>}
               {store.expired && <p className="text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires, t.language) })}</p>}
             </div>
             <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>
             <div className="flex justify-end gap-2">
               <Button onClick={onClose}>{t("common.cancel")}</Button>
-              <Button variant="primary" data-testid="apps-add-store-confirm" disabled={busy} onClick={() => void addStore()}>{t("apps.add.addStore")}</Button>
+              <Button variant="primary" data-testid="apps-add-store-confirm" loading={busy} onClick={() => void addStore()}>{t("apps.add.addStore")}</Button>
             </div>
           </div>
         )}

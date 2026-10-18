@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo, type Server } from "node:net";
 import { createInterface } from "node:readline";
@@ -71,6 +72,30 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
     const listed = await ghostly(["--home", dir, "chat", "list"], { env });
     expect(ok(listed)).toEqual({ chats: [] });
     expect(listed.stderr).toBe("");
+  });
+
+  it("daemon restart on a daemon that does not answer ends it, SIGTERM then SIGKILL, and starts a fresh one", async () => {
+    const wedged = home("wedged-restart");
+    ok(await ghostly(["--home", wedged, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    const paths = profilePaths(wedged, "default");
+    // A daemon whose event loop wedged: its socket accepts and never answers, and it holds the profile; one that
+    // ignores SIGTERM, as a loop that runs no handler does. The version probe ahead of the stop gets no answer either.
+    const stuck = spawn(process.execPath, ["-e", 'process.on("SIGTERM", () => {}); require("node:net").createServer(() => {}).listen(process.argv[1], () => process.stdout.write("ready\\n"))', paths.socket], { stdio: ["ignore", "pipe", "ignore"] });
+    try {
+      await new Promise<void>((resolve) => stuck.stdout!.once("data", () => resolve()));
+      writeFileSync(paths.lock, String(stuck.pid));
+      const ended = new Promise<string | null>((resolve) => stuck.once("exit", (_, signalName) => resolve(signalName)));
+      const restarted = await ghostly(["--home", wedged, "daemon", "restart", "--timeout", "1"], { env });
+      expect(ok(restarted)).toMatchObject({ restarted: true, stopped: stuck.pid, before: null, version: packageJson.version, daemon: "started" });
+      expect(restarted.json.pid).not.toBe(stuck.pid);
+      expect(restarted.stderr).toContain(`process ${stuck.pid}) did not answer daemon.stop in 1 s: stopping it with SIGTERM`);
+      expect(restarted.stderr).toContain("did not stop on SIGTERM in 1 s: killing it");
+      expect(await ended).toBe("SIGKILL");
+      expect(ok(await ghostly(["--home", wedged, "daemon", "status"], { env }))).toMatchObject({ running: true, pid: restarted.json.pid });
+    } finally {
+      stuck.kill("SIGKILL");
+      await ghostly(["--home", wedged, "daemon", "stop"], { env });
+    }
   });
 
   it("daemon status and daemon stop on a profile that does not exist say so; `default` is not made by asking", async () => {
@@ -168,5 +193,52 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
       daemon.child.kill("SIGKILL");
       dead.close();
     }
+  });
+
+  it("engine clearProfileData asks for --yes, says what it removed, and a daemon stops instead of showing what is gone", async () => {
+    const cleared = home("clear-profile");
+    ok(await ghostly(["--home", cleared, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
+    ok(await ghostly(["--home", cleared, "invite", "create", "--label", "bob"], { env }));
+    ok(await ghostly(["--home", cleared, "group", "create", "team", "--mesh"], { env }));
+    const daemon = new Running(["--home", cleared, "daemon"], env);
+    try {
+      await daemon.waitFor((l) => l.daemon === "ready");
+      expect(error(await ghostly(["--home", cleared, "engine", "clearProfileData"], { env }), "confirm", 5).message).toContain("--yes");
+      expect(ok(await ghostly(["--home", cleared, "status"], { env }))).toMatchObject({ mode: "daemon", chats: 1, groups: 1 });
+      expect(ok(await ghostly(["--home", cleared, "engine", "clearProfileData", "--yes"], { env }))).toEqual({ cleared: { chats: 1, groups: 1 }, stopped: true });
+      expect(await daemon.exited(30_000)).toBe(0);
+      // The next command opens the emptied profile itself: nothing the daemon held in memory comes back.
+      expect(ok(await ghostly(["--home", cleared, "status"], { env }))).toMatchObject({ mode: "one-shot", chats: 0, groups: 0 });
+    } finally {
+      await daemon.stop();
+    }
+  });
+
+  it("a listen whose reader leaves (`listen | head -n 1`) stops quietly with exit 0, through a daemon and on its own profile, which it frees", async () => {
+    const piped = home("listen-head");
+    // A relay that takes its time, as on a loaded host: the poke's invite waits to be published after its event is out.
+    const slow = await localRelay(300), slowEnv = { ...env, GHOSTLY_PKARR_RELAYS: slow.url };
+    ok(await ghostly(["--home", piped, "settings", "set", "relays", JSON.stringify([slow.url])], { env: slowEnv }));
+    for (const withDaemon of [true, false]) {
+      if (withDaemon) ok(await ghostly(["--home", piped, "daemon", "--detach"], { env: slowEnv }));
+      const listen = new Running(["--home", piped, "listen", "--since", "0"], slowEnv);
+      try {
+        await listen.waitFor(() => true);
+        // The reader takes its one line and goes, as `head -n 1` does: the next event is written to a closed pipe.
+        listen.child.stdout!.destroy();
+        const poke = await ghostly(["--home", piped, "invite", "create", "--label", "poke"], { env: slowEnv });
+        // Through a daemon the poke is answered, whoever stopped reading. With none, the listen is the profile's daemon:
+        // the poke's own event stops it, and with it the connection the poke still waits on.
+        if (withDaemon || poke.code === 0) ok(poke);
+        else expect(error(poke, "unavailable", 1).message).toBe("The daemon went away");
+        expect(await listen.exited(20_000), `${withDaemon ? "through a daemon" : "no daemon"}: ${listen.stderr}`).toBe(0);
+        expect(listen.stderr).not.toContain("EPIPE");
+        expect(lockOwner(profilePaths(piped, "default")) !== null).toBe(withDaemon);
+      } finally {
+        await listen.stop();
+        if (withDaemon) await ghostly(["--home", piped, "daemon", "stop"], { env: slowEnv });
+      }
+    }
+    slow.server.close();
   });
 });

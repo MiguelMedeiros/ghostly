@@ -25,7 +25,7 @@ test("a bot on the CLI opens Chess with a person: the card, the app installed fr
 }, async ({ peer, relay }, info) => {
   const url = await relay.listen();
   const publisher = new ChessPublisher();
-  const chess = publisher.publish({ sequence: 4 });
+  const chess = publisher.publish({ sequence: 5 });
   const bot = new HeadlessBot();
   try {
     // The bot serves Chess from its signed bundle before its daemon starts, granting what the manifest asks.

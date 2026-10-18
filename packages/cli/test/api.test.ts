@@ -5,6 +5,8 @@ import { callApi, findChat, findGroup, hideStateSecrets, mentionsFor, redactSett
 import { chatOrGroup, findChatOrGroup } from "../src/apiKit";
 import { parseArgs } from "../src/args";
 import { COMMANDS } from "../src/commands";
+import { ENGINE_PARAMS } from "../src/engineMethods";
+import { asCliError } from "../src/errors";
 import type { GhostlyEvent } from "../src/events";
 import { allowlist } from "../src/listen";
 import { chatJson, isLive } from "../src/views";
@@ -222,6 +224,23 @@ describe("chats", () => {
     expect(node.sendMessage).toHaveBeenCalledOnce();
   });
 
+  it("a --timeout out of range is refused before anything is sent, edited or forwarded: a retry never sends it twice", async () => {
+    const { ctx, node } = fake([msg("me_1", 5, { sender: "me", delivery: "sending" })]);
+    Object.assign(node, { editMessage: vi.fn(async () => ({ error: null, messageId: "me_1" })), forwardMessages: vi.fn(async () => ({ results: [] })) });
+    const engine = node as unknown as Record<"sendMessage" | "sendGroupMessage" | "editMessage" | "forwardMessages", ReturnType<typeof vi.fn>>;
+    const calls: [string, Record<string, unknown>][] = [
+      ["chat.send", { chat: "Alice", text: "hi", wait: "sent" }],
+      ["chat.edit", { chat: "Alice", message: "me_1", text: "new", wait: "confirmed" }],
+      ["group.send", { group: "Crew", text: "hi", wait: "sent" }],
+      ["group.edit", { group: "Crew", message: "k:0:1", text: "new", wait: "sent" }],
+      ["chat.forward", { chat: "Alice", messages: ["me_1"], to: ["Bob"], wait: "sent" }],
+    ];
+    for (const [method, params] of calls) for (const timeout of [0, 99999, ""]) {
+      await expect(callApi(ctx, method, { ...params, timeout })).rejects.toMatchObject({ code: "bad_request", message: "timeout must be a number from 1 to 3600" });
+    }
+    for (const call of ["sendMessage", "sendGroupMessage", "editMessage", "forwardMessages"] as const) expect(engine[call]).not.toHaveBeenCalled();
+  });
+
   it("typing tells the engine this side writes, or stopped, and says whether the chat is live", async () => {
     const { ctx, node } = fake();
     expect(await callApi(ctx, "chat.typing", { chat: "Alice" })).toEqual({ chat: "chat-one", typing: true, kind: "typing", live: false, sendTyping: true });
@@ -327,6 +346,21 @@ describe("chats", () => {
     expect(await callApi(ctx, "chat.history", { chat: "chat-one", after: 1, limit: 2 })).toMatchObject({ messages: [{ id: "b" }, { id: "c" }], more: true });
     await expect(callApi(ctx, "chat.history", { chat: "chat-one", before: "zz" })).rejects.toMatchObject({ code: "not_found" });
     await expect(callApi(ctx, "chat.history", { chat: "chat-one", limit: -1 })).rejects.toMatchObject({ code: "bad_request" });
+  });
+
+  it("a window between two messages it holds that has nothing in it is an empty page, not a message not found", async () => {
+    const { ctx } = fake([msg("a", 1), msg("b", 2), msg("c", 3)]);
+    const page = (after: unknown, before: unknown) => callApi(ctx, "chat.history", { chat: "chat-one", after, before });
+    // `after` was looked up in what `before` had already cut away: "No message b" for a message that is there.
+    expect(await page("b", "b")).toEqual({ messages: [], more: false });
+    expect(await page("c", "a")).toEqual({ messages: [], more: false });
+    expect(await page("b", "c")).toEqual({ messages: [], more: false });
+    expect(await page("a", "c")).toMatchObject({ messages: [{ id: "b" }], more: false });
+    expect(await page("c", 2)).toEqual({ messages: [], more: false });
+    expect(await page(2, "b")).toEqual({ messages: [], more: false });
+    // A message that is not there is still said, on either side.
+    await expect(page("zz", "c")).rejects.toMatchObject({ code: "not_found", message: "No message zz" });
+    await expect(page("a", "zz")).rejects.toMatchObject({ code: "not_found", message: "No message zz" });
   });
 
   it("a history limit that is not a whole number is bad_request, not the engine failing", async () => {
@@ -614,6 +648,61 @@ describe("the engine passthrough", () => {
     expect(node.payRequest).not.toHaveBeenCalled();
     await callApi(ctx, "engine.call", { method: "payRequest", params: { linkId: "x", paymentId: "y", confirmedReal: true }, confirmReal: true });
     expect(node.payRequest).toHaveBeenCalledWith({ linkId: "x", paymentId: "y", confirmedReal: true });
+  });
+
+  it("a call that deletes chats or groups asks for yes, as the commands made for it do", async () => {
+    const { ctx, node } = fake();
+    const calls = { clearProfileData: vi.fn(), removeLink: vi.fn(), leaveGroup: vi.fn(async () => ({})), forgetGroup: vi.fn(), deviceRemove: vi.fn() };
+    Object.assign(node, calls);
+    for (const [method, call] of Object.entries(calls)) {
+      await expect(callApi(ctx, "engine.call", { method, params: {} }), method).rejects.toMatchObject({ code: "confirm", message: expect.stringContaining("--yes") });
+      expect(call, method).not.toHaveBeenCalled();
+    }
+    await callApi(ctx, "engine.call", { method: "removeLink", params: { linkId: "chat-one" }, yes: true });
+    expect(calls.removeLink).toHaveBeenCalledWith({ linkId: "chat-one" });
+  });
+
+  it("clearProfileData says what it removed, and a daemon stops instead of serving the engine it shut down", async () => {
+    const { ctx, node } = fake();
+    const stop = vi.fn();
+    Object.assign(node, { clearProfileData: vi.fn(async () => undefined) });
+    Object.assign(ctx, { stop });
+    vi.useFakeTimers();
+    try {
+      expect(await callApi(ctx, "engine.call", { method: "clearProfileData", yes: true })).toEqual({ cleared: { chats: 2, groups: 1 }, stopped: true });
+      // Answered first, then stopped (as daemon.stop does).
+      expect(stop).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(stop).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+    Object.assign(ctx, { mode: "one-shot", stop: undefined });
+    expect(await callApi(ctx, "engine.call", { method: "clearProfileData", yes: true })).toEqual({ cleared: { chats: 2, groups: 1 } });
+  });
+
+  it("refuses a call given less than it takes, or a value of the wrong kind, naming what it takes", async () => {
+    const { ctx, node } = fake();
+    // As the engine's own: JavaScript's TypeError on what is not there, or nothing done for a chat it does not find.
+    const renameLink = vi.fn(async ({ linkId, label }: { linkId?: string; label?: string }) => { if (linkId) label!.trim(); });
+    const updateSettings = vi.fn(async ({ settings }: { settings: { nostr?: unknown } }) => { void settings.nostr; });
+    const lnurlResolve = vi.fn(async () => { throw new TypeError("fetch failed"); });
+    Object.assign(node, { renameLink, updateSettings, lnurlResolve });
+    const call = (method: string, params?: unknown) => callApi(ctx, "engine.call", { method, params }).then(() => null, asCliError);
+    const takes = (method: string, why: string) => ({ code: "bad_request", message: `${method} takes ${ENGINE_PARAMS[method]}: ${why} (ghostly engine --list --verbose)` });
+    expect(await call("renameLink")).toMatchObject(takes("renameLink", "no parameters given"));
+    expect(await call("renameLink", {})).toMatchObject(takes("renameLink", "linkId, label missing"));
+    expect(await call("renameLink", { linkId: "c" })).toMatchObject(takes("renameLink", "label missing"));
+    expect(await call("updateSettings", { nick: "x" })).toMatchObject(takes("updateSettings", "settings missing"));
+    expect(renameLink).not.toHaveBeenCalled();
+    expect(updateSettings).not.toHaveBeenCalled();
+    // A number for the text: the engine's words behind it.
+    expect((await call("renameLink", { linkId: "c", label: 5 }))?.toJSON()).toEqual({
+      ...takes("renameLink", "a parameter of the wrong kind"), details: { takes: "{ linkId, label }", rawError: "label.trim is not a function" },
+    });
+    expect(await call("renameLink", { linkId: "c", label: "x" })).toBeNull();
+    // The network failing is not the caller's parameters.
+    expect(await call("lnurlResolve", { text: "a@b.c" })).toMatchObject({ code: "engine", message: "fetch failed" });
   });
 
   it("runs send's secret guard on the calls that send a text: a seed, a key or ecash goes only with force", async () => {

@@ -76,6 +76,17 @@
     "tooLarge": "太大了。",
     "unlistedVersion": "这个链接里是该商店尚未列出的版本。"
   },
+  "files": {
+    "allow": "允许",
+    "askAgain": "{{app}} 请求再次读取“{{name}}”",
+    "askAgainMore": "{{app}} 请求再次读取“{{name}}”及其他 {{count}} 项",
+    "askFiles": "{{app}} 请求读取文件",
+    "askFolder": "{{app}} 请求读取一个文件夹",
+    "chooseFiles": "选择文件",
+    "chooseFolder": "选择文件夹",
+    "notNow": "以后再说",
+    "note": "不会复制任何内容：{{app}} 在此设备上读取你选择的内容。"
+  },
   "install": {
     "equivocation": "存在两个不同的版本 {{sequence}}。Ghostly 保留了你已有的那个。",
     "fetching": "正在检查应用…",
@@ -91,6 +102,8 @@
     "notListed": "不在你的任何商店中",
     "perm": {
       "chat": "与联系人那边的同一应用通信",
+      "files": "读取你选择的文件和文件夹，并在聊天中与联系人分享",
+      "filesInfo": "只能读取你选择的内容，绝不会读取你设备上的其他内容。在你们双方都打开该应用期间，联系人的应用可以读取它分享的内容。",
       "internet": "使用互联网",
       "internetInfo": "应用及其通信的服务器可能会知道你的 IP 地址以及你在其中的操作。",
       "name": "查看你在此聊天中的名字",

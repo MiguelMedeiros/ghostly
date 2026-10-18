@@ -22,17 +22,20 @@ export function isNotTheDaemon(error: unknown): boolean {
 
 /**
  * A connection to a profile's daemon over its socket (WISP 1100 § Local control API). `null` from `connectDaemon`
- * means no daemon answers there: a one-shot command runs the profile itself. *
+ * means no daemon answers there: a one-shot command runs the profile itself.
+ *
  * The first line on it is a `daemon.hello`, and no call is written until its answer proves the other end read the
- * profile's daemon secret (`daemonProof.ts`): until then every call waits, and a listener that does not prove it gets
- * every call refused (`refused`, `isNotTheDaemon`) having read nothing but the hello. Nothing it writes before that
- * is read either.
+ * profile's daemon secret (`daemonProof.ts`): until then every call waits, under its own deadline, and a listener
+ * that does not prove it gets every call refused (`refused`, `isNotTheDaemon`) having read nothing but the hello.
+ * Nothing it writes before that is read either.
  */
 export class DaemonClient {
   private nextId = 1;
   private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   private eventListener: ((event: GhostlyEvent) => void) | null = null;
   private closedListener: (() => void) | null = null;
+  /** While paused: the events of the chunk already read, given to the listener on resume. */
+  private held: GhostlyEvent[] | null = null;
   private verified = false;
   private refusal: CliError | null = null;
   private readonly ready: Promise<void>;
@@ -53,7 +56,7 @@ export class DaemonClient {
         this.refuse();
         return;
       }
-      if (message.event) { this.eventListener?.(message.event); return; }
+      if (message.event) { if (this.held) this.held.push(message.event); else this.eventListener?.(message.event); return; }
       const waiting = typeof message.id === "number" ? this.pending.get(message.id) : undefined;
       if (!waiting) return;
       this.pending.delete(message.id as number);
@@ -77,15 +80,33 @@ export class DaemonClient {
     this.socket.destroy();
   }
 
-  call(method: string, params: unknown = {}): Promise<unknown> {
-    if (this.socket.destroyed && this.refusal) return Promise.reject(this.refusal);
+  /**
+   * `timeoutMs`: give up (code `timeout`, exit 4) when the daemon has not answered by then; without it the call waits
+   * for as long as the connection holds. A call that timed out closes the connection: its answer, if one ever comes,
+   * is of no use, and the process leaves once nothing else keeps it (not every caller reaches `exit`).
+   */
+  call(method: string, params: unknown = {}, { timeoutMs }: { timeoutMs?: number } = {}): Promise<unknown> {
+    if (this.socket.destroyed) return Promise.reject(this.refusal ?? new CliError("unavailable", "The daemon went away"));
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      if (timeoutMs !== undefined) {
+        timer = setTimeout(() => {
+          if (!this.pending.delete(id)) return;
+          reject(new CliError("timeout", `The daemon did not answer ${method} in ${timeoutMs / 1000} s: \`ghostly daemon restart\` starts a fresh one`, { method }));
+          this.destroy();
+        }, timeoutMs);
+        timer.unref?.();
+      }
+      const settle = {
+        resolve: (value: unknown) => { if (timer) clearTimeout(timer); resolve(value); },
+        reject: (error: Error) => { if (timer) clearTimeout(timer); reject(error); },
+      };
+      this.pending.set(id, settle);
       // Written once the daemon proved itself, in the order the calls were made; a refusal ends each instead.
       this.ready.then(
         () => { if (this.pending.has(id) && !this.socket.destroyed) this.socket.write(JSON.stringify({ id, method, params }) + "\n"); },
-        (error: CliError) => { if (this.pending.delete(id)) reject(error); },
+        (error: CliError) => { if (this.pending.delete(id)) settle.reject(error); },
       );
     });
   }
@@ -95,6 +116,28 @@ export class DaemonClient {
     this.eventListener = listener;
     this.closedListener = onClosed ?? null;
     return this.call("events.subscribe", since === undefined ? {} : { since }) as Promise<{ lastSeq: number }>;
+  }
+
+  /**
+   * Stops reading: what the daemon sends waits in the connection (and past its bound the daemon ends it), and no
+   * event reaches the listener until `resume`.
+   */
+  pause(): void {
+    if (this.held) return;
+    this.held = [];
+    this.socket.pause();
+  }
+
+  /** Gives the listener the events held, then reads again; a listener that pauses again keeps the rest held. */
+  resume(): void {
+    const held = this.held;
+    if (!held) return;
+    this.held = null;
+    for (let i = 0; i < held.length; i++) {
+      this.eventListener?.(held[i]);
+      if (this.held) { (this.held as GhostlyEvent[]).unshift(...held.slice(i + 1)); return; }
+    }
+    this.socket.resume();
   }
 
   close(): void {

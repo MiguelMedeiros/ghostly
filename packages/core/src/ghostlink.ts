@@ -45,7 +45,7 @@ import type { Payment, PaymentAsk, PaymentRequest, PaymentResult } from "./payme
 import { EXPECT_PEER_MS, OFFER_FAST_MS, WATCH_PEER_MS, LinkSession, presenceSeenAt, type LinkStatus, type PeerPresence, type PollIntervals } from "./link";
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
-import { PairedHttp } from "./pairedHttp";
+import { PairedHttp, type PairedHttpBodies } from "./pairedHttp";
 import { CALLS_CAPABILITY, FILES_CAPABILITY, FILES_BINARY_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, APPS_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
 import { APP_DATA_MAX_BYTES, APP_FRAME, APP_RESUME_GRACE_MS, AppSessions, appDataBytes, appCloseFrame, appDataFrame, appOpenFrame, type AppFrameEvent, type AppSendError } from "./pairedApps";
 import { WAKE_FRAME, parseWakeFrame, wakeFrame, type WakeTarget } from "./pairedWake";
@@ -273,8 +273,9 @@ const FILES_IN_USE_MS = 2_000;
 
 /**
  * How far an app's data may get ahead of a file's bytes while the file waits for room on the channel (WISP 1200 § In a
- * chat): a frame goes only while the app has sent less than this more than the file since. A small frame (a Chess move)
- * still goes at once; one streaming at its limit gets about half the link, and the file the other half.
+ * chat): a frame goes only while the app has sent less than this more than the file since (`FilesUse.appAhead`, below
+ * zero by what files wrote beyond the app, at most what files may hold). A small frame (a Chess move) still goes at
+ * once; one streaming at its limit gets about half the link, and the file the other half.
  */
 const APP_AHEAD_OF_FILES = 16 * 1024;
 
@@ -925,6 +926,8 @@ export class GhostLink {
   private heldSignal: { signal: string; sight?: SignalSight } | null = null;
   /** The link packet of a DHT-only contact its mailbox was last read early for (its timestamp): once per packet. */
   private leftDhtSeenFor = 0;
+  /** A first contact under way: its mailbox was read on the contact's first sight (`onPresence`), once per session. */
+  private firstSightRead = false;
   /** The first pairing of this chat, while it is one (`pairingProgress` option, no peer key yet). */
   private readonly tracker: PairingTracker | null;
   private lastDataLinkState: DataLinkState = "idle";
@@ -941,6 +944,11 @@ export class GhostLink {
    * then was `packet`; it is dialled again once a newer one shows it back, or after `until`.
    */
   private departed: { packet: number; until: number } | null = null;
+  /**
+   * The contact gave the session's listener up (`peerYielded`) when its packet was `packet`: that packet still describes
+   * the listener, so nothing is dialled before a newer one (which lists the transport undescribed), or `until`.
+   */
+  private yielded: { packet: number; until: number } | null = null;
   /** The contact's link packet last seen (its timestamp), to tell a new one from the same one read again. */
   private peerPacketSeen = 0;
   /** A live session ended without this side ending it (`peerLost`): until when the contact's next new packet is news. */
@@ -1072,6 +1080,7 @@ export class GhostLink {
         // stops saying it if an envelope of the contact's reads here again.
         if (view.inviteTaken) this.tracker?.failed("taken", false, INVITE_TAKEN);
         else this.tracker?.untaken();
+        this.takenChanged();
         this.streamBlockChanged();
         // A contact who chose DHT only (a ghostly1 code carries no mode) paired through the mailbox: the first
         // pairing ends on the DHT, chosen (WISP 400), and the stream attempt it will never answer is not a failure.
@@ -1083,6 +1092,7 @@ export class GhostLink {
       },
     }) : null;
     this.streamWasBlocked = this.streamBlocked;
+    this.quietForTaken = this.takenFromUs;
     this.peerDescriptors = checkedDescriptors(options.native?.peerDescriptors);
     this.peerTransports = options.native?.peerTransports;
     this.saidTransports = !!options.packetTransports && !!options.packetTransportsSaid;
@@ -1108,6 +1118,8 @@ export class GhostLink {
       // contact: its offer goes in its first packet, not in a second one right behind its presence. A joiner with no WebRTC
       // (a Linux Desktop) has no offer to wait for: its presence goes at once, and the inviter sees it a read sooner.
       firstPublish: options.firstPublish ?? ((this.tracker && options.pairingProgress?.role === "joiner" && options.rtcAvailable !== false) || this.resuming ? "after-first-poll" : "at-start"),
+      // …so those reads say they are a resume's: a group edge's go on the edges' floor at the relays.
+      resumed: !!this.resuming,
       events: {
         // The first look decided nothing to dial: say we are here now (a dial says it with its offer).
         onFirstPoll: () => {
@@ -1124,8 +1136,17 @@ export class GhostLink {
         onPresence: (presence) => {
           if (presence.online) this.tracker?.sawPeer();
           this.peerPacketArrived(presence);
-          // A first contact under way: a fresh packet of the contact says its envelope is a read away.
-          if (presence.online && !options.pairing?.credentials.peerKey && Date.now() - presenceSeenAt(presence) < EXPECT_PEER_MS) this.dht?.expect();
+          // A first contact under way, or a joined chat whose inviter never answered (read at its unused-invite wait): a
+          // fresh packet of the contact says its envelope is a read away. A first contact's first sight, however old the
+          // packet (an inviter back from a restart notices a join late), reads the mailbox now: that read pins the contact,
+          // which a mailbox read at the pace of an unused invite would leave up to minutes away. Not once the invite was
+          // taken (`takenFromUs`): there is nobody to pair with.
+          const firstContact = !options.pairing?.credentials.peerKey;
+          if (presence.online && (firstContact || this.dht?.unanswered) && !this.takenFromUs) {
+            if (Date.now() - presenceSeenAt(presence) < EXPECT_PEER_MS) this.dht?.expect();
+            else if (firstContact && !this.firstSightRead) this.dht?.expect(0);
+            if (firstContact) this.firstSightRead = true;
+          }
           events.onPresence?.(this.mergePresence(presence));
           this.peerMayHaveLeftDht(presence);
           this.maybeAutoConnect(presence);
@@ -1526,6 +1547,26 @@ export class GhostLink {
     return this.mergePresence(this.session.peerPresence);
   }
 
+  /** Someone else used the invite first, and this side never pinned its inviter: there is nobody to pair with. */
+  get takenFromUs(): boolean { return !this.options.pairing?.credentials.peerKey && !!this.dht?.inviteTaken; }
+  /**
+   * The session runs on the joiner's link key, which every copy of the invite derives: while the invite is taken from
+   * this side, its packets there read as those of whoever joined first. Republished every 4 minutes, they kept that
+   * joiner online at the inviter for good once it quit, dialled at an endpoint long dead (bug hunt 1016-2110). So the
+   * session stops without a goodbye (one would say the joiner left) and the native listeners go; only the mailbox's
+   * slow read stays, to notice the invite was not taken after all, and that starts it all again.
+   */
+  private quietForTaken = false;
+  private takenChanged(): void {
+    const taken = this.takenFromUs;
+    if (taken === this.quietForTaken || this.stopped) return;
+    this.quietForTaken = taken;
+    traceLink(this.myPubKeyZ32, "taken-quiet", { taken });
+    if (taken) {
+      void this.session.stop(false);
+      void Promise.allSettled([...this.endpoints.keys()].map(t => this.releaseEndpoint(t)));
+    } else if (this.deliveryMode !== "dht") this.session.start();
+  }
   private get streamBlocked(): boolean { return this.deliveryMode === "dht" || this.dht?.peerMode === "dht"; }
   /**
    * A stream authenticated a participation key other than the pinned one: a security rejection, which stops the chat
@@ -1580,7 +1621,7 @@ export class GhostLink {
     this.lastAutoConnectAt = 0;
     if (mode === "dht") { this.disconnect(); this.heldSignal = null; }
     // The link session runs before the contact can learn the new method (from the envelope setMode publishes).
-    else this.session.start();
+    else if (!this.quietForTaken) this.session.start();
     await this.dht.setMode(mode);
     if (mode === "dht") {
       await this.session.stop(false);
@@ -1598,7 +1639,7 @@ export class GhostLink {
       this.session.expectPeer();
       this.resumeWaitUntil = Date.now() + RESUME_WAIT_MS;
     }
-    if (this.deliveryMode !== "dht") this.session.start();
+    if (this.deliveryMode !== "dht" && !this.quietForTaken) this.session.start();
     // A joiner has just opened the invite: the inviter is there, and its first-contact envelope is worth reading
     // at the signaling pace now (an inviter speeds up when the joiner's fresh packet shows).
     if (this.tracker && !this.tracker.done && this.options.pairingProgress?.role === "joiner") { this.dht?.expect(); this.dialEarly(); }
@@ -1993,7 +2034,7 @@ export class GhostLink {
   private transportOffer(): PairedTransport[] { return transportOrder(this.availableTransports, this.preferred, this.fallback); }
 
   registerEndpoint(endpoint: NativeEndpoint): void {
-    if (this.stopped || this.deliveryMode === "dht" || !this.options.params.profile) { void endpoint.close(); return; }
+    if (this.stopped || this.deliveryMode === "dht" || this.quietForTaken || !this.options.params.profile) { void endpoint.close(); return; }
     this.endpoints.set(endpoint.transport, endpoint);
     traceLink(this.myPubKeyZ32, "endpoint-up", { transport: endpoint.transport });
     endpoint.onConnection = ({ channel, binding }) => {
@@ -2131,7 +2172,8 @@ export class GhostLink {
       void this.attachCandidate(channel, binding, plan).catch(() => {}); return;
     }
     if (this.channel && Date.now() < this.switchAllowedUntil) { this.switchAllowedUntil = 0; this.disconnect(); }
-    if (this.stopped || this.leaving || !this.transportOffer().includes(binding.transport)) { channel.close(); return; }
+    // While yielding, the listener closes in a moment, and a session taken on it with it.
+    if (this.stopped || this.leaving || this.yielding || !this.transportOffer().includes(binding.transport)) { channel.close(); return; }
     if (this.channel) { this.attachReplacement(channel, binding); return; }
     if (this.dialing && this.myPubKeyZ32 < this.options.params.peerPubKeyZ32 && this.options.pairing?.credentials.peerKey) { this.parkCrossed(channel, binding); return; }
     this.attach(channel, binding);
@@ -2384,7 +2426,12 @@ export class GhostLink {
   private async dialNative(transport: PairedTransport, epoch: number): Promise<true | Error> {
     const endpoint = this.endpoints.get(transport as NativeEndpoint["transport"]);
     const descriptor = this.peerDescriptors[transport as NativeEndpoint["transport"]];
-    if (!endpoint || !descriptor) return new Error("Peer native address unavailable; reconnect WebRTC once to exchange endpoints");
+    if (!endpoint || !descriptor) {
+      // A WebRTC session tells it. With no WebRTC between the two apps (a Linux Desktop, the CLI), the contact's app says
+      // it once it takes this chat's listener back, as the chat is used there: no session of ours can ask for it.
+      const rtc = this.availableTransports.includes("webrtc/1") && (!this.peerTransports || this.peerTransports.includes("webrtc/1"));
+      return new Error(rtc ? "Peer native address unavailable; reconnect WebRTC once to exchange endpoints" : "Peer native address unavailable; the contact's app has not given it yet");
+    }
     const started = Date.now();
     const dialed = this.nativeDial = { epoch, transport: transport as NativeTransport, endpoint: endpointId(transport as NativeTransport, descriptor), offline: this.isOffline() };
     try {
@@ -2939,6 +2986,10 @@ export class GhostLink {
   private maybeAutoConnect(presence: PeerPresence): void {
     // Stopping (its loops end after an await): a poll finishing meanwhile must not dial again.
     if (this.stopped || this.leaving || this.yielding || this.streamBlocked || this.keyStopped || !this.options.autoConnect || !presence.online || this.channel || this.dialing || this.dataLink.state !== "idle") return;
+    // The invite was taken before this side pinned anyone: its inviter answers nobody here, and neither a dial nor a fast
+    // look for its offer is worth the relays' budget at each of its heartbeats (bug hunt 1014-1317). The mailbox's slow
+    // read still hears it if it was not so (`untaken`), and dials go again then.
+    if (this.takenFromUs) return;
     // On the DHT the chat is usable: layer 1 is retried at the background pace (WISP 100), not the pairing's.
     // A pin over the DHT alone changes nothing here: the joiner still knocks and the inviter still answers.
     // Back after a restart on a native transport whose endpoint is still starting: it is knocked on once it has, and a
@@ -2950,6 +3001,11 @@ export class GhostLink {
     if (this.departed) {
       if (presence.lastPacketAt === this.departed.packet && Date.now() < this.departed.until) return;
       this.departed = null;
+    }
+    // The contact let its listener go: its old packet describes a listener that is closing.
+    if (this.yielded) {
+      if (presence.lastPacketAt === this.yielded.packet && Date.now() < this.yielded.until) return;
+      this.yielded = null;
     }
     const pairing = !!this.tracker && !this.tracker.done && this.tracker.progress.stage !== "on-dht";
     const role = pairing ? this.options.pairingProgress?.role : undefined;
@@ -3450,11 +3506,31 @@ export class GhostLink {
     try {
       const frame = this.supportsBinaryFiles ? encodeFileData(id, offset, data) : JSON.stringify({ t: "pf-data", id, offset, data: toBase64Url(data) });
       this.channel.send(frame);
-      const use = this.filesUsing(this.channel);
-      use.at = Date.now();
-      use.appAhead = Math.max(0, use.appAhead - (typeof frame === "string" ? frame.length : frame.byteLength));
+      this.filesWrote(this.channel, typeof frame === "string" ? frame.length : frame.byteLength);
       return true;
     } catch { return false; }
+  }
+  /** Files (or a shared service's body, `PairedHttpBodies`) wrote `bytes` on a channel. */
+  private filesWrote(channel: FrameChannel, bytes: number): void {
+    const use = this.filesUsing(channel);
+    use.at = Date.now();
+    // What files write is the app's to send too, up to what files may hold: a WebRTC channel drains to its low water
+    // mark before files write again, so they write in bursts of most of it, and the app's share is the same burst.
+    use.appAhead = Math.max(-filesCap(channel), use.appAhead - bytes);
+  }
+  /**
+   * A shared service's body on a channel counts as files there (WISP 1200 § In a chat): it keeps a WebRTC channel at the
+   * same 1 MiB line, so an app's data gets its quarter above it, and about half the link while the body waits for room.
+   */
+  private bodiesOn(channel: FrameChannel): PairedHttpBodies {
+    return {
+      wrote: bytes => this.filesWrote(channel, bytes),
+      waiting: async drained => {
+        const use = this.filesUsing(channel);
+        use.waiting++;
+        try { await drained; } finally { use.waiting--; use.at = Date.now(); }
+      },
+    };
   }
   /**
    * Files on a channel: when they last wrote on it, how many wait for room, and how many bytes an app's data has sent
@@ -3911,7 +3987,7 @@ export class GhostLink {
           this.typingSender.reset(); this.typingReceiver.clear();
           this.appsSuspended();
           this.pairedHttp?.close();
-          this.pairedHttp = new PairedHttp(channel, this.options.getHostedHttpService, this.options.localFetch);
+          this.pairedHttp = new PairedHttp(channel, this.options.getHostedHttpService, this.options.localFetch, this.bodiesOn(channel));
           this.emitPairingState();
           this.sendPairedNick();
           this.sendPairedAvatar();
@@ -4348,11 +4424,14 @@ export class GhostLink {
    * record now lists the transport undescribed, so there is nothing to dial and no return to watch for. The session
    * ends now, and the chat reads the contact at its own pace; the contact dials once it takes a listener back. Taken
    * as a goodbye, it was watched as an app that quit: 89 reads of its key in the 2 minutes after a yield on the
-   * Desktop, against 6 at the background pace (bug hunt, 2026-10-15).
+   * Desktop, against 6 at the background pace (bug hunt, 2026-10-15). The side whose key dials waits for the contact's
+   * next packet: dialled at once, the listener being given up took the dial and closed it, a goodbye-less loss watched
+   * the same way (bug hunt, 2026-10-16).
    */
   private peerYielded(channel: FrameChannel): void {
     if (this.channel !== channel || this.stopped) return;
     traceLink(this.myPubKeyZ32, "peer-yielded", {});
+    this.yielded = { packet: this.session.peerPresence.lastPacketAt, until: Date.now() + WATCH_PEER_MS };
     this.disconnect();
   }
 
@@ -4377,16 +4456,18 @@ export class GhostLink {
   /**
    * This app is going away (it quits, the page closes): the contact hears it on the live session now, rather than when
    * its liveness gives up about a minute later, and watches for this app to come back. Older apps drop the frame (it
-   * carries no id). Synchronous, so it goes before anything else an app does on its way out.
+   * carries no id). Synchronous, so it goes before anything else an app does on its way out. `quitting`: the app itself
+   * quits (the Desktop app, a CLI daemon), not a web page that may be reloading: only then is a contact's call still
+   * ringing here declined.
    */
-  depart(): void {
+  depart(options: { quitting?: boolean } = {}): void {
     // Going: nothing is dialled or answered from now on, whatever the contact does in the moments left.
     this.leaving = true;
     if (!this.channel || this.paired?.state.status !== "ready") return;
     traceLink(this.myPubKeyZ32, "depart", {});
     // A call still on is hung up first: the goodbye ends the contact's session, so a hang-up after it never arrives,
     // and the contact's call went on until its media gave up (half a minute).
-    const hangUp = this.supportsCalls ? this.pairedCalls.hangUp() : null;
+    const hangUp = this.supportsCalls ? this.pairedCalls.hangUp({ declineRinging: options.quitting === true }) : null;
     if (hangUp) try { this.channel.send(JSON.stringify(hangUp)); } catch { /* closing already */ }
     try { this.channel.send(JSON.stringify({ t: "paired-bye" })); } catch { /* closing already: the contact's liveness finds out */ }
   }

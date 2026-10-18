@@ -19,10 +19,10 @@ const RATE = 48000;
 /** The page's microphone is a tone, and the contact's audio is kept where the test can measure it. */
 async function tapCallAudio(page: Page, hz: number): Promise<void> {
   await page.evaluate((hz) => {
-    const w = window as unknown as { __ctx: AudioContext; __remote: MediaStream | null; __connections: number };
+    const w = window as unknown as { __ctx: AudioContext; __remote: MediaStream | null; __offers: Set<string> };
     w.__ctx = new AudioContext();
     w.__remote = null;
-    w.__connections = 0;
+    w.__offers = new Set();
     // On the prototype: an instance override was sometimes bypassed (#230).
     MediaDevices.prototype.getUserMedia = async function () {
       await w.__ctx.resume();
@@ -38,7 +38,14 @@ async function tapCallAudio(page: Page, hz: number): Promise<void> {
     const Native = window.RTCPeerConnection;
     const Tapped = function (this: unknown, config?: RTCConfiguration) {
       const pc = new Native(config);
-      w.__connections++;
+      // The offers the page answered, each once by its origin line: a connection whose gathering stalled is made again
+      // for the same offer (`gathered` in packages/react/src/useWebRTC.ts), which is not a new answer.
+      const setRemote = pc.setRemoteDescription.bind(pc);
+      pc.setRemoteDescription = ((description: RTCSessionDescriptionInit) => {
+        const origin = description?.type === "offer" ? description.sdp?.match(/^o=.*$/m)?.[0] : undefined;
+        if (origin) w.__offers.add(origin);
+        return setRemote(description);
+      }) as typeof pc.setRemoteDescription;
       pc.addEventListener("track", (event) => { if (event.track.kind === "audio") w.__remote = new MediaStream([event.track]); });
       return pc;
     } as unknown as typeof RTCPeerConnection;
@@ -236,10 +243,14 @@ test("the bot's first two answers are refused as libdatachannel refuses one: the
     const placed = await bot.run("call", "start", invite.chat as string, "--rate", "16000");
     await expect(person.page.getByText("Incoming audio call...")).toBeVisible();
     await person.page.getByTitle("Accept audio call").click();
-    // The page answered three times: on the two connections the bot refused, and on a new one for the bot's third offer.
+    // The page answered every offer the bot made: on the two connections it refused, on any the real race refused as
+    // well (CI loses one now and then, as `redial` says), and on the one that connected.
     await bot.event((e) => e.type === "call.connected" && e.call === placed.call);
     expect(bot.events.filter((e) => e.type === "call.ended")).toEqual([]);
-    await expect.poll(() => person.page.evaluate(() => (window as unknown as { __connections: number }).__connections)).toBe(3);
+    // Connected: the bot offers no more, so its offers are all counted now.
+    const offers = 1 + bot.redials(placed.call as string);
+    expect(offers).toBeGreaterThanOrEqual(3);
+    await expect.poll(() => person.page.evaluate(() => (window as unknown as { __offers: Set<string> }).__offers.size)).toBe(offers);
     await expect(person.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
 
     const program1 = await program((placed.audio as { socket: string }).socket);

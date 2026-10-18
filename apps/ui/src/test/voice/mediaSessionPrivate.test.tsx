@@ -4,6 +4,7 @@ import { AudioBubble } from "../../components/audio/AudioBubble";
 import { VoiceBubble } from "../../components/voice/VoiceBubble";
 import { LockScreenProvider, useLockScreen } from "../../contexts/LockScreenContext";
 import { handOverUnlock } from "../../lib/lockHandover";
+import { NowPlayingChat, resetNowPlaying } from "../../lib/nowPlaying";
 import { servicesPlatform } from "../../lib/platform";
 import { activeProfileId } from "../../lib/profiles";
 import type { ChatFile } from "../../lib/types";
@@ -38,12 +39,16 @@ function LockButton() {
   return <button data-testid="lock" onClick={lock}>{String(isLocked)}</button>;
 }
 
-function Screen({ voice = [], songs = [] }: { voice?: ReturnType<typeof voiceFile>[]; songs?: ChatFile[] }) {
+function Screen({ voice = [], songs = [], open = true }: { voice?: ReturnType<typeof voiceFile>[]; songs?: ChatFile[]; open?: boolean }) {
   return (
     <LockScreenProvider>
       <LockButton />
-      {voice.map((file) => <VoiceBubble key={file.id} file={file} sender="peer" peerName="Ana Souza" />)}
-      {songs.map((file) => <AudioBubble key={file.id} file={file} sender="peer" peerName="Ana Souza" />)}
+      {open && (
+        <NowPlayingChat.Provider value={{ path: "/chat/chat1", name: "Ana Souza", contact: true }}>
+          {voice.map((file) => <VoiceBubble key={file.id} file={file} sender="peer" peerName="Ana Souza" />)}
+          {songs.map((file) => <AudioBubble key={file.id} file={file} sender="peer" peerName="Ana Souza" />)}
+        </NowPlayingChat.Provider>
+      )}
     </LockScreenProvider>
   );
 }
@@ -65,6 +70,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetNowPlaying();
   Reflect.deleteProperty(navigator, "mediaSession");
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -73,18 +79,29 @@ afterEach(() => {
 });
 
 describe("what the system's media controls show", () => {
-  it("a voice message: \"Voice message\" from Ghostly, never the contact", async () => {
-    renderApp(<Screen voice={[voiceFile()]} />);
+  it("a voice message: \"Voice message\" from Ghostly, in its bubble and played on away from it, never the contact", async () => {
+    const file = voiceFile();
+    const view = renderApp(<Screen voice={[file]} />);
     fireEvent.click(screen.getByTestId("voice-play"));
     await flush();
+    expect(session.metadata).toMatchObject({ init: { title: "Voice message", artist: "Ghostly" } });
+    expect(shown()).not.toContain("Ana");
+
+    view.rerender(<Screen voice={[file]} open={false} />);
+    expect(audio.players[0]!.paused).toBe(false);
     expect(session.metadata).toMatchObject({ init: { title: "Voice message", artist: "Ghostly" } });
     expect(shown()).not.toContain("Ana");
   });
 
   it("an audio file: \"Audio\" from Ghostly, never its name or who sent it, in the app's language too", async () => {
-    renderApp(<Screen songs={[song()]} />, { language: "pt" });
+    const file = song();
+    const view = renderApp(<Screen songs={[file]} />, { language: "pt" });
     fireEvent.click(screen.getByTestId("audio-play"));
     await flush();
+    expect(session.metadata).toMatchObject({ init: { title: "Áudio", artist: "Ghostly" } });
+    expect(shown()).not.toMatch(/Ghost Town|Ana/);
+
+    view.rerender(<Screen songs={[file]} open={false} />);
     expect(session.metadata).toMatchObject({ init: { title: "Áudio", artist: "Ghostly" } });
     expect(shown()).not.toMatch(/Ghost Town|Ana/);
   });
@@ -105,11 +122,13 @@ describe("the app locking while something plays", () => {
     expect(handlers.get("play")).toBeNull();
   });
 
-  it("pauses an audio file in its bubble and the system's controls let go of it", async () => {
-    renderApp(<Screen songs={[song()]} />);
+  it("stops one playing on away from its chat, and the system's controls let go of it", async () => {
+    const file = song();
+    const view = renderApp(<Screen songs={[file]} />);
     fireEvent.click(screen.getByTestId("audio-play"));
     await flush();
     const player = screen.getByTestId("audio-element") as HTMLAudioElement;
+    view.rerender(<Screen songs={[file]} open={false} />);
     expect(player.paused).toBe(false);
     act(() => { fireEvent.click(screen.getByTestId("lock")); });
     expect(player.paused).toBe(true);

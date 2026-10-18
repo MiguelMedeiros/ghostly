@@ -27,14 +27,28 @@ import { date } from "../lib/identities";
  */
 
 /** What a line under an installed app says: what needs the person first, else its tagline. */
-function appHint(app: InstalledAppView, t: Translate): { text: string; tone: "muted" | "warning" | "danger" } {
+function appHint(app: InstalledAppView, t: Translate): { lead?: string; text: string; tone: "muted" | "warning" | "danger" } {
   if (app.run.status === "revoked" || app.run.status === "removed") return { text: t("apps.app.stopped"), tone: "danger" };
   if (app.run.status === "needs-files") return { text: t("apps.app.needsFiles"), tone: "warning" };
   if (app.pending) return { text: t("apps.app.updateAsks"), tone: "warning" };
   // The version this client's own list pins is no stranger's (WISP 1200 § Built-in apps).
   // What the row is there to say comes first: on a phone the one line is cut at its end, and a tagline is long.
-  if (app.unknownPublisher && !app.builtIn) return { text: `${t("apps.install.unknownPublisher")} · ${app.tagline}`, tone: "muted" };
+  if (app.unknownPublisher && !app.builtIn) return { lead: t("apps.install.unknownPublisher"), text: app.tagline, tone: "muted" };
   return { text: app.tagline, tone: "muted" };
+}
+
+/**
+ * A row's one line under its title: Ghostly's own words (`lead`), then the app's tagline. Each reads in its own direction
+ * and only the tagline is cut: in Arabic an English tagline in the same run took "Ghostly" and its start off the line.
+ */
+function HintLine({ lead, text, id, testId, className }: { lead?: string; text: string; id?: string; testId: string; className: string }) {
+  if (!lead) return <span id={id} dir="auto" data-testid={testId} className={`block text-xs truncate ${className}`}>{text}</span>;
+  return (
+    <span id={id} data-testid={testId} className={`flex min-w-0 text-xs ${className}`}>
+      <span className="shrink-0 whitespace-pre">{`${lead} · `}</span>
+      <span dir="auto" className="min-w-0 truncate">{text}</span>
+    </span>
+  );
 }
 
 function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDetails: () => void; onOpen: () => void }) {
@@ -50,8 +64,12 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
         aria-label={t("apps.page.details", { title: app.title })} aria-describedby={`${versionId} ${hintId}`}>
         <AppIcon installed={app} />
         <span className="min-w-0">
-          <span dir="auto" className="block text-sm text-text-primary truncate">{app.title} <span id={versionId} className="text-text-muted text-xs">{app.version}</span></span>
-          <span id={hintId} dir="auto" data-testid="installed-app-hint" className={`block text-xs truncate ${color}`}>{hint.text}</span>
+          {/* A long title is cut alone: the version stays whole after it. */}
+          <span dir="auto" className="flex items-baseline gap-1 text-sm text-text-primary">
+            <span dir="auto" className="truncate min-w-0">{app.title}</span>{" "}
+            <span id={versionId} className="shrink-0 whitespace-nowrap text-text-muted text-xs">{app.version}</span>
+          </span>
+          <HintLine id={hintId} testId="installed-app-hint" className={color} lead={hint.lead} text={hint.text} />
         </span>
       </button>
       {app.run.status === "ok" && <Button data-testid="installed-app-open" onClick={onOpen}>{t("apps.page.open")}</Button>}
@@ -71,11 +89,11 @@ function BuiltInRow({ app, busy, onOpen, onRemove }: { app: BuiltInAppOffer; bus
         <AppIcon />
         <span className="min-w-0">
           <span dir="auto" className="block text-sm text-text-primary truncate">{app.title}</span>
-          <span dir="auto" data-testid="built-in-app-hint" className="block text-xs text-text-muted truncate">{t("apps.builtIn.hint")} · {app.tagline}</span>
+          <HintLine testId="built-in-app-hint" className="text-text-muted" lead={t("apps.builtIn.hint")} text={app.tagline} />
         </span>
       </div>
       <div className="flex items-center gap-2 ms-auto">
-        <Button data-testid="built-in-app-remove" disabled={busy} aria-label={t("apps.builtIn.removeNamed", { title: app.title })} onClick={onRemove}>{t("apps.builtIn.remove")}</Button>
+        <Button data-testid="built-in-app-remove" loading={busy} aria-label={t("apps.builtIn.removeNamed", { title: app.title })} onClick={onRemove}>{t("apps.builtIn.remove")}</Button>
         <Button variant="primary" data-testid="built-in-app-open" disabled={busy} aria-label={t("apps.builtIn.openNamed", { title: app.title })} onClick={onOpen}>{t("apps.page.open")}</Button>
       </div>
     </div>
@@ -105,11 +123,13 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
   const [chosen, setChosen] = useState<boolean | null>(null);
   const open = chosen ?? (store.apps.length > 0 && (alone || store.apps.length <= LISTING_FEW));
   const [busy, setBusy] = useState(false);
+  // Which button started the work in progress: that one shows it is going (Refresh, Remove).
+  const [pending, setPending] = useState<"refresh" | "remove" | null>(null);
   const focusBack = useFocusBack(busy);
-  const work = async (call: () => Promise<unknown>, done?: () => void) => {
+  const work = async (call: () => Promise<unknown>, done?: () => void, which: "refresh" | "remove" | null = null) => {
     focusBack();
-    setBusy(true);
-    try { await call(); done?.(); onChanged(); } catch (e) { onError(e); } finally { setBusy(false); }
+    setBusy(true); setPending(which);
+    try { await call(); done?.(); onChanged(); } catch (e) { onError(e); } finally { setBusy(false); setPending(null); }
   };
   // A store may list up to 4096 apps: one page of them at a time, and a search over them all.
   const [limit, setLimit] = useState(LISTING_PAGE);
@@ -160,8 +180,8 @@ function StoreBlock({ store, alone, installed, onInstall, onChanged, onRemoved, 
         </button>
         <div className="flex items-center gap-2">
           {/* A store read again or removed can stop an installed app (a removal) or change who lists it: both lists again. */}
-          <Button data-testid="app-store-refresh" disabled={busy} onClick={() => void work(() => engine.call("appStoreRefresh", { key: store.key }))}>{read ? t("apps.store.refresh") : t("apps.store.read")}</Button>
-          <Button variant="danger" data-testid="app-store-remove" disabled={busy} onClick={() => void work(() => engine.call("appStoreRemove", { key: store.key }), onRemoved)}>{t("apps.store.remove")}</Button>
+          <Button data-testid="app-store-refresh" disabled={busy} loading={pending === "refresh"} onClick={() => void work(() => engine.call("appStoreRefresh", { key: store.key }), undefined, "refresh")}>{read ? t("apps.store.refresh") : t("apps.store.read")}</Button>
+          <Button variant="danger" data-testid="app-store-remove" disabled={busy} loading={pending === "remove"} onClick={() => void work(() => engine.call("appStoreRemove", { key: store.key }), onRemoved, "remove")}>{t("apps.store.remove")}</Button>
         </div>
       </div>
       {open && store.apps.length > LISTING_PAGE && (

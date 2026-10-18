@@ -177,6 +177,7 @@
     "messages": "{{count}} messages",
     "noChats": "Aucune discussion pour l’instant",
     "noMatch": "Aucune discussion de ce nom",
+    "partial": "{{sent}} sur {{count}} envoyés",
     "pick": "Choisissez-en jusqu’à {{count}}",
     "search": "Rechercher des discussions",
     "select": "Sélectionner",
@@ -275,6 +276,11 @@
     "retry": "Renvoyer"
   },
   "noMessages": "Aucun message",
+  "nowPlaying": {
+    "close": "Arrêter et fermer",
+    "label": "En cours de lecture",
+    "open": "Afficher dans la discussion"
+  },
   "offline": "hors ligne",
   "online": "en ligne",
   "options": "Options",

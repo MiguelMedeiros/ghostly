@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { formatFileSize, formatVideoDuration, sanitizeFileName } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
@@ -13,6 +13,7 @@ import { openStoredMedia, type StoredMedia } from "../../lib/storedMedia";
 import { audioFormat, canPlayAudio } from "../../lib/videoPlayer";
 import { applyVoiceRate, claimPlayback, onVoiceRate, registerVoicePlayer, releasePlayback, voiceRate } from "../../lib/voicePlayback";
 import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMediaSession, type MediaSessionPlayer } from "../../lib/mediaSession";
+import { forgetPosition, holdPlayback, playingFrom, rememberPosition, rememberedPosition, takePlayback, usePlayingChat } from "../../lib/nowPlaying";
 import { Highlight } from "../chat/ChatSearch";
 import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry";
 import { SpeedPill } from "../voice/VoiceBubble";
@@ -41,8 +42,10 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const [state, setPlayState] = useState<PlayState>("idle");
   const [problem, setProblem] = useState<Problem | null>(null);
   const [src, setSrc] = useState<string | null>(null);
-  const [position, setPosition] = useState(0);
-  const [duration, setDuration] = useState(0);
+  // Paused or left part-way earlier in this session: it goes on from there (lib/nowPlaying.ts).
+  const [remembered] = useState(() => rememberedPosition(file.id));
+  const [position, setPosition] = useState(remembered?.at ?? 0);
+  const [duration, setDuration] = useState(remembered?.duration ?? 0);
   const [rate, setRate] = useState(voiceRate);
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -59,7 +62,15 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   const sourceRef = useRef<StoredMedia | null>(null);
   /** A stream the player refused was tried again from the file's bytes, once. */
   const fellBack = useRef(false);
-  const resumeAt = useRef(0);
+  const resumeAt = useRef(remembered?.at ?? 0);
+  const durationRef = useRef(duration);
+  durationRef.current = duration;
+  /** The message it is in, found when it starts: the bar's tap opens the chat there. */
+  const messageRef = useRef<string | undefined>(undefined);
+  /** What the now-playing bar shows of it, should it play on away from here. */
+  const chat = usePlayingChat();
+  const trackRef = useRef({ title: file.name, label: "", from: "", chat });
+  trackRef.current = { title: file.name, label: t("chat.audio.message"), from: playingFrom(sender === "me", t("chat.reply.you"), peerName, chat), chat };
   /** On screen: a stream that opens after the bubble went is let go at once. */
   const mounted = useRef(false);
   /** What the system's media controls call (lock screen, media keys): set on every render, below. */
@@ -148,10 +159,48 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
   // Another audio file, video or voice message starts: this one stops and lets go of its bytes.
   useEffect(() => registerVoicePlayer(file.id, { play: () => void play(), pause: () => { if (srcRef.current) unload(); } }), [file.id, play, unload]);
 
+  // Back on screen while the app plays it on (lib/nowPlaying.ts): it goes on here, from where it is.
+  useLayoutEffect(() => {
+    const handed = takePlayback(file.id);
+    if (!handed) return;
+    const { audio } = handed;
+    const playing = !audio.paused;
+    resumeAt.current = audio.currentTime;
+    setPosition(audio.currentTime);
+    if (handed.duration > 0) setDuration(handed.duration);
+    messageRef.current = handed.messageId;
+    handed.release();
+    if (playing) void play();
+    else setPlayState("paused");
+  }, [file.id, play]);
+  /** Handed to the app: what it plays from is the app's to let go of now. */
+  const handedRef = useRef(false);
+  // A layout cleanup, while the element is still in the page: it runs before the app's own (App), which stops one held
+  // when the app itself goes.
+  useLayoutEffect(() => () => {
+    const audio = audioRef.current;
+    const source = sourceRef.current;
+    if (audio && source && !audio.paused && !audio.ended) {
+      // Leaving the screen while it plays (another chat, another page, the chat list): it plays on, with the bar. Moved
+      // out of the chat first: an element taken out of the page stops.
+      audio.hidden = true;
+      document.body.append(audio);
+      handedRef.current = true;
+      sourceRef.current = null;
+      srcRef.current = null;
+      const release = () => { audio.pause(); audio.remove(); source.release(); };
+      holdPlayback({ ...trackRef.current, id: file.id, kind: "audio", messageId: messageRef.current, duration: durationRef.current, audio, release });
+      return;
+    }
+    rememberPosition(file.id, audio && srcRef.current ? audio.currentTime : resumeAt.current, durationRef.current);
+  }, [file.id]);
+
   useEffect(() => {
     mounted.current = true;
+    handedRef.current = false;
     return () => {
       mounted.current = false;
+      if (handedRef.current) return;
       releasePlayback(file.id);
       releaseMediaSession(file.id);
       sourceRef.current?.release();
@@ -323,12 +372,13 @@ export function AudioBubble({ file, sender, peerName: named, highlight }: { file
           onPlay={() => {
             claimPlayback(file.id);
             setPlayState("playing");
+            messageRef.current = rootRef.current?.closest<HTMLElement>("[data-message-id]")?.dataset.messageId;
             // The lock screen and media keys drive the one playing now.
             const shown = mediaRef.current!;
             claimMediaSession(file.id, { title: shown.title, play: () => mediaRef.current?.play(), pause: () => mediaRef.current?.pause(), seekTo: (at) => mediaRef.current?.seekTo(at) });
           }}
           onPause={() => { releasePlayback(file.id); mediaSessionState(file.id, "paused"); setPlayState((was) => (was === "playing" ? "paused" : was)); }}
-          onEnded={() => { resumeAt.current = 0; setPosition(0); unload(); setPlayState("idle"); }}
+          onEnded={() => { resumeAt.current = 0; forgetPosition(file.id); setPosition(0); unload(); setPlayState("idle"); }}
           onError={() => refusedRef.current()}
         />
       )}

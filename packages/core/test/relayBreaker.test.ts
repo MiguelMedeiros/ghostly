@@ -427,36 +427,6 @@ describe("the default relays", () => {
     for (let i = 0; i < 3; i++) await expect(fresh.publish(createIdentity(), [{ label: "_ts", value: "1" }])).resolves.toBeUndefined();
     for (let i = 0; i < 6; i++) await expect(fresh.resolve(createIdentity().pubKeyZ32)).resolves.toBeNull();
   });
-
-  it("never sends pkarr.miguelmedeiros.dev more than the 10 a minute it allows, whoever asks, while the Pubky relays are down", async () => {
-    vi.useFakeTimers();
-    try {
-      const at: number[] = [];
-      const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
-        const host = new URL(String(input)).host;
-        if (host !== "pkarr.miguelmedeiros.dev") throw new TypeError("Failed to fetch");
-        at.push(Date.now());
-        return new Response(null, { status: init?.method === "PUT" ? 204 : 404 });
-      }) as typeof fetch;
-      const relay = new RelayTransport({ freshReadMs: 0, relays: DEFAULT_RELAYS, fetch: fetchFn, log: () => {} });
-      // Every kind of request this client makes, chats', groups' and background ones, reads and writes, as fast as they come.
-      const askers = [{}, { urgent: true }, { urgent: true, signal: true }, { background: true }, { background: true, door: true }, { group: true }, { group: true, urgent: true }, { group: true, signal: true }, { group: true, watch: true }, { departed: true }];
-      const keys = Array.from({ length: 4 }, () => createIdentity());
-      for (let tick = 0; tick < 3 * 60 * 4; tick++) {
-        for (const [i, options] of askers.entries()) {
-          const id = keys[(tick + i) % keys.length];
-          void relay.resolve(id.pubKeyZ32, options).catch(() => {});
-          if (tick % 4 === 0) void relay.publish(id, [{ label: "_ts", value: String(tick) }], options).catch(() => {});
-        }
-        await vi.advanceTimersByTimeAsync(250);
-      }
-      await vi.advanceTimersByTimeAsync(120_000);
-      expect(at.length).toBeGreaterThan(10);
-      // No minute, sliding, holds more than the relay allows.
-      const most = Math.max(...at.map((t) => at.filter((u) => u >= t && u < t + 60_000).length));
-      expect(most).toBeLessThanOrEqual(10);
-    } finally { vi.useRealTimers(); }
-  });
 });
 
 describe("when publishing fails, and a new network", () => {

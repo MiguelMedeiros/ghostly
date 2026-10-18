@@ -19,7 +19,7 @@ function fake() {
     groupMessages: vi.fn(async ({ groupId }: { groupId: string }) => rows.filter((m) => m.linkId === `group:${groupId}`)),
     getMessage: vi.fn(async (linkId: string, id: string) => rows.find((m) => m.linkId === linkId && m.id === id)),
     deleteMessage: vi.fn(async () => {}),
-    forwardMessages: vi.fn(async ({ to }: { to: string[] }) => ({ results: to.map(() => ({ messageIds: ["me_fwd"], error: null })) })),
+    forwardMessages: vi.fn(async ({ to, messageIds }: { to: string[]; messageIds: string[] }) => ({ results: to.map(() => ({ messageIds: ["me_fwd"], sent: messageIds, error: null })) })),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode: "daemon", version: "test" } as unknown as ApiContext;
   const whole = () => node.getMessages.mock.calls.length + node.groupMessages.mock.calls.length;
@@ -41,7 +41,7 @@ describe("forward", () => {
   it("reads the messages it forwards, from a chat or a group, and each it waits for, one row each", async () => {
     const { ctx, node, whole } = fake();
     expect(await callApi(ctx, "chat.forward", { chat: "Alice", messages: ["peer_1", "peer_2"], to: ["Bob"], wait: "sent", timeout: 1 }))
-      .toEqual({ from: "chat-one", results: [{ to: "chat-two", kind: "chat", messageIds: ["me_fwd"], error: null }] });
+      .toEqual({ from: "chat-one", results: [{ to: "chat-two", kind: "chat", messageIds: ["me_fwd"], sent: ["peer_1", "peer_2"], error: null }] });
     expect(node.forwardMessages).toHaveBeenCalledWith({ linkId: "chat-one", messageIds: ["peer_1", "peer_2"], to: ["chat-two"] });
     await callApi(ctx, "chat.forward", { chat: "Crew", messages: ["k:0:1"], to: ["Bob"] });
     expect(node.getMessage).toHaveBeenCalledWith("group:g1", "k:0:1");

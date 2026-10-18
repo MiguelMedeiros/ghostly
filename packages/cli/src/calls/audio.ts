@@ -52,6 +52,8 @@ export class CallAudio {
   private readonly samples: number;
   private readonly silence: Buffer;
   private pending: Buffer = Buffer.alloc(0);
+  /** What the decoder concealed for the current gap and is not handed on yet (see `conceal`). */
+  private concealed: Buffer | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private startedAt = 0;
   private ticks = 0;
@@ -144,12 +146,28 @@ export class CallAudio {
     if (!rtp || rtp.payloadType !== this.options.payloadType) return;
     for (const item of this.reorder.push(rtp)) {
       let pcm: Buffer;
-      if ("lost" in item) pcm = this.silence;
+      if ("lost" in item) pcm = this.conceal();
       else {
+        this.concealed = null;
         try { pcm = this.options.decoder.decode(item.payload); } catch { pcm = this.silence; }
       }
       this.emit(pcm);
     }
+  }
+
+  /**
+   * A frame for one that never came: the decoder's loss concealment (libopus PLC, what an empty packet decodes to), as
+   * the apps' WebRTC stacks do, not a frame of silence (a click). opusscript conceals 60 ms at a time (its largest
+   * frame), so one run of it serves the frames of a gap in turn (ReorderBuffer gives MAX_LOST_FRAMES at most).
+   */
+  private conceal(): Buffer {
+    if (!this.concealed || this.concealed.length < this.frame) {
+      try { this.concealed = Buffer.from(this.options.decoder.decode(Buffer.alloc(0))); } catch { this.concealed = null; }
+    }
+    if (!this.concealed || this.concealed.length < this.frame) return this.silence;
+    const pcm = this.concealed.subarray(0, this.frame);
+    this.concealed = this.concealed.subarray(this.frame);
+    return pcm;
   }
 
   /** Hands decoded audio on in 20 ms frames, whatever the contact's packet length (10, 20, 40 or 60 ms). */

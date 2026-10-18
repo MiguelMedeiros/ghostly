@@ -2,13 +2,14 @@ import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH,
 import type { EngineState, GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
-import { ENGINE_METHODS, ENGINE_READS } from "./engineMethods";
+import { DESTRUCTIVE_CALLS, ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, engineParamsProblem } from "./engineMethods";
 import { CliError } from "./errors";
 import {
   bool, chatOf, chatOrGroup, findChat, findGroup, groupOf, inviteTaken, list, messageOf, node, num, oneOf, state, str, waitForState,
   type ApiContext, type Method, type Params,
 } from "./apiKit";
 import { FILE_METHODS } from "./files";
+import { checkShownName } from "./profiles";
 import { waitForEdit, waitForGroupFrame, waitForMessage } from "./waits";
 import { STATUS_CARD_METHODS, secretIn } from "./statusCards";
 import { BUTTON_METHODS, buttonsCard, pressable } from "./buttons";
@@ -17,6 +18,7 @@ import { endTyping, keepOneShot, keepTyping, sayTyping } from "./typing";
 import { GROUP_ADMIN_METHODS, noMember } from "./groupAdmin";
 import { withStoredIds } from "./turnRefs";
 import { IDENTITY_METHODS } from "./identities";
+import { X401_METHODS } from "./x401";
 import { SERVICE_METHODS } from "./services";
 import { BACKUP_METHODS } from "./backup";
 import { CALL_METHODS } from "./calls/api";
@@ -165,6 +167,9 @@ function showUntilPaired(ctx: ApiContext, linkId: string): void {
   inviteShown.set(ctx, stop);
 }
 
+/** V8's words for reading what a value does not have: an `engine.call` given a parameter of the wrong kind. */
+const BAD_VALUE = /^Cannot (destructure|read properties of (undefined|null))|is not (a function|iterable)/;
+
 // ---------- methods ----------
 
 const METHODS: Record<string, Method> = {
@@ -174,6 +179,7 @@ const METHODS: Record<string, Method> = {
   ...BUTTON_METHODS,
   ...GROUP_ADMIN_METHODS,
   ...IDENTITY_METHODS,
+  ...X401_METHODS,
   ...SERVICE_METHODS,
   ...BACKUP_METHODS,
   ...CALL_METHODS,
@@ -197,11 +203,7 @@ const METHODS: Record<string, Method> = {
   },
   async "profile.set"(ctx, params) {
     const patch: Partial<Settings> = {};
-    const name = params.name;
-    if (name !== undefined) {
-      if (typeof name !== "string" || [...name].length > 64) throw new CliError("bad_request", "name must be a string of up to 64 characters");
-      patch.nick = name.trim();
-    }
+    if (params.name !== undefined) patch.nick = checkShownName(params.name);
     if (params.shareProfile !== undefined) patch.shareProfile = bool(params, "shareProfile");
     await node(ctx).updateSettings({ settings: patch });
     return METHODS["profile.get"](ctx, {});
@@ -220,6 +222,8 @@ const METHODS: Record<string, Method> = {
       if (kind === "strings" && !(Array.isArray(value) && value.every((v) => typeof v === "string"))) throw new CliError("bad_request", `${key} must be a list of strings`);
       if (kind === "string" && typeof value !== "string") throw new CliError("bad_request", `${key} must be a string`);
       if (kind === "boolean" && typeof value !== "boolean") throw new CliError("bad_request", `${key} must be true or false`);
+      // The name contacts see: `profile set --name`'s rule.
+      if (key === "nick") { patch.nick = checkShownName(value, key); continue; }
       if (kind === "ice") {
         if (!(Array.isArray(value) && value.every((v) => v && typeof v === "object"))) throw new CliError("bad_request", `${key} must be a list of ICE servers`);
         // WebRTC's own form (`urls` a list) is taken; a server without urls is said here, not as the engine's TypeError.
@@ -295,6 +299,8 @@ const METHODS: Record<string, Method> = {
       if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; send it with --force if you mean to`, { kind: secret.kind });
     }
     const wait = oneOf(params, "wait", ["none", "sent", "delivered"] as const, "none");
+    // Read before anything is sent, as `wait` is: a timeout refused after the send made a retry send it again.
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const replyTo = str(params, "reply");
     // Buttons under the text (WISP 406 · Message Buttons): the text is the question, and what older apps show.
     const card = buttonsCard(params);
@@ -305,7 +311,7 @@ const METHODS: Record<string, Method> = {
     if (result.error) throw /not in this chat|cannot be replied to/.test(result.error) ? new CliError("not_found", result.error) : new CliError(result.refused ? "refused" : "unavailable", result.error);
     if (!result.messageId) throw new CliError("bad_request", "Nothing to send");
     let message = await node(ctx).getMessage(link.id, result.messageId);
-    if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
+    if (wait !== "none") message = await waitForMessage(ctx, link.id, result.messageId, wait, ms);
     return { chat: link.id, messageId: result.messageId, delivery: message?.delivery ?? null, ...(card ? { buttons: card.id, card, pressable: pressable(link) } : {}) };
   },
   /**
@@ -321,11 +327,12 @@ const METHODS: Record<string, Method> = {
       if (secret) throw new CliError("confirm", `The text looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; edit with --force if you mean to`, { kind: secret.kind });
     }
     const wait = oneOf(params, "wait", ["none", "confirmed"] as const, "none");
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const result = await node(ctx).editMessage({ linkId: link.id, messageId, text });
     if (result.error) throw editRefused(await messageOf(ctx, link.id, messageId), messageId, "chat", result.error, result.refused);
     const id = result.messageId ?? messageId;
     let message = await node(ctx).getMessage(link.id, id);
-    if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000);
+    if (wait === "confirmed" && message?.edit?.pending) message = await waitForEdit(ctx, link.id, id, ms);
     return { chat: link.id, messageId: id, edits: message?.edit?.seq ?? 0, confirmed: !!message && !message.edit?.pending };
   },
   /**
@@ -393,11 +400,11 @@ const METHODS: Record<string, Method> = {
       if (secret) throw new CliError("confirm", `A message looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; forward it with --force if you mean to`, { kind: secret.kind, messageId: message.id });
     }
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     let results;
     try { ({ results } = await node(ctx).forwardMessages({ linkId: from.linkId, messageIds, to: to.map((t) => t.linkId) })); }
     catch (error) { throw new CliError("refused", error instanceof Error ? error.message : String(error)); }
-    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
-    const out = results.map((result, i) => ({ to: to[i]!.id, kind: to[i]!.group ? "group" as const : "chat" as const, messageIds: result.messageIds, error: result.error }));
+    const out = results.map((result, i) => ({ to: to[i]!.id, kind: to[i]!.group ? "group" as const : "chat" as const, messageIds: result.messageIds, sent: result.sent, error: result.error }));
     if (wait === "sent") for (const [i, result] of out.entries()) for (const messageId of result.messageIds) {
       if (to[i]!.group) { await waitForGroupFrame(ctx, to[i]!.id, messageId, undefined, ms); continue; }
       const sent = await node(ctx).getMessage(to[i]!.id, messageId);
@@ -542,6 +549,7 @@ const METHODS: Record<string, Method> = {
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const replyTo = str(params, "reply");
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const card = buttonsCard(params);
     // A kept `group typing --for` ends with the message (the engine says stop with it).
     endTyping(ctx, { groupId: group.id }, false);
@@ -551,7 +559,7 @@ const METHODS: Record<string, Method> = {
     const messageId = result.messageId ?? null;
     // `edges`: how many took it so far (none yet is not an error: it goes when one opens). `sent`: whether one did.
     // Before 2026-10-02 `sent` was always true, also for a message no edge had taken.
-    const edges = messageId ? (wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, undefined, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000) : node(ctx).groupTaken({ groupId: group.id, messageId })) : 0;
+    const edges = messageId ? (wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, undefined, ms) : node(ctx).groupTaken({ groupId: group.id, messageId })) : 0;
     return { group: group.id, messageId, sent: edges > 0, edges, ...(card ? { buttons: card.id, card } : {}) };
   },
   /**
@@ -569,6 +577,7 @@ const METHODS: Record<string, Method> = {
     }
     const mentions = mentionsFor(text, list(params, "mentions"), group);
     const wait = oneOf(params, "wait", ["none", "sent"] as const, "none");
+    const ms = num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000;
     const linkId = `group:${group.id}`;
     const before = (await node(ctx).getMessage(linkId, messageId))?.edit?.seq ?? 0;
     const result = await node(ctx).editMessage({ linkId, messageId, text, ...(mentions.length ? { mentions } : {}) });
@@ -579,7 +588,7 @@ const METHODS: Record<string, Method> = {
     // message never edited, as if an edit had gone.
     if (edits === before) return { group: group.id, messageId, edits, sent: false, edges: 0, unchanged: true };
     // An edit waiting for the pace is not said yet: `--wait sent` waits for that too, then for an edge to take it.
-    const edges = !edits ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, edits, num(params, "timeout", 30, { min: 1, max: 3600 }) * 1000)
+    const edges = !edits ? 0 : wait === "sent" ? await waitForGroupFrame(ctx, group.id, messageId, edits, ms)
       : node(ctx).groupTaken({ groupId: group.id, messageId, edit: edits });
     return { group: group.id, messageId, edits, sent: edges > 0 || (!!message && !message.edit?.pending), edges };
   },
@@ -652,11 +661,19 @@ const METHODS: Record<string, Method> = {
     if (!ENGINE_METHODS.includes(method) && !ENGINE_READS.includes(method)) throw new CliError("not_found", `The engine has no call ${method}`);
     const raw = params.params;
     if (raw !== undefined && (raw === null || typeof raw !== "object" || Array.isArray(raw))) throw new CliError("bad_request", "params must be an object");
-    let args = raw as Params | undefined;
+    const args = raw as Params | undefined;
     // Real money moves only on an explicit confirmation of this call (WISP 1100 § Mainnet).
     if (args && "confirmedReal" in args && !bool(params, "confirmReal")) {
       throw new CliError("confirm", `${method} spends real money: pass --confirm-real (confirmReal: true over the socket) to confirm it`);
     }
+    const deletes = DESTRUCTIVE_CALLS.get(method);
+    if (deletes && !bool(params, "yes")) throw new CliError("confirm", `${method} ${deletes}; pass --yes (yes: true over the socket) to go on`);
+    if (method === "clearProfileData") return clearProfile(ctx);
+    // A call given less than it takes failed with JavaScript's own TypeError, or did nothing and answered null.
+    const takes = ENGINE_PARAMS[method] ?? READ_PARAMS[method];
+    const wrong = (why: string, rawError?: string) => new CliError("bad_request", `${method} takes ${takes || "no parameters"}: ${why} (ghostly engine --list --verbose)`, { takes, ...(rawError ? { rawError } : {}) });
+    const problem = engineParamsProblem(method, args);
+    if (problem) throw wrong(problem);
     if (args && ENGINE_SENDS.has(method) && !bool(params, "force")) await guardEngineSend(ctx, method, args);
     if (method === "getMessages") return node(ctx).getMessages(str(args ?? {}, "linkId", true));
     if (method === "getState") return state(ctx);
@@ -664,10 +681,30 @@ const METHODS: Record<string, Method> = {
     if (method === "setActiveLink") inviteShown.get(ctx)?.();
     const target = (node(ctx) as unknown as Record<string, (p?: unknown) => unknown>)[method];
     if (typeof target !== "function") throw new CliError("not_found", `The engine has no call ${method}`);
-    if (args === undefined) args = undefined;
-    return (await target.call(node(ctx), args)) ?? null;
+    try {
+      return (await target.call(node(ctx), args)) ?? null;
+    } catch (error) {
+      // A value of the wrong kind (a number for a text, a missing key of a typed object) ends as JavaScript reading what is
+      // not there. Not every TypeError: Node's `fetch failed` is the network.
+      if (error instanceof TypeError && BAD_VALUE.test(error.message)) throw wrong("a parameter of the wrong kind", error.message);
+      throw error;
+    }
   },
 };
+
+/**
+ * "Clear all data": the engine withdraws what it can, stops and empties its stores; the app reloads its page after it.
+ * A daemon would go on serving the stopped engine's memory (chats and groups that are gone, new ones that are not
+ * kept): it stops once it has answered, and the next command starts on the emptied profile.
+ */
+async function clearProfile(ctx: ApiContext): Promise<{ cleared: { chats: number; groups: number }; stopped?: true }> {
+  const { links, groups } = state(ctx);
+  await node(ctx).clearProfileData();
+  const cleared = { chats: links.length, groups: groups.length };
+  if (ctx.mode !== "daemon" || !ctx.stop) return { cleared };
+  setTimeout(() => ctx.stop!(), 10);
+  return { cleared, stopped: true };
+}
 
 /**
  * The engine's calls that send a text this side writes (a message, a file's caption, a payment's memo): `engine.call`
@@ -782,17 +819,19 @@ function history(messages: StoredMessage[], params: Params, json: (message: Stor
   const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
   const before = params.before;
   const after = params.after;
-  let list = messages.slice().sort((a, b) => a.timestamp - b.timestamp);
-  const cut = (value: unknown, side: "before" | "after") => {
+  const sorted = messages.slice().sort((a, b) => a.timestamp - b.timestamp);
+  // Each id is found in the whole history, not in what the other side already cut away: a window with nothing in it
+  // (`--after b --before b`, or crossed) is an empty page, not "No message b".
+  const bound = (value: unknown, side: "before" | "after"): ((m: StoredMessage, at: number) => boolean) | undefined => {
     if (value === undefined || value === null) return;
-    if (typeof value === "number") { list = list.filter((m) => (side === "before" ? m.timestamp < value : m.timestamp > value)); return; }
+    if (typeof value === "number") return (m) => (side === "before" ? m.timestamp < value : m.timestamp > value);
     if (typeof value !== "string") throw new CliError("bad_request", `${side} must be a timestamp or a message id`);
-    const index = list.findIndex((m) => m.id === value);
+    const index = sorted.findIndex((m) => m.id === value);
     if (index === -1) throw new CliError("not_found", `No message ${value}`);
-    list = side === "before" ? list.slice(0, index) : list.slice(index + 1);
+    return (_, at) => (side === "before" ? at < index : at > index);
   };
-  cut(before, "before");
-  cut(after, "after");
+  const bounds = [bound(before, "before"), bound(after, "after")].filter((b) => b !== undefined);
+  const list = sorted.filter((m, at) => bounds.every((within) => within(m, at)));
   const more = after !== undefined && after !== null ? list.length > limit : list.length > limit;
   const page = after !== undefined && after !== null ? list.slice(0, limit) : list.slice(-limit);
   return { messages: page.map((m) => json(m)), more };

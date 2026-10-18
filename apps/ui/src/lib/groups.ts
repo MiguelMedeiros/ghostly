@@ -11,7 +11,6 @@ import { english } from "./english";
 import { relayCause } from "./problemText";
 import type { Translate } from "../contexts/I18nContext";
 
-/** How a member is named in a group: their announced name, or their key. `t`: the interface's words ("You"). */
 type Segmenter = { segment(text: string): Iterable<{ segment: string }> };
 const SegmenterCtor = (globalThis as { Intl?: { Segmenter?: new (locale?: string, options?: { granularity: string }) => Segmenter } }).Intl?.Segmenter;
 const graphemes = SegmenterCtor ? new SegmenterCtor(undefined, { granularity: "grapheme" }) : null;
@@ -32,6 +31,38 @@ export function fitGroupName(value: string): string {
     kept += part; chars += c; bytes += b;
   }
   return kept;
+}
+
+const fits = (s: string) => [...s].length <= MAX_GROUP_NAME_LENGTH && utf8Bytes(s) <= MAX_GROUP_NAME_BYTES;
+const splitGraphemes = (s: string) => graphemes ? Array.from(graphemes.segment(s), (g) => g.segment) : [...s];
+const lowSurrogate = (s: string, i: number) => { const c = s.charCodeAt(i); return c >= 0xdc00 && c <= 0xdfff; };
+
+/**
+ * A change to a group's name field, kept to what `groupName` takes (`fitGroupName`'s count) the way a text field
+ * with a limit does: what was typed or pasted goes in at the caret as far as it fits, the rest of it is left out, and
+ * the name around it and the caret stay where they were. Cutting the new value's end instead dropped the name's last
+ * character, threw the caret to the end and cut what was typed after there (agents#1097). `caret`: where the field's
+ * caret is after the change (`selectionStart`).
+ */
+export function fitGroupNameEdit(before: string, after: string, caret: number | null): { value: string; caret: number } {
+  if (fits(after)) return { value: after, caret: caret ?? after.length };
+  // The text before and after the change, in both: what lies between in `after` is what was put in.
+  const end = Math.max(0, Math.min(caret ?? after.length, after.length));
+  let head = 0;
+  while (head < before.length && head < end && before[head] === after[head]) head++;
+  let tail = 0;
+  while (tail < before.length - head && tail < after.length - end && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
+  // Never between the two halves of a character.
+  while (head > 0 && lowSurrogate(after, head)) head--;
+  while (tail > 0 && lowSurrogate(after, after.length - tail)) tail--;
+  const start = after.slice(0, head), rest = after.slice(after.length - tail), put = after.slice(head, after.length - tail);
+  if (!fits(start + rest)) return { value: fitGroupName(after), caret: fitGroupName(after).length };
+  let kept = "";
+  for (const part of splitGraphemes(put)) {
+    if (!fits(start + kept + part + rest)) break;
+    kept += part;
+  }
+  return { value: start + kept + rest, caret: start.length + kept.length };
 }
 
 export const memberName = (m: { key: string; me: boolean; nick?: string }, t: Translate = english) =>

@@ -27,7 +27,8 @@ import { ChatFolderMenu, FolderMenuItem } from "../components/chat/ChatFolderMen
 import { groupChat } from "../lib/chatMute";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { GroupInvitationCard } from "../components/GroupInvitation";
-import { authorName, forgetGroupLocal, groupReadAt, groupStatusText, markGroupRead, memberName, memberPhoto } from "../lib/groups";
+import { authorName, forgetGroupLocal, groupPath, groupReadAt, groupStatusText, groupUnreadAt, markGroupRead, memberName, memberPhoto } from "../lib/groups";
+import { NowPlayingChat } from "../lib/nowPlaying";
 import { clearChatNotification } from "../lib/notifications";
 import { useWindowAway, windowAway } from "../lib/windowAway";
 import { authorsMemo, type MessageAuthor } from "../lib/senderRuns";
@@ -60,6 +61,7 @@ import { paymentWireId } from "@ghostly/browser/shared/paymentIds";
 import { replyRef } from "@ghostly/browser/shared/replies";
 import { problemLine, problemText, type Problem } from "../lib/problemText";
 import { Notice } from "../components/ui/Notice";
+import { Spinner } from "../components/wallet/ui";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const snapshot = () => engine.state;
@@ -210,6 +212,10 @@ function eventText(message: StoredMessage, group: GroupView, t: Translate): stri
   }
   const name = member ? memberName(member, t) : authorName(group, message.member!, t);
   if (message.event === "joined") return t("group.event.joined", { name });
+  // A member back in the group (invited again): the line of their earlier removal or leave is theirs too. Mine says
+  // what happened to me in its own words.
+  if (message.event === "gone") return me ? t("group.event.removed") : t("group.event.gone", { name });
+  if (message.event === "left" && !me) return t("group.event.left", { name });
   if (message.event === "admin") return me ? t("group.event.adminYou") : t("group.event.admin", { name });
   if (message.event === "picture") {
     const removed = text.endsWith("removed the group's picture");
@@ -292,6 +298,9 @@ export function GroupChat() {
   // group was left). Until this group's own list comes, what the engine last sent for it.
   const [loaded, setLoaded] = useState<{ groupId: string; list: StoredMessage[] }>({ groupId: "", list: NO_MESSAGES });
   const messages = loaded.groupId === groupId ? loaded.list : engine.messages.get(`group:${groupId}`) ?? NO_MESSAGES;
+  // A group with a history whose rows have not come yet (shown at start, the engine still starting): it says it is
+  // loading, not an empty group.
+  const reading = loaded.groupId !== groupId && !engine.messages.has(`group:${groupId}`) && (group?.lastMessageAt ?? 0) > 0;
   /** The message the composer answers (WISP 902 § Replies). */
   const [replyingTo, setReplyingTo] = useState<StoredMessage | null>(null);
   /**
@@ -373,6 +382,9 @@ export function GroupChat() {
   }, [groupId]);
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(!!group, id => messages.some(m => m.id === id));
+  // What the now-playing bar names, for a voice message from here that plays on elsewhere.
+  const groupName = group ? group.name || t("group.chat.unnamed") : "";
+  const playingChat = useMemo(() => ({ path: groupPath(groupId), name: groupName }), [groupId, groupName]);
   // A bot's routines in a row: one row, opened on a tap (WISP 405 · Status Cards), whichever of its rows are in the page.
   const stacks = useMemo(() => routineStacks(messages, m => m), [messages]);
   const stackHeads = useMemo(() => new Map([...stacks.values()].flatMap(run => run.slice(1).map(m => [m.id, run[0].id] as const))), [stacks]);
@@ -390,8 +402,10 @@ export function GroupChat() {
   // Read while the page shows; in a hidden window what comes stays unread (usePageShown).
   // Written only when something new was read, as a chat's is: every write wakes the other pages of the app (`storage`).
   const pageShown = usePageShown();
+  // Up to the newest of what the list calls unread: after a restart a message written before the mark but handed over
+  // later has lastMessageAt at its writing, lastPeerMessageAt and lastMentionAt at its arrival.
   const readGroupId = group?.id;
-  const readUpTo = group?.lastMessageAt;
+  const readUpTo = group && Math.max(group.lastMessageAt, groupUnreadAt(group), group.lastMentionAt ?? 0);
   useEffect(() => {
     if (!readGroupId || readUpTo === undefined || !pageShown || groupReadAt(readGroupId) >= readUpTo) return;
     markGroupRead(readGroupId, Math.max(readUpTo, Date.now()));
@@ -555,6 +569,7 @@ export function GroupChat() {
 
   return (
     <CueChat.Provider value={groupChat(groupId)}>
+    <NowPlayingChat.Provider value={playingChat}>
     {/* Each member's colour, given out over the roster: the same on every member's device (lib/memberColors.ts). */}
     <MemberColorsProvider keys={group.members.map(m => m.key)}>
     {/* A file dropped anywhere on the group goes to the composer (`data-file-drop`), as in a chat. */}
@@ -664,9 +679,10 @@ export function GroupChat() {
             className="mt-4 rounded px-2 py-1 text-xs text-text-muted hover:bg-danger/10 hover:text-danger">{t("group.join.cancel")}</button>
         </div>
       </div> : <div className="relative flex-1 min-h-0 flex flex-col">
-      <div ref={jump.listRef} data-message-list className="flex-1 overflow-y-auto [overflow-anchor:none] chat-wallpaper">
+      <div ref={jump.listRef} data-message-list aria-busy={reading || undefined} className="flex-1 overflow-y-auto [overflow-anchor:none] chat-wallpaper">
         {/* A bubble arriving slides in from its side: clipped here, it never makes the list scroll sideways (a scrollbar, and a jump). */}
         <div ref={jump.columnRef} className="max-w-3xl mx-auto py-3 overflow-x-clip">
+          {reading && <div data-testid="group-reading" className="flex justify-center py-6 text-text-muted"><Spinner size={20} /></div>}
           {(() => {
             const drawn = messages.slice(rowWindow.from, rowWindow.to);
             return drawn.map(m => {
@@ -726,6 +742,7 @@ export function GroupChat() {
         onConfirm={() => { setConfirmForget(false); void act(async () => { await engine.call("forgetGroup", { groupId }); forgetGroupLocal(groupId); nav.home(); }); }} />}
     </div>
     </MemberColorsProvider>
+    </NowPlayingChat.Provider>
     </CueChat.Provider>
   );
 }

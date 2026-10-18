@@ -23,7 +23,9 @@
     "takenBack": "{{contact}}さんが{{name}}への招待を取り消しました",
     "takenBackNext": "{{contact}}さんに新しい招待かグループのリンクを頼んでください。",
     "takenBackNextUnknown": "グループの管理者に新しい招待かグループのリンクを頼んでください。",
+    "takenBackNoName": "{{contact}}さんがグループへの招待を取り消しました",
     "takenBackUnknown": "{{name}}への招待は取り消されました",
+    "takenBackUnknownNoName": "グループへの招待は取り消されました",
     "unnamed": "グループ"
   },
   "connection": {

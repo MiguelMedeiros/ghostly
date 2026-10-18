@@ -177,6 +177,7 @@
     "messages": "{{count}} mensagens",
     "noChats": "Nenhuma conversa ainda",
     "noMatch": "Nenhuma conversa com esse nome",
+    "partial": "{{sent}} de {{count}} enviadas",
     "pick": "Escolha até {{count}}",
     "search": "Buscar conversas",
     "select": "Selecionar",
@@ -275,6 +276,11 @@
     "retry": "Enviar de novo"
   },
   "noMessages": "Nenhuma mensagem",
+  "nowPlaying": {
+    "close": "Parar e fechar",
+    "label": "Tocando agora",
+    "open": "Mostrar na conversa"
+  },
   "offline": "offline",
   "online": "online",
   "options": "Opções",

@@ -496,6 +496,8 @@ describe("redeeming a token", () => {
     mintApi.completeSwap.mockResolvedValue(receiveAnswer());
     let redeemed = false;
     const redeem = wallet.receiveToken(token("u1")).then((result) => { redeemed = true; return result; });
+    // The mint answers once the redeem waits its turn there (it reads the token first).
+    await idle();
     answer();
     await pass(0);
     expect(redeemed, "not behind the second open swap").toBe(true);

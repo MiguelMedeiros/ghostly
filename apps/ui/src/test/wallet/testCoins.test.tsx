@@ -12,8 +12,8 @@ import { arkReady, barkReady, bitcoinSource, lightningSource, mint, REAL_MINT, s
 // covers: wallet.test-coins
 
 /** Opens the Wallets page on one card, on its network's tab. */
-async function open(wallet: WalletView, card: string) {
-  const app = renderApp(<Wallet />);
+async function open(wallet: WalletView, card: string, language?: "ar") {
+  const app = renderApp(<Wallet />, language ? { language } : undefined);
   app.engine.update({ wallet });
   await app.user.click(await screen.findByTestId(`wallet-network-${card.split("-")[1]}`));
   await app.user.click(await screen.findByTestId(`wallet-card-${card}`));
@@ -68,6 +68,17 @@ describe("Get test coins", () => {
     engine.on("walletTestCoins", () => ({ amount: 1_000, unit: "TEST-USDT", pending: true }));
     await user.click(screen.getByTestId("test-coins-get"));
     expect(await screen.findByTestId("test-coins-result")).toHaveTextContent("+1,000 TEST-USDT on the way");
+  });
+
+  it("in Arabic, the \"+\" stays at its number's left: the signed amount is its own left-to-right run", async () => {
+    const { user, engine } = await open(walletView({ mints: [mint(TEST_MINT, 0)] }), "cashu-testnet", "ar");
+    engine.on("walletTestCoins", () => ({ amount: 10_000, unit: "test sats" }));
+    await user.click(await screen.findByTestId("test-coins-get"));
+    const result = await screen.findByTestId("test-coins-result");
+    expect([...result.querySelectorAll('[dir="ltr"]')].map((el) => el.textContent)).toEqual(["+10,000"]);
+    engine.on("walletTestCoins", () => ({ amount: 1_000, unit: "TEST-USDT", pending: true }));
+    await user.click(screen.getByTestId("test-coins-get"));
+    await waitFor(() => expect([...screen.getByTestId("test-coins-result").querySelectorAll('[dir="ltr"]')].map((el) => el.textContent)).toEqual(["+1,000"]));
   });
 
   it("a faucet behind a login is a link, never asked by Ghostly", async () => {

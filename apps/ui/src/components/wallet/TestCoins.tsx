@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { SEPOLIA_TEST_USDT } from "@ghostly/core";
 import type { WalletNetwork, WalletPlatform, WalletState } from "../../lib/platform";
 import type { WalletRail } from "../walletCardTypes";
 import { CASHU_MINT_SOURCE } from "../walletCardData";
 import { NetworkTag } from "../NetworkTag";
-import { Block, Button, Notice, Row, Section } from "./ui";
+import { Block, Button, Notice, Row, Section, Signed } from "./ui";
 import { externalLinkProps } from "../../lib/externalLink";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { fillNodes } from "../../lib/fillNodes";
@@ -87,7 +87,7 @@ function faucetHint(t: Translate, faucet: Faucet): string {
 export function TestCoins({ rail, network, wallet, state }: { rail: WalletRail; network: WalletNetwork; wallet: WalletPlatform; state: WalletState }) {
   const { t } = useI18n();
   const [asking, setAsking] = useState(false);
-  const [got, setGot] = useState<string | null>(null);
+  const [got, setGot] = useState<ReactNode>(null);
   const [error, setError] = useState<Problem | null>(null);
   const faucet = faucetFor(rail, network, state);
   if (!faucet) return null;
@@ -97,8 +97,8 @@ export function TestCoins({ rail, network, wallet, state }: { rail: WalletRail; 
       const result = await wallet.testCoins({ type: rail, network, ...(wallet.lightningCard ? { card: wallet.lightningCard } : {}) });
       // The engine names its unit in English; sats are said in the app's language, a token by its symbol.
       const unit = result.unit === "test sats" ? t("wallet.sats.testnet") : result.unit === "sats" ? t("wallet.sats.mainnet") : result.unit;
-      const words = { amount: formatAmount(result.amount, t.language), unit };
-      setGot(result.pending ? t("wallet.testCoins.gotPending", words) : t("wallet.testCoins.got", words));
+      // "+10,000" in its own left-to-right run (Signed): a bare "+" in a right-to-left line goes after the number.
+      setGot(fillNodes(t(result.pending ? "wallet.testCoins.gotPending" : "wallet.testCoins.got", { unit }), { amount: <Signed sign="+" amount={formatAmount(result.amount, t.language)} /> }));
     } catch (e) {
       setError(problemText(e, t));
     } finally { setAsking(false); }

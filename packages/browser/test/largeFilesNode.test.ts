@@ -332,7 +332,8 @@ it("Retry never says 'already active': a failed read goes again, an unfinished t
   // 2. Unfinished when the app restarts (the contact takes nothing meanwhile): Retry takes the transfer over.
   let deaf = false;
   const handle = t.files.handle.bind(t.files);
-  t.files.handle = async (frame) => { if (deaf && frame.t === "pf-data") return; return handle(frame); };
+  // Deaf only while the app is down: the restarted app's offer, and what it sends from then on, arrive.
+  t.files.handle = async (frame) => { if (frame.t === "pf-offer") deaf = false; if (deaf && frame.t === "pf-data") return; return handle(frame); };
   const size = 2 * 1024 * 1024 + 1;
   const stuck = await put(t, "restart-01", size, 13);
   await vi.waitFor(() => expect(t.node().getState().transfers[stuck.id]?.transferred).toBeGreaterThan(0), { timeout: 20_000 });

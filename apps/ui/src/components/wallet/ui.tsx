@@ -53,8 +53,30 @@ const BUTTON = {
   secondary: "bg-surface-alt text-text-primary hover:bg-surface-hover border border-border",
   danger: "bg-transparent text-danger hover:bg-danger/10 border border-border",
 } as const;
-export function Button({ variant = "secondary", className = "", ...props }: React.ComponentPropsWithRef<"button"> & { variant?: keyof typeof BUTTON }) {
-  return <button type="button" {...props} className={`px-4 py-2 min-h-10 max-md:min-h-11 whitespace-nowrap rounded-lg text-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${BUTTON[variant]} ${className}`} />;
+/**
+ * `loading`: the click is being worked on. The button keeps its words, shows a turning ring before them, is busy for a
+ * screen reader and takes no second click, so a press that takes a while (an install, a refresh) is seen to be going.
+ * It is `aria-disabled`, not disabled (even when `disabled` is passed too): that would drop a keyboard's focus to the
+ * page, and leave it there when the work fails. A press while loading, or a form's Enter on it, does nothing.
+ */
+export function Button({ variant = "secondary", className = "", loading = false, disabled, onClick, children, ...props }: React.ComponentPropsWithRef<"button"> & { variant?: keyof typeof BUTTON; loading?: boolean }) {
+  return (
+    <button type="button" {...props} disabled={disabled && !loading} aria-disabled={loading || undefined} aria-busy={loading || undefined} data-loading={loading || undefined}
+      onClick={(e) => { if (loading) e.preventDefault(); else onClick?.(e); }}
+      className={`px-4 py-2 min-h-10 max-md:min-h-11 whitespace-nowrap rounded-lg text-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress ${BUTTON[variant]} ${className}`}>
+      {loading ? <span className="inline-flex items-center gap-2"><Spinner />{children}</span> : children}
+    </button>
+  );
+}
+
+/** A small ring that turns (it stands still under reduced motion, still showing the button is busy). */
+export function Spinner({ size = 14 }: { size?: number }) {
+  return (
+    <svg data-testid="button-spinner" width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0 motion-safe:animate-spin">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 export const input = "w-full min-w-0 bg-surface-alt text-text-primary px-3 py-2 max-md:min-h-11 rounded-lg border border-border text-sm placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent";

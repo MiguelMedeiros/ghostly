@@ -3,8 +3,8 @@ import { deflateSync } from "node:zlib";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { describe, expect, it } from "vitest";
 import {
-  APP_STORE_LIMITS, appRef, buildAppBundle, canonicalJson, seedSigner, signAppRevocation, signAppStore, toZ32, utf8Encode, type AppManifestDraft,
-  type AppStoreIndex, type Signer,
+  APP_PERMISSIONS, APP_STORE_LIMITS, appRef, buildAppBundle, canonicalJson, seedSigner, signAppRevocation, signAppStore, toZ32, utf8Encode, type AppManifestDraft,
+  type AppPermission, type AppStoreIndex, type Signer,
 } from "@ghostly/core";
 import { APP_FETCH_HOSTS, APP_FETCH_LIMITS } from "../src/engine/appFetch";
 import { DEFAULT_STORE_KEY, DEFAULT_STORE_URL } from "../src/engine/appDefaults";
@@ -204,6 +204,33 @@ describe("the site reads a store as the app does", () => {
     expect(secondOnly.ok && secondOnly.apps[0]?.url).toBe(second);
   });
 
+  it("keeps every permission the manifest asks for, files too, and the release its runtime.host needs", async () => {
+    const a = signerOf("publisher a");
+    const listing = async (name: string, permissions: AppPermission[], host: string) => {
+      const bundle = await buildAppBundle({ ...base(name, name), permissions, runtime: { host, clients: ["web", "desktop"] } }, [page(name)], a);
+      const url = `${RAW}/${name}/HEAD/app.ghostlyapp`;
+      return { bundle, url, listed: { ref: appRef(keyOf("publisher a"), name), sequence: 1, digest: bundle.digest, urls: [url], title: name, tagline: name } };
+    };
+    const all = await listing("everything", ["internet", "files", "name", "chat"], ">=1.4");
+    const files = await listing("viewer", ["chat", "files"], ">=1.10.1");
+    const old = await listing("old", [], ">=1.0");
+    const index: AppStoreIndex = {
+      ghostlyStore: 1, key: keyOf("store"), name: "Test Store", kind: "curated", sequence: 1, expires: NOW + 80 * DAY,
+      apps: [all.listed, files.listed, old.listed], removed: [], revoked: [],
+    };
+    const { indexBytes, sigBytes } = await signAppStore(index, signerOf("store"));
+    const bundles = Object.fromEntries([all, files, old].map((x) => [x.url, x.bundle.bytes]));
+    const view = readStore({ index: indexBytes, sig: sigBytes, bundles }, NOW, keyOf("store"));
+    if (!view.ok) throw new Error(view.reason);
+    expect(view.apps.map((x) => [x.name, x.permissions, x.release])).toEqual([
+      ["everything", ["chat", "files", "name", "internet"], "1.4"],
+      ["viewer", ["chat", "files"], "1.10.1"],
+      ["old", [], "1.2"],
+    ]);
+    // Every permission the reader knows reaches the page, so one added to core cannot be left out of it.
+    expect([...view.apps[0]!.permissions].sort()).toEqual([...APP_PERMISSIONS].sort());
+  });
+
   it("shows the verified versions, and leaves out removed, revoked, mismatched and foreign ones", () => {
     const { bytes, key, now } = fixture();
     const view = readStore(bytes, now, key);
@@ -214,7 +241,9 @@ describe("the site reads a store as the app does", () => {
     expect(chess).toMatchObject({ title: "Test Chess", version: "1.0.2", sequence: 3, permissions: ["chat"], view: "chat", category: "Games", publisher: keyOf("publisher a") });
     expect(chess!.icon?.subarray(0, 4)).toEqual(new Uint8Array([0x89, 0x50, 0x4e, 0x47]));
     expect(chess!.fingerprint).toBe(keyOf("publisher a").slice(0, 16).match(/.{4}/g)!.join(" "));
-    expect(notes).toMatchObject({ permissions: ["chat", "internet", "name"], view: "full", license: "Apache-2.0" });
+    expect(chess!.release).toBe("1.2");
+    // The manifest says chat, internet, name: the page lists the internet last.
+    expect(notes).toMatchObject({ permissions: ["chat", "name", "internet"], view: "full", license: "Apache-2.0" });
     expect(notes!.icon).toBeUndefined();
     expect(notes!.url.startsWith("https://cdn.jsdelivr.net/")).toBe(true);
     expect(Object.fromEntries(view.skipped.map((s) => [s.ref.slice(53), s.reason]))).toEqual({

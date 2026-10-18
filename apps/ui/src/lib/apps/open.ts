@@ -4,6 +4,7 @@
  */
 import { useSyncExternalStore } from "react";
 import type { Translate } from "../../locales/translate";
+import type { LinkedFilesHost } from "../platform";
 
 /** How to open it. `runAnyway`: the person chose "Run anyway" for a version a store of theirs removed (never a revoked one). */
 export interface OpenAppOptions { runAnyway?: boolean }
@@ -82,4 +83,19 @@ export function stopTakenDown(apps: readonly { ref: string; digest: string; run:
     if (run?.status === "revoked") entry.takeDown({ why: "revoked" });
     else if (run?.status === "removed" && !entry.runAnyway) entry.takeDown({ why: "removed", store: run.by?.[0]?.name ?? "" });
   }
+}
+
+/**
+ * The files people picked for apps on this client (WISP 1200 · Linked files), as its opener keeps them: set once by
+ * the client that runs apps. An app uninstalled drops its links (`forgetLinkedFiles`); the files are never touched.
+ */
+let linkedFiles: LinkedFilesHost | null = null;
+
+export function setLinkedFiles(host: LinkedFilesHost | null): void {
+  linkedFiles = host;
+}
+
+/** Drops every link of an app: it was uninstalled. Never fails the uninstall. */
+export async function forgetLinkedFiles(ref: string): Promise<void> {
+  await linkedFiles?.forget(ref, "all").catch(() => {});
 }

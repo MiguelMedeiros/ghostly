@@ -55,8 +55,12 @@ by IP), so about 3 invites a minute go out at once. Past that, `invite create` s
 link works from then on. A one-shot (no daemon) waits up to 20 s for it before it leaves.
 
 To join someone else's invite: `printf '%s' "$INVITE" | ghostly invite join --label bob` (stdin keeps it out of `ps`
-and the shell's history; `ghostly invite join <ghostly1… or link>` works too, with a warning). The invite is the app's own, so
-the other side can be the web app, the extension, the Desktop or another `ghostly`.
+and the shell's history; `ghostly invite join <ghostly1… or link>` works too, with a warning). With no invite given,
+a join whose stdin stays empty says so on stderr after 2 s and gives up with a usage error after 60 s; `invite join -`
+waits for stdin as long as it takes. The invite is the app's own, so
+the other side can be the web app, the extension, the Desktop or another `ghostly`. A one-shot (no daemon) waits up
+to 60 s for the inviter, then answers `"paired":true|false` and the `stage`; when it did not pair, stderr says the next
+step (keep the profile running with `ghostly daemon --detach`, then `ghostly chat wait bob --until paired`).
 
 ## Profiles
 
@@ -215,7 +219,7 @@ key), which every answer and event carries. What the CLI does when names meet:
 
 - Where a command takes a chat or a group (`forward --to`, `file send`, `task`, `routine`, `usage`, `pin`, `button`), a
   chat found only by a prefix of its id or the name its contact gave itself never takes what also names a group. The group's id is the
-  group; a prefix of it or the name of a group you are in is refused (exit 2, `details.chat` and `details.groups`):
+  group; a prefix of it or the name of a group you are in is refused (exit 1, `bad_request`, `details.chat` and `details.groups`):
   use the chat's id or `group:<id>`. A label you gave the chat still wins.
 - A label you gave a chat, or a group's name, wins over an id prefix: a contact can choose how a chat's id begins
   (yours is made from their invite code), and a group's creator its id. A prefix that fits one chat and the name a
@@ -237,7 +241,13 @@ Safety rules the CLI enforces:
 - **Secrets stay hidden.** Seeds, keys, wallet phrases, backups, group entry links and a pending chat's invite code are printed only with `--show-secret` (or `group link`, for a group's link, and `invite create`, for the invite it makes).
 
 Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage), 3 (not found), 4 (timed out) or
-5 (needs `--force`, `--yes` or `--confirm-real`).
+5 (needs `--force`, `--yes` or `--confirm-real`). A daemon that does not answer a read or `daemon status` within 15
+seconds (`daemon status --timeout s` sets its own), or a command that waits (`chat wait`, `file wait`, `--wait`)
+within its `--timeout` (or the default, 60, 300 and 30 s) plus 10 seconds, is a timeout too (exit 4,
+`details.method`). `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
+its `--timeout` (default 20 s) is ended with SIGTERM, and SIGKILL after as long again (on Windows the first ends it:
+there is no second). A daemon kept by a service manager (systemd, launchd) is restarted with the manager instead: it
+starts its own again, and the one `restart` started would race it for the profile.
 
 ## Bots
 

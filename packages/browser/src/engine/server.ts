@@ -2,8 +2,8 @@ import { parseCallSignal } from "@ghostly/core";
 import type { MessageChanges } from "../shared/messageChanges";
 import type { EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
 import type { StoredMessage } from "../shared/types";
-import { profileOpenFailure } from "../shared/idb";
-import type { PeerServer } from "../devices/linkOnly";
+import { errorLine, profileOpenFailure } from "../shared/idb";
+import type { PeerServer, PeerStopOptions } from "../devices/linkOnly";
 import { GhostlyNode, LIMITED_MODE_ERROR, LIMITED_MODE_METHODS, type NodeOptions } from "./node";
 
 /**
@@ -113,8 +113,8 @@ export class EngineServer implements PeerServer {
     });
   }
 
-  stop(): Promise<void> {
-    return this.node.shutdown();
+  stop(options: PeerStopOptions = {}): Promise<void> {
+    return this.node.shutdown({ quitting: options.quitting === true });
   }
 
   detach(client: EngineClientSink): void {
@@ -141,14 +141,16 @@ export class EngineServer implements PeerServer {
       params = { on: this.onCall.size > 0 };
     }
     try {
-      await this.ready;
+      // A group's newest page and its history are reads of the store: they answer once the groups are loaded, not after
+      // every chat's whole history is read and every link started. A group shown at start stayed empty until then.
+      await (readsGroupHistory(request) ? Promise.race([this.ready, this.node.groupsRead]) : this.ready);
       const method = this.node[request.method] as (params: unknown) => unknown;
       if (typeof method !== "function") throw new Error(`Unknown method: ${request.method}`);
       // Limited mode (WISP 06): only what reads history, writes messages and changes settings.
       if (this.node.limited && !LIMITED_MODE_METHODS.has(String(request.method))) throw new Error(LIMITED_MODE_ERROR);
       response.result = await method.call(this.node, params);
     } catch (error) {
-      response.error = error instanceof Error ? error.message : String(error);
+      response.error = errorLine(error);
     }
     try {
       client.post(response);
@@ -217,6 +219,13 @@ export class EngineServer implements PeerServer {
   private broadcast(event: EngineEvent): void {
     for (const client of [...this.clients]) this.post(client, event);
   }
+}
+
+/** Whether a call only reads a group's stored history (`GhostlyNode.groupsRead`). */
+function readsGroupHistory(request: RpcRequest): boolean {
+  if (request.method === "groupMessages") return true;
+  const linkId = (request.params as { linkId?: unknown } | undefined)?.linkId;
+  return request.method === "messagePage" && typeof linkId === "string" && linkId.startsWith("group:");
 }
 
 /** A call signal's kind (`o` for an offer), read as the client reads it; checked in full before it is replayed. */

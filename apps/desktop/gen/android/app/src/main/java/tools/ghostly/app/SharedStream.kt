@@ -13,4 +13,12 @@ object SharedStream {
     if (scheme != "content" || authority.isNullOrEmpty()) return false
     return own.none { it.equals(authority, ignoreCase = true) }
   }
+
+  /**
+   * A share's streams from its EXTRA_STREAM extra read untyped (`many`: ACTION_SEND_MULTIPLE's list, else the one
+   * stream): only those of `type` (`Uri`). Below Android 13 the typed getters cast what the sending app put there
+   * unchecked, and it may be anything (`am start --esal` puts strings): read as a Uri, it ended the app.
+   */
+  fun <T> of(extra: Any?, type: Class<T>, many: Boolean): List<T> =
+    if (many) (extra as? Collection<*>).orEmpty().filterIsInstance(type) else listOf(extra).filterIsInstance(type)
 }

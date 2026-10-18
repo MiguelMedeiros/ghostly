@@ -79,6 +79,28 @@ describe.each(["pt", "ar"] as const)("in %s", (language) => {
     expect(lines.join(" ")).not.toMatch(/joined|now the admin|renamed|picture|no longer/);
   });
 
+  it("the lines of a member's earlier removal and leave are translated once that member is back in the group", async () => {
+    // Ana was removed, invited back, left, and was invited back again: she is in the roster, her old lines stay.
+    openGroup(language, groupView({
+      status: "active",
+      members: [member({ key: ME, me: true, online: true, role: "admin" }), member({ key: ANA, nick: "Ana", online: true })],
+    }), [
+      stored({ id: "e1", event: "gone", member: ANA, text: "Ana is no longer a member" }),
+      stored({ id: "e2", event: "joined", member: ANA, text: "Ana joined" }),
+      stored({ id: "e3", event: "left", member: ANA, text: "Ana left" }),
+      // Mine, as a community writes it when I was removed and was let in again.
+      stored({ id: "e4", event: "gone", member: ME, text: "You is no longer a member" }),
+    ]);
+    const lines = (await screen.findAllByTestId("group-event")).map(e => e.textContent);
+    expect(lines).toEqual([
+      t(language, "group.event.gone", { name: "Ana" }),
+      t(language, "group.event.joined", { name: "Ana" }),
+      t(language, "group.event.left", { name: "Ana" }),
+      t(language, "group.event.removed"),
+    ]);
+    expect(lines.join(" ")).not.toMatch(/joined|no longer| left/);
+  });
+
   it("a line about a member who never said a name, and has left, names it in the interface's words", async () => {
     const GONE = "46ishssi".padEnd(52, "y");
     // As the engine stores them: "Member" and the start of the key, in English.

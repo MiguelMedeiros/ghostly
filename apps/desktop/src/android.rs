@@ -169,33 +169,7 @@ pub fn system_bars(color: u32, dark: bool) -> Result<(), String> {
     call::<Value>("systemBars", json!({ "color": color, "dark": dark })).map(drop)
 }
 
-/// A share from another app, as the Kotlin side copied it: its text and the files it made of the shared streams, in
-/// the app's cache.
-#[derive(Deserialize, Default, Clone, Debug, PartialEq)]
-pub struct Shared {
-    #[serde(default)]
-    pub title: String,
-    #[serde(default)]
-    pub text: String,
-    #[serde(default)]
-    pub files: Vec<SharedFile>,
-}
-
-#[derive(Deserialize, Clone, Debug, PartialEq)]
-pub struct SharedFile {
-    pub path: String,
-    pub mime: Option<String>,
-}
-
-/// The latest share waiting for the page: one at a time, a newer one replaces it (as the web app's share target).
-#[derive(Default)]
-pub struct Incoming(Mutex<Option<Shared>>);
-
-impl Incoming {
-    pub fn take(&self) -> Option<Shared> {
-        self.0.lock().unwrap().take()
-    }
-}
+pub use crate::android_share::{Incoming, Shared};
 
 /// The latest notification tapped, until the page takes it (`native_notification_tap`): the tap that starts the app
 /// comes before the page listens for `notification-open`.
@@ -235,7 +209,7 @@ fn received(kind: &str, value: String) {
         }
         "share" => match serde_json::from_str::<Shared>(&value) {
             Ok(shared) => {
-                *app.state::<Incoming>().0.lock().unwrap() = Some(shared);
+                app.state::<Incoming>().put(shared);
                 let _ = app.emit_to("main", SHARE_EVENT, ());
             }
             Err(error) => crate::diagnostics::log(&format!("share: unreadable ({error})")),

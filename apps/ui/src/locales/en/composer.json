@@ -23,6 +23,7 @@
   "emojiCategories": "Emoji categories",
   "emojiNotLoading": "The emoji could not be loaded.",
   "expressions": "Emoji and GIFs",
+  "filePreparing": "Preparing {{name}}…",
   "gif": "GIF",
   "gifCategories": "GIF categories",
   "gifCategory": {
@@ -69,6 +70,7 @@
   "services": "Shared services",
   "servicesNeedApp": "Needs the Ghostly extension or desktop app",
   "servicesShared": "{{count}} shared in this chat",
+  "sharedTextFile": "Shared text",
   "skinTone": "Skin tone",
   "takePhoto": "Take photo",
   "tooLong": "That is too long to send ({{count}} characters, the limit is {{max}}).",

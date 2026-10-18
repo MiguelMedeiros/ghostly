@@ -177,6 +177,7 @@
     "messages": "{{count}}件のメッセージ",
     "noChats": "チャットはまだありません",
     "noMatch": "その名前のチャットはありません",
+    "partial": "{{count}} 件中 {{sent}} 件送信済み",
     "pick": "最大{{count}}件まで選択",
     "search": "チャットを検索",
     "select": "選択",
@@ -275,6 +276,11 @@
     "retry": "もう一度送信"
   },
   "noMessages": "メッセージはありません",
+  "nowPlaying": {
+    "close": "停止して閉じる",
+    "label": "再生中",
+    "open": "チャットで表示"
+  },
   "offline": "オフライン",
   "online": "オンライン",
   "options": "オプション",

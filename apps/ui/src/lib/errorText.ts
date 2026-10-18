@@ -98,6 +98,12 @@ const RULES: readonly Rule[] = [
   exact("Ghostly is starting…", "errors.app.starting"),
   exact("Ghostly is still starting. Try again in a moment.", "errors.app.stillStarting"),
   exact("Lost the Ghostly peer", "errors.app.lostPeer"),
+  // A part that loads on demand (a wallet's library, the identity providers) whose file did not come: offline before the
+  // worker kept it, or a deploy replaced it under an open tab. Each browser says it its own way (Chromium, WebKit, Firefox).
+  { match: /^(?:Failed to fetch dynamically imported module|error loading dynamically imported module)(?::[\s\S]*)?$|^Importing a module script failed\.?$/, key: "errors.app.partNotLoaded", next: "app.pageNotLoaded.hint", detail: true },
+  // A call whose storage write the browser refused for want of space (engine/server.ts): a group made, a text sent. A
+  // forward's copy that found no room (engine/forwards.ts forwardError) says Desktop's io error the same way.
+  { match: /^Not enough space on this device \((?:QuotaExceededError(?:: [\s\S]*)?|No space left on device[\s\S]*)\)$/, key: "errors.app.noRoom", next: "errors.app.noRoomNext", detail: true },
   // A call refused in limited mode (packages/browser/src/engine/node.ts LIMITED_MODE_ERROR): the banner's own words, and what to do.
   exact("Ghostly could not check which device is active yet. This works once it can.", "devices.limited.title", "errors.app.limitedNext"),
   exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress"),
@@ -123,6 +129,8 @@ const RULES: readonly Rule[] = [
   // status, the next step behind the ⓘ. The system's reason for a file not stored stays English, as the detail.
   exact("The file arrived damaged and was deleted. Ask for it again.", "errors.files.refused.damaged", "errors.files.askAgain"),
   exact("The offer expired", "errors.files.offerExpired", "errors.files.askAgain"),
+  // A group's file every holder served damaged (packages/browser groupFiles.ts DAMAGED): the group is asked, not a contact.
+  exact("Every copy of this file arrived damaged and was deleted. Ask for it again later.", "errors.files.refused.damaged", "errors.files.askGroupAgain"),
   { match: /^Could not store the file: (?:This device has no space left for the file|QuotaExceededError[\s\S]*|[\s\S]*No space left on device[\s\S]*)$/, key: "errors.files.noRoomHere", next: "errors.files.noRoomHereNext", detail: true },
   { match: /^Could not store the file: [\s\S]+$/, key: "errors.files.storeFailed", next: "errors.files.askAgain", detail: true },
   exact("Not delivered in time", "errors.files.notDelivered", "errors.files.sendWhenBack"),
@@ -140,6 +148,9 @@ const RULES: readonly Rule[] = [
   { match: /^Could not read the file: [\s\S]+$/, key: "errors.files.unreadable", next: "errors.files.unreadableNext", detail: true },
   // A large file this device had no room to copy before sending it (platform/services.ts): nothing was kept to send again.
   exact("Not enough space on this device to send it", "errors.files.noRoomToSend", "errors.files.noRoomToSendNext"),
+  // A file forwarded that is still arriving here, or whose bytes are gone (engine/forwards.ts `copyForForward`).
+  exact("The file has not arrived yet", "errors.files.notArrived", "errors.files.notArrivedNext"),
+  exact("The file is not on this device any more", "errors.files.notHere", "errors.files.notHereNext"),
   exact("This device cannot decode the recording", "errors.files.cannotDecodeRecording"),
   exact("The video took too long", "errors.files.videoTooSlow"),
   { match: HOLD_FULL_ITEMS, key: "errors.hold.fullItems", next: "errors.hold.fullNext" },
@@ -163,6 +174,8 @@ const RULES: readonly Rule[] = [
   exact("Transport change cancelled", "errors.transport.switchCancelled"),
   { ...exact("Transport preferences do not overlap. Enable fallback or choose the same supported transport on both sides.", "errors.transport.noOverlap", "errors.transport.noOverlapNext"), detail: true },
   { match: /^Peer native address unavailable(?:; reconnect WebRTC once to exchange endpoints)?$/, key: "errors.transport.noAddress", next: "errors.transport.noAddressNext", detail: true },
+  // No WebRTC between the two apps: the contact's app says it once it uses the chat; no WebRTC session can ask for it.
+  { match: /^Peer native address unavailable; the contact's app has not given it yet$/, key: "errors.transport.noAddress", next: "errors.transport.noAddressWait", detail: true },
   // A native dial that failed (native/transports/hyperdht/endpoint.mjs, apps/desktop paired_transport.rs).
   { match: /^Native connection limit reached$/, key: "errors.transport.slotsFull", next: "errors.transport.slotsFullNext", detail: true },
   { match: /^HyperDHT handshake timed out$/, key: "errors.transport.handshakeTimedOut", detail: true },
@@ -216,6 +229,9 @@ const RULES: readonly Rule[] = [
   exact("Message too long once encoded. Shorten it or send it as a file.", "errors.chat.tooLong", "errors.chat.tooLongNext"),
   { match: /^This message was edited (?<max>\d+) times, the most one takes\.$/, key: "errors.chat.editTooMany", next: "errors.chat.editTooManyNext" },
   { match: /^That message (?:is not in this chat, or )?cannot be replied to$/, key: "errors.chat.replyGone", next: "errors.chat.replyGoneNext" },
+  // A forward of a message deleted meanwhile, or of none (engine/node.ts forwardMessages).
+  exact("That message is not in this chat", "errors.chat.messageGone", "errors.chat.messageGoneNext"),
+  exact("No message to forward", "errors.chat.forwardNone", "errors.chat.forwardNoneNext"),
   // A chat made or joined that the storage had no room for (lib/storage.ts ensureSession).
   exact("There is no room left on this device for a new chat", "errors.chat.noRoom", "errors.chat.noRoomNext"),
   exact("Someone else joined with this invite first. Ask your contact for a new one.", "pairing.reason.taken"),
@@ -266,6 +282,7 @@ const RULES: readonly Rule[] = [
   exact("A Lightning payment for this request is still pending", "errors.pay.lightningPending"),
   exact("You already paid this request", "errors.pay.alreadyPaid"),
   exact("Already paid by another member of the group", "errors.pay.paidByOther"),
+  exact("Another member of the group is paying it", "errors.pay.payingByOther"),
   exact("The payment was refused", "errors.pay.refused"),
   // A refused send whose ecash came back (payments.ts refusedLine): why, and what came back, less the mint's fee.
   { match: /^Refused: (?<reason>[\s\S]+?)\. (?<amount>\d+) sats? came back; the mint kept (?<fee>\d+) as its fee\.$/, key: "errors.pay.refused", reason: "next", next: "errors.pay.refusedLessFee", params: ({ amount, fee }, t) => ({ amount: formatAmount(Number(amount), t.language ?? "en"), fee: formatAmount(Number(fee), t.language ?? "en") }) },
@@ -398,9 +415,12 @@ const RULES: readonly Rule[] = [
   exact("An edit cannot be empty", "errors.group.editEmpty"),
   exact("Too long to edit in this group", "errors.group.editTooLong"),
   exact("Only the admin can invite", "errors.group.adminInvites"),
+  // An Invite, Remove, Hand over or Rotate on a device where managing the group is off (packages/core/src/groupCommits.ts).
+  exact("Managing this group is off on this device. Turn on Manage groups from this device first.", "errors.group.adminOff", "errors.group.adminOffNext"),
   exact("This contact is already a member", "errors.group.alreadyMember"),
   { match: /^A group holds (?<max>\d+) members at most$/, key: "errors.group.full" },
-  exact("Connect to this contact first. Their app needs groups (an updated Ghostly).", "errors.group.connectFirst", "errors.group.connectFirstNext"),
+  exact("This contact is not connected right now. Invite them when they are online.", "errors.group.contactAway", "errors.group.contactAwayNext"),
+  exact("Their app does not take part in groups: they need an updated Ghostly first.", "errors.group.hubsNeedUpdate", "errors.group.needsGroupsNext"),
   exact("The contact who invited you is not connected. Try again when they are.", "errors.group.inviterAway", "errors.group.inviterAwayNext"),
   exact("You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first.", "errors.group.adminAlone", "errors.group.adminAloneNext"),
   exact("Nobody in the group is connected right now to take your leave. Try again in a moment.", "errors.group.nobodyForLeave", "errors.group.nobodyForLeaveNext"),
@@ -415,6 +435,7 @@ const RULES: readonly Rule[] = [
   // A group's link pasted or opened while Ghostly is set offline (engine/node.ts joinGroupByLink).
   exact("Go online to join a group", "errors.group.offline", "errors.group.offlineNext"),
   exact("Only the admin can change the members of this group", "errors.group.adminMembers"),
+  exact("Only the admin can renew the group's secret", "errors.group.adminRotate"),
   exact("Only the admin can do that", "errors.group.adminOnly"),
   exact("Make someone else the admin before leaving", "errors.group.adminFirst"),
   exact("Only the admin can change the group's picture", "errors.group.adminPicture"),

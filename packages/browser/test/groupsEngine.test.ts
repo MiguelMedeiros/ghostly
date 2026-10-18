@@ -43,6 +43,8 @@ class World {
   publishes = 0;
   /** Pkarr reads, per peer. */
   readonly resolves = new Map<string, number>();
+  /** Pkarr reads, in order: who read which key, and when. */
+  readonly reads: { name: string; key: string; at: number }[] = [];
   readonly chats = new Map<string, [string, string]>();
   /** Contact chats whose other app announces groups up to version 2 only (rosters of eight). */
   readonly oldChats = new Set<string>();
@@ -90,7 +92,7 @@ class World {
       },
       entries: groupId => new Map([...peer.entries.entries()].filter(([, e]) => e.g === groupId).map(([id, e]) => [e.peer, id])),
       publish: async (identity, records) => { this.publishes++; this.pkarr.set(identity.pubKeyZ32, records); },
-      resolve: async key => { this.resolves.set(name, (this.resolves.get(name) ?? 0) + 1); return this.pkarr.get(key) ?? null; },
+      resolve: async key => { this.resolves.set(name, (this.resolves.get(name) ?? 0) + 1); this.reads.push({ name, key, at: Date.now() }); return this.pkarr.get(key) ?? null; },
       edgeNick: () => undefined,
       storeMessage: async message => { if (!peer.messages.some(m => m.id === message.id)) peer.messages.push(message); },
       emit: () => {},
@@ -389,6 +391,19 @@ describe("invitations: what the admission exchange ignores", () => {
     expect(view(alice).invited).toHaveLength(31);
     world.chats.set("chat-31", ["alice", "p31"]); world.add("p31");
     await expect(alice.invite(groupId, "chat-31")).rejects.toThrow(/32 members at most/);
+  });
+
+  it("on a device where managing the group is off, Invite is refused with the reason: nothing goes to the contact", async () => {
+    const world = new World();
+    const alice = world.add("alice"), bob = world.add("bob");
+    world.chats.set("chat-ab", ["alice", "bob"]);
+    const groupId = await alice.create("Ghosts", "mesh");
+    // A restore or a forced takeover: node.ts turns adminWork off for the group, as Remove and Rotate are told.
+    world.peers.get("alice")!.host.adminWork = () => false;
+    await expect(alice.invite(groupId, "chat-ab")).rejects.toThrow("Managing this group is off on this device. Turn on Manage groups from this device first.");
+    await world.settle();
+    expect(bob.views()).toEqual([]);
+    expect(view(alice).invited).toEqual([]);
   });
 
   it("a declined invitation leaves the admin's pending list, and the invitee keeps nothing", async () => {
@@ -1176,6 +1191,47 @@ describe("the group's link: knocks, pending entries and refusals", () => {
     vi.setSystemTime(t0 + 131_000);
     await alice.enableLink(groupId);
     await alice.tick(t0 + 133_000); expect(looks()).toBe(8);
+  });
+
+  it("links nobody is using share one pace among the admin's groups, read in turn; a warm one keeps its own", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.now();
+    const world = new World();
+    const alice = world.add("alice", { ...timings, pollMs: 5_000, warmPollMs: 2_000, warmMs: 60_000 });
+    const groups = [await alice.create("One", "mesh"), await alice.create("Two", "mesh"), await alice.create("Three", "mesh")];
+    for (const groupId of groups) await alice.enableLink(groupId);
+    const looks = () => world.resolves.get("alice") ?? 0;
+    const minute = async (from: number) => { const before = looks(); for (let s = 0; s < 60; s++) await alice.tick(from + s * 1_000); return looks() - before; };
+    // Warm (just handed out): each link on its own, every 2 s.
+    expect(await minute(t0)).toBe(90);
+    // Quiet: three links share the 5 s pace, each every 15 s, as one link alone costs. Not 36 a minute for good.
+    expect(await minute(t0 + 120_000)).toBe(12);
+    // One handed out again is warm on its own; the two quiet ones keep the shared pace.
+    vi.setSystemTime(t0 + 180_000);
+    await alice.enableLink(groups[0]);
+    expect(await minute(t0 + 180_000)).toBe(30 + 12);
+  });
+
+  it("ten quiet links cost what one does, each read in turn: none waits more than ten turns", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const t0 = Date.now();
+    const world = new World();
+    const alice = world.add("alice", { ...timings, pollMs: 5_000, warmPollMs: 2_000, warmMs: 60_000 });
+    const groups: string[] = [];
+    for (let i = 0; i < 10; i++) { groups.push(await alice.create(`G${i}`, "mesh")); await alice.enableLink(groups[i]); }
+    // Past the warm minute, ten quiet minutes.
+    const from = t0 + 120_000, to = from + 10 * 60_000;
+    for (let at = from; at < to; at += 1_000) { vi.setSystemTime(at); await alice.tick(at); }
+    const reads = world.reads.filter(r => r.name === "alice" && r.at >= from);
+    for (let m = 0; m < 10; m++) expect(reads.filter(r => r.at >= from + m * 60_000 && r.at < from + (m + 1) * 60_000).length).toBeLessThanOrEqual(13);
+    const byKey = new Map<string, typeof reads>();
+    for (const r of reads) byKey.set(r.key, [...byKey.get(r.key) ?? [], r]);
+    // Every link's knock record is read, and none waits more than its turn among the ten (10 × 5 s), the first one past.
+    expect(byKey.size).toBe(10);
+    for (const list of byKey.values()) {
+      expect(list[0].at - from).toBeLessThanOrEqual(50_000);
+      for (let i = 1; i < list.length; i++) expect(list[i].at - list[i - 1].at).toBeLessThanOrEqual(50_000);
+    }
   });
 
   it("a joiner knocks at its pace, slower once it has waited long, and not while its entry session is up", async () => {

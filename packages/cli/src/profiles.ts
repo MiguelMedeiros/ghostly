@@ -25,6 +25,20 @@ export function checkProfileName(name: string): string {
   return name;
 }
 
+/**
+ * The name a profile shows its contacts, whichever command sets it (`--name`, `profile.set`, `settings set nick`):
+ * trimmed, up to 64 characters on one line, as a group's name; empty is no name. `settings set nick` took any length
+ * and every one took a line break, printed whole by `status`. `field` names it in the refusal.
+ */
+export function checkShownName(name: unknown, field = "name"): string {
+  const shown = typeof name === "string" ? name.trim() : undefined;
+  // Core's MAX_NICK_LENGTH: this file loads before any command, without the engine.
+  if (shown === undefined || [...shown].length > 64 || /\p{Cc}/u.test(shown)) {
+    throw new CliError("bad_request", `${field} must be up to 64 characters on one line`);
+  }
+  return shown;
+}
+
 export function currentProfile(home: string, option?: string): string {
   if (option === "") throw new CliError("usage", "--profile needs a profile name");
   if (option !== undefined) return checkProfileName(option);

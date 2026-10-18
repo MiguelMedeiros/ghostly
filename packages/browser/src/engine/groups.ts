@@ -1,7 +1,7 @@
 import {
   GroupSession, GROUP_EDIT_FRAME, GROUP_PIN_FRAME, GROUP_REACTION_FRAME, GROUP_REACTED_FRAME, GROUP_TYPING_FRAME, readReaction, MAX_GROUP_CHAIN, parseGroupCommit, GROUP_MEMBER_CAP, LEGACY_GROUP_MEMBERS, GROUP_VERSION_LARGE, GROUP_VERSION_HUBS, GROUP_VERSION_SIGNALS, GROUP_SIGNAL_FRAME, GROUP_READ_NOTE, KNOCK_TTL_MS, MEMBER_KEY, PIN_LIMITS, ReactionWindow, createIdentity, decodeGroupEntryLink, encodeGroupEntryLink, identityFromSeedB64,
   EXPECT_PEER_MS, presenceSeenAt, groupName, knockIdentity, knockRecords, mentionsMember, pinIsNewer, readPin, receivedTimestamp, mergeKnocks, readKnocks, rosterAdmin, rosterHas, verifyCommitSignature, decodeCommunityLink, commitHash,
-  GROUP_LIMITS, frameBytes, type GroupMessageFrame,
+  GROUP_ADMIN_OFF_ERROR, GROUP_LIMITS, frameBytes, type GroupMessageFrame,
   GROUP_HAVE_FRAME, GROUP_VERSION_FILES, GROUP_WANT_FRAME, GROUP_WANT_NO_FRAME, type GroupFileMeta,
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
@@ -91,10 +91,11 @@ export interface GroupsHost {
    * Pkarr, for the knocks under a link's knock identity (and a community's beacon and lobbies).
    * `background`: a periodic look that can wait, spending only part of the relays' budget. `door`: a community hub's
    * own records (the knock bell it reads as the door, its lobby, the beacon; its reads only while someone is coming in)
-   * and a member's request in a hub's lobby (`PkarrRequestOptions.door`).
+   * and a member's request in a hub's lobby (`PkarrRequestOptions.door`). `back`: a community member's way back to an
+   * edge while it has none up (`Communities.wayBack`), within its own allowance (`PkarrRequestOptions.back`).
    */
-  publish(identity: Identity, records: GhostRecord[], background?: boolean, door?: boolean): Promise<void>;
-  resolve(pubKeyZ32: string, background?: boolean, door?: boolean): Promise<GhostRecord[] | null>;
+  publish(identity: Identity, records: GhostRecord[], background?: boolean, door?: boolean, back?: boolean): Promise<void>;
+  resolve(pubKeyZ32: string, background?: boolean, door?: boolean, back?: boolean): Promise<GhostRecord[] | null>;
   /** The other end of this link is due any moment: look fast for it a while (`LinkSession.expectPeer`). */
   expectPeer?(linkId: string): void;
   /**
@@ -104,8 +105,12 @@ export interface GroupsHost {
   signalIn?(linkId: string, payload: Uint8Array, direct?: boolean): boolean;
   /** My newest packet for this edge while it is down, to hand to a member that may pass it on (`CarriedTransport.latest`). */
   edgeSignal?(linkId: string): Uint8Array | null;
-  /** Resolves false when the message was there already: nothing new came (void: a host that does not say). */
-  storeMessage(message: StoredMessage): Promise<boolean | void>;
+  /**
+   * Resolves false when the message was there already: nothing new came (void: a host that does not say). `live`: it
+   * came straight from its author as it was written (`GroupIncomingMessage.live`), what tells the author's clock.
+   * `place`: the one `placeAbove` gave it, else it goes where it comes.
+   */
+  storeMessage(message: StoredMessage, live?: boolean, place?: number): Promise<boolean | void>;
   /**
    * A message stored from a copy that was not whole, now whole: its mentions, reply and hop count join the stored one
    * (stored now if it is not there). Absent: `storeMessage`, which keeps the first.
@@ -124,6 +129,12 @@ export interface GroupsHost {
    * where it came.
    */
   placeAgain?(linkId: string, ids: readonly string[]): Promise<void>;
+  /**
+   * A place in the history just above this stored message, below the one before it, for a message to be stored there
+   * (`storeMessage`): a member's message that comes after a later one of theirs (`GroupAuthorOrder`). Undefined when
+   * the two leave no room (or it is not there any more). Absent: it goes where it comes.
+   */
+  placeAbove?(linkId: string, id: string): Promise<number | undefined>;
   /** A private group's roster or my status in it changed, or I forgot it. */
   membersChanged?(groupId: string): void;
   /**
@@ -425,6 +436,8 @@ export class Groups {
   /** Admin side: entry sessions of a member key that timed out in a row, and when the last did. */
   private readonly entryTimeouts = new Map<string, { count: number; at: number }>();
   private readonly lastPoll = new Map<string, number>();
+  /** Admin side: when a link nobody is using was last read. Those links share one `pollMs` between them, read in turn. */
+  private lastQuietPoll = 0;
   /** Admin side: until when a group's link is looked at the warm pace. */
   private readonly warmUntil = new Map<string, number>();
   private readonly lastKnock = new Map<string, number>();
@@ -455,6 +468,12 @@ export class Groups {
    * whom, and when it was asked. Their sync goes once that answer has come.
    */
   private readonly syncHeld = new Map<string, Map<string, { via: string; at: number }>>();
+  /**
+   * Per mesh group, the members told where I am since their edge came up (`edgeReady`), forgotten when a tick sees it
+   * down. One whose edge is up but not told yet opened in the same moment as the one being told: it is asked of that
+   * one, as if its edge were still down (`askOf`), and no gossip turn or ask for gaps goes to it before it is told.
+   */
+  private readonly told = new Map<string, Set<string>>();
   /** Per mesh group and member, when a message last came over its edge (its own, or one it handed on). */
   private readonly lastHanded = new Map<string, Map<string, number>>();
   /** Admin side, per group and member let in: when its welcome was last sent again, over its chat or the link (`REWELCOME_MS`). */
@@ -512,17 +531,19 @@ export class Groups {
     this.hubs = new MeshHubs(host, { stored: id => this.stored.get(id), save: group => { if (this.stored.get(group.id) === group) void this.store.putGroup(group).catch(() => {}); } }, hubTimings);
     this.typings = new GroupTypings(host);
     // A member some of whose messages are still on their way (and not known gone): its rows wait for them.
-    this.lineOrder = new GroupLineOrder(host);
+    this.lineOrder = new GroupLineOrder(host, linkId => {
+      const groupId = linkId.slice(MESSAGE_LINK("").length), session = this.sessions.get(groupId);
+      // Only messages of an epoch before the current one go above a line.
+      return !!session && [...session.lacking().keys()].some(sender => this.onTheirWay(groupId, sender, session.epoch));
+    });
     // What it places again, the line order follows: the places are taken before anything is awaited.
     const placeAgain = host.placeAgain && (async (linkId: string, ids: readonly string[]) => {
       const done = host.placeAgain!(linkId, ids);
-      this.lineOrder.moved(linkId, ids);
+      this.lineOrder.moved(linkId, ids, this.now());
       await done;
     });
-    this.authorOrder = new GroupAuthorOrder({ placeAgain }, MESSAGE_LINK, (groupId, sender) => {
-      const session = this.sessions.get(groupId);
-      return !!session && session.missing(sender, this.gapsGone.get(groupId)?.get(sender)?.[session.epoch]) > 0;
-    });
+    // In any epoch: across a join, the older messages a catch-up hands on are in the epoch before.
+    this.authorOrder = new GroupAuthorOrder({ placeAgain }, MESSAGE_LINK, (groupId, sender) => this.onTheirWay(groupId, sender));
     this.signals = new MeshSignals(host, { session: id => this.sessions.get(id), stored: id => this.stored.get(id), now: () => this.now() });
     const files = host.groupFiles;
     if (files) {
@@ -707,10 +728,16 @@ export class Groups {
     if (this.isCommunity(groupId)) throw new Error("Share the group's link with them: anyone who opens it joins");
     const session = this.session(groupId);
     if (!session.isAdmin) throw new Error("Only the admin can invite");
+    // Its accept would be let in by a commit, which this device may not sign (a restore or a forced takeover).
+    if (this.host.adminWork?.(groupId) === false) throw new Error(GROUP_ADMIN_OFF_ERROR);
     const group = this.stored.get(groupId)!;
     if (Object.entries(group.contacts ?? {}).some(([key, id]) => id === linkId && rosterHas(session.roster, key))) throw new Error("This contact is already a member");
     if (session.roster.length + (this.invited.get(groupId)?.size ?? 0) >= GROUP_MEMBER_CAP.max) throw new Error(`A group holds ${GROUP_MEMBER_CAP.max} members at most`);
-    if (!this.host.linkReady(linkId)) throw new Error("Connect to this contact first. Their app needs groups (an updated Ghostly).");
+    // A chat that is down is a contact whose app is closed, most of the time: only one that is up without groups is old.
+    if (!this.host.linkReady(linkId)) {
+      throw new Error(this.host.linkOpen?.(linkId) === false ? "This contact is not connected right now. Invite them when they are online."
+        : "Their app does not take part in groups: they need an updated Ghostly first.");
+    }
     const blocked = this.growthBlocked(group, session, session.roster.length + (this.invited.get(groupId)?.size ?? 0) + 1, linkId);
     if (blocked) throw new Error(blocked);
     this.host.sendOnLink(linkId, session.inviteFrame());
@@ -1167,6 +1194,7 @@ export class Groups {
     this.lingering.delete(groupId);
     this.relayAsked.delete(groupId);
     this.syncHeld.delete(groupId);
+    this.told.delete(groupId);
     this.lastHanded.delete(groupId);
     this.rewelcomed.delete(groupId);
     this.hubs.forget(groupId);
@@ -1274,6 +1302,10 @@ export class Groups {
     this.ticking = true;
     try {
       this.authorOrder.tick(now);
+      this.lineOrder.tick(now);
+      // Links nobody is using share one pace: one of them is read every `pollMs`, the one read longest ago, so they
+      // cost the relays what one link alone does, whatever their number, and each waits its turn (`n` links: `n` × 5 s).
+      const quiet: string[] = [];
       for (const group of [...this.stored.values()]) {
         if (group.left) {
           if (now - group.left.at > LEFT_KEPT_MS) await this.forget(group.id);
@@ -1302,10 +1334,20 @@ export class Groups {
           const linkId = this.host.entries(group.id).get(key);
           if (linkId) await this.host.closeEdge(linkId);
         }
-        const every = now < (this.warmUntil.get(group.id) ?? 0) ? this.timings.warmPollMs : this.timings.pollMs;
         // With every entry session taken, or no room, a knock read now could open nothing: its requests go to the edges.
         const busy = (pending?.size ?? 0) >= MAX_PENDING_ENTRIES || session.roster.length + (pending?.size ?? 0) >= GROUP_MEMBER_CAP.max;
-        if (!busy && now - (this.lastPoll.get(group.id) ?? 0) >= every) { this.lastPoll.set(group.id, now); await this.answerKnocks(group, session, now).catch(() => {}); }
+        const since = now - (this.lastPoll.get(group.id) ?? 0);
+        if (busy) continue;
+        if (now >= (this.warmUntil.get(group.id) ?? 0)) { if (since >= this.timings.pollMs) quiet.push(group.id); }
+        else if (since >= this.timings.warmPollMs) { this.lastPoll.set(group.id, now); await this.answerKnocks(group, session, now).catch(() => {}); }
+      }
+      if (quiet.length && now - this.lastQuietPoll >= this.timings.pollMs) {
+        const groupId = quiet.reduce((a, b) => (this.lastPoll.get(b) ?? 0) < (this.lastPoll.get(a) ?? 0) ? b : a);
+        const group = this.stored.get(groupId), session = this.sessions.get(groupId);
+        if (group?.entry && !group.left && session?.isAdmin) {
+          this.lastQuietPoll = now; this.lastPoll.set(groupId, now);
+          await this.answerKnocks(group, session, now).catch(() => {});
+        }
       }
       for (const [key, until] of this.refused) if (until <= now) this.refused.delete(key);
       for (const [key, { at }] of this.entryTimeouts) if (now - at > 60 * 60_000) this.entryTimeouts.delete(key);
@@ -1382,7 +1424,17 @@ export class Groups {
   /** The member at the other end of an entry session (the joiner, on the admin's side) or of a chat an invitation went over. */
   private linkMember(groupId: string, linkId: string): string | undefined {
     for (const [peer, id] of this.host.entries(groupId)) if (id === linkId) return peer;
-    return Object.entries(this.stored.get(groupId)?.contacts ?? {}).find(([, id]) => id === linkId)?.[0];
+    return this.chatMember(groupId, linkId);
+  }
+
+  /**
+   * The member a chat an invitation went over is: one removed and invited back over the same chat has its old key on it
+   * too (`contacts` keeps it for the removal notice), so the key in the roster, else the newest.
+   */
+  private chatMember(groupId: string, linkId: string): string | undefined {
+    const keys = Object.entries(this.stored.get(groupId)?.contacts ?? {}).filter(([, id]) => id === linkId).map(([key]) => key);
+    const roster = this.sessions.get(groupId)?.roster;
+    return (roster && keys.find(key => rosterHas(roster, key))) || keys[keys.length - 1];
   }
 
   /**
@@ -1711,8 +1763,7 @@ export class Groups {
       case "group-leave": {
         // A member I invited from my contacts leaves, and says so on our chat too: its edge may be down.
         const session = this.sessions.get(g);
-        const group = this.stored.get(g);
-        const member = Object.entries(group?.contacts ?? {}).find(([, id]) => id === linkId)?.[0];
+        const member = this.chatMember(g, linkId);
         if (!session?.isAdmin || !member || member === session.myKey) return;
         // Its edge may have carried the same leave a moment ago: removed once is enough.
         if (rosterHas(session.roster, member)) await session.remove(member, Date.now(), { left: true }).catch(() => {});
@@ -1847,6 +1898,9 @@ export class Groups {
     const session = this.sessions.get(groupId), group = this.stored.get(groupId);
     if (session?.status === "active" && group?.farewells?.[peerKey] && !rosterHas(session.roster, peerKey)) { this.sayFarewell(groupId, session, group, peerKey, linkId); return; }
     if (!session || !group || session.status !== "active" || !rosterHas(session.roster, peerKey)) return;
+    let told = this.told.get(groupId);
+    if (!told) this.told.set(groupId, (told = new Set()));
+    told.add(peerKey);
     // Its app has the group's keys: a decline over its chat says nothing about its place any more.
     const seen = !!group.unseen?.includes(peerKey);
     if (seen) { const unseen = group.unseen!.filter(key => key !== peerKey); group.unseen = unseen.length ? unseen : undefined; }
@@ -1856,7 +1910,7 @@ export class Groups {
     if (large || legacy || seen) void this.store.putGroup(group).catch(() => {});
     // Its messages were just asked of another member: it hears where I am once that answer has come (`holdSync`).
     if (!this.holdSync(groupId, peerKey)) {
-      try { this.host.sendOnLink(linkId, session.syncFrame(this.askOf(groupId, session, peerKey))); } catch { return; /* it closed again */ }
+      try { this.host.sendOnLink(linkId, session.syncFrame(this.askOf(groupId, session, peerKey), peerKey)); } catch { return; /* it closed again */ }
     }
     // The admin was away when a member's signed leave went round the hubs: it hears it now.
     if (peerKey === session.admin) { try { for (const bye of session.byesHeld()) this.host.sendOnLink(linkId, bye); } catch { /* next time it opens */ } }
@@ -1996,15 +2050,18 @@ export class Groups {
 
   /**
    * The unreachable members whose messages `via` should hand on to me: each is asked of one connected member at a
-   * time, so a member whose edges open one after another is not sent the same messages by each of them.
+   * time, so a member whose edges open one after another is not sent the same messages by each of them. Those whose
+   * edge opened in the same moment, not told yet, are asked of `via` too, and their syncs wait for its answer
+   * (`holdSync`): each told at once answered with its own lines alone, and a conversation two of them had while I was
+   * away came as all of one's lines, then all of the other's.
    */
   private askOf(groupId: string, session: GroupSession, via: string): string[] {
     let asked = this.relayAsked.get(groupId);
     if (!asked) this.relayAsked.set(groupId, (asked = new Map()));
-    const edges = this.host.edges(groupId), now = this.now();
+    const edges = this.host.edges(groupId), now = this.now(), told = this.told.get(groupId);
     const up = (key: string) => { const edge = edges.get(key); return !!edge && this.host.linkReady(edge); };
     const out: string[] = [];
-    for (const key of this.unreachable(groupId, session)) {
+    for (const key of session.others.filter(key => !up(key) || !told?.has(key))) {
       if (key === via) continue;
       // Asked lately of a member still connected (this one included): its answer is on the way.
       const prior = asked.get(key);
@@ -2082,7 +2139,7 @@ export class Groups {
       asked?.set(key, { via: next, at: now });
       held.set(key, { via: next, at: now });
     }
-    try { this.host.sendOnLink(edges.get(next)!, session.syncFrame([...ask])); } catch { /* it closed: it is told when it opens again, and the others at the next tick */ }
+    try { this.host.sendOnLink(edges.get(next)!, session.syncFrame([...ask], next)); } catch { /* it closed: it is told when it opens again, and the others at the next tick */ }
   }
 
   /**
@@ -2100,9 +2157,9 @@ export class Groups {
     for (const key of tried.keys()) if (!lacking.has(key)) tried.delete(key);
     const out: string[] = [];
     for (const [key, mark] of lacking) {
-      if (key === via || !up(key)) continue;
+      if (key === via || !up(key) || !session.mayHold(via, key)) continue;
       const prior = asked.get(key);
-      if (prior && prior.via !== via && up(prior.via) && now - prior.at < MESH_GOSSIP_MS) continue;
+      if (prior && prior.via !== via && up(prior.via) && now - prior.at < MESH_GOSSIP_MS && session.mayHold(prior.via, key)) continue;
       let entry = tried.get(key);
       if (!entry || entry.mark !== mark) tried.set(key, (entry = { mark, of: new Set(), noticed: entry?.noticed, last: entry?.last }));
       if (entry.of.has(via)) continue;
@@ -2135,6 +2192,12 @@ export class Groups {
     return true;
   }
 
+  /** Whether some of a member's messages are still on their way (not known gone): in any epoch, or in those below `below`. */
+  private onTheirWay(groupId: string, sender: string, below = Infinity): boolean {
+    const gone = this.gapsGone.get(groupId)?.get(sender);
+    return Object.entries(this.sessions.get(groupId)?.missOf(sender) ?? {}).some(([e, gaps]) => Number(e) < below && gaps.some(n => n > (gone?.[e] ?? -1)));
+  }
+
   /**
    * Messages nobody holds any more: every connected member, their author included, was asked for the same missing
    * numbers `MESH_GAP_AGAIN_MS` ago or more and none arrived. An author keeps its last 32 and the others the group's
@@ -2148,7 +2211,8 @@ export class Groups {
     for (const [key, mark] of lacking) {
       const entry = tried.get(key);
       if (!entry || entry.mark !== mark || entry.at === undefined || now - entry.at < MESH_GAP_AGAIN_MS) continue;
-      if (!connected.includes(key) || !connected.every(member => entry.of.has(member))) continue;
+      // A member let in since those epochs is not asked (`gapsOf`): it holds none of them.
+      if (!connected.includes(key) || !connected.every(member => entry.of.has(member) || !session.mayHold(member, key))) continue;
       let gone = this.gapsGone.get(groupId);
       if (!gone) this.gapsGone.set(groupId, (gone = new Map()));
       const upTo = { ...gone.get(key) };
@@ -2186,7 +2250,9 @@ export class Groups {
       if (!up(key)) continue;
       if (!last) { if (now - (entry.noticed ?? now) >= MESH_GAP_AGAIN_MS) fresh.set(key, mark); continue; }
       if (now - last.at < MESH_GAP_AGAIN_MS || !up(last.via)) continue;
-      if (session.filledSince(key, last.asked)) again.set(last.via, [...(again.get(last.via) ?? []), key]);
+      if (!session.filledSince(key, last.asked)) continue;
+      // What is left is of epochs it was not in (it was let in since): another member is asked now.
+      if (session.mayHold(last.via, key)) again.set(last.via, [...(again.get(last.via) ?? []), key]); else fresh.set(key, mark);
     }
     const asked = this.relayAsked.get(groupId);
     for (const [via, keys] of again) {
@@ -2194,20 +2260,22 @@ export class Groups {
         tried.set(key, { mark: lacking.get(key)!, of: new Set([via]), at: now, last: { via, at: now, asked: session.missOf(key) } });
         asked?.set(key, { via, at: now });
       }
-      try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(keys)); } catch { /* it closed: the gossip turn asks another */ }
+      try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(keys, via)); } catch { /* it closed: the gossip turn asks another */ }
     }
     if (!fresh.size || !connected.length) return;
     // The gossip turn's next member that is not one of the authors asked for, when there is another: an author hands on
-    // nobody's messages of its own. Taken from the turns' own order, the next turns go on to the members not asked yet.
+    // nobody's messages of its own, and one let in since holds none of them. Taken from the turns' own order, the next
+    // turns go on to the members not asked yet.
     const at = () => connected[(gossipStart(session.myKey) + this.gossipTurn++) % connected.length]!;
+    const helps = (member: string) => !fresh.has(member) && [...fresh.keys()].some(key => session.mayHold(member, key));
     let via = at();
-    for (let i = 1; i < connected.length && fresh.has(via); i++) via = at();
+    for (let i = 1; i < connected.length && !helps(via); i++) via = at();
     const keys = this.gapsOf(groupId, session, via, fresh);
     if (!keys.length) return;
     // As `askOf`: this is the gossip turn's ask, and the next waits a whole turn. Sooner, it found this one's answer
     // still on its way (`gapsOf`) and asked nobody, and the turn after that went to a member asked already.
     this.lastGossip.set(groupId, now);
-    try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(keys)); } catch { /* it closed: the gossip turn asks another */ }
+    try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(keys, via)); } catch { /* it closed: the gossip turn asks another */ }
   }
 
   /**
@@ -2231,9 +2299,13 @@ export class Groups {
         // A large group's edges follow its hubs, every tick (`hubsTick`).
         if (!this.hubs.large(session) && session.others.some(key => !edges.has(key))) this.reconcileEdges(groupId);
       }
-      const away = this.unreachable(groupId, session);
-      this.noteDown(groupId, session, away, now);
-      const connected = session.others.filter(key => !away.includes(key));
+      const down = this.unreachable(groupId, session);
+      this.noteDown(groupId, session, down, now);
+      const told = this.told.get(groupId);
+      for (const key of down) told?.delete(key);
+      // An edge up whose member is not told yet (its `edgeReady` comes in the same moment) is asked for, not of.
+      const connected = session.others.filter(key => !down.includes(key) && told?.has(key));
+      const away = session.others.filter(key => !connected.includes(key));
       this.gapsAgain(groupId, session, now, connected);
       if (now - (this.lastGossip.get(groupId) ?? -Infinity) < MESH_GOSSIP_MS) continue;
       const edges = this.host.edges(groupId);
@@ -2251,7 +2323,7 @@ export class Groups {
       const ask = [...away, ...this.gapsOf(groupId, session, via, lacking)];
       // An author is asked for its own with no `ask`: the sync alone names what is missing.
       if (!this.ownGap(groupId, via, lacking) && !ask.length) continue;
-      try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(ask)); } catch { /* it closed: the next turn asks another */ }
+      try { this.host.sendOnLink(edges.get(via)!, session.syncFrame(ask, via)); } catch { /* it closed: the next turn asks another */ }
     }
   }
 
@@ -2348,14 +2420,19 @@ export class Groups {
           ...(m.frame && { frame: m.frame }) };
         // A copy handed on stripped came first: the whole one adds what it lacked (WISP 902 · Group Mesh § Catch-up).
         const completed = !!m.completes && !!this.host.completeMessage;
-        // Its place is taken as the store is called, before anything is awaited: the line order follows it from there.
-        const placing = completed ? undefined : this.lineOrder.placing(MESSAGE_LINK(state.id), { id: m.id, epoch: m.epoch, line: false }, this.now());
-        const stored = completed ? (await this.host.completeMessage!(message), false) : await this.host.storeMessage(message);
+        // Older than a message of its author placed already (a catch-up's older page): just above it, where there is room.
+        const row = { sender: m.sender, epoch: m.epoch, seq: m.seq, id: m.id };
+        const above = completed || m.sender === session.myKey ? undefined : this.authorOrder.above(state.id, row);
+        const place = above === undefined ? undefined : await this.host.placeAbove?.(message.linkId, above).catch(() => undefined);
+        const placedAbove = place === undefined ? undefined : above;
+        // Its place is taken as the store is called, after the last await before it: the line order follows it from there.
+        const placing = completed ? undefined : this.lineOrder.placing(MESSAGE_LINK(state.id), { id: m.id, epoch: m.epoch, line: false }, this.now(), placedAbove);
+        const stored = completed ? (await this.host.completeMessage!(message), false) : await this.host.storeMessage(message, m.live, place);
         placing?.(stored !== false);
         // On its row now: new, or the whole copy of one stored before. A copy I had already changes no row.
         if (m.frame && (completed || stored !== false)) await this.frameKept(state.id, m.id, m.frame);
         // Mine are followed too: a member's rows placed again take along the lines written after them, mine included.
-        if (!completed && stored !== false) this.authorOrder.placed(state.id, { sender: m.sender, epoch: m.epoch, seq: m.seq, id: m.id, at: this.now() });
+        if (!completed && stored !== false) this.authorOrder.placed(state.id, { ...row, at: this.now() }, placedAbove);
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
         this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, came));
         if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, came));

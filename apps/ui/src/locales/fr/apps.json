@@ -76,6 +76,17 @@
     "tooLarge": "Trop volumineux.",
     "unlistedVersion": "Le lien contient une version que cette boutique ne propose pas encore."
   },
+  "files": {
+    "allow": "Autoriser",
+    "askAgain": "{{app}} demande à lire « {{name}} » à nouveau",
+    "askAgainMore": "{{app}} demande à lire « {{name}} » et {{count}} autres à nouveau",
+    "askFiles": "{{app}} demande à lire des fichiers",
+    "askFolder": "{{app}} demande à lire un dossier",
+    "chooseFiles": "Choisir des fichiers",
+    "chooseFolder": "Choisir un dossier",
+    "notNow": "Pas maintenant",
+    "note": "Rien n’est copié : {{app}} lit ce que vous choisissez, sur cet appareil."
+  },
   "install": {
     "equivocation": "Deux versions {{sequence}} différentes existent. Ghostly a gardé celle que vous avez.",
     "fetching": "Vérification de l'app…",
@@ -91,6 +102,8 @@
     "notListed": "Dans aucune de vos boutiques",
     "perm": {
       "chat": "Échanger avec la même app chez votre contact",
+      "files": "Lire les fichiers et dossiers que vous choisissez, et les partager avec votre contact dans la discussion",
+      "filesInfo": "Seulement ce que vous choisissez, jamais le reste de votre appareil. L'app de votre contact peut lire ce qu'elle partage tant que vous l'avez tous deux ouverte.",
       "internet": "Utiliser Internet",
       "internetInfo": "L'app et les serveurs avec lesquels elle échange peuvent apprendre votre adresse IP et ce que vous y faites.",
       "name": "Voir votre nom dans cette discussion",
