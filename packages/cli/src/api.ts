@@ -427,6 +427,16 @@ const METHODS: Record<string, Method> = {
     return { chat: link.id, messageId };
   },
   async "chat.delete"(ctx, params) {
+    // For everyone (WISP 400 § Delete for everyone): a message of mine, in a chat or a group, gone from every device.
+    if (bool(params, "everyone")) {
+      const target = chatOrGroup(ctx, str(params, "chat", true));
+      const ref = str(params, "message", true);
+      const message = await messageOf(ctx, target.linkId, ref, (m) => m.sender === "me");
+      if (!message) throw new CliError("not_found", `No message ${ref} of yours in this ${target.group ? "group" : "chat"}: only your own messages are deleted for everyone`);
+      const result = await node(ctx).removeMessage({ linkId: target.linkId, messageId: message.id });
+      if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
+      return { [target.group ? "group" : "chat"]: target.id, deleted: message.id, everyone: true };
+    }
     const link = chatOf(ctx, params);
     const messageId = str(params, "message", true);
     if (!(await node(ctx).getMessage(link.id, messageId))) throw new CliError("not_found", `No message ${messageId} in this chat`);
