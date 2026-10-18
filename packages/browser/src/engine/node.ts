@@ -1475,7 +1475,8 @@ export class GhostlyNode implements EngineImplementation {
     // My removals on their way read as rows of mine with the removal as their edit (`engine/removals.ts`).
     messages: async chat => [...await db.getMessages(chat), ...this.groupRemovalRows(chat)],
     history: async chat => [...await this.edgeOpenHistory(chat), ...this.groupRemovalRows(chat)],
-    message: async (chat, id) => await db.getMessage(chat, id) ?? this.groupRemovalRows(chat).find(m => m.id === id),
+    // A removal of mine first: its row is gone from the store, and a flush reads each one that waits, every time.
+    message: async (chat, id) => this.groupRemovalRow(chat, id) ?? await db.getMessage(chat, id),
     patch: async (chat, id, change) => {
       const groupId = chat.slice("group:".length), patched = patchRemoval(this.groups.removals(groupId), id, change, chat);
       if (!patched) return db.patchMessage(chat, id, change);
@@ -1513,6 +1514,12 @@ export class GhostlyNode implements EngineImplementation {
 
   private groupRemovalRows(chat: string): StoredMessage[] {
     return this.groups.removals(chat.slice("group:".length)).map(r => removalRow(chat, r));
+  }
+
+  /** The row of one removal of mine in a group, by the message's id: none when it is not one. */
+  private groupRemovalRow(chat: string, id: string): StoredMessage | undefined {
+    const removal = this.groups.removals(chat.slice("group:".length)).find(r => r.id === id);
+    return removal && removalRow(chat, removal);
   }
 
   /** A community member's edit, signed by them: of their own message, and only while they are a member. */

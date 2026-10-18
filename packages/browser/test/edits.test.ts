@@ -1,9 +1,11 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DhtDelivery, EDIT_BUFFER_MS, EDIT_SEND_LIMIT, GhostLink, MAX_EDITS_PER_MESSAGE, REMOVED_TEXT, createIdentity, createLink, createRelayPayload, dhtEditId, identityFromSeedB64, parseRelayPayload, readStatusCard, type IncomingMessage, type PairingState, type SignedPacket, type StatusCard, type WireEdit } from "@ghostly/core";
+import { DhtDelivery, EDIT_BUFFER_MS, EDIT_SEND_LIMIT, GhostLink, MAX_EDITS_PER_MESSAGE, REMOVED_TEXT, createIdentity, createLink, createRelayPayload, dhtEditId, identityFromSeedB64, parseRelayPayload, readStatusCard, type GroupEdit, type IncomingMessage, type PairingState, type SignedPacket, type StatusCard, type WireEdit } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { CARD_RESTORE_GAP_MS, EditBuffer, EditQueue } from "../src/engine/edits";
+import type { GroupEditsHost } from "../src/engine/groupEdits";
+import type { Removal } from "../src/engine/removals";
 import { EDIT_HISTORY_KEEP, EDIT_HISTORY_MAX_BYTES, canEdit, takesPeerEdit, withEdit } from "../src/shared/edits";
 import type { StoredMessage } from "../src/shared/types";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
@@ -614,4 +616,34 @@ describe("what an edit keeps", () => {
     expect(takesPeerEdit({ ...base, sender: "peer" }, "👋 Alice joined")).toBe(false);
     expect(takesPeerEdit({ ...base, sender: "peer" }, "👋 joined")).toBe(false);
   });
+});
+
+describe("deleting many of my group messages for everyone", () => {
+  it("a removal on its way is read from the group's removals, not from the store: 200 in a row read each row once", async () => {
+    // Removals go at the pace of edits (10 a window): each flush read every one still waiting from the store, where it is
+    // gone, then made a row of every removal to find it. 500 in a row held the engine 5.3 s.
+    const me = createIdentity().pubKeyZ32, g = `removals-${crypto.randomUUID()}`, chat = `group:${g}`;
+    const ids = Array.from({ length: 200 }, (_, n) => `${me}:1:${n}`);
+    for (const [n, id] of ids.entries()) await db.addMessage({ linkId: chat, id, text: `🔄 Task ${n}`, sender: "me", member: me, timestamp: n + 1, via: "datalink" });
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
+    const inner = node as unknown as {
+      groups: { removals(groupId: string): readonly Removal[]; setRemovals(groupId: string, list: Removal[]): Promise<void> };
+      groupEdits: { removeMine(groupId: string, id: string): Promise<unknown>; stop(): void; host: GroupEditsHost };
+    };
+    let removals: Removal[] = [];
+    vi.spyOn(inner.groups, "removals").mockImplementation(() => removals);
+    vi.spyOn(inner.groups, "setRemovals").mockImplementation(async (_group, list) => { removals = list; });
+    const host = inner.groupEdits.host, sent: GroupEdit[] = [];
+    vi.spyOn(host, "membership").mockReturnValue({ me, members: new Set([me, "bob"]), community: false, admin: true });
+    vi.spyOn(host, "send").mockImplementation(async (_group, edit) => { sent.push(edit); return null; });
+    const reads = vi.spyOn(db, "getMessage");
+    cleanup.push(async () => { inner.groupEdits.stop(); reads.mockRestore(); });
+    for (const id of ids) expect(await inner.groupEdits.removeMine(g, id)).toEqual({ error: null, messageId: id });
+    expect(reads.mock.calls.filter(([linkId]) => linkId === chat).length).toBeLessThanOrEqual(ids.length);
+    expect(await db.getMessages(chat)).toEqual([]);
+    // The first window's go now, the rest at the pace; each read as the removal it is.
+    expect(sent).toEqual(ids.slice(0, EDIT_SEND_LIMIT).map(id => ({ id, e: 1, ts: expect.any(Number), m: REMOVED_TEXT, rm: true })));
+    expect(removals.filter(r => r.pending)).toHaveLength(ids.length - EDIT_SEND_LIMIT);
+  }, 60_000);
 });
