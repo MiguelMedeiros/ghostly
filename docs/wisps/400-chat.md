@@ -253,6 +253,43 @@ A removal is the author's **last edit** of the message, flagged `rm`: the edit f
 
 **Older apps.** An app from before this revision takes a removal as an edit and shows its fallback text in place of the message, marked edited, keeping the earlier version in its history; an edit of a card message numbered past 100 it drops, keeping the card it last took. Nothing in a removal makes an older app keep less than it did: deleting for everyone asks every app to forget, and a member's own copy, a screenshot or an older app is not something a sender can take back. The app says so where the person removes a message.
 
+## Disappearing messages
+
+**Planned for 1.5, not built.** This section is the design under review (revision 2026-10-18, [#3021](https://github.com/MiguelMedeiros/ghostly/issues/3021)); its open decisions are listed at its end. Nothing here is on the wire yet.
+
+A chat may have a **timer**: new messages in it disappear from both devices after a time. It is off by default and set per chat, in the chat's ⋮ and its details: Off, 1 hour, 1 day, 1 week, 4 weeks. Either side sets it, and the last setting wins on both ([401](401-paired-chat.md#disappearing-messages), the pin's rule). Each side's timeline gets a line, local like a transport row ([Transport rows](#transport-rows)): "You set disappearing messages to 1 day", "Ana turned off disappearing messages". The lines carry no content and stay. While a timer is on, the chat's row and header show a clock mark, and a message's details say when it disappears.
+
+- **Which messages.** Only those sent after the timer was set. Each message keeps the timer it was sent under (`ttl`, a duration in seconds), also after the timer changes or is turned off. A reader applies the shorter of the message's `ttl` and its own setting.
+- **When the clock starts.** For one's own message, when it is sent. For a contact's, when it is first shown (its chat open on screen, the app in front), so nothing disappears unread; an unread message still goes 4 weeks after it arrived. A headless app ([1100](1100-headless.md)) shows nothing, so its clock starts on arrival. Each side counts on its own clock: no deadline ever compares two clocks.
+- **What goes.** What a delete here forgets ([Delete for everyone](#delete-for-everyone)): the text and its versions, a link preview, a card, reactions, a file's bytes and a download in progress, a held copy and a file's offer on the floor, the chat list's line, search and the Tasks panel. A reply's quote of it says "Original message deleted", and the quoted line (`s`) is blanked on this device. A pinned message unpins. A notification of it is closed.
+- **Forwards.** A message under a timer can be forwarded; the copy follows the timer of the chat it goes to.
+- **Money.** A payment's bubble goes once it is settled or failed, a request's once it is answered, withdrawn or expired: a bearer token or a waiting request is never lost with a bubble. The wallet's history and proofs stay.
+- **Late copies.** A swept message's id is kept for 8 days (longer than a hold's 7 days, the outbox's week and the floor's minutes), at most 10,000 per chat, apart from the 500 tombstones. A late copy, edit or reaction for it is confirmed and dropped.
+- **The sweep.** Each app deletes its own copies at the time, through the delete it already has: at start, every minute while it runs, at the next deadline, and in the headless daemon. The page's own copy of recent messages is cleared too, for a chat that is not open as well.
+- **Backups and devices.** A bundle leaves out messages under a timer and their files ([05](05-backups.md#what-a-bundle-does-not-hold)); a device going to standby leaves them out of the copy it freezes ([06](06-devices.md#what-moves)).
+- **Groups.** Not in the first slices. The rule is fixed now so the frames are designed once: in a private group any member sets it, signed like a pin ([mesh](902-group-mesh.md#pinned-message)); in a community only its admin ([community](903-group-community.md#pinned-message)); `ttl` goes inside the signed part of each message.
+
+**What it promises, and what it cannot.** Both apps delete their copy at the time, or at their next start when the device was off. It cannot stop a screenshot, a copy, a file saved out of the app, a modified app (the `ttl` asks, nothing enforces it), a bot's webhook that already handed an event on, a backup made before, notifications the system mirrored elsewhere, or storage that does not promise secure erasure (IndexedDB, OPFS and SQLite do not; under an encrypted profile the remnants stay under its key). Sealed copies sit on the DHT floor and the relays for minutes ([403](403-dht-text.md#disappearing-messages)), and the floor has no forward secrecy. The setting's hint says the first; its ⓘ says the rest.
+
+**Older apps.** An app without `timer/1` gets no setting; the setter's app says "Ana's app does not support disappearing messages", and the timer applies to the setter's own copies only. An older app keeps everything it receives.
+
+**Open decisions** (the recommended default of each):
+
+1. Values Off, 1 hour, 1 day, 1 week, 4 weeks, no custom. The wire takes 60 s to a year, so custom needs no new format later.
+2. Either side sets it, the last setting wins.
+3. The reader's clock starts when the message is first shown; unread messages go after 4 weeks.
+4. Only new messages are timed, and each keeps its own timer.
+5. Backups leave timed messages out, rather than keep them until their time.
+6. A device going to standby drops timed messages from its frozen copy.
+7. A payment's bubble goes once settled; the wallet's history stays.
+8. Forwards are allowed and follow the destination's timer.
+9. Notifications keep the person's setting and are closed when their message goes.
+10. No `ttl` on the DHT floor in 1.5: the reader's setting gives the same result.
+11. Swept ids are kept 8 days, at most 10,000 per chat.
+12. No default timer for new chats in 1.5.
+13. The home screen and the site's copy stay as they are: the timer is off by default and per chat.
+14. Groups come after 1:1 chats, in a later slice.
+
 ## Forwards
 
 A person can send a message they have on to other chats and groups (revision 0.2.11), as in WhatsApp: one message from its ⋮ (Forward), or several chosen first (Select, then Forward), to at most **5** chats and groups at once. Each copy is a **new message of the forwarder's**, in the order the messages were written. It carries one thing more than a message written there: a **hop count**, how many times it has been forwarded, this time included.

@@ -105,6 +105,7 @@ A light backup is everything above but the bytes of the profile's larger files: 
 - The bytes of a file still arriving, or no longer on the device. Its message and record are kept.
 - In a light backup, the bytes of the files over its cut. Their messages and records are kept.
 - The local databases of Bark ([204](204-bark.md)), Spark and Fedimint wallets. Their recovery phrases are in the bundle; the wallets rebuild their state from the phrase and their servers.
+- Messages under a disappearing timer ([400](400-chat.md#disappearing-messages); planned for 1.5, not built), with their files, versions and reactions: restoring them would bring back what was meant to go. The chat's timer setting travels. The `profile` record would count how many were left out, as `light` does for files.
 
 ### Version 1
 
