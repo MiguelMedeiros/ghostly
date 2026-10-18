@@ -62,6 +62,7 @@ import { listText } from "../lib/listText";
 import { hasMediaDevices } from "../lib/mediaDevices";
 import { navOnly, readNav } from "../lib/navigation";
 import { formatAt } from "../lib/time";
+import { ContactLinkSettings } from "../components/requests/ContactLinkSettings";
 import { SECTION_TITLE, SETTINGS_SECTIONS, isOldSection, sectionInView, settingsPath, settingsSection, type SettingEntry, type SettingNeeds, type SettingsSection } from "../lib/settingsSections";
 import { SettingsIndex, SettingsMenu, SettingsSearch } from "../components/settings/SettingsMenu";
 
@@ -504,6 +505,10 @@ export function Settings() {
             </button>
           </InputGroup>
         </Field>
+      </Section>
+      {/* WISP 8xx: a link that names nobody, for a site; what it takes waits in Requests. */}
+      <Section title={t("requests.linkTitle")}>
+        <ContactLinkSettings />
       </Section>
       </SettingsGroup>
 

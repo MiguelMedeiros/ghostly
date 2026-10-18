@@ -109,6 +109,30 @@ function JoinDialog({ check }: { check: InviteCheck }) {
       setCopied("failed");
     }
   };
+  if (!check.ok && check.reason === "contact" && check.code) {
+    // Someone's contact link (WISP 8xx): the web app shows a request form for it. Never opened by itself: writing is
+    // the person's choice.
+    return (
+      <dialog ref={dialog} className="join-dialog card" aria-labelledby="join-title" data-testid="join-landing" data-kind="contact" onClose={close}>
+        <CloseButton label={t.close} onClick={close} />
+        <div className="join-ghost" aria-hidden="true">
+          <Ghost who="boo" size={88} mood="happy" />
+        </div>
+        <h2 id="join-title" className="join-title">{t.contact.title}</h2>
+        <p className="join-lead">{t.contact.lead}</p>
+        <div className="join-actions">
+          <a className="btn btn--primary" href={`${APP_URL}/#${check.code}`} rel="noreferrer" data-testid="join-contact-open" data-autofocus>
+            <Icon name="globe" /> {t.contact.open}
+          </a>
+          <p className="join-note" data-testid="join-contact-steps">{t.contact.steps}</p>
+          <a className="btn" href={`${"/"}#download`} onClick={close} data-testid="join-download">
+            <Icon name="download" /> {t.download}
+          </a>
+        </div>
+        <p className="caption join-private">{t.contact.private}</p>
+      </dialog>
+    );
+  }
   if (!check.ok && check.reason === "device" && check.code) {
     // A code that adds a device to a profile (WISP 06): the web app takes it, in the fragment again, and asks before it
     // makes a profile for it. Never opened by itself: the person chooses this device.

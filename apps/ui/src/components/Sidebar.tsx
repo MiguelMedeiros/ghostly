@@ -49,6 +49,7 @@ import { usePageShown } from "../hooks/usePageShown";
 import { shownContactName, useContactFaces } from "./identities/contactFace";
 import { reactionNoteText } from "../lib/reactions";
 import { SidebarTasks } from "./tasks/SidebarTasks";
+import { SidebarRequests } from "./requests/SidebarRequests";
 import { openJoinProfile } from "../lib/devices";
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
@@ -369,6 +370,7 @@ export function Sidebar() {
         </div>
       </div>
 
+      <SidebarRequests active={location.pathname === "/requests"} onOpen={() => (location.pathname === "/requests" ? nav.home() : nav.place("/requests"))} />
       <SidebarTasks active={location.pathname === "/tasks"} onOpen={() => (location.pathname === "/tasks" ? nav.home() : nav.place("/tasks"))} />
 
       {/* Chat List */}
