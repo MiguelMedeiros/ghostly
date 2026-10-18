@@ -234,7 +234,7 @@ export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { payment
             const target=payment.target ?? {method:"cashu" as const,network:mintNetwork(selectedMint!) === "testnet" ? "cashu-test" as const : "bitcoin" as const,provider:selectedMint!,asset:"BTC" as const,unit:"sat" as const,address:payment.id,expiresAt:Date.now()+15*60*1000};
             setReview(await onNet.preparePayment({target,amount:payment.amount,feeCap:tokenPayment?parsePaymentAmount(feeInput,18):Number(feeInput),payee:peerPubKey,linkId:payment.linkId,requestId:payment.id}));
           }, "review")}>
-            {busy ? t("payments.bubble.preparing") : t("payments.bubble.review")}
+            {running === "review" ? t("payments.bubble.preparing") : t("payments.bubble.review")}
           </button>
           </>}
           {externalUri && (
