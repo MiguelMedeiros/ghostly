@@ -240,7 +240,7 @@ A person can edit a text they sent in a 1:1 chat (revision 0.2.9) or a group (re
 
 ## Delete for everyone
 
-The author of a message can take it off every member's device (revision 2026-10-18): a text, a status card ([405](405-status-cards.md#removing-a-card)), a file or a voice message, in a 1:1 chat or a group. Deleting a message only here stays what it was: it forgets this device's copy and tells nobody.
+The author of a message can take it off every member's device (revision 2026-10-18): a text, a status card ([405](405-status-cards.md#deleting-a-cards-message-for-everyone); a card alone is taken back as a removed card, [405](405-status-cards.md#removing-a-card)), a file or a voice message, in a 1:1 chat or a group. Deleting a message only here stays what it was: it forgets this device's copy and tells nobody.
 
 A removal is the author's **last edit** of the message, flagged `rm`: the edit frame of each path, with `rm: true` beside its text ([401](401-paired-chat.md#edits), [mesh](902-group-mesh.md#edits), [community](903-group-community.md#edits)). So it goes where an edit goes and is authenticated, ordered, sent again and caught up as one is. Its text is a fallback only: what an app from before this revision shows as the message's edited text. Ghostly writes `🗑 Message removed`.
 
