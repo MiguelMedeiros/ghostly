@@ -485,7 +485,7 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(t.seen.filter(s => s.from === "carol" && s.to === "bob" && s.frame.t === "pf-accept").length).toBe(2);
   });
 
-  it(`a member's group-have is taken at most ${GROUP_FILE_LIMITS.haveFrames} times in ${GROUP_FILE_LIMITS.haveWindowMs / 1000} seconds on an edge`, async () => {
+  it(`a member's group-have is taken at most ${GROUP_FILE_LIMITS.haveFramesTaken} times in ${GROUP_FILE_LIMITS.haveWindowMs / 1000} seconds on an edge`, async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
     t.files.get(bob)!.settings.autoDownloads = false;
@@ -497,7 +497,31 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     await t.world.until(() => asked() === 1 && t.got(carol, id, messageId).transfer?.wait === "nobody", 5 * 60_000);
     // Bob says he holds it, again and again, and answers `gone` each time he is asked.
     for (let i = 0; i < 50; i++) { t.say(bob, carol, id, { t: "group-have", g: id, ids: [messageId] }); await t.world.run(100, 100); }
-    expect(asked()).toBeLessThanOrEqual(1 + GROUP_FILE_LIMITS.haveFrames);
+    expect(asked()).toBeLessThanOrEqual(1 + GROUP_FILE_LIMITS.haveFramesTaken);
+  });
+
+  it("a member's group-have sent at its pace is taken also when one of its frames comes late, and who said gone is asked again", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    for (const p of [bob, carol]) t.files.get(p)!.settings.autoDownloads = false;
+    const sent = [];
+    // At the pace a member may announce them.
+    for (let i = 0; i <= GROUP_FILE_LIMITS.haveFrames; i++) { sent.push(await t.send(alice, id, pattern(1000, 40 + i))); await t.world.run(60_000 / GROUP_FILE_LIMITS.announcePerMinute + 1000); }
+    const ids = sent.map(s => s.messageId);
+    const asked = (messageId: string) => t.seen.filter(s => s.from === "carol" && s.to === "bob" && s.frame.t === "group-want" && s.frame.id === messageId).length;
+    await t.world.until(() => ids.every(m => !!t.got(carol, id, m).message?.file), 60_000);
+    // Alice is away: Carol asks Bob for each, who does not hold them yet and says so.
+    alice.online = false;
+    for (const m of ids) await carol.groups.downloadFile(t.got(carol, id, m).message!.file!.id);
+    await t.world.until(() => ids.every(m => asked(m) === 1 && t.got(carol, id, m).transfer?.wait === "nobody"), 5 * 60_000, 1000, () => JSON.stringify(ids.map(m => [asked(m), t.got(carol, id, m).transfer])));
+    // Bob comes to hold them one a second and says so, as his window lets him: 11 frames in 11 seconds. His first one
+    // comes a second late, with his second.
+    await t.world.run(1000);
+    for (const messageId of ids) {
+      t.say(bob, carol, id, { t: "group-have", g: id, ids: [messageId] });
+      if (messageId !== ids[0]) await t.world.run(1000);
+    }
+    expect(ids.filter(m => asked(m) < 2)).toEqual([]);
   });
 
   it("a member that keeps saying it holds a file it does not hold does not keep the holder left from being asked again", async () => {
