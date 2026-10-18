@@ -8,7 +8,7 @@ import { ensureSession, findSession, updateSessionLabel } from "./storage";
  * link that has none (`platform/sync.ts`). The chat's id here, for its address.
  */
 export async function adoptEngineChat(linkId: string): Promise<string> {
-  const peer = engine.state?.links.find((l) => l.id === linkId)?.peerPubKeyZ32;
+  const peer = await linkPeer(linkId);
   const link = (await engine.call("exportLinks")).find((l) => l.peerPubKeyZ32 === peer);
   if (!peer || !link) throw new Error("The chat was not made. Try again.");
   const existing = findSession(link.seedB64, link.peerPubKeyZ32);
@@ -20,6 +20,21 @@ export async function adoptEngineChat(linkId: string): Promise<string> {
   window.dispatchEvent(new Event("session-updated"));
   return id;
 }
+
+/**
+ * The chat's peer key, from the engine's state. The engine answers once the chat is made and sends a state with it
+ * first; a state that comes later all the same (another transport, a state already on its way) is waited for, briefly.
+ */
+function linkPeer(linkId: string, waitMs = ADOPT_WAIT_MS): Promise<string | undefined> {
+  const now = () => engine.state?.links.find((l) => l.id === linkId)?.peerPubKeyZ32;
+  if (now()) return Promise.resolve(now());
+  return new Promise((resolve) => {
+    const done = () => { clearTimeout(timer); off(); resolve(now()); };
+    const timer = setTimeout(done, waitMs);
+    const off = engine.subscribe(() => { if (now()) done(); });
+  });
+}
+const ADOPT_WAIT_MS = 10_000;
 
 /** Said on `window` when a contact link was opened or pasted: the request form takes it (`takeContactLink`). */
 export const CONTACT_LINK_EVENT = "ghostly-contact-link";

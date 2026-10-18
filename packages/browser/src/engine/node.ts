@@ -2695,10 +2695,19 @@ export class GhostlyNode implements EngineImplementation {
   turnOffContactLink(): Promise<void> { return this.contactLinks.turnOff(); }
   /** The contact link was shown or copied, or Requests opened: look for requests now and often for a while. */
   contactLinkShown(): void { this.contactLinks.shown(); }
-  acceptContactRequest({ id }: { id: string }): Promise<{ linkId: string }> { return this.contactLinks.accept(id); }
+  /** The chat goes out in a state before the answer does: the app takes it into its own list as the answer comes. */
+  async acceptContactRequest({ id }: { id: string }): Promise<{ linkId: string }> {
+    const made = await this.contactLinks.accept(id);
+    this.flushState();
+    return made;
+  }
   declineContactRequest({ id }: { id: string }): Promise<void> { return this.contactLinks.decline(id); }
   /** Sends a request through someone's contact link; the chat made for it. */
-  askContactLink(params: { code: string; name: string; text: string; label?: string }): Promise<{ chatId: string }> { return this.contactAsks.ask(params); }
+  async askContactLink(params: { code: string; name: string; text: string; label?: string }): Promise<{ chatId: string }> {
+    const made = await this.contactAsks.ask(params);
+    this.flushState();
+    return made;
+  }
   lookupIdentityDisplay(params: { linkId: string; id: string }): Promise<void> {
     // A Nostr profile comes through the social layer, from the relays the person configured.
     const r = this.links.get(params.linkId)?.stored.identities?.received.find(x => x.id === params.id);
