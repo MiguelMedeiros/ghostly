@@ -201,6 +201,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "This invoice expired: nobody can pay it now.",
     "invoiceFor": "Invoice for {{amount}}",
     "makePrimary": "Make primary",
     "mints": "Mints",
