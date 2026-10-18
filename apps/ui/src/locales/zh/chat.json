@@ -27,6 +27,8 @@
   "connecting": "连接中",
   "createdHere": "此聊天由你创建",
   "deleteArrivingFileHint": "仅在此设备上删除。接收将停止，对方会看到发送已取消。",
+  "deleteForEveryone": "为所有人删除",
+  "deleteForEveryoneHint": "也会从对方或群组成员的设备上删除。旧版应用会显示“消息已删除”；别人保存的副本仍归其所有。",
   "deleteMessage": "删除消息",
   "deleteMessageHint": "仅在此设备上删除，对方仍保留副本。",
   "deleteSendingFileHint": "仅在此设备上删除。发送将停止，对方不会收到该文件。",

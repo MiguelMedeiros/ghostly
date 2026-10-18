@@ -809,6 +809,36 @@ describe("MessageBubble: deleting", () => {
     expect(screen.queryByTestId("message-delete-menu")).not.toBeInTheDocument();
   });
 
+  it("Delete for everyone, on my own message, says what it does and deletes only once confirmed", async () => {
+    const onDelete = vi.fn(), onDeleteForEveryone = vi.fn();
+    const { user } = bubble({ sender: "me", text: "wrong chat" }, { onDelete, onDeleteForEveryone });
+    await user.click(screen.getByTestId("message-options"));
+    await user.click(screen.getByRole("button", { name: "Delete for everyone" }));
+    expect(screen.getByTestId("message-delete-menu")).toHaveTextContent("Deleted from your contact's or the group's devices too.");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onDeleteForEveryone).not.toHaveBeenCalled();
+    await user.click(screen.getByTestId("message-options"));
+    await user.click(screen.getByTestId("message-delete-everyone"));
+    await user.click(screen.getByTestId("message-delete-confirm"));
+    expect(onDeleteForEveryone).toHaveBeenCalledOnce();
+    expect(onDelete).not.toHaveBeenCalled();
+    // Delete (here only) still says it is only here.
+    await user.click(screen.getByTestId("message-options"));
+    await user.click(screen.getByRole("button", { name: "Delete message" }));
+    expect(screen.getByTestId("message-delete-menu")).toHaveTextContent("Deleted only here.");
+  });
+
+  it("offers no Delete for everyone on the contact's message, or while it still waits to be sent", async () => {
+    const onDeleteForEveryone = vi.fn();
+    const { user, unmount } = bubble({ text: "theirs" }, { onDelete: vi.fn(), onDeleteForEveryone });
+    await user.click(screen.getByTestId("message-options"));
+    expect(screen.queryByTestId("message-delete-everyone")).not.toBeInTheDocument();
+    unmount();
+    const waiting = bubble({ sender: "me", delivery: "waiting" }, { onDelete: vi.fn(), onDeleteForEveryone });
+    await waiting.user.click(screen.getByTestId("message-options"));
+    expect(screen.queryByTestId("message-delete-everyone")).not.toBeInTheDocument();
+  });
+
   it("a file still on its way says it stops, not that the contact keeps a copy; once here it does", async () => {
     vi.spyOn(servicesPlatform!, "getFile").mockResolvedValue(null);
     const moving = { state: "transferring" as const, transferred: 1_000_000, size: 30_000_000 };

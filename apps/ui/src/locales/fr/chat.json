@@ -27,6 +27,8 @@
   "connecting": "connexion",
   "createdHere": "Vous avez créé cette discussion",
   "deleteArrivingFileHint": "Supprimé uniquement ici. Le fichier cesse d'arriver ; votre contact verra l'envoi annulé.",
+  "deleteForEveryone": "Supprimer pour tous",
+  "deleteForEveryoneHint": "Supprimé aussi sur les appareils de votre contact ou du groupe. Une application plus ancienne affiche « Message supprimé » à la place ; une copie que quelqu'un a gardée reste la sienne.",
   "deleteMessage": "Supprimer le message",
   "deleteMessageHint": "Supprimé uniquement ici. Votre contact garde sa copie.",
   "deleteSendingFileHint": "Supprimé uniquement ici. L'envoi s'arrête ; votre contact ne recevra pas le fichier.",

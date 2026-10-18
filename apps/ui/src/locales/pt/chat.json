@@ -27,6 +27,8 @@
   "connecting": "conectando",
   "createdHere": "Você criou esta conversa",
   "deleteArrivingFileHint": "Apagada só aqui. O arquivo para de chegar; seu contato vê o envio cancelado.",
+  "deleteForEveryone": "Apagar para todos",
+  "deleteForEveryoneHint": "Apagada também nos aparelhos do contato ou do grupo. Um app de antes disso mostra \"Mensagem removida\" no lugar; uma cópia que alguém salvou continua com essa pessoa.",
   "deleteMessage": "Apagar mensagem",
   "deleteMessageHint": "Apagada só aqui. Seu contato continua com a cópia dele.",
   "deleteSendingFileHint": "Apagada só aqui. O envio para; seu contato não vai receber o arquivo.",

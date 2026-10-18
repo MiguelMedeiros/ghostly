@@ -27,6 +27,8 @@
   "connecting": "接続中",
   "createdHere": "このチャットはあなたが作成しました",
   "deleteArrivingFileHint": "この端末からのみ削除されます。受信は止まり、相手には送信の取り消しが表示されます。",
+  "deleteForEveryone": "全員から削除",
+  "deleteForEveryoneHint": "相手やグループのメンバーの端末からも削除されます。古いアプリでは代わりに「メッセージは削除されました」と表示されます。誰かが保存したコピーはその人の手元に残ります。",
   "deleteMessage": "メッセージを削除",
   "deleteMessageHint": "この端末からのみ削除されます。相手の端末には残ります。",
   "deleteSendingFileHint": "この端末からのみ削除されます。送信は止まり、相手にはファイルが届きません。",

@@ -93,6 +93,7 @@ export const ENGINE_PARAMS: Readonly<Record<string, string>> = {
   appSend: "{ linkId, ref, data, digest? }",
   messageDetails: "{ linkId, messageId }",
   deleteMessage: "{ linkId, messageId }",
+  removeMessage: "{ linkId, messageId }",
   exportLinks: "",
   sendFile: "{ linkId, file, timestamp, replyTo?, forwarded? }",
   sendGroupFile: "{ groupId, file, caption?, replyTo?, forwarded? }",
