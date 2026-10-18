@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useI18n } from "../../contexts/I18nContext";
 import { CELEBRATE_MS, useNow, type PairingProgressState } from "../../hooks/usePairingProgress";
 import { PAIRING_STEPS, SLOW_AFTER_MS, failureReason, formatElapsed, pairingDetail, type FailureReason, type PairingStage } from "../../lib/pairingProgress";
@@ -119,6 +119,15 @@ export function PairingScene({ progress, contact, retry, retrying, retryError, i
   const [me, peer] = moods(stage);
   // The failure has its own alert; this region tells the stage and, once, that it is taking long.
   const announcement = [label, slowWords].filter(Boolean).join(" ");
+  // The failure goes, Try again and all, once a retry moves the stage on: the keyboard focus that was in it goes to the
+  // stage's words, not to the page.
+  const labelRef = useRef<HTMLParagraphElement>(null);
+  const focusInFailure = useRef(false);
+  useLayoutEffect(() => {
+    if (reason || !focusInFailure.current) return;
+    focusInFailure.current = false;
+    if (!document.activeElement || document.activeElement === document.body) labelRef.current?.focus();
+  }, [reason]);
 
   return <section ref={root} id={id} className="ps" data-testid="pairing-scene" data-stage={stage} data-role={role} data-paused={paused || undefined} data-still={still || undefined} data-step={current} data-leaving={leaving || undefined} aria-labelledby={titleId}>
     <svg className="ps-svg" viewBox="0 0 320 150" aria-hidden="true" focusable="false">
@@ -166,13 +175,16 @@ export function PairingScene({ progress, contact, retry, retrying, retryError, i
     </svg>
     <div className="ps-names" aria-hidden="true"><span>{t("pairing.you")}</span><span className="ps-contact">{contact || t("pairing.contact")}</span></div>
     <div className="ps-caption">
-      <p id={titleId} className="ps-label" data-testid="pairing-stage-label">{label}</p>
+      <p ref={labelRef} id={titleId} className="ps-label" data-testid="pairing-stage-label" tabIndex={-1}>{label}</p>
       {ticking && <p className="ps-time" data-testid="pairing-elapsed"><time dateTime={`PT${Math.floor(elapsed / 1000)}S`} aria-label={t("pairing.elapsed", { time: formatElapsed(elapsed) })}>{formatElapsed(elapsed)}</time>{progress.attempt > 1 && <span> · {t("pairing.attempt", { n: progress.attempt })}</span>}</p>}
       {slowWords && <div className="ps-slow" data-testid="pairing-slow">{slowWords}<PairingDetail detail={detail} testId="pairing-detail" className="ps-detail" /></div>}
       {stage === "live" && <p className="ps-slow">{t("pairing.sayHello")}</p>}
-      {reason && <div role="alert" className="ps-failure" data-testid="pairing-failure">
+      {reason && <div role="alert" className="ps-failure" data-testid="pairing-failure" onFocus={() => { focusInFailure.current = true; }}
+        onBlur={event => { if (event.relatedTarget) focusInFailure.current = false; }}>
         <div>{words.reason(reason)}<PairingDetail detail={detail} testId="pairing-detail" className="ps-detail" /></div>
-        {progress.retryable ? <button type="button" className="ps-retry" data-testid="pairing-retry" disabled={retrying || !progress.linkId} onClick={retry}>{retrying ? t("pairing.retrying") : t("pairing.retry")}</button>
+        {/* `aria-disabled`, not `disabled`, while it runs: a disabled button drops the keyboard focus to the page. */}
+        {progress.retryable ? <button type="button" className="ps-retry" data-testid="pairing-retry" disabled={!progress.linkId} aria-disabled={retrying || undefined} aria-busy={retrying || undefined}
+          onClick={() => { if (!retrying) retry(); }}>{retrying ? t("pairing.retrying") : t("pairing.retry")}</button>
           : !SAYS_WHAT_NEXT.has(reason) && <p className="ps-detail">{t("pairing.newInvite")}</p>}
         {retryError && <p className="ps-detail">{retryError}</p>}
       </div>}
