@@ -4,6 +4,22 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.4.1
+
+### Security
+
+- Web app and extension: a burst of many small HyperDHT messages from a peer no longer holds the page busy for seconds. The app reads them as the Desktop does, in time that grows with their size only.
+- Wallet: before Look up on a Lightning address or LNURL, the app names the server the lookup really asks. A crafted LNURL could name one server while the request went to another, and a bech32 LNURL named none.
+
+### Fixed
+
+**Wallets**
+
+- Restoring Fedimint from a backup file says when the file is too large to be a backup or cannot be read. Before, nothing happened, and a file picked earlier stayed loaded, so Restore backup restored that one.
+- Money in a chat (a Lightning invoice and its QR code, an ecash token, an address, a payment or a request) is drawn again only when the wallets, its payment or the chat's ways of paying change. Before, every card was drawn again on every change in the app, up to 20 times a second while a file moved: with 80 of them in a chat, 23 ms of work each time, now under 1 ms.
+- Get test coins and the steps of paying a Lightning address (Look up, Get invoice, Pay), pressed from the keyboard, keep the focus while they run and after a refusal, and each new step takes it. Before, the button turned disabled while it ran, which put the focus back at the top of the page, where it stayed when the faucet or the address's server refused.
+- The wallet's Receive screen takes its invoice away once it has expired and says so ("This invoice expired: nobody can pay it now."), with New amount. Before, an invoice left on screen past its expiry still showed its QR code, Copy and "Waiting for the payment…", so it could be shared when no wallet could pay it any more.
+
 ## 1.4.0
 
 Voice and audio messages keep playing across chats, apps can read the files you pick for them, the app starts with almost 1 MB less JavaScript, and groups and communities come back much sooner after a restart.

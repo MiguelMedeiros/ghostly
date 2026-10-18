@@ -201,6 +201,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "Esta factura caducó: ya nadie puede pagarla.",
     "invoiceFor": "Factura de {{amount}}",
     "makePrimary": "Hacer principal",
     "mints": "Mints",

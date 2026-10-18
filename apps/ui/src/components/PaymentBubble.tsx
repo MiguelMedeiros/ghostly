@@ -4,7 +4,8 @@ import type { PaymentReview as Review } from "@ghostly/core";
 import { PaymentReview } from "./PaymentReview";
 import { useEffect, useRef, useState } from "react";
 import { useCountUp } from "../hooks/useCountUp";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { usePlatformValue, useWalletPlatform } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { mintNetwork } from "@ghostly/browser/shared/mints";
 import { ONCHAIN_FEE_CAP, holdsLess } from "./walletCardData";
 import { LightningPayWith, lightningPayer as payerOf } from "./LightningPayWith";
@@ -37,11 +38,11 @@ function FeeCapInput({ label, value, onChange, decimals }: { label: string; valu
 /** A payment or a payment request in the chat. The amounts are live: they follow what the wallet knows. */
 export function PaymentBubble({ paymentId, peerPubKey, fallbackText }: { paymentId: string; peerPubKey: string; fallbackText: string }) {
   const { t } = useI18n();
-  const platform = useServicesPlatform();
-  const wallet = platform?.wallet;
-  const payment = wallet?.getPayment(paymentId) ?? null;
+  // Drawn again when the wallets, this payment or the chat's ways of paying change, not on every engine state.
+  const wallet = useWalletPlatform();
+  const payment = usePlatformValue(() => wallet?.getPayment(paymentId) ?? null);
   /** Its way of paying is off in this chat: the request stays readable, but nothing here can pay it. */
-  const allowed = platform?.getPeer(peerPubKey)?.paymentMethods;
+  const allowed = usePlatformValue(() => servicesPlatform?.getPeer(peerPubKey)?.paymentMethods);
   const paymentsOff = !!allowed && !!payment && (payment.target ? !(allowed as Partial<Record<string, boolean>>)[payment.target.method] : !(allowed.cashu || allowed.lightning));
   const [review,setReview] = useState<Review|null>(null);
   /** The unfinished payment of this request that was put away with Close: shown again only once it moves on. */

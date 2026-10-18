@@ -72,6 +72,9 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   const [paymentHash, setPaymentHash] = useState<string | undefined>();
   /** The invoice's mint quote: once its ecash is minted, its Lightning receipt carries it. */
   const [invoiceQuote, setInvoiceQuote] = useState<string | undefined>();
+  /** When the invoice can no longer be paid (the mint's or the source's word), and whether that time has come. */
+  const [invoiceExpiresAt, setInvoiceExpiresAt] = useState<number | null>(null);
+  const [invoiceExpired, setInvoiceExpired] = useState(false);
   const [payInput, setPayInput] = useState("");
   const [quote, setQuote] = useState<{ quote: string; mint: string; amount: number; feeReserve: number } | null>(null);
   /** Real money: Pay opens the second step, and only it pays. */
@@ -123,11 +126,21 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   // keys go on from there (to Copy, to Pay) and a screen reader says what came. Not when it went somewhere else meanwhile.
   const invoiceLine = useRef<HTMLParagraphElement>(null);
   const quoteLine = useRef<HTMLParagraphElement>(null);
-  const showing = invoice ? "invoice" : quote ? "quote" : null;
+  // An expired invoice goes with the Copy that may have had the focus: New amount takes it.
+  const expiredNew = useRef<HTMLButtonElement>(null);
+  const showing = invoice ? (invoiceExpired ? "expired" : "invoice") : quote ? "quote" : null;
   useEffect(() => {
-    const line = showing === "invoice" ? invoiceLine.current : showing === "quote" ? quoteLine.current : null;
+    const line = showing === "invoice" ? invoiceLine.current : showing === "expired" ? expiredNew.current : showing === "quote" ? quoteLine.current : null;
     if (line && (!document.activeElement || document.activeElement === document.body)) line.focus();
   }, [showing]);
+  // Past its expiry nobody can pay the invoice: it is no longer offered to be copied or scanned.
+  useEffect(() => {
+    setInvoiceExpired(false);
+    // Past setTimeout's longest wait (24.8 days) a page is not left open: no timer, rather than one that fires at once.
+    if (!invoice || invoiceExpiresAt === null || invoiceExpiresAt - Date.now() > 0x7fffffff) return;
+    const timer = setTimeout(() => setInvoiceExpired(true), Math.max(0, invoiceExpiresAt - Date.now()));
+    return () => clearTimeout(timer);
+  }, [invoice, invoiceExpiresAt]);
 
   const choose = (next: Action) => { setAction(next); setActionChosen(true); setError(""); setNotice(""); setInvoice(null); setQuote(null); setConfirming(false); };
 
@@ -182,6 +195,11 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                 <p className="text-accent text-sm font-semibold" data-testid="wallet-paid">{t("wallet.cashu.received", { amount: formatAmount(Number(amount), t.language), unit })}</p>
                 <Button onClick={() => { setInvoice(null); setAmount(""); }}>{t("wallet.lightning.done")}</Button>
               </div>
+            ) : invoice && invoiceExpired ? (
+              <div className="space-y-3">
+                <Notice tone="error" testId="wallet-invoice-expired">{t("wallet.cashu.invoiceExpired")}</Notice>
+                <Button ref={expiredNew} onClick={() => setInvoice(null)}>{t("wallet.cashu.newAmount")}</Button>
+              </div>
             ) : invoice ? (
               <div className="space-y-3">
                 <p ref={invoiceLine} tabIndex={-1} className="text-text-primary text-sm focus:outline-none">{fillNodes(t("wallet.cashu.invoiceFor"), { amount: <b>{sats(Number(amount))}</b> })}</p>
@@ -189,7 +207,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                   actions={<button type="button" className="px-3 py-1.5 min-h-9 max-md:min-h-11 rounded-lg text-xs font-bold bg-black/20 hover:bg-black/30 transition-colors cursor-pointer" onClick={() => setInvoice(null)}>{t("wallet.cashu.newAmount")}</button>} />
               </div>
             ) : (
-              <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void run(async () => { const created = await wallet.receiveLightning(Number(amount), rail === "cashu" ? "cashu" : undefined); setInvoiceQuote(created.quote); setPaymentHash(created.paymentHash); setInvoice(created.invoice); }); }}>
+              <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void run(async () => { const created = await wallet.receiveLightning(Number(amount), rail === "cashu" ? "cashu" : undefined); setInvoiceQuote(created.quote); setInvoiceExpiresAt(created.expiresAt); setPaymentHash(created.paymentHash); setInvoice(created.invoice); }); }}>
                 <Amount value={amount} onChange={setAmount} unit={unit} testId="wallet-receive-amount" autoFocus={focusAmount || actionChosen} />
                 <Button type="submit" variant="primary" className="w-full" data-testid="wallet-create-invoice" disabled={busy || !amount || (viaMint ? !state.mints.length : ln?.status !== "ready")}>{busy ? (viaMint ? t("wallet.cashu.askingMint") : sourceName ? t("wallet.lightning.asking", { source: sourceName }) : t("wallet.lightning.askingSource")) : t("wallet.cashu.createInvoice")}</Button>
                 <Notice>{rail === "cashu" ? t("wallet.cashu.tokenHint") : t("wallet.lightning.anyonePays")}</Notice>

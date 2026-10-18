@@ -201,6 +201,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "Cette facture a expiré : plus personne ne peut la payer.",
     "invoiceFor": "Facture de {{amount}}",
     "makePrimary": "Rendre principal",
     "mints": "Mints",
