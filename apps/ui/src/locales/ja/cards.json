@@ -26,6 +26,8 @@
       "tagsLabel": "タグ:",
       "updatedLabel": "更新:"
     },
+    "clearFinished": "完了分を消去",
+    "clearFinishedHint": "完了・失敗・キャンセルのタスクをこのデバイスで非表示にします。ボットが次に更新すると再び表示されます。",
     "column": {
       "blocked": "ブロック中",
       "closed": "停止",

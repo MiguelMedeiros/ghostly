@@ -26,6 +26,8 @@
       "tagsLabel": "Etiquetas:",
       "updatedLabel": "Actualizado:"
     },
+    "clearFinished": "Borrar terminadas",
+    "clearFinishedHint": "Oculta en este dispositivo las tareas hechas, fallidas y canceladas. La próxima actualización de un bot trae una de vuelta.",
     "column": {
       "blocked": "Bloqueadas",
       "closed": "Detenidas",

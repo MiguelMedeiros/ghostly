@@ -227,6 +227,37 @@ describe("the Tasks board", () => {
     expect(within(column("done")).getByTestId("board-column-older")).toHaveTextContent("Hide older");
   });
 
+  it("Clear finished hides the done, failed and cancelled tasks on this device, for good after a reload; a bot's update brings one back", async () => {
+    const finished = () => [
+      row("link-1", task({ id: "relay", status: "running" })),
+      row("link-1", task({ id: "done", status: "done" })),
+      row("group:g1", task({ id: "failed", title: "Fix the flaky spec", status: "failed" }), { member: "hermes-key" }),
+    ];
+    const first = profile(finished());
+    await loaded();
+    const clear = screen.getByTestId("tasks-clear-finished");
+    expect(clear).toHaveTextContent("Clear finished");
+    expect(clear).toHaveAttribute("title", expect.stringMatching(/on this device/));
+    await first.user.click(clear);
+    expect(cardIds("done")).toEqual([]);
+    expect(cardIds("closed")).toEqual([]);
+    expect(cardIds("running")).toEqual(["relay"]);
+    expect(screen.getByTestId("tasks-summary")).toHaveTextContent("1 active · 1 task");
+    // Nothing finished is left to clear.
+    expect(screen.queryByTestId("tasks-clear-finished")).not.toBeInTheDocument();
+    first.unmount();
+
+    // The page again: still cleared. Then the bot runs the failed task again, and it is back in its new column.
+    const again = profile(finished());
+    await loaded();
+    expect(cardIds("closed")).toEqual([]);
+    const rerun = task({ id: "failed", title: "Fix the flaky spec", status: "running" }), at = Date.now() + 1_000;
+    const back = row("group:g1", rerun, { member: "hermes-key", editedAt: at });
+    again.set([...finished().slice(0, 2), back]);
+    act(() => again.engine.messages("group:g1", [{ linkId: "group:g1", id: back.id, text: statusCardText(rerun), sender: "peer", timestamp: back.timestamp, via: "datalink", card: rerun, edit: { seq: 1, at, history: [] } } as StoredMessage]));
+    await waitFor(() => expect(cardIds("running").sort()).toEqual(["failed", "relay"]));
+  });
+
   it("with hundreds of cards, draws fifty a column and more on Show more", async () => {
     const many = Array.from({ length: 500 }, (_, i) => row("link-1", task({ id: `t${i}`, title: `Task ${i}`, status: i % 5 === 0 ? "queued" : "running" })));
     const { user } = profile(many);

@@ -1,0 +1,1 @@
+The Tasks board has Clear finished: it hides, on this device, every done, failed and cancelled task last changed until then, even from "Show older", and a bot's later update of one brings it back. It sends nothing and deletes no card. No field and no rule on the wire changed.
