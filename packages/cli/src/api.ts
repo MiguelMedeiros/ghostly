@@ -437,7 +437,10 @@ const METHODS: Record<string, Method> = {
       if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
       return { [target.group ? "group" : "chat"]: target.id, deleted: message.id, everyone: true };
     }
-    const link = chatOf(ctx, params);
+    // A group's message is deleted for everyone only (the apps forget none on one device): a group named without the
+    // flag says so, with the command that takes it, not "No chat".
+    const ref = str(params, "message") ?? "<message>";
+    const link = chatNotGroup(ctx, params, "message delete", `${/^[\w.:<>-]+$/.test(ref) ? ref : JSON.stringify(ref)} --everyone`);
     const messageId = str(params, "message", true);
     if (!(await node(ctx).getMessage(link.id, messageId))) throw new CliError("not_found", `No message ${messageId} in this chat`);
     await node(ctx).deleteMessage({ linkId: link.id, messageId });
