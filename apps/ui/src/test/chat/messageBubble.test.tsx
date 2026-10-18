@@ -860,6 +860,27 @@ describe("MessageBubble: deleting", () => {
     expect(await hint({ id: "peer_c", file: file("link-1-in-c") })).toBe("Deleted only here. Your contact keeps their copy.");
   });
 
+  it("from the keyboard the confirmation takes the focus, its keys stay in it, and Escape gives it back to ⋮", async () => {
+    const onDelete = vi.fn(), onDeleteForEveryone = vi.fn();
+    const { user } = bubble({ sender: "me", text: "typo" }, { onDelete, onDeleteForEveryone });
+    for (const item of ["message-delete", "message-delete-everyone"]) {
+      screen.getByTestId("message-options").focus();
+      await user.keyboard("{Enter}");
+      screen.getByTestId(item).focus();
+      await user.keyboard("{Enter}");
+      const confirm = screen.getByTestId("message-delete-menu");
+      // Cancel first: Enter at once never deletes.
+      expect(within(confirm).getByRole("button", { name: "Cancel" })).toHaveFocus();
+      await user.keyboard("{ArrowDown}");
+      expect(screen.getByTestId("message-delete-confirm")).toHaveFocus();
+      await user.keyboard("{Escape}");
+      expect(screen.queryByTestId("message-delete-menu")).not.toBeInTheDocument();
+      expect(screen.getByTestId("message-options")).toHaveFocus();
+    }
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(onDeleteForEveryone).not.toHaveBeenCalled();
+  });
+
   it("closes the menu on a click elsewhere", async () => {
     const onDelete = vi.fn();
     const { user } = renderApp(<><p>elsewhere</p><MessageBubble message={message({ sender: "me" })} onDelete={onDelete} /></>);
