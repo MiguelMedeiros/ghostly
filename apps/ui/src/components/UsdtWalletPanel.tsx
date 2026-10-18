@@ -20,7 +20,8 @@ const PLACE:Record<Exclude<Network,'evm-local'>,string>={ethereum:'Ethereum',sep
 export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPlatform;state:WalletState;backupNow?:boolean}) {
  const usdt=state.usdt;
  const {t}=useI18n();
- const {busy,error,run}=useRun();
+ // The button pressed is busy while it works and keeps the keys (`loading`, by the key `run` was given); the others wait.
+ const {busy,running,error,run}=useRun();
  const [action,setAction]=useState<Action>('receive');
  const [recipient,setRecipient]=useState(''),[amount,setAmount]=useState(''),[gas,setGas]=useState('0.001'),[review,setReview]=useState<Review|null>(null);
  /** The gas ceiling in ETH ("0.001"), typed the person's way. */
@@ -41,7 +42,7 @@ export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPla
 
  return <div className="space-y-6" data-testid="usdt-wallet" aria-label={t('wallet.usdt.wallet')}>
   {!usdt?.configured||(usdt.locked&&usdt.automatic)?<div className="bg-surface rounded-xl p-6 text-center space-y-2" data-testid="usdt-connecting"><p className="text-text-primary">{t('wallet.panel.connecting',{wallet:'USDT'})}</p>{usdt?.error ? <Notice problem={problemText(usdt.error, t)} tone="muted" /> : <Notice>{t('wallet.panel.firstTime')}</Notice>}</div>
-  :!ready?<Section title={t('wallet.panel.unlock.title')}><Row label={t('wallet.panel.unlock.withPassword')}/><Block><InputGroup><input aria-label={t('wallet.panel.unlock.password',{wallet:'USDT'})} type="password" autoComplete="current-password" className={input} value={password} onChange={e=>setPassword(e.target.value)}/><Button variant="primary" disabled={busy} onClick={()=>void run(async()=>{await wallet.usdtUnlock(password);setPassword('');})}>{t('wallet.panel.unlock.button',{wallet:'USDT'})}</Button></InputGroup></Block></Section>
+  :!ready?<Section title={t('wallet.panel.unlock.title')}><Row label={t('wallet.panel.unlock.withPassword')}/><Block><InputGroup><input aria-label={t('wallet.panel.unlock.password',{wallet:'USDT'})} type="password" autoComplete="current-password" className={input} value={password} onChange={e=>setPassword(e.target.value)}/><Button variant="primary" disabled={busy} loading={running==='unlock'} onClick={()=>void run(async()=>{await wallet.usdtUnlock(password);setPassword('');},'unlock')}>{t('wallet.panel.unlock.button',{wallet:'USDT'})}</Button></InputGroup></Block></Section>
   :<div className="space-y-4">
    <div>
     <p className="text-text-primary break-words" data-testid="usdt-balance"><span className="text-4xl font-semibold tabular-nums">{formatTokenAmount(usdt.balance,usdt.decimals,t.language)}</span> <span className="text-text-muted text-sm">{label}</span></p>
@@ -55,7 +56,7 @@ export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPla
     <Amount value={amount} onChange={setAmount} unit={label} decimals={usdt.decimals}/>
     <label className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-sm text-text-secondary">{t('wallet.usdt.feeLimit')}<span className="flex items-center gap-2"><input aria-label={t('wallet.usdt.gasInput')} inputMode="decimal" className={`${input} w-28 text-end`} aria-invalid={gasField.hint?true:undefined} value={gasField.text} onChange={e=>gasField.change(e.target.value)}/>ETH</span></label>
     {gasField.hint&&<Notice tone="error" testId="usdt-gas-unclear">{gasField.hint}</Notice>}
-    <Button variant="primary" className="w-full" disabled={busy||!!review||!funded||!recipient||!Number(amount)||!gas} onClick={()=>void run(async()=>{const now=Date.now();setReview(await wallet.preparePayment({target:{method:'usdt',network:usdt.network!,provider:usdt.provider!,asset:usdt.chainId===1?'USDT':'TEST-USDT',unit:'token-base',address:recipient,token:usdt.token,decimals:usdt.decimals,chainId:usdt.chainId,issuedAt:now,expiresAt:now+15*60*1000},amount:parsePaymentAmount(amount,usdt.decimals!),feeCap:parsePaymentAmount(gas,18),payee:recipient}));})}>{funded?t('wallet.panel.review'):t('wallet.panel.noBalance')}</Button>
+    <Button variant="primary" className="w-full" loading={running==='review'} disabled={busy||!!review||!funded||!recipient||!Number(amount)||!gas} onClick={()=>void run(async()=>{const now=Date.now();setReview(await wallet.preparePayment({target:{method:'usdt',network:usdt.network!,provider:usdt.provider!,asset:usdt.chainId===1?'USDT':'TEST-USDT',unit:'token-base',address:recipient,token:usdt.token,decimals:usdt.decimals,chainId:usdt.chainId,issuedAt:now,expiresAt:now+15*60*1000},amount:parsePaymentAmount(amount,usdt.decimals!),feeCap:parsePaymentAmount(gas,18),payee:recipient}));},'review')}>{funded?t('wallet.panel.review'):t('wallet.panel.noBalance')}</Button>
     <Notice>{BigInt(usdt.gasBalance)===0n?t('wallet.usdt.needsGas'):t('wallet.usdt.approve')}</Notice>
    </div>}
    {review&&<PaymentReview key={review.id} review={review} wallet={wallet} onClose={()=>setReview(null)}/>}
@@ -73,7 +74,7 @@ export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPla
    {pending&&<Block>
     <input aria-label={t('wallet.usdt.rpcInput')} className={`${input} font-mono text-xs`} value={provider} onChange={e=>setProvider(e.target.value)} spellCheck={false}/>
     <input aria-label={t('wallet.usdt.tokenContract')} placeholder={t('wallet.usdt.tokenContractPlaceholder')} className={`${input} font-mono text-xs`} value={token} onChange={e=>setToken(e.target.value.trim())} spellCheck={false}/>
-    <ButtonGroup><Button variant="primary" disabled={busy||!token} onClick={()=>void run(async()=>{await use(pending,{provider,token});setPending(null);})}>{t('wallet.usdt.switchNetwork')}</Button><Button onClick={()=>setPending(null)}>{t('common.cancel')}</Button></ButtonGroup>
+    <ButtonGroup><Button variant="primary" disabled={busy||!token} loading={running==='switch'} onClick={()=>void run(async()=>{await use(pending,{provider,token});setPending(null);},'switch')}>{t('wallet.usdt.switchNetwork')}</Button><Button onClick={()=>setPending(null)}>{t('common.cancel')}</Button></ButtonGroup>
    </Block>}
    {ready&&<><Row label={t('wallet.usdt.rpcProvider')} hint={<><Truncate className="font-mono">{usdt.provider??''}</Truncate>{t('wallet.usdt.seesAddress')}</>}/>
    <Row label={t('wallet.usdt.token')} hint={<><Truncate className="font-mono">{usdt.token??''}</Truncate>{t(usdt.chainId===1?'wallet.usdt.decimalsFreeze':'wallet.usdt.decimals',{count:String(usdt.decimals)})}</>}/>
