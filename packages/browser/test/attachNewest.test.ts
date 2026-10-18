@@ -7,7 +7,7 @@ import type { StoredMessage } from "../src/shared/types";
 /**
  * A client that attaches with `newest` gets each chat's newest page, not its whole history: the extension's pages get
  * what the peer sends as JSON, and 50 chats of 2,000 messages were about 20 MiB per page opened. It asks for a chat's
- * whole history when it needs one (`history`), and gets it in order with what changes in that chat.
+ * whole history when it needs one (`EngineServer.history`), and gets it in order with what changes in that chat.
  */
 type Events = { onMessages(linkId: string, messages: StoredMessage[]): void; onMessageChanges?(linkId: string, changes: MessageChanges): void };
 const CHATS = 50, LONG = 2_000;
@@ -86,7 +86,7 @@ describe("a client that attaches with each chat's newest page", () => {
     fake.stored.set("chat", history("chat", 121));
     let open!: () => void;
     fake.gate = new Promise<void>((resolve) => (open = resolve));
-    void server.handle(page, { kind: "history", linkId: "chat" });
+    void server.history(page, "chat");
     await flush();
     events.onMessageChanges!("chat", { messages: [row("chat", 121)], deleted: [] });
     open();
@@ -118,7 +118,7 @@ describe("a client that attaches with each chat's newest page", () => {
     await flush();
     server.detach(page);
     fake.reads = [];
-    await server.handle(page, { kind: "history", linkId: "chat" });
+    await server.history(page, "chat");
     await flush();
     expect(fake.reads).toEqual([]);
     expect(page.history()).toHaveLength(1);

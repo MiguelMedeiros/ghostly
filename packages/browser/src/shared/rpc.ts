@@ -576,8 +576,9 @@ export interface RpcRequest<M extends EngineMethod = EngineMethod> {
 }
 
 /**
- * A client asks for a chat's or group's whole history: the server sends it to that client alone as a `messages` event,
- * in order with what changes in it. Not an engine call: nothing answers it but that event.
+ * A client asks for a chat's or group's whole history: the host hands it to `EngineServer.history`, which sends it to
+ * that client alone as a `messages` event, in order with what changes in it. Not an engine call: nothing answers it but
+ * that event.
  */
 export interface HistoryRequest {
   kind: "history";

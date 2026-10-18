@@ -1,6 +1,6 @@
 import { parseCallSignal } from "@ghostly/core";
 import type { MessageChanges } from "../shared/messageChanges";
-import type { ClientMessage, EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
+import type { EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
 import type { StoredMessage } from "../shared/types";
 import { errorLine, profileOpenFailure } from "../shared/idb";
 import type { PeerServer, PeerStopOptions } from "../devices/linkOnly";
@@ -130,8 +130,7 @@ export class EngineServer implements PeerServer {
     if (this.onCall.delete(client)) this.node.setCallOn({ on: this.onCall.size > 0 });
   }
 
-  async handle(client: EngineClientSink, request: ClientMessage): Promise<void> {
-    if (request?.kind === "history") return this.sendWhole(client, request.linkId);
+  async handle(client: EngineClientSink, request: RpcRequest): Promise<void> {
     if (request?.kind !== "request") return;
     const response: RpcResponse = { kind: "response", id: request.id };
     // This app answered, declined or called in that chat: the contact's offer is not one to ring for any more.
@@ -183,8 +182,11 @@ export class EngineServer implements PeerServer {
     return { kind: "messages", linkId, messages: page.messages, ...(page.more ? { more: true as const } : {}) };
   }
 
-  /** A chat's or group's whole history, to this client alone, after what is still being sent for it (`HistoryRequest`). */
-  private async sendWhole(client: EngineClientSink, linkId: unknown): Promise<void> {
+  /**
+   * A chat's or group's whole history, to this client alone as a `messages` event, after what is still being sent for it
+   * (a `HistoryRequest`, which the host hands here): what changes while it is read follows it.
+   */
+  async history(client: EngineClientSink, linkId: unknown): Promise<void> {
     if (typeof linkId !== "string" || !this.clients.has(client)) return;
     try {
       await this.ready;
