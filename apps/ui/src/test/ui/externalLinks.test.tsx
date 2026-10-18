@@ -79,8 +79,11 @@ afterEach(() => setDesktop(false));
 
 describe("a new window is asked for only through externalLinkProps", () => {
   it("no file in apps/ui/src/ spells _blank but apps/ui/src/lib/externalLink.ts", () => {
+    // Parsing every file takes seconds on a loaded runner; only a file whose text has `_blank` can spell it.
     const offenders = sources(SRC)
-      .map((file) => ({ name: relative(join(SRC, ".."), file), lines: blanks(file, readFileSync(file, "utf8")) }))
+      .map((file) => ({ file, text: readFileSync(file, "utf8") }))
+      .filter(({ text }) => /_blank/i.test(text))
+      .map(({ file, text }) => ({ name: relative(join(SRC, ".."), file), lines: blanks(file, text) }))
       .filter(({ name, lines }) => name !== HOME && lines.length > 0)
       .map(({ name, lines }) => `${name}:${lines.join(",")} (use externalLinkProps from ${HOME})`);
     expect(offenders).toEqual([]);

@@ -36,7 +36,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 url = "2"
 cookie = "0.18"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
-tokio = { version = "1", features = ["rt", "sync", "time", "process", "io-util", "macros"] }
+# `signal`: a SIGTERM, SIGINT or SIGHUP quits the app as its window's close does (src/lib.rs `exit_on_signals`).
+tokio = { version = "1", features = ["rt", "sync", "time", "process", "io-util", "macros", "signal"] }
 tauri-plugin-notification = "2"
 # `png` writes a pasted picture out (clipboard.rs).
 png = "0.18"

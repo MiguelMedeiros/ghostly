@@ -49,6 +49,8 @@ function Screen({ files, open = true, audioFiles = [], where = FAMILY }: { files
         </NowPlayingChat.Provider>
       )}
       <Where />
+      {/* What comes after the bar, as the tab bar does on a phone. */}
+      <button type="button">Chats</button>
     </>
   );
 }
@@ -115,6 +117,22 @@ describe("a voice message playing as its chat goes", () => {
     expect(screen.getByTestId("now-playing-from")).toHaveTextContent(/^Ana Lima$/);
   });
 
+  it("in the Arabic app a Latin name, chat or file name starts at its start and is cut at its end", async () => {
+    // A <bdi> inside the truncating box took the box's (the page's) direction for the cut: "…elease Agent Number One".
+    const where: PlayingChat = { path: "/group/team", name: "Weekly release planning team" };
+    const file = song();
+    const view = renderApp(<Screen files={[]} audioFiles={[file]} where={where} />, { language: "ar" });
+    fireEvent.click(screen.getByTestId("audio-play"));
+    await flush();
+    view.rerender(<Screen files={[]} audioFiles={[file]} where={where} open={false} />);
+    for (const text of ["Ana", "Weekly release planning team", "Ghost Town.mp3"]) {
+      const shown = within(bar()!).getByText(text);
+      expect(shown).toHaveAttribute("dir", "auto");
+      expect(shown).toHaveClass("truncate");
+    }
+    expect(within(bar()!).getByTestId("now-playing-from")).toHaveTextContent("Ana · Weekly release planning team");
+  });
+
   it("the bar pauses and plays it, from the keyboard too, and says where it is in the app's language", async () => {
     const file = voiceFile();
     const view = renderApp(<Screen files={[file]} />, { route: "/group/family", language: "pt" });
@@ -161,6 +179,19 @@ describe("a voice message playing as its chat goes", () => {
     await flush();
     expect(audio.players).toHaveLength(2);
     expect(audio.players[1]!.currentTime).toBe(6);
+  });
+
+  it("closed from the keyboard, the focus goes on to what comes after the bar, not to the page's body", async () => {
+    const file = voiceFile();
+    const view = renderApp(<Screen files={[file]} />);
+    fireEvent.click(screen.getByTestId("voice-play"));
+    await flush();
+    view.rerender(<Screen files={[file]} open={false} />);
+
+    screen.getByRole("button", { name: "Stop and close" }).focus();
+    await view.user.keyboard("{Enter}");
+    expect(bar()).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Chats" }));
   });
 
   it("played to its end away from its chat: the bar goes, and it starts from the beginning next time", async () => {

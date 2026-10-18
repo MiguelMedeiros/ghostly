@@ -100,6 +100,15 @@ export class Outbox {
   private began = 0;
   /** The link closed and what was unconfirmed on it is not queued again yet: the next turn does it first. */
   private dropped = false;
+  /** Sends asked for (`transmit`) whose turn is not over, each counted from the moment its row began to be stored. */
+  private transmits = 0;
+  /**
+   * Rows of mine being stored by someone else (`storing`), and a count moved at each one's start and end: the last
+   * look at the chat that found nothing of mine to go that this outbox did not know of was at `seen`.
+   */
+  private writes = 0;
+  private stamp = 0;
+  private seen = -1;
   private stopped = false;
   private readonly resender: Resender;
   private readonly policy: ResendPolicy;
@@ -171,24 +180,63 @@ export class Outbox {
   /**
    * Sends one message. A new one goes after the ones written before it that still wait to go: those the chat can
    * carry go first, and if it then cannot carry this one (the DHT path took one of them), it waits its turn too.
-   * `manual`: the Retry button — it goes now, with a new window and a fresh count of attempts.
+   * `manual`: the Retry button — it goes now, with a new window and a fresh count of attempts. `storing`: its row's
+   * write, still on its way: the message counts as on its way from now, so a send asked for meanwhile reads the chat.
    */
-  transmit(id: string, { manual = false }: { manual?: boolean } = {}): Promise<void> {
-    return this.turn(async () => {
-      if (manual || this.stopped || this.busy.has(id) || this.receipts.has(id)) return this.transmitNow(id, { manual });
-      const messages = await this.store.read(), message = messages.find(m => m.id === id);
-      // Nothing before it waits (the usual case): it goes as it was read, with no second look at the store.
-      const before = message?.delivery === "sending" ? this.before(messages, message) : [];
-      if (!before.length) return this.transmitNow(id, {}, message);
-      const passed = await this.inOrder(before);
-      if (this.stopped) return;
-      if (this.sameLink && this.resender.ready({ ...message!, via: "datalink" })) {
-        await this.catchUp(passed);
-        if (this.sameLink) return this.transmitNow(id);
-      }
-      if (this.stopped) return;
-      await this.waitsItsTurn(message!);
+  transmit(id: string, { manual = false, storing }: { manual?: boolean; storing?: Promise<unknown> } = {}): Promise<void> {
+    this.transmits++;
+    const go = () => this.turn(async () => {
+      try { await this.transmitTurn(id, manual); } finally { this.transmits--; }
     });
+    return storing ? storing.then(go, error => { this.transmits--; throw error; }) : go();
+  }
+
+  /**
+   * A row of mine someone else stores that this outbox sends in its place (a file that waits for the live link): from
+   * the moment its write begins until a look at the chat has seen it, a new message reads the chat to find it.
+   */
+  storing<T>(write: Promise<T>): Promise<T> {
+    this.writes++;
+    this.stamp++;
+    return write.finally(() => { this.writes--; this.stamp++; });
+  }
+
+  /**
+   * Nothing written before a new message can still wait: nothing here is queued, waiting or awaiting a receipt, no
+   * other send is on its way, and no row stored by someone else since the last look at the chat that found nothing
+   * this outbox did not know of. Each text sent read and sorted the chat's whole history (220 ms at 10,000 messages
+   * on the CLI's store) to find what this says.
+   */
+  private get alone(): boolean {
+    return !this.waiting.size && !this.receipts.size && this.transmits === 1 && !this.writes && this.seen === this.stamp;
+  }
+
+  /** A row of mine still to go that this outbox holds nothing of: only a look at the chat finds it. */
+  private unknown(m: StoredMessage, id: string): boolean {
+    if (m.sender !== "me" || m.via === "hold" || m.id === id || this.busy.has(m.id) || this.receipts.has(m.id) || this.waiting.has(m.id)) return false;
+    return toGo(m) || this.file(m) || (m.delivery === "sending" && !!m.wireId);
+  }
+
+  private async transmitTurn(id: string, manual: boolean): Promise<void> {
+    if (manual || this.stopped || this.busy.has(id) || this.receipts.has(id)) return this.transmitNow(id, { manual });
+    // The usual case: the chat's history is not read.
+    if (this.alone) return this.transmitNow(id);
+    // A look that began with no write of someone else's on its way, and found nothing of mine this outbox does not
+    // know of: until the next such write, it says so for every send that comes alone.
+    const at = this.writes ? undefined : this.stamp;
+    const messages = await this.store.read(), message = messages.find(m => m.id === id);
+    if (at !== undefined && !messages.some(m => this.unknown(m, id))) this.seen = at;
+    // Nothing before it waits: it goes as it was read, with no second look at the store.
+    const before = message?.delivery === "sending" ? this.before(messages, message) : [];
+    if (!before.length) return this.transmitNow(id, {}, message);
+    const passed = await this.inOrder(before);
+    if (this.stopped) return;
+    if (this.sameLink && this.resender.ready({ ...message!, via: "datalink" })) {
+      await this.catchUp(passed);
+      if (this.sameLink) return this.transmitNow(id);
+    }
+    if (this.stopped) return;
+    await this.waitsItsTurn(message!);
   }
 
   /** The messages written before a new one that have not gone yet, oldest first. */
@@ -223,6 +271,8 @@ export class Outbox {
     if (!this.sameLink) { if (!this.stopped && !this.waiting.get(message.id)?.timer) this.schedule(message.id); return true; }
     await this.resender.sendFile!(message).catch(() => {});
     this.forget(message.id);
+    // Its row may wait still (its offer went on the DHT floor, or the link closed): the next new message reads the chat.
+    this.stamp++;
     return true;
   }
 
