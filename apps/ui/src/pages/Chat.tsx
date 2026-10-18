@@ -119,6 +119,14 @@ import { problemText, type Problem, problemLine } from "../lib/problemText";
 /** What a call captures from: the devices the profile chose, read when it asks. */
 const callDevicePreferences = () => ({ audio: preferredDevice("audioinput"), video: preferredDevice("videoinput") });
 
+/** Why a call did not start or could not use the microphone or camera (`useWebRTC`'s `mediaProblem`): its title and next step. */
+const MEDIA_PROBLEM_TEXT = {
+  denied: ["calls.mediaDenied", "calls.mediaDeniedNext"],
+  unavailable: ["calls.mediaUnavailable", "calls.mediaUnavailableNext"],
+  relay: ["calls.relayNoAnswer", "calls.relayNoAnswerNext"],
+  relayOnly: ["calls.relayOnlyOff", "calls.relayOnlyOffNext"],
+} as const;
+
 interface ChatProps {
   /** The stored session this chat is. `App` reads it off the address. */
   sessionId: string;
@@ -240,6 +248,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     media: platform?.callMedia?.(),
     // The profile's ICE servers (a TURN relay) serve calls too; a signal on the chat session carries every path.
     iceServers: engine.state?.settings.iceServers,
+    // "Hide my IP from contacts" (Settings → Network): through that TURN server only.
+    relayOnly: engine.state?.settings.relayOnly === true,
     maxCandidates: session?.profile === "paired-chat/1" ? PAIRED_CALL_CANDIDATES : undefined,
     // The microphone and camera this profile chose in Settings → Audio & video.
     devices: callDevicePreferences,
@@ -685,12 +695,13 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           {t("calls.noAnswer")}
         </div>
       )}
-      {/* A call could not use the microphone or camera (refused, or none there): it says why, and how to fix it. */}
+      {/* A call could not use the microphone or camera (refused, or none there), or "Hide my IP from contacts" kept it
+          from starting (the TURN server did not answer, or this app's calls cannot keep to it): it says why, and how to fix it. */}
       {webrtc.mediaProblem && (
         <div role="alert" data-testid="call-media-problem" data-problem={webrtc.mediaProblem}
           className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
-          <span className="block font-medium">{t(webrtc.mediaProblem === "denied" ? "calls.mediaDenied" : "calls.mediaUnavailable")}</span>
-          <span className="block text-text-secondary">{t(webrtc.mediaProblem === "denied" ? "calls.mediaDeniedNext" : "calls.mediaUnavailableNext")}</span>
+          <span className="block font-medium">{t(MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][0])}</span>
+          <span className="block text-text-secondary">{t(MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][1])}</span>
         </div>
       )}
       {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the

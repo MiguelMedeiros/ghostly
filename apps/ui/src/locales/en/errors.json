@@ -503,6 +503,12 @@
     "usdtReverted": "The transaction was reverted",
     "usdtRevertedNext": "No tokens were sent; the gas was spent."
   },
+  "relayOnly": {
+    "keepsTurn": "Hide my IP needs this TURN server",
+    "keepsTurnNext": "Turn it off first, then remove the server.",
+    "needsTurn": "Add a TURN server first",
+    "needsTurnNext": "Save one above, then turn this on."
+  },
   "relays": {
     "atLeastOne": "Enter at least one relay address",
     "notAddress": "Not a relay address: {{address}}",

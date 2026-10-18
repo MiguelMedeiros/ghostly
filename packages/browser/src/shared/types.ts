@@ -1258,6 +1258,13 @@ export interface Settings {
   /** Extra ICE servers (typically TURN) on top of the built-in STUN set. */
   iceServers: IceServerSetting[];
   /**
+   * "Hide my IP from contacts" (WISP 100 § Relay only): every WebRTC connection to a contact (calls, chat links,
+   * group edges) goes through the TURN server in `iceServers` alone, with no STUN server, and this app's own direct
+   * Iroh and HyperDHT endpoints are not offered (a HyperDHT relay is, where one is set). On only with a TURN server
+   * (`relayOnlyProblem`). Absent means off.
+   */
+  relayOnly?: boolean;
+  /**
    * The Iroh relays a browser build homes on (WISP 102, relay only): a page cannot send UDP, so every Iroh
    * packet goes through one. Absent or empty means the defaults (n0's public relays, as the desktop app's).
    */

@@ -503,6 +503,12 @@
     "usdtReverted": "トランザクションはリバートされました",
     "usdtRevertedNext": "トークンは送られていません。ガスは消費されました。"
   },
+  "relayOnly": {
+    "keepsTurn": "IPを隠す設定にはこのTURNサーバーが必要です",
+    "keepsTurnNext": "先にオフにしてから、サーバーを削除してください。",
+    "needsTurn": "先にTURNサーバーを追加してください",
+    "needsTurnNext": "上で保存してから、これをオンにしてください。"
+  },
   "relays": {
     "atLeastOne": "リレーのアドレスを 1 つ以上入力してください",
     "notAddress": "リレーのアドレスではありません：{{address}}",

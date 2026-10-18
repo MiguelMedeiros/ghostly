@@ -25,6 +25,40 @@ async function keepOffline(peer: Peer): Promise<void> {
   await peer.context.route(/^https?:\/\/relay\.example\.org\//, (route) => route.abort());
 }
 
+test("Hide my IP from contacts needs a TURN server, is kept across a reload, and keeps its server while on", { tag: ["@feature:settings.network.relay-only", "@feature:settings.network.turn"] }, async ({ peer }) => {
+  const { page } = await peer("alice");
+  await page.goto("/#/settings/network");
+  const form = network(page);
+  const relayOnly = page.getByTestId("network-relay-only");
+  await expect(relayOnly).toHaveAttribute("aria-checked", "false");
+
+  // Without a TURN server it stays off, and says what to do first.
+  await relayOnly.click();
+  await expect(page.getByTestId("network-error")).toHaveText("Add a TURN server first. Save one above, then turn this on.");
+  await expect(relayOnly).toHaveAttribute("aria-checked", "false");
+
+  await form.turnUrl.fill("turn:turn.example.org:3478");
+  await form.turnUser.fill("ghost");
+  await form.turnCredential.fill("s3cret-boo");
+  await save(page);
+  await relayOnly.click();
+  await expect(relayOnly).toHaveAttribute("aria-checked", "true");
+  await page.reload();
+  await expect(relayOnly).toHaveAttribute("aria-checked", "true");
+
+  // The server it goes through is not taken away while it is on.
+  await form.turnUrl.fill("");
+  await form.save.click();
+  await expect(page.getByTestId("network-error")).toHaveText("Hide my IP needs this TURN server. Turn it off first, then remove the server.");
+  await page.reload();
+  await expect(form.turnUrl).toHaveValue("turn:turn.example.org:3478");
+
+  await relayOnly.click();
+  await expect(relayOnly).toHaveAttribute("aria-checked", "false");
+  await page.reload();
+  await expect(relayOnly).toHaveAttribute("aria-checked", "false");
+});
+
 test("a TURN server is kept across a reload, and removed by clearing its address", { tag: ["@feature:settings.network.turn", "@feature:settings.network.relays"] }, async ({ peer }) => {
   const { page } = await peer("alice");
   await page.goto("/#/settings/network");

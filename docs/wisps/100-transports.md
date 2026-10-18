@@ -149,6 +149,17 @@ A transport is **relayed** on a chat when either side's descriptor says it reach
 
 The same flag serves a browser's HyperDHT, which goes through a HyperDHT relay ([103](103-hyperdht.md#browser-profile-through-a-hyperdht-relay-revision-03)). The chat's timeline marks a move onto a relayed transport as such, not as a direct path found.
 
+### Relay only (revision 2026-10-18)
+
+A profile may keep every path to its contacts on relays, so no contact learns its IP address: **Hide my IP from contacts** in Settings, Network (`relayOnly`). It is a local choice; nothing on the wire changes, and a contact sees only relay addresses.
+
+1. **Needs a TURN server.** It turns on only while the profile has a TURN server with its username and credential ([101](101-webrtc.md#relay-only)), and that server is not removed while it is on.
+2. **WebRTC on the relay.** Every WebRTC connection to a contact (a chat's data link, a group's edge, a call, [601](601-webrtc-media.md)) uses the profile's TURN servers alone, with no STUN server, under the relay policy (`iceTransportPolicy: "relay"`), and its signals carry relay candidates only, without a related address.
+3. **Native transports.** The app's own direct endpoints are not offered: the Desktop's Iroh (its descriptor lists direct addresses) and its HyperDHT (direct). HyperDHT goes through the HyperDHT relay instead where one is set, with a `relayed: true` descriptor, as in a browser; a browser's Iroh is relay only already. A profile's own devices are not contacts: their links keep their transports.
+4. **Fail closed.** A TURN server that does not answer leaves the connection without a candidate: a call fails, saying the relay did not answer, and a chat goes on over the DHT floor. Nothing falls back to a direct path. Call media that cannot keep to the relay policy (the Linux Desktop's own call engine) places and answers no call while it is on.
+5. **Turned on or off** while online, every chat and edge starts over, without a goodbye, so no session opened before keeps a direct path.
+6. **Not covered yet.** The Desktop reads the DHT directly (Pkarr, [01](01-ghost-core.md)), which DHT nodes see, not contacts; public profiles a reader loads are fetched from the hosts that serve them.
+
 ### DHT only as a choice
 
 The per-chat Connection menu lists **DHT only** beside Automatic and the transports both apps support ([400](400-chat.md#pairing-progress-and-transport-rows)). Choosing it closes layer 1 and releases native endpoints for that chat, exactly as today's DHT-only mode does. It travels as the envelope's `mode` ([403](403-dht-text.md)), not as a `paired-policy` intent, because it must reach a contact that has no layer-1 session.

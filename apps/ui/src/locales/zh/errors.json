@@ -503,6 +503,12 @@
     "usdtReverted": "交易已回滚",
     "usdtRevertedNext": "没有发送代币；gas 已花费。"
   },
+  "relayOnly": {
+    "keepsTurn": "隐藏 IP 需要这个 TURN 服务器",
+    "keepsTurnNext": "请先关闭它，再移除服务器。",
+    "needsTurn": "请先添加 TURN 服务器",
+    "needsTurnNext": "在上方保存一个，然后再开启。"
+  },
   "relays": {
     "atLeastOne": "请至少输入一个中继地址",
     "notAddress": "这不是中继地址：{{address}}",

@@ -552,12 +552,13 @@ export const servicesPlatform: ServicesPlatform | null = {
       ...(state.transport.iroh ? { iroh: { relays: state.settings.irohRelays ?? [], defaultRelays: state.transport.iroh.defaults } } : {}),
       hyperdhtRelay: state.settings.hyperdhtRelay ?? DEFAULT_HYPERDHT_RELAY,
       pushRelay: state.settings.pushRelay ?? "",
+      relayOnly: state.settings.relayOnly === true,
       ...(state.transport.direct ? { readRelays: state.settings.readRelays === true } : {}),
       ...(state.transport.directBlocked ? { directBlocked: true } : {}),
       ...(state.transport.clockOffMs !== undefined ? { clockOffMs: state.transport.clockOffMs } : {}),
     };
   },
-  setNetwork: ({ relays, turn, irohRelays, hyperdhtRelay, readRelays, pushRelay }) =>
+  setNetwork: ({ relays, turn, irohRelays, hyperdhtRelay, readRelays, pushRelay, relayOnly }) =>
     // `turn` left out leaves the TURN server as it is (a switch saved on its own, say).
-    engine.call("updateSettings", { settings: { relays, ...(turn !== undefined ? { iceServers: turn?.urls ? [turn] : [] } : {}), ...(irohRelays ? { irohRelays } : {}), ...(hyperdhtRelay !== undefined ? { hyperdhtRelay } : {}), ...(readRelays !== undefined ? { readRelays } : {}), ...(pushRelay !== undefined ? { pushRelay } : {}) } }),
+    engine.call("updateSettings", { settings: { relays, ...(turn !== undefined ? { iceServers: turn?.urls ? [turn] : [] } : {}), ...(irohRelays ? { irohRelays } : {}), ...(hyperdhtRelay !== undefined ? { hyperdhtRelay } : {}), ...(readRelays !== undefined ? { readRelays } : {}), ...(pushRelay !== undefined ? { pushRelay } : {}), ...(relayOnly !== undefined ? { relayOnly } : {}) } }),
 };
