@@ -4,7 +4,7 @@ import { PUBKY_RELAYS, pubkyHomeserver } from "@ghostly/browser/proofs/pubky";
 import { boundedIdentityFetch } from "@ghostly/browser/proofs/verify";
 import { isGood, type BadgeState } from "../identities/contactBadges";
 import { ProviderMark, StatusPill } from "../identities/ProviderMark";
-import { providerOf, shortSubject, useEngineState } from "../../lib/identities";
+import { providerOf, shortSubject, useEngineValue } from "../../lib/identities";
 import { EntityCardFrame, cardQuiet } from "./EntityCardFrame";
 import { identityStanding } from "./identityStanding";
 import { useT, type Translate } from "../../contexts/I18nContext";
@@ -42,9 +42,9 @@ type Lookup = { status: "idle" } | { status: "loading" } | { status: "ok"; facts
  * (did:key, did:jwk). Resolving shows what the identifier is; only a proof ties it to a person.
  */
 export function IdentityEntityCard({ provider, subject, peerPubKey }: { provider: "pubky" | "did"; subject: string; peerPubKey?: string }) {
-  const state = useEngineState();
+  // Its badge only: the engine sends its whole state anew on every change.
+  const standing = useEngineValue(state => identityStanding(state, provider, subject, peerPubKey));
   const t = useT();
-  const standing = identityStanding(state, provider, subject, peerPubKey);
   const { offline, where } = lookupOf(t, provider, subject);
   const [lookup, setLookup] = useState<Lookup>({ status: "idle" });
   const controller = useRef<AbortController | null>(null);

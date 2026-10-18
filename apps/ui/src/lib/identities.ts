@@ -12,8 +12,7 @@ import type { Language } from "./settings";
 import { formatAt } from "./time";
 import type { ChatSession } from "./types";
 import { english } from "./english";
-import { sameValue } from "./sameValue";
-import { useEngineState as usePlainEngineState } from "./engineState";
+import { useEngineState as usePlainEngineState, useEngineValue as usePlainEngineValue } from "./engineState";
 import type { Translate } from "../contexts/I18nContext";
 
 const subscribeProviders = (listener: () => void) => {
@@ -29,8 +28,6 @@ export const useEngineState = () => {
   return usePlainEngineState();
 };
 
-const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
-
 /**
  * What `select` reads of the engine's state, for what draws identities, drawn again only when that changes by content
  * (the engine sends its state anew on every change) or when the identity providers load. A chat list draws one per
@@ -38,12 +35,7 @@ const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
  */
 export function useEngineValue<T>(select: (state: typeof engine.state) => T): T {
   useSyncExternalStore(subscribeProviders, identityProvidersLoaded);
-  const last = useRef<T | undefined>(undefined);
-  return useSyncExternalStore(subscribeEngine, () => {
-    const now = select(engine.state);
-    if (!sameValue(now, last.current)) last.current = now;
-    return last.current as T;
-  });
+  return usePlainEngineValue(select);
 }
 
 const identityProvider = (id: string) => loadedIdentityProviders().find(p => p.id === id);

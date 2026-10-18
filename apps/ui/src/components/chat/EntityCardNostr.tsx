@@ -3,7 +3,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import type { NostrPointer } from "@ghostly/browser/nostr/social";
 import { shortNpub } from "@ghostly/browser/nostr/social";
 import type { NostrLookupResult } from "@ghostly/browser/nostr/types";
-import { useEngineState } from "../../lib/engineState";
+import { useEngineValue } from "../../lib/engineState";
 import { ago } from "../../lib/nostr";
 import { ProviderMark } from "../identities/ProviderMark";
 import { EntityCardFrame, cardQuiet } from "./EntityCardFrame";
@@ -24,9 +24,8 @@ const relayNames = (relays: readonly string[]) => relays.map(r => r.replace(/^ws
  * be anyone's. What comes back is what the key published about itself, shown as plain text.
  */
 export function NostrEntityCard({ code, pointer }: { code: string; pointer: NostrPointer }) {
-  const state = useEngineState();
+  const relays = useEngineValue(state => state?.nostr.settings.relays ?? []);
   const t = useT();
-  const relays = state?.nostr.settings.relays ?? [];
   const [result, setResult] = useState(() => loaded.get(keyOf(pointer)));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
