@@ -78,7 +78,7 @@ Only the running profile is online. What a contact sends to another profile of t
 
 ## Encrypted profile (proposal)
 
-Planned, not built: a design for the owner's review. Nothing below is implemented, and the rest of this document describes clients as they are. An encrypted profile is opt-in, per profile: Settings → Privacy & security → "Encrypt this profile". A profile that does not turn it on stays exactly as it is today.
+Being built, slice by slice (Slice manifest below). Slice 1, the profile key (`packages/browser/src/shared/profileKey.ts`), is in the code, but no client calls it yet: nothing below changes what a client stores or does, and the rest of this document describes clients as they are. An encrypted profile is opt-in, per profile: Settings → Privacy & security → "Encrypt this profile". A profile that does not turn it on stays exactly as it is today.
 
 ### What it protects, and what it does not
 
