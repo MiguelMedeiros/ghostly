@@ -163,7 +163,7 @@ describe("hooks", () => {
     try {
       const event = received("c1", "m1", "the plan for tonight");
       eventHandler({ types: [], print: false, write: () => {}, webhook: `http://127.0.0.1:${port(hook)}/hook` })(event);
-      await vi.waitFor(() => expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toMatch(`the webhook did not take event ${event.seq}`), { timeout: 8000 });
+      await vi.waitFor(() => expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toMatch(`answered 307: event ${event.seq} (message.received) passed, not taken`), { timeout: 8000 });
       expect(asked).toBeGreaterThan(0);
       expect(elsewhere).toEqual([]);
     } finally {
@@ -205,7 +205,7 @@ describe("hooks", () => {
       // Said once for the outage, and again when it is over; never "did not take".
       expect(said().match(/is not answering/g)).toHaveLength(1);
       expect(said()).toMatch(`answers again: event ${events[0].seq} taken`);
-      expect(said()).not.toMatch("did not take");
+      expect(said()).not.toMatch("passed, not taken");
     } finally {
       stderr.mockRestore();
       bridge.close();
@@ -224,7 +224,9 @@ describe("hooks", () => {
       handle(event);
       await handle.idle();
       expect(asked).toBe(3);
-      expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toMatch(`the webhook did not take event ${event.seq}`);
+      // The bridge, what it answered, and that the event will not come again: a wrong path or a missing token is seen.
+      expect(stderr.mock.calls.map(([text]) => String(text)).join("")).toMatch(
+        `ghostly: the webhook at http://127.0.0.1:${(bridge.address() as AddressInfo).port}/hook answered 400: event ${event.seq} (message.received) passed, not taken (a 4xx or a redirect is not tried again)\n`);
       expect(readFileSync(cursor, "utf8").trim()).toBe(String(event.seq));
     } finally {
       stderr.mockRestore();
