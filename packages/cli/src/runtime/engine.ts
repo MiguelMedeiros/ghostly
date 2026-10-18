@@ -304,7 +304,7 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   return {
     paths, server, store, webrtc, callsUnavailable, apps,
     close: () => (closing ??= (async () => {
-      await server.node.shutdown().catch(() => {});
+      await server.node.shutdown({ quitting: true }).catch(() => {});
       await mainline?.destroy().catch(() => {});
       await store.close();
     })()),

@@ -2217,24 +2217,26 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * Says goodbye on every live session (`paired-bye`): the contacts end theirs now and watch for this app to come back,
    * instead of noticing a minute later. Synchronous: an app closing may have no time for anything after it.
+   * `quitting`: the app quits (not a page that may be reloading), so a contact's call still ringing is declined too.
    */
-  depart(): void {
-    for (const live of this.links.values()) live.link?.depart();
+  depart(options: { quitting?: boolean } = {}): void {
+    for (const live of this.links.values()) live.link?.depart(options);
   }
 
   /**
    * Tells every peer we are leaving. Best effort: the browser may already be closing. `quiet`: says nothing to anyone
    * (no goodbye, no departure in the links' packets), as a device another device replaced must (WISP 06 § When a
-   * device finds itself superseded: "Nothing is said to contacts and nothing more is published").
+   * device finds itself superseded: "Nothing is said to contacts and nothing more is published"). `quitting`: the app
+   * itself quits (the Desktop app, a CLI daemon), not a web page that may be reloading (`depart`).
    */
-  async shutdown(options: { quiet?: boolean } = {}): Promise<void> {
+  async shutdown(options: { quiet?: boolean; quitting?: boolean } = {}): Promise<void> {
     const quiet = options.quiet === true || this.gatedOut;
     this.shuttingDown = true;
     this.stopBegan();
     if (this.limitedTimer) { clearTimeout(this.limitedTimer); this.limitedTimer = null; }
     this.appShelf?.stop();
     // First, before anything that waits: every live contact hears this app is going, and watches for it to come back.
-    if (!quiet) this.depart();
+    if (!quiet) this.depart({ quitting: options.quitting === true });
     // Then every link stops, its record too, still before anything that waits: the leave packet is the last thing a link
     // publishes. Stopped last, a daemon's link offered and published again 3 s after its goodbye, while the stop waited
     // for a native listener still starting (#1452).
