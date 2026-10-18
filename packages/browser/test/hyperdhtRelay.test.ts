@@ -218,6 +218,32 @@ it("refuses a malformed descriptor and oversized frames", async () => {
   dialled.channel.close();
 }, 60_000);
 
+it("reads a burst of tiny frames in time linear in its bytes, as the Desktop does", async () => {
+  const endpoint = await web();
+  const { default: DHT } = await import("hyperdht");
+  const bootstrap = relay.bootstrap.map(node => { const [host, port] = node.split(":"); return { host, port: Number(port) }; });
+  const dht = new DHT({ bootstrap, host: "127.0.0.1" });
+  try {
+    const frame = (text: string) => { const bytes = Buffer.from(text); const out = Buffer.alloc(4 + bytes.length); out.writeUInt32BE(bytes.length); bytes.copy(out, 4); return out; };
+    const accepted = incoming(endpoint);
+    const socket = dht.connect(Buffer.from((endpoint.descriptor as { publicKey: string }).publicKey, "hex"));
+    socket.on("error", () => {});
+    socket.write(frame("ghostly/paired-chat/1"));
+    const bound = await accepted;
+    const count = 80_000;
+    let heard = 0;
+    const all = new Promise<void>(resolve => { bound.channel.onMessage = () => { if (++heard === count) resolve(); }; });
+    const started = performance.now();
+    socket.write(Buffer.concat(Array.from({ length: count }, () => frame("x"))));
+    await all;
+    // 400 KB of 1-byte frames: copying the rest of the buffer per frame took seconds; the Desktop takes ~60 ms.
+    expect(performance.now() - started).toBeLessThan(1000);
+    socket.destroy();
+  } finally {
+    await dht.destroy();
+  }
+}, 60_000);
+
 it("fails to start, and so is not offered, when the relay cannot be reached", async () => {
   await expect(createRelayedHyperEndpoint(seed(), "ws://127.0.0.1:1")).rejects.toThrow(/relay/i);
   await expect(createRelayedHyperEndpoint(seed(), "ws://relay.example")).rejects.toThrow(/wss/);
