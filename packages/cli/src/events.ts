@@ -3,7 +3,7 @@ import type { AppFrameEvent } from "@ghostly/core";
 import type { EngineClientSink } from "@ghostly/browser/engine/server";
 import type { EngineEvent, RpcResponse } from "@ghostly/browser/shared/rpc";
 import type { EngineState, GroupView, LinkView, PinView, StoredMessage } from "@ghostly/browser/shared/types";
-import { chatJson, chatMessageJson, groupJson, groupMessageJson } from "./views";
+import { chatJson, chatMessageJson, groupJson, groupMessageJson, type MessageJson } from "./views";
 import { paymentJson } from "./wallets";
 
 /**
@@ -278,9 +278,10 @@ export class EventHub {
   /**
    * What was removed here leaves the journal too: the journal is written again without the events that name it (a
    * line that names it and cannot be read goes as well), and a journal set aside as unreadable, which cannot be sorted,
-   * is deleted. `ids`: what was removed (a message's id, a chat's or a group's); `gone`: whether an event is of it.
+   * is deleted. `ids`: what was removed (a message's id, a chat's or a group's); `gone`: whether an event is of it;
+   * `unquote`: an event that stays, written again without what it quotes of the removed (a reply's event), else none.
    */
-  private forget(ids: readonly string[], gone: (event: GhostlyEvent) => boolean): void {
+  private forget(ids: readonly string[], gone: (event: GhostlyEvent) => boolean, unquote: (event: GhostlyEvent) => GhostlyEvent | undefined = () => undefined): void {
     if (!ids.length) return;
     try {
       rmSync(this.journalPath + ".unreadable", { force: true });
@@ -296,12 +297,19 @@ export class EventHub {
       if (from === bytes.length) return;
       from = Math.max(start, bytes.lastIndexOf(10, from) + 1);
       const lines = bytes.toString("utf8", from).split("\n").filter(Boolean);
-      const kept = lines.filter((line) => {
-        if (few && !names(line)) return true;
+      let changed = false;
+      const kept = lines.flatMap((line) => {
+        if (few && !names(line)) return [line];
+        let event: GhostlyEvent;
         // A line that names one and cannot be read goes.
-        try { return !gone(JSON.parse(line) as GhostlyEvent); } catch { return !few && !names(line); }
+        try { event = JSON.parse(line) as GhostlyEvent; } catch { if (!few && !names(line)) return [line]; changed = true; return []; }
+        if (gone(event)) { changed = true; return []; }
+        const written = unquote(event);
+        if (!written) return [line];
+        changed = true;
+        return [JSON.stringify(written)];
       });
-      if (kept.length === lines.length) return;
+      if (!changed) return;
       const tail = kept.length ? kept.join("\n") + "\n" : "";
       writeFileSync(this.journalPath + ".tmp", Buffer.concat([bytes.subarray(start, from), Buffer.from(tail)]), { mode: 0o600 });
       renameSync(this.journalPath + ".tmp", this.journalPath);
@@ -587,11 +595,18 @@ export class EventHub {
     }
     if (changes.length) this.persist(chat, changes);
     // A message deleted here leaves the journal with its texts, its edits, its reactions, its presses and its files:
-    // its deletion stays. A group's history gone whole (left, forgotten) takes every message event of the group.
+    // its deletion stays. A group's history gone whole (left, forgotten) takes every message event of the group. A
+    // reply to it stays, its quote as history gives it ("Original message deleted"): no text of the original.
     const whole = !!group && !deleted && messages.length === 0 && gone.length > 0, goneIds = new Set(gone);
-    this.forget(whole ? [group] : gone, (event) => (group ? event.group === group : event.chat === chat) && !event.type.endsWith(".deleted") && (whole
+    const here = (event: GhostlyEvent) => (group ? event.group === group : event.chat === chat);
+    this.forget(whole ? [group] : gone, (event) => here(event) && !event.type.endsWith(".deleted") && (whole
       ? "message" in event || "messageId" in event || "replyId" in event
-      : goneIds.has(event.messageId as string) || goneIds.has((event.message as { id?: string } | undefined)?.id as string) || goneIds.has(event.replyId as string)));
+      : goneIds.has(event.messageId as string) || goneIds.has((event.message as { id?: string } | undefined)?.id as string) || goneIds.has(event.replyId as string)),
+    (event) => {
+      const message = event.message as MessageJson | undefined;
+      if (whole || !here(event) || !message?.replyTo || !goneIds.has(message.replyTo.id) || message.replyTo.deleted) return;
+      return { ...event, message: { ...message, replyTo: { ...message.replyTo, snippet: "", found: false, deleted: true } } };
+    });
     // After the message's own event: what waited for it goes now.
     for (const [fileId, messageId] of files) this.flushFile(fileId, messageId);
   }
