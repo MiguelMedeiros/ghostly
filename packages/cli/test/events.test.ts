@@ -377,6 +377,61 @@ describe("the event stream", () => {
     expect(h.emit("x", "x:1").seq).toBe(h.replay(0).at(-2)!.seq + 1);
   });
 
+  /**
+   * A deletion is synchronous work on the daemon's one thread: each read the whole journal as text and tried every id
+   * on every line (25 ms a message at 10,000 events, 12 s for 2,000 ids in one change), a contact's delete for everyone
+   * included. Counted here as the journal's bytes made into text, and as the time of one long change.
+   */
+  describe("what a deletion reads of the journal", () => {
+    const text = "x".repeat(300);
+    async function filled(journal: string, count: number) {
+      const { h } = await hub(journal);
+      h.baseline(state([link("c1")]), new Map());
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: Array.from({ length: count }, (_, i) => message("c1", `m${i}`, { text: `${text} ${i}` })), deleted: [] });
+      return { h, path: join(dir, journal) };
+    }
+    function decoded(work: () => void): number {
+      const toString = Buffer.prototype.toString;
+      let bytes = 0;
+      const spy = vi.spyOn(Buffer.prototype, "toString").mockImplementation(function (this: Buffer, ...args: unknown[]) {
+        const [, start = 0, end = this.length] = args as [string?, number?, number?];
+        bytes += Math.max(0, Math.min(end, this.length) - start);
+        return toString.apply(this, args as never);
+      });
+      try { work(); } finally { spy.mockRestore(); }
+      return bytes;
+    }
+
+    it("a recent message reads the journal from its events on; one the journal no longer names reads none as text", async () => {
+      const { h, path } = await filled("reads.jsonl", 2_000);
+      const size = statSync(path).size;
+      expect(decoded(() => h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m1999"] }))).toBeLessThan(size / 50);
+      expect(readFileSync(path, "utf8")).not.toContain(`${text} 1999"`);
+      expect(readFileSync(path, "utf8")).toContain(`${text} 1998"`);
+      // Known here, its events gone from the journal (trimmed, as a long one is): only its deletion's own line is read
+      // as text, and nothing is written but that line.
+      writeFileSync(path, readFileSync(path, "utf8").split("\n").filter((line) => !line.includes('"m5"')).join("\n"));
+      const before = readFileSync(path, "utf8");
+      expect(decoded(() => h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ["m5"] }))).toBeLessThan(200);
+      expect(readFileSync(path, "utf8").slice(before.length)).toMatch(/^\{[^\n]*"message\.deleted:c1:m5"[^\n]*\}\n$/);
+      // What the journal holds still holds: it replays, and goes on.
+      expect(h.replay(0).filter((e) => e.type === "message.received")).toHaveLength(1_998);
+      expect(h.replay(0).map((e) => e.id)).toContain("message.deleted:c1:m1999");
+      expect(h.emit("x", "x:2").seq).toBe(h.replay(0).at(-2)!.seq + 1);
+    });
+
+    it("a change that deletes thousands of messages reads each line once", async () => {
+      const { h, path } = await filled("many.jsonl", 5_000);
+      const ids = Array.from({ length: 4_000 }, (_, i) => `m${i}`);
+      const start = performance.now();
+      h.sink.post({ kind: "message-changes", linkId: "c1", messages: [], deleted: ids });
+      expect(performance.now() - start).toBeLessThan(1_500);
+      const left = h.replay(0).filter((e) => e.type === "message.received").map((e) => (e.message as { id: string }).id);
+      expect(left).toEqual(Array.from({ length: 1_000 }, (_, i) => `m${4_000 + i}`));
+      expect(readFileSync(path, "utf8")).not.toContain(`${text} 3999"`);
+    }, 60_000);
+  });
+
   it("a first run learns the history without reporting it; a later one reports what came meanwhile", async () => {
     const first = await hub("e.jsonl");
     first.h.baseline(state([link("c9")]), new Map([["c9", [message("c9", "a"), message("c9", "b")]]]));
