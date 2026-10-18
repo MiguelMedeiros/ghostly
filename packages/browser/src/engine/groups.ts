@@ -293,6 +293,8 @@ const MAX_PENDING_ENTRIES = 4;
 const ENTRY_TIMEOUT_MS = 3 * 60_000;
 /** A joiner refused (its app cannot follow the group) is not answered again for this long. */
 const REFUSED_FOR_MS = 10 * 60_000;
+/** Messages deleted for everyone a group remembers, so a copy that comes again stays gone: as many as a chat's deleted ids. */
+export const MAX_REMOVED_IDS = 500;
 /**
  * A joiner whose entry session timed out (the relays failing, its app closed a moment) is answered again after this,
  * doubling with each timeout in a row up to `REFUSED_FOR_MS`: a slow network is no refusal.
@@ -703,7 +705,7 @@ export class Groups {
     if (this.isCommunity(groupId)) return this.communities.sendEdit(groupId, edit);
     const session = this.sessions.get(groupId);
     if (!session) return "You are not in this group";
-    const result = await session.sendEdit(edit.id, { v: edit.e, ts: edit.ts, text: edit.m, mentions: edit.k, ...(edit.sc && { card: edit.sc }) }, to);
+    const result = await session.sendEdit(edit.id, { v: edit.e, ts: edit.ts, text: edit.m, mentions: edit.k, ...(edit.sc && { card: edit.sc }), ...(edit.rm && { remove: true }) }, to);
     return "error" in result ? result.error : null;
   }
   /** Resolves once the community frames received so far were handed to the engine (tests). */
@@ -1096,6 +1098,25 @@ export class Groups {
     const commit = frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-commit" ? (frame as { commit?: { e?: unknown } }).commit : undefined;
     return typeof commit?.e === "number" && commit.e <= removalEpoch(session.state.chain, key);
   }
+  /** A member's message its author deleted for everyone (WISP 400 § Delete for everyone): a copy that comes again is not kept. */
+  isRemoved(groupId: string, messageId: string): boolean {
+    return !!this.stored.get(groupId)?.removedIds?.includes(messageId);
+  }
+
+  /**
+   * Its author deleted a message for everyone: noted so (the newest `MAX_REMOVED_IDS`, also when the message is not here
+   * yet, so it is taken as gone when it comes), and its file goes from this device.
+   */
+  async removed(groupId: string, messageId: string): Promise<void> {
+    const group = this.stored.get(groupId);
+    if (!group) return;
+    if (!group.removedIds?.includes(messageId)) {
+      group.removedIds = [...(group.removedIds ?? []), messageId].slice(-MAX_REMOVED_IDS);
+      await this.store.putGroup(group);
+    }
+    await this.files?.forget(groupId, messageId);
+  }
+
   /** The connection of an edge opened. One kept to tell a removed member closes a while after, whatever its app says or does not say. */
   edgeOpen(groupId: string, peerKey: string): void {
     const group = this.stored.get(groupId), farewell = group?.farewells?.[peerKey];

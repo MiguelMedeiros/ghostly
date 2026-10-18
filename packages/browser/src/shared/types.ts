@@ -153,6 +153,11 @@ export interface StoredGroup {
    * started again still lets them in.
    */
   invited?: Record<string, number>;
+  /**
+   * Members' messages their authors deleted for everyone (WISP 400 § Delete for everyone), by id, the newest
+   * `MAX_REMOVED_IDS`: a copy that comes again (a catch-up, a member handing it on) is not stored again.
+   */
+  removedIds?: string[];
   /** On the admin's side: the group's link is on, with this entry key seed (`group-entry/1`). */
   entry?: { seedB64: string; createdAt: number };
   state?: GroupState;

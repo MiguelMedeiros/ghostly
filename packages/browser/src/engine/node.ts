@@ -186,7 +186,7 @@ import { forgetWallet, mainnetBalances, markBackedUp, observeBalances, putOff, t
 import { withoutFrame, type MessageChanges } from "../shared/messageChanges";
 import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOriginal } from "../shared/replies";
 import { buttonPress, buttonsState, messageButtons } from "../shared/buttons";
-import { canEdit, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
+import { canEdit, canRemove, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
 import { CardEditPacer, EditBuffer, EditQueue } from "./edits";
 import { ENGLISH_REMOVAL, removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
 import { mintAwaiting, walletAwaiting } from "./walletAwaiting";
@@ -1481,6 +1481,12 @@ export class GhostlyNode implements EngineImplementation {
       return membership && { ...membership, community: this.groups.isCommunityGroup(groupId), admin: !!this.groups.views().find(g => g.id === groupId)?.isAdmin };
     },
     send: (groupId, edit, to) => this.groups.sendEdit(groupId, edit, to),
+    remove: async (chat, id) => {
+      await this.groups.removed(chat.slice("group:".length), id);
+      await db.deleteMessage(chat, id);
+      await this.messagesChanged(chat, [id]);
+      this.emitState();
+    },
     edge: (groupId, member) => {
       const link = this.links.get(this.memberEdges(groupId).get(member) ?? "")?.link;
       return link?.supportsGroupVersion(1) ? link : undefined;
@@ -3416,6 +3422,13 @@ export class GhostlyNode implements EngineImplementation {
     if (!live?.stored.profile || live.stored.group) return false;
     const id = `peer_${edit.id}`;
     if (live.stored.deletedIds?.includes(id)) return true;
+    // The contact deleted its message for everyone (WISP 400 § Delete for everyone): forgotten as a delete here is, a
+    // file and its transfer included, and at once when it is not here yet, so it is taken as gone when it comes.
+    if (edit.rm) {
+      const message = await db.getMessage(linkId, id);
+      if (!message || canRemove(message)) await this.forgetMessage(linkId, id);
+      return true;
+    }
     const message = await db.getMessage(linkId, id);
     if (!message) { this.editBuffer.hold(linkId, edit); return false; }
     await this.applyPeerEdit(linkId, message, edit);
@@ -3803,6 +3816,15 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   deleteMessage({ linkId, messageId }: { linkId: string; messageId: string }): void {
+    void this.forgetMessage(linkId, messageId);
+  }
+
+  /**
+   * Forgets one message of a chat on this device, the bytes of its file and any transfer of it, and keeps its id so a
+   * copy that comes again is not stored: a delete here, or the contact's own removal (WISP 400 § Delete for everyone),
+   * also of a message not here yet.
+   */
+  private async forgetMessage(linkId: string, messageId: string): Promise<void> {
     const live = this.links.get(linkId);
     if (!live) return;
     live.stored = {
@@ -3812,36 +3834,34 @@ export class GhostlyNode implements EngineImplementation {
     void db.patchLink(linkId, { deletedIds: live.stored.deletedIds });
     void this.hold.forget(linkId, messageId).catch(() => {});
 
-    void (async () => {
-      const message = await db.getMessage(linkId, messageId);
-      // A request that never left (waiting for live) is withdrawn with its message: the next session must not send it.
-      if (message?.paymentId && message.delivery === "waiting") await this.desk.withdraw(message.paymentId).catch(() => {});
-      // A contact's receipt still waiting for its money is dropped with its message: its request can take another.
-      if (message?.paymentId && message.sender === "peer") await this.desk.dropReceipt(message.paymentId).catch(() => {});
-      // A file whose offer went on the floor, deleted before it went live: the contact's bubble is told on the next session.
-      if (message?.sender === "me" && message.file && message.delivery === "waiting" && (message.fileOnFloor === "sent" || message.fileOnFloor === "seen")) {
-        const wireId = message.file.id.slice(`${linkId}-out-`.length);
-        void live.link?.settleDht(dhtFileId(wireId)).catch(() => {});
-        live.stored = { ...live.stored, withdrawnFiles: [...(live.stored.withdrawnFiles ?? []).filter(id => id !== wireId), wireId].slice(-64) };
-        await db.patchLink(linkId, { withdrawnFiles: live.stored.withdrawnFiles });
+    const message = await db.getMessage(linkId, messageId);
+    // A request that never left (waiting for live) is withdrawn with its message: the next session must not send it.
+    if (message?.paymentId && message.delivery === "waiting") await this.desk.withdraw(message.paymentId).catch(() => {});
+    // A contact's receipt still waiting for its money is dropped with its message: its request can take another.
+    if (message?.paymentId && message.sender === "peer") await this.desk.dropReceipt(message.paymentId).catch(() => {});
+    // A file whose offer went on the floor, deleted before it went live: the contact's bubble is told on the next session.
+    if (message?.sender === "me" && message.file && message.delivery === "waiting" && (message.fileOnFloor === "sent" || message.fileOnFloor === "seen")) {
+      const wireId = message.file.id.slice(`${linkId}-out-`.length);
+      void live.link?.settleDht(dhtFileId(wireId)).catch(() => {});
+      live.stored = { ...live.stored, withdrawnFiles: [...(live.stored.withdrawnFiles ?? []).filter(id => id !== wireId), wireId].slice(-64) };
+      await db.patchLink(linkId, { withdrawnFiles: live.stored.withdrawnFiles });
+    }
+    if (message?.file) {
+      const stored = await fileStore.get(message.file.id);
+      // Only what the peer sent counts against the room it has here.
+      // (A file only said on the DHT floor brought no byte, and counted none.)
+      if (stored && !stored.wire3 && !stored.announced && (stored.direction === "in" || (!stored.direction && message.sender === "peer"))) {
+        live.files.receivedBytes = Math.max(0, live.files.receivedBytes - storedSize(stored));
       }
-      if (message?.file) {
-        const stored = await fileStore.get(message.file.id);
-        // Only what the peer sent counts against the room it has here.
-        // (A file only said on the DHT floor brought no byte, and counted none.)
-        if (stored && !stored.wire3 && !stored.announced && (stored.direction === "in" || (!stored.direction && message.sender === "peer"))) {
-          live.files.receivedBytes = Math.max(0, live.files.receivedBytes - storedSize(stored));
-        }
-        // A files/3 transfer still going ends on both sides.
-        this.fileDesk.forget(linkId, message.file.id);
-        await removeStored(message.file.id);
-        this.transfers.delete(message.file.id);
-      }
-      await db.deleteMessage(linkId, messageId);
-      live.lastMessageAt = (await db.getMessagePage(linkId, { limit: 1 })).messages[0]?.timestamp ?? 0;
-      await this.messagesChanged(linkId, [messageId]);
-      this.emitState();
-    })();
+      // A files/3 transfer still going ends on both sides.
+      this.fileDesk.forget(linkId, message.file.id);
+      await removeStored(message.file.id);
+      this.transfers.delete(message.file.id);
+    }
+    await db.deleteMessage(linkId, messageId);
+    live.lastMessageAt = (await db.getMessagePage(linkId, { limit: 1 })).messages[0]?.timestamp ?? 0;
+    await this.messagesChanged(linkId, [messageId]);
+    this.emitState();
   }
 
   /** Local id of a file we send: the id on the wire is ours too, but lives in its own key space. */
@@ -8033,6 +8053,8 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(message.linkId);
     // The peer republishes what it sent for a few minutes: what was deleted here stays deleted.
     if (live?.stored.deletedIds?.includes(message.id)) return false;
+    // A member's message its author deleted for everyone, coming again with a catch-up or handed on: it stays gone.
+    if (message.linkId.startsWith("group:") && this.groups.isRemoved(message.linkId.slice("group:".length), message.id)) return false;
     // A reply's original, looked for in this chat only: one named from elsewhere is simply not found here.
     message = await this.resolveReply(message);
     // Its details begin here: the path a received message came over, or the one a payment goes over right now.
