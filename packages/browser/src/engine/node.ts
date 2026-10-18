@@ -3334,10 +3334,20 @@ export class GhostlyNode implements EngineImplementation {
     return live?.stored.deliveryMode === "dht" || live?.link?.dhtDelivery?.peerMode === "dht";
   }
 
-  /** A status card a caller asks to send, by the sender's rule (WISP 405 · Status Cards), or why it cannot go. */
-  private static cardToSend(raw: unknown): StatusCard | string {
+  /**
+   * A status card a caller asks to send, by the sender's rule (WISP 405 · Status Cards), or why it cannot go. A removal
+   * is only ever an edit of the card's own message (WISP 405 § Removing a card), never a message of its own.
+   */
+  private static cardToSend(raw: unknown, edit = false): StatusCard | string {
     const checked = checkStatusCard(raw);
-    return "error" in checked ? `Status card: ${checked.error}` : checked.card;
+    if ("error" in checked) return `Status card: ${checked.error}`;
+    if (checked.card.kind === "removed" && !edit) return "Status card: a removal is an edit of the card's message";
+    return checked.card;
+  }
+
+  /** Whether a removal (WISP 405 § Removing a card) takes back the card this message of mine carries: its kind and id. */
+  private static removes(card: StatusCard, message: StoredMessage | undefined): boolean {
+    return card.kind !== "removed" || (message?.sender === "me" && message.card?.kind === card.of && message.card.id === card.id);
   }
 
   /**
@@ -3358,11 +3368,13 @@ export class GhostlyNode implements EngineImplementation {
     const { linkId } = params;
     const refuse = (error: string) => ({ error, refused: true });
     // A card's update (WISP 405 · Status Cards): the whole new card, and its fallback text unless one is given.
-    const card = params.card === undefined ? undefined : GhostlyNode.cardToSend(params.card);
+    const card = params.card === undefined ? undefined : GhostlyNode.cardToSend(params.card, true);
     if (typeof card === "string") return refuse(card);
     if (card && !(typeof params.text === "string" && params.text.trim())) params = { ...params, text: statusCardText(card) };
+    const notRemoved = "Status card: a removal takes back a task or routine of yours with that id, on its own message";
     // A group's (WISP 902 § Edits): said to its members, with the mentions the new text keeps or adds.
     if (typeof linkId === "string" && linkId.startsWith("group:")) {
+      if (card && typeof params.messageId === "string" && !GhostlyNode.removes(card, await db.getMessage(linkId, params.messageId))) return refuse(notRemoved);
       const mentions = Array.isArray(params.mentions) ? params.mentions : [];
       return card ? this.groupEdits.edit(linkId.slice("group:".length), params.messageId, params.text, mentions, card) : this.groupEdits.edit(linkId.slice("group:".length), params.messageId, params.text, mentions);
     }
@@ -3373,6 +3385,7 @@ export class GhostlyNode implements EngineImplementation {
     if (typeof params.messageId !== "string" || typeof params.text !== "string") return refuse("No message to edit");
     const message = await db.getMessage(linkId, params.messageId) ?? (await db.getMessages(linkId)).find(m => m.sender === "me" && m.wireId === params.messageId);
     if (!message || !canEdit(message)) return refuse("Only your own text messages can be edited");
+    if (card && !GhostlyNode.removes(card, message)) return refuse(notRemoved);
     const text = params.text.trim();
     if (!text) return refuse("An edit cannot be empty. Delete the message instead.");
     if (isJoinNotice(text)) return refuse("An edit cannot read as a join notice.");
