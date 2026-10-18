@@ -201,6 +201,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "这张发票已过期：现在没有人能支付它。",
     "invoiceFor": "{{amount}} 的发票",
     "makePrimary": "设为主要",
     "mints": "铸币厂",
