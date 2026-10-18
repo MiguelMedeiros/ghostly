@@ -866,7 +866,7 @@ describe("with the apps flag on", () => {
     expect(within(row).getByText(BETA)).toHaveClass("shrink-0", "whitespace-nowrap");
     expect(within(row).getByText(LONG)).not.toContainElement(within(row).getByText(BETA));
     // Still the details button's description, as before.
-    expect(within(row).getByRole("button", { name: `${LONG}: details` })).toHaveAccessibleDescription(new RegExp(`^${BETA.replace(/\./g, "\\.")}`));
+    expect(within(row).getByRole("button", { name: `${LONG}: details` })).toHaveAccessibleDescription(new RegExp(`^${BETA.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   });
 });
 
