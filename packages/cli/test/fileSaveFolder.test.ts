@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -40,6 +40,15 @@ describe("file save to a folder", () => {
     expect(await callApi(ctx, "file.save", { file: "chat-one-in-r", dir: folder })).toMatchObject({ path: join(folder, "report.txt"), size: 6 });
     expect(readFileSync(join(folder, "report.txt"), "utf8")).toBe("report");
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: join(folder, "report.txt") })).rejects.toMatchObject({ code: "confirm" });
+  });
+
+  it("a folder that is not there, or is a file, is named alone: the received file is all here", async () => {
+    const missing = join(dir, "nofolder");
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", dir: missing })).rejects.toMatchObject({ code: "not_found", message: `No such file or folder: ${missing}` });
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", path: join(missing, "x.txt") })).rejects.toMatchObject({ code: "not_found", message: `No such file or folder: ${missing}` });
+    const file = join(dir, "plain.txt");
+    writeFileSync(file, "x");
+    await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", dir: file })).rejects.toMatchObject({ code: "not_found", message: `${file} is a file, not a folder` });
   });
 
   it("an empty --path or --dir is a usage error", () => {
