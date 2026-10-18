@@ -1,5 +1,5 @@
 import type { FoundUpdate } from "../../../apps/ui/src/lib/updates";
-import type { EngineEvent, RpcRequest, RpcResponse } from "./shared/rpc";
+import type { PostedEvent, RpcRequest } from "./shared/rpc";
 import type { OidcPlatform } from "./proofs/oidc/providers";
 import type { OidcWindow } from "./proofs/oidc/flow";
 import type { AtprotoHost } from "./proofs/atproto/oauth";
@@ -67,7 +67,7 @@ export interface BrowserHost {
    */
   restartEngine?(): Promise<void>;
   /** Reaches the peer. `onDisconnect` fires when it goes away; the client then connects again. */
-  connect(onMessage: (message: EngineEvent | RpcResponse) => void, onDisconnect: () => void): Promise<EngineConnection>;
+  connect(onMessage: (message: PostedEvent) => void, onDisconnect: () => void): Promise<EngineConnection>;
   /**
    * Asks the user for access to a local origin, where the platform has such a thing: `originPattern` is the
    * extension's host pattern (`http://localhost/*`), `origin` the exact address with its port (`http://localhost:3400`),

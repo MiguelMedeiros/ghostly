@@ -1,6 +1,6 @@
 import { getBrowserHost, type EngineConnection } from "../host";
 import type { AppFrameEvent } from "@ghostly/core";
-import type { AttentionEvent, EngineApi, EngineEvent, EngineMethod, RpcResponse } from "../shared/rpc";
+import type { AttentionEvent, EngineApi, EngineMethod, PostedEvent, PostedState } from "../shared/rpc";
 import type { EngineState, LinkView, StoredMessage } from "../shared/types";
 import { applyMessageChanges, type MessageChanges } from "../shared/messageChanges";
 import type { ProfileOpenFailure } from "../shared/idb";
@@ -152,7 +152,7 @@ class EngineClient {
     return this.connecting;
   }
 
-  private handle(message: EngineEvent | RpcResponse): void {
+  private handle(message: PostedEvent): void {
     switch (message.kind) {
       case "attention":
         for (const listener of this.attentionListeners) listener(message.event);
@@ -169,7 +169,7 @@ class EngineClient {
         // A peer that runs (the extension's, started again) takes the notice away.
         this.startFailure = null;
         this.deviceGate = null;
-        this.state = message.state;
+        this.state = keptState(message.state, this.state);
         for (const listener of this.stateListeners) listener();
         break;
       case "messages":
@@ -231,6 +231,13 @@ class EngineClient {
       for (const listener of this.messageListeners) listener(linkId, messages, changes);
     }
   }
+}
+
+/** A state the peer sent, whole: what it left out (`PostedState`) is what this page has from the state before. */
+function keptState(state: PostedState, before: EngineState | null): EngineState {
+  const payments = "payments" in state ? undefined : before?.payments, wallet = "wallet" in state ? undefined : before?.wallet;
+  if (!payments && !wallet) return state as EngineState;
+  return { ...state, ...(payments ? { payments } : {}), ...(wallet ? { wallet } : {}) } as EngineState;
 }
 
 export const engine = new EngineClient();

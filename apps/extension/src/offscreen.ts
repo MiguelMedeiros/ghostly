@@ -1,5 +1,6 @@
 import { GhostlyHttpError, fromBase64, toBase64 } from "@ghostly/core";
 import type { EngineServer, EngineClientSink } from "@ghostly/browser/engine/server";
+import { copyingSink } from "@ghostly/browser/engine/copyingSink";
 import { createPeerServer } from "@ghostly/browser/devices/peer";
 import type { PeerServer } from "@ghostly/browser/devices/linkOnly";
 import type { RpcRequest } from "@ghostly/browser/shared/rpc";
@@ -59,7 +60,8 @@ chrome.runtime.onConnect.addListener((port) => {
   }
   // TODO(apps, WISP 1200 § Per client, Extension): this port carries JSON, so the app calls that answer bytes (`appFile`,
   // `appPreview`'s `icon`) need another shape before the extension runs apps. The extension is out of phase 1.
-  const client: EngineClientSink = { post: (message) => port.postMessage(message) };
+  // Each message is copied on its way: a state carries the payments and the wallet only when they changed.
+  const client: EngineClientSink = copyingSink((message) => port.postMessage(message));
   // Listeners go on at once, so nothing a page sends while the peer waits for its lock is lost.
   withPeer((s) => s.attach(client));
   port.onDisconnect.addListener(() => withPeer((s) => s.detach(client)));
