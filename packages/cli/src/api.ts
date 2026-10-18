@@ -815,17 +815,50 @@ function editRefused(message: StoredMessage | undefined, ref: string, where: "ch
  * before `before`), so a long chat's is as quick as a short one's; with `after` the whole history is read and cut.
  */
 async function historyOf(ctx: ApiContext, chat: string, params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {
-  if (params.after !== undefined && params.after !== null) return history(await node(ctx).getMessages(chat), params, json);
+  if (params.after !== undefined && params.after !== null) {
+    const whole = await node(ctx).getMessages(chat), { messages, more } = history(whole, params);
+    const gone = await originalsGone(ctx, chat, messages, whole);
+    return { messages: messages.map((m) => quoteChecked(json(m), m, gone)), more };
+  }
   const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
   const before = params.before ?? undefined;
   if (before !== undefined && typeof before !== "number" && typeof before !== "string") throw new CliError("bad_request", "before must be a timestamp or a message id");
   const page = await node(ctx).messagePage({ linkId: chat, limit, before }).catch((error: unknown) => {
     throw error instanceof Error && error.message === `No message ${before}` ? new CliError("not_found", error.message) : error;
   });
-  return { messages: page.messages.map((m) => json(m)), more: page.more };
+  const gone = await originalsGone(ctx, chat, page.messages);
+  return { messages: page.messages.map((m) => quoteChecked(json(m), m, gone)), more: page.more };
 }
 
-function history(messages: StoredMessage[], params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {
+/** Past this many originals outside a page, its history is read once instead of row by row. */
+const ORIGINAL_READS = 32;
+
+/**
+ * The originals a page's replies found here when they came that are gone now: deleted on this device, or for everyone
+ * by their author (WISP 400 § Delete for everyone). Each is looked for in the page, else read as its one row, one at
+ * a time (a burst of reads stalls fake-indexeddb's scheduler); `whole` is the chat's whole history when it was read
+ * already. Before, such a reply still said `found`, with the original's text.
+ */
+async function originalsGone(ctx: ApiContext, chat: string, page: readonly StoredMessage[], whole: readonly StoredMessage[] = page): Promise<Set<string>> {
+  const here = new Set(whole.map((m) => m.id));
+  const asked = [...new Set(page.flatMap((m) => (m.replyTo?.messageId && !here.has(m.replyTo.messageId) ? [m.replyTo.messageId] : [])))];
+  // The whole history read: what is not in it is gone.
+  if (whole !== page) return new Set(asked);
+  // Many (a long page of answers to old messages): the history once is cheaper than a burst of row reads.
+  if (asked.length > ORIGINAL_READS) return originalsGone(ctx, chat, page, await node(ctx).getMessages(chat));
+  const gone = new Set<string>();
+  for (const id of asked) if (!(await node(ctx).getMessage(chat, id))) gone.add(id);
+  return gone;
+}
+
+/** A reply whose original is gone, as the apps show it ("Original message deleted"): not found, and none of its text. */
+function quoteChecked(json: MessageJson, message: StoredMessage, gone: ReadonlySet<string>): MessageJson {
+  const id = message.replyTo?.messageId;
+  if (!json.replyTo || !id || !gone.has(id)) return json;
+  return { ...json, replyTo: { ...json.replyTo, snippet: "", found: false, deleted: true } };
+}
+
+function history(messages: StoredMessage[], params: Params): { messages: StoredMessage[]; more: boolean } {
   const limit = num(params, "limit", 50, { min: 1, max: 10_000, whole: true });
   const before = params.before;
   const after = params.after;
@@ -844,7 +877,7 @@ function history(messages: StoredMessage[], params: Params, json: (message: Stor
   const list = sorted.filter((m, at) => bounds.every((within) => within(m, at)));
   const more = after !== undefined && after !== null ? list.length > limit : list.length > limit;
   const page = after !== undefined && after !== null ? list.slice(0, limit) : list.slice(-limit);
-  return { messages: page.map((m) => json(m)), more };
+  return { messages: page, more };
 }
 
 export { findChat, findGroup } from "./apiKit";

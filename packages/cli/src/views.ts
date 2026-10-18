@@ -120,7 +120,7 @@ export interface MessageJson {
    * The message this one answers (WISP 400 § Replies). `id`: the original's message id here when it is in this chat
    * (`found`), else the id the reply named. `from`: null when nothing says (only the id came, over the DHT).
    */
-  replyTo?: { id: string; snippet: string; from: "me" | "peer" | null; member?: string; found: boolean; button?: string };
+  replyTo?: { id: string; snippet: string; from: "me" | "peer" | null; member?: string; found: boolean; deleted?: true; button?: string };
   /** Reactions to it, one per person (WISP 400 § Reactions): `by` is `me`, `peer` or a member's key. */
   reactions?: { by: string; emoji: string; at: number }[];
   /** An edited text (WISP 400 § Edits): `text` is the latest version, `edits` its number, `editedAt` when it was made. */

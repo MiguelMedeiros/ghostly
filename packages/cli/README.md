@@ -315,7 +315,9 @@ chat (`chat list`, `chat show`, `chat rename`, …) and `engine getState` print 
   the journal, so `--since` does not replay them, and each carries the `seq` of the event before it), `events.gap` (the journal no longer holds what `--since` asked for).
 - A message that answers another carries `replyTo`: `{id, snippet, from, member?, found}`. `id` is the original's
   message id in this chat when it is here (`found: true`, and `snippet` and `from` come from that copy), else the id
-  the reply named; `from` is `me`, `peer` or null (only the id came, over the DHT). Answer one with
+  the reply named; `from` is `me`, `peer` or null (only the id came, over the DHT). An original that was here and is
+  gone (deleted on this device, or for everyone by its author) is `found: false, deleted: true`, with an empty
+  `snippet`, as the apps show "Original message deleted". Answer one with
   `ghostly send <chat> --reply <message id> "…"` (`group send` too): the id from history or from the event.
 - Reactions (WISP 400 § Reactions): `message.reaction` (a chat) and `group.reaction` (a group) say each change once:
   `{messageId, by, emoji, removed, mine}`, with `by` `me`, `peer` or a member key, `emoji` "" when taken back, `mine`
