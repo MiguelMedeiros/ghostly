@@ -201,7 +201,9 @@ export const FILE_METHODS: Record<string, Method> = {
       await removeStored(file.id).catch(() => {});
       throw new CliError("refused", error instanceof Error ? error.message : String(error));
     }
-    return { chat: link.id, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
+    // The message's id, as a group's file and `send` answer it: what `message delete`, `react`, `pin` and `--reply` take.
+    // The engine names a sent file's row after its time (node.ts `sendFile`), the one given here.
+    return { chat: link.id, messageId: `me_${timestamp}`, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
   },
 
   async "file.list"(ctx, params) {
