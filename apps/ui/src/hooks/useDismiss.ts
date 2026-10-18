@@ -80,7 +80,7 @@ export function useOutsideDismiss(ref: RefObject<HTMLElement | null>, open: bool
 const modals: RefObject<HTMLElement | null>[] = [];
 
 /** What Tab can reach inside `root`, in order: enabled, shown, not taken out with tabindex="-1". */
-function tabbables(root: HTMLElement): HTMLElement[] {
+export function tabbables(root: HTMLElement): HTMLElement[] {
   const all = root.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, summary, [tabindex], [contenteditable="true"]');
   return [...all].filter((el) => !(el as HTMLButtonElement).disabled && el.tabIndex >= 0 && !el.closest("[inert], [hidden]") && (el.checkVisibility?.() ?? true));
 }
