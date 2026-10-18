@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { act, fireEvent, screen, within } from "@testing-library/react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageBubble } from "../../components/MessageBubble";
 import { forgetPictureLinks } from "../../lib/pictureLink";
@@ -876,6 +877,31 @@ describe("MessageBubble: deleting", () => {
     await user.click(screen.getByRole("button", { name: "Delete message" }));
     expect(screen.getByTestId("message-delete-menu").parentElement).toBe(document.body);
     expect(container).not.toContainElement(screen.getByTestId("message-delete-menu"));
+  });
+
+  it("once a deleted row is gone, the focus goes to the next message's ⋮, or the one before it at the end, not to the page", async () => {
+    function List() {
+      const [ids, setIds] = useState(["a", "b", "c"]);
+      return <div data-message-list>{ids.map((id) => (
+        <MessageBubble key={id} message={message({ id, sender: "me", text: `text ${id}` })} onDelete={() => setIds((all) => all.filter((x) => x !== id))} />
+      ))}</div>;
+    }
+    const { user } = renderApp(<List />);
+    const options = (text: string) => within(screen.getByText(text).closest<HTMLElement>("[data-message-row]")!).getByTestId("message-options");
+    const remove = async (text: string) => {
+      options(text).focus();
+      await user.keyboard("{Enter}");
+      screen.getByTestId("message-delete").focus();
+      await user.keyboard("{Enter}");
+      screen.getByTestId("message-delete-confirm").focus();
+      await user.keyboard("{Enter}");
+      expect(screen.queryByText(text)).not.toBeInTheDocument();
+    };
+    await remove("text b");
+    expect(options("text c")).toHaveFocus();
+    // The last one: the one before it.
+    await remove("text c");
+    expect(options("text a")).toHaveFocus();
   });
 
   it("offers no delete where the chat cannot be edited", () => {

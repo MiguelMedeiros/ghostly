@@ -4,6 +4,7 @@ import { sameValue } from "../lib/sameValue";
 import { clockTime } from "../lib/time";
 import { useI18n } from "../contexts/I18nContext";
 import { FileBubble } from "./FileBubble";
+import { focusLost } from "../lib/focus";
 import { Menu, MenuItem } from "./Menu";
 import { MessageBoundary } from "./MessageBoundary";
 import { MessageDetailsPanel } from "./MessageDetailsPanel";
@@ -457,6 +458,15 @@ function CallEventIcon({ type, hasVideo }: { type: string; hasVideo?: boolean })
 /** The chat's scrolling list of messages: a message's menus stay inside it (see `Menu`'s `within`). */
 export const MESSAGE_LIST = "[data-message-list]";
 
+/** The ⋮ of the message after the one `from` is in, then of the one before it: where the focus goes once it is deleted. */
+function neighbourOptions(from: HTMLElement | null): HTMLElement[] {
+  const list = from?.closest(MESSAGE_LIST);
+  if (!from || !list) return [];
+  const options = [...list.querySelectorAll<HTMLElement>("[data-message-row] [data-testid=message-options]")];
+  const at = options.findIndex((el) => from.contains(el));
+  return at < 0 ? [] : [options[at + 1], options[at - 1]].filter((el): el is HTMLElement => !!el);
+}
+
 const downloadIcon = (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
@@ -598,6 +608,13 @@ function MessageMenu({ onDelete, onDeleteForEveryone, onDetails, onReply, onEdit
   const [confirm, setConfirm] = useState<"here" | "everyone" | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const side = align === "left" ? "end" : "start";
+  // A delete takes this row away with its ⋮, where the confirmation gives the focus back: once the row is gone, the
+  // focus goes to the ⋮ of the message now in its place (the one before it at the end), not to the page.
+  const after = useRef<HTMLElement[]>([]);
+  useEffect(() => () => {
+    const next = after.current;
+    if (next.length && focusLost()) next.find((el) => el.isConnected)?.focus({ preventScroll: true });
+  }, []);
   // A file still on its way stops on both sides when its message is deleted (the engine's deleteMessage): the contact
   // keeps no copy of it, so the hint says what happens instead.
   const { transfer } = useTransfer(download?.file.id);
@@ -682,6 +699,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, onDetails, onReply, onEdit
                 onClick={() => {
                   setConfirm(null);
                   playCue("deleted", { chat });
+                  after.current = neighbourOptions(ref.current);
                   confirmed();
                 }}
                 className="px-2 py-0.5 rounded border border-danger/30 bg-danger/20 text-danger-ink text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
