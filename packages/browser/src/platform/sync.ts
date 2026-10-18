@@ -22,7 +22,7 @@ import {
   wasDeleted,
 } from "../../../../apps/ui/src/lib/storage";
 import type { ChatMessage, ChatSession } from "../../../../apps/ui/src/lib/types";
-import type { EngineState, LinkView, StoredMessage } from "../shared/types";
+import type { EngineState, LinkView, ReactionNote, StoredMessage } from "../shared/types";
 import { engine, type ListChanges } from "./engine";
 import { replyRef } from "../shared/replies";
 
@@ -271,13 +271,19 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
 
 /**
  * The chat's latest reaction, for the chat list: its note, and its place, as a message would move it. Not a message,
- * so the unread count stays. Put on this session, not saved: whoever holds it saves it.
+ * so the unread count stays. Put on this session, not saved: whoever holds it saves it. A note that quotes a message
+ * deleted here is never kept: the engine's next one (the reaction before it that stands, or none) takes its place.
  */
 function noteReaction(session: ChatSession, link: LinkView): boolean {
   const note = link.lastReaction;
-  const shown = session.lastReaction;
+  const deleted = (n: ReactionNote | undefined) => !!n?.message && !!session.deletedIds?.includes(n.message);
+  const shown = deleted(session.lastReaction) ? undefined : session.lastReaction;
   // A newer reaction, or the same one whose message was edited since (its line quotes the text).
-  if (!note || note.at < (shown?.at ?? 0) || (note.at === shown?.at && note.snippet === shown.snippet)) return false;
+  if (!note || deleted(note) || note.at < (shown?.at ?? 0) || (note.at === shown?.at && note.snippet === shown.snippet)) {
+    if (shown === session.lastReaction) return false;
+    delete session.lastReaction;
+    return true;
+  }
   session.lastReaction = note;
   session.lastSyncAt = Math.max(session.lastSyncAt ?? 0, note.at);
   return true;

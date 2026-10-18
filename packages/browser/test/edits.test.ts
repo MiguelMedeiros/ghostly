@@ -211,6 +211,17 @@ describe("the contact's edits", () => {
     await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ emoji: "👍", snippet: "plan v2", at }));
   });
 
+  it("take the chat list's reaction line away with the message they delete for everyone", async () => {
+    const t = await setup();
+    expect(await t.contact.sendMessage("the door code is 4471", Date.now(), WIRE("R"))).toBeNull();
+    const original = await t.peerRow("the door code is 4471");
+    expect(await t.node.react({ linkId: t.id, messageId: original.id, emoji: "👍" })).toEqual({ error: null });
+    expect(t.view().lastReaction).toMatchObject({ snippet: "the door code is 4471" });
+    expect(await t.contact.sendEdit({ id: WIRE("R"), e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(async () => expect((await t.messages()).find(m => m.id === original.id)).toBeUndefined());
+    await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
+  });
+
   it("change its message, the highest number winning whatever order they come in; no sound, no move", async () => {
     const t = await setup();
     const at = Date.now() - 60_000;
@@ -646,4 +657,18 @@ describe("deleting many of my group messages for everyone", () => {
     expect(sent).toEqual(ids.slice(0, EDIT_SEND_LIMIT).map(id => ({ id, e: 1, ts: expect.any(Number), m: REMOVED_TEXT, rm: true })));
     expect(removals.filter(r => r.pending)).toHaveLength(ids.length - EDIT_SEND_LIMIT);
   }, 60_000);
+});
+
+describe("a delete here", () => {
+  it("takes the chat list's reaction line away with its message, back to the one before that still stands", async () => {
+    const t = await setup();
+    expect(await t.contact.sendMessage("first", Date.now(), WIRE("A"))).toBeNull();
+    expect(await t.contact.sendMessage("second", Date.now(), WIRE("B"))).toBeNull();
+    const first = await t.peerRow("first"), second = await t.peerRow("second");
+    expect(await t.node.react({ linkId: t.id, messageId: first.id, emoji: "👍" })).toEqual({ error: null });
+    expect(await t.node.react({ linkId: t.id, messageId: second.id, emoji: "❤️" })).toEqual({ error: null });
+    expect(t.view().lastReaction).toMatchObject({ emoji: "❤️", snippet: "second" });
+    t.node.deleteMessage({ linkId: t.id, messageId: second.id });
+    await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ emoji: "👍", snippet: "first" }));
+  });
 });

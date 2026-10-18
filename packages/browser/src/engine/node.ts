@@ -8032,12 +8032,22 @@ export class GhostlyNode implements EngineImplementation {
    * the whole history. A host that takes whole histories only (no `onMessageChanges`) gets the whole history, as before.
    */
   private async messagesChanged(linkId: string, ids: readonly string[]): Promise<void> {
-    // The chat list's reaction line quotes its message: an edit of that message changes the quote too.
+    // The chat list's reaction line quotes its message: an edit of that message changes the quote too, and a delete (here
+    // or for everyone) takes the line back to the reaction before it that still stands.
     const reacted = this.reactionNotes.get(linkId);
     if (reacted?.message && ids.includes(reacted.message)) {
       const row = await db.getMessage(linkId, reacted.message);
-      const fresh = row && noteAfterChange(reacted, row);
-      if (fresh) { this.reactionNotes.set(linkId, fresh); this.emitState(); }
+      if (!row) {
+        const before = await this.reactionNoteNow(linkId, reacted);
+        if (this.reactionNotes.get(linkId) === reacted) {
+          if (before) this.reactionNotes.set(linkId, before);
+          else this.reactionNotes.delete(linkId);
+          this.emitState();
+        }
+      } else {
+        const fresh = noteAfterChange(reacted, row);
+        if (fresh) { this.reactionNotes.set(linkId, fresh); this.emitState(); }
+      }
     }
     const onChanges = this.events.onMessageChanges;
     if (!onChanges) return this.events.onMessages(linkId, await this.getMessages(linkId));
