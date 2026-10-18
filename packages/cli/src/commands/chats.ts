@@ -127,6 +127,9 @@ export const commands: Record<string, Command> = {
     options: { ...routineOptions, wait: { type: "string", description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" }, timeout: groupWait.timeout },
     params: ({ options }, a) => ({ chat: a.chat, routine: a.routine, card: routineFields(options), run: runOf(options.run), text: options.text, force: options.force === true, wait: options.wait, timeout: options.timeout }),
   },
+  "saved add": { method: "saved.add", usage: "saved add <chat|group> <message>", summary: "Save a message on this device, to find it again in `saved list` (nothing is sent)", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
+  "saved list": { method: "saved.list", usage: "saved list", summary: "Saved messages of every chat and group, the last saved first" },
+  "saved remove": { method: "saved.remove", usage: "saved remove <chat|group> <message>", summary: "Unsave a message", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
   "task send": {
     method: "task.send", usage: "task send <chat|group> --title <title> [--status s] [--progress n | --steps a/b] [--step \"...\"] [--item state:text]... [--pr-url url --pr-number n --additions n --deletions n --files n --pr-state s --pr-checks c] [--branch b] [--tag label]... [--parent task] [--link url]... [--id id] [--json json|-|file] [--force] [--wait none|sent|delivered] [--timeout s]",
     summary: "Send a task card (a bot's work: status, progress, its PR) to a chat or group; prints its id and message",
