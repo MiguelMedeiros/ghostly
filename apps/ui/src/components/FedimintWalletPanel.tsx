@@ -12,6 +12,8 @@ import { formatAmount } from "../lib/amount";
 import { fillNodes } from "../lib/fillNodes";
 import { problemText } from "../lib/problemText";
 
+/** A Fedimint backup file is read whole into the page: anything larger is not one. */
+const MAX_BACKUP_FILE = 1024 * 1024;
 const short = (id: string) => `${id.slice(0, 8)}…${id.slice(-4)}`;
 /** A history row's kind, in the app's language (the engine's own word when it is a new one). */
 const kindOf = (t: Translate, kind: string) => {
@@ -94,6 +96,14 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
   }, [backupNow]);
   // Real money when the federation says Bitcoin or this is the Mainnet wallet (the engine's rule too).
   const real = current?.network === "bitcoin" || state.mode === "mainnet";
+  // A new pick takes the place of the file before it, read or not: Restore never uses a file the input no longer shows.
+  const pickBackup = (picker: HTMLInputElement) => {
+    const f = picker.files?.[0];
+    setFile(""); setFilePassword(""); setError("");
+    if (!f) return;
+    if (f.size > MAX_BACKUP_FILE) { setError(t("errors.profile.backupTooLarge")); return; }
+    f.text().then((text) => { if (picker.files?.[0] === f) setFile(text); }, () => setError(t("errors.files.unreadable")));
+  };
   const spend = (confirmedReal: boolean) => { const id = current!.id; void run(async () => { const notes = await wallet.fedimintSpendNotes(id, Number(amount), confirmedReal || undefined); setMade((all) => ({ ...all, [id]: notes })); }).finally(() => setConfirming(false)); };
 
   const join = <Section title={federations.length ? t("wallet.fedimint.joinAnother") : t("wallet.fedimint.join")}>
@@ -190,7 +200,7 @@ export function FedimintWalletPanel({ wallet, state, backupNow = false }: { wall
         <textarea aria-label={t("wallet.fedimint.invitesInput")} rows={2} spellCheck={false} placeholder={t("wallet.fedimint.invitesPlaceholder")} className={`${input} font-mono text-xs resize-none`} value={restoreInvites} onChange={(e) => setRestoreInvites(e.target.value)} />
         <Button variant="primary" disabled={busy || !phrase.trim() || !restoreInvites.trim()} onClick={() => void run(async () => { const r = await wallet.fedimintRestorePhrase(phrase, restoreInvites.split(/\s+/).filter(Boolean)); setPhrase(""); setRestoreInvites(""); setOpen("none"); if (r.failed.length) throw new Error(t("wallet.fedimint.restoreFailed", { count: r.joined, failed: r.failed.join("; ") })); })}>{t("wallet.fedimint.restorePhrase")}</Button>
         <label className="block text-xs text-text-muted">{t("wallet.fedimint.fileInput")}
-          <input type="file" accept="application/json,.json" className={`${input} mt-1`} onChange={(e) => { const f = e.target.files?.[0]; if (f && f.size <= 1024 * 1024) void f.text().then(setFile); }} />
+          <input type="file" accept="application/json,.json" className={`${input} mt-1`} onChange={(e) => pickBackup(e.target)} />
         </label>
         {file && <><input aria-label={t("wallet.fedimint.filePassword")} type="password" className={input} placeholder={t("wallet.fedimint.filePasswordPlaceholder")} value={filePassword} onChange={(e) => setFilePassword(e.target.value)} />
           <Button variant="primary" disabled={busy || !filePassword} onClick={() => void run(async () => { const r = await wallet.fedimintRestoreBackup(file, filePassword); setFile(""); setFilePassword(""); setOpen("none"); if (r.failed.length) throw new Error(t("wallet.fedimint.restoreFailed", { count: r.joined, failed: r.failed.join("; ") })); })}>{t("wallet.fedimint.restoreBackup")}</Button></>}
