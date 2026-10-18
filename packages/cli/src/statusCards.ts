@@ -282,6 +282,32 @@ async function updateCard(ctx: ApiContext, params: Params, kind: Kind): Promise<
 }
 
 /**
+ * `task remove` / `routine remove` (WISP 405 § Removing a card): every message of mine in the chat or group whose card
+ * is of this kind and id, deleted for everyone (a bot may have sent one card several times; the newest stands for it),
+ * or with `all` every card of this kind of mine there. Each goes from this device at once and from every member's as
+ * the message's last edit. An update of one still waiting for its time goes nowhere.
+ */
+async function removeCards(ctx: ApiContext, params: Params, kind: "task" | "routine"): Promise<Record<string, unknown>> {
+  const target = chatOrGroup(ctx, str(params, "chat", true));
+  const all = bool(params, "all"), id = str(params, kind);
+  if (all === !!id) throw new CliError("bad_request", `Name a ${kind} or --all: ghostly ${kind} remove <chat|group> <${kind}|--all>`);
+  const messages = target.group ? await node(ctx).groupMessages({ groupId: target.id }) : await node(ctx).getMessages(target.linkId);
+  const mine = messages.filter((m) => m.sender === "me" && m.card?.kind === kind && (all || m.card.id === id));
+  if (!mine.length && !all) throw new CliError("not_found", `No ${kind} ${JSON.stringify(id)} of yours in this ${target.group ? "group" : "chat"}`);
+  const cards = carriersOf(ctx), removed: string[] = [];
+  for (const message of mine) {
+    const pace = paces.get(ctx)?.get(`${target.linkId}\n${message.id}`);
+    // What waited to go would edit a message that is gone: it ends here, and whoever waits on it is let go.
+    if (pace) { pace.next = undefined; pace.flush?.(); }
+    const result = await node(ctx).removeMessage({ linkId: target.linkId, messageId: message.id });
+    if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error, { removed });
+    cards.delete(carrierKey(target.linkId, kind, message.card!.id));
+    removed.push(message.id);
+  }
+  return { [target.group ? "group" : "chat"]: target.id, ...(id && { [kind]: id }), [`${kind}s`]: [...new Set(mine.map((m) => m.card!.id))], removed };
+}
+
+/**
  * Sends now every update still waiting for its time: the daemon is stopping, and the update it answered `queued` for
  * (often a task's last one, done or failed) would otherwise go with it, leaving the card running for good. Called
  * while the engine can still store the edit; it goes to the contact as any edit does, now or once they are back.
@@ -359,6 +385,10 @@ export const STATUS_CARD_METHODS: Record<string, Method> = {
   "routine.send": (ctx, params) => sendCard(ctx, params, "routine"),
   /** A routine's update, as a task's; `run` records a run as its last and the newest of its recent ones. */
   "routine.update": (ctx, params) => updateCard(ctx, params, "routine"),
+  /** WISP 405 § Removing a card: a task of mine (every message of its id), or `all` of them, deleted for everyone. */
+  "task.remove": (ctx, params) => removeCards(ctx, params, "task"),
+  /** A routine of mine, or `all`, deleted for everyone, as a task. */
+  "routine.remove": (ctx, params) => removeCards(ctx, params, "routine"),
   /** WISP 405 § Usage: how much of a quota the bot has left, kept as one card per chat; `all` for every 1:1 chat. */
   "usage.send": sendUsage,
 };

@@ -108,6 +108,12 @@ export const commands: Record<string, Command> = {
     args: ["chat", "message", "emoji...?"], options: { remove: { type: "boolean", description: "Take your reaction back" } },
     params: ({ options }, a) => ({ chat: a.chat, message: a.message, emoji: a.emoji, remove: options.remove === true }),
   },
+  "routine remove": {
+    method: "routine.remove", usage: "routine remove <chat|group> [<routine>] [--all]",
+    summary: "Delete a routine card you sent for everyone: it goes from every member's device, app and CLI (--all: every routine card of yours there)",
+    args: ["chat", "routine...?"], options: { all: { type: "boolean", description: "Every routine card of yours in that chat or group" } },
+    params: ({ options }, a) => ({ chat: a.chat, routine: a.routine, all: options.all === true }),
+  },
   "routine send": {
     method: "routine.send", usage: "routine send <chat|group> --name <name> --schedule \"every day 01:00\" [--cron \"0 1 * * *\"] [--state active|paused] [--next <time>] [--run ok|failed|skipped[:summary]] [--link url]... [--id id] [--json json|-|file] [--force] [--wait none|sent|delivered] [--timeout s]",
     summary: "Send a routine card (something a bot runs on a schedule: its last run and the next) to a chat or group",
@@ -121,6 +127,12 @@ export const commands: Record<string, Command> = {
     args: ["chat", "routine"],
     options: { ...routineOptions, wait: { type: "string", description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" }, timeout: groupWait.timeout },
     params: ({ options }, a) => ({ chat: a.chat, routine: a.routine, card: routineFields(options), run: runOf(options.run), text: options.text, force: options.force === true, wait: options.wait, timeout: options.timeout }),
+  },
+  "task remove": {
+    method: "task.remove", usage: "task remove <chat|group> [<task>] [--all]",
+    summary: "Delete a task card you sent for everyone: it goes from every member's device, app and CLI (--all: every task card of yours there)",
+    args: ["chat", "task...?"], options: { all: { type: "boolean", description: "Every task card of yours in that chat or group" } },
+    params: ({ options }, a) => ({ chat: a.chat, task: a.task, all: options.all === true }),
   },
   "task send": {
     method: "task.send", usage: "task send <chat|group> --title <title> [--status s] [--progress n | --steps a/b] [--step \"...\"] [--item state:text]... [--pr-url url --pr-number n --additions n --deletions n --files n --pr-state s --pr-checks c] [--branch b] [--tag label]... [--parent task] [--link url]... [--id id] [--json json|-|file] [--force] [--wait none|sent|delivered] [--timeout s]",

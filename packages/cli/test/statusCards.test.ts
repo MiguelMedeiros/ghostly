@@ -42,6 +42,12 @@ function fake(mode: "daemon" | "one-shot" = "daemon") {
       return { error: null, messageId };
     }),
     groupTaken: vi.fn(() => 1),
+    removeMessage: vi.fn(async ({ linkId, messageId }: { linkId: string; messageId: string }) => {
+      const at = of(linkId).findIndex((m) => m.id === messageId);
+      if (at < 0) return { error: "Only your own messages can be deleted for everyone", refused: true };
+      of(linkId).splice(at, 1);
+      return { error: null };
+    }),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {}, lastSeq: 0, replay: () => [] }, mode, version: "test" } as unknown as ApiContext;
   return { ctx, node, rows: of, store };
@@ -319,6 +325,57 @@ describe("task update", () => {
     vi.useFakeTimers({ now: Date.now() + CARD_UPDATE_GAP_MS });
     expect(await callApi(ctx, "task.update", { chat: "g1", task: "t1", card: { progress: 60 } })).toMatchObject({ group: "g1", task: "t1", edits: 1 });
     expect(node.editMessage).toHaveBeenCalledWith(expect.objectContaining({ linkId: "group:g1", messageId: "me_1" }));
+  });
+});
+
+describe("task remove", () => {
+  it("deletes every message of mine with that task's card for everyone, in a chat or a group; nothing else", async () => {
+    const { ctx, node, rows } = fake();
+    const first = await callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "Old run", id: "relay" } }) as { messageId: string };
+    const again = await callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "New run", id: "relay" } }) as { messageId: string };
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "Another", id: "other" } });
+    await callApi(ctx, "routine.send", { chat: "Coordinator", card: { id: "relay", name: "Nightly", schedule: "every day 01:00", state: "active" } });
+    rows("chat-one").push({ linkId: "chat-one", id: "peer_x", text: "theirs", sender: "peer", timestamp: 1, via: "datalink", card: { kind: "task", id: "relay", title: "Theirs", status: "running" } as StatusCard });
+    expect(params("task remove", ["Coordinator", "relay"])).toEqual({ chat: "Coordinator", task: "relay", all: false });
+    expect(await callApi(ctx, "task.remove", { chat: "Coordinator", task: "relay" })).toEqual({ chat: "chat-one", task: "relay", tasks: ["relay"], removed: [first.messageId, again.messageId] });
+    expect(node.removeMessage).toHaveBeenCalledTimes(2);
+    expect(rows("chat-one").map((m) => m.card?.kind === "routine" ? "routine" : m.card?.id)).toEqual(["other", "routine", "relay"]);
+    // Gone: an update or a second removal finds nothing.
+    await expect(callApi(ctx, "task.update", { chat: "Coordinator", task: "relay", card: { progress: 50 } })).rejects.toMatchObject({ code: "not_found" });
+    await expect(callApi(ctx, "task.remove", { chat: "Coordinator", task: "relay" })).rejects.toMatchObject({ code: "not_found" });
+    // A group's, by its name.
+    const inGroup = await callApi(ctx, "task.send", { chat: "Sala de Máquinas", card: { title: "Group task", id: "g-task" } }) as { messageId: string };
+    expect(await callApi(ctx, "task.remove", { chat: "Sala de Máquinas", task: "g-task" })).toEqual({ group: "g1", task: "g-task", tasks: ["g-task"], removed: [inGroup.messageId] });
+    expect(node.removeMessage).toHaveBeenLastCalledWith({ linkId: "group:g1", messageId: inGroup.messageId });
+  });
+
+  it("--all takes every task card of mine there, and routine remove a routine's; a task or --all, not both or neither", async () => {
+    const { ctx, rows } = fake();
+    for (const id of ["a", "b"]) await callApi(ctx, "task.send", { chat: "Coordinator", card: { title: id, id } });
+    await callApi(ctx, "routine.send", { chat: "Coordinator", card: { id: "nightly", name: "Nightly", schedule: "every day 01:00", state: "active" } });
+    expect(params("task remove", ["Coordinator", "--all"])).toEqual({ chat: "Coordinator", task: undefined, all: true });
+    expect(await callApi(ctx, "task.remove", { chat: "Coordinator", all: true })).toMatchObject({ chat: "chat-one", tasks: ["a", "b"], removed: expect.any(Array) });
+    expect(rows("chat-one").map((m) => m.card?.kind)).toEqual(["routine"]);
+    // Nothing left: --all says so with an empty list, not an error.
+    expect(await callApi(ctx, "task.remove", { chat: "Coordinator", all: true })).toEqual({ chat: "chat-one", tasks: [], removed: [] });
+    expect(await callApi(ctx, "routine.remove", { chat: "Coordinator", routine: "nightly" })).toMatchObject({ routine: "nightly", removed: [expect.any(String)] });
+    expect(rows("chat-one")).toEqual([]);
+    await expect(callApi(ctx, "task.remove", { chat: "Coordinator" })).rejects.toMatchObject({ code: "bad_request" });
+    await expect(callApi(ctx, "task.remove", { chat: "Coordinator", task: "a", all: true })).rejects.toMatchObject({ code: "bad_request" });
+  });
+
+  it("an update of the card still waiting for its time goes nowhere once it is removed", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const { ctx, node } = fake();
+    await callApi(ctx, "task.send", { chat: "Coordinator", card: { title: "T", id: "t" } });
+    // Sooner than the gap after it was sent: it waits for its time.
+    expect(await callApi(ctx, "task.update", { chat: "Coordinator", task: "t", card: { progress: 20 } })).toMatchObject({ queued: true });
+    await callApi(ctx, "task.remove", { chat: "Coordinator", task: "t" });
+    await vi.advanceTimersByTimeAsync(CARD_UPDATE_GAP_MS * 2);
+    expect(node.editMessage).not.toHaveBeenCalled();
+    // Nothing is left to flush when the daemon stops.
+    await flushCardUpdates(ctx);
+    expect(node.editMessage).not.toHaveBeenCalled();
   });
 });
 

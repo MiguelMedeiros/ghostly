@@ -79,6 +79,7 @@ also named `ghostly`, so install it or the CLI's skill above under that name, no
 | `ghostly listen --turns --from <chat>` | one `agent.turn` event per message to answer, from the allowed chats and groups only; the contact's words under `untrusted` |
 | `ghostly typing <chat> --kind thinking --status "<text>" --for 600` | show "thinking" and what it is doing while it works; a send ends it (`group typing` in a private group) |
 | `ghostly task send` / `task update` | a task card: status, progress, the step it is on, how long it has run and its pull request, updated in place ([WISP 405 · Status Cards](wisps/405-status-cards.md)) |
+| `ghostly task remove <chat\|group> <task>` (or `--all`) | takes your task card off every member's device, app and CLI, for a card nobody needs to see any more; `cancelled` keeps one on screen ([WISP 405 § Removing a card](wisps/405-status-cards.md#removing-a-card)) |
 | `ghostly routine send` / `routine update` | a routine card for a scheduled job: its schedule, last run and next run |
 | `ghostly group create` / `group send` | take part in a group, with `@mentions` (`group send --mention <member>`) |
 | `ghostly file send` / `file send --voice` | send a file or a voice note |
