@@ -1,6 +1,6 @@
 import type { EngineServer, EngineClientSink } from "./engine/server";
 import { createPeerServer } from "./devices/peer";
-import type { PeerServer } from "./devices/linkOnly";
+import type { PeerServer, PeerStopOptions } from "./devices/linkOnly";
 import type { NodeOptions } from "./engine/node";
 import type { BrowserHost } from "./host";
 
@@ -16,7 +16,7 @@ export interface InPageHostOptions
   onServer?: (server: EngineServer) => void;
 }
 
-export function createInPageHost(options: InPageHostOptions): BrowserHost & { announceDeparture(): void } {
+export function createInPageHost(options: InPageHostOptions): BrowserHost & { announceDeparture(options?: PeerStopOptions): void } {
   // The device state is read first (WISP 06 § The gate): the engine, or device-link-only mode on a standby.
   let server: Promise<PeerServer> | null = null;
   let running: PeerServer | null = null;
@@ -55,9 +55,9 @@ export function createInPageHost(options: InPageHostOptions): BrowserHost & { an
       return { send: (request) => void active.handle(client, request) };
     },
 
-    /** Say goodbye to every peer when the page closes, if there is time. */
-    announceDeparture() {
-      void running?.stop().catch(() => {});
+    /** Say goodbye to every peer when the page closes, if there is time. `quitting`: the app exits, not only the page. */
+    announceDeparture(options?: PeerStopOptions) {
+      void running?.stop(options).catch(() => {});
     },
   };
 }

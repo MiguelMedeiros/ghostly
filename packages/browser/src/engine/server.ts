@@ -3,7 +3,7 @@ import type { MessageChanges } from "../shared/messageChanges";
 import type { EngineEvent, RpcRequest, RpcResponse } from "../shared/rpc";
 import type { StoredMessage } from "../shared/types";
 import { errorLine, profileOpenFailure } from "../shared/idb";
-import type { PeerServer } from "../devices/linkOnly";
+import type { PeerServer, PeerStopOptions } from "../devices/linkOnly";
 import { GhostlyNode, LIMITED_MODE_ERROR, LIMITED_MODE_METHODS, type NodeOptions } from "./node";
 
 /**
@@ -113,8 +113,8 @@ export class EngineServer implements PeerServer {
     });
   }
 
-  stop(): Promise<void> {
-    return this.node.shutdown();
+  stop(options: PeerStopOptions = {}): Promise<void> {
+    return this.node.shutdown({ quitting: options.quitting === true });
   }
 
   detach(client: EngineClientSink): void {

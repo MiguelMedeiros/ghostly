@@ -4459,16 +4459,18 @@ export class GhostLink {
   /**
    * This app is going away (it quits, the page closes): the contact hears it on the live session now, rather than when
    * its liveness gives up about a minute later, and watches for this app to come back. Older apps drop the frame (it
-   * carries no id). Synchronous, so it goes before anything else an app does on its way out.
+   * carries no id). Synchronous, so it goes before anything else an app does on its way out. `quitting`: the app itself
+   * quits (the Desktop app, a CLI daemon), not a web page that may be reloading: only then is a contact's call still
+   * ringing here declined.
    */
-  depart(): void {
+  depart(options: { quitting?: boolean } = {}): void {
     // Going: nothing is dialled or answered from now on, whatever the contact does in the moments left.
     this.leaving = true;
     if (!this.channel || this.paired?.state.status !== "ready") return;
     traceLink(this.myPubKeyZ32, "depart", {});
     // A call still on is hung up first: the goodbye ends the contact's session, so a hang-up after it never arrives,
     // and the contact's call went on until its media gave up (half a minute).
-    const hangUp = this.supportsCalls ? this.pairedCalls.hangUp() : null;
+    const hangUp = this.supportsCalls ? this.pairedCalls.hangUp({ declineRinging: options.quitting === true }) : null;
     if (hangUp) try { this.channel.send(JSON.stringify(hangUp)); } catch { /* closing already */ }
     try { this.channel.send(JSON.stringify({ t: "paired-bye" })); } catch { /* closing already: the contact's liveness finds out */ }
   }
