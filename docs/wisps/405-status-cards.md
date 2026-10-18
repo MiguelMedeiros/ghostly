@@ -282,14 +282,14 @@ The DHT floor and a hold carry a card message's text alone, and a copy under the
 - At most once per message, and the note is kept with the message, so a restart sends nothing again. Only the newest noted message of each card goes (its kind and id: a bot may send a task again as a new message, and the newest message of an id stands for it); an older one of the same card is given up, also when a newer one comes while it waits. Of those, only the newest **50** of a chat sent in the last **7 days** go; older ones are given up. The edit goes through the sender's edit queue, only on the live session, **one every 2 seconds** (two of the edit pace's 10 in 10 seconds, so the author's own updates keep half of it and a reconnect does not burst), and an update of the author's already on its way carries the card instead.
 - The edit is the author's app's own: a bot's event stream ([1100](1100-headless.md)) reports nothing for it, and its number counts, so a later update takes the next one.
 
-## Removing a card
+## Deleting a card's message for everyone
 
-Revision 2026-10-18. A bot takes its own card off every member's device by **deleting its message for everyone** ([400](400-chat.md#delete-for-everyone)): the card message's last edit, flagged `rm`, numbered one past its last update (at most 5,001, so a card that took its 5,000 updates can still go). The headless CLI says it as `task remove <chat|group> <task>`: every message of mine in that chat or group whose card is a task with that id, since a bot may have sent one card several times and the newest stands for it; `--all` removes every task card of mine there. Routines go the same way (`routine remove`).
+Revision 2026-10-18. Taking a card back ([Removing a card](#removing-a-card)) keeps its message as a short line. Its author may instead **delete the message for everyone** ([400](400-chat.md#delete-for-everyone)), as any message of theirs: the message's last edit, flagged `rm`, numbered one past its last update (at most 5,001, so a card that took its 5,000 updates can still go). The message then goes from every reader's timeline, and its card with it. The headless CLI's `task remove` takes a card back; `message delete <chat|group> <message> --everyone` deletes a message for everyone, a card's included.
 
-- **Gone, not cancelled.** A removed card is in no Tasks button count, panel, board column or working dot, and its message is not in the timeline. `cancelled` stays the status for work that stopped and is worth seeing.
-- **Offline members.** The removal travels as the card's latest edit: a 1:1 contact gets it when the chat is next live, a private group's member when its edge opens (the per-card resend of [mesh](902-group-mesh.md#edits), not the latest 16), a community's with the catch-up.
-- **Older apps.** One that shows cards and lists `status-card/1` drops a removal numbered past 100 (it has no card) and keeps the card it last took; one numbered up to 100 it shows as the fallback text, edited. An app from before cards shows the fallback text up to the hundredth edit.
-- **Not a reader's choice.** Only the author removes; a person hides a bot's card on their own device with Delete (here only), as any message.
+- **Gone with its message.** A reader keeps no card of a message deleted for everyone: it counts in no Tasks button, panel, board column or working dot. Deleting every message of a card's id leaves nothing to stand for it.
+- **Offline members.** A deletion travels as the message's latest edit: a 1:1 contact gets it when the chat is next live, a private group's member when its edge opens (the per-message resend of [mesh](902-group-mesh.md#edits)), a community's with the catch-up.
+- **Older apps.** One that shows cards and lists `status-card/1` drops a deletion numbered past 100 (it has no card) and keeps the card it last took; one numbered up to 100 it shows as the fallback text, edited.
+- **Only the author.** A person hides a bot's card on their own device with Delete (here only), as any message.
 
 ## Showing a card
 
