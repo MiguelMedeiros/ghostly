@@ -617,3 +617,11 @@ export type EngineEvent =
    * every engine call fails.
    */
   | { kind: "device-gate"; gate: import("../devices/gate").DeviceGateView };
+
+/**
+ * A state as a client across a copying boundary gets it (`copyingSink`, the extension's port): `payments` and `wallet`
+ * are left out when they are the ones that client was sent last, and the page keeps those.
+ */
+export type PostedState = Omit<EngineState, "payments" | "wallet"> & Partial<Pick<EngineState, "payments" | "wallet">>;
+/** What a page hears from the peer: an event, a state that may leave out what it already has, or an answer. */
+export type PostedEvent = Exclude<EngineEvent, { kind: "state" }> | { kind: "state"; state: PostedState } | RpcResponse;
