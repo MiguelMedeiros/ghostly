@@ -1,5 +1,6 @@
 import {
   addMessages,
+  deleteMessage,
   saveSession,
   setEngineMessages,
   STORED_MESSAGES,
@@ -169,8 +170,20 @@ function mirrorNew(linkId: string, messages: StoredMessage[], changes?: ListChan
 
 function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: ListChanges): void {
   const link = engine.state?.links.find((l) => l.id === linkId);
-  const shown = link && sessionForPeer(link.peerPubKeyZ32);
+  let shown = link && sessionForPeer(link.peerPubKeyZ32);
   if (!link || !shown) return;
+  // A row the engine says it deleted (its author deleted it for everyone, WISP 400 § Delete for everyone) goes from the
+  // chat as a delete here does: the row, its id kept so it is not taken again, its place in the read count. Only what
+  // the change tick names: a whole list without a row may be one a page has not caught up with (two pages of the
+  // extension over one storage), and a row the engine never had (a call's line) is the chat's own.
+  const gone = (changes?.deleted ?? []).filter((id) => shown!.messages.some((m) => m.id === id));
+  if (gone.length) {
+    for (const id of gone) deleteMessage(shown.id, id);
+    forget(shown.id);
+    notifySessionsChanged();
+    shown = sessionForPeer(link.peerPubKeyZ32);
+    if (!shown) return;
+  }
   // Changed here (its rows, its sort, what is added), never the one the other readers hold.
   const session: ChatSession = { ...shown, messages: shown.messages.slice() };
 
