@@ -1,4 +1,5 @@
 import { MAX_GROUP_NAME_BYTES, MAX_GROUP_NAME_LENGTH, decodeCommunityLink, decodeGroupEntryLink, groupEntryUrl, type PairedTransport } from "@ghostly/core";
+import { fitText, fitTextEdit, utf8Bytes } from "./fitText";
 import { getPrefix, setSessionDraft } from "./storage";
 import { decodePart } from "./url";
 import { setChatFolder } from "./chatFolders";
@@ -11,59 +12,19 @@ import { english } from "./english";
 import { relayCause } from "./problemText";
 import type { Translate } from "../contexts/I18nContext";
 
-type Segmenter = { segment(text: string): Iterable<{ segment: string }> };
-const SegmenterCtor = (globalThis as { Intl?: { Segmenter?: new (locale?: string, options?: { granularity: string }) => Segmenter } }).Intl?.Segmenter;
-const graphemes = SegmenterCtor ? new SegmenterCtor(undefined, { granularity: "grapheme" }) : null;
-const utf8Bytes = (s: string) => new TextEncoder().encode(s).length;
+/** Whether a group's name is one `groupName` takes whole: characters (`MAX_GROUP_NAME_LENGTH`) and bytes (`MAX_GROUP_NAME_BYTES`). */
+export const fitsGroupName = (s: string) => [...s].length <= MAX_GROUP_NAME_LENGTH && utf8Bytes(s) <= MAX_GROUP_NAME_BYTES;
 
 /**
  * What a group's name field keeps of what was typed or pasted: as much as `groupName` takes, counted as it counts
- * (characters, `MAX_GROUP_NAME_LENGTH`, and bytes, `MAX_GROUP_NAME_BYTES`), cut between whole emoji. An input's
- * `maxLength` counts UTF-16 units: a name of emoji stopped at 32 of them, a family at 5 (agents#1048).
+ * (`fitsGroupName`), cut between whole emoji. An input's `maxLength` counts UTF-16 units: a name of emoji stopped at
+ * 32 of them, a family at 5 (agents#1048).
  */
-export function fitGroupName(value: string): string {
-  if ([...value].length <= MAX_GROUP_NAME_LENGTH && utf8Bytes(value) <= MAX_GROUP_NAME_BYTES) return value;
-  const parts = graphemes ? Array.from(graphemes.segment(value), (s) => s.segment) : [...value];
-  let kept = "", chars = 0, bytes = 0;
-  for (const part of parts) {
-    const c = [...part].length, b = utf8Bytes(part);
-    if (chars + c > MAX_GROUP_NAME_LENGTH || bytes + b > MAX_GROUP_NAME_BYTES) break;
-    kept += part; chars += c; bytes += b;
-  }
-  return kept;
-}
+export const fitGroupName = (value: string): string => fitText(value, fitsGroupName);
 
-const fits = (s: string) => [...s].length <= MAX_GROUP_NAME_LENGTH && utf8Bytes(s) <= MAX_GROUP_NAME_BYTES;
-const splitGraphemes = (s: string) => graphemes ? Array.from(graphemes.segment(s), (g) => g.segment) : [...s];
-const lowSurrogate = (s: string, i: number) => { const c = s.charCodeAt(i); return c >= 0xdc00 && c <= 0xdfff; };
-
-/**
- * A change to a group's name field, kept to what `groupName` takes (`fitGroupName`'s count) the way a text field
- * with a limit does: what was typed or pasted goes in at the caret as far as it fits, the rest of it is left out, and
- * the name around it and the caret stay where they were. Cutting the new value's end instead dropped the name's last
- * character, threw the caret to the end and cut what was typed after there (agents#1097). `caret`: where the field's
- * caret is after the change (`selectionStart`).
- */
-export function fitGroupNameEdit(before: string, after: string, caret: number | null): { value: string; caret: number } {
-  if (fits(after)) return { value: after, caret: caret ?? after.length };
-  // The text before and after the change, in both: what lies between in `after` is what was put in.
-  const end = Math.max(0, Math.min(caret ?? after.length, after.length));
-  let head = 0;
-  while (head < before.length && head < end && before[head] === after[head]) head++;
-  let tail = 0;
-  while (tail < before.length - head && tail < after.length - end && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
-  // Never between the two halves of a character.
-  while (head > 0 && lowSurrogate(after, head)) head--;
-  while (tail > 0 && lowSurrogate(after, after.length - tail)) tail--;
-  const start = after.slice(0, head), rest = after.slice(after.length - tail), put = after.slice(head, after.length - tail);
-  if (!fits(start + rest)) return { value: fitGroupName(after), caret: fitGroupName(after).length };
-  let kept = "";
-  for (const part of splitGraphemes(put)) {
-    if (!fits(start + kept + part + rest)) break;
-    kept += part;
-  }
-  return { value: start + kept + rest, caret: start.length + kept.length };
-}
+/** A change to a group's name field, kept to what `groupName` takes the way a text field with a limit does (`fitTextEdit`). */
+export const fitGroupNameEdit = (before: string, after: string, caret: number | null): { value: string; caret: number } =>
+  fitTextEdit(before, after, caret, fitsGroupName);
 
 export const memberName = (m: { key: string; me: boolean; nick?: string }, t: Translate = english) =>
   m.me ? t("group.member.you") : m.nick || t("group.member.unnamed", { key: publicKeyLabel(m.key) });
