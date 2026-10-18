@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { QRCodeSVG } from "qrcode.react";
+import { MoneyQr } from "./MoneyQr";
 import { parseEngineError, type Bolt11Invoice, type LightningDestination } from "@ghostly/core";
 import { LightningAddressPay } from "./wallet/LightningAddressPay";
 import { holdsLess, lightningNetworkFor } from "./walletCardData";
@@ -8,8 +8,8 @@ import { NetworkTag, satsIn } from "./NetworkTag";
 import { useI18n, type Translate } from "../contexts/I18nContext";
 import { ConfirmRealMoney } from "./ConfirmRealMoney";
 import { LightningPayWith, useLightningPayer } from "./LightningPayWith";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
-import type { CashuInspection, WalletNetwork } from "../lib/platform";
+import { usePlatformValue, useWalletPlatform } from "../hooks/useServicesPlatform";
+import { servicesPlatform, type CashuInspection, type WalletNetwork } from "../lib/platform";
 import { mintNetwork } from "@ghostly/browser/shared/mints";
 import type { MoneyInText } from "../lib/money";
 import { MoneyFormatsBubble } from "./MoneyFormatsBubble";
@@ -99,7 +99,7 @@ function Card({ label, tag, amount, unit, otherUnit, lines, qr, children, testId
           className="block mt-2 bg-white p-2.5 rounded-lg cursor-pointer border-none"
           title={t("payments.invoice.hideQr")}
         >
-          <QRCodeSVG value={qr} size={184} bgColor="#ffffff" fgColor="#0b0f1a" level="L" className="block max-w-full h-auto" />
+          <MoneyQr value={qr} />
         </button>
       )}
       <div className="flex flex-wrap gap-1.5 mt-2">
@@ -124,7 +124,7 @@ function relativeExpiry(t: Translate, expiresAt: number, now: number): string {
 /** `peerPubKey`: the chat the invoice is in, told once it is paid (a test mint's invoice counts only on the payer's word). */
 function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invoice; mine: boolean; off: boolean; peerPubKey?: string }) {
   const { t } = useI18n();
-  const all = useServicesPlatform()?.wallet;
+  const all = useWalletPlatform();
   // Paid by the Lightning wallet of the invoice's network: a test invoice never meets real money. An invoice on
   // Bitcoin (a test mint's look the same) goes to the Mainnet wallet when there is one, else the Testnet one; the
   // money named is that wallet's, since that is what leaves.
@@ -136,7 +136,7 @@ function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invo
   // No Lightning wallet of that network (the profile's wallets are known): said in words, nothing here pays it.
   const known = all?.getState()?.wallets;
   const noWallet = !!known && !known.some((w) => w.type === "lightning" && w.network === network);
-  const id = settledMoneyId(invoice.invoice.toLowerCase());
+  const id = useMemo(() => settledMoneyId(invoice.invoice.toLowerCase()), [invoice.invoice]);
   const [paid, setPaid] = useState(() => isSettled(id));
   // Handed to the mint, which has not settled it yet: paying again could pay twice.
   const [pending, setPending] = useState(false);
@@ -235,7 +235,7 @@ function LightningCard({ invoice, mine, off, peerPubKey }: { invoice: Bolt11Invo
 /** A Lightning address or LNURL: resolved and paid through the Lightning source, step by step, when tapped. */
 function LightningAddressCard({ destination, mine, off }: { destination: LightningDestination; mine: boolean; off: boolean }) {
   const { t } = useI18n();
-  const all = useServicesPlatform()?.wallet;
+  const all = useWalletPlatform();
   const network = lightningNetworkFor(all?.getState());
   const lightningPayer = useLightningPayer(all?.forNetwork(network));
   const wallet = lightningPayer.payer;
@@ -262,9 +262,9 @@ function LightningAddressCard({ destination, mine, off }: { destination: Lightni
 
 function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: boolean }) {
   const { t } = useI18n();
-  const wallet = useServicesPlatform()?.wallet;
+  const wallet = useWalletPlatform();
   const [inspection, setInspection] = useState<CashuInspection | null | undefined>(undefined);
-  const id = settledMoneyId(value);
+  const id = useMemo(() => settledMoneyId(value), [value]);
   const [redeemed, setRedeemed] = useState(() => isSettled(id));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
@@ -386,7 +386,7 @@ const METHOD_NAME = { cashu: "Cashu", lightning: "Lightning", arkade: "Ark", bar
 /** `peerPubKey`: the chat it is in, whose choice of ways of paying decides whether it can be paid or redeemed here. */
 export function InvoiceBubble({ money, mine, peerPubKey }: { money: MoneyInText; mine: boolean; peerPubKey?: string }) {
   const { t } = useI18n();
-  const allowed = useServicesPlatform()?.getPeer(peerPubKey ?? "")?.paymentMethods;
+  const allowed = usePlatformValue(() => servicesPlatform?.getPeer(peerPubKey ?? "")?.paymentMethods);
   const method = money.type === "cashu" ? "cashu" : money.type === "lightning" || money.type === "lnurl" ? "lightning" : moreMoneyMethod(money);
   const off = !!allowed && !allowed[method];
   return (

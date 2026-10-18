@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import { QRCodeSVG } from "qrcode.react";
+import { MoneyQr } from "./MoneyQr";
 import { formatPaymentAmount, parsePaymentAmount, type Bolt11Invoice, type PaymentReview as Review, type PaymentTarget, type WalletNetwork } from "@ghostly/core";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { useWalletPlatform } from "../hooks/useServicesPlatform";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import type { WalletPlatform, WalletState } from "../lib/platform";
 import type { MoreMoney } from "../lib/parse/money-more";
@@ -89,7 +89,7 @@ function Shell({ label, network, chain, amount, testId, lines, detail, qr, child
       {!fits && <p className="text-[12.5px] leading-snug m-0 mt-1 text-text-primary/65" data-testid="qr-too-long">{t("payments.invoice.qrTooLong")}</p>}
       {fits && showQr && (
         <button onClick={() => setShowQr(false)} className="block mt-2 bg-white p-2.5 rounded-lg cursor-pointer border-none" title={t("payments.invoice.hideQr")}>
-          <QRCodeSVG value={qr} size={184} bgColor="#ffffff" fgColor="#0b0f1a" level="L" className="block max-w-full h-auto" />
+          <MoneyQr value={qr} />
         </button>
       )}
       <div className="flex flex-wrap gap-1.5 mt-2">
@@ -213,7 +213,7 @@ const wholeSats = (text: string) => { if (!/^\d+$/.test(text)) throw new Error("
 
 function OnchainCard({ request, mine, off, lightning }: { request: OnchainRequest; mine: boolean; off: boolean; lightning?: React.ReactNode }) {
   const { t } = useI18n();
-  const wallet = useServicesPlatform()?.wallet;
+  const wallet = useWalletPlatform();
   const state = wallet?.getState() ?? null;
   const view = networkView(state, request.network), other = networkView(state, request.network === "mainnet" ? "testnet" : "mainnet");
   const bitcoin = view?.bitcoin;
@@ -287,7 +287,7 @@ function Bolt12Card({ offer }: { offer: Bolt12Offer }) {
 
 function ArkCard({ request, mine, off }: { request: ArkRequest; mine: boolean; off: boolean }) {
   const { t } = useI18n();
-  const wallet = useServicesPlatform()?.wallet;
+  const wallet = useWalletPlatform();
   const state = wallet?.getState() ?? null;
   const rail = request.kind;
   const view = networkView(state, request.network), other = networkView(state, request.network === "mainnet" ? "testnet" : "mainnet");
@@ -328,7 +328,7 @@ function ArkCard({ request, mine, off }: { request: ArkRequest; mine: boolean; o
 
 function UsdtCard({ request, mine, off }: { request: UsdtRequest; mine: boolean; off: boolean }) {
   const { t } = useI18n();
-  const wallet = useServicesPlatform()?.wallet;
+  const wallet = useWalletPlatform();
   const state = wallet?.getState() ?? null;
   const chain = request.chainId !== undefined ? USDT_CHAINS[request.chainId]?.name ?? t("payments.formats.chainId", { id: request.chainId }) : undefined;
   const { copied, failed, copy } = useMoneyCopy(request.recipient);
