@@ -12,7 +12,7 @@ import type { SparkNetwork, WalletNetwork } from "@ghostly/core";
 import type { ProfileChoice } from '../profiles/public';
 import type { ProofChallenge, ProofEvidence, ProofAdapter } from "@ghostly/core";
 import type { LinkParams, LinkPreview, PairedTransport, DeliveryMode } from "@ghostly/core";
-import type { CardIndexRow, CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, WalletType, TestCoinsResult, WakeSubscription } from "./types";
+import type { CardIndexRow, CashuInspection, EngineState, MessageDetailsView, MessageFile, MessagePage, PublicGraphView, PublicPostImageView, PublicPostsView, SavedMessage, SettingsPatch, StoredMessage, WalletCreate, WalletInstanceView, WalletRemove, WalletTestCoins, WalletType, TestCoinsResult, WakeSubscription } from "./types";
 import type { NostrDraft, NostrDraftRequest, NostrLookupRequest, NostrLookupResult, NostrPublishResult } from "../nostr/types";
 import type { MessageChanges } from "./messageChanges";
 
@@ -382,6 +382,13 @@ export interface EngineApi {
    * § The Tasks board): one row per message with a card. Read from the store's card index, never from the histories.
    */
   statusCardIndex(): CardIndexRow[];
+  /**
+   * Saves a message on this device, or unsaves it with `remove`: `linkId` a chat's link or `group:<id>`, `messageId` the
+   * message's id here or, in a 1:1 chat, the id both sides know. Nothing is sent: the mark stays in this profile here.
+   */
+  saveMessage(params: { linkId: string; messageId: string; remove?: boolean }): { error: string | null };
+  /** This profile's saved messages from all its chats and groups, the last saved first, each as it is now. */
+  savedMessages(): SavedMessage[];
   /** `admin`: the member a leaving admin handed the role to. */
   leaveGroup(params: { groupId: string }): { admin?: string };
   removeGroupMember(params: { groupId: string; key: string }): void;

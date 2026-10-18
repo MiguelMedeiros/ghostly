@@ -962,6 +962,12 @@ export interface CardIndexRow {
   editedAt?: number;
 }
 
+/**
+ * A message saved on this device (`savedMessages`): when it was saved and its row as it is now (an edit shows its latest
+ * version). Kept for the profile here only, never sent.
+ */
+export interface SavedMessage { savedAt: number; message: StoredMessage }
+
 /** A page of a chat's history, oldest first, and whether older messages remain (`messagePage`). */
 export interface MessagePage { messages: StoredMessage[]; more: boolean }
 
