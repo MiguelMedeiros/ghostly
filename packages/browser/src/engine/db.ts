@@ -167,6 +167,15 @@ export const db = {
     return wrap((await store(STORES.messages, "readonly")).get([linkId, id]));
   },
   /**
+   * These rows of a chat, in the order asked (undefined where none is), in one transaction: in the CLI's store
+   * (fake-indexeddb) each transaction waiting at once is checked against all the others, so one per row costs the square.
+   */
+  async getMessagesById(linkId: string, ids: readonly string[]): Promise<(StoredMessage | undefined)[]> {
+    if (!ids.length) return [];
+    const messages = await store(STORES.messages, "readonly");
+    return Promise.all(ids.map(id => wrap<StoredMessage | undefined>(messages.get([linkId, id]))));
+  },
+  /**
    * The newest `limit` messages of a chat before `before`, oldest first, in `getMessages`' order (time, then id), and
    * whether older ones remain. Reads those rows only: a long chat's first page costs what a short one's does.
    * `before`: a message's place (the page ends just before it), or a time (`id` left out: the page ends before it).
