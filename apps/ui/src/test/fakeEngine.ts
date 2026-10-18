@@ -203,8 +203,8 @@ export class FakeEngine implements BrowserHost {
     this.send?.(event);
   }
 
-  messages(linkId: string, messages: StoredMessage[]): void {
-    this.emit({ kind: "messages", linkId, messages });
+  messages(linkId: string, messages: StoredMessage[], deleted?: string[]): void {
+    this.emit({ kind: "messages", linkId, messages, ...(deleted && { deleted }) });
   }
 
   reset(): void {

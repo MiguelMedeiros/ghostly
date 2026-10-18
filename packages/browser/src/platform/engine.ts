@@ -33,6 +33,8 @@ export type MessagesListener = (linkId: string, messages: StoredMessage[], chang
 class EngineClient {
   state: EngineState | null = null;
   readonly messages = new Map<string, StoredMessage[]>();
+  /** Per chat, the ids the engine deleted in it, as its last whole history said (the `messages` event's `deleted`). */
+  readonly deletedIds = new Map<string, readonly string[]>();
   /**
    * Why the peer did not start, when it did not (the profile's database did not open): the app shows this and nothing
    * of the profile. Null while it runs or is still starting. State listeners hear of it.
@@ -176,6 +178,8 @@ class EngineClient {
         // The whole history holds what changed before it: told now, and not again when the tick ends.
         this.changed.delete(message.linkId);
         this.messages.set(message.linkId, message.messages);
+        if (message.deleted?.length) this.deletedIds.set(message.linkId, message.deleted);
+        else this.deletedIds.delete(message.linkId);
         for (const listener of this.messageListeners) listener(message.linkId, message.messages);
         break;
       case "message-changes": {

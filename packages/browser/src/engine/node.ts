@@ -2512,6 +2512,11 @@ export class GhostlyNode implements EngineImplementation {
     return (await db.getMessages(linkId)).map(withoutFrame);
   }
 
+  /** The ids of the messages deleted in a chat (`deletedIds`, the newest `MAX_DELETED_IDS`): a whole history goes with them. */
+  deletedIdsOf(linkId: string): string[] {
+    return this.links.get(linkId)?.stored.deletedIds ?? [];
+  }
+
   /** One message of a chat, read by its id: the whole history costs a read of every row. */
   async getMessage(linkId: string, id: string): Promise<StoredMessage | undefined> {
     const message = await db.getMessage(linkId, id);

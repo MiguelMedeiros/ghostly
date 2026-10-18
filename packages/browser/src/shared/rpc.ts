@@ -625,9 +625,11 @@ export type EngineEvent =
   | { kind: "state"; state: EngineState }
   /**
    * A chat's or group's history, whole; with `more`, only its newest page (a client attached with `newest`), the older
-   * rows not sent: the client asks for them (`HistoryRequest`).
+   * rows not sent: the client asks for them (`HistoryRequest`). `deleted`: the ids the engine deleted in a chat (its
+   * `deletedIds`), when it has any: a list does not say a row went, and a removal no page heard (the extension's engine
+   * runs with none open) would stay in a page's copy.
    */
-  | { kind: "messages"; linkId: string; messages: StoredMessage[]; more?: true }
+  | { kind: "messages"; linkId: string; messages: StoredMessage[]; more?: true; deleted?: string[] }
   /** What changed in a history the client was sent whole already (`applyMessageChanges`): only those rows. */
   | ({ kind: "message-changes"; linkId: string } & MessageChanges)
   | { kind: "call-signal"; linkId: string; signal: string }
