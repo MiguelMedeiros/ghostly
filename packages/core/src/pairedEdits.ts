@@ -2,7 +2,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { toBase64Url, utf8Encode } from "./bytes";
 import { LIMITS } from "./frames";
 import { parseLinkPreview, type LinkPreview } from "./linkPreview";
-import { cardEditNumber, readStatusCard, type StatusCard } from "./statusCards";
+import { STATUS_CARD_LIMITS, cardEditNumber, readStatusCard, type StatusCard } from "./statusCards";
 
 /**
  * Editing a sent text in a 1:1 chat (WISP 401 § Edits). The sender says the whole new text of one of its own
@@ -18,6 +18,11 @@ import { cardEditNumber, readStatusCard, type StatusCard } from "./statusCards";
  * message. A status card (`sc`, WISP 405 · Status Cards) may come with it too; a card message takes up to
  * `STATUS_CARD_LIMITS.edits` edits, a number past `MAX_EDITS_PER_MESSAGE` holding only with a card. Older apps drop
  * both frames: they have an id, but a `t` they do not know.
+ *
+ * A removal (WISP 400 § Delete for everyone) is the message's last edit, flagged `rm`, with a fallback text and
+ * nothing else beside it; an app from before removals shows that text as the edit:
+ *
+ *     {"t":"paired-edit","id":"<the message's wire id>","e":4,"ts":1790000000000,"m":"🗑 Message removed","rm":true}
  */
 
 export const EDIT_FRAME = "paired-edit";
@@ -25,6 +30,12 @@ export const EDITED_FRAME = "paired-edited";
 
 /** Edits one message takes; the sender refuses the next one and the receiver ignores a higher number. */
 export const MAX_EDITS_PER_MESSAGE = 100;
+
+/** A removal is numbered one past the message's last edit, so it may pass a card message's bound by one. */
+export const MAX_REMOVAL_NUMBER = STATUS_CARD_LIMITS.edits + 1;
+
+/** The text a removal carries: only what an app from before removals shows in the message's place. */
+export const REMOVED_TEXT = "🗑 Message removed";
 
 /** A sender says at most this many edits per `EDIT_RATE_WINDOW_MS` in one chat; the newest text of each message waits. */
 export const EDIT_SEND_LIMIT = 10;
@@ -51,6 +62,8 @@ export interface WireEdit {
   pv?: LinkPreview;
   /** The status card of this version (WISP 405 · Status Cards): a message with a card takes an edit with one. */
   sc?: StatusCard;
+  /** The author deleted the message for everyone (WISP 400 § Delete for everyone): `m` is only a fallback. */
+  rm?: true;
 }
 
 /** Largest edit frame sent with a preview: the preview is left out past it, as with a message. */
@@ -61,6 +74,7 @@ const MAX_EDIT_FRAME = 56 * 1024;
  * goes: it is bounded well under what the frame has room for, and it is what a card message is.
  */
 export function editFrame(edit: WireEdit): string {
+  if (edit.rm) return JSON.stringify({ t: EDIT_FRAME, id: edit.id, e: edit.e, ts: edit.ts, m: edit.m, rm: true });
   const base = { t: EDIT_FRAME, id: edit.id, e: edit.e, ts: edit.ts, m: edit.m, ...(edit.sc && { sc: edit.sc }) };
   const plain = JSON.stringify(base);
   if (!edit.pv) return plain;
@@ -78,6 +92,11 @@ export function validEditNumber(e: unknown): e is number {
   return Number.isSafeInteger(e) && (e as number) >= 1 && (e as number) <= MAX_EDITS_PER_MESSAGE;
 }
 
+/** A removal's number: any up to one past a card message's bound, card or not. */
+export function validRemovalNumber(e: unknown): e is number {
+  return Number.isSafeInteger(e) && (e as number) >= 1 && (e as number) <= MAX_REMOVAL_NUMBER;
+}
+
 /** A message's new text: not empty, no space around it, within a chat message's bytes. The same on a session and on the DHT. */
 export function validEditMessage(m: unknown): m is string {
   return typeof m === "string" && !!m.trim() && m === m.trim() && utf8Encode(m).length <= LIMITS.maxChatMessageBytes;
@@ -86,14 +105,16 @@ export function validEditMessage(m: unknown): m is string {
 /**
  * The edit a `paired-edit` frame says, or null when it is malformed (then it says nothing and is not confirmed). A
  * preview or a card that does not hold is dropped, never the edit; an edit numbered past `MAX_EDITS_PER_MESSAGE`
- * holds only with a card.
+ * holds only with a card. A removal carries its fallback text alone, and a `rm` other than `true` is no edit.
  */
 export function parseEditFrame(frame: Record<string, unknown>, now = Date.now()): WireEdit | null {
   if (frame?.t !== EDIT_FRAME) return null;
-  const { id, e, ts, m } = frame;
-  if (typeof id !== "string" || !ID.test(id) || !cardEditNumber(e)) return null;
+  const { id, e, ts, m, rm } = frame;
+  if (rm !== undefined && rm !== true) return null;
+  if (typeof id !== "string" || !ID.test(id) || typeof e !== "number" || !(rm ? validRemovalNumber(e) : cardEditNumber(e))) return null;
   if (typeof ts !== "number" || !Number.isSafeInteger(ts) || ts <= 0) return null;
   if (!validEditMessage(m)) return null;
+  if (rm) return { id, e, ts, m, rm };
   const sc = frame.sc === undefined ? undefined : readStatusCard(frame.sc, now);
   if (!validEditNumber(e) && !sc) return null;
   const pv = frame.pv === undefined ? undefined : parseLinkPreview(frame.pv, m);
@@ -103,7 +124,7 @@ export function parseEditFrame(frame: Record<string, unknown>, now = Date.now())
 /** The confirmation a `paired-edited` frame says, or null when it is malformed. */
 export function parseEditedFrame(frame: Record<string, unknown>): { id: string; e: number } | null {
   if (frame?.t !== EDITED_FRAME) return null;
-  return typeof frame.id === "string" && ID.test(frame.id) && cardEditNumber(frame.e) ? { id: frame.id, e: frame.e } : null;
+  return typeof frame.id === "string" && ID.test(frame.id) && validRemovalNumber(frame.e) ? { id: frame.id, e: frame.e } : null;
 }
 
 /**

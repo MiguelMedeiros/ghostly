@@ -19,7 +19,7 @@ import { groupReplyAuthor, readReply, REPLY_LIMITS, wireReply, type WireReply } 
 import { readForwarded } from "./forwards";
 import { STATUS_CARD_LIMITS, cardEditNumber, readStatusCard, type StatusCard } from "./statusCards";
 import { GROUP_EDIT_FRAME, meshMessageRef, validEditText, type GroupIncomingEdit } from "./groupEdits";
-import { validEditNumber } from "./pairedEdits";
+import { validEditNumber, validRemovalNumber } from "./pairedEdits";
 import { MESH_HUBS, meshRendezvous, NO_HUB_POLICY, type MeshHubPolicy } from "./groupHubs";
 import { readReaction, type WireReaction } from "./reactions";
 import { GROUP_PIN_FRAME, readPin, type WirePin } from "./pins";
@@ -333,7 +333,7 @@ function isEditFrame(v: unknown): v is GroupEditFrame {
   if (!v || typeof v !== "object") return false;
   const f = v as Record<string, unknown>;
   return f.t === GROUP_EDIT_FRAME && typeof f.g === "string" && GROUP_ID.test(f.g) && Number.isSafeInteger(f.e) && (f.e as number) >= 0 &&
-    typeof f.s === "string" && MEMBER_KEY.test(f.s) && Number.isSafeInteger(f.n) && (f.n as number) >= 0 && cardEditNumber(f.v) &&
+    typeof f.s === "string" && MEMBER_KEY.test(f.s) && Number.isSafeInteger(f.n) && (f.n as number) >= 0 && validRemovalNumber(f.v) &&
     Number.isSafeInteger(f.ts) && (f.ts as number) > 0 && typeof f.nn === "string" && f.nn.length === 32 && B64.test(f.nn) &&
     typeof f.c === "string" && f.c.length <= MAX_EDIT_BOX && B64.test(f.c) && typeof f.sig === "string" && f.sig.length === 86 && B64.test(f.sig);
 }
@@ -1098,19 +1098,20 @@ export class GroupSession {
    * edge that just opened). Someone admitted after the message cannot open it and is not sent it. The message's
    * epoch key must still be here: past `GROUP_LIMITS.secrets` epochs a message cannot be edited.
    */
-  sendEdit(messageId: string, edit: { v: number; ts: number; text: string; mentions?: readonly GroupMention[]; card?: StatusCard }, to?: string): Promise<{ sent: number } | { error: string }> {
+  sendEdit(messageId: string, edit: { v: number; ts: number; text: string; mentions?: readonly GroupMention[]; card?: StatusCard; remove?: boolean }, to?: string): Promise<{ sent: number } | { error: string }> {
     return this.serialize(async () => {
       if (this.state.status !== "active") return { error: this.state.statusReason ?? "You are no longer in this group" };
       const ref = meshMessageRef(messageId);
       const commit = ref && this.state.chain[ref.e];
       if (!ref || ref.s !== this.myKey || !commit || !rosterHas(commit.m, this.myKey)) return { error: "Only your own messages can be edited" };
-      if (!(edit.card ? cardEditNumber(edit.v) : validEditNumber(edit.v))) return { error: "This message was edited too many times" };
+      if (!(edit.remove ? validRemovalNumber(edit.v) : edit.card ? cardEditNumber(edit.v) : validEditNumber(edit.v))) return { error: "This message was edited too many times" };
       const text = edit.text.trim();
       if (!validEditText(text)) return { error: text ? "Message exceeds 16 KiB" : "An edit cannot be empty" };
       const secret = this.secret(ref.e);
       if (!secret) return { error: "This message is too old to edit: its epoch's key is gone" };
       const named = validMentions(wireMentions(edit.mentions ?? []), text, rosterAdmin(commit.m) === this.myKey && this.isAdmin);
-      const plain = JSON.stringify({ text, ...(named.length ? { m: named } : {}), ...(edit.card ? { sc: edit.card } : {}) });
+      // A removal (WISP 400 § Delete for everyone) carries its fallback text alone.
+      const plain = JSON.stringify(edit.remove ? { text, rm: true } : { text, ...(named.length ? { m: named } : {}), ...(edit.card ? { sc: edit.card } : {}) });
       if (utf8Encode(plain).length > MAX_EDIT_PLAIN) return { error: "Message exceeds 16 KiB" };
       // The message, and each copy of it said again under a later epoch (`resealBehind`): a member let in meanwhile can
       // open only the copy, so it gets the edit of the copy, which it files under the same message.
@@ -1391,17 +1392,21 @@ export class GroupSession {
     if (!secret) { if (raw.e >= this.epoch - GROUP_LIMITS.secrets) this.parkEdit(from, raw); return; }
     const plain = decryptText(epochKeys(secret, this.id, raw.e).message, editAad(raw), raw.nn, raw.c);
     if (plain === null) return;
-    let body: { text?: unknown; m?: unknown; sc?: unknown };
+    let body: { text?: unknown; m?: unknown; sc?: unknown; rm?: unknown };
     try { body = JSON.parse(plain) as typeof body; } catch { return; }
     if (!body || typeof body !== "object" || !validEditText(body.text)) return;
-    const k = validMentions(body.m, body.text, rosterAdmin(commit.m) === raw.s && this.admin === raw.s);
+    if (body.rm !== undefined && body.rm !== true) return;
+    const rm = body.rm === true;
+    if (!rm && !cardEditNumber(raw.v)) return;
+    // A removal (WISP 400 § Delete for everyone) is its fallback text alone: no mentions, no card.
+    const k = rm ? [] : validMentions(body.m, body.text, rosterAdmin(commit.m) === raw.s && this.admin === raw.s);
     // A card that does not hold is left out; an edit numbered past a text's bound stands only with one.
-    const sc = body.sc === undefined ? undefined : readStatusCard(body.sc);
-    if (!validEditNumber(raw.v) && !sc) return;
+    const sc = rm || body.sc === undefined ? undefined : readStatusCard(body.sc);
+    if (!rm && !validEditNumber(raw.v) && !sc) return;
     // An edit of a copy said again (its author was behind) is one of the message it first was, as the copy is.
     const copy = this.kept().find(f => f.s === raw.s && f.e === raw.e && f.n === raw.n);
     const first = copy && readFirstPlace(copy.o, copy.e);
-    await this.hooks.edit?.({ id: first ? groupMessageId(raw.s, first.e, first.n) : groupMessageId(raw.s, raw.e, raw.n), sender: raw.s, e: raw.v, ts: raw.ts, m: body.text, ...(k.length ? { k } : {}), ...(sc ? { sc } : {}) });
+    await this.hooks.edit?.({ id: first ? groupMessageId(raw.s, first.e, first.n) : groupMessageId(raw.s, raw.e, raw.n), sender: raw.s, e: raw.v, ts: raw.ts, m: body.text, ...(k.length ? { k } : {}), ...(sc ? { sc } : {}), ...(rm ? { rm: true as const } : {}) });
     if (this.keepEdit(raw)) { await this.persist(); this.took(cleanEdit(raw)); }
   }
 

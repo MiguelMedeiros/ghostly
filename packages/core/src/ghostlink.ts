@@ -3388,11 +3388,14 @@ export class GhostLink {
     if (this.channel && this.isDataLinkOpen) {
       if (!this.supportsEdits) return "Your contact's app does not show edits yet";
       // Past a text's edits only an app that shows cards takes one (WISP 405 · Status Cards); an older one would drop it.
-      if (!validEditNumber(edit.e) && !(edit.sc && this.supportsStatusCards)) return "Your contact's app takes no more edits of this message";
+      // A removal goes whatever its number: an app that knows removals takes it, an older one shows or drops its fallback.
+      if (!edit.rm && !validEditNumber(edit.e) && !(edit.sc && this.supportsStatusCards)) return "Your contact's app takes no more edits of this message";
       try { this.channel.send(editFrame(edit)); return null; } catch { return "The connection closed before sending"; }
     }
     // A card's edit waits for the live session: on the floor the card would read as its text until the next one.
     if (edit.sc) return "A card's update goes when you are live";
+    // A removal never goes on the floor (WISP 403 § Edits): an older reader would show its fallback as the new text.
+    if (edit.rm) return "A removal goes when you are live";
     if (dht && this.dht && this.textDelivery === "dht") return this.dht.send(edit.m, edit.ts, dhtEditId(edit.id, edit.e), undefined, [edit.id, edit.e]);
     return "Edits go when you are live";
   }

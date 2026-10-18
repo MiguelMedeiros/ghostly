@@ -1,0 +1,1 @@
+An `edit` application frame with `"rm": true` deletes the message for everyone (WISP 400 § Delete for everyone): a fallback `text`, no mentions or card, `v` at most 5,001. A member keeps a tombstone, so the message and its edits coming again with a catch-up change nothing. A frame whose `rm` is not `true` is dropped. Older apps show the fallback text.
