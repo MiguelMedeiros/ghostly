@@ -376,6 +376,22 @@ const METHODS: Record<string, Method> = {
     if (result.error) throw new CliError(/not in this chat|Nothing is pinned/.test(result.error) ? "not_found" : /Only the admin/.test(result.error) ? "refused" : "bad_request", result.error);
     return { [target.group ? "group" : "chat"]: target.id, messageId: remove ? null : messageId, removed: remove };
   },
+  /** Saved messages: a mark on a message of a chat or a group, kept for this profile on this device; nothing is sent. */
+  async "saved.add"(ctx, params) {
+    return saveMark(ctx, params, false);
+  },
+  async "saved.remove"(ctx, params) {
+    return saveMark(ctx, params, true);
+  },
+  /** The saved messages, the last saved first, each as it is now and named by its chat or group. */
+  async "saved.list"(ctx) {
+    const { links, groups } = state(ctx);
+    return (await node(ctx).savedMessages()).map(({ savedAt, message }) => {
+      if (!message.linkId.startsWith("group:")) return { chat: message.linkId, savedAt, message: chatMessageJson(message, links.find((l) => l.id === message.linkId)) };
+      const id = message.linkId.slice("group:".length);
+      return { group: id, savedAt, message: groupMessageJson(message, groups.find((g) => g.id === id)) };
+    });
+  },
   /**
    * WISP 400 § Forwards: messages of a chat or a group sent on to up to 5 chats and groups, each as a new message of mine
    * that says it was forwarded (one hop more) and nothing of who wrote it. A file goes from the bytes here, never
@@ -817,6 +833,13 @@ function editRefused(message: StoredMessage | undefined, ref: string, where: "ch
  * A page of a chat's or a group's history. Without `after` only that page is read from the store (the newest, or those
  * before `before`), so a long chat's is as quick as a short one's; with `after` the whole history is read and cut.
  */
+async function saveMark(ctx: ApiContext, params: Params, remove: boolean) {
+  const target = chatOrGroup(ctx, str(params, "chat", true)), messageId = str(params, "message", true);
+  const result = await node(ctx).saveMessage({ linkId: target.linkId, messageId, remove });
+  if (result.error) throw new CliError(/not in this chat/.test(result.error) ? "not_found" : "bad_request", result.error);
+  return { [target.group ? "group" : "chat"]: target.id, messageId, saved: !remove };
+}
+
 async function historyOf(ctx: ApiContext, chat: string, params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {
   if (params.after !== undefined && params.after !== null) {
     const whole = await node(ctx).getMessages(chat), { messages, more } = history(whole, params);
