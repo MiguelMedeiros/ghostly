@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { EngineState, SavedMessage, StoredMessage } from "@ghostly/browser/shared/types";
 
@@ -84,6 +84,12 @@ export function useSavedMessages(): readonly SavedMessage[] {
 /** Whether the engine answered yet: until then `useSavedMessages` is empty because nothing is known. */
 export function useSavedRead(): boolean {
   return useSyncExternalStore(subscribe, () => loaded);
+}
+
+/** The ids of the saved messages of one chat (`linkId`: its link, or `group:<id>`): what its rows' ⋮ say. */
+export function useSavedIn(linkId: string | undefined): ReadonlySet<string> {
+  const saved = useSavedMessages();
+  return useMemo(() => new Set(saved.flatMap((s) => s.message.linkId === linkId ? [s.message.id] : [])), [saved, linkId]);
 }
 
 /** Saves a message (`linkId`: a chat's link or `group:<id>`), or unsaves it with `remove`; the list follows. */
