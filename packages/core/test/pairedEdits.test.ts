@@ -4,8 +4,8 @@ import { createLink } from "../src/invite";
 import { createIdentity } from "../src/identity";
 import { EDIT_CAPABILITY, SessionCapabilities } from "../src/pairedCapabilities";
 import {
-  EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, MAX_EDITS_PER_MESSAGE, RateWindow,
-  dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditMessage, validEditNumber, type WireEdit,
+  EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, MAX_EDITS_PER_MESSAGE, MAX_REMOVAL_NUMBER, REMOVED_TEXT, RateWindow,
+  dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditMessage, validEditNumber, validRemovalNumber, type WireEdit,
 } from "../src/pairedEdits";
 import { LIMITS } from "../src/frames";
 import { DhtDelivery, emptyDhtDeliveryState, type DhtDeliveryState } from "../src/dhtDelivery";
@@ -43,6 +43,33 @@ describe("paired-edit frames", () => {
     expect(validEditNumber(MAX_EDITS_PER_MESSAGE)).toBe(true);
     for (const frame of [{ t: "paired-edited", id: ID, e: 0 }, { t: "paired-edited", id: "x", e: 1 }, { t: "paired-received", id: ID, e: 1 }])
       expect(parseEditedFrame(frame)).toBeNull();
+  });
+
+  it("say a removal as the last edit, its fallback text alone, numbered up to one past a card's bound", () => {
+    const pv = { u: "https://ghostly.tools/", t: "Ghostly" };
+    const sc = { kind: "task", id: "t1", title: "Fix it", status: "running" } as const;
+    const removal = edit({ e: 5_001, m: REMOVED_TEXT, rm: true });
+    // What else the version had (a preview, a card) does not go with it.
+    expect(editFrame({ ...removal, pv, sc })).toBe(`{"t":"paired-edit","id":"${ID}","e":5001,"ts":1790000000000,"m":"${REMOVED_TEXT}","rm":true}`);
+    expect(parse(editFrame(removal))).toEqual(removal);
+    expect(parse({ ...JSON.parse(editFrame(removal)), sc, pv })).toEqual(removal);
+    expect(MAX_REMOVAL_NUMBER).toBe(5_001);
+    expect(validRemovalNumber(5_001)).toBe(true);
+    // An edit without a card still stops at 100; a removal does not need one past it.
+    expect(parse(editFrame(edit({ e: 101 })))).toBeNull();
+    expect(parse(editFrame(edit({ e: 101, m: REMOVED_TEXT, rm: true })))).toEqual(edit({ e: 101, m: REMOVED_TEXT, rm: true }));
+    // A confirmation of a removal past the card bound reads too.
+    expect(parseEditedFrame(JSON.parse(editedFrame(ID, 5_001)))).toEqual({ id: ID, e: 5_001 });
+    const base = JSON.parse(editFrame(removal));
+    for (const bad of [{ ...base, rm: false }, { ...base, rm: 1 }, { ...base, rm: "true" }, { ...base, rm: null }, { ...base, e: 5_002 }, { ...base, e: 0 }, { ...base, m: "" }])
+      expect(parseEditFrame(bad)).toBeNull();
+    expect(parseEditedFrame({ t: "paired-edited", id: ID, e: 5_002 })).toBeNull();
+    // A file is named by its offer's id (Ghostly's are 16 characters): a removal may name one, an edit may not.
+    const file = "F".repeat(16);
+    expect(parse(editFrame(edit({ id: file, m: REMOVED_TEXT, rm: true })))).toEqual(edit({ id: file, m: REMOVED_TEXT, rm: true }));
+    expect(parse(editFrame(edit({ id: file })))).toBeNull();
+    expect(parseEditedFrame(JSON.parse(editedFrame(file, 1)))).toEqual({ id: file, e: 1 });
+    for (const id of ["F".repeat(7), "F".repeat(65), "F".repeat(15) + "!"]) expect(parse(editFrame(edit({ id, m: REMOVED_TEXT, rm: true })))).toBeNull();
   });
 
   it("keep a preview only for a link in the new text; a bad one drops, never the edit", () => {
@@ -194,6 +221,18 @@ describe("edits on a paired session (edit/1)", () => {
     expect(b.edits.map(x => [x.e, x.m])).toEqual([[1, "Step 1"], [2, "Step 2"], [3, "Step 3"]]);
     // Nothing of it is a message.
     expect(b.messages).toEqual(["Working…"]);
+  });
+
+  it("a removal goes live past a text's 100 edits without a card, is read as one and confirmed", async () => {
+    const { a, b } = pair();
+    // Not live: a removal waits for the session, never the floor.
+    expect(await a.link.sendEdit(edit({ e: 1, m: REMOVED_TEXT, rm: true }), { dht: true })).toMatch(/removal goes when you are live/);
+    await live(a, b);
+    await vi.waitFor(() => expect(a.link.supportsEdits && b.link.supportsEdits).toBe(true));
+    expect(await a.link.sendEdit(edit({ e: 101, m: "text past 100" }))).toMatch(/no more edits/);
+    expect(await a.link.sendEdit(edit({ e: 101, m: REMOVED_TEXT, rm: true }))).toBeNull();
+    await vi.waitFor(() => expect(a.receipts).toEqual([[ID, 101]]));
+    expect(b.edits).toEqual([edit({ e: 101, m: REMOVED_TEXT, rm: true })]);
   });
 
   it("confirms only when the receiver says so; a waiting edit is confirmed later", async () => {
