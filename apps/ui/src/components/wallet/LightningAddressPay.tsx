@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LightningAddressInfo, WalletPlatform } from "../../lib/platform";
 import { CASHU_MINT_SOURCE, holdsLess } from "../walletCardData";
 import { ConfirmRealMoney } from "../ConfirmRealMoney";
@@ -46,7 +46,21 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
     setError(null); setBusy(true);
     try { await task(); } catch (e) { setError(problemText(e, t)); } finally { setBusy(false); }
   };
-  const primary = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed`;
+  // The button pressed stays focusable while it works (busy, not disabled): a disabled one drops the keys to the page,
+  // and they stay there when the server or the wallet refuses. A press while busy does nothing.
+  const working = busy ? { "aria-disabled": true, "aria-busy": true, "data-loading": true } as const : {};
+
+  // A step that comes takes the place of the button that asked for it: its first line takes the keys, so they go on
+  // from there (to the amount, to Pay, to Done). Not when they went somewhere else meanwhile, nor on the first step.
+  const step = outcome ? "done" : !info ? "resolve" : quote && invoice ? "review" : "amount";
+  const stepLine = useRef<HTMLParagraphElement>(null);
+  const shownStep = useRef(step);
+  useEffect(() => {
+    if (shownStep.current === step) return;
+    shownStep.current = step;
+    if (!document.activeElement || document.activeElement === document.body) stepLine.current?.focus();
+  }, [step]);
+  const primary = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress`;
   const quiet = `${dense ? "px-3 py-1.5 text-xs" : "px-4 py-2 min-h-10 text-sm"} max-md:min-h-11 rounded-lg font-bold bg-black/20 hover:bg-black/30 transition-colors cursor-pointer disabled:opacity-40`;
   const field = `w-full min-w-0 bg-black/20 rounded-lg px-3 py-2 ${dense ? "text-xs" : "text-sm"} placeholder-current/50 focus:outline-none focus:ring-1 focus:ring-accent`;
   const muted = `${dense ? "text-[11px]" : "text-xs"} opacity-70 m-0`;
@@ -54,7 +68,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   if (outcome) {
     return (
       <div className="space-y-1.5" data-testid="lnurl-done">
-        <p className={`${dense ? "text-xs" : "text-sm"} font-semibold text-accent m-0`} data-testid={outcome === "paid" ? "lnurl-paid" : "lnurl-pending"}>{outcome === "paid" ? t("wallet.lightning.paidTo", { amount: quote ? formatAmount(quote.amount, t.language) : "", unit, to: text }) : t("wallet.lightning.pending")}</p>
+        <p ref={stepLine} tabIndex={-1} className={`${dense ? "text-xs" : "text-sm"} font-semibold text-accent m-0 focus:outline-none`} data-testid={outcome === "paid" ? "lnurl-paid" : "lnurl-pending"}>{outcome === "paid" ? t("wallet.lightning.paidTo", { amount: quote ? formatAmount(quote.amount, t.language) : "", unit, to: text }) : t("wallet.lightning.pending")}</p>
         {invoice?.successAction?.tag === "message" && invoice.successAction.message && <p className={muted} data-testid="lnurl-success">{t("wallet.lightning.says", { domain: info?.domain ?? "", message: invoice.successAction.message })}</p>}
         {invoice?.successAction?.tag === "url" && invoice.successAction.url && <p className={muted}>{fillNodes(t("wallet.lightning.linkLine", { what: invoice.successAction.description || t("wallet.lightning.leftLink", { domain: info?.domain ?? "" }) }), { link: <a className="underline" {...externalLinkProps(invoice.successAction.url)}>{invoice.successAction.url}</a> })}</p>}
         {onDone && <button type="button" className={quiet} onClick={onDone}>{t("wallet.lightning.done")}</button>}
@@ -65,12 +79,12 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   if (!info) {
     return (
       <div className="space-y-2" data-testid="lnurl-resolve">
-        <p className={muted}>{fillNodes(t("wallet.lightning.lookupAsks"), { domain: <b>{domainOf(text) ?? t("wallet.lightning.lnurlServer")}</b> })}</p>
-        <button type="button" className={primary} disabled={busy} data-testid="lnurl-lookup" onClick={() => void run(async () => {
+        <p ref={stepLine} tabIndex={-1} className={`${muted} focus:outline-none`}>{fillNodes(t("wallet.lightning.lookupAsks"), { domain: <b>{domainOf(text) ?? t("wallet.lightning.lnurlServer")}</b> })}</p>
+        <button type="button" className={primary} {...working} data-testid="lnurl-lookup" onClick={() => { if (!busy) void run(async () => {
           const resolved = await wallet.resolveLightningAddress(text);
           setInfo(resolved);
           if (resolved.minSat === resolved.maxSat) setAmount(String(resolved.minSat));
-        })}>{busy ? t("wallet.lightning.lookingUp") : t("wallet.lightning.lookUp")}</button>
+        }); }}>{busy ? t("wallet.lightning.lookingUp") : t("wallet.lightning.lookUp")}</button>
         {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} ink />}
       </div>
     );
@@ -79,13 +93,13 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   if (quote && invoice) {
     // More than the paying card holds is never approved: the node or the mint would only refuse it afterwards.
     const over = holdsLess(via === "cashu" ? "cashu" : "lightning", wallet.getState(), quote.amount);
-    const pay = (confirmedReal: boolean) => void run(async () => {
+    const pay = (confirmedReal: boolean) => { if (!busy) void run(async () => {
       const paid = await wallet.payQuote(quote.quote, quote.mint, invoice.note, confirmedReal);
       setOutcome(paid ? "paid" : "pending");
-    });
+    }); };
     return (
       <div className="space-y-2" data-testid="lnurl-review">
-        <p className={`${dense ? "text-xs" : "text-sm"} m-0`}>{fillNodes(t("wallet.lightning.payTo", { to: info.text }), {
+        <p ref={stepLine} tabIndex={-1} className={`${dense ? "text-xs" : "text-sm"} m-0 focus:outline-none`}>{fillNodes(t("wallet.lightning.payTo", { to: info.text }), {
           amount: <b>{t("wallet.cards.amount", { amount: formatAmount(quote.amount, t.language), unit })}</b>,
           fees: <span className="opacity-70"> {t("wallet.lightning.feesThrough", { fee: formatAmount(quote.feeReserve, t.language), source: sourceName(quote.source) })}</span>,
         })}</p>
@@ -94,7 +108,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
         {over !== undefined && <p className={`${dense ? "text-[11px]" : "text-xs"} text-danger-ink m-0`} data-testid="lnurl-over">{t("payments.composer.tooMuch", { amount: formatAmount(over, t.language), unit })}</p>}
         {confirming && over === undefined ? <ConfirmRealMoney what={t("wallet.lightning.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => pay(true)} onBack={() => setConfirming(false)} /> : (
           <div className="flex flex-wrap gap-2">
-            <button type="button" className={primary} disabled={busy || over !== undefined} data-testid="lnurl-pay" onClick={() => real ? setConfirming(true) : pay(false)}>{busy ? t("wallet.lightning.paying") : t("wallet.lightning.pay")}</button>
+            <button type="button" className={primary} disabled={over !== undefined} {...working} data-testid="lnurl-pay" onClick={() => real ? setConfirming(true) : pay(false)}>{busy ? t("wallet.lightning.paying") : t("wallet.lightning.pay")}</button>
             <button type="button" className={quiet} disabled={busy} onClick={() => { setQuote(null); setInvoice(null); }}>{t("common.cancel")}</button>
           </div>
         )}
@@ -114,7 +128,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   const onEnter = (e: React.KeyboardEvent) => { if (e.key === "Enter" && !composition.composing(e)) { e.preventDefault(); e.stopPropagation(); getInvoice(); } };
   return (
     <div className="space-y-2" data-testid="lnurl-amount-form">
-      <p className={`${dense ? "text-xs" : "text-sm"} m-0`}><b>{info.text}</b>{info.description && <> · <bdi>{info.description}</bdi></>}</p>
+      <p ref={stepLine} tabIndex={-1} className={`${dense ? "text-xs" : "text-sm"} m-0 focus:outline-none`}><b>{info.text}</b>{info.description && <> · <bdi>{info.description}</bdi></>}</p>
       <p className={muted} data-testid="lnurl-domain">{t("wallet.lightning.domainLine", {
         answered: info.callbackDomain !== info.domain ? t("wallet.lightning.answeredVia", { domain: info.domain, callback: info.callbackDomain }) : t("wallet.lightning.answeredBy", { domain: info.domain }),
         limits: fixed ? t("wallet.lightning.asksExactly", { amount: formatAmount(info.minSat, t.language), unit }) : t("wallet.lightning.takesRange", { min: formatAmount(info.minSat, t.language), max: formatAmount(info.maxSat, t.language), unit }),
@@ -128,7 +142,7 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
       {amountField.hint && <p role="alert" className="text-xs m-0 text-danger-ink" data-testid="amount-unclear">{amountField.hint}</p>}
       {info.commentAllowed > 0 && <input data-testid="lnurl-comment" className={field} placeholder={t("wallet.lightning.commentFor", { to: info.text })} maxLength={info.commentAllowed} value={comment} onChange={(e) => setComment(e.target.value)} {...composition.inputProps} onKeyDown={onEnter} />}
       <div className="flex flex-wrap gap-2">
-        <button type="button" className={primary} disabled={busy || !Number(amount)} data-testid="lnurl-invoice" onClick={getInvoice}>{busy ? t("wallet.lightning.askingInvoice") : t("wallet.lightning.getInvoice")}</button>
+        <button type="button" className={primary} disabled={!Number(amount)} {...working} data-testid="lnurl-invoice" onClick={getInvoice}>{busy ? t("wallet.lightning.askingInvoice") : t("wallet.lightning.getInvoice")}</button>
         <button type="button" className={quiet} disabled={busy} onClick={() => { setInfo(null); setAmount(""); setComment(""); }}>{t("common.back")}</button>
       </div>
       {error && <Notice problem={error} testId="lnurl-error" className={`${dense ? "text-[11px]" : "text-xs"} m-0`} ink />}
