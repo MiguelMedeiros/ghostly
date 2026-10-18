@@ -5,7 +5,7 @@ import type { WalletPlatform, WalletState } from "../../lib/platform";
 import { walletView } from "../fakeEngine";
 import { renderApp } from "../render";
 
-// covers: wallet.fedimint.join, wallet.fedimint.notes
+// covers: wallet.fedimint.backup, wallet.fedimint.join, wallet.fedimint.notes
 
 /** Two federations of a Testnet wallet: Alpha has movements, Beta was just joined and has none. */
 const federation = (id: string, name: string, balance: number) => ({ id, name, balance, status: "ready" as const, lightning: true, invite: `fed1${id}`,
@@ -78,6 +78,36 @@ describe("notes made in the Fedimint panel", () => {
     expect(screen.queryByTestId("fedimint-take-back")).toBeNull();
     expect(screen.getByTestId("fedimint-spend")).toBeInTheDocument();
     expect(calls.fedimintTakeBack).not.toHaveBeenCalled();
+  });
+});
+
+describe("a backup file picked under Restore", () => {
+  const empty = walletView({ mode: "testnet", fedimint: { federations: [], balance: 0, history: [] } as never }) as WalletState;
+  const backup = (text: string, size = text.length) => Object.defineProperty(new File([text], "ghostly-fedimint-backup.json", { type: "application/json" }), "size", { value: size });
+  const open = async () => {
+    const calls = { fedimintRestoreBackup: vi.fn(async () => ({ joined: 1, failed: [] })) };
+    const view = renderApp(<FedimintWalletPanel wallet={wallet(calls)} state={empty} />);
+    await view.user.click(screen.getByRole("button", { name: "Restore" }));
+    return { calls, ...view };
+  };
+
+  it("says when it is too large to be a backup, and asks no password for it", async () => {
+    const { user } = await open();
+    await user.upload(screen.getByLabelText("…or an encrypted backup file"), backup("{}", 2 * 1024 * 1024));
+    expect(await screen.findByText("This backup is too large to restore here.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Fedimint backup file password")).toBeNull();
+  });
+
+  it("takes the place of the one picked before: a file that is not read leaves nothing to restore", async () => {
+    const { user, calls } = await open();
+    const input = screen.getByLabelText("…or an encrypted backup file");
+    await user.upload(input, backup('{"first":true}'));
+    expect(await screen.findByLabelText("Fedimint backup file password")).toBeInTheDocument();
+    await user.upload(input, backup("{}", 2 * 1024 * 1024));
+    expect(await screen.findByText("This backup is too large to restore here.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Fedimint backup file password")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Restore backup" })).toBeNull();
+    expect(calls.fedimintRestoreBackup).not.toHaveBeenCalled();
   });
 });
 
