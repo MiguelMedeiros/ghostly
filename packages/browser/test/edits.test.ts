@@ -336,6 +336,19 @@ describe("the contact's edits", () => {
     for (const id of [mine.messageId!, theirs.id]) expect((await t.row(id)).replyTo).toEqual({ id: WIRE("Q"), snippet: "", from: "peer", messageId: original.id });
   });
 
+  it("a removal of a message already deleted here still leaves no line of it in the replies here that quote it", async () => {
+    const t = await setup();
+    expect(await t.contact.sendMessage("quote me", Date.now(), WIRE("Q"))).toBeNull();
+    const original = await t.peerRow("quote me");
+    const mine = await t.node.sendMessage({ linkId: t.id, text: "my answer", replyTo: original.id });
+    expect((await t.row(mine.messageId!)).replyTo).toMatchObject({ snippet: "quote me" });
+    t.node.deleteMessage({ linkId: t.id, messageId: original.id });
+    await vi.waitFor(async () => expect((await t.messages()).map(m => m.id)).not.toContain(original.id));
+    expect(await t.contact.sendEdit({ id: WIRE("Q"), e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("Q"), 1]]));
+    expect((await t.row(mine.messageId!)).replyTo).toEqual({ id: WIRE("Q"), snippet: "", from: "peer", messageId: original.id });
+  });
+
   it("a removal never takes one of my messages", async () => {
     const t = await setup();
     const sent = await t.node.sendMessage({ linkId: t.id, text: "mine to keep" });

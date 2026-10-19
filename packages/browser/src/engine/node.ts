@@ -3529,7 +3529,14 @@ export class GhostlyNode implements EngineImplementation {
     const live = this.links.get(linkId);
     if (!live?.stored.profile || live.stored.group) return false;
     const id = `peer_${edit.id}`;
-    if (live.stored.deletedIds?.includes(id)) return true;
+    if (live.stored.deletedIds?.includes(id)) {
+      // Deleted here before its author deleted it for everyone: the replies here that quote it still lose its line.
+      if (edit.rm) {
+        const quoting = await this.forgetQuotes(linkId, id, replyRef({ id, linkId }));
+        if (quoting.length) await this.messagesChanged(linkId, quoting);
+      }
+      return true;
+    }
     // The contact deleted its message for everyone (WISP 400 § Delete for everyone): forgotten as a delete here is, a
     // file and its transfer included, and at once when it is not here yet, so it is taken as gone when it comes.
     if (edit.rm) {
