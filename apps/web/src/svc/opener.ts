@@ -143,11 +143,18 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     channel.port1.onmessage = (request) => { if (request.ports[0]) void serve(request.ports[0], request.data, options.send, jar, options.words); };
     frame.contentWindow!.postMessage({ type: BRIDGE_PORT }, origin, [channel.port2]);
   };
+  // A dialog over the whole app: the app under it is out of the keyboard's reach while it is open (Tab never lands on
+  // the hidden chat), and closing it gives the focus back to what had it (the Open button), not to the page's body.
+  const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const shut = [...document.body.children].filter((el) => !el.hasAttribute("inert"));
   const end = () => {
     removeEventListener("message", onMessage);
     removeEventListener("keydown", onKey);
     for (const port of ports) port.close();
     view.remove();
+    for (const el of shut) el.removeAttribute("inert");
+    const active = document.activeElement;
+    if (before?.isConnected && (!active || active === document.body)) before.focus({ preventScroll: true });
   };
   const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") end(); };
   addEventListener("message", onMessage);
@@ -155,6 +162,7 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   close.addEventListener("click", end);
   view.addEventListener(SERVICE_VIEW_CLOSE, end);
   frame.src = `${origin}${BRIDGE_PAGE}`;
+  for (const el of shut) el.setAttribute("inert", "");
   document.body.append(view);
   close.focus();
 }
