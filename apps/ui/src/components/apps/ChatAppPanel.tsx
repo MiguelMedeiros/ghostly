@@ -187,11 +187,13 @@ export function ChatAppResume({ linkId }: { linkId: string }) {
     <button type="button" data-testid="mini-app-resume" data-serving={app.serving || undefined} onClick={() => updateChatApp(linkId, { shown: true })}
       className="flex w-full items-center gap-2 px-4 py-2 bg-panel-header border-b border-border text-[13px] font-medium text-accent hover:bg-surface-hover cursor-pointer shrink-0 text-start">
       <AppGlyph size={16} />
-      <span className="min-w-0 flex-1 truncate">{t("apps.view.resume", { title: app.title })}</span>
-      {/* The title is cut first: the sharing words stay whole. */}
-      {app.serving && <span data-testid="mini-app-resume-sharing" className="shrink-0 font-normal text-text-secondary">
-        <span className="sr-only">, </span>{t("apps.view.resumeSharing")}
-      </span>}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{t("apps.view.resume", { title: app.title })}</span>
+        {/* A line of its own: beside the title, a narrow phone cut the app's name in some languages. */}
+        {app.serving && <span data-testid="mini-app-resume-sharing" className="block truncate text-[12px] font-normal text-text-secondary">
+          <span className="sr-only">, </span>{t("apps.view.resumeSharing")}
+        </span>}
+      </span>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100"><path d="m9 18 6-6-6-6" /></svg>
     </button>
   );
