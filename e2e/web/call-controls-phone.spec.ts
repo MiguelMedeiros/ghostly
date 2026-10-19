@@ -230,5 +230,15 @@ test("on a phone the notice that the contact shares their screen is clear of you
   const box = (await notice.boundingBox())!;
   expect(box.y).toBeGreaterThanOrEqual(self.y + self.height);
   expect(box.x + box.width).toBeLessThanOrEqual(375);
+  // Your picture dragged down over it: the notice is still drawn on top, end to end.
+  await bob.page.mouse.move(self.x + self.width / 2, self.y + self.height / 2);
+  await bob.page.mouse.down();
+  await bob.page.mouse.move(self.x + self.width / 2, box.y + box.height / 2, { steps: 8 });
+  await bob.page.mouse.up();
+  const moved = (await bob.page.getByTestId("call-self-view").boundingBox())!;
+  expect(moved.y).toBeLessThan(box.y + box.height);
+  expect(moved.y + moved.height).toBeGreaterThan(box.y);
+  const onTop = (x: number) => notice.evaluate((el, at) => el.contains(document.elementFromPoint(at.x, at.y)), { x, y: box.y + box.height / 2 });
+  expect([await onTop(box.x + 12), await onTop(box.x + box.width - 12)]).toEqual([true, true]);
   await bob.page.getByTestId("call-hang-up").click();
 });
