@@ -1569,6 +1569,7 @@ export class GhostlyNode implements EngineImplementation {
       await this.messagesChanged(message.linkId, [message.id]);
       this.emitState();
     },
+    federationNetwork: federation => this.fedimintOf(federation)?.federation(federation)?.network,
   });
 
   /**
