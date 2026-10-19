@@ -614,6 +614,31 @@ describe("LinkSession discovery errors", () => {
     await a.s.stop(false);
   });
 
+  it("tries a publish the relays' budget held back again when the budget frees a request, up to a minute later; something new goes at once", async () => {
+    // Every 4 s, an idle admin signed packets the budget refused again: 93% of its publishes (bug hunt, 2026-10-19).
+    const { a } = pair({ getServices: () => [] });
+    a.s.start();
+    await settle();
+    a.transport.failPublish = new DiscoveryBudgetError(50_000);
+    await a.s.refreshAdvertisement();
+    const held = a.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(49_000);
+    expect(a.transport.publish.mock.calls.length).toBe(held);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(a.transport.publish.mock.calls.length).toBe(held + 1);
+    // Never longer than a minute, whatever the budget says.
+    a.transport.failPublish = new DiscoveryBudgetError(10 * 60_000);
+    await a.s.refreshAdvertisement();
+    const longer = a.transport.publish.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(a.transport.publish.mock.calls.length).toBe(longer + 1);
+    // A change to say does not wait for the retry.
+    a.transport.failPublish = null;
+    await a.s.setCallSignal("ring");
+    expect(a.transport.publish.mock.calls.length).toBe(longer + 2);
+    await a.s.stop(false);
+  });
+
   it("coalesces publishes requested while one is in flight into a single follow-up", async () => {
     const { a } = pair();
     let release!: () => void;

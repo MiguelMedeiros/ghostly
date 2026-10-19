@@ -135,10 +135,16 @@ export function unusedInviteWait(age: number, interval: number, readers: number)
 export const TRANSPORTS_GONE_MS = 2 * 60_000;
 const PUBLISH_RETRY_MS = 4_000;
 /**
- * A packet the relays' request budget held back goes again when the budget frees a request, and at least this often
- * meanwhile: each refusal keeps it first in line for that request (`WRITE_FIRST_MS`), and costs no request itself.
+ * A packet the relays' request budget held back goes again when the budget frees a request, never sooner than this:
+ * each refusal keeps it first in line for that request (`WRITE_FIRST_MS`), and costs no request itself.
  */
 const BUDGET_RETRY_MIN_MS = 250;
+/**
+ * Nor later than this, as the caps record (`CapsRecord`). Anything new to say goes at once meanwhile. Held to
+ * `PUBLISH_RETRY_MS`, a background write the budget held back for a minute was built and signed again every 4 s, refused
+ * each time: 93% of an idle admin's publishes, and a quarter of its daemon's busy time (bug hunt, 2026-10-19).
+ */
+const BUDGET_RETRY_MAX_MS = 60_000;
 /** Two reads are never closer than this, however long the last one took. */
 const MIN_POLL_GAP_MS = 250;
 export const IDLE_THRESHOLD = 60_000;
@@ -763,7 +769,7 @@ export class LinkSession {
 
   /** When a publish that failed goes again: when the relays' budget frees a request, if that held it back. */
   private retryDelay(error: unknown): number {
-    return isDiscoveryBudgetError(error) ? budgetRetryMs(error, BUDGET_RETRY_MIN_MS, PUBLISH_RETRY_MS) : PUBLISH_RETRY_MS;
+    return isDiscoveryBudgetError(error) ? budgetRetryMs(error, BUDGET_RETRY_MIN_MS, BUDGET_RETRY_MAX_MS) : PUBLISH_RETRY_MS;
   }
 
   private discoveryResult(operation: "publish" | "read", error?: unknown): void {
