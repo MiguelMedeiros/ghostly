@@ -86,6 +86,13 @@ export const outgoingFileId = (linkId: string, wireId: string) => `${linkId}-out
 /** A file said on the DHT floor whose offer does not come within this long is shown as not coming (an offer's week). */
 const ANNOUNCED_FOR_MS = 7 * 24 * 60 * 60_000;
 
+/**
+ * Why this device refused the offer of a file said on the floor, as the bubble's error keeps it: no room, or too many
+ * files waiting for the person, each with its own next step in the app (errorText.ts); else that it was refused.
+ */
+const floorRefusal = (why: unknown): string =>
+  why === "no-room" ? "No room on this device for this file" : why === "too-many" ? "Too many files are waiting here" : "It was refused here";
+
 /** Progress is written to the database at most this often; every change of state is written at once. */
 const SAVE_EVERY_MS = 2_000;
 
@@ -117,7 +124,7 @@ export class FileDesk {
     if (chat) return chat;
     const made: Chat = { local: new Map(), places: new Map(), announced: new Map(), withdrawn: new Map(), saving: Promise.resolve(), lastSaved: new Map(), unsaved: new Map(), files: undefined as unknown as ChatFiles };
     made.files = new ChatFiles({
-      send: (frame) => this.deps.send(linkId, frame),
+      send: (frame) => { this.refusedHere(made, frame); return this.deps.send(linkId, frame); },
       decide: (file, again) => this.decide(linkId, file, again),
       openTarget: (record) => this.openTarget(linkId, record),
       openSource: (record) => this.openSource(linkId, record),
@@ -217,7 +224,12 @@ export class FileDesk {
     this.deps.transfers.set(localId, { state: "transferring", stage: "waiting", transferred: 0, size });
   }
 
-  /** A file said on the floor will not come (cancelled by its sender, or never offered within a week). */
+  /** This device refuses the offer of a file said on the floor: its bubble ends, saying why (`floorRefusal`). */
+  private refusedHere(chat: Chat, frame: Record<string, unknown>): void {
+    if (frame.t === "pf-refuse" && typeof frame.id === "string") this.withdrawn(chat, frame.id, floorRefusal(frame.why));
+  }
+
+  /** A file said on the floor will not come (cancelled by its sender, refused here, or never offered within a week). */
   private withdrawn(chat: Chat, wireId: string, error: string): void {
     const said = chat.announced.get(wireId);
     if (!said) return;
