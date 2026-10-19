@@ -475,15 +475,23 @@ describe("a limited start (WISP 06 § When a device checks)", () => {
     expect(screen.getByTestId("limited-banner")).toHaveTextContent("Messages you write wait until then.");
   });
 
-  it("while the read at start is out the app opens and asks nothing; if no source answered, the question comes then", async () => {
+  it("while the read at start is out the app opens and asks nothing; if no source answered, the app stays, the line shows at once and the focus stays", async () => {
     fakeEngine.setState({ limited: true, startCheck: true });
     render(<Root />);
     expect(await screen.findByTestId("sidebar")).toBeInTheDocument();
     expect(screen.queryByTestId("limited-start")).toBeNull();
     expect(screen.queryByTestId("limited-banner")).toBeNull();
-    // No source answered: this was a limited start after all.
+    const typing = screen.getAllByRole("textbox")[0];
+    act(() => typing.focus());
+    // No source answered: a limited start, but the person is already using the app, so it is not taken away.
     act(() => fakeEngine.setState({ limited: true }));
-    expect(await screen.findByTestId("limited-start")).toBeInTheDocument();
+    expect(screen.getByTestId("limited-banner")).toHaveTextContent("Offline until Ghostly can check which device is active");
+    expect(screen.queryByTestId("limited-start")).toBeNull();
+    expect(screen.getByTestId("sidebar")).toBeInTheDocument();
+    expect(typing).toHaveFocus();
+    // The first good read ends it: the line goes.
+    act(() => fakeEngine.setState({}));
+    await waitFor(() => expect(screen.queryByTestId("limited-banner")).toBeNull());
   });
 
   it("a read at start that says this device is the active one leaves no question behind", async () => {
