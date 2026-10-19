@@ -685,6 +685,11 @@ const METHODS: Record<string, Method> = {
     const raw = params.params;
     if (raw !== undefined && (raw === null || typeof raw !== "object" || Array.isArray(raw))) throw new CliError("bad_request", "params must be an object");
     const args = raw as Params | undefined;
+    // "Hide my IP from contacts" (`relayOnly`, WISP 100 § Relay only) is not in 1.5: no app shows it, and the Desktop's
+    // own transports do not follow it yet. Nobody turns it on through here either, until the release that shows it.
+    if (method === "updateSettings" && args?.settings && typeof args.settings === "object" && "relayOnly" in args.settings) {
+      throw new CliError("bad_request", "relayOnly is not a setting yet: Hide my IP from contacts comes in a later release");
+    }
     // Real money moves only on an explicit confirmation of this call (WISP 1100 § Mainnet).
     if (args && "confirmedReal" in args && !bool(params, "confirmReal")) {
       throw new CliError("confirm", `${method} spends real money: pass --confirm-real (confirmReal: true over the socket) to confirm it`);
