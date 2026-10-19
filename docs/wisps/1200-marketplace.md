@@ -673,7 +673,7 @@ The contact's app reads a file this side's app chose to share, in ranges, over t
 
 For watching where the person who shares it is offline: the client sends the whole file over `files/3`, the contact's client keeps it, and the contact's app reads it there.
 
-- **Offering.** `ghostly.files.offer(id)` in a chat (permissions `files` and `chat`) sends a linked file as a chat file, a message the contact sees as any file, with the contact's consent as any file ([501](501-paired-files.md#rules): above 25 MiB the person decides, and sees the name, the size and their free space). Its `pf-offer` gains `"app": "<chat app id>"`; an older client ignores the key and keeps the file as any file.
+- **Offering.** `ghostly.files.offer(id)` in a chat (permissions `files` and `chat`) sends a linked file as a chat file, a message the contact sees as any file, with the contact's consent as any file ([501](501-paired-files.md#rules): above 25 MiB the person decides, and sees the name, the size and their free space). Its `pf-offer` gains `"app": "<chat app id>"`; an older client ignores the key and keeps the file as any file. Fixed on 2026-10-19 (`chatFiles.ts`, [501](501-paired-files.md#rules)): `app` is a chat app id, 22 base64url characters, on `files/3`'s `pf-offer` only; a receiver drops a malformed one and takes the file as any file.
 - **Reading it on the other side.** Once stored and checked, the receiver's client links the file to that app for that chat: it shows in the app's `ghostly.files.list()` with `received: true`, and `files.read` reads it, from the client's file store, in ranges. Deleting the message deletes the file and the link. The app learns nothing of the file before the person accepted it.
 
 ### What it adds to the threats
