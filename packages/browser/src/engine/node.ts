@@ -5077,11 +5077,13 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   appUnserve({ linkId, serve }: { linkId: string; serve: string }): void {
+    if (!this.appsOn) throw this.appsOff();
     this.links.get(linkId)?.link?.unserveAppFile(serve);
   }
 
   /** A page's answer to an `app-range` it served: the bytes and the file's size go to the contact, or why they cannot. */
   appRangeAnswer({ linkId, app, request, bytes, size, error }: { linkId: string; app: string; request: number; bytes?: Uint8Array; size?: number; error?: "changed" | "gone" }): void {
+    if (!this.appsOn) throw this.appsOff();
     const key = `${linkId} ${app} ${request}`, task = this.appRanges.get(key), link = this.links.get(linkId)?.link;
     this.appRanges.delete(key);
     if (!task || !link) return;
