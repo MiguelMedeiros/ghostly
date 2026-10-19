@@ -146,6 +146,13 @@
     "cannotRetry": "No se puede reintentar este archivo",
     "clipboardUnavailable": "No se puede leer el portapapeles",
     "clipboardUnavailableNext": "Adjúntalo con +.",
+    "floor": {
+      "noRoomNext": "Libera espacio y pide a tu contacto que lo envíe de nuevo.",
+      "notInAWeek": "No llegó en una semana",
+      "refused": "Este dispositivo no pudo recibir este archivo",
+      "tooMany": "Hay demasiados archivos esperando aquí",
+      "tooManyNext": "Responde a los archivos que te esperan y pide a tu contacto que lo envíe de nuevo."
+    },
     "gone": "Este archivo ya no está aquí",
     "noRoom": "No hay espacio en el dispositivo de tu contacto",
     "noRoomHere": "No hay espacio en este dispositivo",

@@ -146,6 +146,13 @@
     "cannotRetry": "This file cannot be retried",
     "clipboardUnavailable": "The clipboard cannot be read",
     "clipboardUnavailableNext": "Attach it with +.",
+    "floor": {
+      "noRoomNext": "Free some space, then ask your contact to send it again.",
+      "notInAWeek": "It did not come within a week",
+      "refused": "This device could not take this file",
+      "tooMany": "Too many files are waiting here",
+      "tooManyNext": "Answer the files waiting for you, then ask your contact to send it again."
+    },
     "gone": "This file is no longer here",
     "noRoom": "No room on your contact's device",
     "noRoomHere": "No room on this device",

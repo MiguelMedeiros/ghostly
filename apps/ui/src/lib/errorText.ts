@@ -129,6 +129,13 @@ const RULES: readonly Rule[] = [
   // status, the next step behind the ⓘ. The system's reason for a file not stored stays English, as the detail.
   exact("The file arrived damaged and was deleted. Ask for it again.", "errors.files.refused.damaged", "errors.files.askAgain"),
   exact("The offer expired", "errors.files.offerExpired", "errors.files.askAgain"),
+  exact("Cancelled by the sender", "chat.file.cancelled", "errors.files.askAgain"),
+  // A file said on the DHT floor that ended here before it came (packages/browser engine/fileDesk.ts): why this device
+  // refused its offer, or its week ran out. Its sender still has it, and its next offer takes the bubble over.
+  exact("No room on this device for this file", "errors.files.noRoomHere", "errors.files.floor.noRoomNext"),
+  exact("Too many files are waiting here", "errors.files.floor.tooMany", "errors.files.floor.tooManyNext"),
+  exact("It was refused here", "errors.files.floor.refused", "errors.files.askAgain"),
+  exact("It did not come within a week", "errors.files.floor.notInAWeek", "errors.files.askAgain"),
   // A group's file every holder served damaged (packages/browser groupFiles.ts DAMAGED): the group is asked, not a contact.
   exact("Every copy of this file arrived damaged and was deleted. Ask for it again later.", "errors.files.refused.damaged", "errors.files.askGroupAgain"),
   { match: /^Could not store the file: (?:This device has no space left for the file|QuotaExceededError[\s\S]*|[\s\S]*No space left on device[\s\S]*)$/, key: "errors.files.noRoomHere", next: "errors.files.noRoomHereNext", detail: true },
