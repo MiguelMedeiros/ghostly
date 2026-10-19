@@ -274,6 +274,8 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
   const ranges = () => (chatAllowed ? platform.ranges ?? null : null);
   /** What this app serves on its chat's session now: serve id to the linked file and its size as listed. */
   const serving = new Map<string, { file: string; size: number }>();
+  /** Every serve id this app was given: an ask under one it ended is still answered, so its place frees at once. */
+  const servedEver = new Set<string>();
   /** A pick waiting for the person: one at a time per app. */
   let picking = false;
   /** Aborts as the app stops: a sheet the client shows for it goes with it. */
@@ -302,8 +304,10 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
     });
     const lane = ranges(), files = linkedFiles();
     const asks = lane && files ? lane.onAsk((askLink, ask) => {
+      if (askLink !== linkId || ask.app !== appId || !servedEver.has(ask.serve)) return;
       const serve = serving.get(ask.serve);
-      if (askLink !== linkId || ask.app !== appId || serve?.file !== ask.file || phase === "stopped") return;
+      // Ended meanwhile (unserved, or the app stopped): nothing to read, but the answer frees its place.
+      if (serve?.file !== ask.file || phase === "stopped") { void lane.answer(linkId, { app: ask.app, request: ask.request, error: "gone" }).catch(() => {}); return; }
       // The bytes as the link reads them now: a file that changed or went says so, as `files.read` would.
       void files.read(launch.ref, ask.file, ask.offset, ask.length).then(
         (bytes) => lane.answer(linkId, { app: ask.app, request: ask.request, bytes, size: serve.size }),
@@ -456,6 +460,7 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         const answer = await lane.serve(launch.chat!.linkId, launch.ref, id as string);
         if ("error" in answer) refuse(answer.error);
         const { serve } = answer as { serve: string };
+        servedEver.add(serve);
         serving.set(serve, { file: id as string, size: entry!.size });
         return { value: serve };
       }

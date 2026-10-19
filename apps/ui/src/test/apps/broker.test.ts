@@ -781,6 +781,8 @@ describe("the read lane (WISP 1200 § A read lane to the contact)", () => {
     expect(await host.askRange(LINK, { app, request: 7, serve, file: id, offset: 0, length: 1 })).toEqual({ app, request: 7, error: "changed" });
     expect(await ask("files.unserve", [serve])).toMatchObject({ ok: true });
     expect(host.serves.size).toBe(0);
+    // An ask that was on its way when it ended is still answered, so its place among the app's 4 frees.
+    expect(await host.askRange(LINK, { app, request: 8, serve, file: id, offset: 0, length: 1 })).toEqual({ app, request: 8, error: "gone" });
     expect(await ask("files.unserve", [serve])).toMatchObject({ ok: true });
   });
 
