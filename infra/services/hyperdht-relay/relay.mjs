@@ -14,7 +14,7 @@ import { WebSocketServer } from 'ws'
 export const DEFAULT_LIMITS = Object.freeze({
   /** WebSockets at once, over all clients. */
   clients: 512,
-  /** WebSockets at once from one address. */
+  /** WebSockets at once from one address (an IPv6 /64 counts as one, see addressKey). */
   clientsPerAddress: 16,
   /** Largest relay protocol message a client may send. */
   payloadBytes: 256 * 1024,
@@ -170,6 +170,22 @@ export function addressOf(request, { proxies = 0, cloudflare = false } = {}) {
 }
 
 /**
+ * What `clientsPerAddress` counts: an IPv4 address as it is (an IPv4-mapped IPv6 one too), an IPv6 address by its
+ * /64, the block one subscriber usually holds whole. The push relay's `rateKey`; the two services ship separately.
+ */
+export function addressKey(address) {
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)
+  if (mapped) return mapped[1]
+  if (!address.includes(':')) return address
+  const [head, tail] = address.split('%')[0].split('::')
+  const before = head ? head.split(':') : []
+  const after = tail ? tail.split(':') : []
+  const groups = tail === undefined ? before : [...before, ...Array(Math.max(0, 8 - before.length - after.length)).fill('0'), ...after]
+  const prefix = groups.slice(0, 4).map(group => parseInt(group, 16))
+  return prefix.length === 4 && prefix.every(n => n >= 0 && n <= 0xffff) ? `${prefix.map(n => n.toString(16)).join(':')}::/64` : address
+}
+
+/**
  * Starts a relay: an HTTP server whose WebSocket upgrades each carry one browser's HyperDHT (dht-relay,
  * non-custodial: the browser keeps its keys and runs the Noise handshake and the encrypted stream itself;
  * the relay moves handshake messages and ciphertext). `GET /healthz` answers with the counts.
@@ -211,7 +227,7 @@ export async function startRelay(options = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: limits.payloadBytes, perMessageDeflate: false })
 
   server.on('upgrade', (request, socket, head) => {
-    const address = addressOf(request, { proxies: options.proxies, cloudflare: options.cloudflare })
+    const address = addressKey(addressOf(request, { proxies: options.proxies, cloudflare: options.cloudflare }))
     const origin = request.headers.origin
     const refuse = (status, why) => {
       stats.refused++; log('refused', why)
