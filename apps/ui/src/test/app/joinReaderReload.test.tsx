@@ -36,11 +36,12 @@ it("once the QR reader failed again, Join says to reload, with Reload, also when
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("The QR reader still did not load. Reload Ghostly to load it."));
   const button = screen.getByRole("button", { name: "Reload" });
 
-  // No connection: a reload would leave the browser's own error page, so the app stays.
+  // No connection: a reload would leave the browser's own error page, so the app stays, and says why.
   fireEvent.click(button);
   await waitFor(() => expect(fetched).toHaveBeenCalledWith(location.pathname, { method: "HEAD", cache: "no-store" }));
   await waitFor(() => expect(button).not.toHaveAttribute("aria-disabled"));
   expect(reload).not.toHaveBeenCalled();
+  expect(screen.getByRole("status")).toHaveTextContent("Can't reach Ghostly's server. Check your connection, then reload.");
 
   // Join closed and opened again: the reader is still the failed one.
   unmount();

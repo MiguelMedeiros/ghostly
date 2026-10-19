@@ -146,6 +146,13 @@
     "cannotRetry": "Não é possível tentar enviar este arquivo de novo",
     "clipboardUnavailable": "Não foi possível ler a área de transferência",
     "clipboardUnavailableNext": "Anexe com +.",
+    "floor": {
+      "noRoomNext": "Libere espaço e peça ao seu contato para enviar de novo.",
+      "notInAWeek": "Não chegou em uma semana",
+      "refused": "Este dispositivo não pôde receber este arquivo",
+      "tooMany": "Há arquivos demais esperando aqui",
+      "tooManyNext": "Responda aos arquivos que esperam por você e peça ao seu contato para enviar de novo."
+    },
     "gone": "Este arquivo não está mais aqui",
     "noRoom": "Sem espaço no dispositivo do contato",
     "noRoomHere": "Sem espaço neste dispositivo",

@@ -4,17 +4,23 @@ import { reloadIfServed } from "../../lib/reloadIfServed";
 
 /**
  * Reload, offered where a part of the app failed to load again (`reloadIfServed`: only into a page the server
- * answers for; with no connection yet it stays). `to`: the address the app comes back on.
+ * answers for; with no connection yet it stays, and a line under it says so). `to`: the address the app comes back on.
  */
-export function ReloadButton({ className, testId, to }: { className: string; testId?: string; to?: string }) {
+export function ReloadButton({ className, noteClassName, testId, to }: { className: string; noteClassName?: string; testId?: string; to?: string }) {
   const t = useT();
   const [busy, setBusy] = useState(false);
+  const [unreachable, setUnreachable] = useState(false);
   const reload = async () => {
     if (busy) return;
     setBusy(true);
-    await reloadIfServed(to);
+    // Cleared first, so a press that fails again says so again.
+    setUnreachable(false);
+    setUnreachable(!(await reloadIfServed(to)));
     setBusy(false);
   };
   // `aria-disabled`, not `disabled`: a disabled button gives up the keyboard focus while the server is asked.
-  return <button type="button" data-testid={testId} aria-disabled={busy || undefined} onClick={() => void reload()} className={className}>{t("boot.reload")}</button>;
+  return <>
+    <button type="button" data-testid={testId} aria-disabled={busy || undefined} onClick={() => void reload()} className={className}>{t("boot.reload")}</button>
+    {unreachable && <p role="status" data-testid={testId && `${testId}-unreachable`} className={noteClassName}>{t("boot.reloadUnreachable")}</p>}
+  </>;
 }
