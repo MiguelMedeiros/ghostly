@@ -101,7 +101,7 @@ export function SparkWalletPanel({ wallet, state, backupNow = false }: { wallet:
     {breezIsLightning ? <span className="text-sm text-text-secondary" data-testid="spark-lightning-on">{t("wallet.panel.inUse")}</span>
      : <Button data-testid="spark-use-lightning" disabled={busy} loading={running === "lightning"} onClick={() => void run(() => wallet.sparkUseForLightning(), "lightning")}>{t("wallet.spark.useForLightning")}</Button>}
    </Row>}
-   <BackupRows name="Spark" busy={busy} run={run} canReplace={canReplace} focusFirst={backupNow}
+   <BackupRows name="Spark" busy={busy} running={running} run={run} canReplace={canReplace} focusFirst={backupNow}
     reveal={async () => (await wallet.sparkBackup()).mnemonic} exportBackup={pw => wallet.sparkExportBackup(pw)}
     restorePhrase={mnemonic => wallet.sparkCreate({ network, mnemonic })} restoreFile={(text, pw) => wallet.sparkRestoreBackup(text, pw)} />
    <Block><Notice>{t("wallet.spark.phraseNote")}</Notice></Block>

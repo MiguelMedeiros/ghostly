@@ -9,7 +9,7 @@ import { useI18n } from "../../../contexts/I18nContext";
  * once to be written down, and an existing one is restored from its phrase. The phrase and the API key
  * are the descriptor's secret fields: sealed on this device by the engine, never shown again.
  */
-export function BreezForm({ descriptor, mode, busy, onSubmit }: ProviderFormProps) {
+export function BreezForm({ descriptor, mode, busy, saving = false, onSubmit }: ProviderFormProps) {
   const { t } = useI18n();
   const [kind, setKind] = useState<"new" | "restore">("new");
   const [fresh] = useState(newRecoveryPhrase);
@@ -47,7 +47,7 @@ export function BreezForm({ descriptor, mode, busy, onSubmit }: ProviderFormProp
         <input aria-label={t("wallet.source.breez.apiKey")} className={`${input} font-mono text-xs`} type="password" autoComplete="new-password" spellCheck={false} value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
         <span className="block text-[11px] text-text-muted">{needsKey ? t("wallet.source.breez.mainnetNeedsKey") : t("wallet.source.breez.regtestNoKey")}</span>
       </label>
-      <Button type="submit" variant="primary" className="w-full" disabled={busy || !ready || invalid} data-testid="provider-save">{busy ? t("wallet.source.connecting") : t("wallet.source.use", { name: descriptor.label })}</Button>
+      <Button type="submit" variant="primary" className="w-full" disabled={busy || !ready || invalid} loading={saving} data-testid="provider-save">{saving ?t("wallet.source.connecting") : t("wallet.source.use", { name: descriptor.label })}</Button>
       <Notice>{t("wallet.source.breez.sealed")}</Notice>
     </form>
   );
