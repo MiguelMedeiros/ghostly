@@ -1880,8 +1880,8 @@ describe("one pull request alone", () => {
   });
 
   it("never pushes its rebase to a branch whose pushes a workflow acts on", async () => {
-    // Every branch a workflow names under `on.push` (or under a `workflow_run` that follows such a push): CI on a push
-    // to `claude/security-auto-*` ends in security-autorelease.yml, which releases that commit.
+    // Every branch a workflow names under `on.push` (or under a `workflow_run` that follows such a push): CI and
+    // Security run on a push to `claude/security-auto-*`, the security routine's fixes.
     const dir = resolve(import.meta.dirname, "../../../.github/workflows");
     const named = new Set<string>();
     for (const file of readdirSync(dir)) {
