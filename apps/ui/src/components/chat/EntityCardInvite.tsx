@@ -4,7 +4,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { groupLinkUrl, groupPath, groupStatusText } from "../../lib/groups";
-import { useEngineState } from "../../lib/engineState";
+import { useEngineValue } from "../../lib/engineState";
 import { showJoinNotice } from "../../lib/joinNotice";
 import { NO_ROOM_FOR_CHAT, ensureSession } from "../../lib/storage";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteShareText, readInvite, type JoinOutcome } from "../../lib/url";
@@ -93,11 +93,14 @@ export function InviteEntityCard({ code, mine, from }: { code: string; mine: boo
 export function GroupEntityCard({ link, community, groupId, mine, from }: { link: string; community: boolean; groupId: string; mine: boolean; from?: string }) {
   const { t } = useI18n();
   const nav = useAppNavigation();
-  const state = useEngineState();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
-  // An invitation not yet answered is not membership: it has no status until it is.
-  const known = state?.groups.find(g => g.id === groupId && g.status);
+  // An invitation not yet answered is not membership: it has no status until it is. Only what the card shows of the
+  // group, so a new message in it (or any other engine state) draws nothing here.
+  const known = useEngineValue(state => {
+    const g = state?.groups.find(g => g.id === groupId && g.status);
+    return g && { id: g.id, name: g.name, status: g.status, statusReason: g.statusReason };
+  });
   const group = known?.status === "active" ? known : undefined;
   // Left is a tombstone the link replaces, so it joins as a group never seen does.
   const out = known && !group && known.status !== "left" ? known : undefined;
