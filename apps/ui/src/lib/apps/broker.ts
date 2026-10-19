@@ -365,6 +365,26 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
     return read;
   };
 
+  /** The contact's reads (`remote.*`), one at a time on a chain of their own. */
+  let remoteReading: Promise<unknown> = Promise.resolve();
+  /**
+   * Counted as `counted` counts, but waiting for the contact only: a contact that never answered held the app's own
+   * `file`, `files.read`, `files.list` and `files.serve` behind it for good. Checked against the budget
+   * before it asks, its bytes added once they came.
+   */
+  const countedRemote = <T>(load: () => Promise<T>, size: (answer: T) => number): Promise<T> => {
+    const read = remoteReading.then(async () => {
+      await counted(async () => undefined, () => 0);
+      const answer = await load();
+      const bytes = size(answer);
+      served.push({ at: now(), bytes });
+      servedBytes += bytes;
+      return answer;
+    });
+    remoteReading = read.catch(() => {});
+    return read;
+  };
+
   const answer = async (type: string, args: unknown[]): Promise<{ value?: MiniAppJson | ArrayBuffer; transfer?: Transferable[]; file?: AppFileAt }> => {
     switch (type as MiniAppRequestType) {
       case "context": {
@@ -494,7 +514,7 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         const serve = args[0];
         if (typeof serve !== "string" || !LINK_ID.test(serve)) refuse("bad-request");
         const { offset, length } = type === "remote.stat" ? { offset: 0, length: 1 } : readRange(args[1]);
-        const read = await counted(() => lane.read(launch.chat!.linkId, launch.ref, serve as string, offset, length), (got) => ("bytes" in got ? got.bytes.byteLength : 0));
+        const read = await countedRemote(() => lane.read(launch.chat!.linkId, launch.ref, serve as string, offset, length), (got) => ("bytes" in got ? got.bytes.byteLength : 0));
         if ("error" in read) refuse(RANGE_REFUSALS.has(read.error) ? read.error as MiniAppErrorCode : "failed");
         const { bytes, size } = read as { bytes: Uint8Array; size: number };
         if (type === "remote.stat") return { value: { size } };
