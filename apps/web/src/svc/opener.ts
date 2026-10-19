@@ -119,6 +119,8 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   close.style.cssText = "min-width:40px;min-height:40px;border:0;border-radius:8px;background:transparent;color:inherit;font-size:18px;cursor:pointer";
   const name = document.createElement("span");
   name.textContent = options.title;
+  // The contact's name for it, in its own direction: a Latin name in the Arabic app is cut at its end, not its start.
+  name.dir = "auto";
   name.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
   bar.append(close, name);
   const frame = document.createElement("iframe");

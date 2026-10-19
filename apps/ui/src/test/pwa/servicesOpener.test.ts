@@ -132,6 +132,17 @@ describe("a contact's app shown over the app", () => {
     expect(document.getElementById(SERVICE_VIEW_ID)?.getAttribute("aria-label")).toBe("two");
   });
 
+  it("reads the app's name in its own direction: in the Arabic app a Latin name is cut at its end, not its start", async () => {
+    document.documentElement.dir = "rtl";
+    try {
+      await open("A very long name for the demo app shared here");
+      const name = [...document.getElementById(SERVICE_VIEW_ID)!.querySelectorAll("span")].find((el) => el.textContent === "A very long name for the demo app shared here");
+      expect(name?.getAttribute("dir")).toBe("auto");
+    } finally {
+      document.documentElement.removeAttribute("dir");
+    }
+  });
+
   it("closes when the profile locks (the lock screen's closeServiceWindows), as Desktop's windows do", async () => {
     setServiceWindowsCloser(closeServiceView);
     await open("one");
