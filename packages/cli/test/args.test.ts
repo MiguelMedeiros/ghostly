@@ -113,6 +113,29 @@ describe("the argument parser", () => {
     expect(parseArgs(["--left", "0"], COMMANDS["usage send"].options!).options).toEqual({ left: 0 });
   });
 
+  it("refuses a word a flag does not take as a usage error that names the flag and its words, before the profile opens", () => {
+    // Before, the API answered after the profile opened: bad_request (exit 1), "network must be one of mainnet, testnet".
+    const refused = (name: string, argv: string[], message: string) => {
+      const command = COMMANDS[name] ?? TEXT_COMMANDS[name];
+      expect(() => parseArgs(["x", ...argv], command.options!, idSlot(command)), `${name} ${argv.join(" ")}`).toThrow(new CliError("usage", message));
+    };
+    for (const name of ["wallet list", "wallet history", "wallet create", "wallet remove", "wallet address", "wallet receive", "pay", "chat pay", "chat request", "lightning default"])
+      refused(name, ["--network", "weird"], "--network takes mainnet or testnet, not \"weird\"");
+    refused("wallet list", ["--network=Testnet"], "--network takes mainnet or testnet, not \"Testnet\"");
+    refused("wallet list", ["--network", ""], "--network takes mainnet or testnet, not \"\"");
+    refused("send", ["--wait", "weird"], "--wait takes none, sent or delivered, not \"weird\"");
+    refused("group send", ["--wait", "delivered"], "--wait takes none or sent, not \"delivered\"");
+    refused("edit", ["--wait", "sent"], "--wait takes none or confirmed, not \"sent\"");
+    refused("task update", ["t", "--wait", "delivered"], "--wait takes none, confirmed or sent, not \"delivered\"");
+    refused("chat wait", ["--until", "weird"], "--until takes live, text or paired, not \"weird\"");
+    refused("chat request", ["1", "--rail", "onchain"], "--rail takes cashu or lightning, not \"onchain\"");
+    refused("chat pay-request", ["p", "--via", "cashu"], "--via takes lightning, not \"cashu\"");
+    // The words each takes still go through as given.
+    expect(parseArgs(["--network", "mainnet"], COMMANDS["wallet list"].options!).options).toEqual({ network: "mainnet" });
+    expect(parseArgs(["--wait=delivered"], TEXT_COMMANDS.send.options!).options).toEqual({ wait: "delivered" });
+    expect(parseArgs(["--until", "paired"], COMMANDS["chat wait"].options!).options).toEqual({ until: "paired" });
+  });
+
   it("moves global options given before the command after it", () => {
     expect(liftGlobals(["--home", "/h", "-p", "bot", "--pretty", "send", "c", "hi"])).toEqual(["send", "c", "hi", "--home", "/h", "-p", "bot", "--pretty"]);
     expect(liftGlobals(["--profile=bot", "chat", "list"])).toEqual(["chat", "list", "--profile=bot"]);

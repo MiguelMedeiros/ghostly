@@ -26,15 +26,15 @@ export interface Command {
 }
 
 export const wait: Record<string, OptionSpec> = {
-  wait: { type: "string", description: "none, sent or delivered (default: none with a daemon, sent without)" },
+  wait: { type: "string", choices: ["none", "sent", "delivered"], description: "none, sent or delivered (default: none with a daemon, sent without)" },
   timeout: { type: "number", description: "Seconds to wait (default 30)" },
 };
 /** A group has no receipts: `sent` waits until an edge took the frame (a member's, or one of my hubs'). */
 export const groupWait: Record<string, OptionSpec> = {
-  wait: { type: "string", description: "none or sent: until an edge took it (default none)" },
+  wait: { type: "string", choices: ["none", "sent"], description: "none or sent: until an edge took it (default none)" },
   timeout: { type: "number", description: "Seconds to wait (default 30)" },
 };
-export const net: OptionSpec = { type: "string", description: "mainnet or testnet (default testnet)" };
+export const net: OptionSpec = { type: "string", choices: ["mainnet", "testnet"], description: "mainnet or testnet (default testnet)" };
 export const card: OptionSpec = { type: "string", description: "A Lightning card (its id; default: the network's default)" };
 export const memo: OptionSpec = { type: "string", description: "What it is for (up to 140 characters)" };
 export const confirmReal: OptionSpec = { type: "boolean", description: "Confirm a Mainnet (real money) spend" };

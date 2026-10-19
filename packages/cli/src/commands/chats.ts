@@ -10,7 +10,7 @@ export const commands: Record<string, Command> = {
     summary: "Press a button of someone else's message, as a tap in the app does (its id from the message's card)",
     args: ["chat", "message", "button"],
     options: {
-      wait: { type: "string", description: "none, sent (a one-shot's default in a chat) or delivered; a group takes none or sent" },
+      wait: { type: "string", choices: ["none", "sent", "delivered"], description: "none, sent (a one-shot's default in a chat) or delivered; a group takes none or sent" },
       timeout: groupWait.timeout,
     },
     params: ({ options }, a) => ({ chat: a.chat, message: a.message, button: a.button, wait: options.wait, timeout: options.timeout }),
@@ -24,7 +24,7 @@ export const commands: Record<string, Command> = {
       close: { type: "boolean", description: "Close the buttons: no more presses" },
       text: { type: "string", description: "A new text for the message (default: the one it has); people see it marked edited" },
       force,
-      wait: { type: "string", description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" },
+      wait: { type: "string", choices: ["none", "confirmed", "sent"], description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" },
       timeout: groupWait.timeout,
     },
     params: ({ options }, a) => {
@@ -61,7 +61,7 @@ export const commands: Record<string, Command> = {
   },
   "chat wait": {
     method: "chat.wait", usage: "chat wait <chat> [--until live|text|paired] [--timeout s]", summary: "Wait for a chat to reach a state", args: ["chat"],
-    options: { until: { type: "string", description: "live (default), text or paired" }, timeout: { type: "number", description: "Seconds (default 60)" } },
+    options: { until: { type: "string", choices: ["live", "text", "paired"], description: "live (default), text or paired" }, timeout: { type: "number", description: "Seconds (default 60)" } },
     params: ({ options }, { chat }) => ({ chat, until: options.until, timeout: options.timeout }),
   },
   "forward": {
@@ -71,7 +71,7 @@ export const commands: Record<string, Command> = {
     options: {
       to: { type: "list", description: "A chat or a group to forward to (id, prefix or name; group:<id> for a group; a dash-leading id as it is); up to 5" },
       force: { type: "boolean", description: "Forward even if a text looks like a seed, a key or ecash" },
-      wait: { type: "string", description: "none or sent: each text on its way (in a group, taken by an edge), each file's transfer done (default none)" },
+      wait: { type: "string", choices: ["none", "sent"], description: "none or sent: each text on its way (in a group, taken by an edge), each file's transfer done (default none)" },
       timeout: groupWait.timeout,
     },
     params: ({ options }, a) => {
@@ -124,7 +124,7 @@ export const commands: Record<string, Command> = {
     method: "routine.update", usage: "routine update <chat|group> <routine> [--run ok|failed|skipped[:summary]] [--next <time>] [--state active|paused] [--schedule ...] [--json json|-|file] [--force] [--wait none|confirmed|sent] [--timeout s]",
     summary: "Update a routine card you sent: record a run, the next one, a pause (at most one update per 2.5 s; sooner ones merge)",
     args: ["chat", "routine"],
-    options: { ...routineOptions, wait: { type: "string", description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" }, timeout: groupWait.timeout },
+    options: { ...routineOptions, wait: { type: "string", choices: ["none", "confirmed", "sent"], description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" }, timeout: groupWait.timeout },
     params: ({ options }, a) => ({ chat: a.chat, routine: a.routine, card: routineFields(options), run: runOf(options.run), text: options.text, force: options.force === true, wait: options.wait, timeout: options.timeout }),
   },
   "saved add": { method: "saved.add", usage: "saved add <chat|group> <message>", summary: "Save a message on this device, to find it again in `saved list` (nothing is sent)", args: ["chat", "message"], params: (_, a) => ({ chat: a.chat, message: a.message }) },
@@ -141,7 +141,7 @@ export const commands: Record<string, Command> = {
     method: "task.update", usage: "task update <chat|group> <task> [--status s] [--progress n | --steps a/b] [--step \"...\"] [--item state:text]... [--pr-url ...] [--pr-state s] [--pr-checks c] [--tag label]... [--parent task] [--json json|-|file] [--force] [--wait none|confirmed|sent] [--timeout s]",
     summary: "Update a task card you sent: the fields given, merged over it (at most one update per 2.5 s; sooner ones merge)",
     args: ["chat", "task"],
-    options: { ...taskOptions, wait: { type: "string", description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" }, timeout: groupWait.timeout },
+    options: { ...taskOptions, wait: { type: "string", choices: ["none", "confirmed", "sent"], description: "none (default), confirmed (a chat's contact took it) or sent (a group's edge took it)" }, timeout: groupWait.timeout },
     params: ({ options }, a) => ({ chat: a.chat, task: a.task, card: taskFields(options), text: options.text, force: options.force === true, wait: options.wait, timeout: options.timeout }),
   },
   "typing": {
