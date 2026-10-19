@@ -94,6 +94,26 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     expect(line).not.toHaveAttribute("data-serving");
   });
 
+  it.each([
+    ["ja", " とファイルを共有中"],
+    ["zh", "正在与 "],
+    ["en", "sharing a file with "],
+  ] as const)("in %s, cuts only the contact's name on a narrow line, never the words that say it shares", async (language, words) => {
+    windowIs(false);
+    renderApp(<ChatAppPanel linkId="link-1" sessionId="s1" contact={{ name: "Bartholomew Montgome", named: true }} peerKey="peer" />, { language });
+    act(() => fakeEngine.update({ links: [ana(true)] }));
+    await act(() => open(REF, "link-1"));
+    act(() => updateChatApp("link-1", { serving: true }));
+    const line = within(screen.getByTestId("mini-app")).getByTestId("mini-app-with");
+    // The name alone truncates; the translated words around it keep their width.
+    const name = within(line).getByTestId("mini-app-with-name");
+    expect(name).toHaveTextContent(/^Bartholomew Montgome$/);
+    expect(name).toHaveClass("truncate", "min-w-0");
+    const kept = [...line.children].filter((node) => node !== name);
+    expect(kept.some((node) => node.textContent === words)).toBe(true);
+    for (const node of kept) expect(node).toHaveClass("shrink-0");
+  });
+
   it("has the chat's look in its header: the app, with the contact, and the chat's connection", async () => {
     windowIs(false);
     panel();
