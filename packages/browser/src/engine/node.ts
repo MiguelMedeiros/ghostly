@@ -191,7 +191,7 @@ import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOrigi
 import { buttonPress, buttonsState, messageButtons } from "../shared/buttons";
 import { canEdit, canRemove, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
 import { CardEditPacer, EditBuffer, EditQueue } from "./edits";
-import { patchRemoval, removalNumber, removalRow, withRemoval, type Removal } from "./removals";
+import { QuoteSweeps, patchRemoval, removalNumber, removalRow, withRemoval, type Removal, type RemovedQuotes } from "./removals";
 import { ENGLISH_REMOVAL, removalRisksFunds, walletRemoval } from "../shared/walletRemoval";
 import { mintAwaiting, walletAwaiting } from "./walletAwaiting";
 import type { WalletRemoval } from "../shared/walletRemoval";
@@ -851,6 +851,11 @@ export class GhostlyNode implements EngineImplementation {
   private readonly cardRestores = new Map<string, { at: number; busy: boolean; again: boolean; timer?: ReturnType<typeof setTimeout> }>();
   /** The contacts' edits of messages not here yet. */
   private readonly editBuffer = new EditBuffer();
+  /** Removals of messages not here, whose quotes are looked for at most once a while per chat (`forgetQuotes`). */
+  private readonly quoteSweeps = new QuoteSweeps(async (chat, removed) => {
+    const ids = await this.forgetQuotes(chat, removed);
+    if (ids.length) await this.messagesChanged(chat, ids);
+  });
   /** Received status card updates, applied at most once a second per message (WISP 405 · Status Cards). */
   private readonly cardEdits = new CardEditPacer();
   /** When each message's buttons were last pressed here (`pressButton`). */
@@ -1531,7 +1536,7 @@ export class GhostlyNode implements EngineImplementation {
       return membership && { ...membership, community: this.groups.isCommunityGroup(groupId), admin: !!this.groups.views().find(g => g.id === groupId)?.isAdmin };
     },
     send: (groupId, edit, to) => this.groups.sendEdit(groupId, edit, to),
-    remove: (chat, id) => this.forgetGroupMessage(chat, id),
+    remove: (chat, id, here) => this.forgetGroupMessage(chat, id, here),
     removeMine: async (chat, message, removal) => {
       const groupId = chat.slice("group:".length);
       await this.groups.setRemovals(groupId, withRemoval(this.groups.removals(groupId), removal));
@@ -1547,10 +1552,12 @@ export class GhostlyNode implements EngineImplementation {
    * A group's message deleted for everyone, by its author or by me: gone from this device with its file, and noted so a
    * copy that comes again (a catch-up, a member handing it on) is not stored. The replies here that quote it lose its line.
    */
-  private async forgetGroupMessage(chat: string, id: string): Promise<void> {
+  private async forgetGroupMessage(chat: string, id: string, here = true): Promise<void> {
     await this.groups.removed(chat.slice("group:".length), id);
     await db.deleteMessage(chat, id);
-    await this.messagesChanged(chat, [id, ...await this.forgetQuotes(chat, id, id)]);
+    // One not here (a removal before its message, or one said again) costs no read of the group now (`QuoteSweeps`).
+    if (!here) this.quoteSweeps.add(chat, id, id);
+    await this.messagesChanged(chat, [id, ...here ? await this.forgetQuotes(chat, new Map([[id, id]])) : []]);
     this.emitState();
   }
 
@@ -2371,6 +2378,7 @@ export class GhostlyNode implements EngineImplementation {
     for (const queue of this.editQueues.values()) queue.stop();
     for (const restore of this.cardRestores.values()) clearTimeout(restore.timer);
     this.cardRestores.clear();
+    this.quoteSweeps.stop();
     this.groupEdits.stop();
     this.reactions.stop();
     this.cardEdits.stop();
@@ -3189,6 +3197,7 @@ export class GhostlyNode implements EngineImplementation {
     this.editQueues.delete(linkId);
     clearTimeout(this.cardRestores.get(linkId)?.timer);
     this.cardRestores.delete(linkId);
+    this.quoteSweeps.forget(linkId);
     this.editBuffer.forget(linkId);
     live.carried?.stop();
     // Gone before its link stops: the link's closing events find no chat to make an outbox or files for again.
@@ -3531,10 +3540,7 @@ export class GhostlyNode implements EngineImplementation {
     const id = `peer_${edit.id}`;
     if (live.stored.deletedIds?.includes(id)) {
       // Deleted here before its author deleted it for everyone: the replies here that quote it still lose its line.
-      if (edit.rm) {
-        const quoting = await this.forgetQuotes(linkId, id, replyRef({ id, linkId }));
-        if (quoting.length) await this.messagesChanged(linkId, quoting);
-      }
+      if (edit.rm) this.quoteSweeps.add(linkId, id, replyRef({ id, linkId }));
       return true;
     }
     // The contact deleted its message for everyone (WISP 400 § Delete for everyone): forgotten as a delete here is, a
@@ -4015,21 +4021,27 @@ export class GhostlyNode implements EngineImplementation {
     }
     await db.deleteMessage(linkId, messageId);
     live.lastMessageAt = (await db.getMessagePage(linkId, { limit: 1 })).messages[0]?.timestamp ?? 0;
-    const quoting = removed ? await this.forgetQuotes(linkId, messageId, replyRef(message ?? { id: messageId, linkId })) : [];
+    // One not here (a removal before its message) costs no read of the chat now: anyone can name ids that never were.
+    if (removed && !message) this.quoteSweeps.add(linkId, messageId, replyRef({ id: messageId, linkId }));
+    const quoting = removed && message ? await this.forgetQuotes(linkId, new Map([[messageId, replyRef(message)]])) : [];
     await this.messagesChanged(linkId, [messageId, ...quoting]);
     this.emitState();
   }
 
   /**
-   * A message deleted for everyone leaves no line of it here (WISP 400 § Delete for everyone): the replies of the chat
-   * that quote it keep the quote's id and who wrote it, which say it was deleted, and lose its snippet. The chat is
-   * read whole: a removal is rare. The ids of the replies changed.
+   * Messages deleted for everyone leave no line of them here (WISP 400 § Delete for everyone): the replies of the chat
+   * that quote one keep the quote's id and who wrote it, which say it was deleted, and lose its snippet. The chat is
+   * read whole: a removal of a message here is rare, and those of messages not here are gathered (`QuoteSweeps`). The
+   * ids of the replies changed.
    */
-  private async forgetQuotes(linkId: string, messageId: string, ref: string | undefined): Promise<string[]> {
-    const quotes = (reply: MessageReply | undefined) => !!reply && (reply.messageId === messageId || (ref !== undefined && reply.id === ref));
-    const ids = (await db.getMessages(linkId)).filter(m => quotes(m.replyTo) && (m.replyTo!.snippet || m.replyTo!.messageId !== messageId)).map(m => m.id);
+  private async forgetQuotes(linkId: string, removed: RemovedQuotes): Promise<string[]> {
+    const byRef = new Map<string, string>();
+    for (const [id, ref] of removed) if (ref !== undefined) byRef.set(ref, id);
+    // The removed message a reply quotes: by its id here, or by the reference both sides know it by.
+    const quoted = (reply: MessageReply | undefined) => !reply ? undefined : reply.messageId !== undefined && removed.has(reply.messageId) ? reply.messageId : byRef.get(reply.id);
+    const ids = (await db.getMessages(linkId)).filter(m => { const id = quoted(m.replyTo); return id !== undefined && (m.replyTo!.snippet || m.replyTo!.messageId !== id); }).map(m => m.id);
     if (!ids.length) return [];
-    await db.patchMessages(linkId, ids, m => quotes(m.replyTo) ? { replyTo: { ...m.replyTo!, snippet: "", messageId } } : null);
+    await db.patchMessages(linkId, ids, m => { const id = quoted(m.replyTo); return id === undefined ? null : { replyTo: { ...m.replyTo!, snippet: "", messageId: id } }; });
     return ids;
   }
 
