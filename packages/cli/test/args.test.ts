@@ -284,6 +284,14 @@ describe("the argument parser", () => {
       expect(params(name, [target, "--for", "600"])).toMatchObject({ for: 600, stop: false });
       expect(params(name, [target, "--stop"])).toMatchObject({ for: undefined, stop: true });
     }
+    // A rate no call takes: before, the API's own check answered after the profile opened ("rate must be …", exit 1),
+    // and `call answer` only once a call rang.
+    for (const [name, argv] of [["call start", ["alice"]], ["call answer", []], ["call answer", ["alice"]], ["call auto", ["on"]]] as const) {
+      usage(name, [...argv, "--rate", "44100"], "--rate takes 8000, 12000, 16000, 24000 or 48000, not 44100");
+      usage(name, [...argv, "--rate", "0"], "--rate takes 8000, 12000, 16000, 24000 or 48000, not 0");
+      expect(params(name, [...argv, "--rate", "16000"])).toMatchObject({ rate: 16000 });
+      expect(params(name, [...argv])).toMatchObject({ rate: undefined });
+    }
     // Each of the three is enough for an update, and a code is taken as typed.
     expect(params("button update", ["alice", "m1", "--chosen", "yes"])).toMatchObject({ chosen: "yes", close: false });
     expect(params("button update", ["alice", "m1", "--close"])).toMatchObject({ close: true });
