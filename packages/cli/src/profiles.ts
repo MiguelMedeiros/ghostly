@@ -17,7 +17,18 @@ const NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
  */
 export function ghostlyHome(option?: string): string {
   if (option === "") throw new CliError("usage", "--home needs a folder");
-  return resolve(option ?? (process.env.GHOSTLY_HOME || join(homedir(), ".ghostly")));
+  return userPath(option ?? (process.env.GHOSTLY_HOME || join(homedir(), ".ghostly")));
+}
+
+/**
+ * A path the CLI was given, made absolute. A `~` the shell left alone (`--home=~/bots`, a quoted variable, a unit
+ * file's `Environment=` line) is the user's home, as the shell reads it: it was a folder named `~` in the current one.
+ * `~user/…` is a usage error, not a guess at another user's home.
+ */
+export function userPath(path: string): string {
+  if (path === "~" || path.startsWith("~/")) return join(homedir(), path.slice(1));
+  if (path.startsWith("~")) throw new CliError("usage", `${path}: ~user is not read here: write the folder in full`);
+  return resolve(path);
 }
 
 export function checkProfileName(name: string): string {

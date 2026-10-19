@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 // From its own module, not the package: the command table is read by every command, and the package is all of the
 // protocol (~100 ms to load), which a command a daemon answers never needs.
 import { ITEM_STATES, PR_CHECKS, PR_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, cardUrl } from "@ghostly/core/statusCards";
 import type { OptionSpec, Parsed } from "../args";
 import { CliError, localFileError } from "../errors";
+import { userPath } from "../profiles";
 
 /**
  * The commands that are one API method each: how the command line becomes the method's parameters. Commands with
@@ -41,11 +41,11 @@ export const confirmReal: OptionSpec = { type: "boolean", description: "Confirm 
 
 /**
  * A path as this command's working directory means it: the daemon runs elsewhere. "" (an unset variable in a script)
- * names no file, never the current folder.
+ * names no file, never the current folder; `~/…` is in the user's home (userPath).
  */
 export function here(path: unknown): string | undefined {
   if (path === "") throw new CliError("usage", "A path given as \"\" names no file");
-  return typeof path === "string" ? resolve(path) : undefined;
+  return typeof path === "string" ? userPath(path) : undefined;
 }
 
 /**
