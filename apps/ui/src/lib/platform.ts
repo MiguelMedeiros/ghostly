@@ -502,6 +502,11 @@ export interface LinkedFilesHost {
   list(ref: string, title: string, signal?: AbortSignal): Promise<MiniAppLinkedFile[]>;
   /** Bytes from `offset`, at most `length`: fewer at the end of the file. A copy the caller owns, which the broker hands to the app (transferred). */
   read(ref: string, id: string, offset: number, length: number): Promise<Uint8Array>;
+  /**
+   * One link the app keeps, `available` as `list` says it, or null: what `files.serve` looks up, without listing every
+   * link. Absent (a host without it yet): the broker lists them.
+   */
+  entry?(ref: string, id: string): Promise<MiniAppLinkedFile | null>;
   /** One link, or all of the app's with "all". */
   forget(ref: string, id: string): Promise<void>;
 }

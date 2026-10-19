@@ -803,6 +803,25 @@ describe("the read lane (WISP 1200 § A read lane to the contact)", () => {
     expect(await noLane.ask("remote.read", [SERVE, { offset: 0, length: 1 }])).toMatchObject({ ok: false, error: "not-allowed" });
   });
 
+  it("serve looks up its one link: in a library of 100 000, three serves and a read in the same second all answer", async () => {
+    const { ask, host, id, clock } = await cinema();
+    // The picked film and 99 999 library-like links (95 characters): listed, they were 17 MB of the app's 16 MiB a second.
+    const links = host.linked.get(REF)!;
+    for (let i = 1; i < MINI_APP_LIMITS.filesEntries; i++) {
+      const other = String(i).padStart(22, "a");
+      links.set(other, { entry: { id: other, path: `Films/${String(i).padStart(6, "0")} A film with a long enough title.mp4`.padEnd(95, "x"), size: 3_000_000_000, modified: 1, available: true }, bytes: null });
+    }
+    clock.t += 1_001;
+    for (let i = 0; i < 3; i++) expect(await ask("files.serve", [id])).toMatchObject({ ok: true });
+    expect(await ask("files.read", [id, { offset: 0, length: 1 }])).toMatchObject({ ok: true });
+    expect(host.calls.filter((c) => c.op === "files.list")).toEqual([]);
+    expect(host.calls.filter((c) => c.op === "files.entry")).toHaveLength(3);
+    // A host without the lookup lists them, as before.
+    delete host.linkedFiles!.entry;
+    expect(await ask("files.serve", [id])).toMatchObject({ ok: true });
+    expect(host.calls.filter((c) => c.op === "files.list")).toHaveLength(1);
+  });
+
   it("remote.read gives the contact's bytes as an ArrayBuffer, handed over; remote.stat its size", async () => {
     const { ask, host, posted } = await cinema(["chat"]);
     host.remote.set(SERVE, film);

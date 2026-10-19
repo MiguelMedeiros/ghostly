@@ -302,6 +302,18 @@ describe("a folder kept past the page (File System Access)", () => {
     expect(state.asked).toBe(1);
   });
 
+  it("one link's entry is what the list says of it, read from the store without asking the person", async () => {
+    const { state, store, entries } = await pickedOnce();
+    state.permission = "prompt";
+    let asked = 0;
+    const next = webLinkedFiles({ text: () => text, store, askAgain: async (_app, _name, _more, grant) => { asked++; return grant(); } });
+    expect(await next.entry!(REF, entries[1]!.id)).toEqual({ ...entries[1], available: false });
+    expect(await next.entry!(REF, "b".repeat(22))).toBeNull();
+    expect(asked).toBe(0);
+    await next.list(REF, "Cinema");
+    expect(await next.entry!(REF, entries[1]!.id)).toEqual(entries[1]);
+  });
+
   it("Not now leaves the links unavailable, and the person is not asked again on that page", async () => {
     const { state, store } = await pickedOnce();
     state.permission = "prompt";
