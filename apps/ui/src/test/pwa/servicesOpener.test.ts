@@ -150,4 +150,30 @@ describe("a contact's app shown over the app", () => {
     closeServiceWindows();
     expect(document.getElementById(SERVICE_VIEW_ID)).toBeNull();
   });
+
+  it("holds the keyboard while open: the app under it is out of reach, and closing gives the focus back to Open", async () => {
+    // The app's page, its Open button focused, and a part of it that was already out of reach.
+    const app = document.createElement("div");
+    const opener = document.createElement("button");
+    app.append(opener);
+    const hidden = document.createElement("div");
+    hidden.setAttribute("inert", "");
+    document.body.append(app, hidden);
+    try {
+      opener.focus();
+      await open("one");
+      expect(document.activeElement?.getAttribute("data-testid")).toBe("service-view-close");
+      // Tab cannot leave the view for the chat hidden under it.
+      expect(app.hasAttribute("inert")).toBe(true);
+      expect(document.getElementById(SERVICE_VIEW_ID)?.hasAttribute("inert")).toBe(false);
+
+      closeServiceView();
+      expect(document.activeElement).toBe(opener);
+      expect(app.hasAttribute("inert")).toBe(false);
+      expect(hidden.hasAttribute("inert")).toBe(true);
+    } finally {
+      app.remove();
+      hidden.remove();
+    }
+  });
 });
