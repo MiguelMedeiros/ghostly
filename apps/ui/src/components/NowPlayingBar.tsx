@@ -62,10 +62,13 @@ export function NowPlayingBar({ className = "" }: { className?: string }) {
         onClick={open}
         className="flex-1 min-w-0 flex flex-col items-start text-start bg-transparent border-none p-0 rounded cursor-pointer disabled:cursor-default focus-visible:outline-2 focus-visible:outline-accent"
       >
-        <span className="max-w-full truncate text-[13px] font-medium leading-tight" data-testid="now-playing-from">
-          <bdi>{now.from}</bdi>{where && <> · <bdi>{where}</bdi></>}
+        {/* Each name in its own direction on the element that cuts it: a <bdi> inside a truncating box is cut from the
+            box's (the page's) side, so a Latin name in the Arabic app lost its start. */}
+        <span className="flex max-w-full min-w-0 text-[13px] font-medium leading-tight" data-testid="now-playing-from">
+          <span dir="auto" className="min-w-0 truncate">{now.from}</span>
+          {where && <><span className="shrink-0 whitespace-pre"> · </span><span dir="auto" className="min-w-0 truncate">{where}</span></>}
         </span>
-        <span className="max-w-full truncate text-[12px] text-text-muted leading-tight" data-testid="now-playing-title"><bdi>{now.title}</bdi></span>
+        <span dir="auto" className="max-w-full truncate text-[12px] text-text-muted leading-tight" data-testid="now-playing-title">{now.title}</span>
       </button>
       <span className="shrink-0 text-[12px] text-text-muted tabular-nums" data-testid="now-playing-time">
         <span aria-hidden="true">{now.duration > 0 ? `${position} / ${duration}` : position}</span>
