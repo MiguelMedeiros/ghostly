@@ -78,7 +78,7 @@ export function UsdtWalletPanel({wallet,state,backupNow=false}:{wallet:WalletPla
    </Block>}
    {ready&&<><Row label={t('wallet.usdt.rpcProvider')} hint={<><Truncate className="font-mono">{usdt.provider??''}</Truncate>{t('wallet.usdt.seesAddress')}</>}/>
    <Row label={t('wallet.usdt.token')} hint={<><Truncate className="font-mono">{usdt.token??''}</Truncate>{t(usdt.chainId===1?'wallet.usdt.decimalsFreeze':'wallet.usdt.decimals',{count:String(usdt.decimals)})}</>}/>
-   <BackupRows name="USDT" busy={busy} run={run} canReplace={canReplace} focusFirst={backupNow}
+   <BackupRows name="USDT" busy={busy} running={running} run={run} canReplace={canReplace} focusFirst={backupNow}
     reveal={()=>wallet.usdtReveal()} exportBackup={pw=>wallet.usdtExportBackup(pw)}
     restorePhrase={mnemonic=>use(network,{provider:usdt.provider,token:usdt.token,mnemonic})} restoreFile={(text,pw)=>wallet.usdtRestoreBackup(text,pw)}/></>}
   </Section>}
