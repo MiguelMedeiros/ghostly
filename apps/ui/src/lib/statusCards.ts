@@ -126,6 +126,11 @@ export function activeTaskCount(entries: readonly CardEntry[]): number {
   return entries.filter((e) => e.active).length;
 }
 
+/** How many cards are going: the tasks still going and the routines not paused. A phone's ⋮ counts these, and has Tasks only with one. */
+export function goingCardCount(entries: readonly CardEntry[]): number {
+  return entries.filter((e) => e.active || (e.card.kind === "routine" && e.card.state === "active")).length;
+}
+
 /**
  * A status's dot, bar and word: the accent while it runs, success with ✓ when done, red with ✕ when it failed, amber
  * when blocked (the word in the warn ink, which a light theme darkens to 4.5:1), muted while queued or once cancelled.

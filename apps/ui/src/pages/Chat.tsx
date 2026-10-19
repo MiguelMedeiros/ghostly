@@ -97,7 +97,8 @@ import { useChatSearch } from "../hooks/useChatSearch";
 import { ChatSearchBar, SearchIcon } from "../components/chat/ChatSearch";
 import { PinnedBar } from "../components/chat/PinnedBar";
 import { TasksButton } from "../components/chat/TasksButton";
-import { activeTaskCount, cardEntries } from "../lib/statusCards";
+import { cardEntries, goingCardCount } from "../lib/statusCards";
+import { useIsMobile } from "../hooks/useIsMobile";
 import { usePhoneHeader } from "../hooks/usePhoneHeader";
 import { UsageButton } from "../components/chat/UsageMeter";
 import { useUsageOf } from "../hooks/useUsage";
@@ -108,8 +109,6 @@ import { RoutineStack } from "../components/chat/RoutineCard";
 import { panelCard, routineStacks } from "../lib/statusCards";
 import { scrollIntoViewGently } from "../lib/motion";
 import { MessageAnnouncer } from "../components/chat/MessageAnnouncer";
-import { PinMoveItems, PinMoveNote } from "../components/chat/PinOrder";
-import { usePinMoveNote } from "../hooks/usePinMoveNote";
 import { usePageShown } from "../hooks/usePageShown";
 import { clearChatNotification } from "../lib/notifications";
 import { useWindowAway, windowAway } from "../lib/windowAway";
@@ -538,7 +537,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   }, [sessionId]);
 
   const closeMenu = () => setMenuOpen(false);
-  const [pinNote, announcePinMove] = usePinMoveNote();
+  // A sheet (a phone): its rarer rows are behind More…, a second sheet. A popover lists them all.
+  const sheetMenu = useIsMobile();
+  const [showMore, setShowMore] = useState(false);
   const techBackdrop = useBackdropDismiss(() => setShowTechInfo(false));
 
   // A bot's routines in a row: one row, opened on a tap (WISP 405 · Status Cards). Found over the whole timeline, so a
@@ -627,8 +628,9 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Tasks and the contact's identities are rows of the ⋮ menu, and the running tasks are counted on ⋮.
   // The connection stays in the row: it is the one mark that changes by itself, and a failure has to be seen.
   const phoneHeader = usePhoneHeader();
-  const tasks = useMemo(() => { const entries = cardEntries(messages); return { any: entries.length > 0, active: activeTaskCount(entries) }; }, [messages]);
-  useEffect(() => setTasksOpen(false), [sessionId]);
+  // The tasks still going and the routines not paused: a phone's ⋮ counts them, and has Tasks while there is one.
+  const goingCards = useMemo(() => goingCardCount(cardEntries(messages)), [messages]);
+  useEffect(() => { setTasksOpen(false); setShowMore(false); }, [sessionId]);
 
   if (!params) {
     // A chat still on a call has nowhere better to be; only the one on screen leaves.
@@ -684,6 +686,24 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
       {wakeCall.waking && <button type="button" onClick={wakeCall.cancel} data-testid="wake-call-cancel" className="text-accent hover:text-accent-hover cursor-pointer">{t("common.cancel")}</button>}
     </div>
   );
+  /** The ⋮ menu's rarer rows: in it on a wide screen, in its More… sheet on a phone. `close` closes the menu they are in. */
+  const rarerRows = (close: () => void) => <>
+    <FolderMenuItem chat={sessionId} onChoose={() => { close(); setShowFolders(true); }} />
+    {paired && platform?.getPeer(params.peerPubKeyB64) && (
+      <MenuItem testId="chat-hold-open" onClick={() => { setShowHold(true); close(); }}
+        icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8v13H3V8" /><path d="M1 3h22v5H1z" /><path d="M10 12h4" /></svg>}>
+        {t("chat.menu.hold")}
+      </MenuItem>
+    )}
+    <MenuItem testId="chat-refresh" onClick={() => { forceRefresh(); close(); }}
+      icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>}>
+      {t("chat.menu.refresh")}
+    </MenuItem>
+    <MenuItem testId="chat-tech-info" onClick={() => { setShowTechInfo(true); close(); }}
+      icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></svg>}>
+      {t("chat.menu.techInfo")}
+    </MenuItem>
+  </>;
 
   return (
     // The chat's column, and beside it (over it when narrow) the contact's identities: the page is their container.
@@ -692,7 +712,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     <div className="chat-pane flex-1 h-full">
     {/* A message that comes while the chat is open, read out once to a screen reader. */}
     <MessageAnnouncer chat={sessionId} messages={messages} nameOf={() => shownName} active={visible} />
-    <PinMoveNote text={pinNote} />
     {/* Files dropped anywhere on the column go to the composer (`data-file-drop`). */}
     <div data-file-drop className={`chat-column relative flex-1 ${chatApp?.shown && (chatApp.wide || chatApp.view === "full") ? "hidden" : "flex"} flex-col h-full min-w-0 bg-chat-bg`}>
       {visible && wakeNotice}
@@ -858,35 +877,28 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                 <circle cx="12" cy="5" r="1" />
                 <circle cx="12" cy="19" r="1" />
               </svg>
-              {/* The bot's running tasks, counted where its Tasks are on a phone. */}
-              {phoneHeader && tasks.active > 0 && (
+              {/* The bot's tasks still going and its routines not paused, counted where its Tasks are on a phone. */}
+              {phoneHeader && goingCards > 0 && (
                 <span data-testid="chat-tasks-count" aria-hidden="true"
-                  className="absolute top-1 end-1 min-w-4 h-4 px-1 rounded-full bg-accent text-on-accent text-[10px] font-bold leading-4 text-center">{tasks.active > 99 ? "99+" : tasks.active}</span>
+                  className="absolute top-1 end-1 min-w-4 h-4 px-1 rounded-full bg-accent text-on-accent text-[10px] font-bold leading-4 text-center">{goingCards > 99 ? "99+" : goingCards}</span>
               )}
             </button>
+            {/* In groups, top to bottom: what is done to the chat now (on a phone a video call first), the conversation
+                (the contact's identities, a bot's Tasks while one is going), the rarer rows (on a phone behind More…,
+                a second sheet), and Delete chat apart at the end. A pinned chat's place is the chat list's: dragged
+                there, or Alt+↑/↓ on its row (hooks/useRowReorder.ts). */}
             <Menu testId="chat-options-menu" open={menuOpen} onClose={closeMenu} anchorRef={menuRef} focusFirst>
-              {phoneHeader && <>
+              {phoneHeader && (
                 <MenuItem testId="call-video" disabled={!!callBlocked || callBusy} title={callBlocked ?? undefined} hint={callBlocked} onClick={() => { closeMenu(); startCall(true); }}
                   icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 7l-7 5 7 5V7z" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" /></svg>}>
                   {t("calls.video")}
                 </MenuItem>
-                {tasks.any && (
-                  <MenuItem testId="chat-tasks" onClick={() => { closeMenu(); setTasksOpen(true); }}
-                    icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6h11M9 12h11M9 18h11" /><path d="m3.5 6 1.2 1.2L7 5M3.5 12l1.2 1.2L7 11M3.5 18l1.2 1.2L7 17" /></svg>}>
-                    {tasks.active ? t("cards.panel.buttonCount", { count: tasks.active }) : t("cards.panel.button")}
-                  </MenuItem>
-                )}
-                {paired && <IdentityMenuItem peerKey={params.peerPubKeyB64} name={shownName} keyLabel={truncatedPeerKey}
-                  onOpen={() => { closeMenu(); setIdentityCard(undefined); setShowIdentities(true); }} />}
-                <MenuSeparator />
-              </>}
+              )}
+              <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>
+              <MuteMenuItem chat={sessionId} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />
               <MenuItem testId="chat-pin-toggle" onClick={() => { setSessionPinned(sessionId, !isSessionPinned(sessionId)); closeMenu(); }} icon={<PinIcon active={isSessionPinned(sessionId)} />}>
                 {isSessionPinned(sessionId) ? t("chat.menu.unpin") : t("chat.menu.pin")}
               </MenuItem>
-              <PinMoveItems chat={sessionId} onMoved={place => { announcePinMove(place); closeMenu(); }} />
-              <MuteMenuItem chat={sessionId} onChoose={() => { closeMenu(); setShowMute(true); }} onDone={closeMenu} />
-              <FolderMenuItem chat={sessionId} onChoose={() => { closeMenu(); setShowFolders(true); }} />
-              <MenuItem testId="chat-search-open" onClick={() => { closeMenu(); search.show(); }} icon={<SearchIcon />}>{t("chat.search.open")}</MenuItem>
               {/* Until the contact's session is ready, not just while the card is up: the card goes as soon as the
                   contact arrives, and this stays the way to copy the invite again until the chat is live. */}
               {inviteCode && !pairedReady && (
@@ -904,36 +916,43 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
                   {t("invite.qrTitle")}
                 </MenuItem>
               )}
-              {paired && platform?.getPeer(params.peerPubKeyB64) && (
-                <MenuItem testId="chat-hold-open" onClick={() => { setShowHold(true); closeMenu(); }}
-                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 8v13H3V8" /><path d="M1 3h22v5H1z" /><path d="M10 12h4" /></svg>}>
-                  {t("chat.menu.hold")}
-                </MenuItem>
-              )}
-              {compat && (
-                <MenuItem testId="chat-continue-new" onClick={() => {
-                  closeMenu();
-                  void continueInNewChat(sessionId).then(next => {
-                    if (next) void sendMessage(next.message).finally(() => nav.conversation(chatPath(next.sessionId)));
-                  }, () => {});
-                }}
-                  icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5" /><path d="M16 19h6m-3-3 3 3-3 3" /></svg>}>
-                  {t("chat.menu.continueNew")}
-                </MenuItem>
-              )}
-              <MenuItem onClick={() => { forceRefresh(); closeMenu(); }}
-                icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10" /><path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14" /></svg>}>
-                {t("chat.menu.refresh")}
-              </MenuItem>
-              <MenuItem onClick={() => { setShowTechInfo(true); closeMenu(); }}
-                icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" /></svg>}>
-                {t("chat.menu.techInfo")}
-              </MenuItem>
+              {((phoneHeader && (paired || goingCards > 0)) || compat) && <>
+                <MenuSeparator />
+                {phoneHeader && paired && <IdentityMenuItem peerKey={params.peerPubKeyB64} name={shownName} keyLabel={truncatedPeerKey}
+                  onOpen={() => { closeMenu(); setIdentityCard(undefined); setShowIdentities(true); }} />}
+                {phoneHeader && goingCards > 0 && (
+                  <MenuItem testId="chat-tasks" onClick={() => { closeMenu(); setTasksOpen(true); }}
+                    icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6h11M9 12h11M9 18h11" /><path d="m3.5 6 1.2 1.2L7 5M3.5 12l1.2 1.2L7 11M3.5 18l1.2 1.2L7 17" /></svg>}>
+                    {t("cards.panel.buttonCount", { count: goingCards })}
+                  </MenuItem>
+                )}
+                {compat && (
+                  <MenuItem testId="chat-continue-new" onClick={() => {
+                    closeMenu();
+                    void continueInNewChat(sessionId).then(next => {
+                      if (next) void sendMessage(next.message).finally(() => nav.conversation(chatPath(next.sessionId)));
+                    }, () => {});
+                  }}
+                    icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11V6a3 3 0 0 0-3-3H6a3 3 0 0 0-3 3v15l4-4h5" /><path d="M16 19h6m-3-3 3 3-3 3" /></svg>}>
+                    {t("chat.menu.continueNew")}
+                  </MenuItem>
+                )}
+              </>}
+              <MenuSeparator />
+              {sheetMenu
+                ? <MenuItem testId="chat-more-open" onClick={() => { closeMenu(); setShowMore(true); }}
+                    icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></svg>}>
+                    {t("chat.menu.more")}
+                  </MenuItem>
+                : rarerRows(closeMenu)}
               <MenuSeparator />
               <MenuItem danger onClick={() => { setConfirmDelete(true); closeMenu(); }}
                 icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>}>
                 {t("sidebar.deleteChat")}
               </MenuItem>
+            </Menu>
+            <Menu testId="chat-more-menu" open={showMore} onClose={() => setShowMore(false)} anchorRef={menuRef} focusFirst label={t("chat.menu.moreTitle")}>
+              {rarerRows(() => setShowMore(false))}
             </Menu>
             <MuteMenu chat={sessionId} open={showMute} onClose={() => setShowMute(false)} anchorRef={menuRef} />
             <ChatFolderMenu chat={sessionId} open={showFolders} onClose={() => setShowFolders(false)} anchorRef={menuRef} returnFocus={optionsRef} />
