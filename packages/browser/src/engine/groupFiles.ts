@@ -447,14 +447,17 @@ export class GroupFileDesk {
   async announced(groupId: string, m: { id: string; sender: string; ts: number; file: GroupFileMeta }, me: string): Promise<MessageFile | undefined> {
     const known = this.byMessage.get(`${groupId}\n${m.id}`);
     if (known) return messageFile(this.kept.get(known)!);
+    // Who could read it is judged by its time (`couldRead`), never later than it came here: an author's clock ahead
+    // does not let members let in after it was written fetch it.
+    const ts = Math.min(m.ts, this.deps.now());
     const ownId = m.sender === me ? this.own.get(`${groupId}\n${m.file.d}`) : undefined;
     if (ownId) {
       this.own.delete(`${groupId}\n${m.file.d}`);
       for (const pace of this.sentPaces(groupId)) pace.take();
-      const kept: Kept = { id: ownId, groupId, message: m.id, author: me, ts: m.ts, meta: m.file, mine: true, auto: false, asked: false, held: true, holders: [], damaged: new Set() };
+      const kept: Kept = { id: ownId, groupId, message: m.id, author: me, ts, meta: m.file, mine: true, auto: false, asked: false, held: true, holders: [], damaged: new Set() };
       this.add(kept);
       const transfer = { state: "done" as const, transferred: m.file.size, size: m.file.size };
-      await this.deps.store.patch(ownId, { group: { message: m.id, author: me, ts: m.ts }, transfer }).catch(() => {});
+      await this.deps.store.patch(ownId, { group: { message: m.id, author: me, ts }, transfer }).catch(() => {});
       this.finished(kept, "out");
       this.queueHave(kept);
       return messageFile(kept);
@@ -467,14 +470,14 @@ export class GroupFileDesk {
     const auto = paced && this.deps.settings().autoDownloads && fetchesByItself(m.file, this.keptAutomatically(groupId)) && await this.hasRoom(m.file.size);
     const holders = this.ahead.get(`${groupId}\n${m.id}`) ?? [];
     this.ahead.delete(`${groupId}\n${m.id}`);
-    const kept: Kept = { id, groupId, message: m.id, author: m.sender, ts: m.ts, meta: m.file, mine: false, auto, asked: false, held: false, holders, damaged: new Set() };
+    const kept: Kept = { id, groupId, message: m.id, author: m.sender, ts, meta: m.file, mine: false, auto, asked: false, held: false, holders, damaged: new Set() };
     const { name, size, mime, voice, video, image } = m.file;
     // Known at once: the same message coming again meanwhile (another copy of it) is this file.
     this.add(kept);
     // No bytes yet: where they go is decided when they come (`GroupFileStore.write`).
     await this.deps.store.put({ id, linkId: `group:${groupId}`, direction: "in", digest: m.file.d, createdAt: this.deps.now(),
       metadata: { name, size, mime, timestamp: this.deps.now(), voice, video, image },
-      transfer: { state: "transferring", transferred: 0, size }, group: { message: m.id, author: m.sender, ts: m.ts, ...(auto && { auto: true }) } });
+      transfer: { state: "transferring", transferred: 0, size }, group: { message: m.id, author: m.sender, ts, ...(auto && { auto: true }) } });
     if (auto) { this.wants.set(id, this.newWant()); this.ask(kept); }
     else this.waiting(kept);
     return messageFile(kept);
