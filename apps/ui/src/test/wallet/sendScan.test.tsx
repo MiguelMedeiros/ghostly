@@ -110,7 +110,7 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
     await user.click(screen.getByRole("tab", { name: "Send" }));
     await user.upload(screen.getByLabelText("Choose image"), picture());
     expect(await screen.findByTestId("wallet-pay-no-amount")).toHaveTextContent("This invoice has no amount.");
-    expect(screen.getByRole("button", { name: "Pay", exact: true })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^Pay$/ })).toBeDisabled();
 
     qr.text = "https://example.com/menu";
     await user.upload(screen.getByLabelText("Choose image"), picture());
