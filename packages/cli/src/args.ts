@@ -97,7 +97,7 @@ export function parseArgs(argv: readonly string[], spec: Record<string, OptionSp
 }
 
 /** Words as a sentence lists them: "a", "a or b", "a, b or c". */
-const listed = (words: readonly string[]) => (words.length > 1 ? `${words.slice(0, -1).join(", ")} or ${words.at(-1)}` : words[0]);
+export const listed = (words: readonly string[]) => (words.length > 1 ? `${words.slice(0, -1).join(", ")} or ${words.at(-1)}` : words[0]);
 
 /** The global option a word names (`--profile`, `--profile=bot`, `-p`), else undefined. */
 export function globalOption(arg: string): OptionSpec | undefined {

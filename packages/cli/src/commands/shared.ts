@@ -5,6 +5,7 @@ import { ITEM_STATES, PR_CHECKS, PR_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, car
 import type { OptionSpec, Parsed } from "../args";
 import { CliError, localFileError } from "../errors";
 import { userPath } from "../profiles";
+import { NETWORKS } from "../words";
 
 /**
  * The commands that are one API method each: how the command line becomes the method's parameters. Commands with
@@ -17,6 +18,11 @@ export interface Command {
   options?: Record<string, OptionSpec>;
   /** Positionals, in order; a trailing `...` one takes the rest joined by spaces. */
   args?: string[];
+  /**
+   * The words a positional takes (`type`: the wallet types): any other is a usage error that names it and lists them,
+   * before the profile opens. Before, the API answered it ("type must be one of …", bad_request, exit 1).
+   */
+  words?: Record<string, readonly string[]>;
   params?: (parsed: Parsed, args: Record<string, string | undefined>) => Record<string, unknown>;
   /**
    * A command that runs here, on files, with no profile or daemon (the publisher tools of WISP 1200): its answer is
@@ -34,7 +40,7 @@ export const groupWait: Record<string, OptionSpec> = {
   wait: { type: "string", choices: ["none", "sent"], description: "none or sent: until an edge took it (default none)" },
   timeout: { type: "number", description: "Seconds to wait (default 30)" },
 };
-export const net: OptionSpec = { type: "string", choices: ["mainnet", "testnet"], description: "mainnet or testnet (default testnet)" };
+export const net: OptionSpec = { type: "string", choices: NETWORKS, description: "mainnet or testnet (default testnet)" };
 export const card: OptionSpec = { type: "string", description: "A Lightning card (its id; default: the network's default)" };
 export const memo: OptionSpec = { type: "string", description: "What it is for (up to 140 characters)" };
 export const confirmReal: OptionSpec = { type: "boolean", description: "Confirm a Mainnet (real money) spend" };

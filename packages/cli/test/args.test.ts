@@ -136,6 +136,25 @@ describe("the argument parser", () => {
     expect(parseArgs(["--until", "paired"], COMMANDS["chat wait"].options!).options).toEqual({ until: "paired" });
   });
 
+  it("refuses a word an argument does not take as a usage error that names it and its words, before the profile opens", () => {
+    // Before, the API answered after the profile opened: bad_request (exit 1), "type must be one of cashu, lightning, …".
+    const refused = (name: string, values: string[], message: string) =>
+      expect(() => positionals(COMMANDS[name], values), `${name} ${values.join(" ")}`).toThrow(new CliError("usage", message));
+    const wallets = "<type> takes cashu, lightning, arkade, bark, spark, bitcoin, fedimint or usdt, not \"weird\"";
+    for (const name of ["wallet create", "wallet remove", "wallet faucet"]) refused(name, ["weird"], wallets);
+    refused("wallet create", ["Cashu"], wallets.replace("weird", "Cashu"));
+    refused("wallet address", ["cashu"], "<type> takes bitcoin, arkade, spark or usdt, not \"cashu\"");
+    refused("chat accept", ["alice", "weird"], "<method> takes cashu, lightning, arkade, usdt, bark, bitcoin, fedimint or spark, not \"weird\"");
+    refused("chat transport", ["alice", "tcp"], "<transport> takes auto, dht, webrtc, iroh or hyperdht, not \"tcp\"");
+    // A flag that names a method, from the same list as the API's.
+    expect(() => parseArgs(["alice", "1", "--method", "weird"], COMMANDS["chat request"].options!)).toThrow(new CliError("usage", "--method takes cashu, arkade, usdt, bark, bitcoin, fedimint or spark, not \"weird\""));
+    // The words each takes still go through, and a missing one is still said missing.
+    expect(positionals(COMMANDS["wallet create"], ["fedimint"])).toEqual({ type: "fedimint" });
+    expect(positionals(COMMANDS["chat accept"], ["alice", "lightning"])).toEqual({ chat: "alice", method: "lightning" });
+    expect(positionals(COMMANDS["chat transport"], ["alice", "hyperdht"])).toEqual({ chat: "alice", transport: "hyperdht" });
+    expect(() => positionals(COMMANDS["wallet create"], [])).toThrow(/^Missing <type>/);
+  });
+
   it("moves global options given before the command after it", () => {
     expect(liftGlobals(["--home", "/h", "-p", "bot", "--pretty", "send", "c", "hi"])).toEqual(["send", "c", "hi", "--home", "/h", "-p", "bot", "--pretty"]);
     expect(liftGlobals(["--profile=bot", "chat", "list"])).toEqual(["chat", "list", "--profile=bot"]);

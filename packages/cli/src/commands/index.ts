@@ -1,3 +1,4 @@
+import { listed } from "../args";
 import { CliError } from "../errors";
 import { commands as apps } from "./apps";
 import { commands as calls } from "./calls";
@@ -98,7 +99,7 @@ function usageNames(usage: string): (string | undefined)[] {
  * required one is there too (`file accept [<chat>] <file>`). A trailing `name...` takes the rest and needs at least
  * one word that is not ""; `name...?` may take none (text from stdin, `chat rename`'s name back to the contact's).
  */
-export function positionals(command: { usage: string; args?: string[] }, values: readonly string[]): Record<string, string | undefined> {
+export function positionals(command: { usage: string; args?: string[]; words?: Record<string, readonly string[]> }, values: readonly string[]): Record<string, string | undefined> {
   let names = command.args ?? [];
   const optional = names.filter(leadingOptional);
   let skip = 0;
@@ -119,6 +120,8 @@ export function positionals(command: { usage: string; args?: string[] }, values:
       return out;
     }
     if (values[i] === undefined || values[i] === "") throw missing(i, name);
+    const words = command.words?.[name];
+    if (words && !words.includes(values[i])) throw new CliError("usage", `<${name}> takes ${listed(words)}, not ${JSON.stringify(values[i])}`);
     out[name] = values[i];
   }
   noMoreThan(names.length, values, command.usage);
