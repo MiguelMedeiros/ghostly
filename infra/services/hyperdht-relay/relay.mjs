@@ -58,8 +58,13 @@ const fixOptions = (options = {}, gone) => ({ ...options, signAnnounce: fixSign(
  * The DHT one client's relay session sees: listen and dial within its budget, nothing else. Topic lookups
  * and announcements are refused (Ghostly never uses them), so the relay is no open crawler. Past a limit
  * the client is dropped, and so is one that holds its slot with no listen open and no dial for `idleMs`.
+ *
+ * Every client shares the relay's one HyperDHT node, which refuses a second listen on a key it already listens
+ * on (`KEYPAIR_ALREADY_USED`, whoever asked first). dht-relay 0.4.3 does not catch that rejection, so it would end
+ * the process and every client with it. A listen the node refuses closes that server only: the client that holds
+ * the key, and the asking client's other listens, go on.
  */
-function clientDht(dht, limits, drop, gone) {
+function clientDht(dht, limits, drop, gone, log) {
   let listening = 0
   let dials = []
   let idle = null
@@ -92,7 +97,10 @@ function clientDht(dht, limits, drop, gone) {
         watchIdle()
         const server = target.createServer(options, onconnection)
         const listen = server.listen.bind(server)
-        server.listen = (keyPair, listenOptions) => listen(keyPair, fixOptions(listenOptions, gone))
+        server.listen = (keyPair, listenOptions) => listen(keyPair, fixOptions(listenOptions, gone)).catch(error => {
+          log('refused listen', error?.code ?? 'error')
+          void server.close().catch(() => {})
+        })
         server.once('close', () => { listening--; watchIdle() })
         server.on('connection', hold)
         return server
@@ -286,7 +294,7 @@ export async function startRelay(options = {}) {
     ws.on('error', () => drop('socket error'))
     const stream = new WsStream(false, ws)
     stream.on('error', () => drop('stream error'))
-    void relay(clientDht(dht, limits, drop, gone), stream).then(node => guardProtocol(node._protocol, drop))
+    void relay(clientDht(dht, limits, drop, gone, log), stream).then(node => guardProtocol(node._protocol, drop))
   }
 
   await new Promise((resolve, reject) => {

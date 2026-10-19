@@ -32,6 +32,9 @@ const relay = await startRelay({
 })
 console.log(new Date().toISOString(), `Ghostly HyperDHT relay on port ${relay.port}`, relay.bootstrap.length ? `(bootstrap ${relay.bootstrap.length} nodes)` : '(public HyperDHT)')
 
+// One client's request that fails where nothing catches it must not end the relay for every other client.
+process.on('unhandledRejection', error => console.log(new Date().toISOString(), 'unhandled', error?.code ?? error?.name ?? 'error'))
+
 let closing = false
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
   if (closing) return
