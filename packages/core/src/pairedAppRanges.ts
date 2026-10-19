@@ -179,6 +179,8 @@ export type AppRangeReadError = "not-served" | "changed" | "gone" | "offline" | 
 export interface AppRangeTask {
   readonly app: string;
   readonly request: number;
+  /** The serve id it came under: the page that served it answers it. */
+  readonly serve: string;
   /** What this side's app served, as it named it (a linked file's id). */
   readonly file: string;
   readonly offset: number;
