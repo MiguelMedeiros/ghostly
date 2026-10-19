@@ -4,6 +4,55 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.4.5
+
+### Fixed
+
+**Chat**
+
+- On a VPN or a firewall that blocks direct connections, a chat with a contact whose app has WebRTC no longer stays offline when your app's native connections are all held by other chats: it takes one from a chat that has been quiet for two minutes, as a chat with a contact that has no WebRTC already did.
+- The CLI no longer waits 10 seconds on a discovery relay that takes requests and never answers. A publish counts as out once the DHT took it, and a read the relays have not answered within 1.5 seconds asks the DHT too, so `ghostly invite create` and a pairing right after start take what they take with the relays down, not 10 to 12 seconds.
+- On a computer, the chat's connection details stay open when you click or drag over their text, so you can select and copy the relay, path or transport.
+- The emoji panel's Try again, pressed from the keyboard, keeps the focus while the emoji load again: when they still did not load, the focus was left on the page, so Enter did nothing and Reload was reached only by tabbing from the start.
+- The cards under a message (a Pubky key or a DID, a Nostr profile or note, a group's link) are drawn again only when what they show changes. Before, each was drawn again on every change in the app, up to 20 times a second while a file moved: with 40 of them in a chat, 38 ms of work each time, now none.
+- A file your contact sent while you were away that ends on your side now says why, in your language, and what to do next: no room on this device, too many files waiting here, not arrived within a week, or cancelled by the sender. Before, it said only "Did not arrive" or "Cancelled", with the reason in English.
+- A file a contact sent while you were away now arrives when they send it again, after it was refused for lack of space or too many files waiting, or waited over a week. Each retry used to fail with "Your contact could not take this file".
+- In Arabic, a contact's name under the pairing scene that ends in Latin letters is now cut at its end, not its start.
+- The invite kept ready for your next chat is replaced on time after 15 minutes, instead of often getting its old keys published to the relays once more first. CLI daemons no longer log a `TimeoutNegativeWarning` every few hours.
+- A chat whose invite someone else used first ("This invite was already used") reads its inviter only now and then after a restart too, and so does a chat that had already found its inviter before it learned the invite was taken, which also stops calling that inviter.
+
+**Calls**
+
+- A call placed in a chat with an older app no longer tells the contact a local network address of yours in the call's connection details. The Linux app sent it there; calls in current chats already left it out.
+
+**CLI**
+
+- A command whose daemon stops while the command waits on it (a `listen` that served the profile and whose reader left) fails with `unavailable` "The daemon went away", as JSON. Before, when the daemon left the command's request unread, the command crashed with a Node.js `ECONNRESET` stack trace and no JSON answer.
+- When the Pkarr relays start failing after they had worked, the CLI reads its contacts from the Mainline DHT at once, instead of handing back the relays' last copy for about 40 seconds, and its status shows the DHT path.
+- A command that opens a profile with a long event journal starts faster: it reads the journal's last event and counts its lines without turning the whole journal into text.
+- `ghostly send`, `ghostly edit`, `ghostly group send` and `ghostly group edit` with no text, and `ghostly wallet redeem` with no token, run with stdin a pipe nobody writes, no longer wait for ever without a word: as the joins, after 2 s stderr says what it waits for on stdin, and after 60 s with nothing on stdin it ends with the usage error. Text that started coming is waited for to the end, and `--stdin` still waits as long as it takes.
+- A `~` the shell left alone (`--home=~/bots`, a quoted `GHOSTLY_HOME="~/bot"`, a unit file's `Environment=` line, `--out=~/bk.backup`) is now your home folder. Before, the CLI made a folder named `~` in the current one and a brand-new profile in it, with no word. `~user/...` is refused: write the folder in full.
+
+**Everywhere**
+
+- On the active device of a profile on several devices, the chat list shows at once when the app starts, as on a profile of one device. Before, it stayed blank until Ghostly had checked with every relay which device is active: almost a second with fast relays, and 16 seconds when one of the two default relays did not answer. Nothing is sent, dialled or paid until that check says this device is the active one.
+- After an internet outage of a minute or more, chats come back in seconds again: once one discovery relay answers, the others are asked again right away instead of up to 5 minutes later, so you and a contact are never left on different relays.
+
+**Groups**
+
+- A private group member whose app works through what it missed slowly (a phone with a long history) no longer gets the same messages over and over from the member answering it. It asks again every 10 seconds, and each answer sent again the messages still waiting in its app from the one before: a member back after 200 messages could be sent them up to five times, and took more than three times as long to catch up.
+- A group's file coming slowly from one member no longer leaves that member for another who has only just got the file. That member was often already sending it to others and said it was busy, so the file ended up later than if it had stayed. It now moves only to a member who said it was busy before and has since said it has room.
+- In a private group past 16 members where most apps stay online (Desktop, CLI), no more than eight members act as hubs at once. Extra hubs step down within a couple of minutes, and the other members go back to keeping two connections. Before, most members could end up as hubs, which roughly doubled the group's idle relay traffic.
+- A private group's link you just shared, or that someone just opened, is checked fast for a minute, as a community's link is, instead of for ten. Each such link spent 30 relay requests a minute for those ten minutes, so sharing three links at once used up the app's whole relay budget and your chats and groups waited for their messages.
+- In a group on an app with no WebRTC (a Linux Desktop, a CLI), or on a VPN, every member now keeps a connection to the group. Before, with several groups, a member of the third one could keep none, and nothing sent there reached it: it kept its connection to the admin, which had none free for it. Now the admin or hub answers the connection each member keeps to it, and a member that gets no answer in 20 seconds connects to the next member instead.
+- In a group, the note other members see for a Testnet request paid over Lightning only, a Testnet Fedimint request, or test Fedimint ecash received now says "test sats", and a Fedimint one is named Fedimint. Before, they read real "sats", and the Fedimint ones read Cashu or Lightning.
+- Groups on a VPN, or on an app with many chats, come up when you open them. Before, once eight chats held your app's native connections, a group showed "0 of N reachable" for as long as that lasted. Now the group you open takes connections from the chats and groups you have used least recently, and a group you are not looking at asks for only one, to its hub, its admin or the member heard from last.
+
+**Wallets**
+
+- Receive: when an invoice is paid, a screen reader now says the sats came in, and the keyboard focus moves from the invoice to Done, then back to the amount, instead of falling to the top of the page.
+- A wallet card's Source and backup buttons, pressed from the keyboard, keep the focus while they run and after a refusal: Retry, Remove (or Back to Cashu mints), Use this server, a provider's Use or Connect button, Show (the recovery phrase), Download (the backup file) and both Restore buttons. Before, they turned disabled while they ran, which put the focus back at the top of the page. A server form or a restore that closes when it is done gives the focus back to the button that opened it, and only the button pressed says it is working.
+
 ## 1.4.4
 
 ### Fixed
