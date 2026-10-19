@@ -122,8 +122,12 @@ const FRESH: ReadonlySet<CommunityKind> = new Set(["create", "leave", "remove", 
  * history keeps room for everyone else to get out after it: two commits a member (a leave or a remove is one, and a
  * leaving admin hands the role over first). The history is never compacted, and one that filled with people in it
  * took no leave, remove or handover any more. Its own rule: a history up to `COMMUNITY_LIMITS.chain` verifies as before.
+ * A member takes in such a commit from someone else only when it keeps that room too (`receiveCommit`): an app that
+ * does not keep it could otherwise fill the history for everyone.
  */
 const GROWS: ReadonlySet<CommunityKind> = new Set(["add", "rotate", "link"]);
+/** Whether a history whose last commit is at `epoch`, with `roster` in it, still has room for everyone else to get out. */
+const keepsRoom = (epoch: number, roster: Roster) => epoch + 1 + 2 * (roster.length - 1) <= COMMUNITY_LIMITS.chain;
 /**
  * Kinds only the admin commits. They are final: a branch that drops one never replaces the branch
  * that has it, however long, so no member can undo a removal, a hand-over, a rotation or a link change
@@ -243,6 +247,7 @@ export function verifyCommunityCommit(raw: unknown, parent: CommunityCommit | nu
   if (parent) {
     if (commit.g !== parent.g) return { error: "Commit for another group" };
     if (commit.e !== parent.e + 1) return { error: "Commit out of sequence" };
+    if (commit.e >= COMMUNITY_LIMITS.chain) return { error: "Membership chain too long" };
     if (commit.p !== communityCommitHash(parent)) return { error: "Commit does not follow its parent" };
   } else {
     if (commit.e !== 0 || commit.p !== "" || commit.k !== "create") return { error: "The chain does not start with the creation of the group" };
@@ -871,6 +876,7 @@ export class CommunitySession {
     if (!parsed || this.known.has(communityCommitHash(parsed))) return false;
     const result = verifyCommunityCommit(raw, parent, parentRoster, this.id);
     if ("error" in result) return false;
+    if (GROWS.has(result.commit.k) && !keepsRoom(result.commit.e, result.roster)) return false;
     const commit = result.commit, h = communityCommitHash(commit);
     // Two commits by the admin after the same commit: equivocation.
     const admin = rosterAdmin(parentRoster);
@@ -1061,7 +1067,7 @@ export class CommunitySession {
     const draftBase = { v: 2 as const, g: this.id, e: parent.e + 1, p: parentHash, k: kind, by: this.myKey, ...fields, ts: now };
     const roster = communityRoster(this.roster, draftBase);
     if (!roster) throw new Error("This change is not allowed");
-    if (GROWS.has(kind) && this.state.chain.length + 1 + 2 * (roster.length - 1) > COMMUNITY_LIMITS.chain) throw new Error("This group has reached its membership history limit. Create a new group.");
+    if (GROWS.has(kind) && !keepsRoom(draftBase.e, roster)) throw new Error("This group has reached its membership history limit. Create a new group.");
     const draft: Omit<CommunityCommit, "sig" | "c"> = { ...draftBase, m: rosterHash(roster) };
     const untagged = communityUntaggedHash(draft);
     let secret: Uint8Array;

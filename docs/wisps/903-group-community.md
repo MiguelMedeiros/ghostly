@@ -54,6 +54,8 @@ Apps announce `{ "t": "paired-groups", "v": [1, 2] }`. Community frames flow onl
 | `rotate` | the admin | nothing else changes | fresh |
 | `link` | the admin | `x` a key, or empty | derived |
 
+The chain is at most 2048 commits and is never compacted, so it keeps room for everyone to get out: an `add`, `rotate` or `link` commit at epoch `e` whose roster after it has `n` members is valid only while `e + 1 + 2 × (n − 1) ≤ 2048` (a leave or a remove is one commit a member, and a leaving admin hands the role over first). Leaves, removes and hand-overs need no room. A member refuses a commit at epoch 2048 or later, and one of those three kinds that leaves no such room, whoever signed it; a full chain takes no one new, and its members move to a new group. Before revision 2026-10-19 only the committer applied these rules, so an app that did not could fill the chain for everyone: no one could then be removed, leave or join.
+
 A derived secret is `HKDF-SHA-256(previous secret, salt = the commit's untagged hash, info = "ghostly-group/2 derived")`. Whoever holds the previous epoch computes it; a newcomer is sent it sealed and cannot go back. The confirmation tag, as in the mesh, is an HMAC under the new epoch's confirm key, so a member handing on a secret cannot hand on a wrong one.
 
 ### Races and forks
