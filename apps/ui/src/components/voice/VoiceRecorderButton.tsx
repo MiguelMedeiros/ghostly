@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { VOICE_LIMITS, formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
-import { toChosenSpeaker } from "../../lib/mediaDevices";
+import { mediaDeniedText, toChosenSpeaker } from "../../lib/mediaDevices";
 import { MICROPHONE_MESSAGES, MicrophoneError, VoiceRecorder, canRecordVoice, type MicrophoneProblem } from "../../lib/voiceRecorder";
 import { useT, type Translate } from "../../contexts/I18nContext";
 
 /** The microphone's own problems, in the person's language; a browser's words about it stay as they are. */
 function microphoneText(t: Translate, problem: MicrophoneProblem): string {
   switch (problem) {
-    case "denied": return t("chat.voice.micDenied");
+    // On an iPhone or iPad, only the Settings app turns a refused microphone back on: it says where.
+    case "denied": return mediaDeniedText() === "settings.media.deniedIos" ? t("settings.media.deniedIos") : t("chat.voice.micDenied");
     case "unavailable": return t("chat.voice.micUnavailable");
     case "unsupported": return t("chat.voice.micUnsupported");
   }

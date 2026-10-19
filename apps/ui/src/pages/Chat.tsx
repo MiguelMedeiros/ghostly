@@ -38,7 +38,7 @@ import { useRowWindow } from "../hooks/useRowWindow";
 import { JumpToLatest } from "../components/chat/JumpToLatest";
 import { useWebRTC } from "../hooks/useWebRTC";
 import { useCallDevices } from "../hooks/useCallDevices";
-import { preferredDevice } from "../lib/mediaDevices";
+import { mediaDeniedText, preferredDevice } from "../lib/mediaDevices";
 import { useSettings } from "../contexts/SettingsContext";
 import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
@@ -728,7 +728,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         <div role="alert" data-testid="call-media-problem" data-problem={webrtc.mediaProblem}
           className="top-notice rounded-lg border border-border bg-panel-header px-4 py-2 text-center text-sm text-text-primary shadow-xl">
           <span className="block font-medium">{t(MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][0])}</span>
-          <span className="block text-text-secondary">{t(MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][1])}</span>
+          <span className="block text-text-secondary">{t(webrtc.mediaProblem === "denied" && mediaDeniedText() === "settings.media.deniedIos" ? "settings.media.deniedIos" : MEDIA_PROBLEM_TEXT[webrtc.mediaProblem][1])}</span>
         </div>
       )}
       {/* The system paused our microphone in a call (an iPhone's Home Screen app while the screen is locked): the
