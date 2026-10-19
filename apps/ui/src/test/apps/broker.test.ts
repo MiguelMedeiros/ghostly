@@ -163,7 +163,7 @@ describe("requests", () => {
   it("the whole API and nothing more: an unknown type is refused", async () => {
     const { run, ask } = setup();
     run();
-    expect(BROKER_REQUESTS).toEqual(["context", "file", "storage.get", "storage.set", "storage.delete", "storage.keys", "chat.send", "files.pick", "files.list", "files.read", "files.forget", "close"]);
+    expect(BROKER_REQUESTS).toEqual(["context", "file", "storage.get", "storage.set", "storage.delete", "storage.keys", "chat.send", "files.pick", "files.list", "files.read", "files.forget", "files.serve", "files.unserve", "remote.read", "remote.stat", "close"]);
     for (const type of ["start", "app_broker", "eval", "storage.clear", "chat.peer", "__proto__"]) expect(await ask(type)).toMatchObject({ ok: false, error: "unknown-type" });
   });
 
@@ -744,5 +744,87 @@ describe("linked files (WISP 1200 · Linked files)", () => {
     expect(posted.filter((p) => (p.message.id as number) >= 2_000).every((p) => p.message.ok === true)).toBe(true);
     expect(most).toBe(1);
     expect(order).toEqual(ids);
+  });
+});
+
+describe("the read lane (WISP 1200 § A read lane to the contact)", () => {
+  const film = Uint8Array.from({ length: 1_000 }, (_, i) => i & 0xff);
+  const SERVE = "s".repeat(22);
+
+  /** Cinema in Ana's chat, granted `chat` and `files`, with one film picked. */
+  async function cinema(permissions = ["chat", "files"]) {
+    const it = setup({ permissions, title: "Cinema" });
+    it.run();
+    it.host.nextPick = [{ path: "Films/Up.mp4", bytes: film }];
+    const picked = permissions.includes("files") ? ((await it.ask("files.pick")).value as { id: string }[])[0]!.id : "l".repeat(22);
+    // The chat open has answered: the app's id in the chat is known.
+    await it.ask("context");
+    return { ...it, id: picked, app: memoryAppId(LINK, REF) };
+  }
+
+  it("serve: a kept file, in a chat, for an app granted chat and files; the contact's ranges are read and answered with its size", async () => {
+    const { ask, host, id, app } = await cinema();
+    const served = await ask("files.serve", [id]);
+    expect(served).toMatchObject({ ok: true });
+    const serve = served.value as string;
+    expect(host.serves.get(serve)).toEqual({ linkId: LINK, ref: REF, file: id });
+    expect(await host.askRange(LINK, { app, request: 3, serve, file: id, offset: 990, length: 100 })).toEqual({ app, request: 3, bytes: film.subarray(990), size: film.length });
+    // Another chat's, another app's or another serve's asks are not this app's to answer.
+    let other = false;
+    void host.askRange("link-2", { app, request: 4, serve, file: id, offset: 0, length: 1 }).then(() => { other = true; });
+    void host.askRange(LINK, { app: "x".repeat(22), request: 5, serve, file: id, offset: 0, length: 1 }).then(() => { other = true; });
+    void host.askRange(LINK, { app, request: 6, serve: SERVE, file: id, offset: 0, length: 1 }).then(() => { other = true; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(other).toBe(false);
+    // A file that changed under the link says so.
+    host.linked.get(REF)!.get(id)!.bytes = film.subarray(1);
+    expect(await host.askRange(LINK, { app, request: 7, serve, file: id, offset: 0, length: 1 })).toEqual({ app, request: 7, error: "changed" });
+    expect(await ask("files.unserve", [serve])).toMatchObject({ ok: true });
+    expect(host.serves.size).toBe(0);
+    // An ask that was on its way when it ended is still answered, so its place among the app's 4 frees.
+    expect(await host.askRange(LINK, { app, request: 8, serve, file: id, offset: 0, length: 1 })).toEqual({ app, request: 8, error: "gone" });
+    expect(await ask("files.unserve", [serve])).toMatchObject({ ok: true });
+  });
+
+  it("serve is refused without files or chat, alone, for an id not kept, and as the chat says", async () => {
+    expect(await (await cinema(["chat"])).ask("files.serve", ["l".repeat(22)])).toMatchObject({ ok: false, error: "not-allowed" });
+    expect(await (await cinema(["files"])).ask("files.serve", ["l".repeat(22)])).toMatchObject({ ok: false, error: "not-allowed" });
+    const alone = setup({ permissions: ["chat", "files"], chat: null });
+    alone.run();
+    expect(await alone.ask("files.serve", ["l".repeat(22)])).toMatchObject({ ok: false, error: "not-allowed" });
+    const { ask, host, id } = await cinema();
+    expect(await ask("files.serve", ["nope"])).toMatchObject({ ok: false, error: "bad-request" });
+    expect(await ask("files.serve", ["b".repeat(22)])).toMatchObject({ ok: false, error: "gone" });
+    host.serveResult = "peer-closed";
+    expect(await ask("files.serve", [id])).toMatchObject({ ok: false, error: "peer-closed" });
+    const noLane = await cinema();
+    delete (noLane.host as { ranges?: unknown }).ranges;
+    expect(await noLane.ask("files.serve", [noLane.id])).toMatchObject({ ok: false, error: "not-allowed" });
+    expect(await noLane.ask("remote.read", [SERVE, { offset: 0, length: 1 }])).toMatchObject({ ok: false, error: "not-allowed" });
+  });
+
+  it("remote.read gives the contact's bytes as an ArrayBuffer, handed over; remote.stat its size", async () => {
+    const { ask, host, posted } = await cinema(["chat"]);
+    host.remote.set(SERVE, film);
+    const answer = await ask("remote.read", [SERVE, { offset: 10, length: 5 }]);
+    expect(new Uint8Array(answer.value as ArrayBuffer)).toEqual(film.subarray(10, 15));
+    expect(posted.find((p) => p.message === answer)!.transfer).toEqual([answer.value]);
+    expect(await ask("remote.stat", [SERVE])).toMatchObject({ ok: true, value: { size: film.length } });
+    expect(await ask("remote.read", ["t".repeat(22), { offset: 0, length: 1 }])).toMatchObject({ ok: false, error: "not-served" });
+    expect(await ask("remote.read", [SERVE, { offset: 0, length: MINI_APP_LIMITS.remoteReadBytes + 1 }])).toMatchObject({ ok: false, error: "too-large" });
+    expect(await ask("remote.read", ["short", { offset: 0, length: 1 }])).toMatchObject({ ok: false, error: "bad-request" });
+    const alone = setup({ permissions: ["chat"], chat: null });
+    alone.run();
+    expect(await alone.ask("remote.stat", [SERVE])).toMatchObject({ ok: false, error: "not-allowed" });
+  });
+
+  it("remote.read shares `file`'s 16 MiB a second", async () => {
+    const { ask, host, clock } = await cinema(["chat"]);
+    host.remote.set(SERVE, new Uint8Array(MINI_APP_LIMITS.remoteReadBytes));
+    const reads = MINI_APP_LIMITS.fileBytesPerSecond / MINI_APP_LIMITS.remoteReadBytes;
+    for (let i = 0; i < reads; i++) expect(await ask("remote.read", [SERVE, { offset: 0, length: MINI_APP_LIMITS.remoteReadBytes }])).toMatchObject({ ok: true });
+    expect(await ask("remote.read", [SERVE, { offset: 0, length: 1 }])).toMatchObject({ ok: false, error: "too-fast" });
+    clock.t += 1000;
+    expect(await ask("remote.read", [SERVE, { offset: 0, length: 1 }])).toMatchObject({ ok: true });
   });
 });
