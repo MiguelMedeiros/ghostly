@@ -12,7 +12,8 @@
 //   pull request from its branch into another base holds the same head (that base's ci.yml ran it).
 // - One batch per base at a time: up to 12 pull requests from the front of the line, once 3 can board, or the one that
 //   has waited longest has waited 15 minutes since it could (queued, and its CI green), or one has `queue:priority`
-//   (MIN_BATCH, MAX_WAIT). Until then it says it is holding, and only the first in line lands, if it needs no CI run
+//   (MIN_BATCH, MAX_WAIT). Until then it says it is holding (in its log, and in each held one's position comment with
+//   the time the batch leaves at the latest), and only the first in line lands, if it needs no CI run
 //   (green on its own full run, at the base's tip). A batch is built on the base's tip with one squash commit per pull
 //   request, in order ("<title> (#n)"). One that conflicts drops out: `queue:conflict`, one comment, `queue` taken off
 //   (`queue:conflict` comes off once it has `queue` back, as does `queue:failed`). The batch is a pull request from
@@ -344,9 +345,11 @@ export function batchBody(base, baseSha, head, prs, next, extra = {}, commits = 
  * The comment that says where a pull request is. It also records the head the train first saw queued (`head`) and,
  * while the train lands it alone, the commit it rebased it to (`alone`: sha, baseSha, at, retried). `held` is CI
  * Success on the base itself ("red" or "still running") while the train holds a red batch or lone pull request for
- * it: the one in flight is no longer waiting for its own CI, and nobody behind it moves.
+ * it: the one in flight is no longer waiting for its own CI, and nobody behind it moves. `company` is set while the
+ * next batch, this pull request in it, waits for company (`holdBatch`): how many can board, the batch size it waits
+ * for, and when it leaves at the latest (a fixed time, so the comment does not change from run to run).
  */
-export function positionText(base, pr, place, batch, head = pr.sha, alone = null, held = null) {
+export function positionText(base, pr, place, batch, head = pr.sha, alone = null, held = null, company = null) {
   const mark = `<!-- merge-train:head ${head} -->`;
   const hold = held ? ` The train is on hold: CI Success on \`${base}\` itself is ${held}, and nobody is blamed until it is green.` : "";
   // The train cancels a pull request's own full CI that it does not land on (`cancelOwnCi`), and `gh pr checks` lists
@@ -367,7 +370,10 @@ export function positionText(base, pr, place, batch, head = pr.sha, alone = null
     !why && own && pr.fast === "success"
       ? ` It can board on its fast tier (CI Success (draft)): while its head is behind \`${base}\`, the train cancels its own full CI run, which it would not land on.${cancelled}`
       : "";
-  return `${POSITION}${mark}\nMerge train: in line for \`${base}\`: **${ordinal(place)}**.${why ? ` Waiting: ${why}. It keeps its place.` : note}${hold}`;
+  const wait = !why && company
+    ? ` Waiting for company: a batch leaves once ${company.minBatch} can board (${company.count} now), or at ${new Date(company.leavesAt).toISOString().slice(11, 16)} UTC at the latest. It keeps its place.`
+    : "";
+  return `${POSITION}${mark}\nMerge train: in line for \`${base}\`: **${ordinal(place)}**.${why ? ` Waiting: ${why}. It keeps its place.` : `${wait}${note}`}${hold}`;
 }
 
 /** The head a pull request had when the train first saw it queued (the reviewed one), from its position comment. */
@@ -1059,9 +1065,12 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   }
   /** The next batch waiting for company (`holdBatch`), or null. */
   let holding = null;
+  /** The pull requests of the held batch: their position comments say it waits, and until when at the latest. */
+  let heldBack = new Set();
   while (inFlight === null || inFlight === undefined) {
     const next = pickBatch(line());
     holding = holdBatch(next, now, { minBatch, maxWait });
+    heldBack = new Set(holding ? next.map((p) => p.number) : []);
     // While it waits, the front still lands at once when it can with no CI run: green on its own full run, at the tip.
     if (holding) inFlight = canGoAlone(next[0]) && next[0].ci === "success" && (await gh.behindBy(await gh.branchSha(base), next[0].sha)) === 0 ? await goAlone(next[0]) : false;
     else if (next.length === 1 && canGoAlone(next[0])) inFlight = await goAlone(next[0]);
@@ -1070,6 +1079,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   inFlight ||= null;
 
   const aboard = new Set(inFlight?.members.map((p) => p.number) ?? []);
+  // The oldest waited `waited` by now: it leaves MAX_WAIT after that one could board, whatever the run.
+  const company = holding && !inFlight ? { count: holding.count, minBatch, leavesAt: now - holding.waited + maxWait } : null;
   let place = 0;
   for (const p of line()) {
     // Whoever is still in line passed the head checks above: its head is the one `queue` (or the train) vouches for.
@@ -1078,7 +1089,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
         ? positionText(base, p, 0, 0, queuedHead(p.sticky) ?? p.sha, p.alone, held)
         : aboard.has(p.number)
           ? positionText(base, p, 0, inFlight.number, p.sha, null, held)
-          : positionText(base, p, ++place, 0, p.sha, null, held);
+          : positionText(base, p, ++place, 0, p.sha, null, held, heldBack.has(p.number) ? company : null);
     if (!p.sticky && p.pushedAt === null) continue; // no CI on its head yet: its comment would record a head of unknown age
     if (p.unread) {
       // A comment posted now would be past what the next run reads too: one more every run.
