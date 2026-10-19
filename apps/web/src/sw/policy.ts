@@ -43,7 +43,9 @@ export interface RequestLike {
  * provider's answer; the worker's own script is the browser's to fetch; the mini-app runner's sandbox is in its
  * server's header (WISP 1200), which a cached copy could lose.
  */
-const NEVER = new Set(["/version.json", "/oidc-callback.html", "/sw.js", "/app-frame.html", "/app-frame-net.html", "/app-frame-unguarded.html"]);
+const NEVER = new Set(["/version.json", "/oidc-callback.html", "/sw.js", "/app-frame.html", "/app-frame-net.html", "/app-frame-unguarded.html",
+  // What a contact's app origin is served (src/svc/): never the app's own, so never in its cache.
+  "/ghostly-services-sw.js", "/_ghostly-svc/bridge.html", "/_ghostly-svc/bridge.js"]);
 
 /** Pages that are the app: its root and its file. Any other path is a static file, or nothing. */
 const APP_PAGES = new Set(["/", "/index.html"]);

@@ -3,8 +3,11 @@
 // FAKE_ENDPOINT_HANG_CLOSE=1 makes close() never finish, and keeps the process
 // busy, as a stuck socket would. FAKE_ENDPOINT_DELAY_MS holds each frame that
 // long in the sender's buffer before it reaches the other end, as a slow link.
+// FAKE_ENDPOINT_DIAL_MS makes a dial to a peer that is not there fail only after
+// that long, as one to a contact whose app died while the DHT still holds its record.
 const registry = new Map()
 const delay = Number(process.env.FAKE_ENDPOINT_DELAY_MS ?? 0)
+const dialDelay = Number(process.env.FAKE_ENDPOINT_DIAL_MS ?? 0)
 
 function pair(bindingContext) {
   const ends = [0, 1].map(() => ({ reader: null, pending: [], closeHandler: null, closed: false, buffered: 0, waiting: [] }))
@@ -51,6 +54,7 @@ export async function createHyperEndpoint(seed) {
     set onConnection(value) { incoming = value },
     async connect(address) {
       const target = registry.get(address?.publicKey)
+      if (!target && dialDelay) await new Promise(resolve => setTimeout(resolve, dialDelay))
       if (!target || closed) throw new Error('peer not found')
       const [local, remote] = pair(`${publicKey}:${address.publicKey}`)
       target.onConnection?.(remote)

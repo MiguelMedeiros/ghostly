@@ -106,7 +106,7 @@ test("a malicious app reaches nothing: no request, no WebRTC from any frame it m
   expect(r.origin).toBe("null");
   expect(r.topIsSelf).toBe(false);
   // Every app sees the same API; what it was not granted is refused (chat and files below).
-  expect(r.ghostly).toBe("chat,close,context,file,files,storage");
+  expect(r.ghostly).toBe("chat,close,context,file,files,remote,storage");
   expect(r.rtcNames).toBe("none");
   // The runner's nonce: not on the script, not in the markup, not in a violation report, not guessed.
   expect(r.nonceProperty).toBe("undefined");

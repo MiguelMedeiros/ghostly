@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, ownInviteRefusal, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, ownInviteRefusal, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
@@ -25,6 +25,7 @@ import { CALL_METHODS } from "./calls/api";
 import { APP_SERVE_METHODS } from "./appServe";
 import { APP_CHAT_METHODS } from "./appChat";
 import { WALLET_METHODS } from "./wallets";
+import { TRANSPORT_NAMES } from "./words";
 import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, isLive, messageJson, type MessageJson } from "./views";
 
 /**
@@ -83,13 +84,6 @@ function relayRefused(error: unknown, patch: Record<string, unknown>): unknown {
   const keys = ["relays", "irohRelays", "hyperdhtRelay"].filter((key) => Object.hasOwn(patch, key));
   return new CliError("bad_request", `${keys.join(", ") || "relays"}: ${error.message.replace(/^Enter /, "give ").replace(/^(Not|Use) /, (word) => word.toLowerCase())}`);
 }
-
-// ---------- transports ----------
-
-const TRANSPORT_NAMES: Record<string, PairedTransport | "auto" | "dht"> = {
-  auto: "auto", dht: "dht", webrtc: "webrtc/1", iroh: "iroh/1", hyperdht: "hyperdht/1",
-  "webrtc/1": "webrtc/1", "iroh/1": "iroh/1", "hyperdht/1": "hyperdht/1",
-};
 
 // ---------- chat names ----------
 
@@ -376,6 +370,22 @@ const METHODS: Record<string, Method> = {
     if (result.error) throw new CliError(/not in this chat|Nothing is pinned/.test(result.error) ? "not_found" : /Only the admin/.test(result.error) ? "refused" : "bad_request", result.error);
     return { [target.group ? "group" : "chat"]: target.id, messageId: remove ? null : messageId, removed: remove };
   },
+  /** Saved messages: a mark on a message of a chat or a group, kept for this profile on this device; nothing is sent. */
+  async "saved.add"(ctx, params) {
+    return saveMark(ctx, params, false);
+  },
+  async "saved.remove"(ctx, params) {
+    return saveMark(ctx, params, true);
+  },
+  /** The saved messages, the last saved first, each as it is now and named by its chat or group. */
+  async "saved.list"(ctx) {
+    const { links, groups } = state(ctx);
+    return (await node(ctx).savedMessages()).map(({ savedAt, message }) => {
+      if (!message.linkId.startsWith("group:")) return { chat: message.linkId, savedAt, message: chatMessageJson(message, links.find((l) => l.id === message.linkId)) };
+      const id = message.linkId.slice("group:".length);
+      return { group: id, savedAt, message: groupMessageJson(message, groups.find((g) => g.id === id)) };
+    });
+  },
   /**
    * WISP 400 § Forwards: messages of a chat or a group sent on to up to 5 chats and groups, each as a new message of mine
    * that says it was forwarded (one hop more) and nothing of who wrote it. A file goes from the bytes here, never
@@ -427,7 +437,20 @@ const METHODS: Record<string, Method> = {
     return { chat: link.id, messageId };
   },
   async "chat.delete"(ctx, params) {
-    const link = chatOf(ctx, params);
+    // For everyone (WISP 400 § Delete for everyone): a message of mine, in a chat or a group, gone from every device.
+    if (bool(params, "everyone")) {
+      const target = chatOrGroup(ctx, str(params, "chat", true));
+      const ref = str(params, "message", true);
+      const message = await messageOf(ctx, target.linkId, ref, (m) => m.sender === "me");
+      if (!message) throw new CliError("not_found", `No message ${ref} of yours in this ${target.group ? "group" : "chat"}: only your own messages are deleted for everyone`);
+      const result = await node(ctx).removeMessage({ linkId: target.linkId, messageId: message.id });
+      if (result.error) throw new CliError(result.refused ? "refused" : "unavailable", result.error);
+      return { [target.group ? "group" : "chat"]: target.id, deleted: message.id, everyone: true };
+    }
+    // A group's message is deleted for everyone only (the apps forget none on one device): a group named without the
+    // flag says so, with the command that takes it, not "No chat".
+    const ref = str(params, "message") ?? "<message>";
+    const link = chatNotGroup(ctx, params, "message delete", `${/^[\w.:<>-]+$/.test(ref) ? ref : JSON.stringify(ref)} --everyone`);
     const messageId = str(params, "message", true);
     if (!(await node(ctx).getMessage(link.id, messageId))) throw new CliError("not_found", `No message ${messageId} in this chat`);
     await node(ctx).deleteMessage({ linkId: link.id, messageId });
@@ -662,6 +685,11 @@ const METHODS: Record<string, Method> = {
     const raw = params.params;
     if (raw !== undefined && (raw === null || typeof raw !== "object" || Array.isArray(raw))) throw new CliError("bad_request", "params must be an object");
     const args = raw as Params | undefined;
+    // "Hide my IP from contacts" (`relayOnly`, WISP 100 § Relay only) is not in 1.5: no app shows it, and the Desktop's
+    // own transports do not follow it yet. Nobody turns it on through here either, until the release that shows it.
+    if (method === "updateSettings" && args?.settings && typeof args.settings === "object" && "relayOnly" in args.settings) {
+      throw new CliError("bad_request", "relayOnly is not a setting yet: Hide my IP from contacts comes in a later release");
+    }
     // Real money moves only on an explicit confirmation of this call (WISP 1100 § Mainnet).
     if (args && "confirmedReal" in args && !bool(params, "confirmReal")) {
       throw new CliError("confirm", `${method} spends real money: pass --confirm-real (confirmReal: true over the socket) to confirm it`);
@@ -804,6 +832,13 @@ function editRefused(message: StoredMessage | undefined, ref: string, where: "ch
  * A page of a chat's or a group's history. Without `after` only that page is read from the store (the newest, or those
  * before `before`), so a long chat's is as quick as a short one's; with `after` the whole history is read and cut.
  */
+async function saveMark(ctx: ApiContext, params: Params, remove: boolean) {
+  const target = chatOrGroup(ctx, str(params, "chat", true)), messageId = str(params, "message", true);
+  const result = await node(ctx).saveMessage({ linkId: target.linkId, messageId, remove });
+  if (result.error) throw new CliError(/not in this chat/.test(result.error) ? "not_found" : "bad_request", result.error);
+  return { [target.group ? "group" : "chat"]: target.id, messageId, saved: !remove };
+}
+
 async function historyOf(ctx: ApiContext, chat: string, params: Params, json: (message: StoredMessage) => MessageJson = messageJson) {
   if (params.after !== undefined && params.after !== null) {
     const whole = await node(ctx).getMessages(chat), { messages, more } = history(whole, params);

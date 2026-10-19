@@ -74,20 +74,27 @@ function start(id, seedB64) {
   })
 }
 
-/** Commands for one endpoint run in order; another endpoint's never wait for them. */
+/**
+ * Commands for one endpoint run in order; another endpoint's never wait for them. A dial goes beside them: the
+ * contact's own connection is used while it waits. Once the endpoint is up and nothing waits, a send or close runs at
+ * once, so a burst read in one go (the host bounds it) never counts against `MAX_QUEUED`.
+ */
 function queue(record, command) {
+  if (command.type === 'connect') { void dial(record, command); return }
+  if (record.endpoint && !record.queued) { run(record, command); return }
   if (record.queued >= MAX_QUEUED) {
     void stop(record)
     emit({ type: 'stopped', endpoint: record.id })
     return
   }
   record.queued++
-  record.chain = record.chain.then(async () => {
-    if (record.stopped) return
-    if (command.type === 'connect') {
-      const id = attach(record, await record.endpoint.connect(command.descriptor), false)
-      if (id) emit({ type: 'result', endpoint: record.id, id })
-    } else if (command.type === 'send') {
+  record.chain = record.chain.then(() => { if (!record.stopped) run(record, command) }).finally(() => { record.queued-- })
+}
+
+/** A send or a close, on a started endpoint. */
+function run(record, command) {
+  try {
+    if (command.type === 'send') {
       const channel = record.connections.get(command.id)
       if (!channel) throw new Error('Native channel is closed')
       channel.send(typeof command.bytes === 'string' ? new Uint8Array(Buffer.from(command.bytes, 'base64')) : command.text)
@@ -96,11 +103,22 @@ function queue(record, command) {
         error => emit({ type: 'error', endpoint: record.id, command: 'send', id: command.id, seq: command.seq, message: message(error) }))
     }
     else record.connections.get(command.id)?.close()
-  }).catch(error => {
-    if (record.stopped) return
+  } catch (error) {
     const send = command.type === 'send' ? { id: command.id, seq: command.seq } : {}
     emit({ type: 'error', endpoint: record.id, command: command.type, ...send, message: message(error) })
-  }).finally(() => { record.queued-- })
+  }
+}
+
+/** A dial waits for the endpoint to be up, then for the contact: a dead one's stale DHT record takes seconds to fail. */
+async function dial(record, command) {
+  try {
+    await record.chain
+    if (record.stopped) return
+    const id = attach(record, await record.endpoint.connect(command.descriptor), false)
+    if (id) emit({ type: 'result', endpoint: record.id, id })
+  } catch (error) {
+    if (!record.stopped) emit({ type: 'error', endpoint: record.id, command: 'connect', message: message(error) })
+  }
 }
 
 /** Resolves once `channel` holds no more than `SEND_ROOM`; throws once it closed. */

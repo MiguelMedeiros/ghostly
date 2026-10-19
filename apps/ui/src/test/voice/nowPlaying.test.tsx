@@ -6,7 +6,7 @@ import { NowPlayingBar } from "../../components/NowPlayingBar";
 import { VoiceBubble } from "../../components/voice/VoiceBubble";
 import { JUMP_TO } from "../../hooks/useJumpTo";
 import { userState } from "../../lib/navigation";
-import { NowPlayingChat, pauseForCall, type PlayingChat } from "../../lib/nowPlaying";
+import { NowPlayingChat, pauseForCall, stopPlayingFrom, type PlayingChat } from "../../lib/nowPlaying";
 import { servicesPlatform } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
@@ -49,6 +49,8 @@ function Screen({ files, open = true, audioFiles = [], where = FAMILY }: { files
         </NowPlayingChat.Provider>
       )}
       <Where />
+      {/* What comes after the bar, as the tab bar does on a phone. */}
+      <button type="button">Chats</button>
     </>
   );
 }
@@ -179,6 +181,19 @@ describe("a voice message playing as its chat goes", () => {
     expect(audio.players[1]!.currentTime).toBe(6);
   });
 
+  it("closed from the keyboard, the focus goes on to what comes after the bar, not to the page's body", async () => {
+    const file = voiceFile();
+    const view = renderApp(<Screen files={[file]} />);
+    fireEvent.click(screen.getByTestId("voice-play"));
+    await flush();
+    view.rerender(<Screen files={[file]} open={false} />);
+
+    screen.getByRole("button", { name: "Stop and close" }).focus();
+    await view.user.keyboard("{Enter}");
+    expect(bar()).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Chats" }));
+  });
+
   it("played to its end away from its chat: the bar goes, and it starts from the beginning next time", async () => {
     const file = voiceFile();
     const view = renderApp(<Screen files={[file]} />);
@@ -283,5 +298,26 @@ describe("an audio file playing as its chat goes", () => {
     expect(again.currentTime).toBe(90);
     expect(again.paused).toBe(false);
     expect(screen.getByTestId("audio-bubble")).toHaveAttribute("data-state", "playing");
+  });
+});
+
+describe("a voice message playing on as its chat goes from this device", () => {
+  it("stops, and the bar goes, when that chat is deleted; another chat going leaves it playing", async () => {
+    const file = voiceFile();
+    const view = renderApp(<Screen files={[file]} />, { route: "/group/family" });
+    fireEvent.click(screen.getByTestId("voice-play"));
+    await flush();
+    const player = audio.players[0]!;
+    playTo(player, 3);
+    view.rerender(<Screen files={[file]} open={false} />);
+    expect(bar()).not.toBeNull();
+
+    act(() => stopPlayingFrom("/group/other", false));
+    expect(player.paused).toBe(false);
+    expect(bar()).not.toBeNull();
+
+    act(() => stopPlayingFrom(FAMILY.path, false));
+    expect(player.paused).toBe(true);
+    expect(bar()).toBeNull();
   });
 });

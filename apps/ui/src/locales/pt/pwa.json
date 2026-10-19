@@ -22,6 +22,8 @@
   "shareFrom": "Veio de outro app ou site. Nada é enviado até você enviar.",
   "shareHint": "Escolha uma conversa. Você confere e envia lá.",
   "shareNoChats": "Nenhuma conversa ainda. Comece uma e compartilhe de novo.",
+  "shareNoRoom": "Sem espaço neste dispositivo para: {{names}}",
+  "shareNoRoomNext": "Libere espaço e compartilhe de novo.",
   "shareNone": "Nada foi compartilhado, ou já foi recebido.",
   "shareOneFile": "1 arquivo",
   "shareTitle": "Compartilhar com…",

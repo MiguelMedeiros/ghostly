@@ -5,7 +5,7 @@ import {
 } from "@ghostly/core";
 import { STORES, store, wrap } from "../shared/idb";
 import type { ContactAskView } from "../shared/types";
-import { newDeviceKey, sealSeed, unsealSeed } from "./paymentAdapters/persistence";
+import { openSecret, sealSecret } from "./dataKey";
 import type { SealedProofKey } from "./identities";
 
 /**
@@ -145,7 +145,7 @@ export class ContactAsks {
     const sent = request(chat.inviteCode);
     // A request of before left nothing to reuse: its stamp, its publish and its looks are this request's to make.
     const ask: StoredAsk = {
-      link, key: asker.pubKeyZ32, seed: known?.seed ?? await this.seal(asker),
+      link, key: asker.pubKeyZ32, seed: known?.seed ?? await this.seal(asker, link),
       chatId: chat.linkId, invite: chat.inviteCode, name: sent.name, text: sent.text, issued: now, expires: sent.expires, state: "sending",
     };
     await this.put(ask);
@@ -226,13 +226,13 @@ export class ContactAsks {
     return run;
   }
 
-  private async seal(identity: Identity): Promise<SealedProofKey> {
-    const deviceKey = newDeviceKey();
-    return { sealed: await sealSeed(identity.seedB64, deviceKey), deviceKey };
+  /** An asker key's seed belongs to the link it asks: one ask per link. */
+  private seal(identity: Identity, link: string): Promise<SealedProofKey> {
+    return sealSecret(identity.seedB64, { store: STORES.settings, key: link, field: "contactAsk.seed" });
   }
 
   private async identity(ask: StoredAsk): Promise<Identity> {
-    return identityFromSeedB64(await unsealSeed(ask.seed.sealed, ask.seed.deviceKey));
+    return identityFromSeedB64(await openSecret(ask.seed, { store: STORES.settings, key: ask.link, field: "contactAsk.seed" }));
   }
 
   private async put(ask: StoredAsk): Promise<void> {

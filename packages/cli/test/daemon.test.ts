@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import packageJson from "../package.json" with { type: "json" };
-import { newDaemonSecret, proof } from "../src/daemonProof";
+import { greeting, newDaemonSecret, proof } from "../src/daemonProof";
 import { createProfile, lockOwner, profilePaths } from "../src/profiles";
 import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 // covers: headless.daemon, headless.cli
@@ -33,10 +33,13 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
     const other = home("old-daemon");
     createProfile(other, "default");
     const { socket, dir: profileDir } = profilePaths(other, "default");
-    // A daemon of another release that has the hello already: it proves itself, then answers as an older one.
+    // A daemon of another release that has the greeting and the hello already: it proves itself, then answers as an
+    // older one. It runs in this process, which holds the profile as a daemon does.
     const secret = newDaemonSecret(profileDir);
+    writeFileSync(profilePaths(other, "default").lock, String(process.pid));
     const methods: string[] = [];
     const server: Server = createServer((connection) => {
+      connection.write(JSON.stringify(greeting(secret)) + "\n");
       createInterface({ input: connection }).on("line", (line) => {
         const { id, method, params } = JSON.parse(line) as { id: number; method: string; params: { nonce?: string } };
         methods.push(method);

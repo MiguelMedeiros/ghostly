@@ -1,9 +1,11 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DhtDelivery, EDIT_BUFFER_MS, EDIT_SEND_LIMIT, GhostLink, MAX_EDITS_PER_MESSAGE, createIdentity, createLink, createRelayPayload, dhtEditId, identityFromSeedB64, parseRelayPayload, readStatusCard, type IncomingMessage, type PairingState, type SignedPacket, type StatusCard, type WireEdit } from "@ghostly/core";
+import { DhtDelivery, EDIT_BUFFER_MS, EDIT_SEND_LIMIT, GhostLink, MAX_EDITS_PER_MESSAGE, REMOVED_TEXT, createIdentity, createLink, createRelayPayload, dhtEditId, identityFromSeedB64, parseRelayPayload, readStatusCard, type GroupEdit, type IncomingMessage, type PairingState, type SignedPacket, type StatusCard, type WireEdit } from "@ghostly/core";
 import { GhostlyNode } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { CARD_RESTORE_GAP_MS, EditBuffer, EditQueue } from "../src/engine/edits";
+import type { GroupEditsHost } from "../src/engine/groupEdits";
+import type { Removal } from "../src/engine/removals";
 import { EDIT_HISTORY_KEEP, EDIT_HISTORY_MAX_BYTES, canEdit, takesPeerEdit, withEdit } from "../src/shared/edits";
 import type { StoredMessage } from "../src/shared/types";
 import { FakeNativeNet, fakeDescriptor } from "./helpers/fakeNative";
@@ -84,6 +86,52 @@ describe("editing my message", () => {
     expect((await t.row(sent.messageId!)).edit).toMatchObject({ seq: 3, history: [{ text: "Working…" }, { text: "Step 1 of 3" }, { text: "Step 2 of 3" }] });
     // Its wire id works as well as its id here (what a bot keeps from `send`).
     expect(await t.node.editMessage({ linkId: t.id, messageId: mine.wireId!, text: "Done!" })).toMatchObject({ error: null, messageId: sent.messageId });
+  });
+
+  it("deleting one for everyone takes it off here at once, tells the contact once as its last edit, and the confirmation ends it", async () => {
+    const t = await setup();
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "🔄 Task" });
+    await vi.waitFor(async () => expect((await t.row(sent.messageId!)).delivery).toBe("delivered"));
+    expect(await t.node.editMessage({ linkId: t.id, messageId: sent.messageId!, text: "🔄 Task, step 2" })).toMatchObject({ error: null });
+    const wireId = (await t.row(sent.messageId!)).wireId!;
+    await vi.waitFor(() => expect(t.contactEdits).toHaveLength(1));
+    expect(await t.node.removeMessage({ linkId: t.id, messageId: sent.messageId! })).toEqual({ error: null });
+    expect((await t.messages()).find(m => m.id === sent.messageId)).toBeUndefined();
+    await vi.waitFor(() => expect(t.contactEdits.slice(1)).toEqual([{ id: wireId, e: 2, ts: expect.any(Number), m: REMOVED_TEXT, rm: true }]));
+    // Confirmed: nothing of it is left to say, and it never comes back here.
+    await vi.waitFor(() => expect((t.node as unknown as { links: Map<string, { stored: { removals?: unknown[] } }> }).links.get(t.id)!.stored.removals).toEqual([]));
+    await vi.waitFor(async () => expect((await db.getLinks()).find(l => l.id === t.id)?.removals).toEqual([]));
+    expect(await t.node.removeMessage({ linkId: t.id, messageId: sent.messageId! })).toMatchObject({ refused: true });
+    expect(t.contactEdits).toHaveLength(2);
+  });
+
+  it("deleting one for everyone leaves no line of it in the contact's reply here that quotes it", async () => {
+    const t = await setup();
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "quote me" });
+    await vi.waitFor(async () => expect((await t.row(sent.messageId!)).delivery).toBe("delivered"));
+    const wireId = (await t.row(sent.messageId!)).wireId!;
+    expect(await t.contact.sendMessage("their answer", Date.now(), WIRE("A"), undefined, { i: wireId, s: "quote me", f: "recipient" })).toBeNull();
+    const theirs = await t.peerRow("their answer");
+    expect(theirs.replyTo).toMatchObject({ snippet: "quote me", messageId: sent.messageId });
+    expect(await t.node.removeMessage({ linkId: t.id, messageId: sent.messageId! })).toEqual({ error: null });
+    expect((await t.row(theirs.id)).replyTo).toEqual({ id: wireId, snippet: "", from: "me", messageId: sent.messageId });
+  });
+
+  it("deleting for everyone refuses the contact's messages and payments; one that never left is only deleted here", async () => {
+    const t = await setup();
+    expect(await t.contact.sendMessage("theirs", Date.now(), WIRE("H"))).toBeNull();
+    const theirs = await t.peerRow("theirs");
+    expect(await t.node.removeMessage({ linkId: t.id, messageId: theirs.id })).toMatchObject({ refused: true, error: expect.stringMatching(/your own/) });
+    const paid: StoredMessage = { linkId: t.id, id: "me_paid", wireId: WIRE("P"), text: "💸 100 sats", sender: "me", timestamp: Date.now(), via: "datalink", delivery: "delivered", paymentId: "pay-1" };
+    await db.addMessage(paid);
+    expect(await t.node.removeMessage({ linkId: t.id, messageId: paid.id })).toMatchObject({ refused: true, error: expect.stringMatching(/payment/) });
+    const waiting: StoredMessage = { linkId: t.id, id: "me_waiting", wireId: WIRE("W"), text: "not yet", sender: "me", timestamp: Date.now(), via: "datalink", delivery: "waiting" };
+    await db.addMessage(waiting);
+    expect(await t.node.removeMessage({ linkId: t.id, messageId: waiting.id })).toEqual({ error: null });
+    expect((await t.messages()).find(m => m.id === waiting.id)).toBeUndefined();
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(t.contactEdits).toEqual([]);
+    expect((await t.messages()).find(m => m.id === theirs.id)).toBeDefined();
   });
 
   it("an edit and its confirmation read the edited message, not the chat's whole history", async () => {
@@ -175,6 +223,17 @@ describe("the contact's edits", () => {
     await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ emoji: "👍", snippet: "plan v2", at }));
   });
 
+  it("take the chat list's reaction line away with the message they delete for everyone", async () => {
+    const t = await setup();
+    expect(await t.contact.sendMessage("the door code is 4471", Date.now(), WIRE("R"))).toBeNull();
+    const original = await t.peerRow("the door code is 4471");
+    expect(await t.node.react({ linkId: t.id, messageId: original.id, emoji: "👍" })).toEqual({ error: null });
+    expect(t.view().lastReaction).toMatchObject({ snippet: "the door code is 4471" });
+    expect(await t.contact.sendEdit({ id: WIRE("R"), e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(async () => expect((await t.messages()).find(m => m.id === original.id)).toBeUndefined());
+    await vi.waitFor(() => expect(t.view().lastReaction).toBeUndefined());
+  });
+
   it("change its message, the highest number winning whatever order they come in; no sound, no move", async () => {
     const t = await setup();
     const at = Date.now() - 60_000;
@@ -234,6 +293,56 @@ describe("the contact's edits", () => {
     // Nor mine, from this side.
     const sent = await t.node.sendMessage({ linkId: t.id, text: "hi" });
     expect(await t.node.editMessage({ linkId: t.id, messageId: sent.messageId!, text: "👋 Mallory joined" })).toMatchObject({ refused: true, error: expect.stringMatching(/join notice/) });
+  });
+
+  it("a removal takes their message off this device, confirmed, and nothing brings it back", async () => {
+    const t = await setup();
+    expect(await t.contact.sendMessage("🔄 Fix it", Date.now(), WIRE("E"))).toBeNull();
+    const row = await t.peerRow("🔄 Fix it");
+    t.onAttention.mockClear();
+    // Numbered past a text's hundred, without a card: a removal holds whatever its number.
+    expect(await t.contact.sendEdit({ id: WIRE("E"), e: 101, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("E"), 101]]));
+    expect((await t.messages()).find(m => m.id === row.id)).toBeUndefined();
+    expect(t.onAttention).not.toHaveBeenCalled();
+    // The same message again (republished, a hold, the DHT floor) and a later edit change nothing.
+    expect(await t.contact.sendMessage("🔄 Fix it", Date.now(), WIRE("E"))).toBeNull();
+    expect(await t.contact.sendEdit({ id: WIRE("E"), e: 5, ts: Date.now(), m: "back?" })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("E"), 101], [WIRE("E"), 5]]));
+    expect((await t.messages()).find(m => m.id === row.id)).toBeUndefined();
+  });
+
+  it("a removal before its message is kept at once: the message, when it comes, is taken as gone", async () => {
+    const t = await setup();
+    expect(await t.contact.sendEdit({ id: WIRE("F"), e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("F"), 1]]));
+    expect(await t.contact.sendMessage("never shown", Date.now(), WIRE("F"))).toBeNull();
+    expect(await t.contact.sendMessage("the next one", Date.now(), WIRE("G"))).toBeNull();
+    await t.peerRow("the next one");
+    expect((await t.messages()).map(m => m.text)).not.toContain("never shown");
+  });
+
+  it("a removal leaves no line of its message in the replies here that quote it: each keeps its quote's id", async () => {
+    const t = await setup();
+    expect(await t.contact.sendMessage("quote me", Date.now(), WIRE("Q"))).toBeNull();
+    const original = await t.peerRow("quote me");
+    const mine = await t.node.sendMessage({ linkId: t.id, text: "my answer", replyTo: original.id });
+    expect(await t.contact.sendMessage("their answer", Date.now(), WIRE("R"), undefined, { i: WIRE("Q"), s: "quote me", f: "sender" })).toBeNull();
+    const theirs = await t.peerRow("their answer");
+    expect((await t.row(mine.messageId!)).replyTo).toMatchObject({ id: WIRE("Q"), snippet: "quote me", messageId: original.id });
+    expect(theirs.replyTo).toMatchObject({ id: WIRE("Q"), snippet: "quote me", messageId: original.id });
+    expect(await t.contact.sendEdit({ id: WIRE("Q"), e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[WIRE("Q"), 1]]));
+    for (const id of [mine.messageId!, theirs.id]) expect((await t.row(id)).replyTo).toEqual({ id: WIRE("Q"), snippet: "", from: "peer", messageId: original.id });
+  });
+
+  it("a removal never takes one of my messages", async () => {
+    const t = await setup();
+    const sent = await t.node.sendMessage({ linkId: t.id, text: "mine to keep" });
+    const mine = await t.row(sent.messageId!);
+    expect(await t.contact.sendEdit({ id: mine.wireId!, e: 1, ts: Date.now(), m: REMOVED_TEXT, rm: true })).toBeNull();
+    await vi.waitFor(() => expect(t.contactReceipts).toEqual([[mine.wireId, 1]]));
+    expect(await t.row(sent.messageId!)).toMatchObject({ text: "mine to keep" });
   });
 
   it("an edit of a message deleted here is confirmed and brings nothing back", async () => {
@@ -543,5 +652,75 @@ describe("what an edit keeps", () => {
     expect(takesPeerEdit({ ...base, sender: "peer" }, "fixed a typo")).toBe(true);
     expect(takesPeerEdit({ ...base, sender: "peer" }, "👋 Alice joined")).toBe(false);
     expect(takesPeerEdit({ ...base, sender: "peer" }, "👋 joined")).toBe(false);
+  });
+});
+
+describe("deleting many of my group messages for everyone", () => {
+  it("a removal on its way is read from the group's removals, not from the store: 200 in a row read each row once", async () => {
+    // Removals go at the pace of edits (10 a window): each flush read every one still waiting from the store, where it is
+    // gone, then made a row of every removal to find it. 500 in a row held the engine 5.3 s.
+    const me = createIdentity().pubKeyZ32, g = `removals-${crypto.randomUUID()}`, chat = `group:${g}`;
+    const ids = Array.from({ length: 200 }, (_, n) => `${me}:1:${n}`);
+    for (const [n, id] of ids.entries()) await db.addMessage({ linkId: chat, id, text: `🔄 Task ${n}`, sender: "me", member: me, timestamp: n + 1, via: "datalink" });
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
+    const inner = node as unknown as {
+      groups: { removals(groupId: string): readonly Removal[]; setRemovals(groupId: string, list: Removal[]): Promise<void> };
+      groupEdits: { removeMine(groupId: string, id: string): Promise<unknown>; stop(): void; host: GroupEditsHost };
+    };
+    let removals: Removal[] = [];
+    vi.spyOn(inner.groups, "removals").mockImplementation(() => removals);
+    vi.spyOn(inner.groups, "setRemovals").mockImplementation(async (_group, list) => { removals = list; });
+    const host = inner.groupEdits.host, sent: GroupEdit[] = [];
+    vi.spyOn(host, "membership").mockReturnValue({ me, members: new Set([me, "bob"]), community: false, admin: true });
+    vi.spyOn(host, "send").mockImplementation(async (_group, edit) => { sent.push(edit); return null; });
+    const reads = vi.spyOn(db, "getMessage");
+    cleanup.push(async () => { inner.groupEdits.stop(); reads.mockRestore(); });
+    for (const id of ids) expect(await inner.groupEdits.removeMine(g, id)).toEqual({ error: null, messageId: id });
+    expect(reads.mock.calls.filter(([linkId]) => linkId === chat).length).toBeLessThanOrEqual(ids.length);
+    expect(await db.getMessages(chat)).toEqual([]);
+    // The first window's go now, the rest at the pace; each read as the removal it is.
+    expect(sent).toEqual(ids.slice(0, EDIT_SEND_LIMIT).map(id => ({ id, e: 1, ts: expect.any(Number), m: REMOVED_TEXT, rm: true })));
+    expect(removals.filter(r => r.pending)).toHaveLength(ids.length - EDIT_SEND_LIMIT);
+  }, 60_000);
+
+  it("a removal, mine or a member's, leaves no line of its message in the replies here that quote it", async () => {
+    const me = createIdentity().pubKeyZ32, bob = createIdentity().pubKeyZ32, g = `quotes-${crypto.randomUUID()}`, chat = `group:${g}`;
+    const [myOriginal, bobsOriginal, bobsReply, myReply] = [`${me}:1:1`, `${bob}:1:1`, `${bob}:1:2`, `${me}:1:2`];
+    const quote = (id: string, author: string, snippet: string) => ({ id, snippet, from: author === me ? "me" as const : "peer" as const, member: author, messageId: id });
+    await db.addMessage({ linkId: chat, id: myOriginal, text: "mine, quote me", sender: "me", member: me, timestamp: 1, via: "datalink" });
+    await db.addMessage({ linkId: chat, id: bobsOriginal, text: "bob's, quote me", sender: "peer", member: bob, timestamp: 2, via: "datalink" });
+    await db.addMessage({ linkId: chat, id: bobsReply, text: "bob's answer", sender: "peer", member: bob, timestamp: 3, via: "datalink", replyTo: quote(myOriginal, me, "mine, quote me") });
+    await db.addMessage({ linkId: chat, id: myReply, text: "my answer", sender: "me", member: me, timestamp: 4, via: "datalink", replyTo: quote(bobsOriginal, bob, "bob's, quote me") });
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
+    const inner = node as unknown as {
+      groups: { setRemovals(groupId: string, list: Removal[]): Promise<void> };
+      groupEdits: { removeMine(groupId: string, id: string): Promise<unknown>; receive(groupId: string, sender: string, edit: GroupEdit): Promise<unknown>; stop(): void; host: GroupEditsHost };
+    };
+    vi.spyOn(inner.groups, "setRemovals").mockImplementation(async () => {});
+    const host = inner.groupEdits.host;
+    vi.spyOn(host, "membership").mockReturnValue({ me, members: new Set([me, bob]), community: false, admin: true });
+    vi.spyOn(host, "send").mockImplementation(async () => null);
+    cleanup.push(async () => { inner.groupEdits.stop(); });
+    expect(await inner.groupEdits.removeMine(g, myOriginal)).toEqual({ error: null, messageId: myOriginal });
+    expect(await inner.groupEdits.receive(g, bob, { id: bobsOriginal, e: 1, ts: 1, m: REMOVED_TEXT, rm: true })).toBe("applied");
+    const rows = await db.getMessages(chat);
+    expect(rows.map(m => m.id)).toEqual([bobsReply, myReply]);
+    expect(rows.map(m => m.replyTo)).toEqual([quote(myOriginal, me, ""), quote(bobsOriginal, bob, "")]);
+  });
+});
+
+describe("a delete here", () => {
+  it("takes the chat list's reaction line away with its message, back to the one before that still stands", async () => {
+    const t = await setup();
+    expect(await t.contact.sendMessage("first", Date.now(), WIRE("A"))).toBeNull();
+    expect(await t.contact.sendMessage("second", Date.now(), WIRE("B"))).toBeNull();
+    const first = await t.peerRow("first"), second = await t.peerRow("second");
+    expect(await t.node.react({ linkId: t.id, messageId: first.id, emoji: "👍" })).toEqual({ error: null });
+    expect(await t.node.react({ linkId: t.id, messageId: second.id, emoji: "❤️" })).toEqual({ error: null });
+    expect(t.view().lastReaction).toMatchObject({ emoji: "❤️", snippet: "second" });
+    t.node.deleteMessage({ linkId: t.id, messageId: second.id });
+    await vi.waitFor(() => expect(t.view().lastReaction).toMatchObject({ emoji: "👍", snippet: "first" }));
   });
 });

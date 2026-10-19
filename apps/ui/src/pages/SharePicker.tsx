@@ -31,6 +31,7 @@ export function SharePicker() {
   const unread = share?.unread ?? [];
   // A name may not be known (the web app's worker never reads a body that is too large): then it says so without one.
   const leftOutNames = leftOut.filter(Boolean);
+  const noRoom = share?.noRoom ?? [];
   const targets = useChatTargets();
   const preview = share ? shareText(share) : "";
 
@@ -58,6 +59,11 @@ export function SharePicker() {
           {unread.length > 0 && (
             <Notice tone="error" className="text-sm" testId="share-unread"
               title={t("pwa.shareUnread", { names: unread.join(", ") })} next={t("pwa.shareUnreadNext")} />
+          )}
+          {/* Files Android had no room to copy (the device is full): sharing again only helps once there is space. */}
+          {noRoom.length > 0 && (
+            <Notice tone="error" className="text-sm" testId="share-no-room"
+              title={t("pwa.shareNoRoom", { names: noRoom.join(", ") })} next={t("pwa.shareNoRoomNext")} />
           )}
           {/* Nothing else came: no chat to pick. */}
           {!isEmptyShare(share) && (

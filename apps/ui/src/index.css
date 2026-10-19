@@ -529,6 +529,12 @@ html[data-standalone="true"] {
   right: 6px;
 }
 
+/* In a video call the own camera's preview takes the top right corner (64 px at 8 px): the line ends 6 px before it.
+   Centred up to the window's edge, a phone's 190 px window had the clock's last digit and a half under the preview. */
+.call-mini:has(> .call-preview) .call-top {
+  right: 78px;
+}
+
 .call-mini .call-top p {
   display: flex;
   flex-flow: row-reverse wrap;
