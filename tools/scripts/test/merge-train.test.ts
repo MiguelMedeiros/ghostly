@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, holdBatch, holdText, isBatch, LABEL, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt } from "../merge-train.mjs";
+import { aloneMark, appTrainIn, batchBody, bisect, noSkip, BudgetLow, canGoAlone, ciPlan, ciRun, ciState, draftState, gateOf, gitLayer, holdBatch, holdText, isBatch, LABEL, MAX_WAIT, MIN_BATCH, localBases, missedWakes, order, ordinal, pickBatch, PLANNED_JOBS, queuedAt, readState, restLayer, rounds, skippedGates, squashMessage, tick, trainBases, waiting, vouchedAt, wakeIn } from "../merge-train.mjs";
 
 type Pr = { number: number; title: string; body: string; draft: boolean; sha: string; branch: string; fork: boolean; labels: string[]; createdAt: string; closedAt?: string; open: boolean; base: string; merged?: boolean; author?: string };
 const green = [{ name: "CI Success", status: "completed", conclusion: "success", started_at: "2026-10-08T00:00:00Z", id: 1 }];
@@ -1096,6 +1096,17 @@ describe("a batch that waits for company", () => {
     expect(holdText({ count: 2, waited: 6.5 * 60_000 })).toBe("holding: 2 boardable, oldest waited 6 min; a batch leaves at 3 or at 15 min");
   });
 
+  it("wakes the train just past a held batch's time, not at GitHub's next scheduled run", () => {
+    // Seconds to sleep: to the time, plus a margin so the run that wakes finds it passed.
+    expect(wakeIn(at(15), at(5))).toBe(10 * 60 + 30);
+    expect(wakeIn(at(15), at(15) - 1_500)).toBe(32);
+    // Passed already (a slow run): soon.
+    expect(wakeIn(at(15), at(16))).toBe(30);
+    // Nothing held, or a time no hold gives (a clock gone wrong): no wake, the schedule stays.
+    expect(wakeIn(null, at(5))).toBeNull();
+    expect(wakeIn(at(60), at(5))).toBeNull();
+  });
+
   it("holds 2 boardable pull requests at 5 minutes, and says so", async () => {
     const repo = fakeRepo();
     repo.add(11, { behind: true });
@@ -1105,6 +1116,8 @@ describe("a batch that waits for company", () => {
     expect(r.inFlight).toBeNull();
     expect(repo.pushes).toEqual([]);
     expect(r.log.at(-1)).toBe("holding: 2 boardable, oldest waited 5 min; a batch leaves at 3 or at 15 min");
+    // When it leaves: the workflow wakes the train then (`wakeIn`), since GitHub's schedule may not come for 30 minutes.
+    expect(r.leavesAt).toBe(at(15));
     // Each held one's comment says why it does not board, and from when the batch leaves anyway: a time that does not
     // change from run to run, so the comment is not edited again until something does. Not "at the latest": the train
     // acts only when something wakes it, and GitHub runs its 5-minute schedule 10 to 30 minutes apart.
@@ -1122,6 +1135,7 @@ describe("a batch that waits for company", () => {
     const r = await repo.run({ now: at(1) });
     expect(r.opened).toHaveLength(1);
     expect(repo.members()).toEqual([11, 12, 13]);
+    expect(r.leavesAt).toBeNull();
   });
 
   it("boards 2 once the oldest has waited 15 minutes", async () => {
