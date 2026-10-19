@@ -23,7 +23,7 @@ import { onAdaptersChanged } from "../plugins/registry";
 import type { ProviderHost, ProviderPlatform } from "./paymentAdapters/providers/types";
 import type { EngineApi } from "../shared/rpc";
 import { APPS_ENABLED, EXTERNAL_IDENTITIES_ENABLED } from '../shared/features';
-import { chatAppId, isAppRef, isAppVersion, publicKeyFromZ32, type AppFrameEvent, type AppSendError } from "@ghostly/core";
+import { APP_RANGE_LIMITS, chatAppId, isAppRef, isAppVersion, isServeId, publicKeyFromZ32, type AppFrameEvent, type AppRangeTask, type AppSendError } from "@ghostly/core";
 import { FILE_LIMITS, GROUP_FILE_LIMITS, formatFileSize, groupFileFallback, readGroupFileMeta } from "@ghostly/core";
 import { IdentityProofs } from './identities';
 import { X401Credentials } from './x401';
@@ -112,7 +112,7 @@ import {
   entryParams,
   pacer,
 } from "@ghostly/core";
-import type { AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
+import type { AppRangeAsk, AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { SavedMessages } from "./saved";
 import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, type StoredFile } from "../shared/idb";
 import { Apps, type AppDataExport, type AppDataExportText, type AppFileAt, type AppCheckResult, type AppPreview, type AppRunEntry, type AppRunStatus, type AppSource, type AppStorePreview, type AppStoreSummary, type BuiltInAppOffer, type InstalledAppView } from "./apps";
@@ -641,6 +641,8 @@ export interface NodeEvents {
   onCallSignal(linkId: string, signal: string): void;
   /** A contact's mini-app frame in a 1:1 chat, already checked (`apps/1`, WISP 1200 § In a chat); never stored. */
   onAppFrame?(linkId: string, event: AppFrameEvent): void;
+  /** The contact's app asks for a range of a file this side's app serves (`app-ranges/1`): a page answers with `appRangeAnswer`. */
+  onAppRange?(linkId: string, range: AppRangeAsk): void;
   /** An update check of the installed mini-apps ran (WISP 1200 § Updates): the pages read them again, and stop those it stopped. */
   onAppsChecked?(): void;
   /**
@@ -5054,6 +5056,52 @@ export class GhostlyNode implements EngineImplementation {
     return { error: live.link ? live.link.sendAppData(app, data) : "offline" };
   }
 
+  /** Ranges the contact's apps asked, by chat, app and request, until a page answers them. */
+  private readonly appRanges = new Map<string, AppRangeTask>();
+
+  /**
+   * Every task stays until a page answers it, live or not: until the link settles it, it holds one of its app's places
+   * (WISP 1200: at most 4 in flight), so the contact gets `busy` rather than more reads while a page is still reading.
+   */
+  private appRangeAsked(linkId: string, task: AppRangeTask): void {
+    this.appRanges.set(`${linkId} ${task.app} ${task.request}`, task);
+    const { app, request, serve, file, offset, length } = task;
+    this.events.onAppRange?.(linkId, { app, request, serve, file, offset, length });
+  }
+
+  /** Lets the contact's app read `file`, one of this side's linked files, while both have the app open on this session. */
+  appServe({ linkId, ref, file }: { linkId: string; ref: string; file: string }): { serve: string } | { error: "not-open" | "offline" | "peer-closed" } {
+    const { live, app } = this.appChat(linkId, ref);
+    if (typeof file !== "string" || !file) throw new Error("Not a file");
+    return live.link ? live.link.serveAppFile(app, file) : { error: "offline" };
+  }
+
+  appUnserve({ linkId, serve }: { linkId: string; serve: string }): void {
+    if (!this.appsOn) throw this.appsOff();
+    this.links.get(linkId)?.link?.unserveAppFile(serve);
+  }
+
+  /** A page's answer to an `app-range` it served: the bytes and the file's size go to the contact, or why they cannot. */
+  appRangeAnswer({ linkId, app, request, bytes, size, error }: { linkId: string; app: string; request: number; bytes?: Uint8Array; size?: number; error?: "changed" | "gone" }): void {
+    if (!this.appsOn) throw this.appsOff();
+    const key = `${linkId} ${app} ${request}`, task = this.appRanges.get(key), link = this.links.get(linkId)?.link;
+    this.appRanges.delete(key);
+    if (!task || !link) return;
+    // A task no longer live goes on too: `sendAppRange` sends nothing for it and frees its place.
+    if (error === "changed" || error === "gone") return link.failAppRange(task, error);
+    if (!(bytes instanceof Uint8Array) || typeof size !== "number" || !Number.isSafeInteger(size) || size < 0) return link.failAppRange(task, "gone");
+    void link.sendAppRange(task, bytes, size);
+  }
+
+  /** Reads a range of what the contact's app serves in this chat, or why not. */
+  async appRemoteRead({ linkId, ref, serve, offset, length }: { linkId: string; ref: string; serve: string; offset: number; length: number }): Promise<{ bytes: Uint8Array; size: number } | { error: string }> {
+    const { live, app } = this.appChat(linkId, ref);
+    if (!live.link) return { error: "offline" };
+    if (!isServeId(serve)) return { error: "not-served" };
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1 || length > APP_RANGE_LIMITS.requestBytes || !Number.isSafeInteger(offset + length)) throw new Error("Not a range");
+    try { return await live.link.readAppRange(app, serve, offset, length); } catch (error) { return { error: error instanceof Error ? error.message : "failed" }; }
+  }
+
   /** Every page went away: no app runs here any more, so each open one is closed (`close` goes where it can). */
   appsCloseAll(): void {
     for (const live of this.links.values()) {
@@ -7395,6 +7443,8 @@ export class GhostlyNode implements EngineImplementation {
       peerUpgrades: () => !!live.caps?.peer?.capabilities.includes(UPGRADE_CAPABILITY),
       // 1:1 chats only, where apps are on: what this side has open outlives the link, so a restarted one says it again.
       appsSupport: this.appsOn,
+      // A store's wire-only engine runs no app, so it has no file to serve: it offers apps/1 alone.
+      appRangesSupport: this.appsOn && !this.appsWireOnly,
       appsOpen: this.appsOn ? (live.appsOpen ??= new Map()) : undefined,
       servicesSupport: this.options.servicesSupport ?? (this.options.platform ?? "web") !== "web",
       dht: stored.profile ? { state: stored.dhtDeliveryState, save: async state => {
@@ -7673,6 +7723,7 @@ export class GhostlyNode implements EngineImplementation {
         onPinReceipt: n => this.pinReceipt(linkId, n),
         onPinSupport: supported => { if (supported) this.flushPin(linkId); },
         onAppFrame: this.appsOn ? event => this.events.onAppFrame?.(linkId, event) : undefined,
+        onAppRangeTask: this.appsOn ? task => this.appRangeAsked(linkId, task) : undefined,
         // Each way of paying is checked where it is used: what this chat does not allow is dropped or refused.
         onPaymentRequest: (request) => this.desk.onPaymentRequest(linkId, request),
         onPaymentAsk: (ask) => this.desk.onPaymentAsk(linkId, ask),

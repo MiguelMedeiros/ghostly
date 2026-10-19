@@ -56,6 +56,8 @@ export class EngineServer implements PeerServer {
         },
         // A contact's mini-app frame (WISP 1200 § In a chat): to the pages, where the app runs. Never stored.
         onAppFrame: (linkId, event) => this.broadcast({ kind: "app-frame", linkId, event }),
+        // A range the contact's app asks of a served file: the page that served it reads it and answers.
+        onAppRange: (linkId, range) => this.broadcast({ kind: "app-range", linkId, range }),
         // An update check of the installed apps ran: the pages read them again, and stop one it stopped.
         onAppsChecked: () => this.broadcast({ kind: "apps-checked" }),
         // Another device took the turn (WISP 06): the pages show the standby screen and start again into the gate.
