@@ -8064,9 +8064,8 @@ export class GhostlyNode implements EngineImplementation {
       if (group && !live.stored.groupEntry && live.link && `group:${group}` !== this.activeLinkId && this.keepsGroupNative(live.stored)) groups.add(group);
     }
     if (!groups.size) return;
-    const views = new Map(this.groups.views().map(view => [view.id, view]));
     for (const groupId of groups) {
-      const edges = this.groupEdgesByRank(groupId, views.get(groupId));
+      const edges = this.groupEdgesByRank(groupId, this.groups.view(groupId));
       if (!edges.length || edges.some(live => live.link!.isDataLinkOpen)) continue;
       const [anchor, next] = edges;
       if (next && !this.anchorPassed(next, now) && this.unanswered(anchor, now)) {
@@ -8100,8 +8099,7 @@ export class GhostlyNode implements EngineImplementation {
   /** A group opened on screen: its edges with no native listener take one as a chat on screen does, the one it keeps first. */
   private groupOnScreen(groupId: string): void {
     const native = Object.keys(this.nativeFactories) as NativeTransport[];
-    const view = this.groups.views().find(g => g.id === groupId);
-    for (const live of this.groupEdgesByRank(groupId, view)) {
+    for (const live of this.groupEdgesByRank(groupId, this.groups.view(groupId))) {
       if (native.every(t => live.link!.availableTransports.includes(t))) continue;
       void this.ensureNativeEndpoints(live.stored.id);
     }
@@ -8170,9 +8168,13 @@ export class GhostlyNode implements EngineImplementation {
       const owners = [...this.links.values()].filter(other => other.link?.availableTransports.includes(key));
       const slots = this.nativeSlots(key), groups = owners.filter(other => other.stored.group).length;
       const now = Date.now();
-      // Groups' views (newest message, hubs, admins), read once for this decision and only if needed.
-      let views: Map<string, GroupView> | undefined;
-      const viewOf = (groupId: string) => (views ??= new Map(this.groups.views().map(view => [view.id, view]))).get(groupId);
+      // Each group's view (newest message, hubs, admins), read once for this decision and only if needed: that one
+      // group's, not every group's per edge.
+      const views = new Map<string, GroupView | undefined>();
+      const viewOf = (groupId: string) => {
+        if (!views.has(groupId)) views.set(groupId, this.groups.view(groupId));
+        return views.get(groupId);
+      };
       const anchors = new Map<string, LiveLink | undefined>();
       const anchorOf = (groupId: string) => {
         if (!anchors.has(groupId)) anchors.set(groupId, this.groupEdgesByRank(groupId, viewOf(groupId))[0]);
