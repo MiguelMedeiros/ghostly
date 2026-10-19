@@ -32,9 +32,9 @@ export interface GroupEditsHost {
   membership(groupId: string): { me: string; members: ReadonlySet<string>; community: boolean; admin?: boolean } | undefined;
   /**
    * A member deleted its message for everyone (WISP 400 § Delete for everyone): it goes from this device with its file,
-   * and its id is kept so a copy that comes again stays gone. Also for a message not here yet (`here` false).
+   * and its id is kept so a copy that comes again stays gone. Also for a message not here yet.
    */
-  remove(chat: string, id: string, here: boolean): Promise<void>;
+  remove(chat: string, id: string): Promise<void>;
   /**
    * I deleted my message for everyone: it goes from this device as a member's removal does (`remove`), and from now on
    * it reads as a row of mine whose edit is the removal (`removalRow`): pending until said, then said again to an edge
@@ -305,7 +305,7 @@ export class GroupEdits {
     // A removal is final, whatever it numbers and whatever the message is (a file too): only the author's own.
     if (edit.rm) {
       if (message && (message.sender !== "peer" || message.member !== sender || !canRemove(message))) return "dropped";
-      await this.host.remove(chat, edit.id, !!message);
+      await this.host.remove(chat, edit.id);
       return "applied";
     }
     if (!message) { this.buffer.hold(chat, { ...edit, sender }); return "waiting"; }
