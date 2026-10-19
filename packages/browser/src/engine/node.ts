@@ -732,7 +732,10 @@ export class GhostlyNode implements EngineImplementation {
   private readonly localFetch: LocalFetch;
   private readonly links = new Map<string, LiveLink>();
   private services: StoredService[] = [];
+  /** The chat (its link id) or the group (`group:<id>`) on screen. */
   private activeLinkId: string | null = null;
+  /** When each chat or group (`group:<id>`) was last on screen, for handing native listeners out least recently used first (`lastUsed`). */
+  private readonly openedAt = new Map<string, number>();
   /**
    * Native listeners start one at a time per transport (`ensureNativeEndpoints`): their slots are counted per transport.
    * Not one queue for all: a transport slow to start held every other chat's listeners of every kind behind it.
@@ -3200,15 +3203,23 @@ export class GhostlyNode implements EngineImplementation {
     this.emitState();
   }
 
+  /** `linkId`: a chat's, or `group:<id>` for a group on screen, whose edges then take native listeners as a chat on screen does. */
   setActiveLink({ linkId }: { linkId: string | null }): void {
+    // The one left was in use until now.
+    const now = Date.now();
+    if (this.activeLinkId) this.openedAt.set(this.activeLinkId, now);
+    if (linkId) this.openedAt.set(linkId, now);
     this.activeLinkId = linkId;
-    if (linkId) void this.ensureNativeEndpoints(linkId);
+    const groupId = linkId?.startsWith("group:") ? linkId.slice("group:".length) : undefined;
+    const chat = groupId === undefined ? linkId : null;
+    if (groupId !== undefined) this.groupOnScreen(groupId);
+    if (chat) void this.ensureNativeEndpoints(chat);
     // With automatic profiles on, a stale Nostr profile is refreshed when the chat is opened.
-    if (linkId && this.settings.nostr?.autoLoadProfiles) void this.nostrSocial.ledgerChanged(linkId).catch(() => {});
-    if (linkId) this.hold.wake(linkId);
+    if (chat && this.settings.nostr?.autoLoadProfiles) void this.nostrSocial.ledgerChanged(chat).catch(() => {});
+    if (chat) this.hold.wake(chat);
     for (const [id, live] of this.links) live.link?.setChatActive(id === linkId);
     // Opening a chat is someone wanting to talk: reconnect now, not after the wait between attempts.
-    if (linkId) this.links.get(linkId)?.link?.wake();
+    if (chat) this.links.get(chat)?.link?.wake();
     // The chat on screen carries its connection story in the state.
     this.emitState();
   }
@@ -7845,6 +7856,45 @@ export class GhostlyNode implements EngineImplementation {
     return typeof RTCPeerConnection === "undefined" || !theirs || !theirs.includes("webrtc/1") || this.directPath.blocked;
   }
 
+  /**
+   * When a chat or a group (for one of its edges) was last in use, for handing native listeners out least recently used
+   * first: now while on screen, else the later of when it was last on screen and its newest message.
+   */
+  private lastUsed(live: LiveLink, viewOf: (groupId: string) => GroupView | undefined): number {
+    const group = live.stored.group, key = group ? `group:${group}` : live.stored.id;
+    if (key === this.activeLinkId) return Date.now();
+    return Math.max(this.openedAt.get(key) ?? 0, group ? viewOf(group)?.lastMessageAt ?? 0 : live.lastMessageAt);
+  }
+
+  /**
+   * A group's edges that run native transports (`keepsGroupNative`), the one it keeps while it is not on screen first
+   * (WISP 902 § Transports): to a hub or the admin, then one that holds a listener already (so the one it keeps does
+   * not change hands each time another member is heard), then the member seen last. The mesh's catch-up brings the
+   * group's messages through any member.
+   */
+  private groupEdgesByRank(groupId: string, view: GroupView | undefined): LiveLink[] {
+    const native = Object.keys(this.nativeFactories) as NativeTransport[], now = Date.now();
+    const lead = new Set(view?.members.filter(member => !member.me && (member.hub || member.role === "admin")).map(member => member.key));
+    const rank = (live: LiveLink) => [Number(lead.has(live.stored.groupPeer!)), Number(native.some(t => live.link!.availableTransports.includes(t))),
+      live.link!.groupsSupport ? now : Math.max(presenceSeenAt(live.presence), live.lastSyncAt)];
+    const edges = [...this.links.values()].filter(live => live.stored.group === groupId && !live.stored.groupEntry && live.link && this.keepsGroupNative(live.stored));
+    const ranks = new Map(edges.map(live => [live, rank(live)]));
+    return edges.sort((a, b) => {
+      const x = ranks.get(a)!, y = ranks.get(b)!;
+      return y[0] - x[0] || y[1] - x[1] || y[2] - x[2];
+    });
+  }
+
+  /** A group opened on screen: its edges with no native listener take one as a chat on screen does, the one it keeps first. */
+  private groupOnScreen(groupId: string): void {
+    const native = Object.keys(this.nativeFactories) as NativeTransport[];
+    const view = this.groups.views().find(g => g.id === groupId);
+    for (const live of this.groupEdgesByRank(groupId, view)) {
+      if (native.every(t => live.link!.availableTransports.includes(t))) continue;
+      void this.ensureNativeEndpoints(live.stored.id);
+    }
+  }
+
   /** `inUse`: a text is going or coming in the chat now, which counts as the chat on screen does for taking a listener. */
   private ensureNativeEndpoints(linkId: string, inUse = false): Promise<void> {
     const expected = this.links.get(linkId)?.link;
@@ -7903,43 +7953,66 @@ export class GhostlyNode implements EngineImplementation {
     if (link.availableTransports.includes(key)) return false;
     live.transportErrors ??= {};
     try {
-      // The native SDKs each allow eight listeners, Iroh's browser build sixteen (`nativeSlots`). Reclaim an idle
-      // listener only for the selected chat, never an established native connection.
+      // The native SDKs each allow eight listeners, Iroh's browser build sixteen (`nativeSlots`). They go to the chats
+      // and groups in use, least recently used first out (WISP 902 § Transports).
       const owners = [...this.links.values()].filter(other => other.link?.availableTransports.includes(key));
       const slots = this.nativeSlots(key), groups = owners.filter(other => other.stored.group).length;
-      // A group's links take all but four of them at most, and never one a chat holds: 1:1 chats keep what they had
-      // before group links went native (WISP 902 § Transports). One that finds none waits for a slot.
-      if (group && (owners.length >= slots || groups >= this.groupNativeSlots(key))) return "no-slot";
+      const now = Date.now();
+      // Groups' views (newest message, hubs, admins), read once for this decision and only if needed.
+      let views: Map<string, GroupView> | undefined;
+      const viewOf = (groupId: string) => (views ??= new Map(this.groups.views().map(view => [view.id, view]))).get(groupId);
+      const anchors = new Map<string, LiveLink | undefined>();
+      const anchorOf = (groupId: string) => {
+        if (!anchors.has(groupId)) anchors.set(groupId, this.groupEdgesByRank(groupId, viewOf(groupId))[0]);
+        return anchors.get(groupId);
+      };
+      const onScreen = (other: LiveLink) => (other.stored.group ? `group:${other.stored.group}` : other.stored.id) === this.activeLinkId;
+      const used = (other: LiveLink) => this.lastUsed(other, viewOf);
+      // A group's edge past the one its group keeps while it is not on screen (`groupEdgesByRank`).
+      const extra = (other: LiveLink) => !!other.stored.group && !other.stored.groupEntry && !onScreen(other) && anchorOf(other.stored.group) !== other;
+      const full = owners.length >= slots, entry = !!live.stored.groupEntry;
+      // Such an edge takes a free listener only once its group's one has one, and within what 1:1 chats leave (all but
+      // four); it never takes one that is held. An entry session (a join) takes a free one within that room, as before.
+      // One that finds none waits for a slot.
+      if (group && (entry || extra(live)) && (full || groups >= this.groupNativeSlots(key)
+        || (!entry && !anchorOf(live.stored.group!)?.link?.availableTransports.includes(key)))) return "no-slot";
       // A chat finds none free once every listener is taken, or the chats hold their eight (of Iroh's sixteen in a browser).
-      const full = owners.length >= slots;
       if (full || (!group && owners.length - groups >= NATIVE_SLOTS)) {
-        const now = Date.now();
-        const taking = !group && (this.activeLinkId === linkId || inUse);
-        // A chat takes a slot from a group's link first, one that carries no session: the link waits for another.
-        const groupVictim = !full ? undefined : owners.filter(other => other.stored.group && other.link?.canReleaseEndpoint(key))
-          .sort((a, b) => (a.link?.isDataLinkOpen ? 1 : 0) - (b.link?.isDataLinkOpen ? 1 : 0))[0];
-        // Then from a chat that carries none, unless that chat took it from an idle session moments ago (no ping-pong).
-        const victim = groupVictim ?? (taking ? owners
-          .filter(other => other !== live && other.stored.id !== this.activeLinkId && other.link?.canReleaseEndpoint(key)
-            && now - (other.nativeTakenAt?.[key] ?? 0) >= NATIVE_HOLD_MS)
-          .sort((a, b) => a.lastMessageAt - b.lastMessageAt)[0] : undefined);
-        // Every one carrying a session: from the 1:1 chat whose session has gone unused longest, once that is
-        // NATIVE_HOLD_MS, and never one with a call on or a file moving. Group links keep theirs. Only for a chat
-        // that can go live no other way: one whose contact has WebRTC, on an app with WebRTC, ends nobody's session.
-        const idle = victim || !taking || !this.reachedOnlyNatively(live) ? undefined : owners
-          .filter(other => other !== live && !other.stored.group && other.stored.id !== this.activeLinkId && !this.fileDesk.moving(other.stored.id)
-            && other.link?.canYieldEndpoint(key, NATIVE_HOLD_MS))
-          .sort((a, b) => a.link!.lastActivityAt - b.link!.lastActivityAt)[0];
+        // Who may take one that is held: the chat in use (on screen, or a text going or coming in it), an edge of the
+        // group on screen, and the one edge a group keeps while it is not.
+        const taking = group || this.activeLinkId === linkId || inUse;
+        const mine = taking && (inUse || onScreen(live)) ? now : used(live);
+        // First a group's edge past its group's one that carries no session, any chat taking it: the group stays
+        // reachable through the one it keeps (mesh catch-up), and the edge waits for another.
+        const groupVictim = !full ? undefined : owners.filter(other => other !== live && extra(other) && other.link?.canReleaseEndpoint(key))
+          .sort((a, b) => (a.link?.isDataLinkOpen ? 1 : 0) - (b.link?.isDataLinkOpen ? 1 : 0) || used(a) - used(b))[0];
+        // Then, for one that may take, from the chat or group unused longest, once that is NATIVE_HOLD_MS and longer
+        // than the one taking: not on screen, no text in it, nor its listener taken moments ago. Two used within that
+        // time never take each other's (no ping-pong); one that lost its listener takes one again once it is in use.
+        // Past the chats' eight of Iroh's sixteen in a browser, only a chat's helps.
+        const quiet = (other: LiveLink) => other !== live && (full || !other.stored.group) && !other.stored.groupEntry && !onScreen(other)
+          && now - (other.nativeTakenAt?.[key] ?? 0) >= NATIVE_HOLD_MS && used(other) <= now - NATIVE_HOLD_MS && used(other) < mine;
+        // One that carries no session first.
+        const victim = groupVictim ?? (taking ? owners.filter(other => quiet(other) && other.link?.canReleaseEndpoint(key))
+          .sort((a, b) => used(a) - used(b))[0] : undefined);
+        // Every one carrying a session: the one unused longest (its session too, NATIVE_HOLD_MS at least), a group's
+        // edge past its one first, and never one with a call on or a file moving. Only for a chat that can go live no
+        // other way: one whose contact has WebRTC, on an app with WebRTC, ends nobody's session. A group's edge runs
+        // a native transport only where it can go live no other way (`keepsGroupNative`).
+        const idle = victim || !taking || (!group && !this.reachedOnlyNatively(live)) ? undefined : owners
+          .filter(other => quiet(other) && !this.fileDesk.moving(other.stored.id) && other.link?.canYieldEndpoint(key, NATIVE_HOLD_MS))
+          .sort((a, b) => Number(extra(b)) - Number(extra(a)) || Math.max(used(a), a.link!.lastActivityAt) - Math.max(used(b), b.link!.lastActivityAt))[0];
         const idleFor = idle ? now - idle.link!.lastActivityAt : 0;
         if (idle && await idle.link!.yieldEndpoint(key, NATIVE_HOLD_MS)) {
-          traceLink(live.myPubKeyZ32, "native-take", { transport: key, idle: idleFor, active: this.activeLinkId === linkId });
-          live.nativeTakenAt = { ...live.nativeTakenAt, [key]: Date.now() };
+          traceLink(live.myPubKeyZ32, "native-take", { transport: key, idle: idleFor, active: this.activeLinkId === linkId, group });
           idle.transportErrors ??= {};
           idle.transportErrors[key] = "Listener given to a chat in use: this one was quiet. Open this chat to take one back; your messages and transport identity are saved.";
+          if (idle.stored.group) this.groupNativeWaiting.add(idle.stored.id);
         } else if (!victim) {
-          traceLink(live.myPubKeyZ32, "native-no-slot", { transport: key, active: this.activeLinkId === linkId });
+          traceLink(live.myPubKeyZ32, "native-no-slot", { transport: key, active: this.activeLinkId === linkId, group });
+          if (group) return "no-slot";
           // Each busy for now (dialling, switching, carrying a session): the chat on screen asks again in a moment.
-          if (this.activeLinkId === linkId && !group) this.retryActiveSlot(linkId);
+          if (this.activeLinkId === linkId) this.retryActiveSlot(linkId);
           throw new Error("All native connection slots are in use. This chat takes one once a chat live over one has been quiet for 2 minutes. Disconnect a native connection in another chat to free one now.");
         } else {
           await victim.link!.releaseEndpoint(key);
@@ -7947,6 +8020,8 @@ export class GhostlyNode implements EngineImplementation {
           victim.transportErrors[key] = "Listener released for another chat. Open this chat to restore it; your messages and transport identity are saved.";
           if (victim.stored.group) this.groupNativeWaiting.add(victim.stored.id);
         }
+        // Not taken straight back (no ping-pong).
+        live.nativeTakenAt = { ...live.nativeTakenAt, [key]: Date.now() };
       }
       if (this.shuttingDown || live.link !== link) return false;
       const seed = live.stored.transportSeeds?.[key] ?? createIdentity().seedB64;
