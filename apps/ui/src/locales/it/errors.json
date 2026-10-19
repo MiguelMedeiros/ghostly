@@ -146,6 +146,13 @@
     "cannotRetry": "Non è possibile riprovare con questo file",
     "clipboardUnavailable": "Impossibile leggere gli appunti",
     "clipboardUnavailableNext": "Allegalo con +.",
+    "floor": {
+      "noRoomNext": "Libera spazio, poi chiedi al tuo contatto di inviarlo di nuovo.",
+      "notInAWeek": "Non è arrivato entro una settimana",
+      "refused": "Questo dispositivo non ha potuto ricevere questo file",
+      "tooMany": "Troppi file in attesa qui",
+      "tooManyNext": "Rispondi ai file che ti aspettano, poi chiedi al tuo contatto di inviarlo di nuovo."
+    },
     "gone": "Questo file non è più qui",
     "noRoom": "Nessuno spazio sul dispositivo del tuo contatto",
     "noRoomHere": "Spazio esaurito su questo dispositivo",
