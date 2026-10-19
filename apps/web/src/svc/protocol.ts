@@ -70,6 +70,15 @@ export type ServiceReply =
 /** The worker tells the app it no longer wants the rest (the page stopped reading). */
 export interface ServiceCancel { type: "cancel" }
 
+/** The element a contact's app is shown in over the app, and the event that closes it (the lock screen sends it). */
+export const SERVICE_VIEW_ID = "ghostly-service-view";
+export const SERVICE_VIEW_CLOSE = "ghostly-close";
+
+/** Closes the contact's app shown over the app, if one is: its requests and its cookies end with it. */
+export function closeServiceView(): void {
+  document.getElementById(SERVICE_VIEW_ID)?.dispatchEvent(new Event(SERVICE_VIEW_CLOSE));
+}
+
 /** The bridge says it loaded; the app answers with the port. */
 export const BRIDGE_READY = "ghostly-svc-ready";
 export const BRIDGE_PORT = "ghostly-svc-port";
