@@ -160,6 +160,7 @@ import type {
   MessageReply,
   ReactionNote,
   MessageSend,
+  GroupMemberView,
   GroupView,
   Settings,
   SettingsPatch,
@@ -271,6 +272,13 @@ export const NATIVE_HOLD_MS = 2 * 60_000;
  * holding the session.
  */
 export const RESUME_SPENT_MS = LIVENESS_PING_MS * (LIVENESS_MISSED_PINGS + 1);
+/**
+ * Where a member of a private group stands among those its other members keep their one edge toward while the group is
+ * not on screen (WISP 902 § Transports): a hub first, then the admin, then everyone else.
+ */
+function leadClass(member: GroupMemberView | undefined): number {
+  return member?.hub ? 2 : member?.role === "admin" ? 1 : 0;
+}
 
 const DEFAULT_SETTINGS: Settings = {
   online: true,
@@ -7903,14 +7911,14 @@ export class GhostlyNode implements EngineImplementation {
 
   /**
    * A group's edges that run native transports (`keepsGroupNative`), the one it keeps while it is not on screen first
-   * (WISP 902 § Transports): to a hub or the admin, then one that holds a listener already (so the one it keeps does
-   * not change hands each time another member is heard), then the member seen last. The mesh's catch-up brings the
-   * group's messages through any member.
+   * (WISP 902 § Transports): to a hub, then to the admin (`leadClass`), then one that holds a listener already (so the
+   * one it keeps does not change hands each time another member is heard), then the member seen last. The mesh's
+   * catch-up brings the group's messages through any member.
    */
   private groupEdgesByRank(groupId: string, view: GroupView | undefined): LiveLink[] {
     const native = Object.keys(this.nativeFactories) as NativeTransport[], now = Date.now();
-    const lead = new Set(view?.members.filter(member => !member.me && (member.hub || member.role === "admin")).map(member => member.key));
-    const rank = (live: LiveLink) => [Number(lead.has(live.stored.groupPeer!)), Number(native.some(t => live.link!.availableTransports.includes(t))),
+    const lead = new Map(view?.members.filter(member => !member.me).map(member => [member.key, leadClass(member)]));
+    const rank = (live: LiveLink) => [lead.get(live.stored.groupPeer!) ?? 0, Number(native.some(t => live.link!.availableTransports.includes(t))),
       live.link!.groupsSupport ? now : Math.max(presenceSeenAt(live.presence), live.lastSyncAt)];
     const edges = [...this.links.values()].filter(live => live.stored.group === groupId && !live.stored.groupEntry && live.link && this.keepsGroupNative(live.stored));
     const ranks = new Map(edges.map(live => [live, rank(live)]));
@@ -7918,6 +7926,17 @@ export class GhostlyNode implements EngineImplementation {
       const x = ranks.get(a)!, y = ranks.get(b)!;
       return y[0] - x[0] || y[1] - x[1] || y[2] - x[2];
     });
+  }
+
+  /**
+   * Whether the member at the other end of a group's edge keeps that edge while its group is not on screen, as far as
+   * this device can tell (`groupEdgesByRank` there): this device is a hub or the admin, and none of the other members
+   * ranks above it. A member's kept edge met only an extra on its hub's or admin's side, which took no listener once
+   * that device's other groups held theirs, and the member had no edge at all in that group.
+   */
+  private keptTowardMe(view: GroupView | undefined, peer: string): boolean {
+    const mine = leadClass(view?.members.find(member => member.me));
+    return mine > 0 && !!view?.members.every(member => member.key === peer || leadClass(member) <= mine);
   }
 
   /** A group opened on screen: its edges with no native listener take one as a chat on screen does, the one it keeps first. */
@@ -8003,24 +8022,31 @@ export class GhostlyNode implements EngineImplementation {
       };
       const onScreen = (other: LiveLink) => (other.stored.group ? `group:${other.stored.group}` : other.stored.id) === this.activeLinkId;
       const used = (other: LiveLink) => this.lastUsed(other, viewOf);
-      // A group's edge past the one its group keeps while it is not on screen (`groupEdgesByRank`).
-      const extra = (other: LiveLink) => !!other.stored.group && !other.stored.groupEntry && !onScreen(other) && anchorOf(other.stored.group) !== other;
-      const full = owners.length >= slots, entry = !!live.stored.groupEntry;
-      // Such an edge takes a free listener only once its group's one has one, and within what 1:1 chats leave (all but
+      // A group's edge past the one its group keeps while it is not on screen (`groupEdgesByRank`): one its member keeps
+      // toward this device (`keptTowardMe`), or an extra.
+      const past = (other: LiveLink) => !!other.stored.group && !other.stored.groupEntry && !onScreen(other) && anchorOf(other.stored.group) !== other;
+      const kept = (other: LiveLink) => past(other) && this.keptTowardMe(viewOf(other.stored.group!), other.stored.groupPeer!);
+      const extra = (other: LiveLink) => past(other) && !kept(other);
+      const full = owners.length >= slots, entry = !!live.stored.groupEntry, keptHere = group && kept(live);
+      // An extra takes a free listener only once its group's one has one, and within what 1:1 chats leave (all but
       // four); it never takes one that is held. An entry session (a join) takes a free one within that room, as before.
-      // One that finds none waits for a slot.
+      // One that finds none waits for a slot. An edge kept toward this device takes any free one (its member has no
+      // other edge in that group), and when none is free only an extra's (below).
       if (group && (entry || extra(live)) && (full || groups >= this.groupNativeSlots(key)
         || (!entry && !anchorOf(live.stored.group!)?.link?.availableTransports.includes(key)))) return "no-slot";
       // A chat finds none free once every listener is taken, or the chats hold their eight (of Iroh's sixteen in a browser).
       if (full || (!group && owners.length - groups >= NATIVE_SLOTS)) {
         // Who may take one that is held: the chat in use (on screen, or a text going or coming in it), an edge of the
         // group on screen, and the one edge a group keeps while it is not.
-        const taking = group || this.activeLinkId === linkId || inUse;
+        const taking = (group && !keptHere) || this.activeLinkId === linkId || inUse;
         const mine = taking && (inUse || onScreen(live)) ? now : used(live);
-        // First a group's edge past its group's one that carries no session, any chat taking it: the group stays
-        // reachable through the one it keeps (mesh catch-up), and the edge waits for another.
-        const groupVictim = !full ? undefined : owners.filter(other => other !== live && extra(other) && other.link?.canReleaseEndpoint(key))
-          .sort((a, b) => (a.link?.isDataLinkOpen ? 1 : 0) - (b.link?.isDataLinkOpen ? 1 : 0) || used(a) - used(b))[0];
+        // How readily a group's edge gives its listener up: an extra first, then one kept toward this device.
+        const yields = (other: LiveLink) => extra(other) ? 2 : kept(other) ? 1 : 0;
+        // First a group's edge past its group's one that carries no session, any chat taking it, an extra first: the
+        // group stays reachable through the one it keeps (mesh catch-up), and the edge waits for another. An edge kept
+        // toward this device takes only an extra's.
+        const groupVictim = !full ? undefined : owners.filter(other => other !== live && yields(other) > (keptHere ? 1 : 0) && other.link?.canReleaseEndpoint(key))
+          .sort((a, b) => yields(b) - yields(a) || (a.link?.isDataLinkOpen ? 1 : 0) - (b.link?.isDataLinkOpen ? 1 : 0) || used(a) - used(b))[0];
         // Then, for one that may take, from the chat or group unused longest, once that is NATIVE_HOLD_MS and longer
         // than the one taking: not on screen, no text in it, nor its listener taken moments ago. Two used within that
         // time never take each other's (no ping-pong); one that lost its listener takes one again once it is in use.
@@ -8036,7 +8062,7 @@ export class GhostlyNode implements EngineImplementation {
         // a native transport only where it can go live no other way (`keepsGroupNative`).
         const idle = victim || !taking || (!group && !this.reachedOnlyNatively(live)) ? undefined : owners
           .filter(other => quiet(other) && !this.fileDesk.moving(other.stored.id) && other.link?.canYieldEndpoint(key, NATIVE_HOLD_MS))
-          .sort((a, b) => Number(extra(b)) - Number(extra(a)) || Math.max(used(a), a.link!.lastActivityAt) - Math.max(used(b), b.link!.lastActivityAt))[0];
+          .sort((a, b) => yields(b) - yields(a) || Math.max(used(a), a.link!.lastActivityAt) - Math.max(used(b), b.link!.lastActivityAt))[0];
         const idleFor = idle ? now - idle.link!.lastActivityAt : 0;
         if (idle && await idle.link!.yieldEndpoint(key, NATIVE_HOLD_MS)) {
           traceLink(live.myPubKeyZ32, "native-take", { transport: key, idle: idleFor, active: this.activeLinkId === linkId, group });

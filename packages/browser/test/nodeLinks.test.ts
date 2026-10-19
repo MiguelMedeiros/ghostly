@@ -111,6 +111,18 @@ async function openEdge(node: GhostlyNode, state: unknown, member: string): Prom
   vi.spyOn(node["groups"], "tick").mockResolvedValue();
   return node["openEdge"](state as never, member);
 }
+/**
+ * The members a group's view lists besides those it has (its roster and beacon would say so), and this app's own role
+ * there when given. Once per node: it wraps the views the engine reads.
+ */
+function groupMembers(node: GhostlyNode, groupId: string, members: { key: string; role?: "admin" | "member"; hub?: boolean }[], myRole?: "admin" | "member") {
+  const groups = node["groups"] as { views(): { id: string; members: { me: boolean }[] }[] };
+  const views = groups.views.bind(groups);
+  vi.spyOn(groups, "views").mockImplementation(() => views().map((g) => g.id !== groupId ? g : { ...g, members: [
+    ...g.members.map((m) => (m.me && myRole ? { ...m, role: myRole } : m)),
+    ...members.map((m) => ({ role: "member", me: false, online: false, missing: 0, ...m })),
+  ] }));
+}
 const saved = async (id: string) => (await db.getLinks()).find((l) => l.id === id);
 const bytes = (text: string) => new TextEncoder().encode(text);
 
@@ -669,9 +681,11 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
           node.setActiveLink({ linkId: null });
         });
 
-        it("a group not on screen keeps the edge to the member seen last when it has no hub", async () => {
+        it("a group not on screen keeps the edge to the member seen last when it has none to a hub or the admin", async () => {
           const { node, linkOf } = await allLive([10, 9, 8, 7, 6, 1, 1, 1]);
           const { groupId } = await node.createGroup({ name: "Plaza" });
+          // A member here, the admin someone it has no edge to (an admin keeps every member's edge toward it).
+          groupMembers(node, groupId, [{ key: createIdentity().pubKeyZ32, role: "admin" }], "member");
           expect((await node.sendGroupMessage({ groupId, text: "hi" })).error).toBeNull();
           const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
           // Two edges whose members were heard from before any listener was free, the second one later.
@@ -1962,6 +1976,8 @@ describe("private groups through the engine", () => {
       nodes.push(node);
       await node.start();
       const { groupId } = await node.createGroup({ name: "Team" });
+      // The members keep their edge to the group's hub, not to this admin: past its one, each edge here is an extra.
+      groupMembers(node, groupId, [{ key: createIdentity().pubKeyZ32, hub: true }]);
       const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
       const members: string[] = [], edgeIds: string[] = [];
       const join = async (count: number) => {
@@ -2043,6 +2059,73 @@ describe("private groups through the engine", () => {
       for (const chat of chats) expect(edgeOf(chat.id).releaseEndpoint).not.toHaveBeenCalled();
       expect(edgeIds.filter((id) => edgeOf(id).availableTransports.includes("iroh/1"))).toHaveLength(2);
       await vi.waitFor(() => expect(members$().filter((m) => m.edge?.noSlot)).toHaveLength(3));
+    });
+
+    it("an admin keeps the edge each member keeps toward it, past the four its groups hold: a third group of three reaches everyone", async () => {
+      // bh-zero50: d (the admin) and two members with no WebRTC, three groups. Its first two groups held the four group
+      // listeners, d kept its edge to e in the third, and its edge to f (the one f keeps) took none: f had no edge there.
+      const chats = Array.from({ length: 2 }, () => row({ pairedPeerKey: createIdentity().pubKeyZ32 }));
+      for (const r of chats) await db.putLink(r);
+      const { node } = await nativeEngine();
+      await vi.waitFor(() => { for (const chat of chats) expect(edgeOf(chat.id).registerEndpoint).toHaveBeenCalled(); });
+      const [e, f] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
+      const edgeIds: string[] = [];
+      for (const name of ["t1", "t2", "t3"]) {
+        const { groupId } = await node.createGroup({ name });
+        const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+        for (const member of [e, f]) edgeIds.push(await openEdge(node, state, member));
+        await node["nativeQueues"].get("iroh/1");
+      }
+      await vi.waitFor(() => expect(edgeIds.filter((id) => edgeOf(id).availableTransports.includes("iroh/1"))).toHaveLength(6));
+      for (const chat of chats) expect(edgeOf(chat.id).releaseEndpoint).not.toHaveBeenCalled();
+      expect(node["groupNativeWaiting"].size).toBe(0);
+    });
+
+    it("an edge a member keeps toward this admin never takes a listener a chat holds, and a chat opened takes one back from it", async () => {
+      // Six chats hold six of the eight listeners.
+      const chats = Array.from({ length: 6 }, () => row({ pairedPeerKey: createIdentity().pubKeyZ32 }));
+      const later = row();
+      for (const r of [...chats, later]) await db.putLink(r);
+      const { node } = await nativeEngine();
+      await vi.waitFor(() => { for (const chat of chats) expect(edgeOf(chat.id).registerEndpoint).toHaveBeenCalled(); });
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      expect((await node.sendGroupMessage({ groupId, text: "hi" })).error).toBeNull();
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const edgeIds: string[] = [];
+      for (let i = 0; i < 3; i++) edgeIds.push(await openEdge(node, state, createIdentity().pubKeyZ32));
+      await node["nativeQueues"].get("iroh/1");
+      const onIroh = () => edgeIds.filter((id) => edgeOf(id).availableTransports.includes("iroh/1"));
+      // The group's one edge and one its member keeps toward this device take the two free; the third waits.
+      await vi.waitFor(() => expect(onIroh()).toHaveLength(2));
+      await vi.waitFor(() => expect(node["groupNativeWaiting"].size).toBe(1));
+      for (const chat of chats) expect(edgeOf(chat.id).releaseEndpoint).not.toHaveBeenCalled();
+      for (const chat of chats) expect(edgeOf(chat.id).yieldEndpoint).not.toHaveBeenCalled();
+      // A chat opened takes the listener of the edge kept toward this device, never a chat's nor the group's one.
+      const [anchor] = onIroh();
+      node.setActiveLink({ linkId: later.id });
+      await vi.waitFor(() => expect(edgeOf(later.id).registerEndpoint).toHaveBeenCalled());
+      for (const chat of chats) expect(edgeOf(chat.id).releaseEndpoint).not.toHaveBeenCalled();
+      expect(onIroh()).toEqual([anchor]);
+      node.setActiveLink({ linkId: null });
+    });
+
+    it("a member keeps its edge to the group's hub before its edge to the admin", async () => {
+      // Every listener held: a member's one edge takes one, the others wait.
+      const chats = Array.from({ length: 8 }, () => row({ pairedPeerKey: createIdentity().pubKeyZ32 }));
+      for (const r of chats) await db.putLink(r);
+      const { node } = await nativeEngine();
+      await vi.waitFor(() => { for (const chat of chats) expect(edgeOf(chat.id).registerEndpoint).toHaveBeenCalled(); });
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      // A text in it a moment ago: it was in use more lately than the chats.
+      expect((await node.sendGroupMessage({ groupId, text: "hi" })).error).toBeNull();
+      const [admin, hub] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
+      groupMembers(node, groupId, [{ key: admin, role: "admin" }, { key: hub, hub: true }], "member");
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      // The edge to the admin first, holding a listener by the time the hub's opens: the hub's still comes first.
+      const toAdmin = await openEdge(node, state, admin);
+      await vi.waitFor(() => expect(edgeOf(toAdmin).availableTransports).toContain("iroh/1"));
+      const toHub = await openEdge(node, state, hub);
+      await vi.waitFor(() => expect(edgeOf(toHub).availableTransports).toContain("iroh/1"));
     });
 
     it("an app with neither WebRTC nor a native transport says its group links have none", async () => {
