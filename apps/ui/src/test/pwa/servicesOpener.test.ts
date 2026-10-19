@@ -84,7 +84,7 @@ describe("one request from the app, over the contact's link", () => {
     expect(new TextDecoder().decode(sent[0]!.body!)).toBe("hi");
     expect(replies[0]).toEqual({ type: "head", status: 200, headers: [["content-type", "text/plain"]] });
     expect(replies.slice(1, 3).map((r) => r.type === "chunk" && new TextDecoder().decode(r.bytes))).toEqual(["he", "llo"]);
-    expect(replies.at(-1)).toEqual({ type: "end" });
+    expect(replies[replies.length - 1]).toEqual({ type: "end" });
     expect(jar.header()).toBe("sid=abc; theme=dark");
     expect(closed()).toBe(true);
   });
