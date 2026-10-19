@@ -171,6 +171,28 @@ describe("the read lane on a paired session (app-ranges/1)", () => {
     expect(a.tasks[0].live).toBe(false);
   });
 
+  it("a contact's ar-get and ar-cancel loop gets 4 tasks to the owner and busy past them, until the owner settles one", async () => {
+    const { a, b } = await pair({ hold: true });
+    await opened(a, b);
+    const served = a.link.serveAppFile(APP, "film") as { serve: string };
+    for (let r = 0; r < 50; r++) {
+      b.channel!.send(JSON.stringify({ t: "ar-get", a: APP, s: served.serve, r, o: 0, n: APP_RANGE_LIMITS.requestBytes }));
+      b.channel!.send(JSON.stringify({ t: "ar-cancel", a: APP, r }));
+    }
+    const busy = () => rangeFrames(a.channel!).filter(data => (data as string).includes('"busy"')).length;
+    await vi.waitFor(() => expect(busy()).toBe(50 - APP_RANGE_LIMITS.inFlight));
+    expect(a.tasks).toHaveLength(APP_RANGE_LIMITS.inFlight);
+    expect(a.tasks.every(task => !task.live)).toBe(true);
+    // The owner settles one: sendAppRange sends nothing for a task no longer live, and its place frees.
+    await a.link.sendAppRange(a.tasks[0], FILM.subarray(0, 10), FILM.length);
+    expect(rangeFrames(a.channel!).filter(data => (data as string).includes('"ar-end"'))).toEqual([]);
+    expect(a.channel!.sent.filter(data => typeof data !== "string")).toEqual([]);
+    b.channel!.send(JSON.stringify({ t: "ar-get", a: APP, s: served.serve, r: 50, o: 0, n: 1 }));
+    b.channel!.send(JSON.stringify({ t: "ar-get", a: APP, s: served.serve, r: 51, o: 0, n: 1 }));
+    await vi.waitFor(() => expect(busy()).toBe(50 - APP_RANGE_LIMITS.inFlight + 1));
+    expect(a.tasks.map(task => task.request)).toEqual([0, 1, 2, 3, 50]);
+  });
+
   it("is not offered without apps/1, nor by a side that does not ask for it, and its frames are dropped then", async () => {
     const { a, b } = await pair({ b: { appRangesSupport: false } });
     await opened(a, b);

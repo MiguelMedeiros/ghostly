@@ -127,15 +127,61 @@ describe("the read lane of one chat", () => {
     bytes.forEach((read, i) => expect(read.bytes).toEqual(FILM.subarray(i * 10, i * 10 + 10)));
   });
 
-  it("a cancel stops what is being sent, and the place it held frees", () => {
+  it("a cancel stops what is being sent, and the place it held frees once the owner settles it", () => {
     const sent: AppRangeFrame[] = [];
     const server = new AppRanges(frame => sent.push(frame));
     const serve = server.serve(CINEMA, "film-id");
-    const task = server.receiveGet(appRangeGetFrame(CINEMA, serve, 9, 0, 1) as Extract<AppRangeFrame, { t: "ar-get" }>)!;
+    const get = (r: number) => server.receiveGet(appRangeGetFrame(CINEMA, serve, r, 0, 1) as Extract<AppRangeFrame, { t: "ar-get" }>);
+    const task = get(9)!;
+    [10, 11, 12].forEach(get);
     server.receiveCancel({ t: "ar-cancel", a: CINEMA, r: 9 });
     expect(task.live).toBe(false);
+    // The read under it may still be going: its place is still taken, but its request number is free.
+    expect(get(13)).toBeNull();
+    expect(get(9)).toBeNull();
+    expect(sent).toEqual([{ t: "ar-err", a: CINEMA, r: 13, e: "busy" }, { t: "ar-err", a: CINEMA, r: 9, e: "busy" }]);
     server.finish(task, 10);
-    expect(sent).toEqual([]);
+    expect(sent).toHaveLength(2);
+    expect(get(13)).not.toBeNull();
+  });
+
+  it("a flood of requests each cancelled at once gets no more than 4 reads per app until the owner settles them", () => {
+    const sent: AppRangeFrame[] = [];
+    const server = new AppRanges(frame => sent.push(frame));
+    const serve = server.serve(CINEMA, "film-id");
+    const tasks: AppRangeTask[] = [];
+    for (let r = 0; r < 1000; r++) {
+      const task = server.receiveGet(appRangeGetFrame(CINEMA, serve, r, 0, APP_RANGE_LIMITS.requestBytes) as Extract<AppRangeFrame, { t: "ar-get" }>);
+      if (task) tasks.push(task);
+      server.receiveCancel({ t: "ar-cancel", a: CINEMA, r });
+    }
+    expect(tasks).toHaveLength(APP_RANGE_LIMITS.inFlight);
+    expect(sent.filter(frame => frame.t === "ar-err" && frame.e === "busy")).toHaveLength(1000 - APP_RANGE_LIMITS.inFlight);
+    // Settled, whichever way, a place frees: nothing goes for a task no longer live.
+    server.release(tasks[0]);
+    server.fail(tasks[1], "gone");
+    sent.length = 0;
+    const next = [1000, 1001, 1002].map(r => server.receiveGet(appRangeGetFrame(CINEMA, serve, r, 0, 1) as Extract<AppRangeFrame, { t: "ar-get" }>));
+    expect(next.map(Boolean)).toEqual([true, true, false]);
+    expect(sent).toEqual([{ t: "ar-err", a: CINEMA, r: 1002, e: "busy" }]);
+  });
+
+  it("an unserved task holds its place until it is settled, and closing the app frees every place", () => {
+    const sent: AppRangeFrame[] = [];
+    const server = new AppRanges(frame => sent.push(frame));
+    const serve = server.serve(CINEMA, "film-id");
+    const tasks = [0, 1, 2, 3].map(r => server.receiveGet(appRangeGetFrame(CINEMA, serve, r, 0, 1) as Extract<AppRangeFrame, { t: "ar-get" }>)!);
+    server.unserve(serve);
+    expect(tasks.every(task => !task.live)).toBe(true);
+    const again = server.serve(CINEMA, "film-id");
+    expect(server.receiveGet(appRangeGetFrame(CINEMA, again, 4, 0, 1) as Extract<AppRangeFrame, { t: "ar-get" }>)).toBeNull();
+    expect(sent).toEqual([{ t: "ar-err", a: CINEMA, r: 4, e: "busy" }]);
+    server.closeApp(CINEMA);
+    const reopened = server.serve(CINEMA, "film-id");
+    expect(server.receiveGet(appRangeGetFrame(CINEMA, reopened, 5, 0, 1) as Extract<AppRangeFrame, { t: "ar-get" }>)).not.toBeNull();
+    // Settling a task the close freed already frees nothing more, and sends nothing.
+    tasks.forEach(task => server.finish(task, 10));
+    expect(sent).toHaveLength(1);
   });
 
   it("chunks out of order, or past what was asked, fail the read and cancel it", async () => {
