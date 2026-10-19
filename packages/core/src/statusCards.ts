@@ -217,7 +217,8 @@ export type StatusCardKind = StatusCard["kind"];
 const ID = /^[A-Za-z0-9_.:][A-Za-z0-9_.:-]{0,63}$/;
 /** A button's id: 1 to 32 of `A-Z a-z 0-9 _ . : -`, not starting with `-`. */
 export const BUTTON_ID = /^[A-Za-z0-9_.:][A-Za-z0-9_.:-]{0,31}$/;
-const CRON = /^[0-9A-Za-z*,/?#\- ]{1,64}$/;
+/** A routine's cron line, trimmed: 1 to 64 of `0-9 A-Z a-z * , / ? # -` and spaces (shown, never run). */
+export const CRON_LINE = /^[0-9A-Za-z*,/?#\- ]{1,64}$/;
 
 /**
  * Whether a typed answer is a button's label or id (WISP 406 · Message Buttons): ignoring case and spaces at the ends.
@@ -428,7 +429,7 @@ export function readStatusCard(raw: unknown, now = Date.now()): StatusCard | und
   if (raw.kind === "routine") {
     const name = cardLine(raw.name, STATUS_CARD_LIMITS.title), schedule = cardLine(raw.schedule, STATUS_CARD_LIMITS.schedule), state = oneOf(ROUTINE_STATES, raw.state);
     if (!name || !schedule || !state) return undefined;
-    const cron = typeof raw.cron === "string" && CRON.test(raw.cron.trim()) ? raw.cron.trim() : undefined;
+    const cron = typeof raw.cron === "string" && CRON_LINE.test(raw.cron.trim()) ? raw.cron.trim() : undefined;
     const lastRun = readRun(raw.lastRun, now);
     const nextRunAt = typeof raw.nextRunAt === "number" && Number.isSafeInteger(raw.nextRunAt) && raw.nextRunAt > 0 && raw.nextRunAt <= now + STATUS_CARD_LIMITS.nextRunMs ? raw.nextRunAt : undefined;
     const runs: RoutineRun[] = [];
@@ -593,7 +594,7 @@ export function checkStatusCard(raw: unknown, now = Date.now()): { card: StatusC
   } else {
     errors.push(line("name", raw.name, STATUS_CARD_LIMITS.title, true), line("schedule", raw.schedule, STATUS_CARD_LIMITS.schedule, true));
     if (!oneOf(ROUTINE_STATES, raw.state)) errors.push(`state is one of ${ROUTINE_STATES.join(", ")}`);
-    if (raw.cron !== undefined && !(typeof raw.cron === "string" && CRON.test(raw.cron.trim()))) errors.push(`cron is a cron line of at most ${STATUS_CARD_LIMITS.cron} characters`);
+    if (raw.cron !== undefined && !(typeof raw.cron === "string" && CRON_LINE.test(raw.cron.trim()))) errors.push(`cron is a cron line of at most ${STATUS_CARD_LIMITS.cron} characters`);
     if (raw.nextRunAt !== undefined && !(typeof raw.nextRunAt === "number" && Number.isSafeInteger(raw.nextRunAt) && raw.nextRunAt > 0 && raw.nextRunAt <= now + STATUS_CARD_LIMITS.nextRunMs)) errors.push("nextRunAt is a time in milliseconds, within a year");
     const run = (field: string, value: unknown) => {
       if (!isObject(value)) return errors.push(`${field} is an object`);
