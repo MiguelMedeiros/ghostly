@@ -35,6 +35,7 @@ RUN npm run build -w @ghostly/web
 FROM nginx:1.30-alpine
 COPY apps/web/nginx-headers.conf /etc/nginx/ghostly-headers.conf
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
+COPY apps/web/nginx-services.conf /etc/nginx/conf.d/services.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 # With a services host, the app's page may frame it (`frame-src`), and only the app's page may frame the bridge there
 # (`frame-ancestors`): a contact's app opens on an origin of its own (apps/web/src/svc/).
@@ -43,7 +44,7 @@ ARG VITE_SERVICES_APP_ORIGIN=""
 RUN if [ -n "$VITE_SERVICES_HOST" ]; then \
       sed -i "s|frame-src 'self';|frame-src 'self' ${VITE_SERVICES_HOST};|" /etc/nginx/ghostly-headers.conf \
       && grep -qF "frame-src 'self' ${VITE_SERVICES_HOST};" /etc/nginx/ghostly-headers.conf \
-      && sed -i "s|form-action 'none'\" always;|form-action 'none'; frame-ancestors ${VITE_SERVICES_APP_ORIGIN}\" always;|" /etc/nginx/conf.d/default.conf \
-      && grep -qF "frame-ancestors ${VITE_SERVICES_APP_ORIGIN}\"" /etc/nginx/conf.d/default.conf; \
+      && sed -i "s|form-action 'none'\" always;|form-action 'none'; frame-ancestors ${VITE_SERVICES_APP_ORIGIN}\" always;|" /etc/nginx/conf.d/services.conf \
+      && grep -qF "frame-ancestors ${VITE_SERVICES_APP_ORIGIN}\"" /etc/nginx/conf.d/services.conf; \
     fi
 EXPOSE 80

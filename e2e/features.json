@@ -1034,6 +1034,7 @@
     "apps/ui/src/{lib/incomingShare.ts,pages/SharePicker.tsx}": ["app.pwa.share-target"],
     "apps/web/appsTestFlag.ts": ["apps.web-sandbox","apps.desktop-sandbox"],
     "apps/web/index.html": ["*"],
+    "apps/web/nginx-services.conf": ["services.web-open"],
     "apps/web/public/**/*": ["app.home","app.updates.web","app.pwa.*","app.boot"],
     "apps/web/public/app-frame.html": ["apps.web-sandbox"],
     "apps/web/runnerPolicy.ts": ["apps.web-sandbox"],
