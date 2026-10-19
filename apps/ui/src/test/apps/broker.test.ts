@@ -787,6 +787,28 @@ describe("the read lane (WISP 1200 § A read lane to the contact)", () => {
     expect(await ask("files.unserve", [serve])).toMatchObject({ ok: true });
   });
 
+  it("serve looks up its one link: in a library of 100 000, three serves and a read in the same second all answer", async () => {
+    // Each serve listed every link, charged as the list (about 17 MB here): the second serve and the app's own reads
+    // were `too-fast` for that second, and Desktop looked at every file on disk per serve.
+    const { ask, host, id, clock } = await cinema();
+    const link = host.linked.get(REF)!.get(id)!;
+    const library = [link.entry, ...Array.from({ length: MINI_APP_LIMITS.filesEntries - 1 }, (_, i) => ({ id: "a".repeat(22), path: `Films/${String(i).padStart(6, "0")} A film with a long enough title.mp4`.padEnd(95, "x"), size: 3_000_000_000, modified: 1_790_000_000_000, available: true }))];
+    host.linkedFiles!.list = async () => library;
+    clock.t += 1_001;
+    const serves = [await ask("files.serve", [id]), await ask("files.serve", [id]), await ask("files.serve", [id])];
+    expect(serves.map((s) => s.ok)).toEqual([true, true, true]);
+    expect(await ask("files.read", [id, { offset: 0, length: 1 }])).toMatchObject({ ok: true });
+    expect(host.calls.filter((c) => c.op === "files.entry")).toHaveLength(3);
+    // A link the host says it cannot read now is gone, as in the list.
+    link.entry = { ...link.entry, available: false };
+    expect(await ask("files.serve", [id])).toMatchObject({ ok: false, error: "gone" });
+    // A host with no lookup: the list still finds it.
+    link.entry = { ...link.entry, available: true };
+    delete host.linkedFiles!.entry;
+    host.linkedFiles!.list = async () => [link.entry];
+    expect(await ask("files.serve", [id])).toMatchObject({ ok: true });
+  });
+
   it("serve is refused without files or chat, alone, for an id not kept, and as the chat says", async () => {
     expect(await (await cinema(["chat"])).ask("files.serve", ["l".repeat(22)])).toMatchObject({ ok: false, error: "not-allowed" });
     expect(await (await cinema(["files"])).ask("files.serve", ["l".repeat(22)])).toMatchObject({ ok: false, error: "not-allowed" });

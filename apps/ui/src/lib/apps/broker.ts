@@ -465,7 +465,10 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         const id = args[0];
         if (typeof id !== "string" || !LINK_ID.test(id)) refuse("bad-request");
         // Its size, as the contact's reads tell it: an id this app does not keep, or cannot read now, is gone.
-        const entry = (await counted(() => files.list(launch.ref, launch.title, alive.signal), listBytes)).find((link) => link.id === id);
+        // The one link where the host can look it up: a library's whole list per serve spent the app's second on it.
+        const entry = files.entry
+          ? await counted(() => files.entry!(launch.ref, id as string), (link) => (link ? listBytes([link]) : 0))
+          : (await counted(() => files.list(launch.ref, launch.title, alive.signal), listBytes)).find((link) => link.id === id);
         if (!entry?.available) refuse("gone");
         const answer = await lane.serve(launch.chat!.linkId, launch.ref, id as string);
         if ("error" in answer) refuse(answer.error);
