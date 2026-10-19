@@ -124,6 +124,45 @@ describe("the task commands", () => {
     expect(params("task send", send("--steps", "5/5", "--json", '{"progress":100}', "--tag", "a", "--tag", "b", "--tag", "c")).card).toMatchObject({ done: 5, total: 5, progress: 100, tags: ["a", "b", "c"] });
   });
 
+  it("refuse a word or a text flag the card would not take as a usage error (exit 2) that names the flag", () => {
+    // Before, each reached the card's own check: bad_request (exit 1), "Status card: title is at most 120 characters",
+    // with the whole card in its details.
+    const usage = (name: string, argv: string[], message: RegExp) => expect(() => params(name, argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
+    const send = (...flags: string[]) => ["g1", "--title", "Build", ...flags];
+    const routine = (...flags: string[]) => ["g1", "--name", "Nightly", "--schedule", "every day 01:00", ...flags];
+    const x = (n: number) => "x".repeat(n);
+    usage("task send", send("--status", "weird"), /^--status takes queued, running, blocked, done, failed or cancelled, not "weird"$/);
+    usage("task update", ["g1", "t", "--status", "paused"], /^--status takes queued, running/);
+    usage("task send", ["g1", "--title", x(121)], /^--title takes at most 120 characters, not 121$/);
+    usage("task update", ["g1", "t", "--title", x(130)], /^--title takes at most 120 characters, not 130$/);
+    usage("task send", send("--step", x(201)), /^--step takes at most 200 characters, not 201$/);
+    usage("task update", ["g1", "t", "--step", ""], /^--step takes text, not ""$/);
+    usage("task send", send("--step", "   "), /^--step takes text, not " {3}"$/);
+    usage("task send", send("--branch", x(121)), /^--branch takes at most 120 characters, not 121$/);
+    usage("task send", send("--tag", x(25)), /^--tag takes at most 24 characters, not 25$/);
+    usage("task send", send("--tag", "web", "--tag", "web"), /^--tag "web" is given twice$/);
+    usage("task send", send("--item", `done:${x(201)}`), /^--item's text takes at most 200 characters, not 201$/);
+    usage("task send", send("--item", "done:"), /^--item's text takes text, not ""$/);
+    usage("task send", send("--link", `${x(41)}=https://ci.example/1`), /^--link's label takes at most 40 characters, not 41$/);
+    usage("task send", send("--link", "notalink"), /^--link takes https:\/\/… or label=https:\/\/…, an https link of at most 512 characters, not "notalink"$/);
+    usage("task send", send(...["a", "b", "c", "d", "e"].flatMap((h) => ["--link", `https://${h}.example`])), /^--link is given at most 4 times, not 5$/);
+    usage("routine send", routine("--state", "weird"), /^--state takes active or paused, not "weird"$/);
+    usage("routine update", ["g1", "r", "--state", "running"], /^--state takes active or paused, not "running"$/);
+    usage("routine send", ["g1", "--name", x(121), "--schedule", "daily"], /^--name takes at most 120 characters, not 121$/);
+    usage("routine send", ["g1", "--name", "Nightly", "--schedule", x(81)], /^--schedule takes at most 80 characters, not 81$/);
+    usage("routine send", routine("--cron", x(65)), /^--cron takes a cron line of at most 64 characters/);
+    usage("routine send", routine("--cron", "0 1 * * * ;rm"), /^--cron takes a cron line of at most 64 characters/);
+    usage("usage send", ["g1", "--left", "50", "--label", x(25)], /^--label takes at most 24 characters, not 25$/);
+    usage("usage send", ["g1", "--left", "50", "--account", x(25)], /^--account takes at most 24 characters, not 25$/);
+    usage("usage send", ["g1", "--left", "50", "--window", x(17)], /^--window takes at most 16 characters, not 17$/);
+    usage("usage send", ["g1", "--left", "50", "--also", `${x(17)}=80`], /^--also's window takes at most 16 characters, not 17$/);
+    usage("usage send", ["g1", "--left", "50", ...["a", "b", "c", "d"].flatMap((w) => ["--also", `${w}=80`])], /^--also is given at most 3 times, not 4$/);
+    // What holds goes on the card as given; what --json gives stays the card's to check.
+    expect(params("task send", send("--status", "blocked", "--title", x(120), "--tag", x(24), "--link", `${x(40)}=https://ci.example/1`)).card).toMatchObject({ status: "blocked", title: x(120), tags: [x(24)] });
+    expect(params("routine send", routine("--state", "paused", "--cron", "0 1 * * *")).card).toMatchObject({ state: "paused", cron: "0 1 * * *" });
+    expect(params("task send", send("--json", `{"status":"weird","step":"${x(300)}"}`)).card).toMatchObject({ status: "weird" });
+  });
+
   it("start the groups' sessions even in a one-shot: the chat they name may be a group", () => {
     expect(chatOnly("task.send", { chat: "Sala" })).toBe(false);
     expect(chatOnly("chat.send", { chat: "Alice" })).toBe(true);

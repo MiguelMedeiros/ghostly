@@ -217,7 +217,8 @@ export type StatusCardKind = StatusCard["kind"];
 const ID = /^[A-Za-z0-9_.:][A-Za-z0-9_.:-]{0,63}$/;
 /** A button's id: 1 to 32 of `A-Z a-z 0-9 _ . : -`, not starting with `-`. */
 export const BUTTON_ID = /^[A-Za-z0-9_.:][A-Za-z0-9_.:-]{0,31}$/;
-const CRON = /^[0-9A-Za-z*,/?#\- ]{1,64}$/;
+/** A routine's cron line, shown only: 1 to 64 of `0-9 A-Z a-z * , / ? # -` and spaces. */
+export const CRON = /^[0-9A-Za-z*,/?#\- ]{1,64}$/;
 
 /**
  * Whether a typed answer is a button's label or id (WISP 406 · Message Buttons): ignoring case and spaces at the ends.
