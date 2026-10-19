@@ -38,7 +38,7 @@ export const TEXT_COMMANDS: Record<string, { method: string; target: "chat" | "g
   },
   "edit": {
     method: "chat.edit", target: "chat", message: true, args: ["chat", "message", "text...?"], usage: "edit <chat> <message> [text... | --text <text> | --stdin] [--force] [--wait none|confirmed]", summary: "Replace the text of a message you sent (the id send gave; in a group, group edit)",
-    options: { stdin: { type: "boolean", description: "Read the new text from stdin" }, text: { type: "string", description: "The new text, as one argument" }, force, wait: { type: "string", description: "none or confirmed (default: none with a daemon, confirmed without)" }, timeout: wait.timeout },
+    options: { stdin: { type: "boolean", description: "Read the new text from stdin" }, text: { type: "string", description: "The new text, as one argument" }, force, wait: { type: "string", choices: ["none", "confirmed"], description: "none or confirmed (default: none with a daemon, confirmed without)" }, timeout: wait.timeout },
   },
   "group send": {
     method: "group.send", target: "group", args: ["group", "text...?"], usage: "group send <group> [text...] [--mention <member>]... [--reply <message>] [--button id:Label]... [--style id=primary|neutral|danger]... [--once] [--id id] [--stdin] [--force] [--wait none|sent] [--timeout s]", summary: "Send to a group; mention members written as @name in the text; --button puts buttons under it",
