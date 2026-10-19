@@ -7,13 +7,14 @@ import { isChatAppId } from "./pairedApps";
  *
  *     {"t":"ar-get","a":"<chat app id>","s":"<serve id>","r":7,"o":0,"n":1048576}
  *     {"t":"ar-data","a":"<chat app id>","r":7,"o":0,"d":"<base64url>"}
- *     {"t":"ar-end","a":"<chat app id>","r":7}
+ *     {"t":"ar-end","a":"<chat app id>","r":7,"z":734003200}
  *     {"t":"ar-err","a":"<chat app id>","r":7,"e":"not-served"}
  *     {"t":"ar-cancel","a":"<chat app id>","r":7}
  *
  * The asker sends `ar-get` (request `r`, a number of its own, for `n` bytes at offset `o` of serve `s`) and may send
  * `ar-cancel`; the server answers with the bytes in chunks of at most `APP_RANGE_LIMITS.chunkBytes`, then `ar-end`
- * once every byte asked was sent (fewer at the end of the file), or `ar-err` instead of any. Where `files/4` is on,
+ * once every byte asked was sent (fewer at the end of the file), with `z` the served file's size, or `ar-err` instead of
+ * any. A read of one byte at 0 is how the asker learns the size. Where `files/4` is on,
  * a chunk is a binary message of kind `APP_RANGE_DATA_KIND` (`encodeAppRangeData`) in place of `ar-data`. It needs
  * `app-ranges/1` in `paired-capabilities` on both sides. A reader ignores keys it does not know, so a later version
  * can add some.
@@ -41,12 +42,12 @@ export type AppRangeError = typeof APP_RANGE_ERRORS[number];
 export type AppRangeFrame =
   | { t: "ar-get"; a: string; s: string; r: number; o: number; n: number }
   | { t: "ar-data"; a: string; r: number; o: number; d: string }
-  | { t: "ar-end"; a: string; r: number }
+  | { t: "ar-end"; a: string; r: number; z: number }
   | { t: "ar-err"; a: string; r: number; e: string }
   | { t: "ar-cancel"; a: string; r: number };
 
 /** Why a reader refuses an `ar-*` frame (the vectors' `refusal`). */
-export type AppRangeRefusal = "not-ranges" | "bad-a" | "bad-s" | "bad-r" | "bad-o" | "bad-n" | "bad-d" | "bad-e";
+export type AppRangeRefusal = "not-ranges" | "bad-a" | "bad-s" | "bad-r" | "bad-o" | "bad-n" | "bad-d" | "bad-e" | "bad-z";
 
 /** A serve id as it is on the wire: 22 base64url characters (16 random bytes, no padding), as a chat app id. */
 export const isServeId = isChatAppId;
@@ -76,9 +77,9 @@ export function appRangeDataFrame(app: string, request: number, offset: number, 
   return frame;
 }
 
-export function appRangeEndFrame(app: string, request: number): AppRangeFrame {
-  if (!isChatAppId(app) || !isRequest(request)) throw new Error("Not an app range end");
-  return { t: "ar-end", a: app, r: request };
+export function appRangeEndFrame(app: string, request: number, size: number): AppRangeFrame {
+  if (!isChatAppId(app) || !isRequest(request) || !isOffset(size)) throw new Error("Not an app range end");
+  return { t: "ar-end", a: app, r: request, z: size };
 }
 
 export function appRangeErrorFrame(app: string, request: number, error: AppRangeError): AppRangeFrame {
@@ -95,7 +96,8 @@ export function appRangeCancelFrame(app: string, request: number): AppRangeFrame
  * An `ar-*` frame as the peer sent it, or why a reader must refuse it: an unknown `t`, no valid `a`, an `ar-get`
  * without a valid `s`, a request number that is not 0 to 2^32 - 1, an offset that is not a safe whole number at or
  * above 0, an `n` that is not 1 to `requestBytes` (or runs past 2^53 - 1), a `d` that is not 1 to `chunkBytes` bytes of
- * canonical base64url, an `e` that is not a code (lower case letters and `-`, at most 32). Other keys are ignored.
+ * canonical base64url, an `e` that is not a code (lower case letters and `-`, at most 32), an `ar-end` whose `z` is not
+ * a size (a safe whole number at or above 0). Other keys are ignored.
  */
 export function readAppRangeFrame(frame: Record<string, unknown>): { ok: true; frame: AppRangeFrame } | { ok: false; refusal: AppRangeRefusal } {
   const refuse = (refusal: AppRangeRefusal) => ({ ok: false as const, refusal });
@@ -120,8 +122,10 @@ export function readAppRangeFrame(frame: Record<string, unknown>): { ok: true; f
     }
     case "ar-err":
       return typeof frame.e === "string" && ERROR_CODE.test(frame.e) ? { ok: true, frame: { t, a, r, e: frame.e } } : refuse("bad-e");
+    case "ar-end":
+      return isOffset(frame.z) ? { ok: true, frame: { t, a, r, z: frame.z } } : refuse("bad-z");
     default:
-      return { ok: true, frame: { t: t as "ar-end" | "ar-cancel", a, r } };
+      return { ok: true, frame: { t: "ar-cancel", a, r } };
   }
 }
 

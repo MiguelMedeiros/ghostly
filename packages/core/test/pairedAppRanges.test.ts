@@ -43,22 +43,23 @@ function build() {
       { name: "get, the largest request number", frame: get({ r: APP_RANGE_LIMITS.maxRequest }) },
       { name: "data, 3 bytes", frame: data({}), bytes: "000102" },
       { name: "data, 16 KiB", frame: data({ o: MiB - KiB16, d: toBase64Url(counting(KiB16)) }), bytes: "16384 bytes counting up from 00" },
-      { name: "end", frame: { t: "ar-end", a, r: 7 } },
+      { name: "end, of a 700 MiB file", frame: { t: "ar-end", a, r: 7, z: 700 * MiB } },
+      { name: "end, of an empty file", frame: { t: "ar-end", a, r: 7, z: 0 } },
       { name: "err, not-served", frame: { t: "ar-err", a, r: 7, e: "not-served" } },
       { name: "err, a code this version does not know (kept: the asker reads it as a failure)", frame: { t: "ar-err", a, r: 7, e: "too-late" } },
       { name: "cancel", frame: { t: "ar-cancel", a, r: 7 } },
-      { name: "an unknown key is ignored", frame: { t: "ar-end", a, r: 7, x: 1 }, reads: { t: "ar-end", a, r: 7 } },
+      { name: "an unknown key is ignored", frame: { t: "ar-cancel", a, r: 7, x: 1 }, reads: { t: "ar-cancel", a, r: 7 } },
     ],
     invalid: [
       { name: "an unknown t", refusal: "not-ranges", frame: { t: "ar-put", a, r: 7 } },
-      { name: "no a", refusal: "bad-a", frame: { t: "ar-end", r: 7 } },
-      { name: "an a of 21 characters", refusal: "bad-a", frame: { t: "ar-end", a: a.slice(1), r: 7 } },
+      { name: "no a", refusal: "bad-a", frame: { t: "ar-cancel", r: 7 } },
+      { name: "an a of 21 characters", refusal: "bad-a", frame: { t: "ar-cancel", a: a.slice(1), r: 7 } },
       { name: "get without s", refusal: "bad-s", frame: get({ s: undefined }) },
       { name: "get with an s of 23 characters", refusal: "bad-s", frame: get({ s: `${s}A` }) },
       { name: "a negative r", refusal: "bad-r", frame: { t: "ar-cancel", a, r: -1 } },
       { name: "an r past 2^32 - 1", refusal: "bad-r", frame: { t: "ar-cancel", a, r: 2 ** 32 } },
-      { name: "an r that is not whole", refusal: "bad-r", frame: { t: "ar-end", a, r: 1.5 } },
-      { name: "an r as a string", refusal: "bad-r", frame: { t: "ar-end", a, r: "7" } },
+      { name: "an r that is not whole", refusal: "bad-r", frame: { t: "ar-cancel", a, r: 1.5 } },
+      { name: "an r as a string", refusal: "bad-r", frame: { t: "ar-cancel", a, r: "7" } },
       { name: "get with a negative o", refusal: "bad-o", frame: get({ o: -1 }) },
       { name: "get with an o past 2^53 - 1", refusal: "bad-o", frame: get({ o: 2 ** 53 }) },
       { name: "get with n 0", refusal: "bad-n", frame: get({ n: 0 }) },
@@ -71,6 +72,9 @@ function build() {
       { name: "data in standard base64", refusal: "bad-d", frame: data({ d: "+/+/" }) },
       // "AAF" and "AAE" both read as 00 01: only the one a writer makes is taken.
       { name: "data not canonical", refusal: "bad-d", frame: data({ d: "AAF" }) },
+      { name: "end without z", refusal: "bad-z", frame: { t: "ar-end", a, r: 7 } },
+      { name: "end with a negative z", refusal: "bad-z", frame: { t: "ar-end", a, r: 7, z: -1 } },
+      { name: "end with a z past 2^53 - 1", refusal: "bad-z", frame: { t: "ar-end", a, r: 7, z: 2 ** 53 } },
       { name: "err without e", refusal: "bad-e", frame: { t: "ar-err", a, r: 7 } },
       { name: "err with an e in capitals", refusal: "bad-e", frame: { t: "ar-err", a, r: 7, e: "BUSY" } },
     ],
@@ -115,14 +119,15 @@ describe("app range frames", () => {
   it("are written only as a reader takes them", () => {
     expect(appRangeGetFrame(a, s, 1, 0, 10)).toEqual({ t: "ar-get", a, s, r: 1, o: 0, n: 10 });
     expect(parseAppRangeFrame(appRangeDataFrame(a, 1, 5, counting(4)))).toEqual({ t: "ar-data", a, r: 1, o: 5, d: toBase64Url(counting(4)) });
-    expect(appRangeEndFrame(a, 1)).toEqual({ t: "ar-end", a, r: 1 });
+    expect(appRangeEndFrame(a, 1, 5)).toEqual({ t: "ar-end", a, r: 1, z: 5 });
     expect(appRangeErrorFrame(a, 1, "busy")).toEqual({ t: "ar-err", a, r: 1, e: "busy" });
     expect(appRangeCancelFrame(a, 1)).toEqual({ t: "ar-cancel", a, r: 1 });
     expect(() => appRangeGetFrame(a, s, 1, 0, APP_RANGE_LIMITS.requestBytes + 1)).toThrow();
     expect(() => appRangeGetFrame(a, "short", 1, 0, 1)).toThrow();
     expect(() => appRangeDataFrame(a, 1, 0, new Uint8Array())).toThrow();
     expect(() => appRangeDataFrame(a, 1, 0, counting(APP_RANGE_LIMITS.chunkBytes + 1))).toThrow();
-    expect(() => appRangeEndFrame(a, -1)).toThrow();
+    expect(() => appRangeEndFrame(a, -1, 0)).toThrow();
+    expect(() => appRangeEndFrame(a, 1, -1)).toThrow();
     // A writer sends only the codes this version defines.
     expect(() => appRangeErrorFrame(a, 1, "too-late" as never)).toThrow();
   });

@@ -66,11 +66,21 @@
       "bytes": "16384 bytes counting up from 00"
     },
     {
-      "name": "end",
+      "name": "end, of a 700 MiB file",
       "frame": {
         "t": "ar-end",
         "a": "wVZjJ6rJMWKz1sAQA2bALA",
-        "r": 7
+        "r": 7,
+        "z": 734003200
+      }
+    },
+    {
+      "name": "end, of an empty file",
+      "frame": {
+        "t": "ar-end",
+        "a": "wVZjJ6rJMWKz1sAQA2bALA",
+        "r": 7,
+        "z": 0
       }
     },
     {
@@ -102,13 +112,13 @@
     {
       "name": "an unknown key is ignored",
       "frame": {
-        "t": "ar-end",
+        "t": "ar-cancel",
         "a": "wVZjJ6rJMWKz1sAQA2bALA",
         "r": 7,
         "x": 1
       },
       "reads": {
-        "t": "ar-end",
+        "t": "ar-cancel",
         "a": "wVZjJ6rJMWKz1sAQA2bALA",
         "r": 7
       }
@@ -128,7 +138,7 @@
       "name": "no a",
       "refusal": "bad-a",
       "frame": {
-        "t": "ar-end",
+        "t": "ar-cancel",
         "r": 7
       }
     },
@@ -136,7 +146,7 @@
       "name": "an a of 21 characters",
       "refusal": "bad-a",
       "frame": {
-        "t": "ar-end",
+        "t": "ar-cancel",
         "a": "VZjJ6rJMWKz1sAQA2bALA",
         "r": 7
       }
@@ -186,7 +196,7 @@
       "name": "an r that is not whole",
       "refusal": "bad-r",
       "frame": {
-        "t": "ar-end",
+        "t": "ar-cancel",
         "a": "wVZjJ6rJMWKz1sAQA2bALA",
         "r": 1.5
       }
@@ -195,7 +205,7 @@
       "name": "an r as a string",
       "refusal": "bad-r",
       "frame": {
-        "t": "ar-end",
+        "t": "ar-cancel",
         "a": "wVZjJ6rJMWKz1sAQA2bALA",
         "r": "7"
       }
@@ -323,6 +333,35 @@
         "r": 7,
         "o": 0,
         "d": "AAF"
+      }
+    },
+    {
+      "name": "end without z",
+      "refusal": "bad-z",
+      "frame": {
+        "t": "ar-end",
+        "a": "wVZjJ6rJMWKz1sAQA2bALA",
+        "r": 7
+      }
+    },
+    {
+      "name": "end with a negative z",
+      "refusal": "bad-z",
+      "frame": {
+        "t": "ar-end",
+        "a": "wVZjJ6rJMWKz1sAQA2bALA",
+        "r": 7,
+        "z": -1
+      }
+    },
+    {
+      "name": "end with a z past 2^53 - 1",
+      "refusal": "bad-z",
+      "frame": {
+        "t": "ar-end",
+        "a": "wVZjJ6rJMWKz1sAQA2bALA",
+        "r": 7,
+        "z": 9007199254740992
       }
     },
     {
