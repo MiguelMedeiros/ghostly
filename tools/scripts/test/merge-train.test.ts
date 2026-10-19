@@ -179,10 +179,12 @@ function fakeRepo() {
   const conflicts = new Set<number>();
   /** Pull requests whose commits do not replay on the tip while their head merges cleanly (a conflict resolved in a merge of the base). */
   const unrebasable = new Set<number>();
+  /** Pull requests git cannot fetch: GitHub made no `refs/pull/N/head` for them, and their branch does not hold their head. */
+  const missing = new Set<number>();
   let lastSha = "";
   const git = {
     build: async (base: string, prs: Pr[]) => {
-      const applied = prs.filter((p) => !conflicts.has(p.number)).map((p) => p.number);
+      const applied = prs.filter((p) => !conflicts.has(p.number) && !missing.has(p.number)).map((p) => p.number);
       lastSha = `${tips[base]}:${applied.join(",")}`;
       // One commit per pull request aboard, each holding the files of the one before plus its own.
       const commitOf: Record<number, string> = {};
@@ -193,7 +195,8 @@ function fakeRepo() {
         trees.set(commitOf[n], tree);
         made.set(commitOf[n], { message: `${pulls.get(n)!.title} (#${n})\n\n* part one of ${n}\n* part two of ${n}`, tree });
       });
-      return { baseSha: tips[base], sha: lastSha, applied, dropped: prs.filter((p) => conflicts.has(p.number)).map((p) => ({ number: p.number, reason: "conflict" })), commits: commitOf };
+      const dropped = prs.filter((p) => missing.has(p.number) || conflicts.has(p.number)).map((p) => ({ number: p.number, reason: missing.has(p.number) ? "missing" : "conflict" }));
+      return { baseSha: tips[base], sha: lastSha, applied, dropped, commits: commitOf };
     },
     push: async (branch: string, sha: string) => void built.set(branch, sha),
     /** An epic's fast-forward: refused unless the epic's tip is the batch's base. */
@@ -211,6 +214,7 @@ function fakeRepo() {
     /** A rebase onto the tip: a new head that sits on it, unless the head already does and nothing forces new commits. */
     rebase: async (base: string, p: Pr, { force = false } = {}) => {
       if (moved.has(p.number)) return { baseSha: tips[base], dropped: "moved" };
+      if (missing.has(p.number)) return { baseSha: tips[base], dropped: "missing" };
       if (conflicts.has(p.number) || unrebasable.has(p.number)) return { baseSha: tips[base], dropped: "conflict" };
       if (!force && sitsOn.get(p.sha) === tips[base]) return { baseSha: tips[base], sha: p.sha };
       const sha = `r${p.number}.${++rebases}`;
@@ -251,7 +255,7 @@ function fakeRepo() {
   const flight = () => (batch() ? members() : [...pulls.values()].filter((p) => p.open && alone(p.number)?.sha === p.sha).map((p) => p.number));
   let stamp = 0;
   const run = (opts = {}) => tick({ gh, git, base: "dev", login: "train", stamp: String(stamp++), pause: async () => {}, ...opts });
-  return { gh, git, pulls, events, comments, runs, earlier, kinds, meta, files, drafts, going, cancelled, cancelAccess, pushed, moves, tips, landed, conflicts, unrebasable, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, add, settle, batch, members, alone, flight, run };
+  return { gh, git, pulls, events, comments, runs, earlier, kinds, meta, files, drafts, going, cancelled, cancelAccess, pushed, moves, tips, landed, conflicts, unrebasable, missing, moved, pushes, sitsOn, merges, squashes, commits, unsigned, trees, made, rules, skewed, add, settle, batch, members, alone, flight, run };
 }
 
 describe("the line", () => {
@@ -413,6 +417,17 @@ describe("a run of the train", () => {
     expect(repo.members()).toEqual([11, 13]);
     expect(repo.pulls.get(12)!.labels).toEqual([LABEL.conflict]);
     expect(repo.comments.get(12)!.map((c) => c.body)).toEqual([expect.stringMatching(/conflicts with `dev`/)]);
+  });
+
+  it("drops a pull request git cannot fetch with queue:failed and one comment, and boards the rest (2026-10-19: one stopped the line)", async () => {
+    const repo = fakeRepo();
+    for (const n of [11, 12, 13]) repo.add(n);
+    repo.missing.add(12);
+    const r = await repo.run();
+    expect(r.dropped).toEqual([12]);
+    expect(repo.members()).toEqual([11, 13]);
+    expect(repo.pulls.get(12)!.labels).toEqual([LABEL.failed]);
+    expect(repo.comments.get(12)!.map((c) => c.body)).toEqual([expect.stringMatching(/could not fetch its head/)]);
   });
 
   it("finds the culprit of a red batch by halves, and lands everyone else", async () => {
@@ -1690,6 +1705,18 @@ describe("one pull request alone", () => {
     expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/conflicts with `dev`/)]);
   });
 
+  it("takes a pull request git cannot fetch out of the line with queue:failed, alone too", async () => {
+    const repo = fakeRepo();
+    repo.missing.add(11);
+    repo.add(11, { behind: true });
+    const r = await repo.run();
+    expect(r.dropped).toEqual([11]);
+    expect(r.inFlight).toBeNull();
+    expect(repo.pushes).toEqual([]);
+    expect(repo.pulls.get(11)!.labels).toEqual([LABEL.failed]);
+    expect(repo.comments.get(11)!.map((c) => c.body)).toEqual([expect.stringMatching(/could not fetch its head/)]);
+  });
+
   it("sends one that resolved its conflict in a merge of the base the batch way, where its head merges cleanly", async () => {
     const repo = fakeRepo();
     repo.unrebasable.add(11);
@@ -2816,6 +2843,40 @@ describe("building a batch with git", () => {
       rmSync(root, { recursive: true, force: true });
     }
   }, 60_000); // some forty git calls: slow on a busy machine
+
+  it("fetches a pull request GitHub made no refs/pull/N/head for from its branch, and drops one it cannot fetch at all", async () => {
+    // 2026-10-19: GitHub never made refs/pull/3449/head, and the one fetch of every head failed: the whole line stopped.
+    const root = mkdtempSync(join(tmpdir(), "merge-train-test-"));
+    const origin = join(root, "origin");
+    const git = (args: string[], cwd = origin) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    try {
+      git(["init", "-q", "-b", "dev", "origin"], root);
+      git(["commit", "-q", "--allow-empty", "-m", "base"]);
+      const make = (number: number, { ref = true, fork = false } = {}) => {
+        git(["checkout", "-q", "-b", `fix-${number}`, "dev"]);
+        writeFileSync(join(origin, `${number}.txt`), "x\n");
+        git(["add", `${number}.txt`]);
+        git(["commit", "-q", "-m", `fix ${number}`]);
+        if (ref) git(["update-ref", `refs/pull/${number}/head`, "HEAD"]);
+        return { number, title: `fix: number ${number}`, sha: git(["rev-parse", "HEAD"]), branch: `fix-${number}`, fork };
+      };
+      // #1 as GitHub makes them; #2 with no refs/pull/2/head; #3 a fork's, with neither (its branch is in another repository).
+      const prs = [make(1), make(2, { ref: false }), make(3, { ref: false, fork: true })];
+      git(["checkout", "-q", "dev"]);
+      git(["branch", "-q", "-D", "fix-3"]);
+      git(["clone", "-q", "origin", "clone"], root);
+      const layer = gitLayer({ cwd: join(root, "clone") });
+      const built = await layer.build("dev", prs);
+      expect(built.applied).toEqual([1, 2]);
+      expect(built.dropped).toEqual([{ number: 3, reason: "missing" }]);
+      // Alone, the same: #2 from its branch, #3 nowhere.
+      expect(await layer.rebase("dev", prs[1])).toMatchObject({ sha: expect.any(String) });
+      expect(await layer.rebase("dev", prs[2])).toEqual({ baseSha: git(["rev-parse", "dev"]), dropped: "missing" });
+      layer.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it("takes a head that resolved a conflict in a merge of the base, which a rebase of its commits cannot", async () => {
     const root = mkdtempSync(join(tmpdir(), "merge-train-test-"));
