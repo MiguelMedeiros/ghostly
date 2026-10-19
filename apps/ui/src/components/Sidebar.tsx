@@ -202,6 +202,14 @@ export function Sidebar() {
   // The identity a contact is shown as (identities/contactFace.ts): its name in the row, and found by search.
   const faceOf = useContactFaces();
   const query = foldText(search);
+  // A search reads every chat's messages: their whole histories, where the engine sent this page only their newest page
+  // (the extension's pages), are asked for while it lasts.
+  const searching = !!search;
+  useEffect(() => {
+    if (!searching) return;
+    const releases = (engine.state?.links ?? []).map((link) => engine.keepWhole(link.id));
+    return () => releases.forEach((release) => release());
+  }, [searching]);
   const filtered = sessions.filter((s) => {
     if (!search) return true;
     if (found(s.label, query)) return true;
