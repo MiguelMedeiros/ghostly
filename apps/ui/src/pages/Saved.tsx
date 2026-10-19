@@ -89,15 +89,19 @@ export function Saved() {
           {rows.map((row, index) => {
             const { message } = row.saved;
             const time = formatListTime(message.timestamp, now, language, t);
+            const byOther = row.author !== row.chat;
+            // Named by what it shows, in its order (Label in Name); the spaces between its pieces keep their words apart
+            // for that too, and take no room in the flex rows.
+            const name = byOther ? t("saved.rowNameBy", { chat: row.chat, author: row.author, time, text: row.text }) : t("saved.rowName", { chat: row.chat, time, text: row.text });
             return (
               <li key={rowKey(row.saved)} data-testid="saved-row" data-message-id={message.id} className="flex items-stretch">
-                <button type="button" data-testid="saved-open" onClick={() => open(row)} aria-label={t("saved.open", { chat: row.chat, text: row.text })}
+                <button type="button" data-testid="saved-open" onClick={() => open(row)} aria-label={name}
                   className="flex min-w-0 flex-1 cursor-pointer flex-col gap-0.5 px-4 py-2.5 text-start hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent max-md:min-h-14">
                   <span className="flex min-w-0 items-baseline gap-2 text-xs text-text-muted">
-                    <bdi data-testid="saved-chat" className="min-w-0 truncate font-medium text-text-secondary">{row.chat}</bdi>
-                    {row.author !== row.chat && <bdi data-testid="saved-author" className="min-w-0 truncate">{row.author}</bdi>}
+                    <bdi data-testid="saved-chat" className="min-w-0 truncate font-medium text-text-secondary">{row.chat}</bdi>{" "}
+                    {byOther && <><bdi data-testid="saved-author" className="min-w-0 truncate">{row.author}</bdi>{" "}</>}
                     <span className="ms-auto shrink-0 tabular-nums">{time}</span>
-                  </span>
+                  </span>{" "}
                   <bdi data-testid="saved-text" className="line-clamp-2 text-sm text-text-primary">{row.text}</bdi>
                 </button>
                 <button type="button" data-testid="saved-unsave" onClick={() => unsave(row, index)} aria-label={t("saved.unsave")} title={t("saved.unsave")}
