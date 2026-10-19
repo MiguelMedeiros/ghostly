@@ -11,7 +11,7 @@ import { defaultWalletsAllowed } from "@ghostly/browser/platform/walletSetupSwit
 import { engine } from "@ghostly/browser/platform/engine";
 import type { EngineServer } from "@ghostly/browser/engine/server";
 import { closeServiceView, parseServicesHost } from "./svc/protocol";
-import { setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
+import { hostErrorText, setServiceWindowsCloser } from "../../ui/src/lib/serviceWindows";
 import { loadSettings } from "../../ui/src/lib/settings";
 import { translatorFor } from "../../ui/src/locales";
 
@@ -138,7 +138,7 @@ export const webHost = createInPageHost({
     await openServiceView({
       host: servicesHost, tag, peer: peerPubKeyZ32, service: serviceId, title,
       send: (request) => node.request(peerPubKeyZ32, serviceId, request),
-      words: { unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), close: t("common.close") },
+      words: { unreachable: t("services.window.unreachable"), failed: t("services.window.failed"), close: t("common.close"), hostError: (headers) => hostErrorText(headers, title, t) },
     });
   },
 });

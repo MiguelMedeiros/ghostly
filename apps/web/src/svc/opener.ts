@@ -9,8 +9,11 @@ import { BRIDGE_PAGE, BRIDGE_PORT, BRIDGE_READY, MAX_RESPONSE_BYTES, SERVICE_VIE
 /** How a request reaches the contact: the engine's `request` for that contact and service. */
 export type ServiceSend = (request: ClientRequest) => Promise<ClientResponse>;
 
-/** What the opener says when there is no answer: the profile's language, from the app. */
-export interface OpenerWords { unreachable: string; failed: string; close: string }
+/**
+ * What the opener says when there is no answer: the profile's language, from the app. `hostError`: what it says for
+ * an answer the contact's machine gave in place of their app (`hostErrorText`), null for the app's own.
+ */
+export interface OpenerWords { unreachable: string; failed: string; close: string; hostError: (headers: readonly (readonly [string, string])[]) => string | null }
 
 /**
  * The label of one contact's app as this profile opens it: `viewerTag` (this side's key for the chat, so another
@@ -72,6 +75,12 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
     const headers = request.headers.filter(([name]) => name.toLowerCase() !== "cookie");
     if (cookie) headers.push(["cookie", cookie]);
     const answer = await send({ method: request.method, path: request.path, headers, body: request.body ? new Uint8Array(request.body) : null, maxResponseBytes: MAX_RESPONSE_BYTES, signal: stop.signal });
+    const hostError = words.hostError(answer.headers);
+    if (hostError !== null) {
+      stop.abort();
+      post({ type: "error", status: answer.status, text: hostError });
+      return;
+    }
     const out: [string, string][] = [];
     for (const [name, value] of viewerResponseHeaders(answer.headers)) {
       if (name.toLowerCase() === "set-cookie") jar.take(value);
