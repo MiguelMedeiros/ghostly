@@ -13,7 +13,7 @@
 // - One batch per base at a time: up to 12 pull requests from the front of the line, once 3 can board, or the one that
 //   has waited longest has waited 15 minutes since it could (queued, and its CI green), or one has `queue:priority`
 //   (MIN_BATCH, MAX_WAIT). Until then it says it is holding (in its log, and in each held one's position comment with
-//   the time the batch leaves at the latest), and only the first in line lands, if it needs no CI run
+//   the time from which the batch leaves at the train's next run), and only the first in line lands, if it needs no CI run
 //   (green on its own full run, at the base's tip). A batch is built on the base's tip with one squash commit per pull
 //   request, in order ("<title> (#n)"). One that conflicts drops out: `queue:conflict`, one comment, `queue` taken off
 //   (`queue:conflict` comes off once it has `queue` back, as does `queue:failed`). The batch is a pull request from
@@ -347,7 +347,8 @@ export function batchBody(base, baseSha, head, prs, next, extra = {}, commits = 
  * Success on the base itself ("red" or "still running") while the train holds a red batch or lone pull request for
  * it: the one in flight is no longer waiting for its own CI, and nobody behind it moves. `company` is set while the
  * next batch, this pull request in it, waits for company (`holdBatch`): how many can board, the batch size it waits
- * for, and when it leaves at the latest (a fixed time, so the comment does not change from run to run).
+ * for, and from when it leaves anyway (a fixed time, so the comment does not change from run to run; it leaves at the
+ * train's first run after it, and GitHub runs the 5-minute schedule 10 to 30 minutes apart).
  */
 export function positionText(base, pr, place, batch, head = pr.sha, alone = null, held = null, company = null) {
   const mark = `<!-- merge-train:head ${head} -->`;
@@ -371,7 +372,7 @@ export function positionText(base, pr, place, batch, head = pr.sha, alone = null
       ? ` It can board on its fast tier (CI Success (draft)): while its head is behind \`${base}\`, the train cancels its own full CI run, which it would not land on.${cancelled}`
       : "";
   const wait = !why && company
-    ? ` Waiting for company: a batch leaves once ${company.minBatch} can board (${company.count} now), or at ${new Date(company.leavesAt).toISOString().slice(11, 16)} UTC at the latest. It keeps its place.`
+    ? ` Waiting for company: a batch leaves once ${company.minBatch} can board (${company.count} now), or at the train's first run after ${new Date(company.leavesAt).toISOString().slice(11, 16)} UTC. It keeps its place.`
     : "";
   return `${POSITION}${mark}\nMerge train: in line for \`${base}\`: **${ordinal(place)}**.${why ? ` Waiting: ${why}. It keeps its place.` : `${wait}${note}`}${hold}`;
 }
@@ -1065,7 +1066,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
   }
   /** The next batch waiting for company (`holdBatch`), or null. */
   let holding = null;
-  /** The pull requests of the held batch: their position comments say it waits, and until when at the latest. */
+  /** The pull requests of the held batch: their position comments say it waits, and from when it leaves anyway. */
   let heldBack = new Set();
   while (inFlight === null || inFlight === undefined) {
     const next = pickBatch(line());
