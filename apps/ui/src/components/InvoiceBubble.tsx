@@ -281,17 +281,20 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
   const [inspection, setInspection] = useState<CashuInspection | null | undefined>(undefined);
   const id = useMemo(() => settledMoneyId(value), [value]);
   const [redeemed, setRedeemed] = useState(() => isSettled(id));
+  const [spent, setSpent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
   const { copied, failed, copy } = useMoneyCopy(value);
-  // Redeemed takes the place of the Redeem that was pressed, and its keys: not when the token was redeemed before.
+  // Redeemed (or Already spent) takes the place of the Redeem that was pressed, and its keys: not when the token was
+  // redeemed before.
   const redeemedLine = useRef<HTMLSpanElement>(null);
-  const shownRedeemed = useRef(redeemed);
+  const settledLine = redeemed || spent;
+  const shownRedeemed = useRef(settledLine);
   useEffect(() => {
-    if (shownRedeemed.current === redeemed) return;
-    shownRedeemed.current = redeemed;
+    if (shownRedeemed.current === settledLine) return;
+    shownRedeemed.current = settledLine;
     if (focusLost()) redeemedLine.current?.focus({ preventScroll: true });
-  }, [redeemed]);
+  }, [settledLine]);
 
   useEffect(() => {
     let alive = true;
@@ -356,6 +359,8 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
     >
       {redeemed ? (
         <span ref={redeemedLine} tabIndex={-1} className="text-accent-hover text-xs font-bold self-center focus:outline-none" data-testid="token-redeemed">{t("payments.invoice.redeemed")}</span>
+      ) : spent ? (
+        <span ref={redeemedLine} tabIndex={-1} className="text-text-primary/65 text-xs font-bold self-center focus:outline-none" data-testid="token-spent">{t("payments.invoice.alreadySpent")}</span>
       ) : (
         wallet && !mine && !off && inspection.accepted && (
           <button
@@ -367,17 +372,14 @@ function CashuCard({ value, mine, off }: { value: string; mine: boolean; off: bo
               setError(null);
               setBusy(true);
               try {
-                try {
-                  await wallet.receiveToken(value);
-                } catch (e) {
-                  // Spent is spent: nothing is left to redeem. A token redeemed before the mark was keyed by the whole
-                  // token (a 1.3.2 mark is its tail, read no more) offers Redeem again, and this is how it learns.
-                  if (parseEngineError(rawError(e))?.code !== "ecashAlreadySpent") throw e;
-                }
+                await wallet.receiveToken(value);
                 markSettled(id);
                 setRedeemed(true);
               } catch (e) {
-                setError(problemText(e, t));
+                // Spent is spent: nothing is left to redeem. The mint does not say who spent it (the contact, someone
+                // they sent it to, or this device on 1.3.2), so it reads spent, never Redeemed, and is not marked.
+                if (parseEngineError(rawError(e))?.code === "ecashAlreadySpent") setSpent(true);
+                else setError(problemText(e, t));
               } finally {
                 setBusy(false);
               }
