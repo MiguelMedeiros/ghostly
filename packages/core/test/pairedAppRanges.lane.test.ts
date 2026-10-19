@@ -138,6 +138,40 @@ describe("the read lane of one chat", () => {
     expect(sent).toEqual([]);
   });
 
+  it("a cancelled request holds its place until it is settled, so a get and cancel loop meets busy", () => {
+    const sent: AppRangeFrame[] = [];
+    const server = new AppRanges(frame => sent.push(frame));
+    const serve = server.serve(CINEMA, "film-id");
+    const get = (r: number) => server.receiveGet(appRangeGetFrame(CINEMA, serve, r, 0, APP_RANGE_LIMITS.requestBytes) as Extract<AppRangeFrame, { t: "ar-get" }>);
+    const handed: AppRangeTask[] = [];
+    for (let r = 0; r < 1_000; r++) {
+      const task = get(r);
+      if (task) handed.push(task);
+      server.receiveCancel({ t: "ar-cancel", a: CINEMA, r });
+    }
+    // The bytes of each are still being read: only four were handed out, the rest were busy.
+    expect(handed).toHaveLength(APP_RANGE_LIMITS.inFlight);
+    expect(sent).toHaveLength(1_000 - APP_RANGE_LIMITS.inFlight);
+    expect(sent.every(frame => frame.t === "ar-err" && frame.e === "busy")).toBe(true);
+    // Settling one, by any of the three, gives its place back and sends nothing for it.
+    sent.length = 0;
+    server.finish(handed[0], 10);
+    server.fail(handed[1], "gone");
+    server.release(handed[2]);
+    expect(sent).toEqual([]);
+    expect([1_000, 1_001, 1_002].map(get).every(Boolean)).toBe(true);
+    expect(get(1_003)).toBeNull();
+    // An unserve, a close and the session's end count the same way, and the last two free every place.
+    server.closeApp(CINEMA);
+    const again = server.serve(CINEMA, "film-id");
+    const task = server.receiveGet(appRangeGetFrame(CINEMA, again, 7, 0, 1) as Extract<AppRangeFrame, { t: "ar-get" }>)!;
+    server.unserve(again);
+    expect(task.live).toBe(false);
+    server.reset();
+    const third = server.serve(CINEMA, "film-id");
+    expect([0, 1, 2, 3].every(r => server.receiveGet(appRangeGetFrame(CINEMA, third, r, 0, 1) as Extract<AppRangeFrame, { t: "ar-get" }>))).toBe(true);
+  });
+
   it("chunks out of order, or past what was asked, fail the read and cancel it", async () => {
     const { ana, bob, toAna, flush } = pair({ hold: true });
     const serve = ana.serve(CINEMA, "film-id");
