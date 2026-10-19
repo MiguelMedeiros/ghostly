@@ -68,7 +68,23 @@ function clientDht(dht, limits, drop, gone) {
     idle = listening > 0 ? null : setTimeout(() => drop('idle'), limits.idleMs)
   }
   watchIdle()
-  void gone.then(() => clearTimeout(idle))
+  // Every HyperDHT stream the relay holds for this client: its dials and the connections its servers get, taken or
+  // not. dht-relay forgets some of them (a dial whose alias the client reuses, an incoming one the client never
+  // takes) and would leave them open after the client has gone, outside every limit; they all close with it.
+  const streams = new Set()
+  let left = false
+  const hold = stream => {
+    if (left) { stream.destroy(); return stream }
+    streams.add(stream)
+    stream.once('close', () => streams.delete(stream))
+    return stream
+  }
+  void gone.then(() => {
+    clearTimeout(idle)
+    left = true
+    for (const stream of streams) stream.destroy()
+    streams.clear()
+  })
   return new Proxy(dht, {
     get(target, prop) {
       if (prop === 'createServer') return (options, onconnection) => {
@@ -78,6 +94,7 @@ function clientDht(dht, limits, drop, gone) {
         const listen = server.listen.bind(server)
         server.listen = (keyPair, listenOptions) => listen(keyPair, fixOptions(listenOptions, gone))
         server.once('close', () => { listening--; watchIdle() })
+        server.on('connection', hold)
         return server
       }
       if (prop === 'connect') return (publicKey, options) => {
@@ -85,7 +102,7 @@ function clientDht(dht, limits, drop, gone) {
         dials = dials.filter(at => now - at < 60_000)
         if (dials.push(now) > limits.connectsPerMinute) { drop('dial limit'); throw new Error('Dial limit reached') }
         watchIdle()
-        return target.connect(publicKey, options)
+        return hold(target.connect(publicKey, options))
       }
       if (prop === 'lookup' || prop === 'announce' || prop === 'lookupAndUnannounce' || prop === 'unannounce') return () => {
         drop('topic query'); throw new Error('Topic queries are not relayed')
