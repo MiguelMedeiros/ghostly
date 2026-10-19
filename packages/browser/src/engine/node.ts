@@ -5056,11 +5056,14 @@ export class GhostlyNode implements EngineImplementation {
     return { error: live.link ? live.link.sendAppData(app, data) : "offline" };
   }
 
-  /** Ranges the contact's apps asked, by chat, app and request, until a page answers or they stop mattering. */
+  /** Ranges the contact's apps asked, by chat, app and request, until a page answers them. */
   private readonly appRanges = new Map<string, AppRangeTask>();
 
+  /**
+   * Every task stays until a page answers it, live or not: until the link settles it, it holds one of its app's places
+   * (WISP 1200: at most 4 in flight), so the contact gets `busy` rather than more reads while a page is still reading.
+   */
   private appRangeAsked(linkId: string, task: AppRangeTask): void {
-    for (const [key, held] of this.appRanges) if (!held.live) this.appRanges.delete(key);
     this.appRanges.set(`${linkId} ${task.app} ${task.request}`, task);
     const { app, request, serve, file, offset, length } = task;
     this.events.onAppRange?.(linkId, { app, request, serve, file, offset, length });
@@ -5081,7 +5084,8 @@ export class GhostlyNode implements EngineImplementation {
   appRangeAnswer({ linkId, app, request, bytes, size, error }: { linkId: string; app: string; request: number; bytes?: Uint8Array; size?: number; error?: "changed" | "gone" }): void {
     const key = `${linkId} ${app} ${request}`, task = this.appRanges.get(key), link = this.links.get(linkId)?.link;
     this.appRanges.delete(key);
-    if (!task?.live || !link) return;
+    if (!task || !link) return;
+    // A task no longer live goes on too: `sendAppRange` sends nothing for it and frees its place.
     if (error === "changed" || error === "gone") return link.failAppRange(task, error);
     if (!(bytes instanceof Uint8Array) || typeof size !== "number" || !Number.isSafeInteger(size) || size < 0) return link.failAppRange(task, "gone");
     void link.sendAppRange(task, bytes, size);
