@@ -593,6 +593,25 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
         node.setActiveLink({ linkId: null });
       });
 
+      it("on a network that blocks direct connections (a VPN), a chat whose contact has WebRTC takes one too: WebRTC is no way there", async () => {
+        // An app behind a VPN that drops UDP, its eight listeners held by contacts with no WebRTC: the chat with a contact
+        // that has WebRTC (a CLI) went down with the VPN and had nothing else to go live on, for as long as the VPN was on.
+        vi.stubGlobal("RTCPeerConnection", class {});
+        onTestFinished(() => { vi.unstubAllGlobals(); });
+        const record = (transports: string[]) => ({ rev: 1, issued: Date.now(), author: createIdentity().pubKeyZ32, versions: [1], transports,
+          capabilities: [], extensions: [], descriptors: {}, name: "" });
+        const { node, holders, nine } = await allLive([10, 9, 8, 7, 6, 5, 4, 3], { capsState: { rev: 1, peer: record(["iroh/1", "webrtc/1"]) } });
+        // This device's own WebRTC attempts gathered no public candidate: no STUN server answers through the VPN.
+        const directPath = node["directPath"] as { note(peer: string, evidence: string): void; blocked: boolean };
+        directPath.note(createIdentity().pubKeyZ32, "no-public");
+        directPath.note(createIdentity().pubKeyZ32, "no-public");
+        expect(directPath.blocked).toBe(true);
+        await nine.options.events.onMessage({ id: "dht-1", text: "are you there?", timestamp: Date.now(), via: "pkarr" });
+        await node["nativeQueue"];
+        expect(nine.registerEndpoint).toHaveBeenCalled();
+        expect(yielded(holders)).toEqual([holders[0]]);
+      });
+
       it("a text over the DHT in a chat not on screen takes one too: a bot has no chat on screen", async () => {
         const { node, holders, nine } = await allLive([3, 4, 5, 6, 7, 8, 9, 10]);
         await nine.options.events.onMessage({ id: "dht-1", text: "are you there?", timestamp: Date.now(), via: "pkarr" });
