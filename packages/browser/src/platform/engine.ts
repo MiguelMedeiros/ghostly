@@ -33,6 +33,12 @@ export type MessagesListener = (linkId: string, messages: StoredMessage[], chang
 class EngineClient {
   state: EngineState | null = null;
   readonly messages = new Map<string, StoredMessage[]>();
+  /** The chats whose list here is only their newest page (a `messages` event with `more`): the peer has older rows. */
+  private readonly partial = new Set<string>();
+  /** The partial chats whose whole history this connection asked for (`askWhole`), once each. */
+  private readonly asked = new Set<string>();
+  /** Per chat, how many readers hold its whole history here (`keepWhole`). */
+  private readonly kept = new Map<string, number>();
   /**
    * Why the peer did not start, when it did not (the profile's database did not open): the app shows this and nothing
    * of the profile. Null while it runs or is still starting. State listeners hear of it.
@@ -72,6 +78,39 @@ class EngineClient {
   onMessages(listener: MessagesListener): () => void {
     this.messageListeners.add(listener);
     return () => this.messageListeners.delete(listener);
+  }
+
+  /** Whether this chat's list here is its whole history, not only its newest page. */
+  whole(linkId: string): boolean {
+    return !this.partial.has(linkId);
+  }
+
+  /**
+   * Asks the peer for this chat's whole history, when only its newest page is here: the listeners hear it when it comes.
+   * Once per connection; nothing to ask for a whole one.
+   */
+  askWhole(linkId: string): void {
+    if (!this.partial.has(linkId) || this.asked.has(linkId) || !this.connection) return;
+    this.asked.add(linkId);
+    this.connection.send({ kind: "history", linkId });
+  }
+
+  /**
+   * While held, this chat's whole history is here for a reader that shows all of it (the chat open, a search): asked for
+   * now if only its newest page is, and whenever only its newest page comes later (a page that connects again). The
+   * returned function lets it go.
+   */
+  keepWhole(linkId: string): () => void {
+    this.kept.set(linkId, (this.kept.get(linkId) ?? 0) + 1);
+    this.askWhole(linkId);
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      const left = (this.kept.get(linkId) ?? 1) - 1;
+      if (left) this.kept.set(linkId, left);
+      else this.kept.delete(linkId);
+    };
   }
 
   /** Whether this chat's list changed since its listeners last heard: they hear of it when the tick ends. */
@@ -140,6 +179,8 @@ class EngineClient {
         (message) => this.handle(message),
         () => {
           this.connection = null;
+          // The next connection is sent each chat again: what it asked for, it asks again.
+          this.asked.clear();
           for (const pending of this.pending.values()) pending.reject(new Error("Lost the Ghostly peer"));
           this.pending.clear();
           setTimeout(() => void this.connect().catch(() => {}), 500);
@@ -175,8 +216,14 @@ class EngineClient {
       case "messages":
         // The whole history holds what changed before it: told now, and not again when the tick ends.
         this.changed.delete(message.linkId);
+        if (message.more) this.partial.add(message.linkId);
+        else {
+          this.partial.delete(message.linkId);
+          this.asked.delete(message.linkId);
+        }
         this.messages.set(message.linkId, message.messages);
         for (const listener of this.messageListeners) listener(message.linkId, message.messages);
+        if (this.kept.has(message.linkId)) this.askWhole(message.linkId);
         break;
       case "message-changes": {
         // Only what changed, in a history the peer sent whole first: listeners still get the whole list, as it is now.

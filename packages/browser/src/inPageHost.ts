@@ -52,7 +52,10 @@ export function createInPageHost(options: InPageHostOptions): BrowserHost & { an
       const active = await server;
       const client: EngineClientSink = { post: (message) => queueMicrotask(() => onMessage(message)) };
       active.attach(client);
-      return { send: (request) => void active.handle(client, request) };
+      return {
+        // A whole history asked for goes to the engine; a device that is not the active one has none.
+        send: (request) => void (request.kind === "history" ? !active.gated && (active as EngineServer).history(client, request.linkId) : active.handle(client, request)),
+      };
     },
 
     /** Say goodbye to every peer when the page closes, if there is time. `quitting`: the app exits, not only the page. */
