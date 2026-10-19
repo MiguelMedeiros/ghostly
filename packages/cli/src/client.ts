@@ -45,7 +45,11 @@ export class DaemonClient {
     this.ready = new Promise<void>((resolve, reject) => { this.settle = { resolve, reject }; });
     this.ready.catch(() => {});
     const nonce = newNonce();
-    createInterface({ input: socket, crlfDelay: Infinity }).on("line", (line) => {
+    const lines = createInterface({ input: socket, crlfDelay: Infinity });
+    // readline passes on its input's errors: a daemon that went away with this client's lines unread (ECONNRESET) ended
+    // the command on an unhandled 'error' instead of the close below (unavailable).
+    lines.on("error", () => {});
+    lines.on("line", (line) => {
       let message: { id?: number | string; result?: unknown; error?: { code: ErrorCode; message: string; details?: Record<string, unknown> }; event?: GhostlyEvent };
       try { message = JSON.parse(line); } catch { return; }
       if (!this.verified) {
