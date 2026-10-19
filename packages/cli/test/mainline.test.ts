@@ -82,6 +82,34 @@ describe("Pkarr over the Mainline DHT, beside the relays", { timeout: 60_000 }, 
     expect(onDht?.records[0].value).toBe("both");
   });
 
+  it("a relay that takes requests and never answers holds neither a publish nor a read for its 10 s timeout", async () => {
+    // Each request ends only when the client drops it (a blackholed or stuck relay).
+    const hung = (async (_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+    })) as typeof fetch;
+    const a = new RelaysAndDht(await peer(bootstrap), { relays: [RELAYS[0]!], fetch: hung, log: () => {} });
+    const b = new RelaysAndDht(await peer(bootstrap), { relays: [RELAYS[0]!], fetch: hung, log: () => {} });
+    const me = createIdentity();
+    let started = Date.now();
+    await a.publish(me, [{ label: "_x", value: "hello" }]);
+    const publishMs = Date.now() - started;
+    started = Date.now();
+    const found = await b.resolve(me.pubKeyZ32);
+    const readMs = Date.now() - started;
+    // A key nobody published, read by a CLI whose relay has not failed yet: the DHT's "none" is the answer once a
+    // slow relay would have had its say.
+    const c = new RelaysAndDht(await peer(bootstrap), { relays: [RELAYS[0]!], fetch: hung, log: () => {} });
+    started = Date.now();
+    expect(await c.resolve(createIdentity().pubKeyZ32)).toBeNull();
+    const missingMs = Date.now() - started;
+    console.log(`MAINLINE hung relay: publish ${publishMs} ms, read ${readMs} ms, read of a missing key ${missingMs} ms`);
+    expect(found?.records[0]?.value).toBe("hello");
+    expect(b.discovery().path).toEqual({ via: "dht" });
+    expect(publishMs).toBeLessThan(1_500);
+    expect(readMs).toBeLessThan(3_000);
+    expect(missingMs).toBeLessThan(4_500);
+  });
+
   it("a group's edge goes live while every relay answers 500, through the DHT, without a restart", async () => {
     const store = { down: true, packets: new Map<string, Uint8Array>() };
     const group = toBase64Url(randomBytes(16));
