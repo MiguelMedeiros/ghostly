@@ -6,28 +6,30 @@ import { FakeTurnNetwork } from "./helpers/turnNetwork";
 // covers: devices.takeover, devices.gate
 
 /*
- * The active device reads the turn before its engine starts (WISP 06 § When a device checks, § Failure cases: "Forced
+ * The active device reads the turn as a condition of starting (WISP 06 § When a device checks, § Failure cases: "Forced
  * takeover while the old device is off; it comes back: it reads the higher turn at start, before the engine starts,
- * and becomes superseded without publishing"). The engine here is a stand-in that counts its starts.
+ * and becomes superseded without publishing"). Its engine starts at once in limited mode, which publishes and dials
+ * nothing, with the read out (`startCheck`); what the read says is what it hands the engine. The engine here is a
+ * stand-in that counts its starts (`deviceStartCheck.test.ts` runs the real one).
  */
 
-const fake = vi.hoisted(() => ({ nodes: [] as { options: { limited?: boolean } ; started: number }[] }));
+type Options = { limited?: boolean; startCheck?: Promise<{ gated?: { state: string }; limited?: true; readAt?: number }> };
+const fake = vi.hoisted(() => ({ nodes: [] as { options: Options; started: number }[] }));
 
 vi.mock("../src/engine/node", () => ({
   GhostlyNode: class {
     started = 0;
     shutdown = vi.fn(async () => {});
-    constructor(public events: unknown, public options: { limited?: boolean }) { fake.nodes.push(this as never); }
+    constructor(public events: unknown, public options: Options) { fake.nodes.push(this as never); }
     async start() { this.started++; }
     getState() { return { links: [] }; }
   },
 }));
 
 const { createPeerServer } = await import("../src/devices/peer");
-const { knownDeviceGate, resetDeviceGates } = await import("../src/devices/gate");
+const { resetDeviceGates } = await import("../src/devices/gate");
 const { closeDevicesDb, readDeviceRecord, setDeviceMirror } = await import("../src/devices/store");
 const { putDeviceRecord, dropDevicesDatabase } = await import("./helpers/deviceRecord");
-const { DeviceLinkOnlyServer } = await import("../src/devices/linkOnly");
 const { EngineServer } = await import("../src/engine/server");
 const { databaseName, setDatabaseName } = await import("../src/shared/idb");
 const { createDeviceSigningKey } = await import("../src/devices/signingKey");
@@ -62,15 +64,15 @@ async function activeDesktop(): Promise<{ stored: Uint8Array }> {
 }
 
 describe("the active device's read before its engine starts", () => {
-  it("another device took the turn while it was off: it is superseded, keeps its copy, and no engine is made", async () => {
+  it("another device took the turn while it was off: it is superseded, keeps its copy, and its limited engine is told to stop", async () => {
     const network = new FakeTurnNetwork();
     await activeDesktop();
     const slots = [{ key: (await createDeviceSigningKey(databaseName())).publicKey, name: "Desktop" }, { key: phone.publicKey, name: "Phone" }, null, null];
     network.seed(await signTurnPacket(keys, { turn: N + 1, rev: 0, author: 1, active: 1, slots, instance: new Uint8Array(8).fill(2) }, (bytes) => sign(bytes, phone.seed)));
     const server = await createPeerServer({}, { turn: network });
-    expect(server).toBeInstanceOf(DeviceLinkOnlyServer);
-    expect(fake.nodes).toEqual([]);
-    expect(knownDeviceGate()).toMatchObject({ state: "superseded", full: false, view: { state: "superseded", activeDevice: "Phone" } });
+    expect(server).toBeInstanceOf(EngineServer);
+    expect(fake.nodes.map((node) => node.options.limited)).toEqual([true]);
+    expect(await fake.nodes[0]!.options.startCheck).toMatchObject({ gated: { state: "superseded", activeDevice: "Phone" } });
     expect(await readDeviceRecord(databaseName())).toMatchObject({ state: "superseded", copy: "frozen", activeSlot: 1 });
     // Nothing was put: a replaced device publishes nothing more.
     expect(network.puts()).toEqual([]);
@@ -83,7 +85,8 @@ describe("the active device's read before its engine starts", () => {
     network.seed(stored);
     const server = await createPeerServer({}, { turn: network });
     expect(server).toBeInstanceOf(EngineServer);
-    expect(fake.nodes.map((node) => node.options.limited)).toEqual([undefined]);
+    expect(fake.nodes.map((node) => node.options.limited)).toEqual([true]);
+    expect(await fake.nodes[0]!.options.startCheck).toEqual({ readAt: expect.any(Number) });
     expect((await readDeviceRecord(databaseName()))?.rev).toBe(1);
   });
 
@@ -94,6 +97,7 @@ describe("the active device's read before its engine starts", () => {
     const server = await createPeerServer({}, { turn: network });
     expect(server).toBeInstanceOf(EngineServer);
     expect(fake.nodes.map((node) => node.options.limited)).toEqual([true]);
+    expect(await fake.nodes[0]!.options.startCheck).toEqual({ limited: true });
     expect((await readDeviceRecord(databaseName()))?.state).toBe("active");
   });
 
@@ -112,6 +116,7 @@ describe("the active device's read before its engine starts", () => {
     } satisfies DeviceRecord);
     const server = await createPeerServer({}, { turn: network });
     expect(server).toBeInstanceOf(EngineServer);
+    expect(await fake.nodes[0]!.options.startCheck).toEqual({ readAt: expect.any(Number) });
     const after = await readDeviceRecord(databaseName());
     expect(after?.state).toBe("active");
     expect(after?.deviceSet.flatMap((slot) => (slot ? [slot.name] : []))).toEqual(["Desktop", "Phone"]);
@@ -125,6 +130,7 @@ describe("the active device's read before its engine starts", () => {
     const server = await createPeerServer({}, { turn: network });
     expect(server).toBeInstanceOf(EngineServer);
     expect(fake.nodes.map((node) => node.options.limited)).toEqual([true]);
+    expect(await fake.nodes[0]!.options.startCheck).toEqual({ limited: true });
   });
 
   it("a profile with no device set reads nothing and starts as before", async () => {
