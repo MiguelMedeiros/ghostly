@@ -320,6 +320,53 @@ it("frees the slot of a client that neither listens nor dials, one that stops an
   await own.close();
 }, 60_000);
 
+it("closes every HyperDHT stream it holds for a client when the client leaves: dials under one alias, and incoming ones never taken", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const { default: DHT } = await import("hyperdht");
+  const { default: RelayedDHT } = await import("@hyperswarm/dht-relay");
+  const { default: WebSocketStream } = await import("@hyperswarm/dht-relay/ws");
+  type Stream = { destroyed: boolean; once(event: string, f: () => void): void; on(event: string, f: (...args: unknown[]) => void): void; destroy(): void };
+  const own = await startRelay({ testnet: 2 });
+  const native = new DHT({ bootstrap: own.bootstrap.map((node: string) => { const [host, port] = node.split(":"); return { host, port: Number(port) }; }), host: "127.0.0.1", firewalled: false });
+  const streams: Stream[] = [];
+  const keep = (stream: Stream) => { stream.on("error", () => {}); streams.push(stream); return stream; };
+  const open = (list: Stream[]) => list.filter(stream => !stream.destroyed).length;
+  const client = async () => {
+    const socket = new WebSocket(own.url);
+    await new Promise(resolve => socket.addEventListener("open", resolve));
+    const closed = new Promise(resolve => socket.addEventListener("close", resolve));
+    return { socket, closed, node: new RelayedDHT(new WebSocketStream(true, socket)) as unknown as { _protocol: Record<string, { send(m: unknown): void }>; createServer(): { listen(keyPair: unknown): Promise<void> } } };
+  };
+
+  // Three dials sent under one alias, to a native server.
+  const server = native.createServer();
+  const accepted: Stream[] = [];
+  server.on("connection", (stream: Stream) => accepted.push(keep(stream)));
+  const serverKeys = DHT.keyPair();
+  await server.listen(serverKeys);
+  const dialer = await client();
+  const keyPair = DHT.keyPair();
+  for (let i = 0; i < 3; i++) dialer.node._protocol.connect.send({ custodial: true, alias: 7, publicKey: keyPair.publicKey, secretKey: keyPair.secretKey, remotePublicKey: serverKeys.publicKey });
+  await vi.waitFor(() => expect(open(accepted)).toBe(3), { timeout: 20_000 });
+  dialer.socket.close();
+  await dialer.closed;
+
+  // A listener that never takes the connections it is offered.
+  const listener = await client();
+  listener.node._protocol.connected.send = () => {};
+  const listenKeys = DHT.keyPair();
+  await listener.node.createServer().listen(listenKeys);
+  const dials = [0, 1].map(() => keep(native.connect(listenKeys.publicKey) as Stream));
+  await Promise.all(dials.map(stream => new Promise(resolve => stream.once("open", resolve))));
+  listener.socket.close();
+  await listener.closed;
+
+  await vi.waitFor(() => expect(open(accepted) + open(dials)).toBe(0), { timeout: 15_000 });
+  for (const stream of streams) stream.destroy();
+  await native.destroy();
+  await own.close();
+}, 90_000);
+
 it("carries a whole paired chat between two browsers with WebRTC off, pinned as on any transport", async () => {
   const invitation = createLink();
   const params = [invitation.mine, invitation.invite];
