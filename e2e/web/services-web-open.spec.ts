@@ -92,8 +92,18 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     expect((await person.page.evaluate(() => Object.keys(localStorage))).filter((key) => !key.startsWith("ghostly-test-")).length).toBeGreaterThan(0);
 
     // Closed: gone, and the chat is where it was.
+    const chat = person.page.url();
     await person.page.getByTestId("service-view-close").click();
     await expect(view).toHaveCount(0);
+    await expect(person.page.getByPlaceholder("Message…")).toBeEnabled();
+    await expect(person.page).toHaveURL(chat);
+
+    // Opened again, Back (Android's back gesture, the browser's) closes it and leaves the chat as it was.
+    await open.click();
+    await expect(view).toBeVisible();
+    await person.page.goBack();
+    await expect(view).toHaveCount(0);
+    await expect(person.page).toHaveURL(chat);
     await expect(person.page.getByPlaceholder("Message…")).toBeEnabled();
   } catch (error) {
     await bot.attachLogs(info);

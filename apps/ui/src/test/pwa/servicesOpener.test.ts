@@ -139,4 +139,44 @@ describe("a contact's app shown over the app", () => {
     closeServiceWindows();
     expect(document.getElementById(SERVICE_VIEW_ID)).toBeNull();
   });
+
+  describe("and Back (Android's back gesture, the browser's)", () => {
+    const CHAT = "#/chat/abc";
+    const ROUTER = { usr: null, key: "k1", idx: 3 };
+    /** Waits for the history to settle: a traversal answers with a popstate, or nothing if there is none. */
+    const settled = () => new Promise<void>((resolve) => { const done = () => { removeEventListener("popstate", done); resolve(); }; addEventListener("popstate", done); setTimeout(done, 200); });
+    const back = async () => { const pop = settled(); history.back(); await pop; };
+    afterEach(async () => { await settled(); });
+
+    it("closes the view and leaves the chat under it where it was", async () => {
+      history.pushState(ROUTER, "", CHAT);
+      await open("one");
+      await back();
+      expect(document.getElementById(SERVICE_VIEW_ID)).toBeNull();
+      expect(location.hash).toBe(CHAT);
+      expect(history.state).toEqual(ROUTER);
+    });
+
+    it("has nothing of the view to step over once ✕ closed it: the app's next Back is its own", async () => {
+      history.pushState(ROUTER, "", CHAT);
+      const length = history.length;
+      await open("one");
+      const pop = settled();
+      (document.querySelector('[data-testid="service-view-close"]') as HTMLButtonElement).click();
+      await pop;
+      expect(document.getElementById(SERVICE_VIEW_ID)).toBeNull();
+      expect(location.hash).toBe(CHAT);
+      expect(history.state).toEqual(ROUTER);
+      expect(history.length).toBe(length + 1); // the view's entry is only ahead now, as after any Back
+    });
+
+    it("is one step for one view, however many were opened in turn", async () => {
+      history.pushState(ROUTER, "", CHAT);
+      await open("one");
+      await open("two");
+      await back();
+      expect(document.getElementById(SERVICE_VIEW_ID)).toBeNull();
+      expect(history.state).toEqual(ROUTER);
+    });
+  });
 });
