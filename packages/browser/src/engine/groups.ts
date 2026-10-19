@@ -262,11 +262,12 @@ export const peerMessageAt = (map: Map<string, number>, groupId: string): { last
 
 /**
  * How often a group's link is looked at (`warmPollMs` for `warmMs` after it was handed out or someone
- * knocked: people open a link in the minutes after it is shared, and in bursts), and a joiner knocks;
- * `slowKnockMs` once it has waited `patienceMs`.
+ * knocked: people open a link soon after it is shared, and in bursts), and a joiner knocks;
+ * `slowKnockMs` once it has waited `patienceMs`. A minute, as a community's door (`knockWarmMs`): each warm
+ * link reads 30 times a minute, so ten minutes of three links just shared took the app's whole relay budget.
  */
 export interface EntryTimings { pollMs: number; warmPollMs: number; warmMs: number; knockMs: number; slowKnockMs: number; patienceMs: number }
-const ENTRY_TIMINGS: EntryTimings = { pollMs: 5_000, warmPollMs: 2_000, warmMs: 10 * 60_000, knockMs: 5_000, slowKnockMs: 20_000, patienceMs: 2 * 60_000 };
+const ENTRY_TIMINGS: EntryTimings = { pollMs: 5_000, warmPollMs: 2_000, warmMs: 60_000, knockMs: 5_000, slowKnockMs: 20_000, patienceMs: 2 * 60_000 };
 /**
  * A knock still in the record is written again only once it is this old. Everyone holding the link writes the same
  * Pkarr record, so a knock is read back before it is repeated: one that is there and fresh costs a read, not a read
