@@ -8007,10 +8007,12 @@ export class GhostlyNode implements EngineImplementation {
       const extra = (other: LiveLink) => !!other.stored.group && !other.stored.groupEntry && !onScreen(other) && anchorOf(other.stored.group) !== other;
       const full = owners.length >= slots, entry = !!live.stored.groupEntry;
       // Such an edge takes a free listener only once its group's one has one, and within what 1:1 chats leave (all but
-      // four); it never takes one that is held. An entry session (a join) takes a free one within that room, as before.
-      // One that finds none waits for a slot.
-      if (group && (entry || extra(live)) && (full || groups >= this.groupNativeSlots(key)
-        || (!entry && !anchorOf(live.stored.group!)?.link?.availableTransports.includes(key)))) return "no-slot";
+      // four); it never takes one that is held. One that finds none waits for a slot.
+      if (group && extra(live) && (full || groups >= this.groupNativeSlots(key) || !anchorOf(live.stored.group!)?.link?.availableTransports.includes(key))) return "no-slot";
+      // An entry session (a join) is short-lived and in use right then: it takes any free listener, past the groups'
+      // room too (two groups with members held the four, and a third group's link let nobody in), or, every one held,
+      // one from a group's edge past its group's one. Never a chat's, nor another group's one.
+      if (entry && full && !owners.some(other => extra(other) && other.link?.canReleaseEndpoint(key))) return "no-slot";
       // A chat finds none free once every listener is taken, or the chats hold their eight (of Iroh's sixteen in a browser).
       if (full || (!group && owners.length - groups >= NATIVE_SLOTS)) {
         // Who may take one that is held: the chat in use (on screen, or a text going or coming in it), an edge of the
