@@ -135,6 +135,43 @@ it("answers each send once its socket has room, and a refused one with an error 
   expect(alive(runtime.child.pid!)).toBe(true);
 }, 15_000);
 
+it("sends on a live connection while the same endpoint's dial is still waiting", async () => {
+  // A dial to a contact whose app just died waits 3 s before it fails, as a stale DHT record does.
+  const runtime = sidecar({ FAKE_ENDPOINT_DIAL_MS: "3000" });
+  runtime.send({ type: "start", endpoint: 1, seedB64: seed(1) });
+  runtime.send({ type: "start", endpoint: 2, seedB64: seed(2) });
+  const a = await runtime.next({ type: "started", endpoint: 1 });
+  await runtime.next({ type: "started", endpoint: 2 });
+  runtime.send({ type: "connect", endpoint: 1, descriptor: { publicKey: "00".repeat(32) } });
+  // The contact comes back and dials in: the chat answers on that connection at once.
+  runtime.send({ type: "connect", endpoint: 2, descriptor: a.descriptor });
+  const incoming = await runtime.next({ type: "open", endpoint: 1, incoming: true });
+  runtime.send({ type: "send", endpoint: 1, id: incoming.id, seq: 1, text: "back" });
+  runtime.send({ type: "close", endpoint: 1, id: 999 });
+  expect(await runtime.next({ type: "frame", endpoint: 2 })).toMatchObject({ text: "back" });
+  await runtime.next({ type: "sent", endpoint: 1, seq: 1 });
+  expect(runtime.events.some(e => e.type === "error" && e.endpoint === 1)).toBe(false);
+  // The dial still ends as it would have.
+  expect(await runtime.next({ type: "error", endpoint: 1, command: "connect" })).toMatchObject({ message: "peer not found" });
+});
+
+it("carries a burst of small frames read at once without stopping the endpoint", async () => {
+  const runtime = sidecar();
+  runtime.send({ type: "start", endpoint: 1, seedB64: seed(1) });
+  runtime.send({ type: "start", endpoint: 2, seedB64: seed(2) });
+  const b = await runtime.next({ type: "started", endpoint: 2 });
+  await runtime.next({ type: "started", endpoint: 1 });
+  runtime.send({ type: "connect", endpoint: 1, descriptor: b.descriptor });
+  const result = await runtime.next({ type: "result", endpoint: 1 });
+  await runtime.next({ type: "open", endpoint: 2, incoming: true });
+  // A catch-up of 200 short messages, in one write: the runtime reads them in one go.
+  const burst = Array.from({ length: 200 }, (_, n) => JSON.stringify({ type: "send", endpoint: 1, id: result.id, seq: n + 1, text: `m${n}` }) + "\n");
+  runtime.child.stdin!.write(burst.join(""));
+  await runtime.next({ type: "sent", endpoint: 1, seq: 200 });
+  expect(runtime.events.filter(e => e.type === "frame" && e.endpoint === 2).map(e => e.text)).toEqual(burst.map((_, n) => `m${n}`));
+  expect(runtime.events.some(e => e.type === "stopped" || e.type === "closed")).toBe(false);
+}, 10_000);
+
 it("refuses a ninth endpoint and an invalid seed without stopping the others", async () => {
   const runtime = sidecar();
   for (let n = 1; n <= 8; n++) runtime.send({ type: "start", endpoint: n, seedB64: seed(n) });
