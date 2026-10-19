@@ -35,8 +35,10 @@ class EngineClient {
   readonly messages = new Map<string, StoredMessage[]>();
   /** The chats whose list here is only their newest page (a `messages` event with `more`): the peer has older rows. */
   private readonly partial = new Set<string>();
-  /** The partial chats whose whole history this connection asked for (`askWhole`), once each. */
+  /** The partial chats and the groups whose whole history this connection asked for (`askWhole`, `history`), once each. */
   private readonly asked = new Set<string>();
+  /** The chats and groups whose whole history this connection was sent: their list here is kept current since. */
+  private readonly held = new Set<string>();
   /** Per chat, how many readers hold its whole history here (`keepWhole`). */
   private readonly kept = new Map<string, number>();
   /**
@@ -94,6 +96,32 @@ class EngineClient {
     if (!this.partial.has(linkId) || this.asked.has(linkId) || !this.connection) return;
     this.asked.add(linkId);
     this.connection.send({ kind: "history", linkId });
+  }
+
+  /**
+   * A chat's or group's whole history as this connection was sent it, kept current since. When it was not (a group no
+   * reader asked for yet), undefined: it is asked for, once per connection, and the listeners hear it when it comes. A
+   * group that opens reads it here, not from the store on each open.
+   */
+  history(linkId: string): StoredMessage[] | undefined {
+    if (this.held.has(linkId)) return this.messages.get(linkId);
+    if (!this.connection) {
+      void this.connect().then(() => void this.history(linkId)).catch(() => {});
+      return undefined;
+    }
+    if (this.asked.has(linkId)) return undefined;
+    this.asked.add(linkId);
+    this.connection.send({ kind: "history", linkId });
+    return undefined;
+  }
+
+  /** Forgets every history held here, as a page that just loaded holds none: each test of the UI is a page of its own. */
+  forgetHistories(): void {
+    this.messages.clear();
+    this.partial.clear();
+    this.asked.clear();
+    this.held.clear();
+    this.changed.clear();
   }
 
   /**
@@ -186,8 +214,10 @@ class EngineClient {
         (message) => this.handle(message),
         () => {
           this.connection = null;
-          // The next connection is sent each chat again: what it asked for, it asks again.
+          // The next connection is sent each chat again: what it asked for, it asks again. A group's list here is no
+          // longer kept current: read again when it is asked for.
           this.asked.clear();
+          this.held.clear();
           for (const pending of this.pending.values()) pending.reject(new Error("Lost the Ghostly peer"));
           this.pending.clear();
           setTimeout(() => void this.connect().catch(() => {}), 500);
@@ -223,10 +253,13 @@ class EngineClient {
       case "messages":
         // The whole history holds what changed before it: told now, and not again when the tick ends.
         this.changed.delete(message.linkId);
-        if (message.more) this.partial.add(message.linkId);
-        else {
+        if (message.more) {
+          this.partial.add(message.linkId);
+          this.held.delete(message.linkId);
+        } else {
           this.partial.delete(message.linkId);
           this.asked.delete(message.linkId);
+          this.held.add(message.linkId);
         }
         this.messages.set(message.linkId, message.messages);
         for (const listener of this.messageListeners) listener(message.linkId, message.messages);
