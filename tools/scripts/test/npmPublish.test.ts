@@ -37,8 +37,11 @@ describe("the CLI on npm", () => {
     expect(workflow).toContain('"v$version" != "$TAG"');
   });
 
-  it("follows a security autorelease too, whose release (made with the workflow token) triggers nothing by itself", () => {
-    expect(read(".github/workflows/security-autorelease.yml")).toContain("gh workflow run npm-publish.yml");
+  it("authenticates with OIDC only: no npm token, in the workflow or the release docs", () => {
+    const workflow = read(".github/workflows/npm-publish.yml");
+    expect(workflow).not.toMatch(/NPM_TOKEN|NODE_AUTH_TOKEN|secrets\./);
+    expect(read("docs/RELEASING.md")).not.toContain("NPM_TOKEN");
+    expect(read("docs/RELEASING.md")).toContain("disallow tokens");
   });
 });
 
@@ -97,7 +100,6 @@ describe("npm-publish.yml's tokens", () => {
       expect(cond === ref || cond.startsWith(`(${ref}) && `), `${id}: ${cond}`).toBe(true);
     }
     // The default branch is not main, so a dispatch by hand names main.
-    expect(read(".github/workflows/security-autorelease.yml")).toContain("gh workflow run npm-publish.yml --repo \"$GITHUB_REPOSITORY\" --ref main");
     const releasing = read("docs/RELEASING.md");
     expect(releasing).toContain("gh workflow run npm-publish.yml --ref main -f tag=");
     expect(releasing).not.toMatch(/gh workflow run npm-publish\.yml -f/);

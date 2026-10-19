@@ -3,9 +3,7 @@ name: Publish npm
 # The headless CLI (packages/cli) goes to npm as `@ghostlytools/cli` (the npm
 # organization `ghostlytools`; the command is `ghostly`) once its release
 # is published: a person publishing the draft (docs/RELEASING.md, step 4)
-# starts this workflow. A security autorelease publishes its release with the
-# workflow token, which starts nothing, so security-autorelease.yml dispatches
-# this workflow itself. A tag can also be (re)published by hand:
+# starts this workflow. A tag can also be (re)published by hand:
 #   gh workflow run npm-publish.yml --ref main -f tag=v1.0.0
 #
 # A run uses the copy of this file on the ref it runs from, and npm's Trusted
@@ -14,10 +12,8 @@ name: Publish npm
 # environment allows only those refs too (docs/RELEASING.md): a branch's own
 # copy can drop the check here, never the environment's.
 #
-# Authentication is npm trusted publishing (OIDC): no long-lived token. npm
-# only lets a package that already exists trust a workflow, so the very first
-# publish uses the NPM_TOKEN secret of the `npm` environment; once the package
-# is on npm and trusts this workflow, delete that secret. See docs/RELEASING.md.
+# Authentication is npm trusted publishing (OIDC) only: no npm token exists,
+# and both packages refuse tokens on npm. See docs/RELEASING.md.
 #
 # Only the two publish jobs can ask for an OIDC token, and both run in the
 # `npm` environment, which each package's Trusted Publisher names. The checks
@@ -34,10 +30,9 @@ name: Publish npm
 # so a problem there never holds the CLI back. `verify-sdk` (no token) runs
 # `npm run test:sdk-example` on the tag and keeps the tarball it checked;
 # `publish-sdk` publishes that very file, with no checkout, install, build or
-# script. It is not on npm yet: it publishes only once the repository
-# variable SDK_NPM_PUBLISH is "true", which the owner sets when he makes the
-# first publish (docs/RELEASING.md, "npm trusted publishing"). Until then it
-# says so in the run's summary and stops.
+# script. It publishes only while the repository variable SDK_NPM_PUBLISH is
+# "true" (docs/RELEASING.md, "npm trusted publishing"); otherwise it says so in
+# the run's summary and stops.
 
 on:
   release:
@@ -162,9 +157,6 @@ jobs:
           node -e 'const p = require(process.argv[1]); process.exit(p.name === "@ghostlytools/cli" && p.version === process.env.VERSION ? 0 : 1)' "$RUNNER_TEMP/cli-package.json"
 
       - name: Publish
-        env:
-          # Only for the first publish (see the top of this file); empty afterwards, and npm uses OIDC.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish "$RUNNER_TEMP/cli/ghostlytools-cli-$VERSION.tgz" --provenance --access public --ignore-scripts
 
   # What a person gets from `npm install -g @ghostlytools/cli`, in a job with no token: the registry can take a moment
@@ -320,9 +312,6 @@ jobs:
           node -e 'const p = require(process.argv[1]); process.exit(p.name === "@ghostlytools/sdk" && p.version === process.env.VERSION ? 0 : 1)' "$RUNNER_TEMP/sdk-package.json"
 
       - name: Publish
-        env:
-          # Only for the first publish (see the top of this file); empty afterwards, and npm uses OIDC.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish "$RUNNER_TEMP/sdk/ghostlytools-sdk-$VERSION.tgz" --provenance --access public --ignore-scripts
 
   # What a mini-app gets from `npm install @ghostlytools/sdk`, in a job with no token: the registry can take a moment to
