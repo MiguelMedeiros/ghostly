@@ -2,7 +2,7 @@ import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import { usePeerAvatar, usePeerNick, useShareProfile } from "../hooks/useAvatars";
 import { PeerAvatar } from "../components/Avatar";
 import { AvatarOpener } from "../components/AvatarViewer";
-import { useBackdropDismiss } from "../hooks/useDismiss";
+import { useBackdropDismiss, useDialogFocus } from "../hooks/useDismiss";
 import { useComposition } from "../hooks/useComposition";
 import { DeleteChatDialog } from "../components/DeleteChatDialog";
 import { createPortal } from "react-dom";
@@ -540,7 +540,6 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // A sheet (a phone): its rarer rows are behind More…, a second sheet. A popover lists them all.
   const sheetMenu = useIsMobile();
   const [showMore, setShowMore] = useState(false);
-  const techBackdrop = useBackdropDismiss(() => setShowTechInfo(false));
 
   // A bot's routines in a row: one row, opened on a tap (WISP 405 · Status Cards). Found over the whole timeline, so a
   // run is the same whichever of its rows are in the page.
@@ -1184,63 +1183,41 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
           onSave={(enabled) => platform.setChatHold(params.peerPubKeyB64, enabled)} />
       )}
       {confirmDelete && <DeleteChatDialog name={`${shownName} · ${truncatedPeerKey}`} onClose={()=>setConfirmDelete(false)} onConfirm={handleDelete} />}
-      {/* Tech Info Modal */}
       {showTechInfo && techInfo && (
-        <div 
-          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in"
-          {...techBackdrop}
-        >
-          <div 
-            className="bg-surface-alt rounded-xl max-w-md w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-fade-in"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between p-4 border-b border-border">
-              <h2 className="text-lg font-semibold text-text-primary">{t("chat.menu.techInfo")}</h2>
-              <button
-                onClick={() => setShowTechInfo(false)}
-                aria-label={t("common.close")}
-                className="p-1.5 text-text-muted hover:text-text-primary hover:bg-surface-hover rounded-full transition-colors"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-            <div className="p-4 space-y-4 text-sm">
-              <TechInfoSection title={t("chat.tech.identity")}>
-                <TechInfoRow label={t("chat.tech.sessionId")} value={techInfo.sessionId} mono copyable />
-                <TechInfoRow label={t("chat.tech.myKey")} value={techInfo.myPubKey} mono copyable />
-                <TechInfoRow label={t("chat.tech.peerKey")} value={techInfo.peerPubKey} mono copyable />
-                <TechInfoRow label={t("chat.tech.encKey")} value={techInfo.encKeyPreview} mono />
-              </TechInfoSection>
-              <TechInfoSection title={t("chat.tech.protocol")}>
-                <TechInfoRow label={t("chat.tech.network")} value={techInfo.protocol} />
-                <TechInfoRow label={t("chat.tech.encryption")} value={techInfo.encryption} />
-                <TechInfoRow label="TTL" value={`${techInfo.messageTtl}s`} />
-                <TechInfoRow label={t("chat.tech.created")} value={formatAt(techInfo.createdAt, { dateStyle: "short", timeStyle: "medium" }, language)} />
-              </TechInfoSection>
-              <TechInfoSection title={t("chat.tech.sync")}>
-                <TechInfoRow label={t("chat.tech.status")} value={status} />
-                <TechInfoRow label={t("chat.tech.pollInterval")} value={`${techInfo.currentPollInterval / 1000}s`} />
-                <TechInfoRow label={t("chat.tech.polls")} value={techInfo.pollCount.toString()} />
-                <TechInfoRow label={t("chat.tech.lastSync")} value={lastSync ? formatAt(lastSync, { timeStyle: "medium" }, language) : "—"} />
-                <TechInfoRow label={t("chat.tech.messages")} value={messages.length.toString()} />
-              </TechInfoSection>
-              <TechInfoSection title={t("chat.tech.ackStatus")}>
-                <TechInfoRow 
-                  label={t("chat.tech.myAck")} 
-                  value={techInfo.myAck > 0 ? formatAt(techInfo.myAck, { timeStyle: "medium" }, language) : t("chat.tech.none")} 
-                />
-                <TechInfoRow 
-                  label={t("chat.tech.peerAck")} 
-                  value={techInfo.peerAck > 0 ? formatAt(techInfo.peerAck, { timeStyle: "medium" }, language) : t("chat.tech.none")} 
-                />
-                <TechInfoRow label={t("chat.tech.pendingBuffer")} value={t("chat.tech.pendingCount", { count: techInfo.sentBufferSize })} />
-              </TechInfoSection>
-            </div>
-          </div>
+        <TechInfoDialog onClose={() => setShowTechInfo(false)} returnFocus={optionsRef}>
+        <div className="p-4 space-y-4 text-sm">
+          <TechInfoSection title={t("chat.tech.identity")}>
+            <TechInfoRow label={t("chat.tech.sessionId")} value={techInfo.sessionId} mono copyable />
+            <TechInfoRow label={t("chat.tech.myKey")} value={techInfo.myPubKey} mono copyable />
+            <TechInfoRow label={t("chat.tech.peerKey")} value={techInfo.peerPubKey} mono copyable />
+            <TechInfoRow label={t("chat.tech.encKey")} value={techInfo.encKeyPreview} mono />
+          </TechInfoSection>
+          <TechInfoSection title={t("chat.tech.protocol")}>
+            <TechInfoRow label={t("chat.tech.network")} value={techInfo.protocol} />
+            <TechInfoRow label={t("chat.tech.encryption")} value={techInfo.encryption} />
+            <TechInfoRow label="TTL" value={`${techInfo.messageTtl}s`} />
+            <TechInfoRow label={t("chat.tech.created")} value={formatAt(techInfo.createdAt, { dateStyle: "short", timeStyle: "medium" }, language)} />
+          </TechInfoSection>
+          <TechInfoSection title={t("chat.tech.sync")}>
+            <TechInfoRow label={t("chat.tech.status")} value={status} />
+            <TechInfoRow label={t("chat.tech.pollInterval")} value={`${techInfo.currentPollInterval / 1000}s`} />
+            <TechInfoRow label={t("chat.tech.polls")} value={techInfo.pollCount.toString()} />
+            <TechInfoRow label={t("chat.tech.lastSync")} value={lastSync ? formatAt(lastSync, { timeStyle: "medium" }, language) : "—"} />
+            <TechInfoRow label={t("chat.tech.messages")} value={messages.length.toString()} />
+          </TechInfoSection>
+          <TechInfoSection title={t("chat.tech.ackStatus")}>
+            <TechInfoRow 
+              label={t("chat.tech.myAck")} 
+              value={techInfo.myAck > 0 ? formatAt(techInfo.myAck, { timeStyle: "medium" }, language) : t("chat.tech.none")} 
+            />
+            <TechInfoRow 
+              label={t("chat.tech.peerAck")} 
+              value={techInfo.peerAck > 0 ? formatAt(techInfo.peerAck, { timeStyle: "medium" }, language) : t("chat.tech.none")} 
+            />
+            <TechInfoRow label={t("chat.tech.pendingBuffer")} value={t("chat.tech.pendingCount", { count: techInfo.sentBufferSize })} />
+          </TechInfoSection>
         </div>
+        </TechInfoDialog>
       )}
     </div>
     {/* A mini-app opened here (WISP 1200): beside the chat, over it on a phone. Always here while Apps is, so its frame
@@ -1256,6 +1233,39 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     </div>
     </NowPlayingChat.Provider>
     </CueChat.Provider>
+  );
+}
+
+/**
+ * The chat's Tech Info, a dialog: the focus goes into it, Tab stays in it, Escape or its ✕ closes it, and the focus goes
+ * back to ⋮ (the menu's row that opened it is gone by then).
+ */
+function TechInfoDialog({ onClose, returnFocus, children }: { onClose: () => void; returnFocus: React.RefObject<HTMLElement | null>; children: React.ReactNode }) {
+  const { t } = useI18n();
+  const dialog = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialog, onClose, () => true, returnFocus);
+  const backdrop = useBackdropDismiss(onClose);
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-fade-in" {...backdrop}>
+      <div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="chat-tech-info-title"
+        className="focus:outline-none bg-surface-alt rounded-xl max-w-md w-full max-h-[80vh] overflow-y-auto shadow-2xl animate-fade-in"
+        onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <h2 id="chat-tech-info-title" className="text-lg font-semibold text-text-primary">{t("chat.menu.techInfo")}</h2>
+          <button
+            onClick={onClose}
+            aria-label={t("common.close")}
+            className="p-1.5 text-text-muted hover:text-text-primary hover:bg-surface-hover rounded-full transition-colors"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
   );
 }
 
