@@ -54,7 +54,7 @@ import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseRe
 import { PINNED_FRAME, PIN_FRAME, PIN_LIMITS, parsePinFrame, parsePinnedFrame, pinFrame, pinnedFrame, type WirePin } from "./pins";
 import { TYPING_FRAME, TypingReceiver, TypingSender, type TypingActivity } from "./pairedTyping";
 import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditMessage, validEditNumber, type WireEdit } from "./pairedEdits";
-import { FILE_FRAMES, decodeFileData, encodeFileData } from "./chatFiles";
+import { FILE_FRAMES, FILE_LIMITS, decodeFileData, encodeFileData } from "./chatFiles";
 import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
 import { heardCallSignal } from "./callSignal";
 import { traceLink } from "./linkTrace";
@@ -3526,11 +3526,19 @@ export class GhostLink {
     try {
       if (!channel) return;
       for (let at = 0; at < bytes.length; at += APP_RANGE_LIMITS.chunkBytes) {
-        await this.filesWritable();
+        // Room is asked again right before the send: the app's other requests wake on the same drain, and each that
+        // sent first took some of it, so they would all send at once and fill a native channel past its budget.
+        for (let room = this.filesWritable(); room; room = this.channel === channel ? this.filesWritable() : undefined) await room;
         if (!task.live || this.channel !== channel || !this.supportsAppRanges) return;
         const chunk = bytes.subarray(at, at + APP_RANGE_LIMITS.chunkBytes);
         const message = this.supportsBinaryFiles ? encodeAppRangeData(task.app, task.request, task.offset + at, chunk) : JSON.stringify(appRangeDataFrame(task.app, task.request, task.offset + at, chunk));
-        try { channel.send(message); } catch { return; }
+        try { channel.send(message); } catch {
+          // A full channel (files beside it woke on the same drain) is tried again later, as a file's chunk is: given up
+          // on, the contact's read would wait for good. A session that ends drops the task, which stops this.
+          await new Promise(resolve => setTimeout(resolve, FILE_LIMITS.sendRetryMs));
+          at -= APP_RANGE_LIMITS.chunkBytes;
+          continue;
+        }
         this.filesWrote(channel, typeof message === "string" ? message.length : message.byteLength);
       }
       this.appRanges.finish(task, size);
