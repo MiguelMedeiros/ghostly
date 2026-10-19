@@ -31,7 +31,7 @@ const STEP_OF: Partial<Record<HandoffView["step"], Step>> = {
  * while files are copied), Cancel while nothing has changed yet, and what went wrong when it failed. The settle wait
  * says why it waits behind its ⓘ; on a phone, "Keep Ghostly open". What the engine refused of Cancel is said under it.
  */
-export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCancel?: () => Promise<unknown> }) {
+export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCancel?: () => unknown }) {
   const { t, language } = useI18n();
   const phone = useIsMobile();
   const [why, setWhy] = useState(false);
@@ -42,7 +42,7 @@ export function HandoffProgress({ view, onCancel }: { view: HandoffView; onCance
   const cancel = () => {
     if (cancelling || !onCancel) return;
     setCancelling(true); setRefused(null);
-    void onCancel().catch((cause: unknown) => setRefused(handoffProblem(cause, t, { device }) ?? problemText(cause, t))).finally(() => setCancelling(false));
+    void Promise.resolve().then(onCancel).catch((cause: unknown) => setRefused(handoffProblem(cause, t, { device }) ?? problemText(cause, t))).finally(() => setCancelling(false));
   };
   const failed = view.step === "failed";
   const done = view.step === "done";
