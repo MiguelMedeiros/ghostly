@@ -1,4 +1,4 @@
-import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, ownInviteRefusal, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type PairedTransport, type TypingKind } from "@ghostly/core";
+import { AWAITING_PEER_MS, groupName, inviteLink, LIMITS, MAX_GROUP_NAME_LENGTH, MENTION_EVERYONE, ownInviteRefusal, sanitizeTypingStatus, TYPING_KINDS, TYPING_STATUS_MAX, type GroupMention, type TypingKind } from "@ghostly/core";
 import type { EngineState, GroupView, Settings, StoredMessage } from "@ghostly/browser/shared/types";
 import { iceServerProblem, iceServerSetting } from "@ghostly/browser/shared/ice";
 import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
@@ -25,6 +25,7 @@ import { CALL_METHODS } from "./calls/api";
 import { APP_SERVE_METHODS } from "./appServe";
 import { APP_CHAT_METHODS } from "./appChat";
 import { WALLET_METHODS } from "./wallets";
+import { TRANSPORT_NAMES } from "./words";
 import { chatDetailsJson, chatJson, chatMessageJson, groupJson, groupMessageJson, isLive, messageJson, type MessageJson } from "./views";
 
 /**
@@ -83,13 +84,6 @@ function relayRefused(error: unknown, patch: Record<string, unknown>): unknown {
   const keys = ["relays", "irohRelays", "hyperdhtRelay"].filter((key) => Object.hasOwn(patch, key));
   return new CliError("bad_request", `${keys.join(", ") || "relays"}: ${error.message.replace(/^Enter /, "give ").replace(/^(Not|Use) /, (word) => word.toLowerCase())}`);
 }
-
-// ---------- transports ----------
-
-const TRANSPORT_NAMES: Record<string, PairedTransport | "auto" | "dht"> = {
-  auto: "auto", dht: "dht", webrtc: "webrtc/1", iroh: "iroh/1", hyperdht: "hyperdht/1",
-  "webrtc/1": "webrtc/1", "iroh/1": "iroh/1", "hyperdht/1": "hyperdht/1",
-};
 
 // ---------- chat names ----------
 

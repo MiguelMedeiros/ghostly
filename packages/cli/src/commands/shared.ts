@@ -17,6 +17,8 @@ export interface Command {
   options?: Record<string, OptionSpec>;
   /** Positionals, in order; a trailing `...` one takes the rest joined by spaces. */
   args?: string[];
+  /** The words a positional takes, by its name in `args`: any other is a usage error before the profile opens. */
+  words?: Record<string, readonly string[]>;
   params?: (parsed: Parsed, args: Record<string, string | undefined>) => Record<string, unknown>;
   /**
    * A command that runs here, on files, with no profile or daemon (the publisher tools of WISP 1200): its answer is
@@ -162,7 +164,7 @@ export function cardLinks(values: unknown): { url: string; label?: string }[] | 
   });
 }
 
-const listed = (words: readonly string[]) => `${words.slice(0, -1).join(", ")} or ${words.at(-1)}`;
+export const listed = (words: readonly string[]) => `${words.slice(0, -1).join(", ")} or ${words.at(-1)}`;
 
 /**
  * `--item state:text` as a task's item. The word before the first colon is the state when it is one lowercase word (and

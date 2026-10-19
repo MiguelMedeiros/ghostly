@@ -165,6 +165,25 @@ describe("the argument parser", () => {
     expect(() => positionals(COMMANDS["chat show"], ["a", "b"])).toThrow(/Too many/);
   });
 
+  it("refuses a word an argument does not take as a usage error that names the argument and its words, before the profile opens", () => {
+    // Before, the API answered after the profile opened: bad_request (exit 1), "type must be one of cashu, lightning, …".
+    const refused = (name: string, values: string[], message: string) =>
+      expect(() => positionals(COMMANDS[name], values), `${name} ${values.join(" ")}`).toThrow(new CliError("usage", message));
+    const types = "cashu, lightning, arkade, bark, spark, bitcoin, fedimint or usdt";
+    for (const name of ["wallet create", "wallet remove", "wallet faucet"]) refused(name, ["weird"], `<type> takes ${types}, not "weird"`);
+    refused("wallet create", ["Cashu"], `<type> takes ${types}, not "Cashu"`);
+    refused("wallet address", ["cashu"], "<type> takes bitcoin, arkade, spark or usdt, not \"cashu\"");
+    refused("chat accept", ["bob", "weird"], "<method> takes cashu, lightning, arkade, usdt, bark, bitcoin, fedimint or spark, not \"weird\"");
+    refused("chat transport", ["bob", "weird"], "<transport> takes auto, dht, webrtc, iroh, hyperdht, webrtc/1, iroh/1 or hyperdht/1, not \"weird\"");
+    refused("chat transport", ["bob", "constructor"], "<transport> takes auto, dht, webrtc, iroh, hyperdht, webrtc/1, iroh/1 or hyperdht/1, not \"constructor\"");
+    // A missing or "" one is still the missing argument, and the words each takes go through as given.
+    expect(() => positionals(COMMANDS["wallet create"], [""])).toThrow(/^Missing <type>/);
+    expect(positionals(COMMANDS["wallet create"], ["spark"])).toEqual({ type: "spark" });
+    expect(positionals(COMMANDS["wallet address"], ["usdt"])).toEqual({ type: "usdt" });
+    expect(positionals(COMMANDS["chat accept"], ["bob", "lightning"])).toEqual({ chat: "bob", method: "lightning" });
+    expect(positionals(COMMANDS["chat transport"], ["bob", "iroh/1"])).toEqual({ chat: "bob", transport: "iroh/1" });
+  });
+
   it("a required positional given as \"\" is the usage error a missing one is, before the profile opens, in every command", () => {
     expect(() => positionals(COMMANDS["chat show"], [""])).toThrow(/^Missing <chat>: ghostly chat show <chat>/);
     expect(() => positionals(COMMANDS["file accept"], ["", "f"])).toThrow(/^Missing <chat>/);
