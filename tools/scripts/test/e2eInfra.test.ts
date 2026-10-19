@@ -20,6 +20,28 @@ describe("the e2e stack (e2e/infra)", () => {
   });
 });
 
+describe("the HyperDHT relay (e2e/infra/env.mjs)", () => {
+  it("is ready once its own HyperDHT node is reachable, not merely when it answers", async () => {
+    const { hyperdhtRelayReady } = await import("../../../e2e/infra/env.mjs");
+    const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+    const { default: DHT } = await import("hyperdht");
+    const reachable = await startRelay({ testnet: 3 });
+    // A node made as any new one is: firewalled until dht-rpc's first network check, about 20 minutes in. Two browsers
+    // on such a relay never reach each other until then (a relay image from before it was made reachable on loopback).
+    const node = new DHT({ bootstrap: reachable.bootstrap, host: "127.0.0.1" });
+    const firewalled = await startRelay({ dht: node });
+    try {
+      expect(await hyperdhtRelayReady(reachable.url)).toBe(true);
+      expect(await hyperdhtRelayReady(firewalled.url)).toBe(false);
+      expect(await hyperdhtRelayReady("ws://127.0.0.1:1")).toBe(false);
+    } finally {
+      await firewalled.close();
+      await node.destroy();
+      await reachable.close();
+    }
+  }, 30_000);
+});
+
 describe("the regtest chain (e2e/infra/chain.mjs)", () => {
   it("mines one block when the shared chain's tip is old, so a Lightning node counts as synced; never when it is fresh", async () => {
     const { freshTip, TIP_MAX_AGE_S } = await import("../../../e2e/infra/chain.mjs");
