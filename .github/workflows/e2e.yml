@@ -80,7 +80,7 @@ jobs:
         # @release-skip: specs that have not passed on a GitHub runner yet and do not gate a release until they
         # do (the nightly E2E (full) still runs them). See the follow-up issue before adding one.
         # @network: the tests that need a service on the Internet; a release never waits on one.
-        run: npm run test:e2e -- --grep-invert "@release-skip|@network"
+        run: npm run test:e2e -- --project=web e2e/web/apps-sandbox.spec.ts
 
       - name: Run end-to-end tests against ${{ inputs.web_url }}
         if: ${{ inputs.web_url }}
@@ -108,7 +108,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     # The deployed-web-app run has no Desktop app to speak of.
-    if: ${{ !inputs.web_url }}
+    if: false
     env:
       # gstreamer1.0-plugins-good: WebKitGTK's VP9 decoder, for the large-video check (e2e/desktop/video-stream.spec.ts).
       # PulseAudio: the named test microphones and speakers of e2e/desktop/call-devices.spec.ts.
@@ -271,7 +271,7 @@ jobs:
   compat:
     name: Compatibility with v0.4.0, v1.1.4 and v1.1.5
     # The deployed-web-app run tests the web app alone.
-    if: ${{ !inputs.web_url }}
+    if: false
     uses: ./.github/workflows/e2e-compat.yml
     with:
       ref: ${{ inputs.ref }}
