@@ -183,7 +183,10 @@ export interface AppRangeTask {
   readonly file: string;
   readonly offset: number;
   readonly length: number;
-  /** False once the asker cancelled, the app closed or the session ended: send nothing more for it. */
+  /**
+   * False once the asker cancelled, the app closed or the session ended: send nothing more for it. A task the asker
+   * cancelled still holds its place among the app's `inFlight` until it is settled (`finish`, `fail` or `release`).
+   */
   readonly live: boolean;
 }
 
@@ -214,6 +217,8 @@ const slot = (app: string, request: number) => `${app}:${request}`;
 export class AppRanges {
   private readonly serves = new Map<string, { app: string; file: string }>();
   private readonly serving = new Map<string, Serving>();
+  /** Tasks cancelled or unserved that the session is still reading or sending: each counts in its app's `inFlight` until settled. */
+  private readonly draining = new Set<Serving>();
   private readonly asking = new Map<string, Asking>();
   private readonly waiting = new Map<string, Asking[]>();
   private nextRequest = 0;
@@ -234,7 +239,7 @@ export class AppRanges {
     const serve = this.serves.get(serveId);
     if (!serve) return false;
     this.serves.delete(serveId);
-    for (const task of this.serving.values()) if (task.serve === serveId) this.drop(task);
+    for (const task of this.serving.values()) if (task.serve === serveId) this.drop(task, true);
     return true;
   }
 
@@ -250,16 +255,18 @@ export class AppRanges {
     if (this.serving.has(slot(app, request))) return null;
     const serve = this.serves.get(frame.s);
     if (!serve || serve.app !== app) { this.send(appRangeErrorFrame(app, request, "not-served")); return null; }
-    if ([...this.serving.values()].filter(task => task.app === app).length >= APP_RANGE_LIMITS.inFlight) { this.send(appRangeErrorFrame(app, request, "busy")); return null; }
+    // A request cancelled but not yet settled still counts: a cancel stops the bytes, not the read under them.
+    const inFlight = [...this.serving.values(), ...this.draining].filter(task => task.app === app).length;
+    if (inFlight >= APP_RANGE_LIMITS.inFlight) { this.send(appRangeErrorFrame(app, request, "busy")); return null; }
     const task: Serving = { app, request, serve: frame.s, file: serve.file, offset: frame.o, length: frame.n, live: true };
     this.serving.set(slot(app, request), task);
     return task;
   }
 
-  /** An `ar-cancel` from the contact: that request sends nothing more. */
+  /** An `ar-cancel` from the contact: that request sends nothing more, and its number frees; its place frees once it is settled. */
   receiveCancel(frame: Extract<AppRangeFrame, { t: "ar-cancel" }>): void {
     const task = this.serving.get(slot(frame.a, frame.r));
-    if (task) this.drop(task);
+    if (task) this.drop(task, true);
   }
 
   /** Every byte of `task` was sent: `ar-end` goes with the file's size, unless the task was dropped meanwhile. */
@@ -270,6 +277,11 @@ export class AppRanges {
   /** The file under `task` could not be read: `ar-err` goes in place of the rest, unless the task was dropped meanwhile. */
   fail(task: AppRangeTask, error: "changed" | "gone"): void {
     if (this.take(task)) this.send(appRangeErrorFrame(task.app, task.request, error));
+  }
+
+  /** The session stopped working on `task` without an answer (it is no longer live, or the channel went): its place frees, nothing is sent. */
+  release(task: AppRangeTask): void {
+    this.take(task);
   }
 
   /** Reads `length` bytes at `offset` of what the contact's `app` serves as `serve`: the bytes (fewer at the end) and the file's size. */
@@ -311,6 +323,7 @@ export class AppRanges {
   closeApp(app: string, error: AppRangeReadError = "peer-closed"): void {
     for (const [id, serve] of this.serves) if (serve.app === app) this.serves.delete(id);
     for (const task of this.serving.values()) if (task.app === app) this.drop(task);
+    for (const task of this.draining) if (task.app === app) this.draining.delete(task);
     for (const ask of this.waiting.get(app) ?? []) ask.reject(new Error(error));
     this.waiting.delete(app);
     for (const ask of this.asking.values()) if (ask.app === app) this.settle(ask, error);
@@ -318,17 +331,20 @@ export class AppRanges {
 
   /** The session ended: no serve id lasts into the next, and every request fails with `offline`. */
   reset(): void {
-    const apps = new Set([...this.serves.values()].map(serve => serve.app).concat([...this.serving.values()].map(task => task.app), [...this.waiting.keys()], [...this.asking.values()].map(ask => ask.app)));
+    const apps = new Set([...this.serves.values()].map(serve => serve.app).concat([...this.serving.values(), ...this.draining].map(task => task.app), [...this.waiting.keys()], [...this.asking.values()].map(ask => ask.app)));
     for (const app of apps) this.closeApp(app, "offline");
   }
 
-  private drop(task: Serving): void {
+  /** Stops `task` and frees its request number; `draining` keeps it counted until it is settled. */
+  private drop(task: Serving, draining = false): void {
     task.live = false;
     this.serving.delete(slot(task.app, task.request));
+    if (draining) this.draining.add(task);
   }
 
-  /** Frees `task`'s place; false when it was dropped already. */
+  /** Frees `task`'s place; false when it was no longer live (nothing to send for it). */
   private take(task: AppRangeTask): boolean {
+    if (this.draining.delete(task as Serving)) return false;
     const held = this.serving.get(slot(task.app, task.request));
     if (held !== task || !held.live) return false;
     this.drop(held);

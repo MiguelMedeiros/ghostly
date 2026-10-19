@@ -171,6 +171,29 @@ describe("the read lane on a paired session (app-ranges/1)", () => {
     expect(a.tasks[0].live).toBe(false);
   });
 
+  it("a contact's get and cancel loop meets busy past 4 until this side settles what it was reading", async () => {
+    const { a, b } = await pair({ hold: true });
+    await opened(a, b);
+    const served = a.link.serveAppFile(APP, "film") as { serve: string };
+    const raw = (frame: object) => b.channel!.send(JSON.stringify(frame));
+    for (let r = 0; r < 50; r++) {
+      raw({ t: "ar-get", a: APP, s: served.serve, r, o: 0, n: APP_RANGE_LIMITS.requestBytes });
+      raw({ t: "ar-cancel", a: APP, r });
+    }
+    const busy = () => rangeFrames(a.channel!).filter(data => (data as string).includes('"busy"')).length;
+    await vi.waitFor(() => expect(busy()).toBe(50 - APP_RANGE_LIMITS.inFlight));
+    expect(a.tasks).toHaveLength(APP_RANGE_LIMITS.inFlight);
+    expect(a.tasks.every(task => !task.live)).toBe(true);
+    // The owner settles two, as it must even when they are no longer live: two places free, and nothing goes for them.
+    const sent = a.channel!.sent.length;
+    a.link.failAppRange(a.tasks[0], "gone");
+    await a.link.sendAppRange(a.tasks[1], FILM.subarray(0, 10), FILM.length);
+    expect(a.channel!.sent.length).toBe(sent);
+    for (const r of [50, 51, 52]) raw({ t: "ar-get", a: APP, s: served.serve, r, o: 0, n: 1 });
+    await vi.waitFor(() => expect(busy()).toBe(50 - APP_RANGE_LIMITS.inFlight + 1));
+    expect(a.tasks).toHaveLength(APP_RANGE_LIMITS.inFlight + 2);
+  });
+
   it("is not offered without apps/1, nor by a side that does not ask for it, and its frames are dropped then", async () => {
     const { a, b } = await pair({ b: { appRangesSupport: false } });
     await opened(a, b);

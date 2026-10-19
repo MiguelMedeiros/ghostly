@@ -495,7 +495,8 @@ export interface GhostLinkEvents {
   /**
    * The contact's app asks for a range of a file this side's app serves (`app-ranges/1`): read it and give the bytes to
    * `sendAppRange`, or say why not with `failAppRange`. Already checked against the serve ids and the requests in
-   * flight; `task.live` turns false when it no longer matters.
+   * flight; `task.live` turns false when it no longer matters. Settle every task, live or not, with one of the two: a
+   * task the contact cancelled holds its place among the app's requests in flight until then.
    */
   onAppRangeTask?(task: AppRangeTask): void;
   onStatus?(status: LinkStatus): void;
@@ -3522,18 +3523,23 @@ export class GhostLink {
   async sendAppRange(task: AppRangeTask, bytes: Uint8Array, size: number): Promise<void> {
     bytes = bytes.subarray(0, task.length);
     const channel = this.channel;
-    if (!channel) return;
-    for (let at = 0; at < bytes.length; at += APP_RANGE_LIMITS.chunkBytes) {
-      await this.filesWritable();
-      if (!task.live || this.channel !== channel || !this.supportsAppRanges) return;
-      const chunk = bytes.subarray(at, at + APP_RANGE_LIMITS.chunkBytes);
-      const message = this.supportsBinaryFiles ? encodeAppRangeData(task.app, task.request, task.offset + at, chunk) : JSON.stringify(appRangeDataFrame(task.app, task.request, task.offset + at, chunk));
-      try { channel.send(message); } catch { return; }
-      this.filesWrote(channel, typeof message === "string" ? message.length : message.byteLength);
+    try {
+      if (!channel) return;
+      for (let at = 0; at < bytes.length; at += APP_RANGE_LIMITS.chunkBytes) {
+        await this.filesWritable();
+        if (!task.live || this.channel !== channel || !this.supportsAppRanges) return;
+        const chunk = bytes.subarray(at, at + APP_RANGE_LIMITS.chunkBytes);
+        const message = this.supportsBinaryFiles ? encodeAppRangeData(task.app, task.request, task.offset + at, chunk) : JSON.stringify(appRangeDataFrame(task.app, task.request, task.offset + at, chunk));
+        try { channel.send(message); } catch { return; }
+        this.filesWrote(channel, typeof message === "string" ? message.length : message.byteLength);
+      }
+      this.appRanges.finish(task, size);
+    } finally {
+      // Stopped early or not, the task's place among its app's requests in flight frees now.
+      this.appRanges.release(task);
     }
-    this.appRanges.finish(task, size);
   }
-  /** `task`'s file cannot be read: `changed` or `gone` goes in place of its bytes. */
+  /** `task`'s file cannot be read: `changed` or `gone` goes in place of its bytes (nothing once it is no longer live, but its place frees). */
   failAppRange(task: AppRangeTask, error: "changed" | "gone"): void { this.appRanges.fail(task, error); }
   /** An `ar-*` frame from the contact, on a session that agreed `app-ranges/1`. */
   private receiveAppRange(frame: Record<string, unknown>): void {
