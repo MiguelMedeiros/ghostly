@@ -4,6 +4,44 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.4.4
+
+### Fixed
+
+**Chat**
+
+- A long audio file name, or a name in the bar of what plays on, written in the other direction than the app's language (an English name in the Arabic app, an Arabic file name in the English one) shows its start and is cut at its end: it lost its start ("...g about the release plan.wav").
+- In a chat's connection panel, choosing a transport from the keyboard, or pressing Use automatic, The codes match or Reconnect, keeps the focus on it once the change is made. Before, the focus fell to the page while the change ran, so the next Tab left the panel and Escape no longer closed it.
+- A contact who comes back to many texts written while they were away no longer freezes the sender's app once the texts are delivered. Each delivery receipt read the chat's whole history again, so on the command line and in bots a backlog of 1,000 to 2,000 texts locked the app for half a minute to two minutes, and a call running on it dropped. The receipts that arrive while the texts go out now share one look at the chat.
+- Try again on a new chat whose first connection failed keeps the keyboard focus while it runs, and after a refusal. When the retry moves the pairing on, the focus goes to the pairing's words. It used to drop to the page, so Enter did nothing and you had to Tab back from the top of the chat.
+- Sending a text in a long chat no longer reads the chat's whole history first. Each send read and sorted every message to find older ones still waiting to go, and usually found none: about a fifth of a second per text at 10,000 messages on the command line, so a bot that posts often in a long chat lost that time on every message. Now the chat's history is read only when something older may still be waiting.
+- A playing voice message no longer keeps the app busy: its waveform moves with the time, four times a second, and the knob glides between steps without the page being laid out again. Scrolling the chat while one plays is lighter too.
+
+**Wallets**
+
+- A BDK wallet's Review payment, Refresh or balance no longer fails with "Could not sync from Esplora" when the server stumbles for a moment, as electrs does for its newest blocks right after a new one: the wallet reads the chain again after 1 s, then 2 s, before saying it failed.
+- The Fedimint wallet's buttons, pressed from the keyboard, keep the focus while they run and after a refusal: Look at this federation, Join, Create invoice, Redeem, Create notes, Take them back, Use for Lightning, Leave, Show (the recovery phrase), Download (the backup file) and both Restore buttons. Before, they turned disabled while they ran, which put the focus back at the top of the page. Join takes the focus from Look when the federation's facts come, Cancel gives it back, and only the button pressed says it is working.
+
+**Devices**
+
+- Add a device on a phone with the keyboard up: the card that says why a password was refused goes to the top instead of standing over the Next button. The same holds for every form's card that would cover its button.
+
+**Groups**
+
+- A community member back from being away no longer loses the rest of someone's missed messages when that person writes something new while the member is still catching up.
+- A group's file this device has no room for says "Not enough space on this device for this file", with Ask again once you have freed some space. It used to switch between "Asking a member who has it…" and "Nobody you are connected to has this file yet" forever, while the members kept offering it. A file too large for the space left is no longer fetched by itself: it waits for a Download.
+
+**Everywhere**
+
+- A new device's name field now takes only what the device set keeps (16 bytes, whole characters), so an Arabic, Japanese or accented name shows on every device as it was typed. Before, the field took 16 characters and the set cut the name, often mid-word ("هاتف أحمد الجديد" became "هاتف أحم").
+- On Linux, Ghostly ended by a logout, a shutdown or `kill` now quits as closing its window does. A call in progress ends at once for the contact, instead of going on in silence for about 16 seconds and ending as failed, and the app's notifications leave the desktop's list.
+
+### For developers
+
+**Chat**
+
+- The GIF panel's busy countdown starts in the same commit that shows it (a layout effect), so a test that advances its fake clock right after the wait appears sees the count move. It used to start in an effect React runs a moment later: on a loaded runner the test could advance 10 s before the count existed, read "Try again in 0:30." instead of "0:20.", and click a Try again that was still off.
+
 ## 1.4.3
 
 ### Fixed
