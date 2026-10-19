@@ -261,6 +261,16 @@ const ACTIVE_SLOT_RETRY_MS = 3_000;
  */
 export const NATIVE_HOLD_MS = 2 * 60_000;
 /**
+ * A group not on screen keeps one edge (`groupEdgesByRank`): when its listener has been up this long and the member
+ * has not answered (no session, and its packet says it holds no listener here, or it is away), the group keeps the
+ * next one instead (WISP 902 § Transports).
+ */
+export const GROUP_ANCHOR_ANSWER_MS = 20_000;
+/** How long an edge passed over that way ranks after the others, before the group tries it again. */
+export const GROUP_ANCHOR_PASSED_MS = 5 * 60_000;
+/** How often the edges groups keep are looked at for that (`groupAnchorsAnswered`). */
+const GROUP_ANCHOR_CHECK_MS = 5_000;
+/**
  * How long a chat live when the app last ran may take to be live again before that stretch counts as over
  * (`TransportLog.notBackAfterRestart`): past the contact's liveness bound (three pings missed), the session it held is
  * gone too. Shorter, an app started twice in quick succession would not knock the second time on a contact still
@@ -342,6 +352,10 @@ interface LiveLink {
   carried?: CarriedTransport;
   /** When this chat last took a native listener from an idle live session (`ensureNativeEndpoints`), by transport. */
   nativeTakenAt?: Partial<Record<NativeTransport, number>>;
+  /** A group's edge: when its native listener last came up, by transport (`groupAnchorsAnswered`). */
+  nativeUpAt?: Partial<Record<NativeTransport, number>>;
+  /** A group's edge: when the member's packet last said, in this run, which transports its app runs here (`_tr`). */
+  peerSaidAt?: number;
   /** The mini-apps this side has open in this chat (chat app id to version), for this run (`apps/1`, WISP 1200). */
   appsOpen?: Map<string, string>;
   /** The public key of `stored.participationSeed`, derived once for that seed (`participationKeyOf`). */
@@ -6808,6 +6822,7 @@ export class GhostlyNode implements EngineImplementation {
     // Its native slot, if it held one, is free: a group link waiting for one tries at the next tick.
     this.groupNativeWaiting.delete(linkId);
     this.nativeFailed.delete(linkId);
+    this.anchorPassedOver.delete(linkId);
     this.groupNativeRetryAt = 0;
     // A member who held the subscription and is no longer in the group (removed, or I left): the app replaces it.
     // An edge a group on hubs no longer keeps is still a member's: nothing to replace.
@@ -6993,7 +7008,10 @@ export class GhostlyNode implements EngineImplementation {
         onPacketTransports: (peerTransports, peerDescriptors) => {
           const patch = { peerTransports, peerDescriptors, peerFallback: true };
           live.stored = { ...live.stored, ...patch };
+          live.peerSaidAt = Date.now();
           void db.patchLink(linkId, patch).catch(() => {});
+          // It holds a listener here: this edge is one the member keeps, which this side answers (`chosenByPeer`).
+          if (this.chosenByPeer(live)) this.anchorPassedOver.delete(linkId);
           if (this.keepsGroupNative(live.stored)) void this.ensureNativeEndpoints(linkId);
           // It has WebRTC (again): this link waits for no native slot any more.
           else this.groupNativeWaiting.delete(linkId);
@@ -7003,6 +7021,7 @@ export class GhostlyNode implements EngineImplementation {
         onPacketTransportsGone: () => {
           const patch = { peerTransports: undefined, peerDescriptors: undefined, peerFallback: undefined };
           live.stored = { ...live.stored, ...patch };
+          live.peerSaidAt = undefined;
           void db.patchLink(linkId, patch).catch(() => {});
           if (!this.keepsGroupNative(live.stored)) this.groupNativeWaiting.delete(linkId);
           this.emitState();
@@ -7047,6 +7066,8 @@ export class GhostlyNode implements EngineImplementation {
           // The last moment the member was reachable on it: when it opens, and when it stops being open.
           if (state === "open" || live.dataLink === "open") live.lastSyncAt = Date.now();
           if (state === "open" && !entry) this.groups.edgeOpen(group, peer);
+          // Answered: the group may keep this edge again (`groupAnchorsAnswered`).
+          if (state === "open") this.anchorPassedOver.delete(linkId);
           // Live over a native transport after WebRTC failed: the member is reachable and WebRTC is not. A return no
           // longer says the failure was its app going (`edgeRtcPresence`).
           if (state === "open") { const off = this.edgeRtcOff.get(linkId); if (off) off.held = true; }
@@ -7739,21 +7760,112 @@ export class GhostlyNode implements EngineImplementation {
 
   /**
    * A group's edges that run native transports (`keepsGroupNative`), the one it keeps while it is not on screen first
-   * (WISP 902 § Transports): to a hub or the admin, then one that holds a listener already (so the one it keeps does
-   * not change hands each time another member is heard), then the member seen last. The mesh's catch-up brings the
-   * group's messages through any member.
+   * (WISP 902 § Transports): to a hub, then the admin, then one the member keeps itself (`chosenByPeer`), then one that
+   * holds a listener already (so the one it keeps does not change hands each time another member is heard), then the
+   * member seen last. One passed over lately (`groupAnchorsAnswered`: its member never answered) comes after all of
+   * them. The mesh's catch-up brings the group's messages through any member.
    */
   private groupEdgesByRank(groupId: string, view: GroupView | undefined): LiveLink[] {
     const native = Object.keys(this.nativeFactories) as NativeTransport[], now = Date.now();
-    const lead = new Set(view?.members.filter(member => !member.me && (member.hub || member.role === "admin")).map(member => member.key));
-    const rank = (live: LiveLink) => [Number(lead.has(live.stored.groupPeer!)), Number(native.some(t => live.link!.availableTransports.includes(t))),
+    const lead = new Map(view?.members.filter(member => !member.me && (member.hub || member.role === "admin")).map(member => [member.key, member.hub ? 2 : 1]));
+    const rank = (live: LiveLink) => [Number(!this.anchorPassed(live, now)), lead.get(live.stored.groupPeer!) ?? 0, Number(this.chosenByPeer(live)),
+      Number(native.some(t => live.link!.availableTransports.includes(t))),
       live.link!.groupsSupport ? now : Math.max(presenceSeenAt(live.presence), live.lastSyncAt)];
     const edges = [...this.links.values()].filter(live => live.stored.group === groupId && !live.stored.groupEntry && live.link && this.keepsGroupNative(live.stored));
     const ranks = new Map(edges.map(live => [live, rank(live)]));
     return edges.sort((a, b) => {
       const x = ranks.get(a)!, y = ranks.get(b)!;
-      return y[0] - x[0] || y[1] - x[1] || y[2] - x[2];
+      for (let i = 0; i < x.length; i++) if (y[i] !== x[i]) return y[i] - x[i];
+      return 0;
     });
+  }
+
+  /**
+   * A group's edge the member keeps (WISP 902 § Transports): its packet, read in this run, says its app holds a native
+   * listener there that this app runs too (`_tr`; an app publishes a native transport there only while it listens).
+   * Each side picks the one edge it keeps on its own (`groupEdgesByRank`), and a member's pick is not this side's: this
+   * side keeps that edge too, or the member's listener meets none here (ghostly-agents#1437: the admin, its four group
+   * listeners taken by two other groups, answered "no slot" to the edge its third group's member kept to it).
+   */
+  private chosenByPeer(live: LiveLink, key?: NativeTransport): boolean {
+    if (!live.stored.group || live.stored.groupEntry || live.peerSaidAt === undefined) return false;
+    const theirs = live.stored.peerTransports ?? [];
+    const common = TRANSPORTS.filter((t): t is NativeTransport => t !== "webrtc/1" && t in this.nativeFactories && theirs.includes(t));
+    if (!key) return common.length > 0;
+    // A link needs one native transport both run: the one it holds already, else the first (`TRANSPORTS`, Iroh
+    // first) that has not failed to start here, not one of each.
+    const failed = this.nativeFailed.has(live.stored.id);
+    return (common.find(t => live.link?.availableTransports.includes(t)) ?? common.find(t => !(failed && live.transportErrors?.[t])) ?? common[0]) === key;
+  }
+
+  /** Group edges passed over as the one their group keeps (`groupAnchorsAnswered`), by link id: when. */
+  private readonly anchorPassedOver = new Map<string, number>();
+  private anchorPassed(live: LiveLink, now: number): boolean {
+    return now - (this.anchorPassedOver.get(live.stored.id) ?? -Infinity) < GROUP_ANCHOR_PASSED_MS;
+  }
+  private anchorCheckAt = 0;
+
+  /**
+   * A group's edge whose native listener has been up `GROUP_ANCHOR_ANSWER_MS` with no session, and whose member's
+   * packet says it holds none there (or it is away): nobody answers it.
+   */
+  private unanswered(live: LiveLink, now: number): boolean {
+    const link = live.link;
+    if (!link || link.isDataLinkOpen) return false;
+    const up = (Object.keys(this.nativeFactories) as NativeTransport[]).filter(t => link.availableTransports.includes(t)).map(t => live.nativeUpAt?.[t] ?? now);
+    if (!up.length || now - Math.min(...up) < GROUP_ANCHOR_ANSWER_MS) return false;
+    return !this.chosenByPeer(live) || !live.presence.online;
+  }
+
+  /**
+   * Every few seconds, each group not on screen whose edges run native transports: the one edge it keeps has a
+   * listener (or waits for one, `groupNativeWaiting`), and when its member has not answered it in
+   * `GROUP_ANCHOR_ANSWER_MS` (it is away, or it has no listener for it: all its own taken), the group keeps the next
+   * one instead (hub, then admin, then the member heard from last), whose member answers the edge it keeps
+   * (`chosenByPeer`). Not while any edge of the group is live: the group is reachable through it. Every other one passed
+   * over lately too: the one it keeps stays, without its listener going back and forth.
+   */
+  private groupAnchorsAnswered(): void {
+    const native = Object.keys(this.nativeFactories) as NativeTransport[], now = Date.now();
+    if (!native.length || now < this.anchorCheckAt) return;
+    this.anchorCheckAt = now + GROUP_ANCHOR_CHECK_MS;
+    const groups = new Set<string>();
+    for (const live of this.links.values()) {
+      const group = live.stored.group;
+      if (group && !live.stored.groupEntry && live.link && `group:${group}` !== this.activeLinkId && this.keepsGroupNative(live.stored)) groups.add(group);
+    }
+    if (!groups.size) return;
+    const views = new Map(this.groups.views().map(view => [view.id, view]));
+    for (const groupId of groups) {
+      const edges = this.groupEdgesByRank(groupId, views.get(groupId));
+      if (!edges.length || edges.some(live => live.link!.isDataLinkOpen)) continue;
+      const [anchor, next] = edges;
+      if (next && !this.anchorPassed(next, now) && this.unanswered(anchor, now)) {
+        this.anchorPassedOver.set(anchor.stored.id, now);
+        this.groupNativeWaiting.delete(anchor.stored.id);
+        traceLink(anchor.myPubKeyZ32, "group-anchor-passed", { group: groupId });
+        void this.passAnchor(anchor, next.stored.id);
+        continue;
+      }
+      // The one it keeps has no listener (one passed over is its turn again, or none was free): it asks for one.
+      // Not one already waiting for a slot or for its next try after a failed start (`retryNative`).
+      const id = anchor.stored.id;
+      if (!native.some(t => anchor.link!.availableTransports.includes(t)) && !this.groupNativeWaiting.has(id) && !this.nativeFailed.has(id)) {
+        void this.ensureNativeEndpoints(id);
+      }
+    }
+  }
+
+  /** The edge passed over gives its listeners up (its member holds none for it), and the next one takes one now. */
+  private async passAnchor(passed: LiveLink, nextId: string): Promise<void> {
+    const link = passed.link;
+    for (const key of Object.keys(this.nativeFactories) as NativeTransport[]) {
+      if (!link || !link.availableTransports.includes(key) || !link.canReleaseEndpoint(key)) continue;
+      await link.releaseEndpoint(key).catch(() => {});
+    }
+    if (this.shuttingDown) return;
+    this.groupNativeWaiting.add(nextId);
+    await this.ensureNativeEndpoints(nextId);
   }
 
   /** A group opened on screen: its edges with no native listener take one as a chat on screen does, the one it keeps first. */
@@ -7839,8 +7951,10 @@ export class GhostlyNode implements EngineImplementation {
       };
       const onScreen = (other: LiveLink) => (other.stored.group ? `group:${other.stored.group}` : other.stored.id) === this.activeLinkId;
       const used = (other: LiveLink) => this.lastUsed(other, viewOf);
-      // A group's edge past the one its group keeps while it is not on screen (`groupEdgesByRank`).
-      const extra = (other: LiveLink) => !!other.stored.group && !other.stored.groupEntry && !onScreen(other) && anchorOf(other.stored.group) !== other;
+      // A group's edge past the one its group keeps while it is not on screen (`groupEdgesByRank`), and not one its
+      // member keeps (`chosenByPeer`): that one this side answers as its own, past its own edges of other groups.
+      const extra = (other: LiveLink) => !!other.stored.group && !other.stored.groupEntry && !onScreen(other) && anchorOf(other.stored.group) !== other
+        && !this.chosenByPeer(other, key);
       const full = owners.length >= slots, entry = !!live.stored.groupEntry;
       // Such an edge takes a free listener only once its group's one has one, and within what 1:1 chats leave (all but
       // four); it never takes one that is held. An entry session (a join) takes a free one within that room, as before.
@@ -7908,6 +8022,7 @@ export class GhostlyNode implements EngineImplementation {
       if (!endpoint) { void starting.then((late) => late.close(), () => {}); return false; }
       if (this.shuttingDown || live.stored.deliveryMode === "dht" || live.link !== link || !this.links.has(linkId) || link.takenFromUs) { await endpoint.close(); return false; }
       link.registerEndpoint(endpoint);
+      if (group) live.nativeUpAt = { ...live.nativeUpAt, [key]: Date.now() };
       delete live.transportErrors[key];
       // The record says how to dial it, so a contact whose WebRTC never connects can try it (WISP 03).
       this.capsChanged(linkId);
@@ -7989,6 +8104,7 @@ export class GhostlyNode implements EngineImplementation {
    * Chats and group links whose listener failed to start try again once their wait is over.
    */
   private retryNative(): void {
+    this.groupAnchorsAnswered();
     const now = Date.now();
     for (const [linkId, failed] of this.nativeFailed) {
       if (now < failed.at) continue;
