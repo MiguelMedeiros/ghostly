@@ -66,6 +66,11 @@ interface Chat {
    * id and when it was said. Its message and bubble are there; the offer that comes live takes them over.
    */
   announced: Map<string, { local: string; at: number }>;
+  /**
+   * Wire id of a file said on the floor whose bubble ended here (refused here, or its week ran out) → its local id. Its
+   * sender still has it: an offer that comes for it later takes that bubble over, as one said on the floor would.
+   */
+  withdrawn: Map<string, string>;
   /** Writes to the database, in order. */
   saving: Promise<void>;
   lastSaved: Map<string, number>;
@@ -107,7 +112,7 @@ export class FileDesk {
   private chat(linkId: string): Chat {
     let chat = this.chats.get(linkId);
     if (chat) return chat;
-    const made: Chat = { local: new Map(), places: new Map(), announced: new Map(), saving: Promise.resolve(), lastSaved: new Map(), unsaved: new Map(), files: undefined as unknown as ChatFiles };
+    const made: Chat = { local: new Map(), places: new Map(), announced: new Map(), withdrawn: new Map(), saving: Promise.resolve(), lastSaved: new Map(), unsaved: new Map(), files: undefined as unknown as ChatFiles };
     made.files = new ChatFiles({
       send: (frame) => this.deps.send(linkId, frame),
       decide: (file, again) => this.decide(linkId, file, again),
@@ -131,6 +136,7 @@ export class FileDesk {
       // Said on the floor, its offer not come yet: its bubble waits again (one withdrawn keeps the end it was given).
       if (file.announced && !file.wire3 && file.direction === "in") {
         if (!file.transfer) this.announcedHere(chat, file.announced, file.id, file.metadata?.size ?? 0, file.createdAt);
+        else { chat.local.set(file.announced, file.id); chat.withdrawn.set(file.announced, file.id); }
         continue;
       }
       if (!file.wire3) continue;
@@ -164,6 +170,12 @@ export class FileDesk {
     }
     // A new offer takes its message's place now, in the order frames come, before anything is awaited.
     const id = frame.t === "pf-offer" && typeof frame.id === "string" ? frame.id : undefined;
+    // The offer of a file said on the floor whose bubble ended here: it waits for this offer again.
+    const ended = id !== undefined && !chat.files.get("in", id) ? chat.withdrawn.get(id) : undefined;
+    if (ended !== undefined) {
+      chat.withdrawn.delete(id!);
+      this.announcedHere(chat, id!, ended, this.deps.transfers.get(ended)?.size ?? 0, Date.now());
+    }
     // The offer of a file said on the floor takes its bubble; one refused here leaves it saying so.
     if (id !== undefined && chat.announced.has(id)) return chat.files.handle(frame).finally(() => { if (chat.announced.has(id) && !chat.files.get("in", id)) this.withdrawn(chat, id, "It was refused here"); });
     if (id === undefined || !this.deps.place || chat.local.has(id) || chat.places.has(id)) return chat.files.handle(frame);
@@ -207,6 +219,7 @@ export class FileDesk {
     const said = chat.announced.get(wireId);
     if (!said) return;
     chat.announced.delete(wireId);
+    chat.withdrawn.set(wireId, said.local);
     const view = this.deps.transfers.get(said.local);
     const transfer = { state: "failed" as const, transferred: 0, size: view?.size ?? 0, error };
     this.deps.transfers.set(said.local, transfer);
@@ -314,7 +327,7 @@ export class FileDesk {
     chat.files.forget(out ? "out" : "in", wireId);
     clearTimeout(chat.unsaved.get(fileId)?.timer);
     chat.unsaved.delete(fileId);
-    if (!out) { chat.local.delete(wireId); chat.announced.delete(wireId); }
+    if (!out) { chat.local.delete(wireId); chat.announced.delete(wireId); chat.withdrawn.delete(wireId); }
     this.speeds.delete(fileId);
     this.unwatch(fileId);
   }
