@@ -137,9 +137,27 @@ describe("a replaced device (WISP 06 § User experience: \"Use here\", \"It wasn
     await user.click(screen.getByTestId("settings-fork-discard"));
     expect(engine.callsTo("deviceForkDiscard")).toEqual([]);
     expect(screen.getByTestId("settings-fork")).toHaveTextContent("Discard this copy for good?");
+    await waitFor(() => expect(screen.getByTestId("settings-fork-discard-confirm")).toBeEnabled());
     await user.click(screen.getByTestId("settings-fork-discard-confirm"));
     expect(engine.callsTo("deviceForkDiscard")).toEqual([{ database: "ghostly_oldcopy" }]);
     await waitFor(() => expect(screen.queryByTestId("settings-fork")).toBeNull());
+  });
+
+  it("a double press on Discard does not pass the question, and Cancel gives the focus back to Discard", async () => {
+    const { user, engine } = renderApp(<ForkRows forks={["ghostly_oldcopy"]} />);
+    engine.on("deviceForkDiscard", () => undefined);
+    // Enter twice: the first asks and puts the focus on Cancel, the second is Cancel's.
+    screen.getByTestId("settings-fork-discard").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("settings-fork-discard")).toHaveFocus();
+    expect(engine.callsTo("deviceForkDiscard")).toEqual([]);
+    // A double click: the second press lands on the question's Discard, which is not on yet.
+    await user.click(screen.getByTestId("settings-fork-discard"));
+    await user.click(screen.getByTestId("settings-fork-discard-confirm"));
+    expect(engine.callsTo("deviceForkDiscard")).toEqual([]);
+    expect(screen.getByTestId("settings-fork")).toHaveTextContent("Discard this copy for good?");
   });
 });
 
