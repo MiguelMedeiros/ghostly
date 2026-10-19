@@ -529,6 +529,12 @@ html[data-standalone="true"] {
   right: 6px;
 }
 
+/* With your camera on, its preview takes the top right corner (64 px at 8 px, below): the line ends 6 px before it.
+   On a phone the window is 190 px wide, and the clock centred up to 6 px from the edge ran 11 px under the preview. */
+.call-mini:has(> .call-preview) .call-top {
+  right: 78px;
+}
+
 .call-mini .call-top p {
   display: flex;
   flex-flow: row-reverse wrap;

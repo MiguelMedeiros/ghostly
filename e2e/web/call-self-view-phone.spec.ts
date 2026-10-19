@@ -44,3 +44,24 @@ test("a phone turned on its side keeps the call's self view in its corner, clear
   expect((await self.boundingBox())!.y).toBeGreaterThanOrEqual(62);
   await bob.page.getByTestId("call-hang-up").click();
 });
+
+test("on a phone the small window of a video call shows its clock clear of your own picture", { tag: ["@feature:calls.video", "@feature:calls.mini-window", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+  const alice = await peer("alice");
+  const bob = await peer("bob", { mobile: true, viewport: { width: 375, height: 667 } });
+  await link(alice, bob);
+  await connect(alice, bob);
+  await alice.page.getByTestId("call-video").click();
+  await bob.page.getByTitle("Accept video call").click();
+  await expect(bob.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+  await bob.page.getByTestId("call-minimize").click();
+  await expect(bob.page.getByTestId("call-window")).toHaveAttribute("data-mini", "true");
+  const self = bob.page.getByTestId("call-self-view");
+  const clock = bob.page.getByTestId("call-status").locator("span").last();
+  await expect(clock).toHaveText(/^\d{1,2}:\d{2}$/);
+  // The window is 190 px wide on a phone: the clock, centred up to 6 px from its edge, ran 11 px under the preview.
+  await expect.poll(async () => {
+    const [time, picture] = [(await clock.boundingBox())!, (await self.boundingBox())!];
+    return Math.round(picture.x - (time.x + time.width));
+  }).toBeGreaterThanOrEqual(0);
+  await bob.page.getByTestId("call-hang-up").click();
+});
