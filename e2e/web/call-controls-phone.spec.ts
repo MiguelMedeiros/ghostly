@@ -138,12 +138,15 @@ for (const { name, viewport, narrowest } of smallRows) {
 }
 
 /**
- * The small call window's state line ("Audio call" and the clock), measured against the window's corner button and
- * its edges: what of it lies under the button or is cut, and whether the words are shown beside the clock.
+ * The small call window's state line ("Audio call" and the clock), measured against the window's corner button, the
+ * own camera's preview of a video call and its edges: what of it lies under one of them or is cut, and whether the
+ * words are shown beside the clock.
  */
 const stateLine = (page: Page) => page.getByTestId("call-window").evaluate((small) => {
   const box = small.getBoundingClientRect();
   const button = small.querySelector("[data-testid=call-minimize]")!.getBoundingClientRect();
+  const preview = small.querySelector("[data-testid=call-self-view]")?.getBoundingClientRect();
+  const over = (r: DOMRect, o: DOMRect) => r.left < o.right && r.right > o.left && r.top < o.bottom && r.bottom > o.top;
   const line = small.querySelector("[data-testid=call-status]")!;
   const shown = line.getBoundingClientRect();
   const wrong: string[] = [];
@@ -155,7 +158,8 @@ const stateLine = (page: Page) => page.getByTestId("call-window").evaluate((smal
     if (!clock && r.top >= shown.bottom - 1) continue;
     if (!clock) words = true;
     const where = `${part.textContent} at ${Math.round(r.left - box.left)}..${Math.round(r.right - box.left)} of ${Math.round(box.width)}`;
-    if (r.left < button.right && r.right > button.left && r.top < button.bottom && r.bottom > button.top) wrong.push(`under the button: ${where}`);
+    if (over(r, button)) wrong.push(`under the button: ${where}`);
+    if (preview && over(r, preview)) wrong.push(`under the preview: ${where}`);
     if (r.left < box.left || r.right > box.right || part.scrollWidth > part.clientWidth + 1) wrong.push(`cut: ${where}`);
   }
   return { wrong, words };
@@ -183,6 +187,27 @@ for (const language of ["pt", "ar"]) {
     // A phone-wide window opens it at its narrowest.
     await expect.poll(async () => Math.round((await small.boundingBox())!.width)).toBe(190);
     // "Chamada de áudio 00:05" was centred over the whole 190 px and started at 27: behind the button, which ends at 38.
+    await expect.poll(async () => (await stateLine(bob.page)).wrong).toEqual([]);
+    await bob.page.getByTestId("call-hang-up").click();
+    await expect(alice.page.getByTestId("call-status")).toHaveCount(0);
+  });
+}
+
+for (const width of [320, 414]) {
+  test(`a ${width} px phone's small window of a video call shows its clock clear of the own camera's preview`, { tag: ["@feature:calls.mini-window", "@feature:calls.video", "@feature:app.mobile-layout"] }, async ({ peer }) => {
+    const alice = await peer("alice");
+    const bob: Peer = await peer("bob", { mobile: true, viewport: { width, height: 740 } });
+    await link(alice, bob);
+    await connect(alice, bob);
+    await alice.page.getByTestId("call-video").click();
+    await bob.page.getByTitle("Accept video call").click();
+    await expect(bob.page.getByTestId("call-status")).toHaveAttribute("data-state", "connected");
+    await bob.page.getByTestId("call-minimize").click();
+    const small = bob.page.getByTestId("call-window");
+    await expect(small).toHaveAttribute("data-mini", "true");
+    await expect.poll(async () => Math.round((await small.boundingBox())!.width)).toBe(190);
+    await expect(bob.page.getByTestId("call-self-view")).toBeVisible();
+    // The clock was centred between the corner button and the right edge, and its last 11 px ran under the preview.
     await expect.poll(async () => (await stateLine(bob.page)).wrong).toEqual([]);
     await bob.page.getByTestId("call-hang-up").click();
     await expect(alice.page.getByTestId("call-status")).toHaveCount(0);
