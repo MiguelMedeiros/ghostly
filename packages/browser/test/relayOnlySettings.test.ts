@@ -79,7 +79,7 @@ describe("Hide my IP from contacts (relayOnly)", () => {
     expect(link.stop).not.toHaveBeenCalled();
     await node.updateSettings({ settings: { relayOnly: true } });
     expect(link.stop).toHaveBeenCalledWith(false);
-    expect(started).toHaveBeenCalledWith(chat.id, []);
+    expect(started).toHaveBeenCalledWith(chat.id);
     // The same value again changes nothing.
     await node.updateSettings({ settings: { relayOnly: true } });
     expect(link.stop).toHaveBeenCalledOnce();
