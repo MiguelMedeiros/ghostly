@@ -1714,8 +1714,11 @@ export class GhostlyNode implements EngineImplementation {
     this.awaitingTimer = setTimeout(() => void this.readAwaiting().then((awaiting) => {
       const networks = this.walletView.networks;
       if (this.shuttingDown || !networks) return;
-      for (const network of WALLET_NETWORKS) networks[network] = { ...networks[network], mints: this.withWaits(networks[network].mints, awaiting.mints), awaiting: awaiting.networks[network] };
-      this.walletView = { ...this.walletView, networks: { ...networks } };
+      // A new object: the page holds the state it was sent (on the web, this very one) and draws the wallets again only
+      // when they differ from it; written into it, nothing would differ.
+      const next = { ...networks };
+      for (const network of WALLET_NETWORKS) next[network] = { ...networks[network], mints: this.withWaits(networks[network].mints, awaiting.mints), awaiting: awaiting.networks[network] };
+      this.walletView = { ...this.walletView, networks: next };
       this.emitState();
     }).catch(() => {}), 250);
   }
