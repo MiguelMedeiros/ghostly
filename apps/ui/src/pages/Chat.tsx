@@ -396,6 +396,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const chatPeer = platform?.getPeer(params?.peerPubKeyB64 ?? "");
   // The chat's link as the engine shows it: its transport lines in the timeline.
   const chatLink = useChatLink(params?.peerPubKeyB64 ?? "");
+  // The open chat shows, searches and jumps over its whole history: where the engine sent this page only its newest page
+  // (the extension's pages), the rest is asked for while the chat is open.
+  const chatLinkId = chatLink?.id;
+  useEffect(() => (chatLinkId ? engine.keepWhole(chatLinkId) : undefined), [chatLinkId]);
   // Saved messages: kept on this device, never sent; the Saved view lists them.
   const savedHere = useSavedIn(chatLink?.id);
   // What tells the contact when this side writes (WISP 401 § Typing): 1:1 paired chats only.
