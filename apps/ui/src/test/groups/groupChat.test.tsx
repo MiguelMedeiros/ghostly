@@ -31,6 +31,16 @@ function openGroup(group: GroupView | null, history: StoredMessage[] = []) {
 
 const composer = () => screen.getByRole("textbox");
 
+describe("GroupChat: on screen", () => {
+  it("tells the engine while it is on screen, so its edges take native connections as a chat on screen does", async () => {
+    fakeEngine.on("setActiveLink", () => undefined);
+    const { unmount } = openGroup(active());
+    await vi.waitFor(() => expect(fakeEngine.callsTo("setActiveLink")).toEqual([{ linkId: "group:group-1" }]));
+    unmount();
+    await vi.waitFor(() => expect(fakeEngine.callsTo("setActiveLink")).toEqual([{ linkId: "group:group-1" }, { linkId: null }]));
+  });
+});
+
 describe("GroupChat: what the header says", () => {
   it("counts the members and who of the others can be reached", () => {
     openGroup(active());

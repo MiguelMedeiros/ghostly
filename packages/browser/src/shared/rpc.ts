@@ -139,6 +139,7 @@ export interface EngineApi {
   pollNow(params: { linkId: string }): void;
   removeLink(params: { linkId: string }): void;
   renameLink(params: { linkId: string; label: string }): void;
+  /** The chat on screen, or `group:<id>` for a group: it takes native connections first (WISP 902 § Transports). */
   setActiveLink(params: { linkId: string | null }): void;
   /** `refused`: the text was not kept (it cannot be sent this way); any other error leaves it to be sent later. */
   /** `preview`: a link preview made by this app (WISP 401 § Link previews); checked against the text, dropped if off. */
