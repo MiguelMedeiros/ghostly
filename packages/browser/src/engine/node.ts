@@ -369,7 +369,16 @@ interface LiveLink {
    * the chat's history once in a run (with the chat, at the start), then kept as they are stored (`storeNewMessage`).
    */
   waitingSends?: Promise<Set<string>>;
+  /**
+   * When the contact's newest message over the DHT was sent (`GhostLinkOptions.lastSeenTimestamp`): from the chat's
+   * history read at the start, then kept as they are stored (`storeNewMessage`). A link started again needs no history.
+   */
+  pkarrSeenAt?: number;
 }
+
+/** When the contact's newest message over the DHT in these was sent (`LiveLink.pkarrSeenAt`). */
+const pkarrSeenAt = (messages: readonly StoredMessage[]): number =>
+  messages.reduce((max, m) => (m.sender === "peer" && m.via === "pkarr" ? Math.max(max, m.sentAt ?? m.timestamp) : max), 0);
 
 /** A file or a payment request of mine that waits for the chat to be live (a text that waits is its outbox's). */
 const waitsForLive = (m: StoredMessage) => m.sender === "me" && m.delivery === "waiting" && (!!m.file || !!m.paymentId);
@@ -1848,10 +1857,7 @@ export class GhostlyNode implements EngineImplementation {
     // Limited mode opens no wallet: they start when it is left (`leaveLimited`).
     if (!this.limitedMode) await this.startWallets();
 
-    const history = new Map<string, StoredMessage[]>();
     const links = await db.getLinks();
-    // Links start in the order they are stored (`nativeStartOrder` ranks the chats among them).
-    for (const stored of links) history.set(stored.id, []);
     // The chat list waits for the groups, and the groups need none of the chats' histories: only their edges, which
     // have none. 50 chats of 1000 messages read first held the list blank 1.3 s at every start (2.8 s at 4x CPU).
     for (const stored of links) if (stored.group) this.links.set(stored.id, newLiveLink(stored, 0, linkFilesFrom(stored.id, [], [])));
@@ -1878,7 +1884,7 @@ export class GhostlyNode implements EngineImplementation {
       this.links.set(stored.id, newLiveLink(stored, messages[messages.length - 1]?.timestamp ?? 0, files));
       // What waits for the live link is known from this read: a session that opens reads no history for it (`sendWaiting`).
       this.links.get(stored.id)!.waitingSends = Promise.resolve(new Set(messages.filter(waitsForLive).map(m => m.id)));
-      history.set(stored.id, messages);
+      this.links.get(stored.id)!.pkarrSeenAt = pkarrSeenAt(messages);
       // What the contact's clock was when the chat was last live: its first message of this run is read by it.
       for (const message of messages.slice(-4 * CLOCK_SAMPLES)) this.clockSample(message);
       const note = latestReaction(messages);
@@ -1892,19 +1898,10 @@ export class GhostlyNode implements EngineImplementation {
     }
     // With the chats loaded, profiles of identities no longer verified can be told apart and dropped.
     this.publicProfiles.start();
-    // Each link derives its keys and seals its capability record as it starts: 50 chats and 20 groups in one task held
-    // the page for 575-762 ms at 4x CPU, right as the chat list appeared. They start in slices that let the page go, in
-    // the same order; a chat not started yet reads as offline until its turn.
-    const pause = pacer(START_SLICE_MS);
-    if (this.networkOn) for (const linkId of this.nativeStartOrder([...history.keys()])) {
-      // Gone offline or shut down while the page had the thread: the links left start with the network, if ever.
-      if (!this.networkOn || this.shuttingDown) break;
-      const messages = history.get(linkId)!;
-      if (!this.links.has(linkId)) continue;
-      this.startLink(linkId, messages);
+    // Links start in the order they are stored (`nativeStartOrder` ranks the chats among them).
+    await this.startLinks(links.map(stored => stored.id), linkId => {
       if (!this.links.get(linkId)?.stored.group) void this.refreshPublicProfiles({ linkId }).catch(() => {});
-      await pause();
-    }
+    });
     if (this.shuttingDown) return;
     this.emitState();
     if (this.networkOn) { this.hold.start(); this.startGroupEntries(); this.prepareSpare(STARTUP_QUIET_MS); }
@@ -2141,7 +2138,7 @@ export class GhostlyNode implements EngineImplementation {
       }
     } catch (error) { failure = error ?? new Error("The wallets did not start"); }
     if (this.networkOn) {
-      for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
+      await this.startLinks([...this.links.keys()]);
       this.hold.start();
       this.startGroupEntries();
       this.prepareSpare(STARTUP_QUIET_MS);
@@ -6104,7 +6101,7 @@ export class GhostlyNode implements EngineImplementation {
         }),
       );
     } else if (!wasOnline && this.networkOn && await this.turnBeforeOnline()) {
-      for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
+      await this.startLinks([...this.links.keys()]);
       this.hold.start();
       this.startGroupEntries();
       this.prepareSpare(STARTUP_QUIET_MS);
@@ -6900,7 +6897,7 @@ export class GhostlyNode implements EngineImplementation {
     this.links.set(stored.id, newLiveLink(stored, 0));
     try { await db.putLink(stored); }
     catch (error) { this.links.delete(stored.id); throw error; }
-    if (this.networkOn) this.startLink(stored.id, []);
+    if (this.networkOn) this.startLink(stored.id);
     // The other side is due any moment: the joiner's inviter is polling for this very moment and its offer
     // (or its answer) is a poll away; an inviter's contact is reading the invite right now more often than
     // not. Both look fast for a while, as a group's entry session does.
@@ -7021,7 +7018,7 @@ export class GhostlyNode implements EngineImplementation {
     this.links.set(id, newLiveLink(stored, 0));
     try { await db.putLink(stored); }
     catch (error) { this.links.delete(id); throw error; }
-    if (this.networkOn) this.startLink(id, []);
+    if (this.networkOn) this.startLink(id);
     if (expectPeer) this.links.get(id)?.link?.expectPeer();
     return id;
   }
@@ -7040,7 +7037,7 @@ export class GhostlyNode implements EngineImplementation {
     this.links.set(id, newLiveLink(stored, 0));
     try { await db.putLink(stored); }
     catch (error) { this.links.delete(id); throw error; }
-    if (this.networkOn) this.startLink(id, []);
+    if (this.networkOn) this.startLink(id);
     // The other side is due any moment (the admin's app answers a knock in seconds): look fast meanwhile.
     this.links.get(id)?.link?.expectPeer();
     return id;
@@ -7323,20 +7320,34 @@ export class GhostlyNode implements EngineImplementation {
       live.status = "offline";
       live.dataLink = "idle";
     }));
-    if (this.shuttingDown || !this.networkOn) return;
-    for (const live of this.links.values()) this.startLink(live.stored.id, await db.getMessages(live.stored.id));
+    await this.startLinks([...this.links.keys()]);
   }
 
-  private startLink(linkId: string, messages: StoredMessage[]): void {
+  /**
+   * Starts these chats' and groups' links, the chats most recently live first (`nativeStartOrder`), in slices that let
+   * the page go: each link derives its keys and seals its capability record as it starts, and 50 chats and 20 groups in
+   * one task held the page for 575-762 ms at 4x CPU, right as the chat list appeared. A chat not started yet reads as
+   * offline until its turn. `started`: after each link started. Gone offline or shut down meanwhile: the links left
+   * start with the network, if ever.
+   */
+  private async startLinks(linkIds: string[], started?: (linkId: string) => void): Promise<void> {
+    const pause = pacer(START_SLICE_MS);
+    for (const linkId of this.nativeStartOrder(linkIds)) {
+      if (!this.networkOn || this.shuttingDown) break;
+      if (!this.links.has(linkId)) continue;
+      this.startLink(linkId);
+      started?.(linkId);
+      await pause();
+    }
+  }
+
+  private startLink(linkId: string): void {
     const live = this.links.get(linkId);
     if (!live || live.link) return;
     const { stored } = live;
     if (stored.group) return this.startEdge(linkId);
     if (stored.profile) live.pairing = { status: "connecting" };
-    const lastSeenTimestamp = messages.reduce(
-      (max, m) => (m.sender === "peer" && m.via === "pkarr" ? Math.max(max, m.sentAt ?? m.timestamp) : max),
-      0,
-    );
+    const lastSeenTimestamp = live.pkarrSeenAt ?? 0;
 
     // One set of credentials for the link and its capability record: a pin by either is seen by both.
     const credentials: PairingCredentials | undefined = stored.profile && stored.participationSeed ? {
@@ -8446,6 +8457,7 @@ export class GhostlyNode implements EngineImplementation {
     if (!message.event) this.newestAt.set(message.linkId, Math.max(newest ?? 0, writtenAt(message, this.clockLeads.get(this.clockOf(message)))));
     if (message.sender === "peer") this.messageFeedback("message", message, newest);
     if (live) live.lastMessageAt = Math.max(live.lastMessageAt, message.timestamp);
+    if (live && message.sender === "peer" && message.via === "pkarr") live.pkarrSeenAt = Math.max(live.pkarrSeenAt ?? 0, pkarrSeenAt([message]));
     // An edit that came before its message is shown now, and confirmed.
     const early = message.sender === "peer" && message.id.startsWith("peer_") ? this.editBuffer.take(message.linkId, message.id.slice(5)) : undefined;
     if (early) {
