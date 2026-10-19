@@ -1,5 +1,5 @@
-import { screen, within } from "@testing-library/react";
-import { useState, type ComponentProps } from "react";
+import { act, screen, within } from "@testing-library/react";
+import { useEffect, useState, type ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { CallButtons } from "../../components/CallButtons";
 import { CallOverlay } from "../../components/CallOverlay";
@@ -287,6 +287,47 @@ describe("a call for a screen reader and the keys", () => {
     expect(screen.getByTestId("call-minimize")).toHaveFocus();
     await user.tab({ shift: true });
     expect(screen.getByTestId("call-hang-up")).toHaveFocus();
+    localStorage.removeItem("ghostly_call_mini");
+  });
+
+  it("ended from its small window, gives the focus back to the call's button, not to the page", async () => {
+    const { user } = renderApp(<ChatWithCall />);
+    await user.tab();
+    await user.keyboard("{Enter}");
+    await user.tab();
+    expect(screen.getByTestId("call-minimize")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "true");
+
+    screen.getByTestId("call-hang-up").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("call-window")).toBeNull();
+    expect(screen.getByTestId("call-audio")).toHaveFocus();
+  });
+
+  it("started in its small window and ended by the contact with the focus in it, gives the focus back", async () => {
+    localStorage.setItem("ghostly_call_mini", "1");
+    const contact = { hangUp: () => {} };
+    function Call() {
+      const [on, setOn] = useState(false);
+      useEffect(() => { contact.hangUp = () => setOn(false); }, []);
+      return (
+        <>
+          <CallButtons blocked={null} busy={on} onCall={() => setOn(true)} />
+          {on && <CallOverlay callState="connected" localStream={null} remoteStream={null} isMuted={false} isVideoOff canSendVideo remoteHasVideo={false}
+            callStartedAt={Date.now()} peerName="Ana" onHangUp={() => setOn(false)} onToggleMute={vi.fn()} onToggleVideo={vi.fn()} />}
+        </>
+      );
+    }
+    const { user } = renderApp(<Call />);
+    await user.tab();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "true");
+    screen.getByTestId("call-mute").focus();
+
+    await act(async () => contact.hangUp());
+    expect(screen.queryByTestId("call-window")).toBeNull();
+    expect(screen.getByTestId("call-audio")).toHaveFocus();
     localStorage.removeItem("ghostly_call_mini");
   });
 

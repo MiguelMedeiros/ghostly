@@ -124,18 +124,18 @@ export function CallOverlay({
     { enabled: mini, minWidth: 190, minHeight: 128 },
   );
 
-  // Whole-screen, the call covers its chat: the focus comes into it and Tab stays in it, as with a ringing call, and
-  // what had the focus (the button that started the call) has it back when the call ends. Not in the small window:
-  // the chat beside it is in use.
+  // Whole-screen, the call covers its chat: the focus comes into it and Tab stays in it, as with a ringing call. Not in
+  // the small window: the chat beside it is in use. Either way, what had the focus (the button that started the call)
+  // has it back when the call ends with the focus gone with it: a call ended from the small window's own End call, or
+  // by the contact while the focus was on its Mute, left it on the page body.
   const box = miniWindow.boxProps.ref;
   const opener = useRef<HTMLElement | null>(null);
   useTabTrap(box, !mini);
   useEffect(() => {
-    if (mini) return;
     const active = document.activeElement as HTMLElement | null;
     if (box.current && !box.current.contains(active)) {
       if (active && active !== document.body) opener.current = active;
-      box.current.focus({ preventScroll: true });
+      if (!mini) box.current.focus({ preventScroll: true });
     }
     return () => {
       const before = opener.current;
