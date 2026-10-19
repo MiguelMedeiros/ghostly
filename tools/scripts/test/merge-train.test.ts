@@ -1105,7 +1105,14 @@ describe("a batch that waits for company", () => {
     expect(r.inFlight).toBeNull();
     expect(repo.pushes).toEqual([]);
     expect(r.log.at(-1)).toBe("holding: 2 boardable, oldest waited 5 min; a batch leaves at 3 or at 15 min");
-    expect(repo.comments.get(11)![0].body).toContain("1st");
+    // Each held one's comment says why it does not board, and when the batch leaves at the latest: a time that does not
+    // change from run to run, so the comment is not edited again until something does.
+    const said = "Waiting for company: a batch leaves once 3 can board (2 now), or at 00:15 UTC at the latest. It keeps its place.";
+    expect(repo.comments.get(11)![0].body).toContain(`**1st**. ${said}`);
+    expect(repo.comments.get(12)![0].body).toContain(`**2nd**. ${said}`);
+    const edits = repo.comments.get(11)!.map((c) => c.body);
+    await repo.run({ now: at(8) });
+    expect(repo.comments.get(11)!.map((c) => c.body)).toEqual(edits);
   });
 
   it("boards 3 boardable pull requests at once", async () => {
