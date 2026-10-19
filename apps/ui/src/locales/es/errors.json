@@ -510,6 +510,12 @@
     "usdtReverted": "La transacción fue revertida",
     "usdtRevertedNext": "No se enviaron tokens; el gas se gastó."
   },
+  "relayOnly": {
+    "keepsTurn": "Ocultar mi IP necesita este servidor TURN",
+    "keepsTurnNext": "Desactívalo primero y luego quita el servidor.",
+    "needsTurn": "Primero añade un servidor TURN",
+    "needsTurnNext": "Guarda uno arriba y luego activa esto."
+  },
   "relays": {
     "atLeastOne": "Escribe al menos una dirección de relay",
     "notAddress": "No es una dirección de relay: {{address}}",
