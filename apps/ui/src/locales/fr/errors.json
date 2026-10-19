@@ -146,6 +146,13 @@
     "cannotRetry": "Ce fichier ne peut pas être renvoyé",
     "clipboardUnavailable": "Impossible de lire le presse-papiers",
     "clipboardUnavailableNext": "Joignez-le avec +.",
+    "floor": {
+      "noRoomNext": "Libérez de la place, puis demandez à votre contact de le renvoyer.",
+      "notInAWeek": "Il n'est pas arrivé en une semaine",
+      "refused": "Cet appareil n'a pas pu recevoir ce fichier",
+      "tooMany": "Trop de fichiers attendent ici",
+      "tooManyNext": "Répondez aux fichiers qui vous attendent, puis demandez à votre contact de le renvoyer."
+    },
     "gone": "Ce fichier n'est plus là",
     "noRoom": "Pas de place sur l'appareil de votre contact",
     "noRoomHere": "Plus de place sur cet appareil",

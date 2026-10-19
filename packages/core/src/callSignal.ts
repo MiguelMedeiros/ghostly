@@ -261,12 +261,13 @@ export function extractParamsFromSdp(sdp: string, { maxCandidates = 2, loopback 
   const hostCandidates = candidates.filter(c => / typ host( |$)/.test(c) && / udp /i.test(c));
   // Include 1 host candidate (for local connections) and 1 srflx (for remote)
   // Keep packet size under 1000 bytes DHT limit
-  // An IPv6 related address (`raddr ::`, WebKit's IPv6 srflx) made apps before 0.5 refuse the whole signal:
-  // the related address is informational, so it is left out.
+  // The related address is informational and names an interface of the sender's (webrtc-rs gives its LAN address),
+  // so it is left out, IPv4 too; an IPv6 one (`raddr ::`, WebKit's IPv6 srflx) also made apps before 0.5 refuse the
+  // whole signal.
   const selectedCandidates = maxCandidates > 2 ? pickCallCandidates(candidates, maxCandidates, { loopback }) : [
     ...hostCandidates.slice(0, 1),
     ...srflxCandidates.slice(0, 1),
-  ].map(c => c.replace(/ raddr \S*:\S* rport \d+/, ""));
+  ].map(c => c.replace(/ raddr \S+ rport \d+/, ""));
   
   const ssrcs: number[] = [];
   if (audioSsrc !== null) ssrcs.push(audioSsrc);
