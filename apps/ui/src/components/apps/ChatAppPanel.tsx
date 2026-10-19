@@ -161,16 +161,23 @@ function TabTrap({ root }: { root: RefObject<HTMLElement | null> }) {
   return null;
 }
 
-/** On a phone, an app the person went Back from: still running, one tap away, under the chat's header. */
+/**
+ * On a phone, an app the person went Back from: still running, one tap away, under the chat's header. While it serves
+ * a file to the contact, it says so here too (WISP 1200 § A read lane to the contact): the panel's header is hidden.
+ */
 export function ChatAppResume({ linkId }: { linkId: string }) {
   const { t } = useI18n();
   const app = useChatApp(linkId);
   if (!app || app.shown) return null;
   return (
-    <button type="button" data-testid="mini-app-resume" onClick={() => updateChatApp(linkId, { shown: true })}
+    <button type="button" data-testid="mini-app-resume" data-serving={app.serving || undefined} onClick={() => updateChatApp(linkId, { shown: true })}
       className="flex w-full items-center gap-2 px-4 py-2 bg-panel-header border-b border-border text-[13px] font-medium text-accent hover:bg-surface-hover cursor-pointer shrink-0 text-start">
       <AppGlyph size={16} />
       <span className="min-w-0 flex-1 truncate">{t("apps.view.resume", { title: app.title })}</span>
+      {/* The title is cut first: the sharing words stay whole. */}
+      {app.serving && <span data-testid="mini-app-resume-sharing" className="shrink-0 font-normal text-text-secondary">
+        <span className="sr-only">, </span>{t("apps.view.resumeSharing")}
+      </span>}
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="rtl:-scale-x-100"><path d="m9 18 6-6-6-6" /></svg>
     </button>
   );

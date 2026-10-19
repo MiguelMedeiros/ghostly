@@ -162,6 +162,7 @@
     "beside": "إظهار المحادثة",
     "full": "العرض الكامل",
     "resume": "العودة إلى {{title}}",
+    "resumeSharing": "تشارك ملفًا",
     "sharingWith": "تشارك ملفًا مع {{name}}",
     "stoppedRemoved": "تم إيقاف {{title}}: أزال {{store}} هذا الإصدار",
     "stoppedRevoked": "تم إيقاف {{title}}: ألغى صانعه هذا الإصدار",

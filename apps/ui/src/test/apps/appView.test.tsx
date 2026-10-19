@@ -94,6 +94,24 @@ describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
     expect(line).not.toHaveAttribute("data-serving");
   });
 
+  it("on a phone after Back, the way back to it still says while it shares a file with the contact", async () => {
+    windowIs(true);
+    const { user } = panel();
+    await act(() => open(REF, "link-1"));
+    act(() => updateChatApp("link-1", { serving: true }));
+    await user.click(screen.getByTestId("mini-app-back"));
+    const resume = screen.getByTestId("mini-app-resume");
+    expect(resume).toHaveAttribute("data-serving", "true");
+    // A pause before the sharing words (jsdom puts a space between the spans, a browser does not).
+    expect(resume).toHaveAccessibleName(/^Back to Chess ?, sharing a file$/);
+    // The title is cut first: the sharing words stay whole.
+    expect(within(resume).getByTestId("mini-app-resume-sharing")).toHaveClass("shrink-0");
+    act(() => updateChatApp("link-1", { serving: false }));
+    expect(resume).not.toHaveAttribute("data-serving");
+    expect(resume).toHaveAccessibleName("Back to Chess");
+    expect(within(resume).queryByTestId("mini-app-resume-sharing")).not.toBeInTheDocument();
+  });
+
   it("has the chat's look in its header: the app, with the contact, and the chat's connection", async () => {
     windowIs(false);
     panel();
