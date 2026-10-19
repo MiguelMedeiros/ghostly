@@ -8,7 +8,7 @@ import { pair } from "../support/paired";
 /**
  * The main screens pass axe-core's WCAG 2.2 A and AA rules: no serious or critical finding (contrast, names, roles),
  * in the default colour theme, light and dark, left to right and right to left. The home screen, a 1:1 chat with its
- * ⋮ menu, + menu and payment sheet, a group, the wallets and New wallet, identities, settings, profile and services.
+ * ⋮ menu, a message's ⋮ and its delete confirmation, + menu and payment sheet, a group, the wallets and New wallet, identities, settings, profile and services.
  * And the Apps screens on the suite's build (VITE_APPS_TEST), with the apps specs' test store: the Apps page, Add, the
  * install screen, the chat picker, + → Apps, the app's panel in a chat (beside it, and over it on a phone), the app card on
  * both sides, the app's details and Uninstall.
@@ -83,6 +83,17 @@ for (const [language, scheme] of [["en", "light"], ["ar", "dark"]] as const) {
     await check("chat");
     await page.getByTestId("chat-options").click();
     await check("chat ⋮");
+    await page.keyboard.press("Escape");
+    // A message's ⋮ and its delete confirmation, its Delete at rest and hovered (red on a pink fill: 3.98:1 in light).
+    const mine = chat(alice).locator("[data-message-row]").filter({ hasText: "hello there" }).last();
+    await mine.hover();
+    await mine.getByTestId("message-options").click();
+    await check("message ⋮");
+    await page.getByTestId("message-delete-everyone").click();
+    await expect(page.getByTestId("message-delete-confirm")).toBeVisible();
+    await check("delete confirmation");
+    await page.getByTestId("message-delete-confirm").hover();
+    await check("delete confirmation, hovered");
     await page.keyboard.press("Escape");
     await composerRow(page, "payment-button");
     await check("composer +");
