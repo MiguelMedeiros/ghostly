@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { GROUP_FILE_LIMITS, fileMessageText, groupFileFallback, type GroupFileMeta } from "@ghostly/core";
-import { CommunityWorld, type Peer } from "./communityWorld";
+import { CommunityWorld, RELAY_NETWORK, type NetworkModel, type Peer } from "./communityWorld";
 import { groupFileId, type GroupFileStore, type GroupFileWriter } from "../src/engine/groupFiles";
 import type { StoredFile } from "../src/shared/idb";
 import { waitingGroupFile } from "../src/shared/storedFiles";
@@ -67,14 +67,16 @@ const saved = { ...limits };
 afterEach(() => { Object.assign(limits, saved); });
 
 class FilesWorld {
-  readonly world = new CommunityWorld();
+  readonly world: CommunityWorld;
   readonly files = new Map<Peer, Files>();
   readonly seen: Seen = [];
   /** Holds files/3 frames on their way (a slow network) while it says so; `release` delivers them. */
   hold: ((from: Peer, to: Peer, frame: Record<string, unknown>) => boolean) | null = null;
   private held: { from: Peer; to: Peer; frame: Record<string, unknown> }[] = [];
 
-  constructor() {
+  /** `network`: the relays' budget and polls, for a test whose edges come up as on public relays. */
+  constructor(network: NetworkModel | null = null) {
+    this.world = new CommunityWorld(undefined, network);
     this.world.drop = (from, to, frame) => {
       this.seen.push({ from: from.name, to: to.name, frame });
       if (!this.hold?.(from, to, frame)) return false;
@@ -691,6 +693,28 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(answers.map(s => [s.from, s.frame.t, s.frame.why]).sort()).toEqual([["alice", "group-want-no", "refused"], ["bob", "group-want-no", "refused"]]);
   });
 
+  it("a file sent while its author was behind on the chain reaches the member let in meanwhile, who read it said again", async () => {
+    const t = new FilesWorld(RELAY_NETWORK);
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    // Carol's app closes; Xena is let in meanwhile.
+    carol.online = false;
+    await t.world.run(2_000);
+    const xena = t.add("xena");
+    await xena.groups.joinByLink(await alice.groups.enableLink(id));
+    await t.world.until(() => t.world.member(xena, id) && t.world.view(alice, id)!.members.length === 4, 10 * 60_000);
+    await t.world.run(1_000);
+    // Carol's app opens again and sends a file at once: no edge is up, and she still believes the group is three.
+    await t.restart(carol);
+    expect(t.world.view(carol, id)!.members).toHaveLength(3);
+    const { messageId, meta } = await t.send(carol, id, pattern(40_000, 9));
+    // Said again under the epoch Xena is in, the announcement reaches her under its first id, and so do the bytes.
+    await t.world.until(() => !!t.got(xena, id, messageId).message, 240_000);
+    await t.world.until(() => t.done(xena, id, messageId), 240_000);
+    expect(sha(t.got(xena, id, messageId).bytes!)).toBe(meta.d);
+    expect(t.seen.filter(s => s.to === "xena" && s.frame.t === "group-want-no" && s.frame.why === "refused")).toEqual([]);
+    await t.world.until(() => t.done(bob, id, messageId), 60_000);
+  });
+
   it("serving is busy when turned off, past one transfer per member, and past the day's bytes", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
@@ -1303,7 +1327,7 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     // It stays stopped: nothing asked, nothing stored, and not counted as fetched by itself.
     expect(wants()).toBe(1);
     expect(t.got(bob, id, messageId)).toMatchObject({ transfer: { state: "transferring", stage: "asking" }, bytes: undefined });
-    expect(files.store.records.get(fileId)!.group).toEqual({ message: messageId, author: t.key(alice, id) });
+    expect(files.store.records.get(fileId)!.group).toEqual({ message: messageId, author: t.key(alice, id), ts: t.got(bob, id, messageId).message!.timestamp });
     // After a restart too.
     await t.restart(bob);
     await t.world.run(3 * 60_000);
@@ -1476,7 +1500,7 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
         const { message, transfer, bytes } = t.got(bob, id, messageId);
         expect(transfer).toEqual({ state: "transferring", stage: "asking", transferred: 0, size: 64 * 1024, direction: "in" });
         expect(bytes).toBeUndefined();
-        expect(t.files.get(bob)!.store.records.get(message!.file!.id)!.group).toEqual({ message: messageId, author: t.key(alice, id) });
+        expect(t.files.get(bob)!.store.records.get(message!.file!.id)!.group).toEqual({ message: messageId, author: t.key(alice, id), ts: message!.timestamp });
       }
       // Each still comes when its person asks.
       await bob.groups.downloadFile(t.got(bob, id, sent[0].messageId).message!.file!.id);

@@ -576,13 +576,23 @@ export class GroupSession {
   /** Members other than me, in the current roster. */
   get others(): string[] { return this.roster.map(([k]) => k).filter(k => k !== this.myKey); }
   /**
-   * Whether `key` could read message `messageId` (`<s>:<e>:<n>`) and still can: in the roster of its epoch, and in the
-   * roster now. A holder serves a group file only to such a member (WISP 503 § Asking).
+   * Whether `key` could read message `messageId` (`<s>:<e>:<n>`) and still can: in the roster now, and in the roster of
+   * its epoch or, given the message's time `ts`, let in after it by an `add` dated no later than the message, before any
+   * later one. Its author, behind on the chain, said such a message again under that epoch (`saidAgainEpoch`), and the
+   * member read it under its first id. A holder serves a group file only to such a member (WISP 503 § Asking).
    */
-  couldRead(key: string, messageId: string): boolean {
+  couldRead(key: string, messageId: string, ts?: number): boolean {
     const e = Number(messageId.split(":")[1]);
     const then = this.state.chain.find(c => c.e === e);
-    return !!then && rosterHas(then.m, key) && rosterHas(this.roster, key);
+    if (!then || !rosterHas(this.roster, key)) return false;
+    if (rosterHas(then.m, key)) return true;
+    if (ts === undefined) return false;
+    for (let later = e + 1; later <= this.epoch; later++) {
+      const c = this.state.chain[later];
+      if (!c || (c.k === "add" && c.ts > ts)) return false;
+      if (rosterHas(c.m, key)) return true;
+    }
+    return false;
   }
   role(key: string): GroupRole | undefined { return this.roster.find(([k]) => k === key)?.[1]; }
   /** The group's picture, if it has one. */
