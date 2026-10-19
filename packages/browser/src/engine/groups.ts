@@ -943,7 +943,7 @@ export class Groups {
     if (this.isCommunity(groupId)) return this.communities.fileMembership(groupId);
     const session = this.sessions.get(groupId);
     if (session?.status !== "active") return undefined;
-    return { me: session.myKey, community: false, inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId) => session.couldRead(key, messageId) };
+    return { me: session.myKey, community: false, inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId, ts) => session.couldRead(key, messageId, ts) };
   }
 
   /**
@@ -2449,7 +2449,7 @@ export class Groups {
         const timestamp = m.timestamp;
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
         // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself.
-        const file = m.file && this.files ? await this.files.announced(state.id, { id: m.id, sender: m.sender, file: m.file }, session.myKey) : undefined;
+        const file = m.file && this.files ? await this.files.announced(state.id, { id: m.id, sender: m.sender, ts: m.timestamp, file: m.file }, session.myKey) : undefined;
         const message: StoredMessage = { linkId: MESSAGE_LINK(state.id), id: m.id, text: file ? groupFileText(m.text, m.file!) : m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }),
           ...(m.frame && { frame: m.frame }) };
