@@ -80,6 +80,19 @@ describe("usage send", () => {
     expect(params(["Alice", "--left", "0"]).card).toEqual({ left: 0 });
   });
 
+  it("refuses a text too long or blank as a usage error (exit 2) that names the flag, not the card's field", () => {
+    const usage = (argv: string[], message: RegExp) => expect(() => params(argv)).toThrow(expect.objectContaining({ code: "usage", message: expect.stringMatching(message) }));
+    // Before: bad_request (exit 1), "Status card: label is at most 24 characters".
+    usage(["Alice", "--left", "50", "--label", "l".repeat(30)], /^--label takes at most 24 characters, not 30$/);
+    usage(["Alice", "--left", "50", "--account", "a".repeat(25)], /^--account takes at most 24 characters, not 25$/);
+    usage(["Alice", "--left", "50", "--window", "w".repeat(17)], /^--window takes at most 16 characters, not 17$/);
+    usage(["Alice", "--left", "50", "--label", " "], /^--label takes text, not " "$/);
+    usage(["Alice", "--left", "50", "--also", `${"w".repeat(20)}=80`], /^--also's window takes at most 16 characters, not 20$/);
+    usage(["Alice", "--left", "50", "--also", "week=150"], /^--also takes a percent from 0 to 100, not 150$/);
+    usage(["Alice", "--left", "50", "--also", "a=1", "--also", "b=1", "--also", "c=1", "--also", "d=1"], /^--also is given at most 3 times, not 4$/);
+    expect(params(["Alice", "--json", `{"left":40,"label":"${"l".repeat(30)}"}`]).card).toMatchObject({ label: "l".repeat(30) });
+  });
+
   it("sends the card once, then edits that one message with each report: one card per chat, whole reports", async () => {
     vi.useFakeTimers({ now: T0, toFake: ["Date"] });
     const { ctx, node, rows } = fake();
