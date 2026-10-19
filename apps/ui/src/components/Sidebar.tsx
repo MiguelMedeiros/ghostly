@@ -65,6 +65,21 @@ const MIN_PAGE_WIDTH = 320;
 /** Search folds case and accents, as the in-chat search does: "jose" finds "José". `q` is folded already. */
 const found = (text: string | undefined, q: string) => !!text && foldText(text).includes(q);
 
+/**
+ * A chat's message texts folded for search, once per list of messages: the page's one cache keeps that list while the
+ * chat is unchanged (`listShownSessions`). Folded at every draw, a search over 100k messages took ~100 ms of each
+ * engine state, which draws the list again with nothing in a message changed.
+ */
+const foldedTexts = new WeakMap<ChatSession["messages"], string[]>();
+function messagesFound(messages: ChatSession["messages"], q: string): boolean {
+  let texts = foldedTexts.get(messages);
+  if (!texts) {
+    texts = messages.flatMap((m) => (m.text ? [foldText(m.text)] : []));
+    foldedTexts.set(messages, texts);
+  }
+  return texts.some((text) => text.includes(q));
+}
+
 /** The groups whose name has the search in it; all of them with no search. (Outside the component: the React Compiler keeps its memoization then.) */
 function groupsFound<G extends { name: string }>(groups: G[], search: string): G[] {
   const q = foldText(search);
@@ -216,7 +231,7 @@ export function Sidebar() {
     if (found(s.nick, query)) return true;
     if (found(faceOf(s.peerPubKeyB64)?.name, query)) return true;
     if (found(s.peerPubKeyB64, query)) return true;
-    return s.messages.some((m) => found(m.text, query));
+    return messagesFound(s.messages, query);
   });
   const shownGroups = groupsFound(groups, search);
   // The person's folders, first in the list and in their order; a search shows what it finds as one list, with no folders.
