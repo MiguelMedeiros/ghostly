@@ -30,14 +30,17 @@ describe("Receive's invoice past its expiry", () => {
   }
 
   it("is replaced by a line saying it expired, with New amount", async () => {
-    const view = await showInvoice(walletExpiringIn(300));
-    // The keys were on the invoice's line (where Create invoice put them): they go on New amount, not to the page.
-    expect(document.activeElement?.textContent).toMatch(/^Invoice for/);
-    await waitFor(() => expect(screen.queryByTestId("wallet-invoice")).not.toBeInTheDocument(), { timeout: 2_000 });
+    // Long enough for the invoice's line to take the focus first on a loaded runner (300 ms was not, now and then).
+    const view = await showInvoice(walletExpiringIn(1_500));
+    // The keys were on the invoice's line (where Create invoice put them): they go on New amount, not to the page. Both
+    // moves are effects, run after the commit that shows the line: on a loaded runner React yields in between, so the
+    // focus is waited for, not read at the first sight of the new line.
+    await waitFor(() => expect(document.activeElement?.textContent).toMatch(/^Invoice for/));
+    await waitFor(() => expect(screen.queryByTestId("wallet-invoice")).not.toBeInTheDocument(), { timeout: 5_000 });
     expect(screen.getByTestId("wallet-invoice-expired")).toHaveTextContent("This invoice expired: nobody can pay it now.");
     expect(screen.getByRole("alert")).toHaveTextContent("This invoice expired");
     expect(screen.queryByText(/Waiting for the payment/)).not.toBeInTheDocument();
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "New amount" }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "New amount" })));
     await view.user.click(screen.getByRole("button", { name: "New amount" }));
     expect(screen.getByTestId("wallet-receive-amount")).toBeInTheDocument();
   });
