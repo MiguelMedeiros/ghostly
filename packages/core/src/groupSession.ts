@@ -577,8 +577,8 @@ export class GroupSession {
   get others(): string[] { return this.roster.map(([k]) => k).filter(k => k !== this.myKey); }
   /**
    * Whether `key` could read message `messageId` (`<s>:<e>:<n>`) and still can: in the roster now, and in the roster of
-   * its epoch or, given the message's time `ts`, let in after it by an `add` dated no later than the message, before any
-   * later one. Its author, behind on the chain, said such a message again under that epoch (`saidAgainEpoch`), and the
+   * its epoch or, given the message's time `ts`, in the roster of the epoch its author, behind on the chain, said it
+   * again under (`saidAgainEpoch`): the newest after its own that comes before any `add` dated later than it. That
    * member read it under its first id. A holder serves a group file only to such a member (WISP 503 § Asking).
    */
   couldRead(key: string, messageId: string, ts?: number): boolean {
@@ -587,12 +587,13 @@ export class GroupSession {
     if (!then || !rosterHas(this.roster, key)) return false;
     if (rosterHas(then.m, key)) return true;
     if (ts === undefined) return false;
+    let again: GroupCommit | undefined;
     for (let later = e + 1; later <= this.epoch; later++) {
       const c = this.state.chain[later];
-      if (!c || (c.k === "add" && c.ts > ts)) return false;
-      if (rosterHas(c.m, key)) return true;
+      if (!c || (c.k === "add" && c.ts > ts)) break;
+      again = c;
     }
-    return false;
+    return !!again && rosterHas(again.m, key);
   }
   role(key: string): GroupRole | undefined { return this.roster.find(([k]) => k === key)?.[1]; }
   /** The group's picture, if it has one. */
