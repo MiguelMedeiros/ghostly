@@ -88,8 +88,8 @@ export const MAX_BATCH = 12;
 // A new batch waits for company: it leaves with MIN_BATCH pull requests that can board, or once the one that has waited
 // longest has waited MAX_WAIT since it could board, or at once for `queue:priority`. Pull requests come in minutes
 // apart and each batch's CI takes ~20 minutes, one at a time, so leaving with the first one ready made batches of ~2
-// (15 batches on 2026-10-15/16: 1 to 4 each): more full CI runs, and a slower line. The schedule (every 5 minutes) wakes
-// the train for the deadline.
+// (15 batches on 2026-10-15/16: 1 to 4 each): more full CI runs, and a slower line. A run that holds a batch has the
+// workflow wake the train just past the deadline (`wakeIn`): GitHub runs the 5-minute schedule only every 10 to 30.
 export const MIN_BATCH = 3;
 export const MAX_WAIT = 15 * 60_000;
 /** The most pages of 100 the train reads of one list (comments, events, pull requests, jobs). */
@@ -284,6 +284,19 @@ export function holdBatch(next, now, { minBatch = MIN_BATCH, maxWait = MAX_WAIT 
   if (!next.length || next.length >= minBatch || next.some((p) => p.priority)) return null;
   const waited = Math.max(...next.map((p) => now - (Date.parse(p.boardableAt ?? p.queuedAt) || 0)));
   return waited >= maxWait ? null : { count: next.length, waited };
+}
+
+/** How long past a held batch's time the run that wakes for it starts, so that run finds the time passed. */
+export const WAKE_MARGIN = 30_000;
+
+/**
+ * The seconds a workflow sleeps before it wakes the train for a held batch that leaves at `leavesAt`, or null with
+ * nothing held (or a time no hold gives, past MAX_WAIT from now). GitHub runs the `*\/5` schedule only every 10 to 30
+ * minutes, so without this a held batch left up to ~45 minutes after the oldest could board, not 15.
+ */
+export function wakeIn(leavesAt, now, { maxWait = MAX_WAIT } = {}) {
+  if (leavesAt === null || leavesAt === undefined || leavesAt - now > maxWait) return null;
+  return Math.ceil((Math.max(leavesAt - now, 0) + WAKE_MARGIN) / 1000);
 }
 
 /** The hold, as the log says it. */
@@ -1101,7 +1114,7 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     if (!aboard.has(p.number)) await cancelBehind(p);
   }
   say(inFlight ? `IN FLIGHT #${inFlight.number}${inFlight.alone ? " (alone)" : ""}` : holding ? holdText(holding, { minBatch, maxWait }) : "Nothing to board.");
-  return { log, ...done, inFlight: inFlight?.number ?? null };
+  return { log, ...done, inFlight: inFlight?.number ?? null, leavesAt: company?.leavesAt ?? null };
 }
 
 /** Logs every write a run would make, and changes nothing. */
@@ -1695,7 +1708,10 @@ async function main() {
         const git = gitLayer({ signal });
         const log = [];
         try {
-          await tick({ gh, git, base, login, dry, also, log });
+          const { leavesAt } = await tick({ gh, git, base, login, dry, also, log });
+          // A held batch: the workflow's `wake` job sleeps this long and starts the train again (merge-queue.yml).
+          const wake = dry ? null : wakeIn(leavesAt, Date.now());
+          if (wake !== null && process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `wake_in=${wake}\n`);
         } catch (e) {
           failed(base, e, log);
         } finally {
