@@ -162,6 +162,7 @@
     "beside": "Show the chat",
     "full": "Full width",
     "resume": "Back to {{title}}",
+    "sharingWith": "sharing a file with {{name}}",
     "stoppedRemoved": "{{title}} was stopped: {{store}} removed this version",
     "stoppedRevoked": "{{title}} was stopped: its maker revoked this version",
     "with": "{{title}} with {{name}}",

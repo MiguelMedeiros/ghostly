@@ -162,6 +162,7 @@
     "beside": "Mostrar a conversa",
     "full": "Largura total",
     "resume": "Voltar para {{title}}",
+    "sharingWith": "compartilhando um arquivo com {{name}}",
     "stoppedRemoved": "{{title}} foi parado: {{store}} removeu esta versão",
     "stoppedRevoked": "{{title}} foi parado: o autor revogou esta versão",
     "with": "{{title}} com {{name}}",

@@ -96,6 +96,8 @@ interface BrokerOptions {
    * the box they type in, and name an app they cannot see. None: always (a Desktop app window).
    */
   shown?: () => boolean;
+  /** The app serves a file to its contact now (true), or no longer (false): the panel's header says so. */
+  serving?: (on: boolean) => void;
   now?: () => number;
 }
 
@@ -252,7 +254,7 @@ function storageKey(value: unknown): string {
   return value as string;
 }
 
-export function createBroker({ host: platform, launch, view, post, stopped, byReference = false, shown = () => true, now = Date.now }: BrokerOptions): Broker {
+export function createBroker({ host: platform, launch, view, post, stopped, byReference = false, shown = () => true, serving: onServing, now = Date.now }: BrokerOptions): Broker {
   const host = platform.running?.(launch.digest) ?? platform;
   let phase: AppPhase = "loading";
   const recent: number[] = [];
@@ -276,6 +278,12 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
   const serving = new Map<string, { file: string; size: number }>();
   /** Every serve id this app was given: an ask under one it ended is still answered, so its place frees at once. */
   const servedEver = new Set<string>();
+  /** Says when the app starts or stops serving anything. */
+  const servingChange = (change: () => void) => {
+    const was = serving.size > 0;
+    change();
+    if (was !== serving.size > 0) onServing?.(!was);
+  };
   /** A pick waiting for the person: one at a time per app. */
   let picking = false;
   /** Aborts as the app stops: a sheet the client shows for it goes with it. */
@@ -300,7 +308,8 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
       if (frameLink !== linkId || appId === null || frame.app !== appId) return;
       if ("d" in frame) { if (peer) event("chat.message", frame.d as MiniAppJson); return; }
       if (frame.o === "open") { peer = { version: frame.v }; event("chat.peer", { open: true, version: frame.v }); }
-      else { peer = null; event("chat.peer", { open: false }); }
+      // The contact's side closed (or the session went): every serve ended with it.
+      else { peer = null; servingChange(() => serving.clear()); event("chat.peer", { open: false }); }
     });
     const lane = ranges(), files = linkedFiles();
     const asks = lane && files ? lane.onAsk((askLink, ask) => {
@@ -329,6 +338,7 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
     if (phase === "stopped") return;
     phase = "stopped";
     alive.abort();
+    servingChange(() => serving.clear());
     unsubscribe?.();
     unsubscribe = null;
     if (chatOpened && launch.chat) void host.chat.close(launch.chat.linkId, launch.ref).catch(() => {});
@@ -461,7 +471,7 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         if ("error" in answer) refuse(answer.error);
         const { serve } = answer as { serve: string };
         servedEver.add(serve);
-        serving.set(serve, { file: id as string, size: entry!.size });
+        servingChange(() => serving.set(serve, { file: id as string, size: entry!.size }));
         return { value: serve };
       }
       case "files.unserve": {
@@ -469,7 +479,9 @@ export function createBroker({ host: platform, launch, view, post, stopped, byRe
         if (!linkedFiles() || !lane || !launch.chat) return refuse("not-allowed");
         const serve = args[0];
         if (typeof serve !== "string" || !LINK_ID.test(serve)) refuse("bad-request");
-        if (serving.delete(serve as string)) await lane.unserve(launch.chat!.linkId, serve as string);
+        let was = false;
+        servingChange(() => { was = serving.delete(serve as string); });
+        if (was) await lane.unserve(launch.chat!.linkId, serve as string);
         return {};
       }
       case "remote.read":
@@ -596,12 +608,14 @@ export function onScreen(frame: HTMLIFrameElement): boolean {
  * Runs an app in a sandboxed frame of the runner, inside `container`: the frame, its one port, the start and the
  * teardown. The frame is removed when the app stops, for whatever reason.
  */
-export function startApp({ container, host, launch, view, onStop, startTimeoutMs = START_TIMEOUT_MS }: {
+export function startApp({ container, host, launch, view, onStop, onServing, startTimeoutMs = START_TIMEOUT_MS }: {
   container: HTMLElement;
   host: AppsPlatform;
   launch: AppLaunch;
   view: AppView;
   onStop?: (reason: AppStopReason) => void;
+  /** It serves a file to its contact now, or no longer. */
+  onServing?: (on: boolean) => void;
   startTimeoutMs?: number;
 }): RunningApp {
   const runner = runnerFor(host, launch);
@@ -617,6 +631,7 @@ export function startApp({ container, host, launch, view, onStop, startTimeoutMs
   const broker = createBroker({
     host, launch, view,
     shown: () => onScreen(frame),
+    serving: onServing,
     post:(message, transfer) => { try { port?.postMessage(message, transfer ?? []); } catch { /* closed */ } },
     stopped: (reason) => {
       if (timer) clearTimeout(timer);
