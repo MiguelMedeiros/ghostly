@@ -249,6 +249,11 @@ export const GROUP_NATIVE_SLOTS = NATIVE_SLOTS - CHAT_NATIVE_SLOTS;
 export const GROUP_IROH_WEB_SLOTS = IROH_WEB_SLOTS - CHAT_NATIVE_SLOTS;
 /** How often a group link that found no free native slot tries again, and the first wait of a listener that failed to start. */
 const NATIVE_RETRY_MS = 15_000;
+/**
+ * How long the one edge a group keeps while it is not on screen may hold a native listener with no session before the
+ * group keeps the next one instead (`groupEdgesByRank`): about a dial's 20 s timeout, the member's side given time to answer.
+ */
+const GROUP_EDGE_ANSWER_MS = 20_000;
 /** The longest a chat or a group link whose native listener failed to start waits before trying again (its wait doubles up to it). */
 const NATIVE_FAILED_MAX_MS = 5 * 60_000;
 /** "Clear all data": how long taking things back from the network may hold up the clear, in all. */
@@ -354,6 +359,8 @@ interface LiveLink {
   carried?: CarriedTransport;
   /** When this chat last took a native listener from an idle live session (`ensureNativeEndpoints`), by transport. */
   nativeTakenAt?: Partial<Record<NativeTransport, number>>;
+  /** When this link last went from holding no native listener to holding one (`startNativeEndpoint`). */
+  nativeUpAt?: number;
   /** The mini-apps this side has open in this chat (chat app id to version), for this run (`apps/1`, WISP 1200). */
   appsOpen?: Map<string, string>;
   /** The public key of `stored.participationSeed`, derived once for that seed (`participationKeyOf`). */
@@ -7913,18 +7920,21 @@ export class GhostlyNode implements EngineImplementation {
    * A group's edges that run native transports (`keepsGroupNative`), the one it keeps while it is not on screen first
    * (WISP 902 § Transports): to a hub, then to the admin (`leadClass`), then one that holds a listener already (so the
    * one it keeps does not change hands each time another member is heard), then the member seen last. The mesh's
-   * catch-up brings the group's messages through any member.
+   * catch-up brings the group's messages through any member. One whose listener got no answer within
+   * GROUP_EDGE_ANSWER_MS goes after the rest: the member's side may hold no listener for it, and the group keeps the next.
    */
   private groupEdgesByRank(groupId: string, view: GroupView | undefined): LiveLink[] {
     const native = Object.keys(this.nativeFactories) as NativeTransport[], now = Date.now();
     const lead = new Map(view?.members.filter(member => !member.me).map(member => [member.key, leadClass(member)]));
-    const rank = (live: LiveLink) => [lead.get(live.stored.groupPeer!) ?? 0, Number(native.some(t => live.link!.availableTransports.includes(t))),
+    const holds = (live: LiveLink) => native.some(t => live.link!.availableTransports.includes(t));
+    const unanswered = (live: LiveLink) => holds(live) && !live.link!.isDataLinkOpen && now - (live.nativeUpAt ?? now) >= GROUP_EDGE_ANSWER_MS;
+    const rank = (live: LiveLink) => [Number(!unanswered(live)), lead.get(live.stored.groupPeer!) ?? 0, Number(holds(live)),
       live.link!.groupsSupport ? now : Math.max(presenceSeenAt(live.presence), live.lastSyncAt)];
     const edges = [...this.links.values()].filter(live => live.stored.group === groupId && !live.stored.groupEntry && live.link && this.keepsGroupNative(live.stored));
     const ranks = new Map(edges.map(live => [live, rank(live)]));
     return edges.sort((a, b) => {
       const x = ranks.get(a)!, y = ranks.get(b)!;
-      return y[0] - x[0] || y[1] - x[1] || y[2] - x[2];
+      return y[0] - x[0] || y[1] - x[1] || y[2] - x[2] || y[3] - x[3];
     });
   }
 
@@ -8097,6 +8107,7 @@ export class GhostlyNode implements EngineImplementation {
       const endpoint = await Promise.race([starting, this.stopping]);
       if (!endpoint) { void starting.then((late) => late.close(), () => {}); return false; }
       if (this.shuttingDown || live.stored.deliveryMode === "dht" || live.link !== link || !this.links.has(linkId) || link.takenFromUs) { await endpoint.close(); return false; }
+      if (!Object.keys(this.nativeFactories).some(t => link.availableTransports.includes(t as NativeTransport))) live.nativeUpAt = Date.now();
       link.registerEndpoint(endpoint);
       delete live.transportErrors[key];
       // The record says how to dial it, so a contact whose WebRTC never connects can try it (WISP 03).

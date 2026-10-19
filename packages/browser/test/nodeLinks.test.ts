@@ -2128,6 +2128,38 @@ describe("private groups through the engine", () => {
       await vi.waitFor(() => expect(edgeOf(toHub).availableTransports).toContain("iroh/1"));
     });
 
+    it("a member whose kept edge gets no answer within 20 s keeps the next one instead, and an answered one stays", async () => {
+      // Every listener held by a chat: the group's one edge takes one, the other waits.
+      const chats = Array.from({ length: 8 }, () => row({ pairedPeerKey: createIdentity().pubKeyZ32 }));
+      for (const r of chats) await db.putLink(r);
+      const { node } = await nativeEngine();
+      await vi.waitFor(() => { for (const chat of chats) expect(edgeOf(chat.id).registerEndpoint).toHaveBeenCalled(); });
+      const { groupId } = await node.createGroup({ name: "Plaza" });
+      expect((await node.sendGroupMessage({ groupId, text: "hi" })).error).toBeNull();
+      const [admin, other] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
+      groupMembers(node, groupId, [{ key: admin, role: "admin" }, { key: other }], "member");
+      const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+      const toAdmin = await openEdge(node, state, admin);
+      await vi.waitFor(() => expect(edgeOf(toAdmin).availableTransports).toContain("iroh/1"));
+      const toOther = await openEdge(node, state, other);
+      await node["nativeQueues"].get("iroh/1");
+      await vi.waitFor(() => expect(node["groupNativeWaiting"].has(toOther)).toBe(true));
+      const retry = () => { node["groupNativeRetryAt"] = 0; node["retryNative"](); };
+      // Answered: the edge to the admin stays the one kept, however long ago its listener started.
+      edgeOf(toAdmin).isDataLinkOpen = true;
+      node["links"].get(toAdmin)!.nativeUpAt = Date.now() - 60_000;
+      retry();
+      await node["nativeQueues"].get("iroh/1");
+      expect(edgeOf(toOther).availableTransports).not.toContain("iroh/1");
+      // No answer for 20 s (the admin's side held no listener for it): the edge to the other member takes its listener.
+      const holding = chats.filter((chat) => edgeOf(chat.id).availableTransports.includes("iroh/1"));
+      edgeOf(toAdmin).isDataLinkOpen = false;
+      retry();
+      await vi.waitFor(() => expect(edgeOf(toOther).availableTransports).toContain("iroh/1"));
+      expect(edgeOf(toAdmin).availableTransports).not.toContain("iroh/1");
+      for (const chat of holding) expect(edgeOf(chat.id).availableTransports).toContain("iroh/1");
+    });
+
     it("an app with neither WebRTC nor a native transport says its group links have none", async () => {
       const { node } = await started();
       expect(node.getState().transport).toMatchObject({ webrtc: false, groupLinks: false });
