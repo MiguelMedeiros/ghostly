@@ -11,7 +11,7 @@ import { forgetAppsAvailable } from "../../lib/apps/flag";
 import { forgetInstalledApps } from "../../lib/apps/installed";
 import { setAppOpener } from "../../lib/apps/open";
 import type { AppOpener } from "../../lib/apps/open";
-import { appWithContact, chatApp, requestOpenInChat, takeOpenRequest } from "../../lib/apps/running";
+import { appWithContact, chatApp, requestOpenInChat, takeOpenRequest, updateChatApp } from "../../lib/apps/running";
 import { saveSession } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 import type { InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -81,6 +81,19 @@ function panel(live = true) {
 }
 
 describe("a mini-app in a chat (WISP 1200 § Per client, web)", () => {
+  it("says in its header while it shares a file with the contact (WISP 1200 § A read lane to the contact)", async () => {
+    windowIs(false);
+    panel();
+    await act(() => open(REF, "link-1"));
+    const line = within(screen.getByTestId("mini-app")).getByTestId("mini-app-with");
+    act(() => updateChatApp("link-1", { serving: true }));
+    expect(line).toHaveTextContent("sharing a file with Ana");
+    expect(line).toHaveAttribute("data-serving", "true");
+    act(() => updateChatApp("link-1", { serving: false }));
+    expect(line).toHaveTextContent("with Ana");
+    expect(line).not.toHaveAttribute("data-serving");
+  });
+
   it("has the chat's look in its header: the app, with the contact, and the chat's connection", async () => {
     windowIs(false);
     panel();

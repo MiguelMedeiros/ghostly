@@ -13,7 +13,7 @@ import { memoryAppId, memoryHost } from "../../lib/apps/memoryHost";
 const REF = "pubkeyalpha/chess";
 const LINK = "link-1";
 
-function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }, { byReference = false } = {}) {
+function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }, { byReference = false, serving }: { byReference?: boolean; serving?: (on: boolean) => void } = {}) {
   const host = memoryHost();
   const posted: { message: Record<string, unknown>; transfer?: Transferable[] }[] = [];
   const stops: AppStopReason[] = [];
@@ -24,6 +24,7 @@ function setup(launch: Partial<AppLaunch> = {}, clock = { t: 1_000 }, { byRefere
     post: (message, transfer) => posted.push({ message: message as Record<string, unknown>, transfer }),
     stopped: (reason) => stops.push(reason),
     byReference,
+    serving,
     now: () => clock.t,
   });
   let next = 1;
@@ -752,8 +753,8 @@ describe("the read lane (WISP 1200 § A read lane to the contact)", () => {
   const SERVE = "s".repeat(22);
 
   /** Cinema in Ana's chat, granted `chat` and `files`, with one film picked. */
-  async function cinema(permissions = ["chat", "files"]) {
-    const it = setup({ permissions, title: "Cinema" });
+  async function cinema(permissions = ["chat", "files"], serving?: (on: boolean) => void) {
+    const it = setup({ permissions, title: "Cinema" }, undefined, { serving });
     it.run();
     it.host.nextPick = [{ path: "Films/Up.mp4", bytes: film }];
     const picked = permissions.includes("files") ? ((await it.ask("files.pick")).value as { id: string }[])[0]!.id : "l".repeat(22);
@@ -816,6 +817,22 @@ describe("the read lane (WISP 1200 § A read lane to the contact)", () => {
     const alone = setup({ permissions: ["chat"], chat: null });
     alone.run();
     expect(await alone.ask("remote.stat", [SERVE])).toMatchObject({ ok: false, error: "not-allowed" });
+  });
+
+  it("says when the app starts and stops serving: its unserve, the contact's close, its own stop", async () => {
+    const said: boolean[] = [];
+    const { ask, host, id, broker, app } = await cinema(undefined, (on) => said.push(on));
+    const first = (await ask("files.serve", [id])).value as string;
+    await ask("files.serve", [id]);
+    expect(said).toEqual([true]);
+    await ask("files.unserve", [first]);
+    expect(said).toEqual([true]);
+    host.receive(LINK, { app, o: "open", v: "1.0.0" });
+    host.receive(LINK, { app, o: "close" });
+    expect(said).toEqual([true, false]);
+    await ask("files.serve", [id]);
+    broker.stop();
+    expect(said).toEqual([true, false, true, false]);
   });
 
   it("remote.read shares `file`'s 16 MiB a second", async () => {
