@@ -866,4 +866,18 @@ describe("the read lane (WISP 1200 § A read lane to the contact)", () => {
     clock.t += 1000;
     expect(await ask("remote.read", [SERVE, { offset: 0, length: 1 }])).toMatchObject({ ok: true });
   });
+
+  // A contact that never answered an `ar-get` held the app's one read chain: its own files.read, files.list and
+  // files.serve waited for good behind it. The contact's reads wait for the contact only, still one at a time.
+  it("a remote.read the contact never answers holds no read of the app's own", async () => {
+    const { ask, host, broker, id } = await cinema();
+    let reads = 0;
+    host.ranges!.read = () => { reads++; return new Promise(() => {}); };
+    broker.message({ id: 3_000, type: "remote.read", args: [SERVE, { offset: 0, length: 1 }] });
+    broker.message({ id: 3_001, type: "remote.stat", args: [SERVE] });
+    expect(await ask("files.read", [id, { offset: 0, length: 4 }])).toMatchObject({ ok: true });
+    expect(await ask("files.list")).toMatchObject({ ok: true });
+    expect(await ask("files.serve", [id])).toMatchObject({ ok: true });
+    expect(reads).toBe(1);
+  });
 });
