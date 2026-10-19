@@ -1,6 +1,6 @@
 # USDT via Tether WDK: experimental implementation
 
-Ghostly integrates `@tetherto/wdk-wallet-evm` 1.0.0-beta.19 with the existing payment coordinator. This is an experimental implementation, not a production security audit or an independent protocol implementation.
+Ghostly integrates `@tetherto/wdk-wallet-evm` 1.0.0-beta.22 with the existing payment coordinator. This is an experimental implementation, not a production security audit or an independent protocol implementation.
 
 ## Supported configuration
 
