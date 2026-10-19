@@ -381,12 +381,6 @@ export function GroupChat() {
     // Its list stops following once this group is left: coming back, the engine's copy (with what came meanwhile) is shown.
     return () => { current = false; off(); setLoaded({ groupId: "", list: NO_MESSAGES }); };
   }, [groupId]);
-  // On screen, its edges take this device's native connections as a chat on screen does (WISP 902 § Transports).
-  useEffect(() => {
-    if (!groupId) return;
-    void engine.call("setActiveLink", { linkId: `group:${groupId}` }).catch(() => {});
-    return () => { void engine.call("setActiveLink", { linkId: null }).catch(() => {}); };
-  }, [groupId]);
   // Opened from the Tasks board: on the card's message, once it is here.
   useJumpTo(!!group, id => messages.some(m => m.id === id));
   // What the now-playing bar names, for a voice message from here that plays on elsewhere.
