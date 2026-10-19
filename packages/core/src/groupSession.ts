@@ -507,6 +507,8 @@ export class GroupSession {
       },
       ...(hooks.handled && { handled: (to: string) => hooks.handled!(to) }),
       active: () => this.state.status === "active",
+      // A member whose app is slow asks again while my last answer still waits there: its messages are not sent twice.
+      key: frame => frame.t === "group-msg" ? frameKey(frame) : undefined,
     });
     this.provisional = new Set((state.provisional ?? []).slice(-GROUP_LIMITS.provisional));
     this.chainMovedAt = this.clock();
