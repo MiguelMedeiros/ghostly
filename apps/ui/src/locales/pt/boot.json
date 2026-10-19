@@ -12,6 +12,7 @@
   "otherTab": "O Ghostly já está aberto em outra aba.",
   "otherTabHint": "Feche-a e esta aba assume.",
   "reload": "Recarregar",
+  "reloadUnreachable": "Não foi possível acessar o servidor do Ghostly. Verifique sua conexão e recarregue.",
   "shared": "Enviado ao Ghostly na sua outra aba.",
   "sharedHint": "Escolha a conversa lá. Pode fechar esta.",
   "title": "O Ghostly não roda neste navegador",
