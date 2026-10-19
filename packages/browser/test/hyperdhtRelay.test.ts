@@ -285,6 +285,49 @@ it("drops a client past its listen budget and refuses topic queries, and keeps s
   await own.close();
 }, 60_000);
 
+it("refuses a listen on a key already listened on, by another client or the same one, and keeps serving the client that holds it", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const reasons: string[] = [];
+  const own = await startRelay({ testnet: 2, log: (what: string, why: string) => { reasons.push(`${what} ${why}`); } });
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+  process.on("unhandledRejection", onUnhandled);
+  const { default: DHT } = await import("hyperdht");
+  const { default: RelayedDHT } = await import("@hyperswarm/dht-relay");
+  const { default: WebSocketStream } = await import("@hyperswarm/dht-relay/ws");
+  type RawServer = { listen(keyPair: unknown): Promise<void> };
+  const sockets: WebSocket[] = [];
+  try {
+    const holder = await createRelayedHyperEndpoint(seed(), own.url);
+    const gone = vi.fn();
+    holder.onUnavailable = gone;
+    // Another client, on its own WebSocket: it listens on the holder's key, and twice on a key of its own.
+    const socket = new WebSocket(own.url);
+    sockets.push(socket);
+    const other = new RelayedDHT(new WebSocketStream(true, socket), { custodial: false }) as { createServer(): RawServer };
+    void other.createServer().listen({ publicKey: Buffer.from((holder.descriptor as { publicKey: string }).publicKey, "hex"), secretKey: null });
+    const mine = DHT.keyPair();
+    await other.createServer().listen(mine);
+    void other.createServer().listen(mine);
+    await vi.waitFor(() => expect(unhandled.length + reasons.filter(r => r.startsWith("refused listen")).length).toBe(2), { timeout: 15_000 });
+    expect(unhandled).toEqual([]);
+    expect(reasons.filter(r => r.startsWith("refused listen"))).toEqual(["refused listen KEYPAIR_ALREADY_USED", "refused listen KEYPAIR_ALREADY_USED"]);
+    // Nobody was dropped, and the holder is still reached on its key.
+    expect(own.stats()).toMatchObject({ clients: 2, dropped: 0 });
+    const caller = await createRelayedHyperEndpoint(seed(), own.url.replace("127.0.0.1", "localhost"));
+    const accepted = incoming(holder);
+    const dialled = await caller.connect(holder.descriptor);
+    expect((await accepted).binding).toEqual(dialled.binding);
+    dialled.channel.close();
+    expect(gone).not.toHaveBeenCalled();
+    await Promise.allSettled([holder.close(), caller.close()]);
+  } finally {
+    for (const socket of sockets) socket.close();
+    process.off("unhandledRejection", onUnhandled);
+    await own.close();
+  }
+}, 60_000);
+
 it("frees the slot of a client that neither listens nor dials, one that stops answering pings, and a request that never ends, but keeps a browser", async () => {
   const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
   const { WebSocket: NodeWebSocket } = await import("ws");
