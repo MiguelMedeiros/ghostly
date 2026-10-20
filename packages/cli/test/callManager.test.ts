@@ -970,4 +970,8 @@ describe("auto-answer from the chats named", () => {
     expect(calls.getAuto()).toMatchObject({ on: false, from: [] });
     expect(existsSync(saved(calls))).toBe(false);
   });
+
+  it("names the command that gives the chat a label when it refuses one", () => {
+    expect(() => manager().setAuto({ on: true, from: ["Bob"] })).toThrow(/ghostly chat rename <chat> <name>/);
+  });
 });
