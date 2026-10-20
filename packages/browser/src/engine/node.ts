@@ -1878,7 +1878,8 @@ export class GhostlyNode implements EngineImplementation {
     // have none. 50 chats of 1000 messages read first held the list blank 1.3 s at every start (2.8 s at 4x CPU).
     for (const stored of links) if (stored.group) this.links.set(stored.id, newLiveLink(stored, 0, linkFilesFrom(stored.id, [], [])));
     for (const group of await db.getGroups()) await this.settleHistory(`group:${group.id}`);
-    // Groups know their edges from the links above, and may add or drop some before anything dials.
+    // Groups know their edges from the links above, and may add or drop some before anything dials. Each group's latest
+    // reaction is noted from the history its load reads (`loaded`).
     await this.groups.load(this.limitedMode);
     this.groupsLoaded = true;
     this.groupsLoadedNow();
@@ -1907,7 +1908,6 @@ export class GhostlyNode implements EngineImplementation {
       if (note) this.reactionNotes.set(stored.id, note);
       if (stored.profile) await this.outboxFor(stored.id).recover(messages);
     }
-    // Each group's latest reaction was noted from the history its load read (`loaded`).
     this.transfersRestored = true;
     // With the chats loaded, profiles of identities no longer verified can be told apart and dropped.
     this.publicProfiles.start();
