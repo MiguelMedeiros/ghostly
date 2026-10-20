@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { IMAGE_LIMITS, imageSize, isImageMime, parseImageMeta, readImageMeta } from "../src/image";
+import { IMAGE_LIMITS, imageSize, isImageMime, parseImageMeta, previewable, readImageMeta } from "../src/image";
 // covers: files.image.meta
 
 const bytes = (...parts: (number[] | string)[]) =>
@@ -101,5 +101,16 @@ describe("reading a picture's size from its first bytes", () => {
     expect(await readImageMeta(blob, "image/png")).toEqual({ width: 1200, height: 900 });
     expect(await readImageMeta(blob, "application/octet-stream")).toBeUndefined();
     expect(await readImageMeta(new Blob([bytes("not a picture")]), "image/jpeg")).toBeUndefined();
+  });
+});
+
+describe("previewable", () => {
+  it("a size up to 50 megapixels and 16384 a side, never one not known", () => {
+    expect(previewable({ width: 8160, height: 6120 })).toBe(true);
+    expect(previewable({ width: IMAGE_LIMITS.previewEdge, height: 3000 })).toBe(true);
+    expect(previewable({ width: 23_000, height: 23_000 })).toBe(false);
+    expect(previewable({ width: 8200, height: 6200 })).toBe(false);
+    expect(previewable({ width: IMAGE_LIMITS.previewEdge + 1, height: 1 })).toBe(false);
+    expect(previewable(undefined)).toBe(false);
   });
 });

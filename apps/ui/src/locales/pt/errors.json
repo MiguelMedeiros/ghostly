@@ -146,6 +146,13 @@
     "cannotRetry": "Não é possível tentar enviar este arquivo de novo",
     "clipboardUnavailable": "Não foi possível ler a área de transferência",
     "clipboardUnavailableNext": "Anexe com +.",
+    "floor": {
+      "noRoomNext": "Libere espaço e peça ao seu contato para enviar de novo.",
+      "notInAWeek": "Não chegou em uma semana",
+      "refused": "Este dispositivo não pôde receber este arquivo",
+      "tooMany": "Há arquivos demais esperando aqui",
+      "tooManyNext": "Responda aos arquivos que esperam por você e peça ao seu contato para enviar de novo."
+    },
     "gone": "Este arquivo não está mais aqui",
     "noRoom": "Sem espaço no dispositivo do contato",
     "noRoomHere": "Sem espaço neste dispositivo",
@@ -203,6 +210,7 @@
     "adminOnly": "Só o admin pode fazer isso",
     "adminPicture": "Só o admin pode alterar a foto do grupo",
     "adminRename": "Só o admin pode renomear o grupo",
+    "adminRotate": "Só o admin pode renovar o segredo do grupo",
     "adminShares": "Só o admin pode compartilhar um link do grupo",
     "alreadyJoining": "Você já está entrando neste grupo",
     "alreadyMember": "Este contato já é membro",
@@ -502,6 +510,12 @@
     "usdtReverted": "A transação foi revertida",
     "usdtRevertedNext": "Nenhum token foi enviado; o gas foi gasto."
   },
+  "relayOnly": {
+    "keepsTurn": "Ocultar meu IP precisa deste servidor TURN",
+    "keepsTurnNext": "Desligue primeiro e depois remova o servidor.",
+    "needsTurn": "Adicione um servidor TURN antes",
+    "needsTurnNext": "Salve um acima e depois ligue isto."
+  },
   "relays": {
     "atLeastOne": "Informe pelo menos um endereço de relay",
     "notAddress": "Não é um endereço de relay: {{address}}",
@@ -531,6 +545,7 @@
     "listenerReleased": "Pausado para outra conversa. Abra esta conversa para retomar.",
     "noAddress": "O endereço do seu contato para esse transporte ainda não é conhecido",
     "noAddressNext": "Reconecte uma vez por WebRTC para trocá-lo.",
+    "noAddressWait": "Chega quando o contato abrir esta conversa no app.",
     "noOverlap": "Suas escolhas de transporte não combinam",
     "noOverlapNext": "Ligue a Alternativa ou escolha o mesmo transporte nos dois lados.",
     "noneConnected": "Nenhum transporte conseguiu conectar",

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BACKGROUND_REQUESTS_PER_MINUTE, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, CHAT_RESERVE_MOST_SHARE, CHAT_RESERVE_PER_CHAT, CHAT_WATCH_SHARE, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RELAY_REQUESTS_PER_MINUTE, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WAY_BACK_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
+import { BACKGROUND_REQUESTS_PER_MINUTE, DEFAULT_RELAYS, BACKGROUND_WHILE_SIGNALING, CHAT_RESERVE, CHAT_RESERVE_MOST_SHARE, CHAT_RESERVE_PER_CHAT, CHAT_WATCH_SHARE, DEPARTED_READS, SIGNALING_ALLOWANCE_SHARE, DiscoveryBudgetError, GROUP_BURST_MS, GROUP_BURST_ONE_LINK, FRESH_READ_MS, REQUESTS_PER_MINUTE, PKARR_FUTURE_SKEW_MS, RELAY_REQUESTS_PER_MINUTE, RelayTransport, newerPacket, parseRelayPayload, readOwnRelayPayload, SIGNALING_WINDOW_MS, SLOW_MS, GROUP_RATION_WINDOW_MS, GROUP_OVER_PACE_MS, GROUP_SIGNALING_ALLOWANCE_SHARE, WATCH_SHARE, WAY_BACK_SHARE, WRITE_FIRST_MS, createIdentity, createRelayPayload, isDiscoveryBudgetError, withRequestOptions } from "../src";
 import type { PkarrRequestOptions, PkarrTransport } from "../src/transport";
 // covers: core.relay-client
 
@@ -888,9 +888,12 @@ describe("relay transport: a relay that held a packet back gets it later", () =>
     return { relay, log };
   }
   const putsOf = (log: ReturnType<typeof twoRelays>["log"], host: string) => log.filter(r => r.method === "PUT" && r.host === host && r.key === id.pubKeyZ32);
-  /** relay.pkarr.org takes 5 requests a minute: spent on reads of another key. */
+  /**
+   * relay.pkarr.org takes 5 requests a minute: spent on writes of another key, which go to every relay (reads go to it
+   * only once a.test refuses them: a relay with a small share takes no read turns).
+   */
   async function spendSmallRelay(relay: RelayTransport) {
-    for (let i = 0; i < 12; i++) await relay.resolve(other.pubKeyZ32).catch(() => {});
+    for (let i = 0; i < 5; i++) await relay.publish(other, [{ label: "_ts", value: String(i) }]);
   }
 
   it("puts the newest packet there once its budget frees, once", async () => {
@@ -925,6 +928,77 @@ describe("relay transport: a relay that held a packet back gets it later", () =>
       expect(there).toHaveLength(1);
       expect(there[0].body).toEqual(putsOf(log, "a.test")[1].body);
     } finally { vi.useRealTimers(); }
+  });
+});
+
+describe("relay transport: a chat's packet one relay took waits for the others while chats need the relays", () => {
+  // Bug hunt, 2026-10-14: an app opened with 30 contacts online wrote each chat's offer to both relays, and the chats
+  // whose contact's offer or answer came a few seconds later found both minutes spent.
+  const me = createIdentity();
+  function twoRelays(failing?: string, slow?: string) {
+    const log: { host: string; method: string; key: string }[] = [];
+    const relay = new RelayTransport({ freshReadMs: 0, relays: ["https://a.test", "https://b.test"], fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input)), key = url.pathname.slice(1);
+      log.push({ host: url.host, method: init?.method ?? "GET", key });
+      if (init?.method !== "PUT") return new Response(null, { status: 404 });
+      // Takes the packet, and says so just before the 10 s timeout.
+      if (url.host === slow && key === me.pubKeyZ32) await new Promise((resolve) => setTimeout(resolve, 9_000));
+      return new Response(null, { status: url.host === failing && key === me.pubKeyZ32 ? 500 : 204 });
+    }) as typeof fetch });
+    return { relay, log };
+  }
+  const putsOf = (log: ReturnType<typeof twoRelays>["log"]) => log.filter(r => r.method === "PUT" && r.key === me.pubKeyZ32).map(r => r.host);
+  /** Four chats look fast for their contacts; the groups' writes spend both relays up to what the chats keep. */
+  async function busy(relay: RelayTransport) {
+    for (let i = 0; i < 4; i++) await relay.resolve(createIdentity().pubKeyZ32, { urgent: true });
+    const group = withRequestOptions(relay, { group: true });
+    for (let i = 0; i < REQUESTS_PER_MINUTE; i++) await group.publish(createIdentity(), [{ label: "_ts", value: "1" }]).catch(() => {});
+  }
+
+  it("puts a chat's offer on one relay, and on the other once the chats no longer need it", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      const { relay, log } = twoRelays();
+      await busy(relay);
+      await relay.publish(me, [{ label: "_ts", value: "1" }], { signal: true });
+      await vi.advanceTimersByTimeAsync(0);
+      // Dev: on both at once.
+      expect(putsOf(log)).toEqual(["a.test"]);
+      await vi.advanceTimersByTimeAsync(65_000);
+      expect(putsOf(log), "put there once the chats' need lapsed").toEqual(["a.test", "b.test"]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("puts it on the other at once when the relay that took its request does not take the packet", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      const { relay, log } = twoRelays("a.test");
+      await busy(relay);
+      await relay.publish(me, [{ label: "_ts", value: "1" }], { signal: true });
+      expect(putsOf(log)).toEqual(["a.test", "b.test"]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("puts it on the other once the relay that took its request has not answered within SLOW_MS", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      const { relay, log } = twoRelays(undefined, "a.test");
+      await busy(relay);
+      const published = relay.publish(me, [{ label: "_ts", value: "1" }], { signal: true });
+      await vi.advanceTimersByTimeAsync(SLOW_MS - 1);
+      expect(putsOf(log)).toEqual(["a.test"]);
+      await vi.advanceTimersByTimeAsync(1);
+      // Dev: only once a.test answered, 9 s on, and the contact reading b.test found nothing until then.
+      expect(putsOf(log)).toEqual(["a.test", "b.test"]);
+      await published;
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("puts it everywhere at once while the relays have requests to spare", async () => {
+    const { relay, log } = twoRelays();
+    for (let i = 0; i < 4; i++) await relay.resolve(createIdentity().pubKeyZ32, { urgent: true });
+    await relay.publish(me, [{ label: "_ts", value: "1" }], { signal: true });
+    expect(putsOf(log).sort()).toEqual(["a.test", "b.test"]);
   });
 });
 
@@ -1452,9 +1526,11 @@ describe("relay transport: a community member's way back has its own share past 
 
   it("keeps a relay's worst minute (its limit and every allowance past it) within what the relay allows", () => {
     // Each relay's own limit an address, from its `x-ratelimit-limit` (docs/TRANSPORTS.md, "The default list").
-    const allows: Record<string, number> = { "https://pkarr.pubky.org": 50, "https://pkarr.pubky.app": 1000, "https://relay.pkarr.org": 10 };
+    const allows: Record<string, number> = { "https://pkarr.pubky.org": 50, "https://pkarr.pubky.app": 1000, "https://relay.pkarr.org": 10, "https://pkarr.miguelmedeiros.dev": 10 };
     const worst = (limit: number) => limit + [SIGNALING_ALLOWANCE_SHARE, GROUP_SIGNALING_ALLOWANCE_SHARE, WAY_BACK_SHARE].reduce((sum, share) => sum + Math.floor(limit * share), 0);
     expect(worst(REQUESTS_PER_MINUTE)).toBe(46);
     for (const [relay, allowed] of Object.entries(allows)) expect(worst(RELAY_REQUESTS_PER_MINUTE[relay] ?? REQUESTS_PER_MINUTE)).toBeLessThanOrEqual(allowed);
+    // Every default relay is in the list: one added without its limit here fails.
+    expect(DEFAULT_RELAYS.filter((relay) => !(relay in allows))).toEqual([]);
   });
 });

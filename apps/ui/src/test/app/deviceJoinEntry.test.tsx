@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createDeviceInvite } from "@ghostly/core";
+import { createDeviceInvite, turnName } from "@ghostly/core";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import { JoinDialog } from "../../components/JoinDialog";
 import { ProfileSwitcherMenu } from "../../components/ProfileSwitcher";
@@ -345,6 +345,29 @@ describe("a device code opened as a link (the QR code, by a phone's camera)", ()
     expect(screen.queryByRole("textbox", { name: "Invite code" })).toBeNull();
     expect(await screen.findByTestId("device-join-connecting")).toHaveTextContent("Connecting to your other device…");
     expect(listProfiles()).toHaveLength(1);
+  });
+
+  it("the name field takes what the device set keeps (16 bytes, whole characters): the name typed is the name every device shows", async () => {
+    offerDeviceLink(code());
+    fakeEngine.on("deviceEnrollReady", () => "ready");
+    fakeEngine.on("deviceEnrollJoin", () => ({ role: "joiner", step: "connecting" }));
+    const { user } = renderApp(<JoinHost />);
+    await oneScreen();
+    const field = screen.getByTestId("device-join-name");
+    for (const typed of ["هاتف أحمد الجديد", "仕事用のスマホ", "Téléphone perso", "Celular da Júlia", "工作手机", "Phone 📱"]) {
+      await user.clear(field);
+      await user.type(field, typed);
+      // Typed key by key, a space after a letter left out still fits; the name goes trimmed.
+      expect((field as HTMLInputElement).value.trim()).toBe(turnName(typed));
+    }
+    // A character typed in the middle of a full name is left out, and the name around it stays as it was.
+    await user.clear(field);
+    await user.type(field, "Celular da Júli");
+    await user.type(field, "X", { initialSelectionStart: 0, initialSelectionEnd: 0 });
+    expect(field).toHaveValue("Celular da Júli");
+    await user.click(screen.getByTestId("device-join-next"));
+    await waitFor(() => expect(fakeEngine.callsTo("deviceEnrollJoin")).toHaveLength(1));
+    expect(fakeEngine.callsTo("deviceEnrollJoin")[0]).toMatchObject({ name: "Celular da Júli" });
   });
 
   it("a code the engine refuses is said in one line, with Scan a new code", async () => {

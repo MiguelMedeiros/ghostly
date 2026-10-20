@@ -38,6 +38,10 @@
   "outgoing": "Appel en cours...",
   "reconnecting": "Reconnexion...",
   "rejected": "Appel rejeté",
+  "relayNoAnswer": "Votre relais n'a pas répondu",
+  "relayNoAnswerNext": "Vérifiez le serveur TURN dans Paramètres, Réseau. Masquer mon IP ne se connecte jamais en direct.",
+  "relayOnlyOff": "Les appels sont désactivés avec Masquer mon IP",
+  "relayOnlyOffNext": "Les appels de cette app ne peuvent pas encore passer par un relais. Désactivez-le dans Paramètres, Réseau pour appeler.",
   "selfView": "Glissez pour déplacer, tirez un coin pour redimensionner, double-cliquez pour réinitialiser",
   "share": {
     "blocked": "Le partage d'écran est bloqué",

@@ -8,6 +8,7 @@ import { ProfileBadge } from "./ProfileBadge";
 import { ProfileSwitcherMenu } from "./ProfileSwitcher";
 import { SWITCHER_SHORTCUT, useLongPress, useProfileGlances, useProfileSwitcher } from "../hooks/useProfileSwitcher";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { HOME, isChatListPage } from "../lib/navigation";
 import { unseenSatsLabel, useUnseenSats } from "../hooks/useUnseenSats";
 import { UnseenSatsDot } from "./UnseenSatsDot";
 import { useBackupDue } from "../hooks/useBackupDue";
@@ -94,7 +95,8 @@ export function MobileTabBar() {
     <>
       <nav className="mobile-tabs shrink-0 flex bg-panel-header border-t border-border pb-safe" data-testid="mobile-tabs">
         {tabs.map((tab) => {
-          const active = pathname === tab.path || pathname.startsWith(`${tab.path}/`);
+          // Saved messages and Tasks are opened from the chat list: Chats is where they are.
+          const active = pathname === tab.path || pathname.startsWith(`${tab.path}/`) || (tab.path === HOME && isChatListPage(pathname));
           const dot = tab.path === "/identities" && identityAttention;
           const account = tab.path === "/settings" && canSwitch;
           const fresh = account && glances.othersFresh > 0;

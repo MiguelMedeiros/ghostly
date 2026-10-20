@@ -101,9 +101,30 @@ export const AWAITING_PEER_MS = 10 * 60_000;
  * to invites nobody may ever open, and a join on one was noticed 90 s later (bug hunt 1013-1642, 2026-10-13).
  */
 export const UNUSED_INVITE_WAIT_MAX_MS = 3 * 60_000;
-/** The wait between reads of an unused invite of age `age` (`UNUSED_INVITE_WAIT_MAX_MS`), never shorter than the pace's `interval`. */
-export function unusedInviteWait(age: number, interval: number): number {
-  return Math.max(interval, Math.min(UNUSED_INVITE_WAIT_MAX_MS, Math.round(age / 5)));
+/**
+ * The reads a minute the unused invites of an app (their keys and their mailboxes) take between them, half the relays'
+ * background share: the slower reads stretch only as far as their count needs. Slowed whatever the count, a single
+ * invite opened 20 minutes later was noticed 136 s after the join, where the background pace takes 30 s at most (bug
+ * hunt 1014-0136, 2026-10-14).
+ */
+export const UNUSED_INVITE_READS_PER_MINUTE = 10;
+/** The keys and mailboxes of unused invites read slowly over each transport (an app's relays). */
+const unusedInviteReaders = new WeakMap<PkarrTransport, Set<object>>();
+/** Counts `reader` (an invite's key or mailbox) among the unused ones read over `transport` while `unused`, or no longer: how many there are. */
+export function countUnusedInvite(transport: PkarrTransport, reader: object, unused: boolean): number {
+  let readers = unusedInviteReaders.get(transport);
+  if (!readers) unusedInviteReaders.set(transport, readers = new Set());
+  if (unused) readers.add(reader); else readers.delete(reader);
+  return readers.size;
+}
+/**
+ * The wait between reads of an unused invite of age `age`, one of `readers` read over the same relays: a fifth of its
+ * age, up to `UNUSED_INVITE_WAIT_MAX_MS`, but no longer than their count needs (`UNUSED_INVITE_READS_PER_MINUTE`), and
+ * never shorter than the pace's `interval`.
+ */
+export function unusedInviteWait(age: number, interval: number, readers: number): number {
+  const share = Math.round(readers * 60_000 / UNUSED_INVITE_READS_PER_MINUTE);
+  return Math.max(interval, Math.min(UNUSED_INVITE_WAIT_MAX_MS, Math.round(age / 5), share));
 }
 /**
  * A group link's peer whose packet advertises and carries no `_tr` on every read for this long publishes none: what it
@@ -118,6 +139,13 @@ const PUBLISH_RETRY_MS = 4_000;
  * meanwhile: each refusal keeps it first in line for that request (`WRITE_FIRST_MS`), and costs no request itself.
  */
 const BUDGET_RETRY_MIN_MS = 250;
+/**
+ * A background write the budget held back (`{ background: true }`) is not first in line for anything (`WRITE_FIRST_MS`
+ * is a chat's or a group's write): it goes again when the budget frees one of its share, up to this long. Tried every
+ * 4 s, an idle admin's daemon built and signed 1,041 packets in 9 minutes that the budget refused again (bug hunt,
+ * 2026-10-19). Anything new to say goes at once all the same (`publish`).
+ */
+const BACKGROUND_RETRY_MAX_MS = 60_000;
 /** Two reads are never closer than this, however long the last one took. */
 const MIN_POLL_GAP_MS = 250;
 export const IDLE_THRESHOLD = 60_000;
@@ -262,6 +290,8 @@ export class LinkSession {
   private publishAgain = false;
   /** What waits to go out is the presence heartbeat alone (`PRESENCE_HEARTBEAT`): nothing in the packet changed. */
   private upkeepOnly = false;
+  /** The last write this link asked for was a background one (`retryDelay`). */
+  private wroteInBackground = false;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private lastActivity = Date.now();
@@ -395,6 +425,7 @@ export class LinkSession {
     if (this.publishRetryTimer) clearTimeout(this.publishRetryTimer);
     if (this.firstPublishTimer) clearTimeout(this.firstPublishTimer);
     this.pollTimer = this.heartbeatTimer = this.publishRetryTimer = this.firstPublishTimer = null;
+    countUnusedInvite(this.transport, this, false);
     this.rtcSignal = null;
     this.callSignal = null;
     this.events.onStatus?.("offline");
@@ -451,6 +482,16 @@ export class LinkSession {
     this.watchFrom = this.presence.lastPacketAt;
     this.departedUntil = Date.now() + DEPARTED_READ_MS;
     this.expectPeer();
+  }
+
+  /**
+   * Nothing a read finds can be acted on for a while (a dial waiting out its backoff, whose end has a look of its own):
+   * the windows that look fast for the contact (`expectPeer`, `watchPeer`) end, and the link reads at its pace from the
+   * next read on. An offer of this side's out keeps its window.
+   */
+  calm(): void {
+    if (this.rtcSignal !== null) return;
+    this.fastPollUntil = this.fastStepsAfter = this.expectUntil = this.watchUntil = 0;
   }
 
   /** The data link carries chat and services while it is up. */
@@ -586,11 +627,13 @@ export class LinkSession {
     const since = Date.now() - this.expectUntil;
     // An offer out a while: 4, 4, 8 s… between looks (on the relays), as long as its window lasts.
     const stepping = this.fastStepsAfter ? Date.now() - this.fastStepsAfter : -1;
+    // Counted among the app's unused invites while read as one (below).
+    const unused = countUnusedInvite(this.transport, this, pace === "background" && since >= 0 && !this.presence.online && this.invite());
     if (pace === "fast" && stepping >= 0) return Math.min(OFFER_STEP_MAX * interval, Math.max(2 * interval, stepping));
     if (pace === "fast" || pace === "connected" || since < 0) return interval;
     // An invite nobody used, or a joined one whose inviter never came, no longer awaited: the older it is, the less often
-    // it is read. Nobody there: an inviter gone may have left a packet, its goodbye, before the join.
-    if (pace === "background" && !this.presence.online && this.invite()) return unusedInviteWait(Date.now() - this.awaitingSince, interval);
+    // it is read, as far as their count needs. Nobody there: an inviter gone may have left a packet, its goodbye, before the join.
+    if (pace === "background" && !this.presence.online && this.invite()) return unusedInviteWait(Date.now() - this.awaitingSince, interval, unused);
     return Math.min(interval, Math.max(2 * this.intervals.fast, since));
   }
 
@@ -700,6 +743,7 @@ export class LinkSession {
       const takesBack = !rtcSignal && this.rtcSignalOut !== null;
       const options = rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : this.watching() ? { watch: true }
         : (upkeep && (this.connected || takesBack)) || (!rtcSignal && !awaited) ? { background: true } : undefined;
+      this.wroteInBackground = options?.background === true;
       await this.transport.publish(this.identity, built.records, options);
     } catch (error) {
       const ms = Date.now() - started, waiting = isDiscoveryBudgetError(error);
@@ -727,9 +771,13 @@ export class LinkSession {
     return built.keptMessages;
   }
 
-  /** When a publish that failed goes again: when the relays' budget frees a request, if that held it back. */
+  /**
+   * When a publish that failed goes again: when the relays' budget frees a request, if that held it back; a chat's or a
+   * group's write within `PUBLISH_RETRY_MS` meanwhile, which keeps it first in line, a background one when its share frees.
+   */
   private retryDelay(error: unknown): number {
-    return isDiscoveryBudgetError(error) ? budgetRetryMs(error, BUDGET_RETRY_MIN_MS, PUBLISH_RETRY_MS) : PUBLISH_RETRY_MS;
+    if (!isDiscoveryBudgetError(error)) return PUBLISH_RETRY_MS;
+    return budgetRetryMs(error, BUDGET_RETRY_MIN_MS, this.wroteInBackground ? BACKGROUND_RETRY_MAX_MS : PUBLISH_RETRY_MS);
   }
 
   private discoveryResult(operation: "publish" | "read", error?: unknown): void {

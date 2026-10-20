@@ -73,6 +73,8 @@ interface HubLive {
   clocks: HubClocks;
   me: string;
   firstRead: boolean;
+  /** The beacon of this epoch was read (or written): until then `beacon` says nothing, and nobody becomes a hub on it. */
+  epochRead: boolean;
   lastRead: number;
   lastWrite: number;
   lastTry: number;
@@ -140,7 +142,7 @@ export class MeshHubs {
     let live = this.live.get(groupId);
     if (!live) {
       const clocks = new HubClocks(() => live!.me, HUB_CLOCK_READ_GAP_MS);
-      this.live.set(groupId, (live = { started: now, epoch: -1, beacon: [], clocks, me: "", firstRead: false, lastRead: 0, lastWrite: 0, lastTry: 0, hub: false, hubSince: 0,
+      this.live.set(groupId, (live = { started: now, epoch: -1, beacon: [], clocks, me: "", firstRead: false, epochRead: false, lastRead: 0, lastWrite: 0, lastTry: 0, hub: false, hubSince: 0,
       members: new Map(), lastLobbyPoll: 0, lobbyBusyUntil: 0, myHubs: [], lobbyWrites: new Map(), hubWaits: new Map(), avoided: new Map(), hubsUp: new Set(),
       seenHubs: new Map(), reach: new Map(), sentReach: "", lastReach: 0, met: new Map(), expect: new Set(), wantedSize: 0, primed: false, gone: new Map(), reactions: new Map(), need: 0, departed: new Set() }));
     }
@@ -321,7 +323,7 @@ export class MeshHubs {
     const before = this.shape(live);
     if (live.epoch !== session.epoch) {
       // A commit moved the beacon: read the new one now, and as a hub say so there at once.
-      live.epoch = session.epoch; live.lastRead = 0; live.lastWrite = 0; live.lastTry = 0; live.beacon = [];
+      live.epoch = session.epoch; live.lastRead = 0; live.lastWrite = 0; live.lastTry = 0; live.beacon = []; live.epochRead = false;
       live.clocks.restart();
     }
     const policy = session.hubPolicy, me = session.myKey, inRoster = (key: string) => rosterHas(session.roster, key);
@@ -333,12 +335,14 @@ export class MeshHubs {
     // in all), only while that fits beside its other groups. Pinned or not: past the budget, a call would not connect.
     const fits = this.fits(groupId, session);
     if (live.hub) live.need = session.others.length;
-    if (!live.hub && may && fits && (policy.pin.includes(me) || others.length < MESH_HUBS.maxHubs)) {
+    // Only on a reading of this epoch's beacon: one the relays' budget held back says nothing of how many hubs there are.
+    if (!live.hub && may && fits && (policy.pin.includes(me) || (live.epochRead && others.length < MESH_HUBS.maxHubs))) {
       live.hub = true; live.hubSince = now; live.myHubs = []; live.need = session.others.length;
       await this.publish(groupId, session, live, now, true).catch(() => {});
-    } else if (live.hub && (!may || !fits)) {
+    } else if (live.hub && (!may || !fits || this.full(live, session, now))) {
       live.hub = false; live.members.clear();
-      await this.publish(groupId, session, live, now, false).catch(() => {});
+      // One hub too many is not in the beacon: nothing to take out of it.
+      if (!may || !fits) await this.publish(groupId, session, live, now, false).catch(() => {});
     } else if (live.hub && now - live.lastTry >= 5_000 && (now - live.lastWrite >= this.timings.beaconEveryMs || !live.beacon.some(h => h.key === me))) {
       await this.publish(groupId, session, live, now, true).catch(() => {});
     }
@@ -351,6 +355,16 @@ export class MeshHubs {
     return before !== this.shape(live);
   }
 
+  /**
+   * The beacon holds eight hubs, the newest: a hub that a reading of it no longer shows, beside eight others, is one too
+   * many, and writing itself in again would only push another out (each would, in turn, and none ever step down). A
+   * pinned hub lists itself whatever the beacon holds.
+   */
+  private full(live: HubLive, session: GroupSession, now: number): boolean {
+    return live.epochRead && !session.hubPolicy.pin.includes(session.myKey) && !live.beacon.some(h => h.key === session.myKey)
+      && this.listed(live, session, now).length >= MESH_HUBS.maxHubs;
+  }
+
   private shape(live: HubLive): string { return `${live.hub}|${live.myHubs.join(",")}|${[...live.members.keys()].sort().join(",")}|${live.beacon.map(h => h.key).sort().join(",")}`; }
 
   private async read(groupId: string, session: GroupSession, live: HubLive, now: number): Promise<void> {
@@ -360,7 +374,7 @@ export class MeshHubs {
     let records: GhostRecord[] | null;
     try { records = await this.host.resolve(keys.identity.pubKeyZ32, true); } catch { return; }
     live.beacon = live.clocks.inMyTime(readBeacon(keys, records ?? []), now);
-    live.firstRead = true;
+    live.firstRead = true; live.epochRead = true;
     this.noteHubs(live, session, now);
   }
 
@@ -382,13 +396,19 @@ export class MeshHubs {
       let records: GhostRecord[] | null;
       try { records = await this.host.resolve(keys.identity.pubKeyZ32, true); } catch { return; }
       existing = live.clocks.inMyTime(readBeacon(keys, records ?? []), now);
+      if (listed) {
+        // Pushed out since my last reading: not in again (the next tick steps me down).
+        live.beacon = existing; live.lastRead = now; live.firstRead = true; live.epochRead = true;
+        this.noteHubs(live, session, now);
+        if (this.full(live, session, now)) return;
+      }
     }
     const policy = session.hubPolicy;
     const hubs = mergeBeacon(existing, session.myKey, listed ? { key: session.myKey, ts: now, load: live.members.size, since: live.hubSince || now } : null, now,
       key => rosterHas(session.roster, key) && !policy.no.includes(key));
     // Each entry as its hub dated it: no hub's entry is dated by another's clock.
     await this.host.publish(keys.identity, beaconRecords(keys, live.clocks.asWritten(hubs)), true);
-    live.beacon = hubs; live.lastWrite = now; live.lastRead = now; live.firstRead = true;
+    live.beacon = hubs; live.lastWrite = now; live.lastRead = now; live.firstRead = true; live.epochRead = true;
     this.noteHubs(live, session, now);
   }
 

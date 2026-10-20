@@ -132,7 +132,7 @@ function StandbyHandoff({ gate }: { gate: DeviceGateView }) {
   return (
     <div className="space-y-3" data-testid="handoff-standby">
       {view?.step === "offer" && <div className={PANEL}><HandoffOffer view={view} /></div>}
-      {view && view.step !== "offer" && <div className={PANEL}><HandoffProgress view={view} onCancel={() => void engine.call("deviceHandoffCancel")} /></div>}
+      {view && view.step !== "offer" && <div className={PANEL}><HandoffProgress view={view} onCancel={() => engine.call("deviceHandoffCancel")} /></div>}
       {!view && gate.state === "taking" && <p data-testid="handoff-line" className="text-sm text-text-secondary">{t("devices.handoff.step.settling")}</p>}
       {/* Installed, and the turn could not be checked within 2 minutes: Try again checks it again. */}
       {gate.state === "taking" && view?.step === "failed" && view.failure === "settle" && (

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { chatOfLink } from "../../lib/chatMute";
 import { offerSession } from "../../lib/lockedRing";
-import { deleteSession, saveSession } from "../../lib/storage";
+import { chatNamesForPeer, deleteSession, saveSession } from "../../lib/storage";
 import type { ChatSession } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
 
@@ -56,6 +56,16 @@ describe("finding a 1:1 chat by its contact", () => {
     saveSession(chat("a", { lastSyncAt: NOW - 5_000 }));
     saveSession(chat("e", { peerPubKeyB64: key("a"), lastSyncAt: NOW - 1_000 }));
     expect(chatOfLink("link-a", links)).toBe("e");
+  });
+
+  it("names a contact with two chats from the one the list shows first, parsing no chat again", () => {
+    saveSession(chat("a", { nick: "Ana", lastSyncAt: NOW - 5_000 }));
+    saveSession(chat("e", { peerPubKeyB64: key("a"), nick: "Ana II", lastSyncAt: NOW - 1_000 }));
+    // Which of the two the list shows first is read through the page's one cache: the Identities screen asks per row.
+    expect(chatNamesForPeer(key("a"))).toEqual({ label: undefined, nick: "Ana II" });
+    expect(chatsParsed(() => {
+      for (let i = 0; i < 20; i++) expect(chatNamesForPeer(key("a"))?.nick).toBe("Ana II");
+    })).toBe(0);
   });
 
   it("finds the chat a call offer rings in, parsing no chat again", () => {

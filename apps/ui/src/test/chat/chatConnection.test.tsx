@@ -291,6 +291,25 @@ describe("ChatConnection: what the panel does", () => {
     expect(menu.open).toBe(false);
   });
 
+  // On a computer the page is a focusable <main tabIndex={-1}> (App.tsx): a press on the panel's text gave the focus to
+  // it, and the panel took that for focus gone elsewhere and closed, so its relay and path could not be selected.
+  it("stays open while its text is pressed and dragged over to select it, inside the page's focusable main", async () => {
+    const view = renderApp(<main tabIndex={-1}><ChatConnection peerKey="peer" /><p>A message</p></main>);
+    act(() => view.engine.update({ links: [linkView({ availableTransports: all, relayedTransports: ["iroh/1"], dataLink: "open",
+      pairing: ready({ transport: "iroh/1" }), transportRelayed: { relays: ["relay.example"] } })] }));
+    const menu = screen.getByTestId("connection-menu") as HTMLDetailsElement;
+    await view.user.click(screen.getByTestId("connection-options"));
+    await view.user.click(screen.getByTestId("connection-details-summary"));
+    const relayed = screen.getByTestId("connection-relayed"), why = within(screen.getByTestId("connection-summary")).getByText(/never what they say/);
+    await view.user.pointer([{ keys: "[MouseLeft>]", target: relayed, offset: 0 }, { target: relayed, offset: 12 }, { target: why }, { keys: "[/MouseLeft]" }]);
+    expect(menu.open).toBe(true);
+    await view.user.click(relayed);
+    expect(menu.open).toBe(true);
+    // A press outside it still closes it.
+    await view.user.click(screen.getByText("A message"));
+    expect(menu.open).toBe(false);
+  });
+
   it("stays open while Tab goes round its own controls", async () => {
     const { user } = banner({ pairing: ready() });
     const menu = screen.getByTestId("connection-menu") as HTMLDetailsElement;

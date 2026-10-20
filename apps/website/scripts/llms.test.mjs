@@ -26,6 +26,7 @@ test("llms.txt follows the convention: an H1, a summary, then sections of links"
   assert.doesNotMatch(index.slice(0, sections), /\n#{1,6} /);
   for (const row of index.slice(sections).split("\n").filter((l) => l.startsWith("- "))) assert.match(row, /^- \[[^\]]+\]\(https:\/\/[^)\s]+\)(: \S.*)?$/, row);
   assert.ok(index.includes(`(${SITE}/developers/agents)`), "the AI agents page");
+  assert.ok(index.includes(`(${SITE}/agents/faq)`), "the Agents FAQ");
   assert.ok(index.includes("/packages/cli/SKILL.md)"), "the agent skill");
 });
 

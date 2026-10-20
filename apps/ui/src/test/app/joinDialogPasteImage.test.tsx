@@ -100,6 +100,21 @@ describe("A QR screenshot pasted or dropped on Join", () => {
       expect(shot.done).toHaveBeenCalledTimes(1);
     });
 
+    it("a QR copied in a web browser (Copy image: its HTML and address, no picture for the page) is read by the app", async () => {
+      const { invite } = createLink();
+      qr.data = encodeInviteCode(invite);
+      fakeEngine.readClipboardFiles = vi.fn(async () => [held(null, 4, "image/png")]);
+      const onJoin = vi.fn();
+      renderApp(<JoinDialog onJoin={onJoin} onClose={() => {}} />);
+      const html = `<meta charset="utf-8"><img src="https://example.com/qr.png">`;
+      expect(fireEvent.paste(dialog(), { clipboardData: transfer({ html, text: "https://example.com/qr.png" }) })).toBe(false);
+      await waitFor(() => expect(onJoin).toHaveBeenCalledTimes(1));
+      expect(onJoin.mock.calls[0][0]).toMatchObject({ seedB64: invite.seedB64 });
+      // A rich copy with words beside its picture is text.
+      expect(fireEvent.paste(dialog(), { clipboardData: transfer({ html: `<p>scan me</p>${html}`, text: "scan me" }) })).toBe(true);
+      expect(fakeEngine.readClipboardFiles).toHaveBeenCalledTimes(1);
+    });
+
     it("a picture copied as a file is read too, alone; a picture too large is not read, and says so", async () => {
       const notes = held("notes.pdf", 9), code = held("invite.PNG", 4);
       fakeEngine.readClipboardFiles = vi.fn(async () => [notes, code]);

@@ -18,4 +18,5 @@ export const updatePlatform: UpdatePlatform | null = {
     if (!updates) throw new Error("This client cannot install updates");
     return updates.install(update, onProgress);
   },
+  onBuildGone: (listener) => getBrowserHost().updates?.onBuildGone?.(listener) ?? (() => {}),
 };

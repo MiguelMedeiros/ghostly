@@ -86,6 +86,7 @@ pub mod viewer {
         _app: &tauri::AppHandle<R>,
         _peer: String,
         _service: String,
+        _tag: String,
         _title: String,
         _unreachable: Option<String>,
     ) -> Result<(), String> {
@@ -98,6 +99,8 @@ pub mod viewer {
         _response: ServiceResponse,
     ) {
     }
+
+    pub fn close_all<R: tauri::Runtime>(_app: &tauri::AppHandle<R>) {}
 }
 
 pub mod app_sandbox {

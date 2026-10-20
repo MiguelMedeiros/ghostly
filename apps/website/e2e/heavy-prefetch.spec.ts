@@ -4,8 +4,9 @@ import { expect, test, type Page } from "@playwright/test";
  * The roadmap's page data is 310 KB (its whole inventory) and a WISP's up to 230 KB. Every page links the roadmap from
  * the nav and the footer, and several link WISPs ("read more", the roadmap's drafts and source): before, each page
  * prefetched the roadmap as it opened (over half of the 553 KB it prefetched), and /roadmap, /cli and /developers/agents
- * up to four WISP pages on top (356 KB). /brand's is 219 KB, linked from every footer. A link to one of them loads its
- * page when the reader is about to open it (pointer, focus, touch).
+ * up to four WISP pages on top (356 KB). /brand's is 219 KB, linked from every footer. A WISP's own pager loaded the
+ * previous and the next WISP as it came into view (up to 626 KB decoded). A link to one of them loads its page when the
+ * reader is about to open it (pointer, focus, touch).
  */
 function prefetches(page: Page): Set<string> {
   const seen = new Set<string>();
@@ -35,7 +36,7 @@ async function readToTheEnd(page: Page) {
   await page.waitForTimeout(1000);
 }
 
-for (const path of ["/", "/developers", "/cli", "/developers/agents", "/roadmap", "/wisps", "/terms"]) {
+for (const path of ["/", "/developers", "/cli", "/developers/agents", "/roadmap", "/wisps", "/terms", "/wisps/02-peer-keys"]) {
   test(`${path} loads neither the roadmap, /brand nor a WISP's page while it is read`, async ({ page }) => {
     const seen = prefetches(page);
     await page.goto(path);
@@ -82,6 +83,18 @@ test("the nav's CLI link loads its page when the reader points at it, and opens 
   await expect.poll(() => seen.has("/cli")).toBe(true);
   await link.click();
   await expect(page).toHaveURL(/\/cli$/);
+});
+
+test("a WISP's next link loads the next WISP when the reader points at it, and opens it", async ({ page }) => {
+  const seen = prefetches(page);
+  await page.goto("/wisps/02-peer-keys");
+  await page.waitForLoadState("networkidle");
+  const link = page.locator(".reader-pager-next");
+  await link.scrollIntoViewIfNeeded();
+  await link.hover();
+  await expect.poll(() => seen.has("/wisps/03-capabilities")).toBe(true);
+  await link.click();
+  await expect(page).toHaveURL(/\/wisps\/03-capabilities$/);
 });
 
 test("the footer's home link loads the home when it gets the focus", async ({ page }) => {

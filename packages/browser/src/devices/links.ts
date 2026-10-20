@@ -432,6 +432,9 @@ export class DeviceLinks implements DeviceLinkEngine {
       packetTransports: true,
       transport: this.options.transport,
       pollIntervals: this.options.pollIntervals,
+      // Never an invite just sent: the other device is there (its packet is read at once) or away. As one, a link to a
+      // device away read it every 4 s for the first ten minutes of every start, half a relay's minute each.
+      madeAt: 0,
       autoConnect: true,
       createPeerConnection: () => {
         if (!this.createPeerConnection) throw new ReferenceError("RTCPeerConnection is not defined");
