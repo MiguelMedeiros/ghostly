@@ -804,8 +804,8 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     say(`BATCH #${batch.number} [${names(state.prs)}] CI ${ci}`);
 
     // dev: a green batch lands one pull request at a time, each by GitHub's squash merge (a commit GitHub signs),
-    // checked against the batch's own commit of it. That needs those commits in the mark: a batch without them (opened
-    // by an older train) lands the old way, like an epic's.
+    // checked against the batch's own commit of it. That needs those commits in the mark: a batch without them is not
+    // one this train built (the body is editable), so it closes and never lands.
     const bySquash = base === "dev" && batch.sha === state.head && state.prs.every((s) => typeof s.commit === "string") && state.prs.at(-1)?.commit === state.head;
     // A landing that stopped half way (a crash, the API budget) left the first pull requests merged and this batch
     // open. GitHub's state says how far it got: the ones no longer open that were merged at the head the batch holds.
@@ -827,9 +827,14 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
     const changed = state.prs.filter((s, i) => i >= before && (!members[i] || members[i].sha !== s.sha || (bySquash && members[i].draft)));
     const stop = changed.length ? state.prs.indexOf(changed[0]) : state.prs.length;
 
-    /** The batch's commit of each pull request, as GitHub lists them: { sha, tree, title, message }; null when one is missing. */
+    /**
+     * The batch's commit of each pull request, as GitHub lists them: { sha, tree, title, message }; null when GitHub
+     * does not list exactly the mark's commits, in its order (one pushed on top of or in place of the train's).
+     */
     const readTested = async () => {
-      const listed = new Map((await gh.pullCommits(batch.number)).map((c) => [c.sha, c]));
+      const commits = await gh.pullCommits(batch.number);
+      if (commits.length !== state.prs.length || commits.some((c, i) => c.sha !== state.prs[i].commit)) return null;
+      const listed = new Map(commits.map((c) => [c.sha, c]));
       const tested = state.prs.map((s) => listed.get(s.commit));
       if (tested.some((c, i) => !c || !c.commit.message.split("\n")[0].endsWith(` (#${state.prs[i].number})`))) return null;
       return tested.map((c) => {
@@ -964,10 +969,9 @@ export async function tick({ gh, git, base, login, dry = false, stamp = new Date
       // The base's tip is the batch's base here (checked above): the first merge starts from what CI tested on.
       const tested = bySquash ? await readTested() : null;
       if (base === "dev" && !tested) {
-        const why = bySquash ? "GitHub does not list the commits its mark names" : "its mark names no commits (an older train opened it)";
-        say(`::warning::Batch #${batch.number} lands by the rebase merge, so its commits will not be verified: ${why}.`);
-      }
-      inFlight = tested ? await landEach(tested, 0) : await landWhole();
+        const why = bySquash ? "GitHub does not list exactly the commits its mark names" : "its mark does not name the commits the train built for it";
+        await retire(batch, `Merge train: this batch's branch does not hold just the commits the train built (${why}), so it closes; its pull requests go back to the line.`);
+      } else inFlight = tested ? await landEach(tested, 0) : await landWhole();
     } else if (ci === "none" && now - Date.parse(batch.createdAt) > CI_START_TIMEOUT) {
       await retire(batch, "Merge train: CI never started on this batch, so it is rebuilt.");
       inFlight = await board(members, next, { retried: state.retried });

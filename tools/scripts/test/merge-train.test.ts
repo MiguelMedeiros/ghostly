@@ -996,33 +996,66 @@ describe("a run of the train", () => {
     expect(repo.members()).toEqual([11, 12]);
   });
 
-  it("lands a batch an older train opened (no commits in its mark) by the rebase merge of the batch", async () => {
+  it("closes a green batch whose mark names no commits, and lands nothing from it", async () => {
     const repo = fakeRepo();
     const build = repo.git.build;
     repo.git.build = async (base: string, prs: Pr[]) => ({ ...(await build(base, prs)), commits: undefined as never });
     repo.add(11);
     repo.add(12);
-    const b = (await repo.run()).inFlight;
+    const b = (await repo.run()).inFlight as number;
     repo.settle();
     const r = await repo.run();
-    expect(repo.merges).toEqual([`rebase #${b}`]);
-    expect(repo.landed).toEqual(["#11", "#12"]);
-    expect(repo.comments.get(11)!.at(-1)!.body).toBe(`Merged via #${b}.`);
-    // GitHub signs no rebase merge: nothing to read back, and the log says why these commits are not verified.
-    expect(r.log).toContain(`::warning::Batch #${b} lands by the rebase merge, so its commits will not be verified: its mark names no commits (an older train opened it).`);
-    expect(r.log.join("\n")).not.toMatch(/VERIFIED/);
+    expect(repo.merges).toEqual([]);
+    expect(repo.landed).toEqual([]);
+    expect(r.closed).toEqual([b]);
+    expect(repo.comments.get(b)!.at(-1)!.body).toBe(
+      "Merge train: this batch's branch does not hold just the commits the train built (its mark does not name the commits the train built for it), so it closes; its pull requests go back to the line.",
+    );
   });
 
-  it("warns and lands by the rebase merge when GitHub does not list the commits the mark names", async () => {
+  it("closes a green batch when GitHub does not list the commits the mark names", async () => {
     const repo = fakeRepo();
     repo.add(11);
     repo.add(12);
-    const b = (await repo.run()).inFlight;
+    const b = (await repo.run()).inFlight as number;
     repo.settle();
     repo.made.clear();
     const r = await repo.run();
-    expect(repo.merges).toEqual([`rebase #${b}`]);
-    expect(r.log).toContain(`::warning::Batch #${b} lands by the rebase merge, so its commits will not be verified: GitHub does not list the commits its mark names.`);
+    expect(repo.merges).toEqual([]);
+    expect(r.closed).toEqual([b]);
+    expect(repo.comments.get(b)!.at(-1)!.body).toMatch(/GitHub does not list exactly the commits its mark names/);
+  });
+
+  it("never merges a head someone pushed to the batch's branch and wrote into its body with no commits", async () => {
+    const repo = fakeRepo();
+    repo.add(11);
+    repo.add(12);
+    const b = (await repo.run()).inFlight as number;
+    // A writer pushes X to the batch's branch and rewrites the mark: dev's tip, head X, one pull request, no commits.
+    const p = repo.pulls.get(b)!;
+    p.sha = "X";
+    p.body = batchBody("dev", repo.tips.dev, "X", [repo.pulls.get(11)!], []);
+    repo.runs.set("X", green);
+    const r = await repo.run();
+    expect(repo.merges).not.toContain(`rebase #${b}`);
+    expect(repo.landed).not.toContain("#11");
+    expect(r.closed).toContain(b);
+    expect(repo.comments.get(11)?.at(-1)?.body).not.toBe(`Merged via #${b}.`);
+  });
+
+  it("never falls back to the rebase merge of a batch whose branch holds a commit its mark does not name", async () => {
+    const repo = fakeRepo();
+    repo.rules.bypass = false;
+    for (const n of [11, 12]) repo.add(n, { behind: true });
+    const b = (await repo.run()).inFlight as number;
+    repo.settle();
+    // GitHub lists one more commit on the batch than the train built (pushed on top, the mark kept as it was).
+    const listed = repo.gh.pullCommits;
+    repo.gh.pullCommits = async (n: number) => [...(await listed(n)), { sha: "X", commit: { message: "x (#12)", tree: { sha: "tree:X" } } }] as never;
+    const r = await repo.run();
+    expect(repo.merges).not.toContain(`rebase #${b}`);
+    expect(repo.landed).toEqual([]);
+    expect(r.closed).toContain(b);
   });
 
   it("lands an epic's batch by a fast-forward of exactly the tested commits", async () => {
