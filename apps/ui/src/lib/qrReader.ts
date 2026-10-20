@@ -37,22 +37,46 @@ export async function qrCamera(): Promise<MediaStream> {
 }
 
 /**
- * Reads the playing video's frames about six times a second while `live()`, handing each QR found to `found`, which
- * says whether to stop.
+ * Reads the playing video's frames while `live()`, one at a time with 160 ms between them, handing each QR found to
+ * `found`, which says whether to stop. A frame is decoded in a worker: on the page each one held the app for tens of
+ * milliseconds, hundreds in low light. Where no worker starts or its script does not load, `jsQR` decodes on the page.
  */
 export function scanQrFrames(element: HTMLVideoElement, jsQR: Awaited<ReturnType<typeof qrDecoder>>, live: () => boolean, found: (data: string) => boolean): void {
   const canvas = document.createElement("canvas"), context = canvas.getContext("2d", { willReadFrequently: true })!;
-  const tick = () => {
-    if (!live()) return;
+  const decode = frameDecoder(jsQR);
+  const tick = async () => {
+    if (!live()) { decode.close(); return; }
     if (element.readyState >= 2 && element.videoWidth) {
       const scale = Math.min(1, 960 / element.videoWidth);
       canvas.width = Math.round(element.videoWidth * scale); canvas.height = Math.round(element.videoHeight * scale);
       context.drawImage(element, 0, 0, canvas.width, canvas.height);
-      const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-      const qr = jsQR(pixels.data, pixels.width, pixels.height, { inversionAttempts: "attemptBoth" });
-      if (qr && found(qr.data)) return;
+      const text = await decode(context.getImageData(0, 0, canvas.width, canvas.height));
+      if (!live()) { decode.close(); return; }
+      if (text !== null && found(text)) { decode.close(); return; }
     }
-    window.setTimeout(tick, 160);
+    window.setTimeout(() => void tick(), 160);
   };
-  tick();
+  void tick();
+}
+
+/**
+ * One frame at a time to the worker (its pixels handed over, not copied), or to `jsQR` on the page. A worker that fails
+ * (its script did not load) answers its frame with nothing, and the frames after it are decoded on the page.
+ */
+function frameDecoder(jsQR: Awaited<ReturnType<typeof qrDecoder>>) {
+  let worker: Worker | null = null;
+  try { worker = new Worker(new URL("./qrFrames.worker.ts", import.meta.url), { type: "module" }); } catch { /* decoded on the page */ }
+  let answer: ((text: string | null) => void) | null = null;
+  const answered = (text: string | null) => { const resolve = answer; answer = null; resolve?.(text); };
+  worker?.addEventListener("message", (event: MessageEvent<{ text: string | null }>) => answered(event.data.text));
+  worker?.addEventListener("error", () => { worker?.terminate(); worker = null; answered(null); });
+  const decode = (pixels: ImageData): Promise<string | null> => {
+    if (!worker) return Promise.resolve(jsQR(pixels.data, pixels.width, pixels.height, { inversionAttempts: "attemptBoth" })?.data ?? null);
+    const to = worker;
+    return new Promise((resolve) => {
+      answer = resolve;
+      to.postMessage({ pixels: pixels.data, width: pixels.width, height: pixels.height }, [pixels.data.buffer]);
+    });
+  };
+  return Object.assign(decode, { close: () => { worker?.terminate(); worker = null; } });
 }
