@@ -129,6 +129,8 @@ export function checkWebhook(url: string): URL {
   try { parsed = new URL(url); } catch { throw new CliError("usage", `Not a URL: ${url}`); }
   if (!["http:", "https:"].includes(parsed.protocol)) throw new CliError("usage", "The webhook must be http:// or https://");
   if (!["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname)) throw new CliError("usage", "The webhook must be on this machine (127.0.0.1, localhost or [::1])");
+  // fetch refuses a URL with credentials: every event was held as "not answering" for good, the password on stderr.
+  if (parsed.username || parsed.password) throw new CliError("usage", "The webhook URL takes no user or password: put the bridge's token in its path or query");
   return parsed;
 }
 

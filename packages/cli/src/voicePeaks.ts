@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { open, type FileHandle } from "node:fs/promises";
 import { VOICE_LIMITS, VOICE_METER, downsamplePeaks, voiceLevel } from "@ghostly/core";
 
 /**
@@ -11,7 +11,8 @@ import { VOICE_LIMITS, VOICE_METER, downsamplePeaks, voiceLevel } from "@ghostly
  * The decoders hand their samples to a sink a piece at a time, and the meter (`VoiceMeter`) keeps only the
  * analyser's window of them: the whole sound decoded into memory first took 2.6 GiB for a 60-minute MP3, in the
  * daemon, only for it to be refused as longer than a voice note (agents#878). Decoding stops once the sound is longer
- * than a voice note may be.
+ * than a voice note may be. A WAV and an MP3 are read from the file in pieces, and a kind left to ffmpeg is not read
+ * here at all: the whole file read first took +190 MiB for a 15-minute WAV (agents#1577).
  */
 
 export interface Sound {
@@ -28,8 +29,11 @@ export interface SoundSink {
   push(channels: readonly Float32Array[], length: number): boolean;
 }
 
-/** Longer than any voice note (15 minutes) with room: a file past it is not read. */
+/** Longer than any voice note (15 minutes) with room: a WebM or Ogg past it is not read (their demuxers hold it all). */
 const MAX_BYTES = 256 * 1024 * 1024;
+/** Read first to tell a file's kind; a WAV's header is looked for in up to `WAV_HEAD_MAX` (as in ffmpeg's output). */
+const HEAD_BYTES = 64 * 1024;
+const WAV_HEAD_MAX = 1024 * 1024;
 const FFMPEG_TIMEOUT_MS = 120_000;
 /** Read past the longest voice note by this much, so its length is known to be too long (`parseVoiceMeta` allows 5 s). */
 const PAST_LIMIT_MS = 6_000;
@@ -135,11 +139,9 @@ export async function decodeSound(path: string): Promise<Sound> {
 
 /** Decodes the sound in `path` into `sink`, by this module's decoders or else ffmpeg. */
 export async function streamSound(path: string, sink: SoundSink): Promise<void> {
-  const bytes = await readFile(path);
-  if (bytes.length > MAX_BYTES) throw new Error("too large to decode");
   let own: Error | undefined;
   try {
-    if (await streamBytes(bytes, sink)) return;
+    if (await streamFile(path, sink)) return;
   } catch (error) {
     own = error instanceof Error ? error : new Error(String(error));
   }
@@ -157,23 +159,71 @@ export async function decodeBytes(bytes: Uint8Array): Promise<Sound | null> {
   return (await streamBytes(bytes, collector)) ? collector.sound() : null;
 }
 
+type Kind = "wav" | "webm" | "ogg" | "mp3" | null;
+
+/** The kind of sound a file's first bytes say it is, of those this module decodes itself. */
+function kindOf(head: Uint8Array): Kind {
+  if (ascii(head, 0, 4) === "RIFF" && ascii(head, 8, 4) === "WAVE") return "wav";
+  if (head[0] === 0x1a && head[1] === 0x45 && head[2] === 0xdf && head[3] === 0xa3) return "webm";
+  if (ascii(head, 0, 4) === "OggS") return "ogg";
+  if (ascii(head, 0, 3) === "ID3" || (head[0] === 0xff && (head[1]! & 0xe0) === 0xe0)) return "mp3";
+  return null;
+}
+
 /** Feeds `sink` the sound of a kind this module decodes itself; false for a kind it leaves to ffmpeg. */
 async function streamBytes(bytes: Uint8Array, sink: SoundSink): Promise<boolean> {
-  if (ascii(bytes, 0, 4) === "RIFF" && ascii(bytes, 8, 4) === "WAVE") { streamWav(bytes, sink); return true; }
-  if (bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) {
-    const opus = demuxWebm(bytes);
-    if (!opus) return false;
-    await streamOpus(opus, sink);
-    return true;
+  const kind = kindOf(bytes);
+  if (kind === "wav") { streamWav(bytes, sink); return true; }
+  if (kind === "mp3") { await streamMp3(slices(bytes, MP3_PIECE), sink); return true; }
+  return kind ? streamOpusOf(kind, bytes, sink) : false;
+}
+
+/** As `streamBytes`, reading the file only as far as its decoder goes; a kind left to ffmpeg is not read past its head. */
+async function streamFile(path: string, sink: SoundSink): Promise<boolean> {
+  const file = await open(path);
+  try {
+    const { size } = await file.stat();
+    const kind = kindOf(await readAt(file, 0, Math.min(size, 12)));
+    if (kind === "wav") { await streamWavFile(file, size, sink); return true; }
+    if (kind === "mp3") { await streamMp3(piecesOf(file, size, MP3_PIECE), sink); return true; }
+    if (!kind) return false;
+    if (size > MAX_BYTES) throw new Error("too large to decode");
+    return streamOpusOf(kind, await file.readFile(), sink);
+  } finally {
+    await file.close();
   }
-  if (ascii(bytes, 0, 4) === "OggS") {
-    const opus = demuxOgg(bytes);
-    if (!opus) return false;
-    await streamOpus(opus, sink);
-    return true;
+}
+
+async function streamOpusOf(kind: "webm" | "ogg", bytes: Uint8Array, sink: SoundSink): Promise<boolean> {
+  const opus = kind === "webm" ? demuxWebm(bytes) : demuxOgg(bytes);
+  if (!opus) return false;
+  await streamOpus(opus, sink);
+  return true;
+}
+
+/** Up to `length` bytes of the file from `at` (fewer at its end), into `into` when given. */
+async function readAt(file: FileHandle, at: number, length: number, into = Buffer.allocUnsafe(length)): Promise<Buffer> {
+  let got = 0;
+  while (got < length) {
+    const { bytesRead } = await file.read(into, got, length - got, at + got);
+    if (!bytesRead) break;
+    got += bytesRead;
   }
-  if (ascii(bytes, 0, 3) === "ID3" || (bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0)) { await streamMp3(bytes, sink); return true; }
-  return false;
+  return into.subarray(0, got);
+}
+
+function* slices(bytes: Uint8Array, piece: number): Generator<Uint8Array> {
+  for (let at = 0; at < bytes.length; at += piece) yield bytes.subarray(at, at + piece);
+}
+
+/** The file in pieces of `piece` bytes, each read into the same buffer once the one before is used. */
+async function* piecesOf(file: FileHandle, size: number, piece: number): AsyncGenerator<Uint8Array> {
+  const buffer = Buffer.allocUnsafe(piece);
+  for (let at = 0; at < size; at += piece) {
+    const bytes = await readAt(file, at, Math.min(piece, size - at), buffer);
+    if (!bytes.length) return;
+    yield bytes;
+  }
 }
 
 function ascii(bytes: Uint8Array, at: number, length: number): string {
@@ -245,6 +295,28 @@ function streamWav(bytes: Uint8Array, sink: SoundSink): void {
   if (!read) throw new Error(`a WAV in a format not read here (${header.format}, ${header.bits} bit)`);
   sink.start(header.sampleRate);
   pushWavFrames(view, header.from, Math.min(bytes.length, header.to), header.channels, header.bits / 8, read, sink);
+}
+
+/** As `streamWav`, reading the file a piece of frames at a time until the sink wants no more. */
+async function streamWavFile(file: FileHandle, size: number, sink: SoundSink): Promise<void> {
+  let header: ReturnType<typeof wavHeader> = null;
+  for (let length = HEAD_BYTES; !header; length *= 2) {
+    header = wavHeader(await readAt(file, 0, Math.min(size, length)));
+    if (length >= size || length >= WAV_HEAD_MAX) break;
+  }
+  if (!header) throw new Error("a WAV without sound");
+  const { format, bits, channels } = header;
+  if (!sampleReader(new DataView(new ArrayBuffer(0)), format, bits)) throw new Error(`a WAV in a format not read here (${format}, ${bits} bit)`);
+  sink.start(header.sampleRate);
+  const frame = (bits / 8) * channels, end = Math.min(size, header.to);
+  const buffer = Buffer.allocUnsafe(PIECE_FRAMES * frame);
+  for (let at = header.from; at + frame <= end;) {
+    const bytes = await readAt(file, at, Math.min(buffer.length, end - at), buffer);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const pushed = pushWavFrames(view, 0, bytes.length, channels, bits / 8, sampleReader(view, format, bits)!, sink);
+    if (!pushed.more || !pushed.at) return;
+    at += pushed.at;
+  }
 }
 
 /** The whole frames between `from` and `to`, as the channels' samples; the byte where it stopped (a frame cut off). */
@@ -445,21 +517,22 @@ async function streamOpus(stream: OpusStream, sink: SoundSink): Promise<void> {
 
 export async function decodeMp3(bytes: Uint8Array): Promise<Sound> {
   const collector = new Collector();
-  await streamMp3(bytes, collector);
+  await streamMp3(slices(bytes, MP3_PIECE), collector);
   return collector.sound();
 }
 
 /** MP3 bytes handed to the decoder at a time: about 16 s of a 128 kbit/s file. */
 const MP3_PIECE = 256 * 1024;
 
-async function streamMp3(bytes: Uint8Array, sink: SoundSink): Promise<void> {
+/** The MP3 in `pieces`, decoded one at a time (the decoder copies each in before the next is asked for). */
+async function streamMp3(pieces: Iterable<Uint8Array> | AsyncIterable<Uint8Array>, sink: SoundSink): Promise<void> {
   const { MPEGDecoder } = await import("mpg123-decoder");
   const decoder = new MPEGDecoder();
   await decoder.ready;
   try {
     let any = false;
-    for (let at = 0; at < bytes.length; at += MP3_PIECE) {
-      const decoded = decoder.decode(bytes.subarray(at, at + MP3_PIECE));
+    for await (const piece of pieces) {
+      const decoded = decoder.decode(piece);
       if (!decoded.samplesDecoded) continue;
       any = true;
       sink.start(decoded.sampleRate);

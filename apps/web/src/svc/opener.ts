@@ -143,7 +143,9 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   view.id = VIEW_ID;
   view.setAttribute("role", "dialog");
   view.setAttribute("aria-label", options.title);
-  view.style.cssText = "position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;background:var(--color-app-bg,#111)";
+  // Clear of a phone's notch and home indicator, its edges in the view's background: inside the frame the app cannot
+  // keep clear of them itself (`env(safe-area-inset-*)` is 0 there). The bar takes the top.
+  view.style.cssText = "position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;padding:0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);background:var(--color-app-bg,#111)";
   const bar = document.createElement("div");
   bar.style.cssText = "display:flex;align-items:center;gap:8px;padding:6px 8px;padding-top:max(6px,env(safe-area-inset-top));color:var(--color-text-primary,#eee);font:600 14px system-ui,sans-serif;border-bottom:1px solid var(--color-border,#333)";
   const close = document.createElement("button");
