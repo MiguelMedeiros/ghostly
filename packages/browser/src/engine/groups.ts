@@ -268,6 +268,78 @@ export const peerMessageAt = (map: Map<string, number>, groupId: string): { last
   return at ? { lastPeerMessageAt: at } : {};
 };
 
+/** A group's marks for the list of groups, unread and the "@": as a mesh group's and a community's engines keep them. */
+export interface GroupMarks {
+  lastMessageAt: Map<string, number>; lastPeerMessageAt: Map<string, number>; lastMentionAt: Map<string, number>;
+  /** Per group, the message each mark was last moved by (`markedBy`): only a removal of one of them reads the history. */
+  by: Map<string, MarkedBy>;
+}
+/** The messages a group's marks were last moved by. */
+export interface MarkedBy { last?: string; peer?: string; mention?: string }
+
+/**
+ * A message came at `came`: the marks move to it (never back), and it is noted as the one that moved them (`unmark`
+ * reads the history again only for one of those).
+ */
+export function markCame(marks: GroupMarks, groupId: string, id: string, came: number, peer: boolean, mentioned: boolean): void {
+  const by = { ...marks.by.get(groupId) };
+  const move = (map: Map<string, number>) => { if (came < (map.get(groupId) ?? 0)) return false; map.set(groupId, came); return true; };
+  if (move(marks.lastMessageAt)) by.last = id;
+  if (mentioned && move(marks.lastMentionAt)) by.mention = id;
+  if (peer && move(marks.lastPeerMessageAt)) by.peer = id;
+  marks.by.set(groupId, by);
+}
+
+/** What `load` reads a group's marks from: the newest rows (`newestMarked`), and when its latest came if later (`came`). */
+export function loadMarks(marks: GroupMarks, group: Pick<StoredGroup, "id" | "came">, history: StoredMessage[]): void {
+  const { last, peer, mention } = newestMarked(history);
+  if (last) marks.lastMessageAt.set(group.id, last.timestamp);
+  // A message that came later than it was written counts from when it came, as it did while the app ran (`noteCame`).
+  const peerAt = cameOrWritten(peer?.timestamp, peer ? group.came?.peer : undefined);
+  if (peerAt) marks.lastPeerMessageAt.set(group.id, peerAt);
+  const mentionAt = cameOrWritten(mention?.timestamp, mention ? group.came?.mention : undefined);
+  if (mentionAt) marks.lastMentionAt.set(group.id, mentionAt);
+  marks.by.set(group.id, { last: last?.id, peer: peer?.id, mention: mention?.id });
+}
+
+/** A group gone from this engine: its marks too. */
+export function dropMarks(marks: GroupMarks, groupId: string): void {
+  marks.lastMessageAt.delete(groupId); marks.lastPeerMessageAt.delete(groupId); marks.lastMentionAt.delete(groupId); marks.by.delete(groupId);
+}
+
+/** The newest rows `load` reads the marks from: a group's last message, last of a member's, last mentioning me. */
+export function newestMarked(history: StoredMessage[]): { last?: StoredMessage; peer?: StoredMessage; mention?: StoredMessage } {
+  const said = history.filter(m => !m.event && !m.groupPay);
+  return { last: said[said.length - 1], peer: [...said].reverse().find(m => m.sender !== "me"), mention: [...history].reverse().find(m => m.mentioned) };
+}
+
+/**
+ * A message deleted for everyone (WISP 400 § Delete for everyone: a tombstone does not count as unread or move the
+ * chat): the marks it moved go back to the newest line still kept, as `load` reads them, and the record's `came` it
+ * raised goes too. A mark a newer line moved stays, and the history is read only when the message moved one
+ * (`markedBy`): removals go at the pace of edits. `history`: the group's rows, with it gone. True when `came` changed
+ * (the record is to be saved).
+ */
+export async function unmark(marks: GroupMarks, group: Pick<StoredGroup, "came"> | undefined, groupId: string, history: () => Promise<StoredMessage[]>, removed: StoredMessage): Promise<boolean> {
+  const by = marks.by.get(groupId);
+  if (!by || ![by.last, by.peer, by.mention].includes(removed.id)) return false;
+  const newest = newestMarked((await history()).filter(m => m.id !== removed.id));
+  const back = (map: Map<string, number>, row: StoredMessage | undefined) => { if (row) map.set(groupId, row.timestamp); else map.delete(groupId); };
+  let came = false;
+  if (by.last === removed.id) back(marks.lastMessageAt, newest.last);
+  if (by.peer === removed.id) {
+    back(marks.lastPeerMessageAt, newest.peer);
+    if (group?.came?.peer !== undefined) { group.came = { ...group.came, peer: undefined }; came = true; }
+  }
+  if (by.mention === removed.id) {
+    back(marks.lastMentionAt, newest.mention);
+    if (group?.came?.mention !== undefined) { group.came = { ...group.came, mention: undefined }; came = true; }
+  }
+  marks.by.set(groupId, { last: by.last === removed.id ? newest.last?.id : by.last, peer: by.peer === removed.id ? newest.peer?.id : by.peer,
+    mention: by.mention === removed.id ? newest.mention?.id : by.mention });
+  return came;
+}
+
 /**
  * How often a group's link is looked at (`warmPollMs` for `warmMs` after it was handed out or someone
  * knocked: people open a link soon after it is shared, and in bursts), and a joiner knocks;
@@ -439,6 +511,8 @@ export class Groups {
   private readonly lastPeerMessageAt = new Map<string, number>();
   /** The latest message that names me, per group (the chat list's "@" while it is unread). */
   private readonly lastMentionAt = new Map<string, number>();
+  /** The maps above, and what moved them last (`markCame`, `unmark`). */
+  private readonly marks: GroupMarks = { lastMessageAt: this.lastMessageAt, lastPeerMessageAt: this.lastPeerMessageAt, lastMentionAt: this.lastMentionAt, by: new Map() };
   private reconciling = Promise.resolve();
   /** Admin side: joiners with an entry session open, per group: member key → since when. */
   private readonly pendingEntries = new Map<string, Map<string, number>>();
@@ -582,20 +656,13 @@ export class Groups {
     for (const group of all.filter(g => !g.community && !g.joining)) {
       this.stored.set(group.id, group);
       // Messages only, as while the app runs: a membership line or a payment's note moves neither the list nor unread.
-      const history = await this.store.getMessages(MESSAGE_LINK(group.id)), said = history.filter(m => !m.event && !m.groupPay);
+      const history = await this.store.getMessages(MESSAGE_LINK(group.id));
       const framed = history.filter(m => m.frame);
       this.framesKept.set(group.id, framed.map(m => ({ id: m.id, bytes: frameBytes(m.frame!) })));
       // The session hands on from the frames its messages' rows hold (`StoredMessage.frame`), not from its own record.
       if (group.state) this.attach(group.state, framed.map(m => m.frame!));
       if (group.invited) this.invited.set(group.id, new Set(Object.keys(group.invited)));
-      const last = said[said.length - 1], lastPeer = [...said].reverse().find(m => m.sender !== "me");
-      if (last) this.lastMessageAt.set(group.id, last.timestamp);
-      // A message that came later than it was written counts from when it came, as it did while the app ran (`noteCame`).
-      const peerAt = cameOrWritten(lastPeer?.timestamp, lastPeer ? group.came?.peer : undefined);
-      if (peerAt) this.lastPeerMessageAt.set(group.id, peerAt);
-      const mention = [...history].reverse().find(m => m.mentioned);
-      const mentionAt = cameOrWritten(mention?.timestamp, mention ? group.came?.mention : undefined);
-      if (mentionAt) this.lastMentionAt.set(group.id, mentionAt);
+      loadMarks(this.marks, group, history);
       this.host.loaded?.(group.id, history);
     }
     for (const id of this.sessions.keys()) this.reconcileEdges(id);
@@ -645,7 +712,11 @@ export class Groups {
   }
 
   private pinned(view: GroupView): GroupView {
-    const pin = pinView(this.record(view.id)?.pin);
+    const record = this.record(view.id), kept = record?.pin;
+    // The pinned message was deleted for everyone: nothing of it stays, its pin neither (agents#1646). The pin is kept
+    // as it came, so the same pin said again (a catch-up) is no newer, and shown as unpinned.
+    const gone = !!kept?.id && !!record?.removedIds?.some(id => id === kept.id || id === kept.messageId);
+    const pin = pinView(gone ? { ...kept!, id: "", messageId: undefined } : kept);
     return pin ? { ...view, pin } : view;
   }
 
@@ -1025,9 +1096,7 @@ export class Groups {
     this.pendingEntries.delete(groupId);
     this.welcomed.delete(groupId);
     this.lingering.delete(groupId);
-    this.lastMessageAt.delete(groupId);
-    this.lastPeerMessageAt.delete(groupId);
-    this.lastMentionAt.delete(groupId);
+    dropMarks(this.marks, groupId);
     this.authorOrder.forget(groupId);
     this.lineOrder.forget(MESSAGE_LINK(groupId));
     await this.store.deleteGroup(groupId);
@@ -1152,6 +1221,22 @@ export class Groups {
       await this.store.putGroup(group);
     }
     await this.files?.forget(groupId, messageId);
+  }
+
+  /**
+   * A message deleted for everyone left this device (`removed`, the row as it was): the group's unread, "@" and place
+   * in the list go back to what they were without it (`unmark`), after a restart too.
+   */
+  /** Whether this message moved one of the group's marks last (`unmark` has something to do for it). */
+  movedMarks(groupId: string, messageId: string): boolean {
+    const by = (this.isCommunity(groupId) ? this.communities.markedBy(groupId) : this.marks.by.get(groupId)) ?? {};
+    return by.last === messageId || by.peer === messageId || by.mention === messageId;
+  }
+
+  async unmark(groupId: string, removed: StoredMessage): Promise<void> {
+    if (this.isCommunity(groupId)) return this.communities.unmark(groupId, removed);
+    const group = this.stored.get(groupId);
+    if (await unmark(this.marks, group, groupId, () => this.store.getMessages(MESSAGE_LINK(groupId)), removed) && group) await this.store.putGroup(group);
   }
 
   /** The connection of an edge opened. One kept to tell a removed member closes a while after, whatever its app says or does not say. */
@@ -2491,10 +2576,11 @@ export class Groups {
         if (m.frame && (completed || stored !== false)) await this.frameKept(state.id, m.id, m.frame);
         // Mine are followed too: a member's rows placed again take along the lines written after them, mine included.
         if (!completed && stored !== false) this.authorOrder.placed(state.id, { ...row, at: this.now() }, placedAbove);
+        // A copy of a line deleted for everyone, refused: it moves no mark (agents#1645). A member away when it was
+        // written and deleted got an "@" for a line it never sees.
+        if (stored === false && !completed && this.isRemoved(state.id, m.id)) { this.typings.messageFrom(state.id, m.sender); return; }
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
-        this.lastMessageAt.set(state.id, Math.max(this.lastMessageAt.get(state.id) ?? 0, came));
-        if (mentioned) this.lastMentionAt.set(state.id, Math.max(this.lastMentionAt.get(state.id) ?? 0, came));
-        if (m.sender !== session.myKey) this.lastPeerMessageAt.set(state.id, Math.max(this.lastPeerMessageAt.get(state.id) ?? 0, came));
+        markCame(this.marks, state.id, m.id, came, m.sender !== session.myKey, mentioned);
         noteCame(this.stored.get(state.id), came, m.sender !== session.myKey, mentioned);
         // What the member was typing arrived: it is not typing any more.
         this.typings.messageFrom(state.id, m.sender);
