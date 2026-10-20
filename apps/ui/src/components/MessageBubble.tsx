@@ -65,8 +65,8 @@ interface MessageBubbleProps {
    * their messages, plain. Left out in a group, where a member's own name goes over theirs with a "~".
    */
   contactName?: string;
-  /** Forgets this message on this device. Left out where a chat cannot be edited. */
-  onDelete?: () => void;
+  /** Forgets this message on this device; a rejection is a delete refused (Cancel sending says it). Left out where a chat cannot be edited. */
+  onDelete?: () => void | Promise<void>;
   /** Deletes this message of mine from every member's device (WISP 400 § Delete for everyone). Left out where it can't. */
   onDeleteForEveryone?: () => void;
   /** The engine's link for the message's details; found from `peerPubKey` when left out (groups name theirs). */
@@ -873,7 +873,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const cancelSending = () => {
     playCue("deleted", { chat });
     setRefused(null);
-    if (onDelete) { onDelete(); return; }
+    if (onDelete) { void Promise.resolve(onDelete()).catch(refuse(shown)); return; }
     const link = engine.linkByPeer(peerPubKey);
     if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(refuse(shown));
   };
