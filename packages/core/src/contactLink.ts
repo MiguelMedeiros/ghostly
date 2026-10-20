@@ -1,8 +1,7 @@
 import { bech32, bech32m } from "@scure/base";
 import { toZ32 } from "./bytes";
 import { createIdentity, publicKeyFromZ32 } from "./identity";
-import { DEVICE_INVITE_VERSION, INVITE_HRP, INVITE_MAX_LENGTH, INVITE_VERSION } from "./invite";
-import { trimEndOf } from "./text";
+import { DEVICE_INVITE_VERSION, INVITE_HRP, INVITE_MAX_LENGTH, INVITE_VERSION, pastedAgain } from "./invite";
 
 /*
  * A contact link (WISP 8xx Contact Links): one link a person can post anywhere, naming nobody. It is a `ghostly1…`
@@ -58,12 +57,7 @@ function read(input: string): ContactLinkReading {
 export function readContactLink(input: string): ContactLinkReading {
   const reading = read(input);
   if (reading.ok) return reading;
-  const bare = trimEndOf(input.trim(), ".,)!");
-  if (bare !== input.trim()) {
-    const again = read(bare);
-    if (again.ok) return again;
-  }
-  return reading;
+  return pastedAgain(input, reading, read);
 }
 
 /** A new contact link: the owner keeps `seedB64` in its profile and hands out `code`. */
