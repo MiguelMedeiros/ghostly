@@ -84,3 +84,17 @@ describe("what an agent is taught", { timeout: 180_000 }, async () => {
     });
   }
 });
+
+/*
+ * An agent on the CLI that should answer voice calls clones ghostly-voice-agent (speech to text, Claude, text to
+ * speech) instead of writing its own: the skills, the guides and the /cli and /developers/agents pages point to it.
+ */
+const VOICE_AGENT = "https://github.com/MiguelMedeiros/ghostly-voice-agent";
+const POINT_TO_VOICE = [...DOCS, "packages/cli/README.md", "docs/CLI.md", "apps/website/content/cli.ts", "apps/website/scripts/llms.mjs"];
+
+describe("a ready voice agent", () => {
+  for (const doc of POINT_TO_VOICE)
+    it(`${doc} points to ghostly-voice-agent`, () => {
+      expect(readFileSync(resolve(ROOT, doc), "utf8").includes(VOICE_AGENT), `${doc} has no link to ${VOICE_AGENT}`).toBe(true);
+    });
+});
