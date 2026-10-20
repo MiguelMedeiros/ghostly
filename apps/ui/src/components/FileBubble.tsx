@@ -236,13 +236,13 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
           </p>
         </div>
         {(blobUrl || saveOnly) && (
-          <a
-            href={blobUrl ?? undefined}
-            download={blobUrl ? file.name : undefined}
-            onClick={(event) => { event.preventDefault(); save(); }}
-            role="button"
+          // A button, not a link to the picture's address: a file that is no picture has none here, and a link
+          // without one is no stop for Tab.
+          <button
+            type="button"
+            onClick={save}
             data-testid="file-save"
-            className={`w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center shrink-0 text-inherit transition-colors cursor-pointer ${watched ? "animate-pop" : ""}`}
+            className={`w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 border-none p-0 flex items-center justify-center shrink-0 text-inherit transition-colors cursor-pointer ${watched ? "animate-pop" : ""}`}
             title={t("common.save")}
             aria-label={t("common.save")}
           >
@@ -251,7 +251,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-          </a>
+          </button>
         )}
       </div>
       {offered && group && (
