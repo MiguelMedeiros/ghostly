@@ -544,6 +544,44 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
         expect(node.getState().links.find((l) => l.id === holders[3].options.params.id)?.transportErrors?.["iroh/1"]).toMatch(/quiet/);
       });
 
+      it("a chat paired while every listener was in use takes one once a chat goes quiet, though it is not on screen", async () => {
+        // agents#1619: a CLI daemon's ninth chat, paired while eight chats used in the last two minutes held the listeners,
+        // stayed "waiting" for 10+ minutes: it was in use only while its invite was on screen, and its retries could take
+        // only a free listener. Its error said it would take one once a chat went quiet.
+        const { node, holders, nine } = await allLive([1, 1, 1, 1, 1, 1, 1, 1], { pairedPeerKey: undefined });
+        expect(nine.registerEndpoint).not.toHaveBeenCalled();
+        await nine.options.pairing.pinPeer(createIdentity().pubKeyZ32, true);
+        await node["nativeQueue"];
+        expect(node.getState().links.find((l) => l.id === "chat-z")?.transportErrors?.["iroh/1"]).toMatch(/slots are in use/);
+        expect(yielded(holders)).toEqual([]);
+        // Three minutes later, nobody has written in any of them: its next try takes the listener of the quietest.
+        holders[4].lastActivityAt -= 30_000;
+        const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 3 * 60_000);
+        onTestFinished(() => { clock.mockRestore(); });
+        node["retryNative"]();
+        await vi.waitFor(() => expect(nine.registerEndpoint).toHaveBeenCalled());
+        expect(yielded(holders)).toEqual([holders[4]]);
+      });
+
+      it("a chat paired in this run takes one only until it has gone live, or for ten minutes", async () => {
+        const { node, holders, nine } = await allLive([1, 1, 1, 1, 1, 1, 1, 1], { pairedPeerKey: undefined });
+        await nine.options.pairing.pinPeer(createIdentity().pubKeyZ32, true);
+        await node["nativeQueue"];
+        const live = node["links"].get("chat-z")!;
+        expect(live.pairedAt).toBeGreaterThan(0);
+        // Its next try eleven minutes on, the others quiet by then: it is a chat like any other not in use, and waits.
+        const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 11 * 60_000);
+        onTestFinished(() => { clock.mockRestore(); });
+        node["retryNative"]();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        await node["nativeQueue"];
+        expect(nine.registerEndpoint).not.toHaveBeenCalled();
+        expect(yielded(holders)).toEqual([]);
+        // Live once, it no longer counts as just paired.
+        (nine.options as unknown as { events: { onDataLinkState(state: string): void } }).events.onDataLinkState("open");
+        expect(live.pairedAt).toBeUndefined();
+      });
+
       it("never one with a call on, nor one used in the last two minutes: the chat on screen waits until one goes quiet", async () => {
         const { node, holders, nine } = await allLive([1, 1, 30, 1, 1, 1, 1, 1]);
         // The quietest has a call on: its media runs elsewhere, the session itself says nothing for half an hour.
