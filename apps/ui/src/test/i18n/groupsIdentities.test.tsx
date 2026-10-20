@@ -11,6 +11,7 @@ import type { Language } from "../../lib/settings";
 import { engineState, fakeEngine, groupView } from "../fakeEngine";
 import { renderApp } from "../render";
 import { proofView } from "../identities/views";
+import { translateWith } from "../../locales/translate";
 import { LOCALES, SECTIONS, flatten, lookup } from "./locales";
 
 // covers: app.i18n
@@ -20,8 +21,9 @@ import { LOCALES, SECTIONS, flatten, lookup } from "./locales";
 const ME = "me".padEnd(52, "y"), ANA = "ana".padEnd(52, "y");
 const member = (patch: Partial<GroupMemberView>): GroupMemberView => ({ key: ME, role: "member", me: false, online: false, missing: 0, ...patch });
 const stored = (patch: Partial<StoredMessage>): StoredMessage => ({ linkId: "group:group-1", id: "g1", text: "", sender: "peer", timestamp: 1_700_000_000_000, via: "datalink", ...patch });
+/** As the app says it: a counted string takes its language's plural form (agents#1614). */
 const t = (language: Language, key: string, params: Record<string, string | number> = {}) =>
-  Object.entries(params).reduce((text, [k, v]) => text.split(`{{${k}}}`).join(String(v)), lookup(language, key)!);
+  translateWith(LOCALES[language], language)(key as never, params);
 const RAW_KEY = new RegExp(`\\b(?:${SECTIONS.join("|")})(?:\\.[a-zA-Z]+)+\\b`);
 
 function openGroup(language: Language, group: GroupView, history: StoredMessage[] = []) {
