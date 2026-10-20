@@ -1419,6 +1419,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     linkReady: (linkId, version = 1) => !!this.links.get(linkId)?.link?.supportsGroupVersion(version),
     linkHandled: linkId => this.links.get(linkId)?.link?.handled() ?? Promise.resolve(false),
+    linkWaiting: linkId => this.links.get(linkId)?.link?.framesWaiting() ?? 0,
     linkOpen: linkId => !!this.links.get(linkId)?.link?.isDataLinkOpen,
     loaded: (groupId, history) => {
       const note = latestReaction(history);

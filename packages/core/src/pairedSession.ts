@@ -201,6 +201,8 @@ export class PairedSession {
   /** The peer said in its offer that it answers pings, so its silence from the open means it stopped. */
   get peerAnswersPings(): boolean { return !!this.peer?.extensions?.includes("ping/1"); }
   get peerAllowsFallback(): boolean { return this.peer?.capabilities.includes("transport-fallback/1") ?? false; }
+  /** Frames received from the peer and not handled yet (the one being handled included). */
+  get waiting(): number { return this.pending; }
 
   start(): void {
     const binding = this.options.binding;
