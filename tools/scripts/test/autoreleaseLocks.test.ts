@@ -77,6 +77,17 @@ describe("the security autorelease gate's lock file check", () => {
     }
   });
 
+  // The registry URL is built from the entry's version: dot segments in both read as the package's own tarball.
+  it("refuses an npm dependency whose version is not a plain semver, even with the URL built from it", () => {
+    for (const mode of ["all", "deps"] as const) {
+      for (const version of ["4.17.21/../../../not-lodash/-/not-lodash-1.0.0", "4.17.21/%2e%2e/%2e%2e/%2e%2e/not-lodash/-/not-lodash-1.0.0", "latest"]) {
+        const run = runGate(npmBump({ "node_modules/lodash": registry("lodash", "4.17.20") }, { "node_modules/lodash": registry("lodash", version) }), mode);
+        expect(run.code, `${mode}: ${version}`).toBe(1);
+        expect(run.stderr).toContain("changes where dependencies come from: lodash");
+      }
+    }
+  });
+
   it("refuses a workspace link turned into a download", () => {
     const run = runGate(npmBump({}, { "node_modules/@ghostly/web": registry("@ghostly/web", "9.9.9") }), "deps");
     expect(run.code).toBe(1);

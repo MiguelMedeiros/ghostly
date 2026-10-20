@@ -109,7 +109,9 @@ if (lines > MAX_LINES) refuse(`${lines} changed lines outside lock files (max ${
 // name that now comes from somewhere else (an npm alias to another package, another registry or a git repository, a
 // workspace link turned into a download, a crate off crates.io). Each name maps to every place it comes from. An npm
 // download counts as that package only at its exact registry URL: npm resolves dot segments (also percent-encoded),
-// so a URL that merely starts with the package's path can fetch any other package.
+// so a URL that merely starts with the package's path can fetch any other package. The URL is built from the entry's
+// own version, so that version must be a plain semver: one with a `/` puts the dot segments in both.
+const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const npmSources = (text) => {
   const sources = new Map();
   for (const [path, entry] of Object.entries(JSON.parse(text).packages ?? {})) {
@@ -120,7 +122,7 @@ const npmSources = (text) => {
       ? `link:${entry.resolved}`
       : !entry.resolved
         ? `${real}, no source`
-        : entry.resolved === `https://registry.npmjs.org/${real}/-/${real.split("/").pop()}-${entry.version}.tgz`
+        : SEMVER.test(entry.version) && entry.resolved === `https://registry.npmjs.org/${real}/-/${real.split("/").pop()}-${entry.version}.tgz`
           ? `npm:${real}`
           : entry.resolved;
     sources.set(name, (sources.get(name) ?? new Set()).add(from));
@@ -156,11 +158,12 @@ if (next !== `${major}.${minor}.${patch + 1}`) refuse(`version must go from ${cu
 // key, a Cargo build script or a Dockerfile's RUN lines. Each changed file is read on main and on the branch with its
 // versions blanked out (a dependency's range, a crate's version, a base image's tag), and the two must be equal. A
 // dependency spec that is not a plain range (`npm:`, `file:`, a git or GitHub source) stays as written, so changing it
-// counts. Lock files have their own check above; the changelog and the security review are notes.
+// counts, and so does a spec with no version in it (`*`, empty, a dist-tag), which npm takes on faith whatever the
+// lock file says. Lock files have their own check above; the changelog and the security review are notes.
 if (MODE === "deps") {
   const RANGE = /^[\w.^~<>=*|+ -]*$/;
   const blank = (value) =>
-    typeof value === "string" ? (RANGE.test(value) ? "" : value) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, blank(v)])) : value;
+    typeof value === "string" ? (RANGE.test(value) && /\d/.test(value) ? "<range>" : value) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, blank(v)])) : value;
   const DEP_FIELDS = ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies", "overrides"];
   const json = (text) => {
     const data = JSON.parse(text);
