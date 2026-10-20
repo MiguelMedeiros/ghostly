@@ -29,6 +29,7 @@ let env: NodeJS.ProcessEnv;
 /** Both daemons' link traces (packages/core/src/linkTrace.ts), one JSON line a step: what a slow test prints. */
 let trace = "";
 const as = (dir: string, ...args: string[]) => ghostly(["--home", dir, ...args], { env });
+const hasFfmpeg = (() => { try { execFileSync("ffmpeg", ["-version"], { stdio: "ignore" }); return true; } catch { return false; } })();
 
 async function startDaemon(dir: string): Promise<void> {
   const daemon = new Running(["--home", dir, "daemon"], env);
@@ -621,14 +622,19 @@ describe("two headless peers", { timeout: 180_000 }, () => {
       return answer?.replyTo?.found;
     }, { timeout: 60_000 }).toBe(true);
     expect(answer!.replyTo!.from).toBe("me");
-    // Sound this side cannot read: sent flat with a warning on stderr when the length is given, refused when not.
-    const noise = join(alice, "noise.wav");
+    // Sound this side cannot measure (no ffmpeg for it): sent flat with a warning on stderr when the length is given,
+    // refused when not. Bytes ffmpeg reads as no sound are not audio, length or not: sent, they would not play.
+    const noise = join(alice, "noise.m4a");
     writeFileSync(noise, randomBytes(4000));
-    const flat = await as(alice, "file", "send", "bob", noise, "--voice", "1200");
-    expect(ok(flat)).toMatchObject({ file: { voice: true } });
-    expect(flat.json.warning).toBeUndefined();
-    expect(flat.stderr).toMatch(/^ghostly: Sent without a waveform: could not read the sound/m);
-    expect(error(await as(alice, "file", "send", "bob", noise, "--voice"), "bad_request", 1).message).toMatch(/give its length as --voice <ms>/);
+    if (hasFfmpeg) {
+      for (const length of [["1200"], []]) expect(error(await as(alice, "file", "send", "bob", noise, "--voice", ...length), "bad_request", 1).message).toMatch(/^noise\.m4a is not audio \(ffmpeg could not read it/);
+    } else {
+      const flat = await as(alice, "file", "send", "bob", noise, "--voice", "1200");
+      expect(ok(flat)).toMatchObject({ file: { voice: true } });
+      expect(flat.json.warning).toBeUndefined();
+      expect(flat.stderr).toMatch(/^ghostly: Sent without a waveform: could not read the sound/m);
+      expect(error(await as(alice, "file", "send", "bob", noise, "--voice"), "bad_request", 1).message).toMatch(/give its length as --voice <ms>/);
+    }
     // A file this user may not read: refused, naming it (root reads anything, so only checked as another user).
     if (process.getuid?.() !== 0) {
       const locked = join(alice, "locked.bin");
