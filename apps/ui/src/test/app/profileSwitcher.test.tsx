@@ -7,6 +7,7 @@ import { ProfileSwitchSplash } from "../../components/ProfileSwitchSplash";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
 import { activeProfileId, createProfile, lastRouteOf, pendingSwitch, prefixOf, renameProfile, settingsKeyFor, type ProfileEntry } from "../../lib/profiles";
 import { fakeEngine } from "../fakeEngine";
+import { shownInName } from "../labelInName";
 import { renderApp } from "../render";
 
 // covers: profiles.switcher
@@ -129,7 +130,8 @@ describe("the account switcher on the account bar", () => {
 
     await user.keyboard("{Alt>}{Shift>}P{/Shift}{/Alt}");
     const items = [...menu().querySelectorAll<HTMLElement>("[role^=menuitem]")];
-    expect(items.map((item) => item.textContent)).toEqual([expect.stringContaining("Personal"), "WWork", "FFamily", "+Add a profile", "Add this device to another profile", "Manage profiles"]);
+    // Each profile's initial is drawn, not text: a profile reads as its name, not "WWork".
+    expect(items.map((item) => item.textContent)).toEqual([expect.stringContaining("Personal"), "Work", "Family", "+Add a profile", "Add this device to another profile", "Manage profiles"]);
     // The first other profile has the focus: the likeliest next step.
     expect(items[1]).toHaveFocus();
     await user.keyboard("{ArrowDown}");
@@ -201,6 +203,9 @@ describe("the account switcher on a phone", () => {
     const tab = screen.getByTestId("mobile-tab-settings");
     expect(screen.getByTestId("mobile-tab-profile")).toBeInTheDocument();
     expect(tab).toHaveAttribute("aria-haspopup", "menu");
+    // Named "Settings, Personal": the profile's initial on the icon is drawn, so the name holds all the tab shows.
+    expect(tab).toHaveAccessibleName(/^Settings, Personal/);
+    expect(tab).toHaveAccessibleName(shownInName(tab));
 
     // A short tap is Settings; holding it is the switcher.
     fireEvent.pointerDown(tab, { pointerType: "touch" });
