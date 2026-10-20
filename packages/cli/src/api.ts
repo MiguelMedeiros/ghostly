@@ -380,10 +380,15 @@ const METHODS: Record<string, Method> = {
   /** The saved messages, the last saved first, each as it is now and named by its chat or group. */
   async "saved.list"(ctx) {
     const { links, groups } = state(ctx);
-    return (await node(ctx).savedMessages()).map(({ savedAt, message }) => {
-      if (!message.linkId.startsWith("group:")) return { chat: message.linkId, savedAt, message: chatMessageJson(message, links.find((l) => l.id === message.linkId)) };
+    const saved = await node(ctx).savedMessages();
+    // A saved reply whose original is gone reads as history gives it: per chat or group, one read per quoted original.
+    const gone = new Map<string, Set<string>>();
+    for (const linkId of new Set(saved.map((s) => s.message.linkId))) gone.set(linkId, await originalsGone(ctx, linkId, saved.flatMap((s) => (s.message.linkId === linkId ? [s.message] : []))));
+    return saved.map(({ savedAt, message }) => {
+      const checked = (json: MessageJson) => quoteChecked(json, message, gone.get(message.linkId)!);
+      if (!message.linkId.startsWith("group:")) return { chat: message.linkId, savedAt, message: checked(chatMessageJson(message, links.find((l) => l.id === message.linkId))) };
       const id = message.linkId.slice("group:".length);
-      return { group: id, savedAt, message: groupMessageJson(message, groups.find((g) => g.id === id)) };
+      return { group: id, savedAt, message: checked(groupMessageJson(message, groups.find((g) => g.id === id))) };
     });
   },
   /**

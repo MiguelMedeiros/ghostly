@@ -29,6 +29,7 @@
     "stopped": "Parado"
   },
   "window": {
+    "callOn": "Há uma chamada em andamento. Encerre-a para abrir {{app}}.",
     "elsewhere": "{{app}} tentou levar você para outro lugar, fora do que seu contato compartilha.",
     "failed": "O pedido falhou.",
     "notAnswering": "{{app}} não está respondendo na máquina do seu contato. Peça ao seu contato que confira se está rodando.",

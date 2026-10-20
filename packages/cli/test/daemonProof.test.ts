@@ -123,12 +123,11 @@ describe.skipIf(process.platform === "win32")("a listener that is not this profi
     expect(seen.bytes(), seen.lines.join("\n")).toBe(0);
   });
 
-  it("no greeting, a wrong one, a stale one, one from a pid that does not hold the profile, or junk: refused, with nothing written", async () => {
+  it("a wrong greeting, a stale one, one from a pid that does not hold the profile, or junk: refused, with nothing written", async () => {
     const { dir, socket } = profileAt("greetings");
     const secret = newDaemonSecret(dir);
     const dead = await deadPid();
     const greets: [string, () => object | string | null][] = [
-      ["no greeting (an older release's daemon, or one waiting for the client to speak)", () => null],
       ["a wrong proof", () => ({ greeting: { pid: process.pid, at: Date.now(), proof: "00".repeat(32) } })],
       ["a stale one", () => greeting(secret, process.pid, Date.now() - 60_000)],
       ["a pid that does not hold the profile", () => greeting(secret, dead, Date.now())],
@@ -272,6 +271,50 @@ describe.skipIf(process.platform === "win32")("a listener that is not this profi
     writeFileSync(daemonSecretPath(paths.dir), "ab".repeat(32) + "\n", { mode: 0o600 });
     const seen = await impostor(paths.socket, (line) => ({ id: line.id ?? null, result: { pid: 1 } }), () => ({ greeting: { pid: 1, at: Date.now(), proof: "00".repeat(32) } }));
     error(await ghostly(["--home", dir, "daemon", "stop", "--timeout", "2"]), "refused", 1);
+    expect(seen.bytes()).toBe(0);
+  });
+});
+
+describe.skipIf(process.platform === "win32")("a daemon of this release that greets late (its event loop busy) is waited for", () => {
+  /** The profile's daemon whose greeting comes `lateMs` after the connection: it then proves itself and answers. */
+  function busyDaemon(socket: string, secret: Buffer, lateMs: number) {
+    return impostor(socket, (line) => line.method === "daemon.hello"
+      ? { id: line.id, result: { proof: proof(secret, "daemon", line.params?.nonce ?? "") } }
+      : { id: line.id, result: { sent: true } }, () => null).then((seen) => {
+      seen.server.on("connection", (s: Socket) => { setTimeout(() => { if (!s.destroyed) s.write(JSON.stringify(greeting(secret)) + "\n"); }, lateMs); });
+      return seen;
+    });
+  }
+
+  it("a call goes through once the greeting comes, past the wait for it", async () => {
+    const { dir, socket } = profileAt("late");
+    const secret = newDaemonSecret(dir);
+    const seen = await busyDaemon(socket, secret, 900);
+    const client = await connectDaemon({ dir, socket }, 1_000, { greetingMs: 300 });
+    expect(await client!.call("chat.send", { chat: "bob", text: "hi" })).toEqual({ sent: true });
+    expect(methods(seen.lines)).toEqual(["daemon.hello", "chat.send"]);
+    client!.close();
+  });
+
+  it("one that never greets costs the call its own deadline (timeout), with nothing written", async () => {
+    const { dir, socket } = profileAt("never");
+    newDaemonSecret(dir);
+    const seen = await impostor(socket, answersEverything);
+    const client = await connectDaemon({ dir, socket }, 1_000, { greetingMs: 300 });
+    const failure = await client!.call("status", {}, { timeoutMs: 1_000 }).catch((e: unknown) => e) as CliError;
+    expect(failure.code).toBe("timeout");
+    expect(seen.bytes()).toBe(0);
+  });
+
+  it("with no secret (an older release's daemon never writes one), what does not greet is refused at the wait's end", async () => {
+    const { dir, socket } = profileAt("older");
+    const seen = await impostor(socket, answersEverything);
+    const client = await connectDaemon({ dir, socket }, 1_000, { greetingMs: 300 });
+    const started = Date.now();
+    const failure = await client!.call("status", {}, { timeoutMs: 3_000 }).catch((e: unknown) => e) as CliError;
+    expect(failure.code).toBe("refused");
+    expect(failure.message).toContain("ghostly daemon restart");
+    expect(Date.now() - started).toBeLessThan(2_000);
     expect(seen.bytes()).toBe(0);
   });
 });

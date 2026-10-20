@@ -55,10 +55,20 @@ test("message details: a text, a file and a voice message, on both sides", { tag
   const [alice, bob] = await Promise.all([peer("details-alice"), peer("details-bob")]);
   await pair(alice, bob);
 
-  // A text, seen from the side that sent it (double click) and from the side that got it (the ⋮ menu).
+  // A text, seen from the side that sent it (Ctrl/⌘+double click) and from the side that got it (the ⋮ menu).
   await say(alice, "how did this travel?");
   await expect(chat(bob).getByText("how did this travel?")).toBeVisible();
-  await rowOf(alice, "how did this travel?").dblclick();
+  // A plain double click on the words selects a word, a triple click the line, as anywhere else: no details.
+  const words = rowOf(alice, "how did this travel?").getByTestId("message-text");
+  const selected = () => alice.page.evaluate(() => window.getSelection()?.toString().trim());
+  const box = (await words.boundingBox())!;
+  await alice.page.mouse.dblclick(box.x + 4, box.y + box.height / 2);
+  expect(await selected()).toBe("how");
+  await alice.page.mouse.click(box.x + 4, box.y + box.height / 2, { clickCount: 3 });
+  expect(await selected()).toBe("how did this travel?");
+  await expect(panel(alice.page)).toHaveCount(0);
+  // Ctrl+double click (⌘ on a Mac) opens them.
+  await words.dblclick({ modifiers: ["ControlOrMeta"] });
   await expect(panel(alice.page)).toHaveAttribute("data-loaded", "yes");
   await expect(panel(alice.page)).toHaveAttribute("data-side", "end");
   await expect(rowOf(alice, "how did this travel?")).toHaveAttribute("data-details-open", "true");
@@ -77,6 +87,10 @@ test("message details: a text, a file and a voice message, on both sides", { tag
   expect(copied).toMatchObject({ kind: "Text", path: { "Sent over": "WebRTC, direct" }, engine: { message: { kind: "text" } } });
   await close(alice.page);
   await expect(rowOf(alice, "how did this travel?")).not.toHaveAttribute("data-details-open");
+  // ⌘ by name, whatever the machine running the test.
+  await words.dblclick({ modifiers: ["Meta"] });
+  await expect(panel(alice.page)).toHaveAttribute("data-loaded", "yes");
+  await close(alice.page);
 
   await openFromMenu(bob, rowOf(bob, "how did this travel?"));
   await expect(field(bob.page, "Received over")).toHaveText("WebRTC, direct");

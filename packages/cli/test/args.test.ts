@@ -286,6 +286,8 @@ describe("the argument parser", () => {
     usage("call auto", ["off", "--from", "bob", "--rate", "16000"], "--from and --rate go with on: ghostly call auto on --from <chat>");
     expect(params("call auto", ["on", "--from", "bob", "--rate", "16000"])).toEqual({ on: true, from: ["bob"], rate: 16000 });
     expect(params("call auto", ["off"])).toEqual({ on: false });
+    // The help names what --from takes: a name the contact chose is refused there.
+    expect(COMMANDS["call auto"].options?.from.description).toMatch(/id.*key.*label.*chat rename/);
     // "" (an unset variable in a script) names no chat: before, it was a prefix of every id and took the only chat.
     usage("forward", ["bob", "m1", "--to", ""], "--to \"\" names no chat or group");
     usage("forward", ["bob", "m1", "--to", "alice", "--to", "group:"], "--to \"group:\" names no chat or group");
@@ -335,6 +337,23 @@ describe("the argument parser", () => {
       expect(params(name, [...argv, "--rate", "16000"])).toMatchObject({ rate: 16000 });
       expect(params(name, [...argv])).toMatchObject({ rate: undefined });
     }
+    // A voice note's length or waveform out of range: before, the API answered after the profile opened (exit 1,
+    // "voice must be a number from 1 to 9007199254740991" or one sentence for every case), and --peaks alone was dropped.
+    const voice = "--voice takes a length in milliseconds from 1 to 900000 (15 minutes), not";
+    usage("file send", ["alice", "a.wav", "--voice", "0"], `${voice} 0`);
+    usage("file send", ["alice", "a.wav", "--voice", "-5"], `${voice} -5`);
+    usage("file send", ["alice", "a.wav", "--voice", "2.5"], `${voice} 2.5`);
+    usage("file send", ["alice", "a.wav", "--voice", "1000000"], `${voice} 1000000`);
+    const peaks = "--peaks takes up to 128 numbers from 0 to 255, comma-separated, not";
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", "1,2,999"], `${peaks} "1,2,999"`);
+    usage("file send", ["alice", "a.wav", "--voice", "2000", "--peaks", "a,b"], `${peaks} "a,b"`);
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", "1,,2"], `${peaks} "1,,2"`);
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", ""], `${peaks} ""`);
+    usage("file send", ["alice", "a.wav", "--voice", "--peaks", new Array(129).fill(1).join(",")], `${peaks} "${new Array(129).fill(1).join(",")}"`);
+    usage("file send", ["alice", "a.wav", "--peaks", "1,2"], "--peaks is a voice note's waveform: not without --voice");
+    expect(params("file send", ["alice", "a.wav", "--voice"])).toMatchObject({ voice: true, peaks: undefined });
+    expect(params("file send", ["alice", "a.wav", "--voice", "900000", "--peaks", "0,40,255"])).toMatchObject({ voice: 900000, peaks: ["0", "40", "255"] });
+    expect(params("file send", ["alice", "a.wav"])).toMatchObject({ voice: undefined, peaks: undefined });
     // Each of the three is enough for an update, and a code is taken as typed.
     expect(params("button update", ["alice", "m1", "--chosen", "yes"])).toMatchObject({ chosen: "yes", close: false });
     expect(params("button update", ["alice", "m1", "--close"])).toMatchObject({ close: true });
@@ -422,6 +441,16 @@ describe("errors", () => {
     expect(asCliError(Object.assign(new Error("EISDIR: illegal operation"), { code: "EISDIR", syscall: "open", path: "/tmp" })).code).toBe("bad_request");
     // An engine error that only mentions a file keeps its words.
     expect(asCliError(new Error("The file is gone")).code).toBe("engine");
+  });
+
+  it("say a change the full disk could not take as unavailable, in the store's words", () => {
+    // A daemon on a full disk answered done for a settings change, a chat's label, that a restart then lost.
+    const store = Object.assign(new DOMException("No room left on the disk of /home/x/store: free some space, then try again", "QuotaExceededError"), { cause: new Error("ENOSPC") });
+    expect(asCliError(store).toJSON()).toEqual({ code: "unavailable", message: "No room left on the disk of /home/x/store: free some space, then try again" });
+    // As the engine's `committed` hands it on: its own words, the store's as the cause.
+    expect(asCliError(Object.assign(new Error("This device has no room left to save this"), { name: "QuotaExceededError", cause: store })).toJSON())
+      .toEqual({ code: "unavailable", message: "No room left on the disk of /home/x/store: free some space, then try again" });
+    expect(asCliError(new DOMException("", "QuotaExceededError")).code).toBe("unavailable");
   });
 
   it("say a contact that could not be reached as unavailable, not as the engine failing", () => {
