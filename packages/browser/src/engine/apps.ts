@@ -985,8 +985,10 @@ export class Apps {
 
   /**
    * Adds a store the person chose: read at its URL and pinned to its key (`key`, when given, is the key the person saw,
-   * and another one is refused). A store already added under that key takes the URL and the newer index. The index the
-   * preview just read at that URL, under that key, is taken as it is (only its expiry again), not downloaded again.
+   * and another one is refused). A store already added under that key keeps the URL it is read from and takes only a newer
+   * index: a copy of its signed index at another URL, the same one or an older one, never moves it there (it would be
+   * read only there from then on, frozen). The index the preview just read at that URL, under that key, is taken as it
+   * is (only its expiry again), not downloaded again.
    */
   async addStore({ url, key }: { url: string; key?: string }): Promise<AppStoreSummary> {
     if (key !== undefined && !isAppKey(key)) fail("store-key", "Not a store key");
@@ -999,7 +1001,7 @@ export class Apps {
     if (!read.ok) fail(read.reason, "This is not a store Ghostly can read");
     const { index, digest } = read.store;
     const held = await this.storeRecord(index.key);
-    const record: AddedAppStore = held && !held.removed ? { ...held, url: at } : { key: index.key, url: at, addedAt: this.now(), ...(held?.preloaded && { preloaded: true as const }) };
+    const record: AddedAppStore = held && !held.removed ? held : { key: index.key, url: at, addedAt: this.now(), ...(held?.preloaded && { preloaded: true as const }) };
     await this.putStore(this.withIndex(record, index, digest));
     return this.summary((await this.storeRecord(index.key))!);
   }

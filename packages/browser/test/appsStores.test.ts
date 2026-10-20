@@ -317,6 +317,30 @@ describe("stores", () => {
     expect(fresh!.equivocation).toBeUndefined();
   });
 
+  it("adding a store already held, at another URL, keeps the URL it is read from: only a newer index is taken", async () => {
+    const COPY_URL = "https://raw.githubusercontent.com/someone/store/HEAD/ghostly-store.json";
+    const store = apps(net, { defaults: [{ url: STORE_URL, key: keyOf(STORE_KEY) }] });
+    await store.start();
+    store.stop();
+    const five = await storeFiles({ sequence: 5 });
+    await net.putStore(five);
+    await store.refreshStores();
+    // The same signed index, copied byte for byte, and an older one: neither moves the store.
+    await net.putStore(five, COPY_URL);
+    expect(await store.addStore({ url: COPY_URL })).toMatchObject({ url: STORE_URL, sequence: 5, preloaded: true });
+    await net.putStore(await storeFiles({ sequence: 4 }), COPY_URL);
+    expect(await store.addStore({ url: COPY_URL })).toMatchObject({ url: STORE_URL, sequence: 5, problem: "rollback" });
+    // A newer one there is taken, and the store is still read at its own URL.
+    await net.putStore(await storeFiles({ sequence: 6 }), COPY_URL);
+    expect(await store.addStore({ url: COPY_URL })).toMatchObject({ url: STORE_URL, sequence: 6 });
+    const v1 = await bundle();
+    await net.putStore(await storeFiles({ sequence: 7, apps: [listing(v1)] }));
+    net.requests.length = 0;
+    expect(await store.refreshStores()).toMatchObject([{ url: STORE_URL, sequence: 7, apps: [{ ref: v1.ref }] }]);
+    expect(net.requests).toContain(STORE_URL);
+    expect(net.requests).not.toContain(COPY_URL);
+  });
+
   it("an index whose bytes have not changed is not checked again, only its expiry; a changed one is read whole", async () => {
     const v1 = await bundle();
     await net.putStore(await storeFiles({ apps: [listing(v1)], revoked: [await revocation(v1.ref, [v1.digest])], expires: NOW_S + 3600 }));
