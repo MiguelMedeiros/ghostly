@@ -116,12 +116,17 @@ export function pasteShowsNothing(data: DataTransfer | null): boolean {
  */
 export function pasteIsPictureOnly(data: DataTransfer | null): boolean {
   if (!data || filesOf(data).length) return false;
+  // The plain text first, which costs nothing: a picture's copy has none (Chromium) or its address, one word (Firefox).
+  // Anything else is text, and the HTML is never read: WebKitGTK makes it again on every `getData`, 90 ms a MB, and a
+  // whole page copied was a read and a parse of its HTML on each paste, 0.1-0.9 s (agents#1575).
+  const plain = data.getData("text/plain").trim();
+  if (/\s/.test(plain)) return false;
   const html = data.getData("text/html");
-  if (!html) return false;
+  // One picture's HTML names one `<img`: no parse for anything else.
+  if (!html || (html.match(/<img\b/gi)?.length ?? 0) !== 1) return false;
   const body = new DOMParser().parseFromString(html, "text/html").body;
   const images = body.querySelectorAll("img");
   if (images.length !== 1 || body.textContent?.trim()) return false;
-  const plain = data.getData("text/plain").trim();
   return !plain || plain === images[0].getAttribute("src")?.trim() || plain === images[0].src;
 }
 
