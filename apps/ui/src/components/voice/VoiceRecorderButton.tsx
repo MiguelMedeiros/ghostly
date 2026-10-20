@@ -139,7 +139,13 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     setPreview(null);
   }, []);
 
+  /** The bar is about to close (or its buttons to turn disabled) under the focus: it goes to the mic, which stays. */
+  const focusOutOfBar = useCallback(() => {
+    if (barRef.current?.contains(document.activeElement)) buttonRef.current?.focus();
+  }, []);
+
   const reset = useCallback(() => {
+    focusOutOfBar();
     stopPreview();
     recorderRef.current = null;
     gestureRef.current = null;
@@ -151,7 +157,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     setElapsed(0);
     setLevels([]);
     setDrag({ x: 0, y: 0 });
-  }, [stopPreview]);
+  }, [focusOutOfBar, stopPreview]);
 
   const cancel = useCallback((why?: string) => {
     recorderRef.current?.cancel();
@@ -169,6 +175,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     }
     const locked = modeRef.current === "locked";
     sendingRef.current = true;
+    // Sending turns the bin and Pause disabled before the bar goes.
+    focusOutOfBar();
     setConfirmingBoth(false);
     setPhase("sending");
     stopPreview();
@@ -182,7 +190,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     } finally {
       sendingRef.current = false;
     }
-  }, [cancel, reset, stopPreview, showHint, onSend, onError, t]);
+  }, [cancel, reset, focusOutOfBar, stopPreview, showHint, onSend, onError, t]);
 
   const begin = useCallback(async (next: Exclude<Mode, "idle">) => {
     if (disabled || recorderRef.current) return;
