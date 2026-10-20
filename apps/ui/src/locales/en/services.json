@@ -29,6 +29,7 @@
     "stopped": "Stopped"
   },
   "window": {
+    "callOn": "A call is on. End it to open {{app}}.",
     "elsewhere": "{{app}} tried to send you somewhere else, outside what your contact shares.",
     "failed": "The request failed.",
     "notAnswering": "{{app}} is not answering on your contact's machine. Ask them to check that it is running.",

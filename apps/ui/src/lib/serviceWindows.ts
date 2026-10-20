@@ -17,6 +17,30 @@ export function closeServiceWindows(): void {
   closer?.();
 }
 
+/*
+ * On the web a contact's app is drawn over the whole app (apps/web/src/svc/opener.ts), a call's windows with it: it
+ * makes way for a call that rings or starts, and does not open over one. Desktop's windows are windows of their own.
+ */
+let viewCloser: (() => void) | null = null;
+let callWindows = 0;
+
+/** How to close a contact's app drawn over the app: set by the web host. */
+export function setServiceViewCloser(next: (() => void) | null): void {
+  viewCloser = next;
+}
+
+/** A call's window (a ringing call, a call full screen or small) on screen, from its effect: returns its end. */
+export function callWindowShown(): () => void {
+  callWindows += 1;
+  viewCloser?.();
+  return () => { callWindows -= 1; };
+}
+
+/** Whether a call's window is on screen: a contact's app does not open over it. */
+export function callWindowOn(): boolean {
+  return callWindows > 0;
+}
+
 const HOST_ERRORS: Record<string, TranslationKey> = {
   unreachable: "services.window.notAnswering",
   timeout: "services.window.tooSlow",
