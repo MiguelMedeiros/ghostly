@@ -89,6 +89,7 @@ export const PACKAGES_READ_FROM_SITE = [
   // guides and pages that point to the voice agent.
   "docs/AI-AGENTS.md",
   "apps/website/content/agents.ts",
+  "apps/website/content/agentsThreat.ts",
   "docs/CLI.md",
   "apps/website/content/cli.ts",
   "apps/website/scripts/llms.mjs",
