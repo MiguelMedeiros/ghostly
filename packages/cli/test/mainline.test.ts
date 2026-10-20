@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { FRESH_READ_MS, GhostLink, createIdentity, edgeParams, randomBytes, toBase64Url, type Identity, type PollIntervals } from "@ghostly/core";
+import { DiscoveryBudgetError, FRESH_READ_MS, GhostLink, createIdentity, edgeParams, randomBytes, toBase64Url, type Identity, type PollIntervals } from "@ghostly/core";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { Mainline, RelaysAndDht } from "../src/runtime/mainline";
@@ -172,6 +172,25 @@ describe("Pkarr over the Mainline DHT, beside the relays", { timeout: 60_000 }, 
 
   // agents#1595: relays that take 4 s to say a key is not there. Every poll of it (an unused invite's joiner key)
   // hedged at 1.5 s, a DHT lookup of its own each time (+47 in 10 min).
+  // agents#1715: a read the relays' budget held back waited for their minute, though the DHT (no budget) had the packet:
+  // past ~10 chats on working relays, each new pairing took 3-18 s instead of 0.1-2.8 s.
+  it("a read the relays' budget holds back is answered from the DHT; a background one, or one the DHT lacks, still waits", async () => {
+    const store = { down: false, packets: new Map<string, Uint8Array>() };
+    const writer = new RelaysAndDht(await peer(bootstrap), { relays: RELAYS, fetch: relays(store), log: () => {} });
+    const me = createIdentity();
+    await writer.publish(me, [{ label: "_x", value: "envelope" }]);
+    const a = new RelaysAndDht(await peer(bootstrap), { relays: RELAYS, fetch: relays(store), log: () => {} });
+    vi.spyOn(a.relays, "resolve").mockRejectedValue(new DiscoveryBudgetError(59_988));
+    // The DHT's copy may take a moment to spread over the testnet.
+    let read: Awaited<ReturnType<RelaysAndDht["resolve"]>> | undefined;
+    const deadline = Date.now() + 10_000;
+    while (!read && Date.now() < deadline) read = await a.resolve(me.pubKeyZ32).catch(() => undefined);
+    expect(read?.records[0].value).toBe("envelope");
+    expect(a.discovery().path).toMatchObject({ via: "dht" });
+    await expect(a.resolve(me.pubKeyZ32, { background: true })).rejects.toBeInstanceOf(DiscoveryBudgetError);
+    await expect(a.resolve(createIdentity().pubKeyZ32)).rejects.toBeInstanceOf(DiscoveryBudgetError);
+  }, 60_000);
+
   it("polls of a key nobody published, answered 404 slowly, do not each look it up on the DHT", async () => {
     const answer = relays({ down: false, packets: new Map() });
     const slow404 = (async (input: RequestInfo | URL, init?: RequestInit) => {
