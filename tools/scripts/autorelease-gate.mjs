@@ -110,7 +110,9 @@ if (lines > MAX_LINES) refuse(`${lines} changed lines outside lock files (max ${
 // workspace link turned into a download, a crate off crates.io). Each name maps to every place it comes from. An npm
 // download counts as that package only at its exact registry URL: npm resolves dot segments (also percent-encoded),
 // so a URL that merely starts with the package's path can fetch any other package. The URL is built from the entry's
-// own version, so that version must be a plain semver: one with a `/` puts the dot segments in both.
+// own version, so that version must be a plain semver: one with a `/` puts the dot segments in both. An entry with no
+// URL comes only from the package it is bundled in (`inBundle`); any other one npm fetches by its version, which can
+// be a URL itself, so it reads as a source of its own at that path.
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const npmSources = (text) => {
   const sources = new Map();
@@ -120,11 +122,15 @@ const npmSources = (text) => {
     const real = entry.name ?? name;
     const from = entry.link
       ? `link:${entry.resolved}`
-      : !entry.resolved
-        ? `${real}, no source`
-        : SEMVER.test(entry.version) && entry.resolved === `https://registry.npmjs.org/${real}/-/${real.split("/").pop()}-${entry.version}.tgz`
-          ? `npm:${real}`
-          : entry.resolved;
+      : !SEMVER.test(entry.version)
+        ? `version ${entry.version}`
+        : !entry.resolved
+          ? entry.inBundle
+            ? `${real}, bundled in ${path.slice(0, path.lastIndexOf("node_modules/")) || "the root"}`
+            : `${real}, no source at ${path}`
+          : entry.resolved === `https://registry.npmjs.org/${real}/-/${real.split("/").pop()}-${entry.version}.tgz`
+            ? `npm:${real}`
+            : entry.resolved;
     sources.set(name, (sources.get(name) ?? new Set()).add(from));
   }
   return sources;
