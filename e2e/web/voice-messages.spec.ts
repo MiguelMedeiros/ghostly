@@ -273,6 +273,8 @@ test("voice messages: hands-free with a click, pause and preview, Enter, Esc; th
   await tabBackTo(page, "voice-delete");
   await page.keyboard.press("Enter");
   await expect(page.getByTestId("voice-bar")).toHaveCount(0);
+  // The focus goes to the mic, not to the page with the bin that held it.
+  await expect(mic(page)).toBeFocused();
 
   // One held, then one hands-free with a pause, a listen and more: two in a row from Alice.
   await hold(page, 1_600);
