@@ -8,6 +8,7 @@ import { HomeProjectLinks } from "../../components/HomeProjectLinks";
 import { OpenFailureNotice } from "../../components/OpenFailureNotice";
 import { UpdateBanner } from "../../components/UpdateBanner";
 import { desktopUrl, externalLinkProps } from "../../lib/externalLink";
+import { shownInName } from "../labelInName";
 import { renderApp } from "../render";
 
 // covers: app.external-links, app.project-links, app.android.refusals
@@ -79,8 +80,11 @@ afterEach(() => setDesktop(false));
 
 describe("a new window is asked for only through externalLinkProps", () => {
   it("no file in apps/ui/src/ spells _blank but apps/ui/src/lib/externalLink.ts", () => {
+    // Parsing every file takes seconds on a loaded runner; only a file whose text has `_blank` can spell it.
     const offenders = sources(SRC)
-      .map((file) => ({ name: relative(join(SRC, ".."), file), lines: blanks(file, readFileSync(file, "utf8")) }))
+      .map((file) => ({ file, text: readFileSync(file, "utf8") }))
+      .filter(({ text }) => /_blank/i.test(text))
+      .map(({ file, text }) => ({ name: relative(join(SRC, ".."), file), lines: blanks(file, text) }))
       .filter(({ name, lines }) => name !== HOME && lines.length > 0)
       .map(({ name, lines }) => `${name}:${lines.join(",")} (use externalLinkProps from ${HOME})`);
     expect(offenders).toEqual([]);
@@ -178,6 +182,14 @@ describe("links that had no way out on Desktop", () => {
     tauri.invoke.mockResolvedValue(undefined);
     click(screen.getByRole("link", { name: "GitHub" }));
     await waitFor(() => expect(screen.queryByTestId("home-link-failed")).not.toBeInTheDocument());
+  });
+
+  it("Home's version link is named with the version it shows, so \"click v0.4.0\" finds it", async () => {
+    renderApp(<HomeProjectLinks />);
+    const version = await screen.findByRole("link", { name: /^v0\.4\.0/ });
+    expect(version).toHaveTextContent("v0.4.0");
+    expect(version).toHaveAccessibleName(shownInName(version));
+    expect(version).toHaveAccessibleDescription("View this release");
   });
 
   it("Android: no app for the link reads as the app's notice in the person's language, the reason behind the ⓘ", async () => {

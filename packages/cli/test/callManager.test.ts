@@ -947,3 +947,31 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await b.calls.stopAll();
   });
 });
+
+describe("auto-answer from the chats named", () => {
+  const KEY = "y".repeat(52);
+  const links = [
+    { id: "chat-real-alice", label: "Alice", peerNick: "alice", peerPubKeyZ32: "o".repeat(51) + "y", profile: "paired-chat/1" },
+    { id: "chat-mallory", label: null, peerNick: "Bob", peerPubKeyZ32: KEY, profile: "paired-chat/1" },
+  ] as unknown as LinkView[];
+  const manager = () => new CallManager({ engine: { getState: () => ({ links, settings: {} }) as unknown as EngineState, setCallSignal: async () => {} }, emit: () => {}, profileDir: tmp() });
+  const saved = (calls: CallManager) => (calls as unknown as { configPath: string }).configPath;
+
+  it("takes a chat by its id, its contact's key or this side's label", () => {
+    const calls = manager();
+    expect(calls.setAuto({ on: true, from: ["chat-mallory", KEY, "alice"] }).from).toEqual(["chat-mallory", "chat-mallory", "chat-real-alice"]);
+  });
+
+  it("refuses a chat named only by its contact's own name or a prefix of its id, and keeps nothing", () => {
+    const calls = manager();
+    for (const ref of ["Bob", "chat-mall"]) {
+      expect(() => calls.setAuto({ on: true, from: [ref] })).toThrow(expect.objectContaining({ code: "bad_request", details: expect.objectContaining({ chat: "chat-mallory", contact: KEY }) }));
+    }
+    expect(calls.getAuto()).toMatchObject({ on: false, from: [] });
+    expect(existsSync(saved(calls))).toBe(false);
+  });
+
+  it("names the command that gives the chat a label when it refuses one", () => {
+    expect(() => manager().setAuto({ on: true, from: ["Bob"] })).toThrow(/ghostly chat rename <chat> <name>/);
+  });
+});

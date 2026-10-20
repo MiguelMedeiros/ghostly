@@ -21,12 +21,16 @@ const lasting = (session: () => CommunitySession) => (m: CommunityIncomingApp) =
 
 class Net {
   readonly members = new Map<string, Member>();
+  /** Every frame handed, by whom to whom. */
+  readonly sent: { from: Member; to: Member; frame: CommunityFrame }[] = [];
+  now = 1_000_000;
   private pending: Promise<unknown>[] = [];
   constructor(private readonly withLasting = true) {}
 
   private hooks(member: Member): CommunitySessionHooks {
     const deliver = (to: Member | undefined, frame: CommunityFrame) => {
       if (!to || !to.online || !member.online || to === member) return;
+      this.sent.push({ from: member, to, frame });
       this.pending.push(to.session.handle(member.session.myKey, clone(frame)));
     };
     return {
@@ -36,6 +40,7 @@ class Net {
       addressed: (to, frame) => deliver(this.byKey(to), frame),
       message: () => {},
       changed: () => {},
+      clock: () => this.now,
       app: m => { member.apps.push(m.frame); },
       ...(this.withLasting && { lasting: lasting(() => member.session) }),
     };
@@ -61,8 +66,11 @@ class Net {
   }
 }
 
-/** Alice (admin), Bob and Carol. Bob's app is closed while Alice pins `pins` in turn, then Carol says `messages` things. */
-async function away(messages: number, pins: { id: string; n: number }[], withLasting = true) {
+/**
+ * Alice (admin), Bob and Carol. Bob's app is closed while Alice pins `pins` in turn, lets `joins` others in (each a
+ * commit), then Carol says `messages` things.
+ */
+async function away(messages: number, pins: { id: string; n: number }[], withLasting = true, joins = 0) {
   const net = new Net(withLasting);
   const alice = net.create("Alice");
   const bob = await net.admit(alice, "Bob");
@@ -75,14 +83,19 @@ async function away(messages: number, pins: { id: string; n: number }[], withLas
     if ("error" in sent) throw new Error(sent.error);
     await net.settle();
   }
+  for (let i = 0; i < joins; i++) { const joiner = await net.admit(alice, `J${i}`); await net.settle(); joiner.online = false; }
   for (let i = 0; i < messages; i++) {
     const sent = await carol.session.sendText(`Carol ${i}`, "Carol", t++);
     if ("error" in sent) throw new Error(sent.error);
     await net.settle();
   }
   bob.online = true;
-  bob.session.catchUp(carol.session.myKey);
-  await net.settle();
+  // Asked again as the engine does while something is missing (every 5 s): the commits first, then what needs them.
+  for (let i = 0; i < 4; i++) {
+    bob.session.catchUp(carol.session.myKey);
+    await net.settle();
+    net.now += 6_000;
+  }
   return { alice, bob, carol, net };
 }
 const pinsOf = (m: Member) => m.apps.filter(f => f.t === "pin");
@@ -105,6 +118,17 @@ describe("a community's pin reaches a member who was away however much was said 
     expect(pinsOf(bob)).toEqual([{ t: "pin", id: "", n: 6_000 }]);
   });
 
+  it("away while 140 were let in after the pin (past the window, twice) and 300 went by: the pin comes all the same, as one message", async () => {
+    const { alice, bob, carol } = await away(300, [{ id: "m1", n: 5_000 }], true, 140);
+    expect(COMMUNITY_LIMITS.window * 2).toBeLessThan(140);
+    expect(bob.session.epoch).toBe(alice.session.epoch);
+    expect(pinsOf(bob)).toEqual([{ t: "pin", id: "m1", n: 5_000 }]);
+    // Said again under a newer commit, named by the first: Carol, who had it, shows it once and keeps the newer.
+    expect(pinsOf(carol)).toEqual([{ t: "pin", id: "m1", n: 5_000 }]);
+    expect(alice.session.epoch - carol.session.state.lasting!.pin.e).toBeLessThan(COMMUNITY_LIMITS.window);
+    expect(bob.session.needsCatchUp).toBe(false);
+  });
+
   it("a member's own pin frame is not lasting, nor is any other application frame", async () => {
     const net = new Net();
     const alice = net.create("Alice");
@@ -115,6 +139,38 @@ describe("a community's pin reaches a member who was away however much was said 
     await net.settle();
     expect(alice.session.state.lasting ?? {}).toEqual({});
     expect(carol.session.state.lasting ?? {}).toEqual({});
+  });
+
+  it("a member who holds the pin is not handed it again when its epoch rolled out of the store", async () => {
+    const net = new Net();
+    const alice = net.create("Alice");
+    const bob = await net.admit(alice, "Bob");
+    const carol = await net.admit(alice, "Carol");
+    await net.settle();
+    let t = 1_000;
+    const sentPin = await alice.session.sendApp({ t: "pin", id: "m1", n: 5_000 }, "Alice", t++);
+    if ("error" in sentPin) throw new Error(sentPin.error);
+    await net.settle();
+    const pin = alice.session.state.lasting!.pin;
+    // A commit after the pin, then more than the store keeps: no frame of the pin's epoch is left in it.
+    await net.admit(alice, "Dave");
+    await net.settle();
+    for (let i = 0; i < 300; i++) {
+      const sent = await carol.session.sendText(`Carol ${i}`, "Carol", t++);
+      if ("error" in sent) throw new Error(sent.error);
+      await net.settle();
+    }
+    expect(alice.session.state.store.some(f => f.e === pin.e)).toBe(false);
+    expect(pinsOf(bob)).toHaveLength(1);
+    const handed: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const from = net.sent.length;
+      await alice.session.handle(bob.session.myKey, clone(bob.session.syncFrame()));
+      await net.settle();
+      handed.push(net.sent.slice(from).filter(s => s.from === alice && s.to === bob && s.frame.t === "group-msg" && s.frame.s === pin.s && s.frame.e === pin.e && s.frame.n === pin.n).length);
+    }
+    expect(handed).toEqual([0, 0, 0]);
+    expect(pinsOf(bob)).toHaveLength(1);
   });
 
   it("without the hook nothing is kept past the store: the member back after 300 has no pin (the bug)", async () => {

@@ -31,6 +31,8 @@ export function asCliError(error: unknown): CliError {
   if (error instanceof Error && (error as { code?: unknown }).code === "unreachable") return new CliError("unavailable", error.message);
   const known = engineKnown(error);
   if (known) return known;
+  const full = noRoomError(error);
+  if (full) return full;
   const local = localFileError(error);
   if (local) return local;
   const unopened = profileOpenError(error);
@@ -64,6 +66,22 @@ function engineKnown(error: unknown): CliError | undefined {
   // The app's reason for a Lightning address it could not read (a browser's CORS) is no reason in a terminal.
   if (engineCode === "lnurlUnreachable" && typeof values?.host === "string") return new CliError("unavailable", `Could not reach ${values.host}`);
   return new CliError(ENGINE_CODES[engineCode], error.message);
+}
+
+/**
+ * A change the profile's store could not put on disk (`storage.ts` refuses its transaction with a QuotaExceededError;
+ * the engine's `committed` wraps it in its own words, the store's as the cause): `unavailable`, try again once there is
+ * room, in the store's words, which name the profile's folder. Before, a daemon on a full disk answered done.
+ */
+function noRoomError(error: unknown): CliError | undefined {
+  let said: string | undefined, found = false;
+  for (let at = error, depth = 0; at && typeof at === "object" && depth < 4; at = (at as { cause?: unknown }).cause, depth++) {
+    if ((at as { name?: unknown }).name !== "QuotaExceededError") continue;
+    found = true;
+    const message = (at as { message?: unknown }).message;
+    if (typeof message === "string" && message.startsWith("No room left")) said = message;
+  }
+  return found ? new CliError("unavailable", said ?? "No room left on the disk: free some space, then try again") : undefined;
 }
 
 /**

@@ -56,11 +56,14 @@ const BUTTON = {
 /**
  * `loading`: the click is being worked on. The button keeps its words, shows a turning ring before them, is busy for a
  * screen reader and takes no second click, so a press that takes a while (an install, a refresh) is seen to be going.
+ * It is `aria-disabled`, not disabled (even when `disabled` is passed too): that would drop a keyboard's focus to the
+ * page, and leave it there when the work fails. A press while loading, or a form's Enter on it, does nothing.
  */
-export function Button({ variant = "secondary", className = "", loading = false, disabled, children, ...props }: React.ComponentPropsWithRef<"button"> & { variant?: keyof typeof BUTTON; loading?: boolean }) {
+export function Button({ variant = "secondary", className = "", loading = false, disabled, onClick, children, ...props }: React.ComponentPropsWithRef<"button"> & { variant?: keyof typeof BUTTON; loading?: boolean }) {
   return (
-    <button type="button" {...props} disabled={disabled || loading} aria-busy={loading || undefined} data-loading={loading || undefined}
-      className={`px-4 py-2 min-h-10 max-md:min-h-11 whitespace-nowrap rounded-lg text-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:disabled:opacity-80 data-[loading]:cursor-progress ${BUTTON[variant]} ${className}`}>
+    <button type="button" {...props} disabled={disabled && !loading} aria-disabled={loading || undefined} aria-busy={loading || undefined} data-loading={loading || undefined}
+      onClick={(e) => { if (loading) e.preventDefault(); else onClick?.(e); }}
+      className={`px-4 py-2 min-h-10 max-md:min-h-11 whitespace-nowrap rounded-lg text-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed data-[loading]:opacity-80 data-[loading]:cursor-progress ${BUTTON[variant]} ${className}`}>
       {loading ? <span className="inline-flex items-center gap-2"><Spinner />{children}</span> : children}
     </button>
   );
@@ -87,16 +90,20 @@ const ACTION_ICON: Record<Action, ReactNode> = {
 /** In English where no language is given (a component rendered on its own). */
 const ACTION_LABEL: Record<Action, string> = { receive: "Receive", send: "Send", history: "History" };
 const ACTION_KEY = { receive: "wallet.ui.receive", send: "wallet.ui.send", history: "wallet.ui.history" } as const;
-/** The two (or three) things a wallet is for, as big equal buttons. */
+/**
+ * The two (or three) things a wallet is for, as big equal buttons. Three in a column under 28rem (a phone, a desktop's
+ * narrowest page) put the icon above the label: beside it, "Historique" and "Cronologia" did not fit a 375px phone.
+ */
 export function Actions({ value, onChange, actions = ["receive", "send"] }: { value: Action; onChange: (next: Action) => void; actions?: Action[] }) {
   const i18n = useOptionalI18n();
+  const stack = actions.length > 2 ? "@max-md/actions:flex-col @max-md/actions:gap-1" : "";
   return (
-    <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${actions.length}, minmax(0, 1fr))` }} role="tablist">
+    <div className="@container/actions grid gap-2" style={{ gridTemplateColumns: `repeat(${actions.length}, minmax(0, 1fr))` }} role="tablist">
       {actions.map((action) => (
         <button key={action} type="button" role="tab" aria-selected={value === action} data-testid={`wallet-${action === "send" ? "send" : action}`} onClick={() => onChange(action)}
-          className={`flex items-center justify-center gap-2 min-w-0 px-2 py-2.5 min-h-10 max-md:min-h-11 rounded-xl text-sm font-semibold transition-colors cursor-pointer border ${value === action ? "bg-accent text-on-accent border-accent" : "bg-surface text-text-secondary border-border hover:text-text-primary hover:border-border-bright"}`}>
+          className={`flex items-center justify-center gap-2 ${stack} min-w-0 px-2 py-2.5 min-h-10 max-md:min-h-11 rounded-xl text-sm font-semibold transition-colors cursor-pointer border ${value === action ? "bg-accent text-on-accent border-accent" : "bg-surface text-text-secondary border-border hover:text-text-primary hover:border-border-bright"}`}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">{ACTION_ICON[action]}</svg>
-          <span className="truncate">{i18n ? i18n.t(ACTION_KEY[action]) : ACTION_LABEL[action]}</span>
+          <span className="truncate max-w-full">{i18n ? i18n.t(ACTION_KEY[action]) : ACTION_LABEL[action]}</span>
         </button>
       ))}
     </div>

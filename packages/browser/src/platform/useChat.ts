@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type * as Desktop from "../../../../apps/ui/src/hooks/useChat";
 import {
   addMessage,
+  addMissedCall,
   deleteMessage as deleteStoredMessage,
+  uncountMissedCall as uncountStoredMissedCall,
   getInviteCode,
   hasAnnouncedJoin,
   loadSession,
@@ -115,7 +117,6 @@ export const useChat: typeof Desktop.useChat = (params) => {
 
   useEffect(() => {
     if (!linkId) return;
-    void engine.call("setActiveLink", { linkId }).catch(() => {});
     // An offer that arrived before this chat was open (it may be open because of it).
     const pending = engine.takeCallOffer(linkId);
     if (pending) setIncomingCallSignal(pending);
@@ -124,10 +125,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
       engine.takeCallOffer(linkId);
       setIncomingCallSignal(signal);
     });
-    return () => {
-      off();
-      void engine.call("setActiveLink", { linkId: null }).catch(() => {});
-    };
+    return off;
   }, [linkId]);
 
   /** `replyTo`: the id of the message of this chat the text answers; the engine keeps the reply with it (WISP 400 § Replies). */
@@ -275,6 +273,29 @@ export const useChat: typeof Desktop.useChat = (params) => {
     [sessionId],
   );
 
+  /** A missed call's line, or one more call on the chat's last missed line (`addMissedCall`): the line's id. */
+  const addMissedCallMessage = useCallback(
+    (message: ChatMessage, options: { rang?: string; seen?: boolean }) => {
+      const updated = addMissedCall(sessionId, message, options);
+      if (!updated) return undefined;
+      setMessages([...updated.session.messages]);
+      notifySessionsChanged();
+      return updated.line;
+    },
+    [sessionId],
+  );
+
+  /** One call less on a line that counts several (`uncountMissedCall`). */
+  const uncountMissedCall = useCallback(
+    (line: string) => {
+      const updated = uncountStoredMissedCall(sessionId, line);
+      if (!updated) return;
+      setMessages([...updated.messages]);
+      notifySessionsChanged();
+    },
+    [sessionId],
+  );
+
   const deleteMessage = useCallback(
     (messageId: string) => {
       const updated = deleteStoredMessage(sessionId, messageId);
@@ -333,6 +354,8 @@ export const useChat: typeof Desktop.useChat = (params) => {
     setCallSignal,
     setChatFastPoll,
     addSystemMessage,
+    addMissedCallMessage,
+    uncountMissedCall,
     deleteMessage,
     pollCountdown,
   };

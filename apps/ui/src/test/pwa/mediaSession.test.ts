@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMediaSession } from "../../lib/mediaSession";
+import { claimMediaSession, dropMediaSession, mediaSessionPosition, mediaSessionState, releaseMediaSession } from "../../lib/mediaSession";
 
 // covers: files.voice.media-session
 
@@ -11,7 +11,7 @@ const session = {
   setActionHandler: vi.fn((action: string, handler: Handler | null) => { handlers.set(action, handler); }),
   setPositionState: vi.fn(),
 };
-const player = () => ({ title: "Voice message", artist: "Ana", play: vi.fn(), pause: vi.fn(), seekTo: vi.fn(), next: vi.fn() });
+const player = () => ({ title: "Voice message", play: vi.fn(), pause: vi.fn(), seekTo: vi.fn(), next: vi.fn() });
 
 beforeEach(() => {
   handlers.clear();
@@ -32,7 +32,7 @@ describe("a voice message on the lock screen and the media keys", () => {
   it("shows what plays, and the system's buttons drive it", () => {
     const a = player();
     claimMediaSession("a", a);
-    expect(session.metadata).toMatchObject({ init: { title: "Voice message", artist: "Ana" } });
+    expect(session.metadata).toMatchObject({ init: { title: "Voice message", artist: "Ghostly" } });
     expect(session.playbackState).toBe("playing");
     handlers.get("pause")!({});
     handlers.get("play")!({});
@@ -66,6 +66,15 @@ describe("a voice message on the lock screen and the media keys", () => {
     expect(session.playbackState).toBe("none");
     expect(session.metadata).toBeNull();
     expect(handlers.get("play")).toBeNull();
+  });
+
+  it("whoever owns it lets go when the app locks; with nobody owning it, nothing happens", () => {
+    claimMediaSession("b", player());
+    dropMediaSession();
+    expect(session.metadata).toBeNull();
+    expect(session.playbackState).toBe("none");
+    expect(handlers.get("play")).toBeNull();
+    expect(() => dropMediaSession()).not.toThrow();
   });
 
   it("names the web app's icons on http(s) only: the extension and the Desktop app have none there, and the browser refuses their schemes", () => {

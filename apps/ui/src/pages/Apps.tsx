@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { AppStoreSummary, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
@@ -41,10 +41,10 @@ function appHint(app: InstalledAppView, t: Translate): { lead?: string; text: st
  * A row's one line under its title: Ghostly's own words (`lead`), then the app's tagline. Each reads in its own direction
  * and only the tagline is cut: in Arabic an English tagline in the same run took "Ghostly" and its start off the line.
  */
-function HintLine({ lead, text, id, testId, className }: { lead?: string; text: string; id?: string; testId: string; className: string }) {
-  if (!lead) return <span id={id} dir="auto" data-testid={testId} className={`block text-xs truncate ${className}`}>{text}</span>;
+function HintLine({ lead, text, testId, className }: { lead?: string; text: string; testId: string; className: string }) {
+  if (!lead) return <span dir="auto" data-testid={testId} className={`block text-xs truncate ${className}`}>{text}</span>;
   return (
-    <span id={id} data-testid={testId} className={`flex min-w-0 text-xs ${className}`}>
+    <span data-testid={testId} className={`flex min-w-0 text-xs ${className}`}>
       <span className="shrink-0 whitespace-pre">{`${lead} · `}</span>
       <span dir="auto" className="min-w-0 truncate">{text}</span>
     </span>
@@ -55,17 +55,23 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
   const { t } = useI18n();
   const hint = appHint(app, t);
   const color = { muted: "text-text-muted", warning: "text-test-money-ink", danger: "text-danger" }[hint.tone];
-  const versionId = useId();
-  const hintId = useId();
+  // Named with all it shows, in its order, then "details": "Chess 1.2.0 Stopped: details". A voice saying what is on
+  // screen finds it (Label in Name), and a screen reader hears the line under the title (Stopped, an update that asks).
+  const shown = [app.title, app.version, hint.lead && `${hint.lead} ·`, hint.text].filter(Boolean).join(" ");
   return (
     <div className="flex items-center gap-3 px-4 py-3" data-testid="installed-app" data-ref={app.ref}>
-      {/* Named "Chess: details", which hides the text in it: its version and the line under it (Stopped, an update that asks) are its description. */}
       <button type="button" onClick={onDetails} className="flex items-center gap-3 min-w-0 flex-1 text-start cursor-pointer rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-        aria-label={t("apps.page.details", { title: app.title })} aria-describedby={`${versionId} ${hintId}`}>
+        aria-label={t("apps.page.details", { title: shown })}>
         <AppIcon installed={app} />
         <span className="min-w-0">
-          <span dir="auto" className="block text-sm text-text-primary truncate">{app.title} <span id={versionId} className="text-text-muted text-xs">{app.version}</span></span>
-          <HintLine id={hintId} testId="installed-app-hint" className={color} lead={hint.lead} text={hint.text} />
+          {/* A long title is cut alone: the version stays whole after it. */}
+          <span dir="auto" className="flex items-baseline gap-1 text-sm text-text-primary">
+            <span dir="auto" className="truncate min-w-0">{app.title}</span>{" "}
+            <span className="shrink-0 whitespace-nowrap text-text-muted text-xs">{app.version}</span>
+          </span>
+          {/* A space between the lines in the text, as in the name: the version's last digit and the line's first word apart. */}
+          {" "}
+          <HintLine testId="installed-app-hint" className={color} lead={hint.lead} text={hint.text} />
         </span>
       </button>
       {app.run.status === "ok" && <Button data-testid="installed-app-open" onClick={onOpen}>{t("apps.page.open")}</Button>}

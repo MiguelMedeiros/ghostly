@@ -201,6 +201,21 @@ describe("Profile, Devices", () => {
     expect(engine.callsTo("deviceHandoffPush")).toEqual([{ key: PHONE }]);
   });
 
+  it("Cancel on the move's steps in the section: once they go, the keyboard focus is on that device's Move to, not on the page", async () => {
+    const { user, engine } = renderApp(<DevicesSection />);
+    engine.on("deviceSet", () => set());
+    let handoff: HandoffView | null = { role: "giver", device: "iPhone", key: PHONE, step: "copying", bytes: 1, total: 2 };
+    engine.on("deviceHandoffView", () => handoff);
+    engine.on("deviceHandoffCancel", () => { handoff = { role: "giver", device: "iPhone", key: PHONE, step: "failed", bytes: 0, total: 0, failure: "cancelled" }; });
+    const running = await screen.findByTestId("handoff-running");
+    within(running).getByTestId("handoff-cancel").focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.queryByTestId("handoff-running")).toBeNull(), { timeout: 3_000 });
+    const move = await screen.findByTestId("device-move");
+    expect(move).toHaveTextContent("Move to iPhone");
+    await waitFor(() => expect(move).toHaveFocus());
+  });
+
   it("a move the other device started with Use here: the section shows it on the active device too", async () => {
     const { engine } = renderApp(<DevicesSection />);
     engine.on("deviceSet", () => set());
@@ -282,6 +297,38 @@ describe("the handoff's progress", () => {
     renderApp(<HandoffProgress view={view({ step: "connecting", woken: true })} />);
     expect(screen.getByTestId("handoff-line")).toHaveTextContent("Open Ghostly on MacBook and keep it open. A notice was sent to it.");
     expect(screen.getByTestId("handoff-keep-open")).toHaveTextContent("Keep Ghostly open.");
+  });
+
+  it("Cancel keeps the keyboard focus while it runs; once the move stopped the focus goes to the move's words, not to the page", async () => {
+    let stop = () => {};
+    const onCancel = vi.fn(() => new Promise<void>((resolve) => { stop = resolve; }));
+    const { user, rerender } = renderApp(<HandoffProgress view={view({ step: "copying", bytes: 1, total: 2 })} onCancel={onCancel} />);
+    const cancel = screen.getByTestId("handoff-cancel");
+    cancel.focus();
+    await user.keyboard("{Enter}");
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    // While the engine stops the move the button stays where the focus is, and a second press asks nothing more.
+    expect(cancel).toHaveFocus();
+    expect(cancel).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    await act(async () => { stop(); });
+    rerender(<HandoffProgress view={view({ step: "failed", failure: "cancelled" })} onCancel={onCancel} />);
+    expect(screen.queryByTestId("handoff-cancel")).toBeNull();
+    expect(screen.getByTestId("handoff-progress")).toHaveFocus();
+    expect(screen.getByTestId("handoff-progress")).toHaveTextContent("Stopped. Nothing changed.");
+  });
+
+  it("a Cancel the engine refused says why under it, and the next press clears it", async () => {
+    let fail = true;
+    const onCancel = vi.fn(async () => { if (fail) throw new Error("The device record could not be written"); });
+    const { user } = renderApp(<HandoffProgress view={view({ step: "copying", bytes: 1, total: 2 })} onCancel={onCancel} />);
+    await user.click(screen.getByTestId("handoff-cancel"));
+    expect(await screen.findByTestId("handoff-cancel-error")).toHaveTextContent("The device record could not be written");
+    expect(screen.getByTestId("handoff-cancel")).toHaveFocus();
+    fail = false;
+    await user.click(screen.getByTestId("handoff-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("handoff-cancel-error")).toBeNull());
   });
 
   it("a failure is one line read out at once, with no steps", () => {
@@ -473,6 +520,36 @@ describe("a limited start (WISP 06 § When a device checks)", () => {
     act(() => fakeEngine.setState({ limited: true }));
     await act(async () => { vi.advanceTimersByTime(2_500); });
     expect(screen.getByTestId("limited-banner")).toHaveTextContent("Messages you write wait until then.");
+  });
+
+  it("while the read at start is out the app opens and asks nothing; if no source answered, the app stays, the line shows at once and the focus stays", async () => {
+    fakeEngine.setState({ limited: true, startCheck: true });
+    render(<Root />);
+    expect(await screen.findByTestId("sidebar")).toBeInTheDocument();
+    expect(screen.queryByTestId("limited-start")).toBeNull();
+    expect(screen.queryByTestId("limited-banner")).toBeNull();
+    const typing = screen.getAllByRole("textbox")[0];
+    act(() => typing.focus());
+    // No source answered: a limited start, but the person is already using the app, so it is not taken away.
+    act(() => fakeEngine.setState({ limited: true }));
+    expect(screen.getByTestId("limited-banner")).toHaveTextContent("Offline until Ghostly can check which device is active");
+    expect(screen.queryByTestId("limited-start")).toBeNull();
+    expect(screen.getByTestId("sidebar")).toBeInTheDocument();
+    expect(typing).toHaveFocus();
+    // The first good read ends it: the line goes.
+    act(() => fakeEngine.setState({}));
+    await waitFor(() => expect(screen.queryByTestId("limited-banner")).toBeNull());
+  });
+
+  it("a read at start that says this device is the active one leaves no question behind", async () => {
+    fakeEngine.setState({ limited: true, startCheck: true });
+    render(<Root />);
+    expect(await screen.findByTestId("sidebar")).toBeInTheDocument();
+    act(() => fakeEngine.setState({}));
+    // Going online later checks the turn for a moment: not a limited start, so no question then either.
+    act(() => fakeEngine.setState({ limited: true }));
+    expect(screen.queryByTestId("limited-start")).toBeNull();
+    expect(screen.getByTestId("sidebar")).toBeInTheDocument();
   });
 
   it("a restored copy checking its turn asks nothing: the app opens, a line says why it is offline, the reason behind the ⓘ", async () => {

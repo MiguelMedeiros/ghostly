@@ -141,6 +141,30 @@ describe("a share from another app", () => {
     expect(read).not.toContain("paste-3");
   });
 
+  it("names what Android could not read, even when that was all of it", async () => {
+    const shares: unknown[] = [{ title: "", text: "", files: [], unread: ["IMG_1.jpg"] }];
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "incoming_share_take") return shares.shift() ?? null;
+      throw new Error(command);
+    });
+    takeIncomingShares(invoke as never, vi.fn(async () => undefined));
+    await vi.waitFor(() => expect(location.hash).toBe("#/shared"));
+    expect(incomingShare()).toMatchObject({ files: [], unread: ["IMG_1.jpg"] });
+    expect(incomingShare()?.leftOut).toBeUndefined();
+  });
+
+  it("names what Android had no room to copy, apart from what it could not read", async () => {
+    const shares: unknown[] = [{ title: "", text: "", files: [], unread: [], noRoom: ["VID_1.mp4"] }];
+    const invoke = vi.fn(async (command: string) => {
+      if (command === "incoming_share_take") return shares.shift() ?? null;
+      throw new Error(command);
+    });
+    takeIncomingShares(invoke as never, vi.fn(async () => undefined));
+    await vi.waitFor(() => expect(location.hash).toBe("#/shared"));
+    expect(incomingShare()).toMatchObject({ files: [], noRoom: ["VID_1.mp4"] });
+    expect(incomingShare()?.unread).toBeUndefined();
+  });
+
   it("shows the picker from names and sizes, and reads only what a paste brings in all once a chat takes it", async () => {
     const MiB = 1024 * 1024;
     const files = [

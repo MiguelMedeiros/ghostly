@@ -1,4 +1,5 @@
 import { appendFileSync, cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
+import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deserialize, serialize, setFlagsFromString } from "node:v8";
@@ -17,6 +18,11 @@ vi.mock("node:fs", async (original) => {
     fsyncSync: (fd: number) => { syncs.count++; fs.fsyncSync(fd); },
     renameSync: (from: string, to: string) => { if (faults.rename) throw new Error("ENOSPC: no space left on device"); fs.renameSync(from, to); },
     writeSync: (fd: number, bytes: Buffer, at = 0) => {
+      if (faults.full) {
+        // A disk filling up: it takes what fits, then refuses the rest.
+        if (bytes.length - at >= 2) return fs.writeSync(fd, bytes, at, (bytes.length - at) >> 1);
+        throw Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC", errno: -28, syscall: "write" });
+      }
       if (!faults.short || bytes.length - at < 2) return fs.writeSync(fd, bytes, at);
       faults.short = false;
       return fs.writeSync(fd, bytes, at, (bytes.length - at) >> 1);
@@ -24,8 +30,8 @@ vi.mock("node:fs", async (original) => {
   };
 });
 
-/** What the disk does wrong when a test asks: a rename that fails, one write that takes only half of its bytes. */
-const faults = vi.hoisted(() => ({ rename: false, short: false }));
+/** What the disk does wrong when a test asks: a rename that fails, one write that takes only half of its bytes, a full disk. */
+const faults = vi.hoisted(() => ({ rename: false, short: false, full: false }));
 
 const opened: PersistentIndexedDb[] = [];
 // A store left open keeps journaling every later test's transactions (the classes it hooks are shared): close them.
@@ -143,6 +149,34 @@ describe("persistent IndexedDB", () => {
     expect((d as unknown as { _rawDatabase: { transactions: unknown[] } })._rawDatabase.transactions).toHaveLength(0);
     expect(await read(d.transaction("messages").objectStore("messages").count())).toBe(40);
   });
+
+  it("runs a burst of 5,000 reads with a write among them in about linear time, in order, and answers a socket meanwhile", async () => {
+    const dir = folder();
+    const d = await db(await open(dir));
+    await tx(d, ["settings"], (s) => { s.settings.put("before", "state"); });
+    const server = createServer((socket) => socket.end("pong"));
+    await new Promise<void>((resolve) => server.listen(join(dir, "daemon.sock"), resolve));
+    try {
+      // fake-indexeddb's own scheduler started one transaction per pass and checked each against all the others: this
+      // burst held the event loop for 36 s here (2,000 reads around a write: 19 s).
+      const started = performance.now();
+      const get = () => read(d.transaction("settings").objectStore("settings").get("state"));
+      const first = Array.from({ length: 2500 }, get);
+      const write = tx(d, ["settings"], (s) => { s.settings.put("after", "state"); });
+      const second = Array.from({ length: 2500 }, get);
+      const answered = new Promise<number>((resolve) => {
+        const socket = connect(join(dir, "daemon.sock"));
+        socket.on("data", () => { resolve(performance.now() - started); socket.destroy(); });
+      });
+      const [before, , after] = await Promise.all([Promise.all(first), write, Promise.all(second)]);
+      const took = performance.now() - started;
+      // The reads made before the write see what was there; the ones made after it wait for it and see what it wrote.
+      expect(new Set(before)).toEqual(new Set(["before"]));
+      expect(new Set(after)).toEqual(new Set(["after"]));
+      expect(took).toBeLessThan(1000);
+      expect(await answered).toBeLessThan(1000);
+    } finally { server.close(); }
+  }, 120_000);
 
   it("replays clears and range deletes, and keeps the key generator", async () => {
     const dir = folder();
@@ -844,6 +878,38 @@ describe("persistent IndexedDB", () => {
     const second = await openPersistentIndexedDb(killed(dir));
     expect(await count(await db(second.factory))).toBe(3);
     await second.close();
+  });
+
+  it("refuses a transaction the full disk could not take, holds nothing of it, and closes whole once there is room", async () => {
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      const dir = folder();
+      const first = await openPersistentIndexedDb(dir);
+      const d = await db(first.factory);
+      await first.flush();
+      await tx(d, ["settings", "messages"], (s) => { s.settings.put("Before", "nick"); s.messages.put({ linkId: "a", id: "1" }); });
+      faults.full = true;
+      // The engine hears that it failed, as an error that names the disk, not that it was done.
+      const refused = await tx(d, ["settings", "messages"], (s) => { s.settings.put("Full", "nick"); s.messages.put({ linkId: "a", id: "2" }); }).catch((error: unknown) => error);
+      expect(refused).toMatchObject({ name: "QuotaExceededError", message: `No room left on the disk of ${dir}: free some space, then try again`, cause: { code: "ENOSPC" } });
+      faults.full = false;
+      // Nothing of it is held: a read does not show it as set.
+      expect(await read(d.transaction("settings").objectStore("settings").get("nick"))).toBe("Before");
+      expect(await count(d)).toBe(1);
+      // Room again: the next write is on disk, and found after a crash (nothing torn sits before it in the journal).
+      await tx(d, ["settings", "messages"], (s) => { s.settings.put("After", "nick"); s.messages.put({ linkId: "a", id: "3" }); });
+      const crashed = await openPersistentIndexedDb(killed(dir));
+      const c = await db(crashed.factory);
+      expect(await read(c.transaction("settings").objectStore("settings").get("nick"))).toBe("After");
+      expect(await count(c)).toBe(2);
+      await crashed.close();
+      await first.close();
+      const second = await openPersistentIndexedDb(dir);
+      const e = await db(second.factory);
+      expect(await read(e.transaction("settings").objectStore("settings").get("nick"))).toBe("After");
+      expect(await count(e)).toBe(2);
+      await second.close();
+    } finally { faults.full = false; stderr.mockRestore(); }
   });
 });
 

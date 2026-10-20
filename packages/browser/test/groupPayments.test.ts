@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GroupPayments, authoredNote, mayAuthor, mergeGroupPay, parseGroupPay, type GroupPaymentsHost, type Placement } from "../src/engine/groupPayments";
+import { GroupPayments, WAITING, authoredNote, mayAuthor, mergeGroupPay, parseGroupPay, type GroupPaymentsHost, type Placement } from "../src/engine/groupPayments";
 import type { GroupPayFrame, GroupPayNote, PaymentView, StoredMessage } from "../src/shared/types";
 // covers: groups.payments.member, groups.payments.group-request, groups.payments.notes
 
@@ -105,8 +105,10 @@ describe("mergeGroupPay: forward only, the initiator describes it", () => {
   it("the payee's description wins over a claim that arrived first; nobody changes who is paid", () => {
     const early = merge(undefined, note({ f: "*", st: "sent", by: C, v: "999" }), C)!;
     expect(early).toMatchObject({ amount: "999", claims: [C] });
+    expect(early.undescribed).toBe(true);
     const described = merge(early, note({ f: "*", v: "100", m: "pizza" }), A)!;
     expect(described).toMatchObject({ amount: "100", memo: "pizza", claims: [C], state: "open" });
+    expect(described.undescribed).toBeUndefined();
     expect(merge(described, note({ to: B, f: A }), B), "another payee for the same id").toBeUndefined();
   });
 
@@ -164,6 +166,18 @@ describe("authoredNote: what this device says about its own payments", () => {
     expect(authoredNote(usdt, atA, [usdt])).toMatchObject({ u: "testusdt", d: 6, r: "usdt", x: 1 });
     const btc = pay({ id: "req-00003", target: { method: "bitcoin", network: "bitcoin" } as PaymentView["target"] });
     expect(authoredNote(btc, atA, [btc])).not.toHaveProperty("x");
+  });
+  it("a record's network says test money, and a federation's is Fedimint, named so", () => {
+    const lightning = pay({ id: "req-00004", invoice: "lnbc10u1ptest", mints: [], network: "testnet" });
+    expect(authoredNote(lightning, atA, [lightning])).toMatchObject({ r: "lightning", x: 1 });
+    expect(authoredNote({ ...lightning, network: "mainnet" }, atA, [lightning])).not.toHaveProperty("x");
+    const fedimint = pay({ id: "req-00005", federations: ["fed-test"], invoice: "lnbc10u1ptest", federation: "fed-test", network: "testnet" });
+    expect(authoredNote(fedimint, atA, [fedimint])).toMatchObject({ r: "fedimint", x: 1 });
+    // A contact's notes carry no network: the federation's, as this device joined it, says.
+    const networkOf = (id: string) => (id === "fed-test" ? "signet" : id === "fed-real" ? "bitcoin" : undefined);
+    const notes = pay({ id: "pay-00006", kind: "payment", direction: "in", state: "settled", federation: "fed-test" });
+    expect(authoredNote(notes, atA, [notes], undefined, undefined, networkOf)).toMatchObject({ r: "fedimint", x: 1 });
+    expect(authoredNote({ ...notes, federation: "fed-real" }, atA, [notes], undefined, undefined, networkOf)).not.toHaveProperty("x");
   });
 });
 
@@ -260,6 +274,52 @@ describe("GroupPayments: every member hears it, the parties say it", () => {
     await peers.get("A")!.engine.edgeReady("g1", "AC");
     await deliver();
     expect(noteOf("C", "req-00001")).toMatchObject({ state: "open", to: A });
+  });
+
+  it("a member's note in another member's name shows nothing until that member describes it", async () => {
+    // M (here D) claims to have paid a request A never made, with D's amount and memo; and says A paid D.
+    const { peers, deliver, noteOf, history } = world({ A, B, C, D });
+    const fake = note({ id: "fresh0001", f: "*", to: A, by: D, st: "sent", v: "5000000", m: "new wallet, pay me here: lnbc1" });
+    await peers.get("C")!.engine.receive("g1", D, fake);
+    // Taken back: nothing of D is left on it, and it would read as A's open request.
+    await peers.get("C")!.engine.receive("g1", D, { ...fake, st: "closed" });
+    await peers.get("C")!.engine.receive("g1", D, note({ id: "pay-fake01", k: "pay", f: A, to: D, st: "paid", v: "5000000" }));
+    expect(history.get("C") ?? []).toEqual([]);
+    for (const id of ["fresh0001", "pay-fake01"]) expect(noteOf("C", id), id).toBeUndefined();
+
+    // A real request by A whose claim came first: shown once A's own note arrives, as A described it.
+    const request = pay({ id: "req-00009", linkId: "AB", memo: "lunch" });
+    await peers.get("C")!.engine.receive("g1", B, note({ id: "req-00009", f: B, to: A, by: B, st: "sent", v: "999", m: "not lunch" }));
+    expect(noteOf("C", "req-00009")).toBeUndefined();
+    peers.get("A")!.payments.push(request);
+    await peers.get("A")!.engine.sync();
+    await deliver();
+    expect(noteOf("C", "req-00009")).toMatchObject({ amount: "100", memo: "lunch", claims: [B], state: "open", to: A });
+    expect(noteOf("C", "req-00009")!.undescribed).toBeUndefined();
+    // A direct payment whose payee's word came first: shown once its payer says it sent it.
+    await peers.get("C")!.engine.receive("g1", A, note({ id: "pay-00002", k: "pay", f: B, to: A, st: "paid" }));
+    expect(noteOf("C", "pay-00002")).toBeUndefined();
+    await peers.get("C")!.engine.receive("g1", B, note({ id: "pay-00002", k: "pay", f: B, to: A, st: "sent" }));
+    expect(noteOf("C", "pay-00002")).toMatchObject({ kind: "payment", from: B, to: A, state: "paid", by: B });
+  });
+
+  it("notes waiting for their initiator are bounded per group, the oldest dropped first", async () => {
+    const { peers, deliver, noteOf } = world({ A, B, C, D });
+    const engine = peers.get("C")!.engine;
+    const kept = () => (engine as unknown as { notes: Map<string, Map<string, GroupPayNote>> }).notes.get("g1")!;
+    // B's claim on A's request arrives before A's note; then D makes up many more, each in A's name.
+    await engine.receive("g1", B, note({ id: "req-00009", f: B, to: A, by: B, st: "sent" }));
+    for (let i = 0; i < WAITING + 50; i++) await engine.receive("g1", D, note({ id: `fake-${String(i).padStart(5, "0")}`, f: "*", to: A, by: D, st: "sent", m: "x".repeat(140) }));
+    expect(kept().size).toBe(WAITING);
+    expect(kept().has("req-00009")).toBe(false);
+    expect(kept().has(`fake-${String(WAITING + 49).padStart(5, "0")}`)).toBe(true);
+    // A's own note still shows, without the claim that was dropped.
+    peers.get("A")!.payments.push(pay({ id: "req-00009", linkId: "AB" }));
+    await peers.get("A")!.engine.sync();
+    await deliver();
+    expect(noteOf("C", "req-00009")).toMatchObject({ state: "open", to: A });
+    expect(noteOf("C", "req-00009")!.claims).toBeUndefined();
+    expect(kept().size).toBe(WAITING + 1);
   });
 
   it("a note from someone it is not about is not kept", async () => {

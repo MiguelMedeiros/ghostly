@@ -26,15 +26,22 @@ afterEach(() => {
   dirs = [];
 });
 
-function run(versions: Partial<Record<keyof typeof BUNDLES, string | null>>, fallback: string | null, tag = "v1.2.3") {
+function run(
+  versions: Partial<Record<keyof typeof BUNDLES, string | null>>,
+  fallback: string | null,
+  tag = "v1.2.3",
+  extra: Partial<Record<keyof typeof BUNDLES, string[]>> = {},
+) {
   const base = mkdtempSync(join(tmpdir(), "ghostly-updater-manifest-"));
   dirs.push(base);
-  for (const [artifact, file] of Object.entries(BUNDLES)) {
+  for (const [artifact, bundle] of Object.entries(BUNDLES)) {
     const dir = join(base, "artifacts", artifact);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, file), "bundle");
     const version = artifact in versions ? versions[artifact as keyof typeof BUNDLES]! : fallback;
-    writeFileSync(join(dir, `${file}.sig`), signature(file, version));
+    for (const file of [bundle, ...(extra[artifact as keyof typeof BUNDLES] ?? [])]) {
+      writeFileSync(join(dir, file), "bundle");
+      writeFileSync(join(dir, `${file}.sig`), signature(file, version));
+    }
   }
   const out = join(base, "out");
   const result = spawnSync(process.execPath, [script, join(base, "artifacts"), out, tag], { encoding: "utf8" });
@@ -54,6 +61,22 @@ describe("the updater manifest", () => {
     const { status, stderr } = run({ "tauri-Windows-x64": "1.2.2" }, "1.2.3");
     expect(status).toBe(1);
     expect(stderr).toContain("windows-x86_64 was built as 1.2.2");
+  });
+
+  it("never points at a signed archive the updater would have to unpack, only the installer or the AppImage", () => {
+    const { status, out, stderr } = run({}, "1.2.3", "v1.2.3", {
+      "tauri-Linux-x64": ["Ghostly_1.2.3_amd64.AppImage.tar.gz"],
+      "tauri-Windows-x64": ["Ghostly_1.2.3_x64-setup.nsis.zip", "Ghostly_1.2.3_x64_en-US.msi.zip"],
+    });
+    expect(status, stderr).toBe(0);
+    const { platforms } = JSON.parse(readFileSync(join(out, "latest.json"), "utf8"));
+    expect(platforms["linux-x86_64"].url).toMatch(/\.AppImage$/);
+    expect(platforms["windows-x86_64"].url).toMatch(/-setup\.exe$/);
+    // The app's updater is built without the `zip` feature that unpacks them.
+    const cargo = readFileSync(resolve(import.meta.dirname, "../../../apps/desktop/Cargo.toml"), "utf8");
+    const updater = cargo.split("\n").find((line) => line.startsWith("tauri-plugin-updater"));
+    expect(updater).toContain("default-features = false");
+    expect(updater).not.toContain("zip");
   });
 
   it("still takes a signature that records no version (made by hand, or by an older CLI)", () => {

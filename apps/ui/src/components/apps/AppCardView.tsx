@@ -40,7 +40,6 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
   // Installed here: the app's own checked title and version, the one Open starts, never the sender's words for it.
   const title = app ? app.title : card.title;
   const version = app ? app.version : card.version;
-  const named = version ? `${title} ${version}` : title;
   const who = mine ? (card.opened ? t("apps.card.youOpened") : t("apps.card.youShared"))
     : card.opened ? t("apps.card.opened", { name: contact }) : t("apps.card.shared", { name: contact });
   const waiting = appsUnavailable(platform?.getPeer(peerKey), title, contact, t);
@@ -53,7 +52,11 @@ export function AppCardView({ card, mine, contact, linkId, peerKey, time, marks 
       <div className="flex items-start gap-3">
         <AppIcon size={40} installed={app} />
         <div className="min-w-0 flex-1">
-          <p dir="auto" className="text-sm font-medium text-text-primary truncate" data-testid="app-card-title">{named}</p>
+          {/* A long title is cut alone: the version stays whole after it, the one a contact opened or this app has. */}
+          <p dir="auto" className="flex items-baseline gap-1 text-sm font-medium text-text-primary" data-testid="app-card-title">
+            <span dir="auto" className="truncate min-w-0">{title}</span>
+            {version && <>{" "}<span className="shrink-0 whitespace-nowrap">{version}</span></>}
+          </p>
           <p className="text-xs text-text-secondary truncate">{who}</p>
           <p className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
             <Fingerprint value={appFingerprint(appRefPublisher(card.ref))} />

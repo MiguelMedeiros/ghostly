@@ -1,4 +1,5 @@
 import { knownDeviceGate } from "@ghostly/browser/devices/gate";
+import { carryIncomingShare } from "./incomingShare";
 import type { ColorTheme } from "./settings";
 
 /**
@@ -383,13 +384,15 @@ export function switchProfile(id: string, options: { route?: string; avatar?: st
   const pending: PendingSwitch = { id, name: shown(target).name, color: THEME_COLOR[themeOf(id)], avatar: options.avatar, at: Date.now() };
   try { sessionStorage.setItem(SWITCH_KEY, JSON.stringify(pending)); } catch { /* no overlay after the reload */ }
   window.dispatchEvent(new CustomEvent<PendingSwitch>("profile-switching", { detail: pending }));
+  // A share waiting for a chat to be picked goes along: the profile opened shows it in its Share to… picker.
+  const shareKept = carryIncomingShare();
   // A moment for the overlay to be painted: the browser keeps that frame until the new page draws. Until
   // then this page stays the old profile under it (whatever re-renders reads the registry), so the new one
   // becomes active only now, quietly.
   setTimeout(() => {
     write({ ...read(), active: id }, false);
     // Not through the router: the old profile would try to open the new one's chat first.
-    window.history.replaceState(null, "", `#${options.route ?? lastRouteOf(id)}`);
+    window.history.replaceState(null, "", `#${options.route ?? (shareKept ? "/shared" : lastRouteOf(id))}`);
     window.location.reload();
   }, 80);
 }

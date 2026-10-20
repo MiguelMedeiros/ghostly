@@ -1,5 +1,5 @@
 import { createContext, useContext, useSyncExternalStore } from "react";
-import { claimMediaSession, mediaSessionPosition, mediaSessionState, releaseMediaSession } from "./mediaSession";
+import { claimMediaSession, dropMediaSession, mediaSessionPosition, mediaSessionState, releaseMediaSession } from "./mediaSession";
 import { applyVoiceRate, claimPlayback, onVoiceRate, pausePlaying, registerVoicePlayer, releasePlayback } from "./voicePlayback";
 
 /*
@@ -39,6 +39,8 @@ export interface Track {
 
 /** What a bubble hands over: the element playing, and how to let go of what it plays from (URLs, a stream, the speaker it follows). */
 export interface Handed extends Track {
+  /** What the system's media controls call it: "Voice message" or "Audio", never the file's name. */
+  label: string;
   audio: HTMLAudioElement;
   release(): void;
 }
@@ -110,8 +112,7 @@ export function holdPlayback(handed: Handed): void {
   claimPlayback(id);
   held = { handed, dispose: () => { listening.abort(); stopRate(); unregister(); } };
   claimMediaSession(id, {
-    title: handed.title,
-    artist: handed.from,
+    title: handed.label,
     play: resumeHeld,
     pause: pauseHeld,
     seekTo: (at) => { audio.currentTime = Math.max(0, Math.min(durationOf(handed) || at, at)); },
@@ -151,10 +152,26 @@ export function stopHeld(): void {
   end();
 }
 
+/**
+ * The chat at `path` goes from this device (deleted, left): what plays from it stops, held here, or in its bubble when
+ * that chat is the one on screen (`onScreen`), before the bubble's leaving would hand it here.
+ */
+export function stopPlayingFrom(path: string, onScreen: boolean): void {
+  if (held) {
+    if (held.handed.chat?.path === path) stopHeld();
+  } else if (onScreen) pausePlaying();
+}
+
 /** A call starts: whatever plays pauses, held here or in its bubble. */
 export function pauseForCall(): void {
   if (held) pauseHeld();
   else pausePlaying();
+}
+
+/** The app locks: whatever plays pauses, held here or in its bubble, and the system's controls let go of it. */
+export function pauseForLock(): void {
+  pauseForCall();
+  dropMediaSession();
 }
 
 const subscribe = (listener: () => void) => {
@@ -164,6 +181,9 @@ const subscribe = (listener: () => void) => {
 
 /** What plays away from its bubble, for the bar: null when nothing does. */
 export const useNowPlaying = (): NowPlaying | null => useSyncExternalStore(subscribe, () => shown);
+
+/** Calls `listener` at each change, before the bar draws it (the bar still on the page as it goes). */
+export const onNowPlaying = (listener: (now: NowPlaying | null) => void): (() => void) => subscribe(() => listener(shown));
 
 /** Forgets everything (tests). */
 export function resetNowPlaying(): void {

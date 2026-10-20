@@ -27,13 +27,15 @@ function digestOf(size: number): string {
   return hash.digest("base64url");
 }
 
-// Node has no storage estimate: this device says it has 40 GiB left for files.
-Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: async () => ({ quota: 50 * 1024 ** 3, usage: 10 * 1024 ** 3 }) }, configurable: true });
+// Node has no storage estimate: this device says it has 40 GiB left for files (`left`, for a test that fills it).
+let left = 40 * 1024 ** 3;
+Object.defineProperty(globalThis.navigator, "storage", { value: { estimate: async () => ({ quota: 50 * 1024 ** 3, usage: 50 * 1024 ** 3 - left }) }, configurable: true });
 
 const cleanup: (() => Promise<void>)[] = [];
-afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
+afterEach(async () => { left = 40 * 1024 ** 3; for (const step of cleanup.splice(0).reverse()) await step(); });
 
-async function setup() {
+/** `files2`: the contact also takes files/2; `largeFiles: false`, an app from before files/3. */
+async function setup({ files2 = false, largeFiles = true } = {}) {
   const net = new FakeNativeNet();
   // As the real Iroh and HyperDHT channels: past 120 KiB queued, a frame is refused.
   net.sendBudget = 120 * 1024;
@@ -75,7 +77,7 @@ async function setup() {
     writable: () => peer.link?.filesWritable(),
   });
   const contact = new GhostLink({
-    params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false, largeFilesSupport: true,
+    params: { ...invitation.invite, profile: "paired-chat/1" }, rtcAvailable: false, largeFilesSupport: largeFiles,
     pairing: { credentials: { seedB64: theirs, peerKey: identityFromSeedB64(mine).pubKeyZ32 }, pinPeer: async () => {} },
     native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1", "hyperdht/1"], peerFallback: true,
       peerDescriptors: { "iroh/1": fakeDescriptor("iroh/1", "app"), "hyperdht/1": fakeDescriptor("hyperdht/1", "app") } },
@@ -84,6 +86,7 @@ async function setup() {
       onMessage: (message) => { arrivals.push(message.text.split(" ")[0]); },
       onFilesFrame: (frame) => { if (frame.t === "pf-offer" && !arrivals.includes(`file ${String(frame.id)}`)) arrivals.push(`file ${String(frame.id)}`); return files.handle(frame); },
       onFilesSession: (open) => { if (open) files.attach(); else files.detach(); },
+      ...(files2 && { onFileIncoming: () => "refused" }),
     },
   });
   peer.link = contact;
@@ -96,6 +99,7 @@ async function setup() {
     node.setActiveLink({ linkId: id });
     await vi.waitFor(() => expect(node.getState().links.find(l => l.id === id)?.availableTransports).toHaveLength(2));
     void contact.connect(5_000).catch(() => {});
+    if (!largeFiles) return void await vi.waitFor(() => expect(contact.supportsFiles).toBe(true), { timeout: 10_000 });
     await vi.waitFor(() => expect(node.getState().links.find(l => l.id === id)?.capabilities?.largeFiles).toBe(true), { timeout: 10_000 });
     await vi.waitFor(() => expect(files.live).toBe(true));
   };
@@ -459,6 +463,62 @@ it("a file said on the floor and cancelled by its sender before it went live say
   expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "Cancelled by the sender" });
 }, 60_000);
 
+it("a file said on the floor and refused here for no room says so here, and arrives on the sender's Retry once there is room", async () => {
+  const t = await setup();
+  await announce(t, "full-00001", 30_000);
+  const fileId = (await db.getMessages(t.id)).find((m) => m.id === "peer_full-00001")!.file!.id;
+  left = 10_000;
+  t.offer("full-00001", 30_000);
+  await vi.waitFor(() => expect(t.records.get("out:full-00001")).toMatchObject({ state: "failed", error: expect.stringContaining("Not enough space") }), { timeout: 10_000 });
+  // Why, not only that it was refused, and after a restart too.
+  await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "No room on this device for this file" }));
+  await t.restartApp();
+  expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "No room on this device for this file" });
+  // The person frees space; the sender presses Retry, as its bubble says. The file takes over the bubble that ended.
+  left = 40 * 1024 ** 3;
+  t.files.retry("full-00001");
+  await vi.waitFor(() => expect(t.records.get("out:full-00001")?.state).toBe("done"), { timeout: 20_000 });
+  await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "done", transferred: 30_000 }));
+  expect((await db.getMessages(t.id)).filter((m) => m.file)).toHaveLength(1);
+  expect(await (await fileBytes()).digest(fileId)).toBe(digestOf(30_000));
+}, 60_000);
+
+it("a file said on the floor and refused here as one too many waiting says so, and arrives on the sender's Retry once the person answered them", async () => {
+  const t = await setup();
+  await announce(t, "many-00001", 30_000);
+  const fileId = (await db.getMessages(t.id)).find((m) => m.id === "peer_many-00001")!.file!.id;
+  const asks = Array.from({ length: FILE_LIMITS.maxWaitingOffers }, (_, i) => `ask-${String(i).padStart(6, "0")}`);
+  for (const id of asks) t.offer(id, FILE_LIMITS.askAboveBytes + 1);
+  await vi.waitFor(async () => { for (const id of asks) expect((await t.incoming(id))?.transfer).toMatchObject({ stage: "asking" }); }, { timeout: 20_000 });
+  t.offer("many-00001", 30_000);
+  await vi.waitFor(() => expect(t.records.get("out:many-00001")).toMatchObject({ state: "failed", error: expect.stringContaining("too many files waiting") }), { timeout: 10_000 });
+  await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "Too many files are waiting here" }));
+  // The person declines the ones waiting; later the sender tries again, as told.
+  for (const id of asks) await t.node().fileAction({ linkId: t.id, fileId: (await t.incoming(id))!.fileId, action: "decline" });
+  await vi.waitFor(() => { for (const id of asks) expect(t.records.get(`out:${id}`)?.state).toBe("declined"); }, { timeout: 10_000 });
+  t.files.retry("many-00001");
+  await vi.waitFor(() => expect(t.records.get("out:many-00001")?.state).toBe("done"), { timeout: 20_000 });
+  await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "done" }));
+}, 90_000);
+
+it("a file said on the floor whose offer comes after its week ran out here still arrives, after a restart too", async () => {
+  const t = await setup();
+  await announce(t, "week-00001", 30_000);
+  const fileId = (await db.getMessages(t.id)).find((m) => m.id === "peer_week-00001")!.file!.id;
+  // Eight days on, the sweep ends the bubble.
+  const real = Date.now, skew = 8 * 24 * 3_600_000;
+  Date.now = () => real() + skew;
+  try { (t.node() as unknown as { fileDesk: { sweep(): void } }).fileDesk.sweep(); } finally { Date.now = real; }
+  expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "It did not come within a week" });
+  await t.restartApp();
+  expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "It did not come within a week" });
+  // Its sender is live at last, and the file it kept goes.
+  t.offer("week-00001", 30_000);
+  await vi.waitFor(() => expect(t.records.get("out:week-00001")?.state).toBe("done"), { timeout: 20_000 });
+  await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "done", transferred: 30_000 }));
+  expect((await db.getMessages(t.id)).find((m) => m.id === "peer_week-00001")).toMatchObject({ via: "datalink", file: { id: fileId } });
+}, 60_000);
+
 /** When the file of this message ended, as its details say it. */
 const completedAt = async (t: Awaited<ReturnType<typeof setup>>, messageId: string) => (await db.getMessage(t.id, messageId))?.details?.completedAt;
 
@@ -502,3 +562,64 @@ it("the files that ended in an earlier run are not noted again when the chat con
   expect(withFour, "three more finished files cost no read of the history").toBe(withOne);
   expect(await Promise.all(ids.map((id) => completedAt(t, id)))).toEqual(ended);
 }, 120_000);
+
+it("the transfers that finished leave the engine's state: after 100 small files each state carries no more of them than after a few", async () => {
+  const t = await setup();
+  const wireIds = Array.from({ length: 100 }, (_, i) => `many-${String(i).padStart(5, "0")}`);
+  // 60 the contact sends, 40 sent from here.
+  for (const wireId of wireIds.slice(0, 60)) t.offer(wireId, 64);
+  for (const [i, wireId] of wireIds.slice(60).entries()) await put(t, wireId, 64, 100 + i);
+  await vi.waitFor(async () => {
+    const records = await fileStore.listForLink(t.id);
+    expect(records.filter((f) => f.wire3?.state === "done")).toHaveLength(100);
+  }, { timeout: 60_000 });
+  // The last state the engine sends is built once everything settled.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const kept = Object.keys(t.node().getState().transfers);
+  expect(kept.length, "a view for each file that finished").toBeLessThanOrEqual(16);
+  // Each settled once, kept as finished: none comes back as a transfer when the chat connects again.
+  await t.dropContact();
+  await vi.waitFor(() => expect(t.files.live).toBe(true), { timeout: 10_000 });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(Object.keys(t.node().getState().transfers).length).toBeLessThanOrEqual(16);
+}, 120_000);
+
+/** The contact sends a file of generated bytes over files/2, the file format from before files/3. */
+const sendOld = (t: Awaited<ReturnType<typeof setup>>, wireId: string, size: number) => t.contact.sendFile(
+  { id: wireId, name: `${wireId}.bin`, mime: "application/octet-stream", size, timestamp: Date.now() },
+  (async function* () { for (let offset = 0; offset < size; offset += 64 * 1024) yield pattern(offset, Math.min(64 * 1024, size - offset)); })());
+const storedIn = async (t: Awaited<ReturnType<typeof setup>>) => (await fileStore.listForLink(t.id)).filter((f) => f.direction === "in");
+
+it("on a session with files/3 a file the contact sends over files/2 is refused: every file goes through files/3's decision", async () => {
+  const t = await setup({ files2: true });
+  expect(t.contact.supportsFiles && t.contact.supportsLargeFiles).toBe(true);
+  await expect(sendOld(t, "old-00001", 1024 * 1024)).rejects.toThrow("Peer refused or could not store the file");
+  expect(await storedIn(t)).toEqual([]);
+  expect((await db.getMessages(t.id)).filter((m) => m.file)).toEqual([]);
+  // files/3 still carries a file on the same session.
+  t.offer("new-00001", 20_000);
+  await vi.waitFor(async () => expect((await t.incoming("new-00001"))?.transfer).toMatchObject({ state: "done" }), { timeout: 20_000 });
+}, 60_000);
+
+it("a contact without files/3 still sends over files/2, but a file larger than the room this device has left is refused", async () => {
+  const t = await setup({ files2: true, largeFiles: false });
+  expect(t.contact.supportsLargeFiles).toBe(false);
+  await sendOld(t, "old-00002", 256 * 1024);
+  await vi.waitFor(async () => expect((await storedIn(t)).map((f) => f.metadata?.size)).toEqual([256 * 1024]));
+  // 6 MiB left here.
+  const room = vi.spyOn(navigator.storage, "estimate").mockResolvedValue({ quota: 6 * 1024 * 1024, usage: 0 });
+  cleanup.push(async () => room.mockRestore());
+  await expect(sendOld(t, "old-00003", 10 * 1024 * 1024)).rejects.toThrow("Peer refused or could not store the file");
+  expect((await storedIn(t)).map((f) => f.metadata?.size)).toEqual([256 * 1024]);
+}, 60_000);
+
+it("a contact without files/3 cannot send over files/2 a file larger than files/3 takes without asking", async () => {
+  const t = await setup({ files2: true, largeFiles: false });
+  expect(t.contact.supportsLargeFiles).toBe(false);
+  await expect(sendOld(t, "old-00004", FILE_LIMITS.askAboveBytes + 1)).rejects.toThrow("Peer refused or could not store the file");
+  expect(await storedIn(t)).toEqual([]);
+  expect((await db.getMessages(t.id)).filter((m) => m.file)).toEqual([]);
+  // Up to that size, files/2 carries a file as before.
+  await sendOld(t, "old-00005", 256 * 1024);
+  await vi.waitFor(async () => expect((await storedIn(t)).map((f) => f.metadata?.size)).toEqual([256 * 1024]));
+}, 60_000);

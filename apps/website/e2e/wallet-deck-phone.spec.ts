@@ -29,3 +29,21 @@ test("a phone gets the swipe track, and a swipe chooses the next card", async ({
   await page.waitForTimeout(4500);
   await expect(page.getByTestId(next)).toHaveAttribute("data-active", "true");
 });
+
+// At 12px the site's status ("Mainnet · experimental") no longer fitted 62% of a phone's card and was cut with
+// "…", the word cut being the warning. Every card says its whole status, on the narrowest phone too.
+for (const width of [320, 375]) {
+  test(`at ${width}px every card shows its whole status`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 740 });
+    await page.goto("/");
+    const deck = page.locator(".wallet-deck");
+    await deck.scrollIntoViewIfNeeded();
+    await expect(deck.locator(".wallet-deck-card-status")).toHaveCount(8);
+    // The identity deck below wears the same face.
+    const statuses = page.locator(".sp-deck .wallet-deck-card-status");
+    const cut = await statuses.evaluateAll((els) =>
+      els.filter((el) => el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight).map((el) => el.textContent),
+    );
+    expect(cut).toEqual([]);
+  });
+}

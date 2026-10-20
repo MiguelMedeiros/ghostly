@@ -11,6 +11,7 @@ import { joinLogLine } from "../joinLog";
 import { nodeLocalFetch } from "../services";
 import { nodeFedimintSdk } from "./fedimint";
 import { installFileFetch } from "./fileFetch";
+import { nodeHoldFetch } from "./holdFetch";
 import { nodePushSend } from "./pushSend";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
 import { RESTORED_MARK, type ProfilePaths } from "../profiles";
@@ -286,6 +287,8 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     localFetch: nodeLocalFetch,
     // A wake-up goes to a push service only, on public addresses only (./pushSend.ts), as the Desktop's does.
     pushSend: (request) => nodePushSend(request),
+    // Held items are read from the contact's storage on public addresses only (./holdFetch.ts).
+    holdFetch: nodeHoldFetch(),
     callsSupport: callsUnavailable === null,
     ...(callsUnavailable ? { callsUnavailable } : {}),
     ...(options.deferGroups ? { deferGroups: true } : {}),
@@ -304,7 +307,7 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
   return {
     paths, server, store, webrtc, callsUnavailable, apps,
     close: () => (closing ??= (async () => {
-      await server.node.shutdown().catch(() => {});
+      await server.node.shutdown({ quitting: true }).catch(() => {});
       await mainline?.destroy().catch(() => {});
       await store.close();
     })()),

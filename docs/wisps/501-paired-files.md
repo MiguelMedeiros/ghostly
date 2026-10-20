@@ -18,7 +18,7 @@ Formerly "Paired Files". This is how files travel in every chat of [400](400-cha
 
 ## files/3: files of any size (revision 0.3)
 
-`files/3` is a session capability ([03](03-capabilities.md)): each side lists it in its `paired-capabilities` frame, and it is on while both do. Without it, `files/2` below applies unchanged, with its 100 MiB limit; an app that speaks both uses `files/3` with a contact that lists it and `files/2` with one that does not.
+`files/3` is a session capability ([03](03-capabilities.md)): each side lists it in its `paired-capabilities` frame, and it is on while both do. Without it, `files/2` below applies unchanged, with its 100 MiB limit; an app that speaks both uses `files/3` with a contact that lists it and `files/2` with one that does not. On a session where `files/3` is on, a receiver refuses a new `files/2` file (`pf-start` answered with `pf-cancel`, `target: "sender"`): every file goes through the consent below.
 
 ### Frames
 
@@ -26,7 +26,7 @@ All are JSON on the authenticated session, at most one 16 KiB chunk each. `id` i
 
 | Frame | From | Meaning |
 |---|---|---|
-| `pf-offer {id, name, mime, size, ts, voice?, video?, image?, r?, fw?, paused?}` | sender | This file, whole; `r` when it answers a message ([401](401-paired-chat.md#replies)), `fw` when it was forwarded (its hop count, [401](401-paired-chat.md#forwards)). Repeated on every session until the transfer ends; `paused` while the sender paused it |
+| `pf-offer {id, name, mime, size, ts, voice?, video?, image?, r?, fw?, app?, paused?}` | sender | This file, whole; `r` when it answers a message ([401](401-paired-chat.md#replies)), `fw` when it was forwarded (its hop count, [401](401-paired-chat.md#forwards)), `app` when a mini-app sent it ahead (its chat app id, [1200](1200-marketplace.md#sending-a-film-ahead)). Repeated on every session until the transfer ends; `paused` while the sender paused it |
 | `pf-accept {id, offset}` | receiver | Send from `offset` (0, or where the stored part ends) |
 | `pf-wait {id, why}` | receiver | Not now: `consent` (its person has not decided), `paused`, `busy` (other files arrive first) |
 | `pf-data {id, offset, data}` | sender | base64url bytes at `offset`, at most 16 KiB |
@@ -51,6 +51,7 @@ All are JSON on the authenticated session, at most one 16 KiB chunk each. `id` i
 - **Pause and cancel.** The sender pauses by offering with `paused` and resumes by offering without it; the receiver pauses with `pf-wait` `paused` and resumes with `pf-accept`. A sender's pause holds whatever the receiver answers: a `pf-wait` (its person still deciding) leaves it paused, and a `pf-accept` while it is paused is answered with the paused offer again. Either side cancels: the sender with `pf-abort`, the receiver with `pf-refuse` `cancelled`; the receiver removes what it stored.
 - **Offered again after a stop (0.4.2, no wire change).** A transfer its sender stopped with `pf-abort` (a read failure, for example) is taken again from the start when the sender offers it again under the same id. One the receiver's person cancelled stays refused with `cancelled`. An older receiver refuses both, as before.
 - **Forwarded files (0.4.3).** A file forwarded from another chat ([400](400-chat.md#forwards)) is offered like any file, from the bytes on the forwarder's device, with `fw` (and `pf-start` carries it for `files/2`). The receiver's consent rules apply as they do to any file. A receiver drops a `fw` that is not a whole number from 1 to 255 and takes the file.
+- **Sent ahead by a mini-app (revision 2026-10-19).** A linked file a mini-app offers with `ghostly.files.offer` ([1200](1200-marketplace.md#sending-a-film-ahead)) is offered like any file, with `app`: the chat app id of that app in this chat, 22 base64url characters ([1200](1200-marketplace.md#in-a-chat-apps1)). The receiver's consent rules apply as they do to any file; it keeps `app` with the file, and drops one that is not a chat app id and takes the file. An older receiver ignores the key and keeps the file as any file. Only `files/3` carries it: not `files/2`, the DHT floor or a held file.
 - **Said on the DHT floor first (revision 2026-10-03).** A file that waited for the live session while the contact was away may have had its offer said on the floor ([403](403-dht-text.md#files-revision-2026-10-03)): the receiver then holds its message, waiting, under that wire id. The `pf-offer` that comes under that id is not refused for it: it takes that message over, in its place, and what the offer says is what the file is. A `pf-abort` for such an id, with no offer before it, ends that message as cancelled by the sender: the sender says it for a file deleted on its side before it went live.
 - **Waiting for the contact's capabilities.** `files/3` is agreed in `paired-capabilities`, which a session that just opened has not heard yet. A sender with files queued while not live waits for them a little (the app: up to 4 s) before it decides the contact takes no files and fails the file with that reason (#385).
 - **Storage.** Received bytes go to storage as they arrive and are read back in ranges, so no file is held whole in memory (browsers: the origin-private file system, IndexedDB pieces where it is missing; Desktop: files in the app's data folder). There is no size limit but the receiver's space and safe integers (2^53 - 1 bytes).
@@ -85,7 +86,7 @@ The receiver MUST validate offsets, exact size and digest, then finish durable `
 
 ## Limits and scope
 
-For `files/2`: the common contract's 100 MiB file bound, three concurrent incoming files, 500 MiB per-peer stored quota and 30-second idle timeout apply. Cancellation releases partial resources. `files/2` retries whole files; `files/3` resumes (above). Neither offers offline download or group distribution. No DHT bulk fallback.
+For `files/2`: the common contract's 100 MiB file bound, three concurrent incoming files, 500 MiB per-peer stored quota and 30-second idle timeout apply. A `files/2` file larger than the room the receiver has left is refused at `pf-start`. A Ghostly receiver also refuses at `pf-start` a `files/2` file larger than `files/3` takes without asking (25 MiB), or one past the contact's 500 MiB taken without asking: `files/2` cannot ask, and every Ghostly app lists `files/3`. Cancellation releases partial resources. `files/2` retries whole files; `files/3` resumes (above). Neither offers offline download or group distribution. No DHT bulk fallback.
 
 [PairedFiles](../../packages/core/src/pairedFiles.ts), [shared limits](../../packages/core/src/frames.ts), [paired capability evidence](PAIRED-CAPABILITIES.md). Validate corrupted/end-missing transfer, disk failure before receipt, cancel and reconnect independently of the transport adapter.
 

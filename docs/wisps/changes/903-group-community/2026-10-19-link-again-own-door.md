@@ -1,0 +1,1 @@
+An app that holds a community and opens a link to it whose entry key is not the one it knows no longer knocks or dials with its member key: a member asks the door it knows instead (nobody while the link is off), and one removed knocks with a fresh key, as any joiner. A link with the door it knows works as before. No change on the wire.

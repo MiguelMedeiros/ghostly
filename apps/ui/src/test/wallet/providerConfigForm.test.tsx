@@ -10,9 +10,9 @@ import { choose, optionsOf } from "../select";
 
 /** The generic form a provider gets from its declared fields (every provider without its own form). */
 describe("ProviderConfigForm", () => {
-  const form = (d: ProviderDescriptorView, mode: "mainnet" | "testnet" = "mainnet", busy = false) => {
+  const form = (d: ProviderDescriptorView, mode: "mainnet" | "testnet" = "mainnet", busy = false, saving = false) => {
     const onSubmit = vi.fn();
-    return { onSubmit, ...renderApp(<ProviderConfigForm descriptor={d} mode={mode} busy={busy} onSubmit={onSubmit} />) };
+    return { onSubmit, ...renderApp(<ProviderConfigForm descriptor={d} mode={mode} busy={busy} saving={saving} onSubmit={onSubmit} />) };
   };
 
   it("submits what was typed in each field, by field name", async () => {
@@ -101,10 +101,15 @@ describe("ProviderConfigForm", () => {
     expect(onSubmit).toHaveBeenCalledWith({});
   });
 
-  it("disables the button while connecting", () => {
+  it("says it is connecting while it saves, busy and still focusable; another run of the card only disables it", () => {
+    const { unmount } = form(descriptor("nwc"), "mainnet", true, true);
+    expect(screen.getByTestId("provider-save")).toHaveTextContent("Connecting…");
+    expect(screen.getByTestId("provider-save")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByTestId("provider-save")).toBeEnabled();
+    unmount();
     form(descriptor("nwc"), "mainnet", true);
     expect(screen.getByTestId("provider-save")).toBeDisabled();
-    expect(screen.getByTestId("provider-save")).toHaveTextContent("Connecting…");
+    expect(screen.getByTestId("provider-save")).not.toHaveTextContent("Connecting…");
   });
 
   it("submits with Enter from a field", async () => {
