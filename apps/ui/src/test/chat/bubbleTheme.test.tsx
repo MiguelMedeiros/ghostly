@@ -45,10 +45,12 @@ describe("MessageBubble: theme colours", () => {
     expect(fixedColours(container)).toEqual([]);
   });
 
-  it("the double-click details take the bubble's colour too", async () => {
+  it("the Ctrl+double-click details take the bubble's colour too", async () => {
     const meta = { dhtKey: "k".repeat(40), dnsRecords: ["a"], relays: [] } as unknown as ChatMessage["meta"];
     const { container, user } = renderApp(<MessageBubble message={message({ meta })} peerPubKey="peer" />);
+    await user.keyboard("{Control>}");
     await user.dblClick(container.querySelector("[data-message-bubble]")!);
+    await user.keyboard("{/Control}");
     const panel = await screen.findByTestId("message-details");
     expect(within(panel).getByTestId("message-details-excerpt")).toHaveClass("bg-received-bg");
     expect(container.querySelector("[data-message-bubble]")).toHaveClass("outline-accent");

@@ -4,6 +4,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { availableSigners } from "@ghostly/browser/proofs/verify";
 import type { ApprovalRequest, IdentityProofProvider, IdentitySigner, SignerContext, SignerInstructions } from "@ghostly/browser/proofs/contract";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
+import { useMoneyCopy } from "../../hooks/useMoneyCopy";
 import { addableProviders, identityPlatform } from "../../lib/identities";
 import { FieldGrid } from "../layout";
 import { Button, Notice, input } from "../wallet/ui";
@@ -323,13 +324,18 @@ function ProviderAbout({ provider: p, testId = "identity-about" }: { provider: I
   );
 }
 
+/**
+ * A command or statement to copy. It is pasted into a terminal next, so "Copied" is said only once it is (the same copy
+ * as money's): a refused copy leaves the clipboard as it was, and says so, the text above to select by hand.
+ */
 function CopyBlock({ text, testId }: { text: string; testId: string }) {
-  const [copied, setCopied] = useState(false);
+  const { copied, failed, copy } = useMoneyCopy(text);
   const { t } = useI18n();
   return (
     <div className="space-y-1.5">
       <code data-testid={testId} className="block break-all select-all whitespace-pre-wrap bg-surface-alt rounded-lg p-2.5 text-xs text-text-primary font-mono">{text}</code>
-      <Button onClick={() => { void navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>{copied ? t("identities.ghostly.copied") : t("common.copy")}</Button>
+      <Button onClick={() => void copy()}>{copied ? t("identities.ghostly.copied") : t("common.copy")}</Button>
+      {failed && <Notice tone="error" testId="add-identity-copy-error">{t("identities.add.copyError")}</Notice>}
     </div>
   );
 }

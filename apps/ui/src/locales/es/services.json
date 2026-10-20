@@ -29,6 +29,7 @@
     "stopped": "Detenido"
   },
   "window": {
+    "callOn": "Hay una llamada en curso. Termínala para abrir {{app}}.",
     "elsewhere": "{{app}} intentó llevarte a otro sitio, fuera de lo que comparte tu contacto.",
     "failed": "La solicitud falló.",
     "notAnswering": "{{app}} no responde en el equipo de tu contacto. Pídele que compruebe que está en marcha.",

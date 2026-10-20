@@ -39,6 +39,7 @@
     "continue": "続ける",
     "continueIn": "{{provider}} のウィンドウで続けてください…",
     "continueWith": "{{provider}} で続ける",
+    "copyError": "コピーできませんでした。上のテキストを選択して手動でコピーしてください。",
     "dayOne": "1 日",
     "days": "{{count}} 日",
     "experimental": "試験的機能: まだすべてのツールで検証されていません。",
