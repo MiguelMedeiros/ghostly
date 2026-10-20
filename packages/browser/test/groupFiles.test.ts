@@ -256,6 +256,25 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(t.seen.filter(s => s.to === "carol" && s.frame.t === "pf-offer").map(s => s.from)).toEqual(["bob"]);
   });
 
+  it("a member that heard a file's Delete for everyone before its message keeps nothing of the file: no record, no want, no bytes", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob, carol], id } = await t.mesh(["alice", "bob", "carol"]);
+    bob.online = false;
+    await t.world.run(2_000);
+    const { messageId } = await t.send(alice, id, pattern(150_000, 9));
+    await t.world.until(() => t.done(carol, id, messageId), 60_000);
+    // The removal reached Bob first (an edge's resend of its author's edits goes before the catch-up).
+    await bob.groups.removed(id, messageId);
+    const from = t.seen.length;
+    t.world.reopen(bob);
+    await t.world.until(() => t.seen.slice(from).some(s => s.to === "bob" && s.frame.t === "group-msg"), 60_000);
+    await t.world.run(30_000);
+    expect(t.got(bob, id, messageId).message).toBeUndefined();
+    expect([...t.files.get(bob)!.store.records.values()]).toEqual([]);
+    expect(t.files.get(bob)!.store.bytes.size).toBe(0);
+    expect(t.seen.slice(from).filter(s => s.from === "bob" && (s.frame.t === "group-want" || s.frame.t === "group-have"))).toEqual([]);
+  });
+
   it("a member back from away gets every file a connected member holds, its app started again and the authors gone, past what one group-have names", async () => {
     const t = new FilesWorld();
     limits.haveIds = 2;
