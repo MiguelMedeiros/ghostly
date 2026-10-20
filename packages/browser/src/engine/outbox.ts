@@ -144,19 +144,22 @@ export class Outbox {
 
   /**
    * One at a time, in the order asked: `run` starts when the turns before it are over. A turn that takes longer than
-   * `TURN_MS` no longer holds the next one back.
+   * `TURN_MS` no longer holds the next one back. Its `TURN_MS` counts from when it begins, not from when it was
+   * queued: counted from the queueing, every turn queued behind a slow one was past its time when its turn came, and
+   * they all started at once (45 whole-chat reads together after a link drop, the heap past 1 GB: agents#1693).
    */
   private turn<T>(run: () => Promise<T>): Promise<T> {
-    const result = this.line.then(async () => {
+    const before = this.line;
+    const result = before.then(async () => {
       // A link that closed since: what was unconfirmed on it is queued again before anything else goes.
       if (this.dropped) { this.dropped = false; await this.requeueUnconfirmed(); }
       this.began = this.closed;
       return run();
     });
-    this.line = new Promise<void>(next => {
+    this.line = before.then(() => new Promise<void>(next => {
       const timer = setTimeout(next, TURN_MS);
       void result.then(() => {}, () => {}).then(() => { clearTimeout(timer); next(); });
-    });
+    }));
     return result;
   }
 
