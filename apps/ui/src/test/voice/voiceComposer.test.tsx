@@ -606,6 +606,45 @@ describe("Esc", () => {
     expect(onSendFile).not.toHaveBeenCalled();
   });
 
+  it("gives the focus to the mic when the bar closes under it, not to the page", async () => {
+    // The bin, Esc from Pause and the question's Discard each removed the focused button: the focus fell to <body>.
+    await lockedFor(1_000);
+    screen.getByTestId("voice-delete").focus();
+    fireEvent.click(screen.getByTestId("voice-delete"));
+    expect(screen.queryByTestId("voice-bar")).not.toBeInTheDocument();
+    expect(mic()).toHaveFocus();
+
+    fireEvent.click(mic());
+    await wait(1_000);
+    screen.getByTestId("voice-pause").focus();
+    fireEvent.keyDown(screen.getByTestId("voice-pause"), { key: "Escape" });
+    expect(screen.queryByTestId("voice-bar")).not.toBeInTheDocument();
+    expect(mic()).toHaveFocus();
+
+    fireEvent.click(mic());
+    await wait(4_000);
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    screen.getByTestId("voice-confirm-discard").focus();
+    fireEvent.click(screen.getByTestId("voice-confirm-discard"));
+    expect(screen.queryByTestId("voice-bar")).not.toBeInTheDocument();
+    expect(mic()).toHaveFocus();
+    expect(onSendFile).not.toHaveBeenCalled();
+  });
+
+  it("gives the focus to the send button when Enter sends from Resume, which turns disabled", async () => {
+    await lockedFor(2_000);
+    const pause = screen.getByTestId("voice-pause");
+    fireEvent.click(pause);
+    fireEvent.pointerDown(pause, mouse);
+    pause.focus();
+    fireEvent.click(pause);
+    fireEvent.keyDown(pause, { key: "Enter" });
+    expect(screen.getByTestId("voice-send")).toHaveFocus();
+    await wait(0);
+    expect(onSendFile).toHaveBeenCalledOnce();
+    expect(mic()).toHaveFocus();
+  });
+
   it("stays paused after Keep when it was paused before", async () => {
     await lockedFor(4_000);
     fireEvent.click(screen.getByRole("button", { name: "Pause" }));
