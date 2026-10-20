@@ -99,7 +99,9 @@ describe("a picture's QR is decoded away from the page", () => {
   /** A phone photo, 4032x3024: read at 2048x1536. */
   const photo = { width: 4032, height: 3024, close: vi.fn() };
   beforeEach(() => { photo.close.mockClear(); vi.stubGlobal("createImageBitmap", async () => photo); });
-  const read = () => readQrImage(new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" }));
+  /** The photo's PNG header: the picture is decoded only once its header says its size. */
+  const header = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0x0f, 0xc0, 0, 0, 0x0b, 0xd0, 8, 6, 0, 0, 0];
+  const read = () => readQrImage(new Blob([new Uint8Array(header)], { type: "image/png" }));
   const posted = async () => { await vi.waitFor(() => expect(FakeWorker.made[0]?.posted).toHaveLength(1)); return FakeWorker.made[0]; };
 
   it("hands the picture's pixels to a worker, never decodes them on the page, and ends the worker", async () => {

@@ -2,18 +2,31 @@ import { useEffect, useRef, useState, type ClipboardEvent, type ReactNode, type 
 import { createPortal } from "react-dom";
 import { useI18n } from "../../contexts/I18nContext";
 import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
+import { decodablePicture } from "../../lib/decodablePicture";
 import { formatFileSize } from "../../lib/format";
 import { DocumentGlyph } from "./icons";
 import { useComposition } from "../../hooks/useComposition";
 
-/** A picture for each image among `files` (while the sheet is open), by position. */
+/**
+ * A picture for each image among `files` (while the sheet is open), by position: only one whose own bytes say a size
+ * the chat would draw (`decodablePicture`). Any other shows its name and size, and is sent as it is.
+ */
 function usePictures(files: File[]): (string | undefined)[] {
+  const [drawable, setDrawable] = useState<ReadonlyMap<File, boolean>>(new Map());
+  const asked = useRef(new WeakSet<File>());
+  useEffect(() => {
+    for (const file of files) {
+      if (!file.type.startsWith("image/") || asked.current.has(file)) continue;
+      asked.current.add(file);
+      void decodablePicture(file).then((yes) => setDrawable((was) => new Map(was).set(file, yes)));
+    }
+  }, [files]);
   const [urls, setUrls] = useState<(string | undefined)[]>([]);
   useEffect(() => {
-    const made = files.map((file) => file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined);
+    const made = files.map((file) => drawable.get(file) ? URL.createObjectURL(file) : undefined);
     setUrls(made);
     return () => made.forEach((url) => url && URL.revokeObjectURL(url));
-  }, [files]);
+  }, [files, drawable]);
   return urls;
 }
 
