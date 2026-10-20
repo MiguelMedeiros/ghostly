@@ -128,6 +128,9 @@
       "knocked": "Llamada dejada para la app del admin",
       "knockedCommunity": "Llamada enviada al grupo"
     },
+    "tryAgain": "Intentar de nuevo",
+    "unanswered": "Este enlace no respondió",
+    "unansweredBody": "Nadie te dejó entrar en una hora, así que esta app dejó de llamar. Puede que el enlace se haya cambiado o desactivado: pide el actual, o inténtalo de nuevo.",
     "waiting": "Esperando a que te dejen entrar"
   },
   "leave": {
