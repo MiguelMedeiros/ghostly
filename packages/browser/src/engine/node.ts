@@ -5193,11 +5193,19 @@ export class GhostlyNode implements EngineImplementation {
     this.events.onAppRange?.(linkId, { app, request, serve, file, offset, length });
   }
 
+  /** The app reference and running version behind each chat app id that served a file, by chat: what an answer is checked against. */
+  private readonly appServing = new Map<string, { ref: string; digest?: string }>();
+
   /** Lets the contact's app read `file`, one of this side's linked files, while both have the app open on this session. */
-  appServe({ linkId, ref, file }: { linkId: string; ref: string; file: string }): { serve: string } | { error: "not-open" | "offline" | "peer-closed" } {
+  async appServe({ linkId, ref, file, digest }: { linkId: string; ref: string; file: string; digest?: string }): Promise<{ serve: string } | { error: "not-open" | "offline" | "peer-closed" }> {
     const { live, app } = this.appChat(linkId, ref);
     if (typeof file !== "string" || !file) throw new Error("Not a file");
-    return live.link ? live.link.serveAppFile(app, file) : { error: "offline" };
+    // A version removed or revoked serves nothing to the contact (WISP 1200 § Takedowns).
+    await this.appChatRunnable(ref, digest);
+    if (!live.link) return { error: "offline" };
+    const served = live.link.serveAppFile(app, file);
+    if ("serve" in served) this.appServing.set(`${linkId} ${app}`, { ref, ...(digest !== undefined && { digest }) });
+    return served;
   }
 
   appUnserve({ linkId, serve }: { linkId: string; serve: string }): void {
@@ -5206,11 +5214,22 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** A page's answer to an `app-range` it served: the bytes and the file's size go to the contact, or why they cannot. */
-  appRangeAnswer({ linkId, app, request, bytes, size, error }: { linkId: string; app: string; request: number; bytes?: Uint8Array; size?: number; error?: "changed" | "gone" }): void {
+  async appRangeAnswer({ linkId, app, request, bytes, size, error }: { linkId: string; app: string; request: number; bytes?: Uint8Array; size?: number; error?: "changed" | "gone" }): Promise<void> {
     if (!this.appsOn) throw this.appsOff();
-    const key = `${linkId} ${app} ${request}`, task = this.appRanges.get(key), link = this.links.get(linkId)?.link;
+    const key = `${linkId} ${app} ${request}`, task = this.appRanges.get(key);
     this.appRanges.delete(key);
-    if (!task || !link) return;
+    if (!task) return;
+    // The version that served it, stopped since (WISP 1200 § Takedowns): no byte goes, and every serve of that app ends.
+    const serving = this.appServing.get(`${linkId} ${app}`);
+    const stopped = serving && await this.appChatRunnable(serving.ref, serving.digest).then(() => false, () => true);
+    const link = this.links.get(linkId)?.link;
+    if (!link) return;
+    if (stopped) {
+      link.failAppRange(task, "gone");
+      for (const serve of link.appServes(app)) link.unserveAppFile(serve);
+      this.appServing.delete(`${linkId} ${app}`);
+      return;
+    }
     // A task no longer live goes on too: `sendAppRange` sends nothing for it and frees its place.
     if (error === "changed" || error === "gone") return link.failAppRange(task, error);
     if (!(bytes instanceof Uint8Array) || typeof size !== "number" || !Number.isSafeInteger(size) || size < 0) return link.failAppRange(task, "gone");
@@ -5218,8 +5237,10 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** Reads a range of what the contact's app serves in this chat, or why not. */
-  async appRemoteRead({ linkId, ref, serve, offset, length }: { linkId: string; ref: string; serve: string; offset: number; length: number }): Promise<{ bytes: Uint8Array; size: number } | { error: string }> {
+  async appRemoteRead({ linkId, ref, serve, offset, length, digest }: { linkId: string; ref: string; serve: string; offset: number; length: number; digest?: string }): Promise<{ bytes: Uint8Array; size: number } | { error: string }> {
     const { live, app } = this.appChat(linkId, ref);
+    // A version removed or revoked reads nothing of the contact's either.
+    await this.appChatRunnable(ref, digest);
     if (!live.link) return { error: "offline" };
     if (!isServeId(serve)) return { error: "not-served" };
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(length) || length < 1 || length > APP_RANGE_LIMITS.requestBytes || !Number.isSafeInteger(offset + length)) throw new Error("Not a range");

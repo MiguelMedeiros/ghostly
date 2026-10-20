@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { APP_RANGES_CAPABILITY, type AppRangeTask, type GhostLink } from "@ghostly/core";
+import { Apps } from "../src/engine/apps";
 import type { EngineEvent } from "../src/shared/rpc";
 import { appsChat } from "./helpers/appsChat";
 // covers: apps.ranges.wire
@@ -137,6 +138,24 @@ describe("the read lane in the engine", () => {
     expect(answers.mock.calls[0]![0]).toMatchObject({ t: "ar-end", r: 0, z: 200_000 });
     expect(data.mock.calls.map(([, request, offset, bytes]) => [request, offset, [...bytes as Uint8Array][0]])).toEqual([[0, 5000, 0x59]]);
     expect(inner.appRanges.size).toBe(0);
+  });
+
+  it("a version stopped here serves nothing, answers nothing and reads nothing (WISP 1200 § Takedowns)", async () => {
+    const { call, contact, id, ref, app, ranges } = await setup();
+    const served = await call("appServe", { linkId: id, ref, file: "LinkIdOfAFilm000000000", digest: "running" }) as { serve: string };
+    const reading = contact.readAppRange(app, served.serve, 0, 1_000);
+    await vi.waitFor(() => expect(ranges()).toHaveLength(1));
+    // Its publisher revokes the running version while the page is reading the contact's ask.
+    const runnable = vi.spyOn(Apps.prototype, "chatRunnable").mockRejectedValue(new Error("stopped: Its publisher revoked this version"));
+    await call("appRangeAnswer", { linkId: id, app, request: ranges()[0].range.request, bytes: FILM.subarray(0, 1_000), size: FILM.length });
+    expect(runnable).toHaveBeenCalledWith({ ref, digest: "running" });
+    expect(await settled(reading)).toEqual({ error: "gone" });
+    // Its serves ended with it: the contact's next ask is refused, and no page hears it.
+    expect(await settled(contact.readAppRange(app, served.serve, 0, 1))).toEqual({ error: "not-served" });
+    expect(ranges()).toHaveLength(1);
+    expect(await settled(call("appServe", { linkId: id, ref, file: "LinkIdOfAFilm000000000", digest: "running" }))).toEqual({ error: "stopped: Its publisher revoked this version" });
+    const theirs = contact.serveAppFile(app, "film") as { serve: string };
+    expect(await settled(call("appRemoteRead", { linkId: id, ref, serve: theirs.serve, offset: 0, length: 1, digest: "running" }))).toEqual({ error: "stopped: Its publisher revoked this version" });
   });
 
   it("serves only while the contact's app is open, and says why not", async () => {
