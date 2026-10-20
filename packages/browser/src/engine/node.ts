@@ -736,6 +736,9 @@ function membershipOf(group: GroupView | undefined): { me: string; members: Read
   return group?.status === "active" && group.myKey ? { me: group.myKey, members: new Set(group.members.map(m => m.key)) } : undefined;
 }
 
+/** The wire part of the ids the payment desk gives a contact's payment, request or refusal line (`peer_<this>`). */
+const PAYMENT_LINE_ID = /^(?:\d+(?:_refused)?|spent_[0-9a-f]{32})$/;
+
 export class GhostlyNode implements EngineImplementation {
   private settings: Settings = DEFAULT_SETTINGS;
   /** Limited mode (`NodeOptions.limited`): on from the start until `leaveLimited()`. */
@@ -3602,6 +3605,10 @@ export class GhostlyNode implements EngineImplementation {
     // file and its transfer included, and at once when it is not here yet, so it is taken as gone when it comes.
     if (edit.rm) {
       const message = await db.getMessage(linkId, id);
+      // Not here yet, under an id a payment, request or refusal line takes (`payments.ts`: the frame's time, `_refused`
+      // after it, `spent_` and a token's digest): never forgotten ahead, or a contact could hide the line of a payment
+      // or request it sends next, which a removal never takes (`canRemove`; agents#1587). No text or file has such an id.
+      if (!message && PAYMENT_LINE_ID.test(edit.id)) return true;
       if (!message || canRemove(message)) await this.forgetMessage(linkId, id, true);
       return true;
     }
