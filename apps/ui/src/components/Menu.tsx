@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { createPortal } from "react-dom";
 import { useOutsideDismiss } from "../hooks/useDismiss";
 import { useIsMobile } from "../hooks/useIsMobile";
+import type { MenuPoint } from "../lib/contextMenu";
 
 /** Space kept between a menu and the edges of the window. */
 const MARGIN = 8;
@@ -48,11 +49,18 @@ type MenuProps = {
    * window: it moves over, and flips, within the part of the window that ancestor covers.
    */
   within?: string;
+  /**
+   * Opened by a right-click (lib/contextMenu.ts): with `portal`, on a wide screen, it opens at this point instead of
+   * its opener's edge, down and towards the line's end as the webview's menu would, and follows the opener on scroll.
+   */
+  at?: MenuPoint;
   className?: string;
   children: ReactNode;
 };
 
-function OpenMenu({ open, onClose, anchorRef, testId, id, align = "end", prefer = "down", focusFirst, label, portal, within, className = "", children }: MenuProps) {
+function OpenMenu({ open, onClose, anchorRef, testId, id, align: edge = "end", prefer: wanted = "down", focusFirst, label, portal, within, at, className = "", children }: MenuProps) {
+  const pointed = !!at && !!portal;
+  const align = pointed ? "start" : edge, prefer = pointed ? "down" : wanted;
   const phone = useIsMobile();
   const ref = useRef<HTMLDivElement>(null);
   useOutsideDismiss(ref, open, onClose, anchorRef);
@@ -66,12 +74,20 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align = "end", prefer 
      * roomier side, as tall as that room, scrolling. A phone on its side has no room either way for a chat's ⋮ menu,
      * which ran off the screen's bottom edge with nothing to scroll to its last rows.
      */
-    const side = (opener: DOMRect, height: number, box: ReturnType<typeof bounds>) => {
+    const side = (opener: Rect, height: number, box: Rect) => {
       const roomBelow = box.bottom - opener.bottom - GAP - MARGIN, roomAbove = opener.top - box.top - GAP - MARGIN;
       const below = height <= roomBelow, above = height <= roomAbove;
       if (below || above) return { up: prefer === "up" ? above : !below };
       const up = roomAbove > roomBelow;
       return { up, room: Math.max(0, up ? roomAbove : roomBelow) };
+    };
+    // A right-click's point, kept where it was on its opener as the page scrolls under it.
+    const start = at && anchorRef.current?.getBoundingClientRect();
+    const opening = (anchor: HTMLElement): Rect => {
+      const rect = anchor.getBoundingClientRect();
+      if (!at || !start) return rect;
+      const x = at.x + rect.left - start.left, y = at.y + rect.top - start.top;
+      return { left: x, right: x, top: y, bottom: y };
     };
     const fit = () => {
       const menu = ref.current, anchor = anchorRef.current;
@@ -81,7 +97,7 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align = "end", prefer 
       const cap = menu.style.maxHeight;
       menu.style.maxHeight = "";
       if (portal) {
-        const rect = menu.getBoundingClientRect(), opener = anchor.getBoundingClientRect();
+        const rect = menu.getBoundingClientRect(), opener = opening(anchor);
         menu.style.maxHeight = cap;
         const { up, room } = side(opener, rect.height, box);
         const height = room ?? rect.height;
@@ -109,7 +125,7 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align = "end", prefer 
       window.removeEventListener("resize", fit);
       window.removeEventListener("scroll", fit, true);
     };
-  }, [open, phone, anchorRef, prefer, portal, align, within]);
+  }, [open, phone, anchorRef, prefer, portal, align, within, at]);
 
   // A sheet opened while typing (a long press on a message, the composer's +): the keyboard goes down, as in a native
   // app. iOS keeps it up otherwise, over the sheet's bottom rows, and the keys went on into the field behind the sheet:
@@ -173,8 +189,10 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align = "end", prefer 
   );
 }
 
+type Rect = { left: number; right: number; top: number; bottom: number };
+
 /** The window, or the part of it the opener's `within` ancestor covers. */
-function bounds(anchor: HTMLElement, within?: string) {
+function bounds(anchor: HTMLElement, within?: string): Rect {
   const width = document.documentElement.clientWidth || window.innerWidth, height = window.innerHeight;
   const box = { left: 0, top: 0, right: width, bottom: height };
   const area = within ? anchor.closest(within)?.getBoundingClientRect() : undefined;
