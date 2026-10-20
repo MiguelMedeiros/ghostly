@@ -266,6 +266,7 @@
     "nobodyForLeave": "Personne n'est en ligne pour prendre acte de votre départ",
     "nobodyForLeaveNext": "Réessayez dans un instant.",
     "notALink": "Ce n'est pas un lien vers un groupe",
+    "notALinkNext": "Redemandez le lien : il a peut-être perdu un caractère à la copie.",
     "notIn": "Vous n'êtes pas dans ce groupe",
     "notYet": "Vous n'êtes pas encore dans ce groupe",
     "nothingToSend": "Rien à envoyer",
