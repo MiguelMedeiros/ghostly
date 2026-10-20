@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QRCodeSVG } from "qrcode.react";
 import type { Page } from "@playwright/test";
-import { expect, getTestCoins, test, useTestnet } from "../support/fixtures";
+import { expect, getTestCoins, openWallet, test, useTestnet } from "../support/fixtures";
 import { strangerInvoice } from "../support/bolt11";
 import { LocalLnurlServer } from "../support/lnurl";
 import { endpoints } from "../infra/env.mjs";
@@ -81,5 +81,39 @@ test.describe("Send scans a QR", () => {
       await expect(pay.getByTestId("lnurl-paid")).toContainText(`Paid 8 test sats to ${server.address("shop")}`);
       await expect.poll(() => server.paid("shop"), { timeout: 30_000 }).toBe(true);
     } finally { server.close(); }
+  });
+
+  test("on a phone, Scan, Paste and Choose image read whole in every language", { tag: ["@feature:wallet.cashu.send-scan", "@feature:app.i18n"] }, async ({ peer }) => {
+    const alice = await peer("alice");
+    await useTestnet(alice);
+    const page = alice.page;
+    await page.setViewportSize({ width: 375, height: 740 });
+    const cut: Record<string, string[]> = {};
+    for (const language of ["en", "pt", "es", "fr", "it", "ja", "zh", "ar"]) {
+      await page.evaluate((language) => {
+        const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+        localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language }));
+      }, language);
+      await page.reload();
+      await openWallet(alice, "cashu-testnet");
+      await page.getByTestId("wallet-send").click();
+      await expect(page.getByTestId("wallet-send-camera")).toBeVisible();
+      // Each word of each label: on one line (a Japanese label, with no spaces, is one word), inside its button's padding.
+      const words = await page.getByTestId("wallet-send-scan").evaluate((root) => [...root.querySelectorAll("button, label")].flatMap((button) => {
+        const text = [...button.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent!.trim());
+        if (!text) return [];
+        const box = button.getBoundingClientRect(), style = getComputedStyle(button);
+        const left = box.left + parseFloat(style.paddingLeft) - 1, right = box.right - parseFloat(style.paddingRight) + 1;
+        return [...text.textContent!.matchAll(/\S+/g)].flatMap((word) => {
+          const range = document.createRange();
+          range.setStart(text, word.index!); range.setEnd(text, word.index! + word[0].length);
+          const rects = [...range.getClientRects()].filter((r) => r.width > 0);
+          const lines = new Set(rects.map((r) => Math.round(r.top))).size;
+          return lines > 1 ? [`"${word[0]}" broken over ${lines} lines`] : rects.some((r) => r.left < left || r.right > right) ? [`"${word[0]}" past its button's padding`] : [];
+        });
+      }));
+      if (words.length) cut[language] = words;
+    }
+    expect(cut).toEqual({});
   });
 });

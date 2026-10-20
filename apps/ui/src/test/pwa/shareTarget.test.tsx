@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { MessageInput } from "../../components/MessageInput";
@@ -76,7 +76,9 @@ describe("in the composer", () => {
       sendShareTo("chat-1");
     });
     await screen.findByTestId("attachment-sheet");
-    expect(screen.getByTestId("attachment-caption")).toHaveFocus();
+    // The sheet opens once the share's files are read, outside act(): its effects (the focus into the caption, the
+    // Escape it answers) may run a task after it is in the page.
+    await waitFor(() => expect(screen.getByTestId("attachment-caption")).toHaveFocus());
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("attachment-sheet")).toBeNull();
     expect(screen.getByPlaceholderText<HTMLTextAreaElement>("Message…")).toHaveFocus();

@@ -1266,7 +1266,8 @@ export interface Settings {
   /**
    * "Hide my IP from contacts" (WISP 100 § Relay only): every WebRTC connection to a contact (calls, chat links,
    * group edges) goes through the TURN server in `iceServers` alone, with no STUN server. On only with a TURN server
-   * (`relayOnlyProblem`). Absent means off. The Desktop's own Iroh and HyperDHT do not follow it yet.
+   * (`relayOnlyProblem`). The Desktop offers contacts neither its own Iroh nor its own HyperDHT (HyperDHT goes through
+   * `hyperdhtRelay`, as in a browser); its own devices keep them. Absent means off.
    */
   relayOnly?: boolean;
   /**
@@ -1277,7 +1278,7 @@ export interface Settings {
   /**
    * The HyperDHT relay (wss://) this browser reaches the HyperDHT through, so paired chats can use HyperDHT
    * (WISP 103) beside WebRTC. Empty: none. Absent means the default (shared/hyperdhtRelay.ts). The Desktop
-   * runs HyperDHT itself and ignores it.
+   * runs HyperDHT itself and ignores it, except toward contacts while `relayOnly` is on.
    */
   hyperdhtRelay?: string;
   /** Cashu mints this peer holds ecash at and accepts ecash from. The first is where invoices are created. */

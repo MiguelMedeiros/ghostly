@@ -60,6 +60,8 @@ export interface GroupsHost {
   linkReady(linkId: string, version?: number): boolean;
   /** Whether the link's connection is open, whatever the other app announces on it. Absent: not known. */
   linkOpen?(linkId: string): boolean;
+  /** A group's history as its load read it at start: what else the start keeps from it costs no second read. */
+  loaded?(groupId: string, history: StoredMessage[]): void;
   /** A name for a contact chat, for the invitation. */
   contactName(linkId: string): string | undefined;
   /** Member key → edge link id, for the edges of this group that exist. */
@@ -589,6 +591,7 @@ export class Groups {
       const mention = [...history].reverse().find(m => m.mentioned);
       const mentionAt = cameOrWritten(mention?.timestamp, mention ? group.came?.mention : undefined);
       if (mentionAt) this.lastMentionAt.set(group.id, mentionAt);
+      this.host.loaded?.(group.id, history);
     }
     for (const id of this.sessions.keys()) this.reconcileEdges(id);
     await this.files?.load(all.map(g => g.id));
@@ -2497,9 +2500,10 @@ export class Groups {
       changed: () => {
         // Taken out as a hub: my edges stay a moment, for my last act, passing on the commit that says so (WISP 902 § Hubs).
         if (session.status === "removed" && this.hubs.isHub(state.id) && !this.removedAt.has(state.id)) this.removedAt.set(state.id, this.now());
-        void this.membershipChanged(state.id);
+        // A line the device had no room to keep is not one more error: the change itself is the session's.
+        this.membershipChanged(state.id).catch(() => {});
       },
-      metaChanged: (by, change, at) => { void this.metaChanged(state.id, session, by, change, at); },
+      metaChanged: (by, change, at) => { this.metaChanged(state.id, session, by, change, at).catch(() => {}); },
       // A catch-up answer goes a slice at a time, each once the member's app handled the last (`GROUP_LIMITS.catchUpSlice`).
       ...(this.host.linkHandled && {
         handled: (to: string) => {

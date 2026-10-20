@@ -1,4 +1,5 @@
 import "fake-indexeddb/auto";
+import { fromBase64Url } from "@ghostly/core";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FILE_BYTES_STEP, NO_ROOM_TO_PLAY, blobDigest, checkFileId, digestText, dropFileSpace, fileBytes, fileBytesOf, registerFileBytes, removeFileBytes, resetFileBytes, type FileBytes } from "../src/shared/fileBytes";
@@ -124,15 +125,18 @@ describe("choosing where files go", () => {
 
 describe("files on Desktop (Rust commands)", () => {
   /** The Rust side, as a map of files: what each command does to the file named by space and id. */
-  function fakeRust() {
+  function fakeRust(jsonIpc = false) {
     const files = new Map<string, Uint8Array>();
     const key = (a: { space: string; id: string }) => `${a.space}/${a.id}`;
     const invoke = vi.fn(async (command: string, args?: Record<string, unknown> | Uint8Array, options?: { headers: Record<string, string> }) => {
       if (command === "file_bytes_append") {
-        const k = `${options!.headers["x-space"]}/${options!.headers["x-id"]}`, have = files.get(k) ?? new Uint8Array();
-        if (Number(options!.headers["x-offset"]) !== have.length) throw "File write out of order";
-        const next = new Uint8Array(have.length + (args as Uint8Array).length);
-        next.set(have); next.set(args as Uint8Array, have.length);
+        // Desktop: a raw body, placed by headers. Android: JSON args, the bytes as base64url.
+        const json = args instanceof Uint8Array ? null : args as { space: string; id: string; offset: number; bytes: string };
+        const body = json ? fromBase64Url(json.bytes) : args as Uint8Array;
+        const k = json ? key(json) : `${options!.headers["x-space"]}/${options!.headers["x-id"]}`, have = files.get(k) ?? new Uint8Array();
+        if ((json ? json.offset : Number(options!.headers["x-offset"])) !== have.length) throw "File write out of order";
+        const next = new Uint8Array(have.length + body.length);
+        next.set(have); next.set(body, have.length);
         files.set(k, next);
         return null;
       }
@@ -153,8 +157,21 @@ describe("files on Desktop (Rust commands)", () => {
         default: return null;
       }
     });
-    return { files, invoke, bytes: new NativeFileBytes(invoke as unknown as NativeInvoke) };
+    return { files, invoke, bytes: new NativeFileBytes(invoke as unknown as NativeInvoke, { jsonIpc }) };
   }
+
+  it("on Android a step crosses as a base64url string in the JSON args, never as a Uint8Array", async () => {
+    const { files, invoke, bytes } = fakeRust(true);
+    const source = new Blob([pattern(0, 2 * STEP + 5) as BlobPart]);
+    expect(await bytes.stage("c-out-1", source)).toBe(await blobDigest(source));
+    await bytes.forSpace("ghostly_work").append("c-in-1", 0, pattern(7, 3));
+    const appends = invoke.mock.calls.filter(([command]) => command === "file_bytes_append");
+    expect(appends).toHaveLength(4);
+    expect(appends.some(([, body]) => body instanceof Uint8Array)).toBe(false);
+    expect(appends[1]).toEqual(["file_bytes_append", { space: "ghostly", id: "c-out-1", offset: STEP, bytes: expect.any(String) }]);
+    expect(appends[3]![1]).toEqual({ space: "ghostly_work", id: "c-in-1", offset: 0, bytes: "2fgX" });
+    expectBytes(files.get("ghostly/c-out-1")!, pattern(0, 2 * STEP + 5));
+  });
 
   it("stages a step at a time as raw bodies, hashes in Rust, and hands small files out as Blobs", async () => {
     const { invoke, bytes } = fakeRust();

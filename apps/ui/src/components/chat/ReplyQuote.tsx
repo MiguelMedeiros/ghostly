@@ -32,14 +32,16 @@ export function ReplyQuote({ quote }: { quote: QuoteView }) {
     const timer = setTimeout(() => setNotHere(false), NOT_HERE_MS);
     return () => clearTimeout(timer);
   }, [notHere]);
-  const snippet = quote.state === "deleted" ? t("chat.reply.deleted") : quote.state === "missing" ? t("chat.reply.unavailable") : quote.snippet;
+  const snippet = quote.state === "deleted" ? t("chat.reply.deleted") : quote.state === "missing" ? t("chat.reply.unavailable")
+    : quote.state === "loading" ? quote.snippet || "…" : quote.snippet;
   const note = notHere ? t("chat.reply.notHere") : quote.state === "unverified" ? t("chat.reply.unverified") : undefined;
   return (
     <button type="button" data-testid="message-quote" data-state={quote.state} data-target={quote.targetId}
       onClick={(e) => {
         // The bubble's own double click opens its details: a tap on the quote is only the jump.
         e.stopPropagation();
-        if (!jumpToQuoted(quote.targetId)) setNotHere(true);
+        // Not loaded yet is not "not in this chat": the quote finds it once the older messages are in.
+        if (!jumpToQuoted(quote.targetId) && quote.state !== "loading") setNotHere(true);
       }}
       onDoubleClick={(e) => e.stopPropagation()}
       title={quote.state === "found" ? t("chat.reply.jump") : undefined}
