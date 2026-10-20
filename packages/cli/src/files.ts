@@ -65,14 +65,20 @@ function fileChat(ctx: ApiContext, params: Params, fileId: string): { linkId: st
   return { linkId: link.id, where: { chat: link.id } };
 }
 
-const VOICE_ONLY = "A voice note is audio (webm, ogg, mp4, mpeg, aac, m4a or wav) of at most 15 minutes, with peaks from 0 to 255";
+const VOICE_MINUTES = VOICE_LIMITS.maxDurationMs / 60_000;
 
-/** `--voice [ms] [--peaks …]`: the voice description, its length and waveform measured from the sound when not given. */
-async function voiceOf(params: Params, path: string, mime: string): Promise<{ voice?: VoiceMeta; warning?: string }> {
+/**
+ * `--voice [ms] [--peaks …]`: the voice description, its length and waveform measured from the sound when not given.
+ * A file that is not a voice note is refused naming what is wrong with it: empty, not audio, too long.
+ */
+async function voiceOf(params: Params, path: string, mime: string, size: number): Promise<{ voice?: VoiceMeta; warning?: string }> {
   if (params.voice === undefined) return {};
-  if (!PLAYABLE_AUDIO.test(baseMime(mime))) throw new CliError("bad_request", VOICE_ONLY);
+  const name = basename(path);
+  if (!size) throw new CliError("bad_request", `${name} is empty: a voice note is audio`);
+  if (!PLAYABLE_AUDIO.test(baseMime(mime))) throw new CliError("bad_request", `${name} is ${mime}, not audio (webm, ogg, mp4, mpeg, aac, m4a or wav)`);
   // Without a length or a waveform, both are measured from the sound, as the apps measure their recordings.
-  let duration = params.voice === true ? undefined : num(params, "voice", 0, { min: 1 });
+  const given = params.voice === true ? undefined : num(params, "voice", 0, { min: 1 });
+  let duration = given;
   let peaks = list(params, "peaks").map(Number);
   let warning: string | undefined;
   if (duration === undefined || !peaks.length) {
@@ -80,13 +86,22 @@ async function voiceOf(params: Params, path: string, mime: string): Promise<{ vo
     if ("voice" in measured) {
       duration ??= measured.voice.duration;
       if (!peaks.length) peaks = measured.voice.peaks;
+    } else if (measured.notSound) {
+      // A length given for it would send a voice note that cannot play.
+      throw new CliError("bad_request", `${name} is not audio (${measured.problem})`);
     } else if (duration === undefined) {
       throw new CliError("bad_request", `Could not measure the voice note (${measured.problem}): give its length as --voice <ms>`);
     } else warning = `Sent without a waveform: could not read the sound (${measured.problem})`;
   }
   const voice = parseVoiceMeta({ duration, peaks: peaks.length ? peaks : new Array(VOICE_LIMITS.bars).fill(0) }, mime);
-  if (!voice) throw new CliError("bad_request", VOICE_ONLY);
-  return { voice, ...(warning ? { warning } : {}) };
+  if (voice) return { voice, ...(warning ? { warning } : {}) };
+  // A length past the limit (with the moment a recorder takes to stop), or else a waveform the voice note does not take.
+  if (duration! > VOICE_LIMITS.maxDurationMs + 5_000) {
+    throw new CliError("bad_request", given === undefined
+      ? `${name} is longer than ${VOICE_MINUTES} minutes: a voice note is at most ${VOICE_MINUTES}`
+      : `A voice note is at most ${VOICE_MINUTES} minutes (${VOICE_LIMITS.maxDurationMs} ms), not ${given} ms`);
+  }
+  throw new CliError("bad_request", `A voice note's waveform is 1 to ${VOICE_LIMITS.maxBars} peaks from 0 to 255`);
 }
 
 /**
@@ -106,7 +121,7 @@ async function sendToGroup(ctx: ApiContext, params: Params, group: GroupView, pa
   // before a byte is copied in: a retry loop writes nothing. The announcement checks again.
   const check = await node(ctx).groupFileCheck({ groupId: group.id });
   if (check.error) throw check.refused ? new CliError("refused", check.error) : groupSendRefused(check.error);
-  const { voice, warning } = await voiceOf(params, path, mime);
+  const { voice, warning } = await voiceOf(params, path, mime, size);
   const source = await openAsBlob(path, { type: mime });
   const image = voice ? undefined : await readImageMeta(source, mime);
   const fileId = groupFileId(group.id, "out");
@@ -178,7 +193,7 @@ export const FILE_METHODS: Record<string, Method> = {
       const messages = await node(ctx).getMessages(link.id);
       if (!messages.some((m) => m.id === replyTo || replyRef(m) === replyTo)) throw new CliError("not_found", "That message is not in this chat, or cannot be replied to");
     }
-    const { voice, warning } = await voiceOf(params, path, mime);
+    const { voice, warning } = await voiceOf(params, path, mime, info.size);
     const source = await openAsBlob(path, { type: mime });
     // A picture goes with its size, read from its first bytes as the apps read it (PNG, JPEG, GIF, WebP).
     const image = voice ? undefined : await readImageMeta(source, mime);
