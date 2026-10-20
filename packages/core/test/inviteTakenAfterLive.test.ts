@@ -94,7 +94,10 @@ describe("a chat that was live, and a copy of its invite writing in the invite's
     // As an app from before stored it: the notice, and nothing saying the chat was live.
     const { wasLive: _wasLive, ...stored } = joiner.dhtState;
     const back = open(made.joiner, pkarr, { dht: true, credentials: joiner.credentials, dhtState: { ...stored, inviteTaken: true } });
-    expect(await until(() => back.link.isDataLinkOpen, 120_000)).toBeLessThan(Infinity);
+    // Quiet while the notice stands, it starts again on the inviter's next envelope (`untaken`). If it read the inviter's
+    // last one before it stopped (`peerPinned`: how the first pairing's steps fell), that is the inviter's keep-alive,
+    // 4 minutes after its last publication.
+    expect(await until(() => back.link.isDataLinkOpen, 6 * 60_000)).toBeLessThan(Infinity);
     await run(1_000);
     expect(back.dhtState.inviteTaken).toBeUndefined();
     expect(back.dhtState.wasLive).toBe(true);
