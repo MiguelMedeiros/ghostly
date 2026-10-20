@@ -210,6 +210,7 @@
     "makeAdmin": "Hand over admin",
     "missing": "{{count}} missing",
     "missingHint": "Messages of this epoch that have not arrived yet",
+    "missingOne": "{{count}} missing",
     "needsBothHint": "Groups need both apps connected and updated",
     "needsUpdate": "Needs an updated Ghostly",
     "noContacts": "Every paired contact is already in, or you have none yet.",
