@@ -62,7 +62,10 @@ test("a pasted screenshot and a dropped file reach the contact", { tag: ["@featu
   for (const name of ["ghost notes.txt", "route.csv"]) await expect(chat(bob).getByTestId("file-bubble").filter({ hasText: name })).toBeVisible();
 });
 
-/** Where the first `needle` inside the element is drawn: its box on the screen, from the text itself. */
+/**
+ * Where the first `needle` inside the element is drawn: its box on the screen, from the text itself, and the element's
+ * own (`box`), read in the same frame.
+ */
 const textBox = (element: Locator, needle: string) => element.evaluate((root, find) => {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -71,8 +74,8 @@ const textBox = (element: Locator, needle: string) => element.evaluate((root, fi
     const range = document.createRange();
     range.setStart(node, at);
     range.setEnd(node, at + find.length);
-    const { left, right } = range.getBoundingClientRect();
-    return { left, right };
+    const { left, right } = range.getBoundingClientRect(), box = root.getBoundingClientRect();
+    return { left, right, box: { left: box.left, right: box.right } };
   }
   throw new Error(`"${find}" is not in the element`);
 }, needle);
@@ -96,8 +99,11 @@ test("a file named in the other script reads from its start, in the sheet and in
   await alice.page.getByTestId("file-input").setInputFiles({ name, mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n") });
   const shown = chat(bob).getByTestId("file-bubble").getByTitle(name);
   await expect(shown).toHaveText(name, { timeout: 30_000 });
-  // Cut with … on a phone, at its end: its first word is on the screen, inside the name's box.
-  const [box, first] = await Promise.all([shown.evaluate((el) => el.getBoundingClientRect().toJSON() as DOMRect), textBox(shown, "تقرير")]);
+  // Cut with … on a phone, at its end: its first word is on the screen, inside the name's box. Read once the bubble's
+  // entry (a 0.22 s slide and scale) is over, and both boxes in one go: mid-slide they were read 1.1 px apart.
+  await shown.evaluate(() => Promise.all(document.getAnimations()
+    .filter((a) => (a as CSSAnimation).animationName?.startsWith("bubble-in")).map((a) => a.finished.catch(() => {}))));
+  const { box, ...first } = await textBox(shown, "تقرير");
   expect(first.left).toBeGreaterThanOrEqual(box.left - 1);
   expect(first.right).toBeLessThanOrEqual(box.right + 1);
 });
