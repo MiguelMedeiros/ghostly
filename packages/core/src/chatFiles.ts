@@ -213,6 +213,124 @@ export interface ChatFilesHost {
    */
   resend?(record: FileTransferRecord, sent: number): boolean;
   now?(): number;
+  /**
+   * The uplink this chat's files share with others that leave the device by it (`FileUplink`): a group's edges, each
+   * a `ChatFiles` of its own, serving one file to several members at once. Absent: the uplink is this chat's alone.
+   */
+  uplink?: FileUplink;
+}
+
+/** What a `FileUplink` asks of the `ChatFiles` that share it. */
+interface UplinkMember {
+  /** Its files are sending: bytes in flight, or held for the window. */
+  sending(): boolean;
+  /** The shortest round trip its files saw on its own session. */
+  baseRtt(): number;
+}
+
+/**
+ * The uplink several chats' files leave the device by. Each chat paces its files by its own path (`FilePace`), down to
+ * a floor of `FILE_LIMITS.minWindowBytes`; on one uplink, that floor is shared out among the chats sending at once.
+ * Each with a floor of its own, a member serving a file to three members on a 1 Mbit/s uplink kept 192 KiB in flight,
+ * and everything else it sent (texts, a ring, a call's voice) waited 1-2 s behind them, up to 5.8 s (agents#1569). A
+ * chat whose receiver barely confirms holds only its share, never the others' bytes. Each chat also reads the queue
+ * against the lowest round trip of the uplink's chats, not its own alone (`lowestBase`).
+ */
+export class FileUplink {
+  private readonly members = new Set<UplinkMember>();
+
+  join(member: UplinkMember): void { this.members.add(member); }
+  leave(member: UplinkMember): void { this.members.delete(member); }
+
+  /**
+   * The floor of one chat's window: its share of `minWindowBytes` among the chats sending, in whole chunks, a chunk at
+   * least (a window sends chunks while what is in flight is under it: 21 KiB would let two go).
+   */
+  floor(): number {
+    let sending = 0;
+    for (const member of this.members) if (member.sending()) sending++;
+    const share = FILE_LIMITS.minWindowBytes / Math.max(1, sending);
+    return Math.max(FILE_LIMITS.chunkBytes, Math.floor(share / FILE_LIMITS.chunkBytes) * FILE_LIMITS.chunkBytes);
+  }
+
+  /**
+   * The shortest round trip any chat on the uplink saw: its path with the least queue. Each chat's own counts the
+   * others' queue on the shared uplink as its path (428-637 ms read on a 1-10 ms path), and so never sees one.
+   */
+  lowestBase(): number {
+    let lowest = Infinity;
+    for (const member of this.members) lowest = Math.min(lowest, member.baseRtt());
+    return lowest;
+  }
+}
+
+/** How much one chat's files may have in flight on its session, sized by the path (delay-based, as LEDBAT: `paced`). */
+class FilePace {
+  /** Bytes the files may have in flight together: sized by the path, from the confirms (`paced`). */
+  window: number = FILE_LIMITS.minWindowBytes;
+  /** The shortest round trip of a chunk to its confirm: the path without a queue. */
+  private baseRtt = Infinity;
+  /** When a confirm last came close to `baseRtt`, or a probe measured it. */
+  private baseAt = 0;
+  /** The path's own round trip is being measured: one chunk in flight from `since`, until one sent then is confirmed. */
+  private probe?: { since: number; window: number };
+  /** A confirm has sized the window on this path. */
+  private sized = false;
+
+  /** Another path (a session of its own opened): what was learnt of the old one goes. */
+  reset(): void {
+    this.window = FILE_LIMITS.minWindowBytes;
+    this.baseRtt = Infinity;
+    this.baseAt = 0;
+    this.probe = undefined;
+    this.sized = false;
+  }
+
+  /** The shortest round trip seen on this path. */
+  get base(): number { return this.baseRtt; }
+
+  /**
+   * What may be in flight now: one chunk while the path's own round trip is measured, else the window; before any
+   * confirm sized it, no more than `floor` (the chat's share of an uplink it shares: three edges starting at once each
+   * sent their whole 64 KiB, 1.5 s of queue at 1 Mbit/s).
+   */
+  limit(floor: number): number { return this.probe ? FILE_LIMITS.chunkBytes : this.sized ? this.window : Math.min(this.window, floor); }
+
+  /**
+   * A confirm came for a chunk sent at `sentAt` with `flight` bytes in flight then: the window becomes what keeps the path
+   * busy with no more than `FILE_LIMITS.queueMs` of queue on it (delay-based, as LEDBAT). Throughput is about
+   * flight / rtt, so flight × (base + queueMs) / rtt: it grows while confirms come about as fast as they can, and shrinks
+   * when they slow down because the files queue on a slow uplink, ahead of everything else the sender says there.
+   * The base is measured again once no confirm has come close to it for `FILE_LIMITS.baseProbeMs`: with one chunk in
+   * flight, so the queue drains first and a slow link's own queue never passes for a longer path. `floor`: the least
+   * the window is, `minWindowBytes` or the chat's share of an uplink it shares (`FileUplink.floor`).
+   */
+  paced(sentAt: number, flight: number, now: number, floor: number = FILE_LIMITS.minWindowBytes, lowest = Infinity): void {
+    const rtt = Math.max(1, now - sentAt);
+    this.sized = true;
+    if (this.probe) {
+      // Sent before the probe: it waited behind the queue the probe lets drain.
+      if (sentAt < this.probe.since) return;
+      this.baseRtt = rtt;
+      this.baseAt = now;
+      this.window = this.probe.window;
+      this.probe = undefined;
+      return;
+    }
+    if (rtt - this.baseRtt < FILE_LIMITS.queueMs / 2) this.baseAt = now;
+    this.baseRtt = Math.min(this.baseRtt, rtt);
+    if (now - this.baseAt > FILE_LIMITS.baseProbeMs) {
+      this.probe = { since: now, window: this.window };
+      return;
+    }
+    // No queue to speak of yet: twice as much per round trip at least, as a long fast path needs many to fill. On a
+    // shared uplink, the queue is read against the lowest round trip any of its chats saw.
+    const base = Math.min(this.baseRtt, lowest);
+    const fits = Math.max((flight * (base + FILE_LIMITS.queueMs)) / rtt, rtt - base < FILE_LIMITS.queueMs / 2 ? 2 * flight : 0);
+    // Little was in flight (a file starting or ending): that says nothing about a larger window being too large.
+    const window = flight < this.window / 2 ? Math.max(this.window, fits) : fits;
+    this.window = Math.min(FILE_LIMITS.chatWindowBytes, Math.max(floor, Math.round(window)));
+  }
 }
 
 interface Outgoing {
@@ -323,16 +441,19 @@ export class ChatFiles {
   private readonly held = new Set<Entry>();
   private attached = false;
   private peerRoomValue: number | null = null;
-  /** Bytes the chat's files may have in flight on this session: sized by the path, from the confirms (`paced`). */
-  private window: number = FILE_LIMITS.minWindowBytes;
-  /** The shortest round trip of a chunk to its confirm on this session: the path without a queue. */
-  private baseRtt = Infinity;
-  /** When a confirm last came close to `baseRtt`, or a probe measured it. */
-  private baseAt = 0;
-  /** The path's own round trip is being measured: one chunk in flight from `since`, until one sent then is confirmed. */
-  private probe?: { since: number; window: number };
+  /** What the chat's files may have in flight, sized by the path. */
+  private readonly pace = new FilePace();
 
   constructor(private readonly host: ChatFilesHost) {}
+
+  /** The floor of this chat's window: all of `minWindowBytes`, or its share of an uplink it shares (`FileUplink`). */
+  private floor(): number { return this.host.uplink?.floor() ?? FILE_LIMITS.minWindowBytes; }
+
+  /** Its files are sending: bytes in flight, or held for the window (`FileUplink`). */
+  sending(): boolean { return this.attached && (this.inFlight() > 0 || this.held.size > 0); }
+
+  /** The shortest round trip this chat's files saw on its session (`FileUplink.lowestBase`). */
+  baseRtt(): number { return this.pace.base; }
 
   private now(): number { return this.host.now?.() ?? Date.now(); }
 
@@ -386,10 +507,8 @@ export class ChatFiles {
     this.attached = true;
     this.peerRoomValue = null;
     // Another session may be another path.
-    this.window = FILE_LIMITS.minWindowBytes;
-    this.baseRtt = Infinity;
-    this.baseAt = 0;
-    this.probe = undefined;
+    this.pace.reset();
+    this.host.uplink?.join(this);
     void this.sayRoom();
     this.sweep();
     for (const entry of this.entries.values()) {
@@ -407,6 +526,7 @@ export class ChatFiles {
     this.attached = false;
     this.peerRoomValue = null;
     this.moving.clear(); this.held.clear();
+    this.host.uplink?.leave(this);
     for (const entry of this.entries.values()) {
       if (entry.out) { entry.out.generation++; clearTimeout(entry.out.timer); clearTimeout(entry.out.wake); entry.out.next = entry.record.confirmed; }
       if (entry.in) clearTimeout(entry.in.timer);
@@ -499,39 +619,7 @@ export class ChatFiles {
   }
 
   private shouldPump(entry: Entry): boolean {
-    return this.fileMayPump(entry) && this.inFlight() < (this.probe ? FILE_LIMITS.chunkBytes : this.window);
-  }
-
-  /**
-   * A confirm came for a chunk sent at `sentAt` with `flight` bytes in flight then: the window becomes what keeps the path
-   * busy with no more than `FILE_LIMITS.queueMs` of queue on it (delay-based, as LEDBAT). Throughput is about
-   * flight / rtt, so flight × (base + queueMs) / rtt: it grows while confirms come about as fast as they can, and shrinks
-   * when they slow down because the files queue on a slow uplink, ahead of everything else the sender says there.
-   * The base is measured again once no confirm has come close to it for `FILE_LIMITS.baseProbeMs`: with one chunk in
-   * flight, so the queue drains first and a slow link's own queue never passes for a longer path.
-   */
-  private paced(sentAt: number, flight: number): void {
-    const now = this.now(), rtt = Math.max(1, now - sentAt);
-    if (this.probe) {
-      // Sent before the probe: it waited behind the queue the probe lets drain.
-      if (sentAt < this.probe.since) return;
-      this.baseRtt = rtt;
-      this.baseAt = now;
-      this.window = this.probe.window;
-      this.probe = undefined;
-      return;
-    }
-    if (rtt - this.baseRtt < FILE_LIMITS.queueMs / 2) this.baseAt = now;
-    this.baseRtt = Math.min(this.baseRtt, rtt);
-    if (now - this.baseAt > FILE_LIMITS.baseProbeMs) {
-      this.probe = { since: now, window: this.window };
-      return;
-    }
-    // No queue to speak of yet: twice as much per round trip at least, as a long fast path needs many to fill.
-    const fits = Math.max((flight * (this.baseRtt + FILE_LIMITS.queueMs)) / rtt, rtt - this.baseRtt < FILE_LIMITS.queueMs / 2 ? 2 * flight : 0);
-    // Little was in flight (a file starting or ending): that says nothing about a larger window being too large.
-    const window = flight < this.window / 2 ? Math.max(this.window, fits) : fits;
-    this.window = Math.min(FILE_LIMITS.chatWindowBytes, Math.max(FILE_LIMITS.minWindowBytes, Math.round(window)));
+    return this.fileMayPump(entry) && this.inFlight() < this.pace.limit(this.floor());
   }
 
   /** Bytes this chat's files sent and have not seen confirmed. */
@@ -960,7 +1048,7 @@ export class ChatFiles {
         // The last chunk this confirms says how long the path took (one sent before a resync says nothing).
         let sample: Outgoing["sends"][number] | undefined;
         while (out.sends.length && out.sends[0].end <= frame.offset) sample = out.sends.shift();
-        if (sample?.generation === out.generation) this.paced(sample.at, sample.flight);
+        if (sample?.generation === out.generation) this.pace.paced(sample.at, sample.flight, this.now(), this.floor(), this.host.uplink?.lowestBase());
         this.changed(outgoing, true);
         this.wakeHeld();
         if (record.confirmed === record.file.size) void this.sendSum(outgoing);
