@@ -422,12 +422,13 @@ export class Communities {
     const ready = (key: string) => { const id = edges.get(key); return !!id && this.host.linkReady(id, 2); };
     const hubs = freshHubs(this.hubs(live), this.now()).map(h => h.key);
     // A name outlives its member's place in the roster, as in a private group: what someone who left wrote is still theirs.
-    const former = Object.entries(s.state.nicks).filter(([key]) => !rosterHas(s.roster, key));
+    const roster = s.roster, inRoster = new Set(roster.map(([key]) => key));
+    const former = Object.entries(s.state.nicks).filter(([key]) => !inRoster.has(key));
     return [{ ...base, name: s.name, ...(former.length ? { formerNames: Object.fromEntries(former) } : {}), status: s.status, statusReason: s.state.statusReason, epoch: s.epoch, myKey: s.myKey, isAdmin: s.isAdmin,
       ...(s.isMember && s.entryKey ? { entryLink: encodeCommunityLink({ g: s.id, host: s.entryKey }) } : {}),
       canSend: s.canSend, ...(s.picture ? { picture: s.picture } : {}), ...(invitation ? { invitation } : {}),
       community: { hub: live.hub, hubs: hubs.length, connected: [...edges.keys()].filter(ready).length },
-      members: s.roster.map(([key, role]) => ({ key, role, me: key === s.myKey,
+      members: roster.map(([key, role]) => ({ key, role, me: key === s.myKey,
         nick: key === s.myKey ? undefined : (edges.get(key) && this.host.edgeNick(edges.get(key)!)) || s.state.nicks[key],
         online: key === s.myKey || ready(key), missing: s.missing(key) })) }];
   }
