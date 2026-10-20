@@ -129,8 +129,10 @@ export interface AddedAppStore {
   addedAt: number;
   /** A default store of this build. */
   preloaded?: true;
-  /** A default store the person removed: kept, without its index, so it does not come back. */
+  /** A store the person removed: kept, without its index, so a default one does not come back. */
   removed?: true;
+  /** A removed store's last index taken (its `sequence` and digest): adding the store back refuses an older one. */
+  seen?: { sequence: number; digest: string };
   index?: AppStoreIndex;
   /** SHA-256 of the index's bytes. */
   digest?: string;
@@ -700,9 +702,6 @@ export class Apps {
   private putStore(record: AddedAppStore): Promise<void> {
     return this.writeStores((records) => records.put(record), (held) => held.set(record.key, record));
   }
-  private deleteStore(key: string): Promise<void> {
-    return this.writeStores((records) => records.delete(key), (held) => held.delete(key));
-  }
   /** The stores' views, made once and again after a store is written here: an app's every storage call and chat frame checks them. */
   private heldViews(): Promise<AppStoreView[]> {
     return this.views ??= this.stores().then((s) => this.storeViews(s), (error: unknown) => { this.views = null; throw error; });
@@ -1001,6 +1000,10 @@ export class Apps {
     if (!read.ok) fail(read.reason, "This is not a store Ghostly can read");
     const { index, digest } = read.store;
     const held = await this.storeRecord(index.key);
+    // A store removed and added back: an index older than the last one taken from it (or another under its sequence) is
+    // refused, so the takedowns the person has seen since still hold.
+    const seen = held?.removed && held.seen && appStoreDecision({ key: held.key, ...held.seen }, { key: index.key, sequence: index.sequence, digest });
+    if (seen === "rollback" || seen === "equivocation") fail(seen, `This store's index is older than the one you had (sequence ${held!.seen!.sequence})`);
     const record: AddedAppStore = held && !held.removed ? held : { key: index.key, url: at, addedAt: this.now(), ...(held?.preloaded && { preloaded: true as const }) };
     await this.putStore(this.withIndex(record, index, digest));
     return this.summary((await this.storeRecord(index.key))!);
@@ -1023,8 +1026,8 @@ export class Apps {
   async removeStore({ key }: { key: string }): Promise<void> {
     const held = await this.storeRecord(key);
     if (!held) return;
-    if (held.preloaded) await this.putStore({ key: held.key, url: held.url, addedAt: held.addedAt, preloaded: true, removed: true });
-    else await this.deleteStore(key);
+    const seen = held.index ? { sequence: held.index.sequence, digest: held.digest ?? "" } : held.seen;
+    await this.putStore({ key: held.key, url: held.url, addedAt: held.addedAt, ...(held.preloaded && { preloaded: true as const }), removed: true, ...(seen && { seen }) });
     // The person no longer takes this store's curation: an app installed from it updates from its sources and the other
     // stores again (WISP 1200 § Updates and rollback), so its security fixes still arrive. A newer version waiting stays:
     // a valid newer version is one under that rule too.
