@@ -1552,7 +1552,7 @@ export class GhostlyNode implements EngineImplementation {
     removeMine: async (chat, message, removal) => {
       const groupId = chat.slice("group:".length);
       await this.groups.setRemovals(groupId, withRemoval(this.groups.removals(groupId), removal));
-      await this.forgetGroupMessage(chat, message.id);
+      await this.forgetGroupMessage(chat, message.id, message);
     },
     edge: (groupId, member) => {
       const link = this.links.get(this.memberEdges(groupId).get(member) ?? "")?.link;
@@ -1564,9 +1564,14 @@ export class GhostlyNode implements EngineImplementation {
    * A group's message deleted for everyone, by its author or by me: gone from this device with its file, and noted so a
    * copy that comes again (a catch-up, a member handing it on) is not stored. The replies here that quote it lose its line.
    */
-  private async forgetGroupMessage(chat: string, id: string): Promise<void> {
-    await this.groups.removed(chat.slice("group:".length), id);
+  private async forgetGroupMessage(chat: string, id: string, row?: StoredMessage): Promise<void> {
+    const groupId = chat.slice("group:".length);
+    // The group's unread, "@" and place in the list as they were without it (agents#1645): read only for a message
+    // that moved one of them (`Groups.movedMarks`), as removals go at the pace of edits.
+    const moved = row ?? (this.groups.movedMarks(groupId, id) ? await db.getMessage(chat, id) : undefined);
+    await this.groups.removed(groupId, id);
     await db.deleteMessage(chat, id);
+    if (moved) await this.groups.unmark(groupId, moved);
     // Its quotes cost no read of the group each (`QuoteSweeps`): a member can post and remove at the pace of edits.
     this.quoteSweeps.add(chat, id, id);
     await this.messagesChanged(chat, [id]);
