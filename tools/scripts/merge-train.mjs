@@ -413,9 +413,9 @@ export const aloneMark = (sticky) => {
 };
 
 /**
- * Branches a workflow acts on when they are pushed to, besides the train's bases (ci.yml, security.yml): a push to
- * `claude/security-auto-*` is what security-autorelease.yml releases once its CI is green, so only the security
- * routine's own commit may ever be that branch's head.
+ * Branches a workflow acts on when they are pushed to, besides the train's bases (ci.yml, security.yml): CI and
+ * Security run on a push to `claude/security-auto-*`, the security routine's fixes, so only the routine's own commit
+ * may ever be that branch's head.
  */
 const SHIPS = /^(main|master|claude\/security-auto-.*)$/;
 

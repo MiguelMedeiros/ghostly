@@ -13,21 +13,47 @@ import type { BoundChannel, NativeBinding, NativeEndpoint } from "../src/pairedT
 
 const hex = (c: string) => c.repeat(64);
 type Data = string | Uint8Array;
-type End = FrameChannel & { peer?: End; closed: boolean; receive(data: Data): void; sent: Data[] };
+type End = Omit<FrameChannel, "bufferedAmount"> & { bufferedAmount: number; peer?: End; closed: boolean; receive(data: Data): void; sent: Data[]; peak: number; refused: number };
 
-function channelPair(binary: boolean): [End, End] {
+/**
+ * Two ends of a channel. With `budget`, each end is a native one (as the Desktop's and the web's iroh channels are): it
+ * holds what it was given and writes one frame a millisecond, `drained` resolves once it holds under a quarter of the
+ * budget, and `send` throws past the budget.
+ */
+function channelPair(binary: boolean, budget?: number): [End, End] {
   const make = (): End => {
     let reader: FrameChannel["onMessage"] = null;
     const waiting: Data[] = [];
+    const queued: Data[] = [];
+    const drains: (() => void)[] = [];
+    const size = (data: Data) => data.length;
+    const write = (end: End) => {
+      const data = queued.shift()!;
+      end.bufferedAmount -= size(data);
+      end.peer?.receive(data);
+      if (end.bufferedAmount < budget! / 4) for (const resolve of drains.splice(0)) resolve();
+      if (queued.length) setTimeout(() => write(end), 1);
+    };
     return {
-      closed: false, bufferedAmount: 0, onClose: null, drained: () => Promise.resolve(), sent: [],
+      closed: false, bufferedAmount: 0, onClose: null, sent: [], peak: 0, refused: 0,
+      drained() { return budget && this.bufferedAmount >= budget / 4 ? new Promise<void>(resolve => drains.push(resolve)) : Promise.resolve(); },
       ...(binary && { binary: true }),
+      ...(budget && { sendBudget: budget }),
       get onMessage() { return reader; },
       set onMessage(value) { reader = value; if (value) for (const data of waiting.splice(0)) value(data); },
       receive(data) { if (this.closed) return; if (reader) reader(data); else waiting.push(data); },
       send(data) {
         if (this.closed) throw new Error("Channel closed");
         if (typeof data !== "string" && !binary) throw new Error("Text only");
+        if (budget) {
+          if (this.bufferedAmount + size(data) > budget) { this.refused++; throw new Error("Send budget is full"); }
+          this.sent.push(data);
+          this.bufferedAmount += size(data);
+          this.peak = Math.max(this.peak, this.bufferedAmount);
+          queued.push(data);
+          if (queued.length === 1) setTimeout(() => write(this), 1);
+          return;
+        }
         this.sent.push(data);
         queueMicrotask(() => this.peer?.receive(data));
       },
@@ -48,7 +74,8 @@ const APP = toBase64Url(new Uint8Array(16).fill(5));
 const FILM = Uint8Array.from({ length: 200_000 }, (_, i) => (i * 131 + 3) & 0xff);
 
 /** A serves FILM to B's app; its owner answers each task from it, unless `hold`. */
-async function pair(options: { a?: Partial<GhostLinkOptions>; b?: Partial<GhostLinkOptions>; binary?: boolean; hold?: boolean } = {}) {
+async function pair(options: { a?: Partial<GhostLinkOptions>; b?: Partial<GhostLinkOptions>; binary?: boolean; budget?: number; hold?: boolean; file?: Uint8Array } = {}) {
+  const file = options.file ?? FILM;
   const invitation = createLink();
   const [ia, ib] = [createIdentity(), createIdentity()];
   const binding: NativeBinding = { transport: "iroh/1", context: hex("c"), identities: [hex("a"), hex("b")] };
@@ -60,7 +87,7 @@ async function pair(options: { a?: Partial<GhostLinkOptions>; b?: Partial<GhostL
       transport: "iroh/1", descriptor: { id: name.repeat(64), relay: null, addresses: ["127.0.0.1:1"] }, onConnection: null, onDescriptor: null,
       close: async () => {},
       connect: async (): Promise<BoundChannel> => {
-        const [mine, theirs] = channelPair(options.binary ?? true);
+        const [mine, theirs] = channelPair(options.binary ?? true, options.budget);
         sides.a!.channel = mine; sides.b!.channel = theirs;
         queueMicrotask(() => endpoints.b.onConnection?.({ channel: theirs, binding }));
         return { channel: mine, binding };
@@ -82,7 +109,7 @@ async function pair(options: { a?: Partial<GhostLinkOptions>; b?: Partial<GhostL
           tasks.push(task);
           if (options.hold) return;
           if (task.file === "gone") return link.failAppRange(task, "gone");
-          void link.sendAppRange(task, FILM.subarray(task.offset, task.offset + task.length), FILM.length);
+          void link.sendAppRange(task, file.subarray(task.offset, task.offset + task.length), file.length);
         },
         ...extra.events,
       },
@@ -132,6 +159,39 @@ describe("the read lane on a paired session (app-ranges/1)", () => {
     expect(a.channel!.sent.every(data => typeof data === "string")).toBe(true);
     expect(rangeFrames(a.channel!).filter(data => (data as string).includes('"ar-data"'))).toHaveLength(2);
   });
+
+  it("two apps' 4 reads each keep a native channel at files' line, a frame over it at most, and every one arrives", async () => {
+    const budget = 120 * 1024, part = 64 * 1024;
+    const other = toBase64Url(new Uint8Array(16).fill(6));
+    const file = Uint8Array.from({ length: 4 * part }, (_, i) => (i * 7 + 1) & 0xff);
+    const { a, b } = await pair({ binary: false, budget, file });
+    await opened(a, b);
+    a.link.openApp(other, "1.0.0"); b.link.openApp(other, "1.0.0");
+    await vi.waitFor(() => expect(a.link.peerApps.has(other) && b.link.peerApps.has(other)).toBe(true));
+    const serves = [APP, other].map(app => [app, (a.link.serveAppFile(app, "film") as { serve: string }).serve]);
+    // Each waits for room; on dev 3 of them hit the budget and their reads never settled.
+    const reads = await Promise.all(serves.flatMap(([app, serve]) => [0, 1, 2, 3].map(i => settled(b.link.readAppRange(app, serve, i * part, part)))));
+    reads.forEach((read, n) => expect(read).toEqual({ value: { bytes: file.subarray((n % 4) * part, (n % 4 + 1) * part), size: file.length } }));
+    expect(a.channel!.refused).toBe(0);
+    // A ping, a message or another app's frame still fits beside the read lane, as beside a file.
+    const frame = Math.max(...rangeFrames(a.channel!).map(data => data.length));
+    expect(a.channel!.peak).toBeLessThanOrEqual(budget / 4 + frame);
+  }, 10_000);
+
+  it("a chunk the channel refuses (full beside a file) goes again later, and the read still arrives", async () => {
+    const { a, b } = await pair();
+    await opened(a, b);
+    const served = a.link.serveAppFile(APP, "film") as { serve: string };
+    const send = a.channel!.send.bind(a.channel!);
+    let refusals = 0;
+    a.channel!.send = data => {
+      if (typeof data !== "string" && data[0] === APP_RANGE_DATA_KIND && refusals < 2) { refusals++; throw new Error("Send budget is full"); }
+      send(data);
+    };
+    const read = await settled(b.link.readAppRange(APP, served.serve, 0, 40_000));
+    expect(refusals).toBe(2);
+    expect(read).toEqual({ value: { bytes: FILM.subarray(0, 40_000), size: FILM.length } });
+  }, 10_000);
 
   it("serves only while the app is open on both sides, and says why not", async () => {
     const { a, b } = await pair();

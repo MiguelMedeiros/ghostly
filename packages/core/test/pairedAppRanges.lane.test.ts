@@ -172,6 +172,32 @@ describe("the read lane of one chat", () => {
     expect([0, 1, 2, 3].every(r => server.receiveGet(appRangeGetFrame(CINEMA, third, r, 0, 1) as Extract<AppRangeFrame, { t: "ar-get" }>))).toBe(true);
   });
 
+  it("a server takes asks for 32 MiB a second, its apps together: a get and cancel loop answered at once meets busy", () => {
+    const sent: AppRangeFrame[] = [];
+    const clock = { t: 1_000 };
+    const server = new AppRanges(frame => sent.push(frame), undefined, () => clock.t);
+    const serve = server.serve(CINEMA, "film-id"), chess = server.serve(CHESS, "board");
+    const MiB = APP_RANGE_LIMITS.requestBytes;
+    const get = (app: string, s: string, r: number, n = MiB) => server.receiveGet(appRangeGetFrame(app, s, r, 0, n) as Extract<AppRangeFrame, { t: "ar-get" }>);
+    // Each ask read at once and cancelled: its place frees, but its read was made.
+    let handed = 0;
+    for (let r = 0; r < 1_000; r++) {
+      const task = get(CINEMA, serve, r);
+      if (task) { handed++; server.receiveCancel({ t: "ar-cancel", a: CINEMA, r }); server.release(task); }
+    }
+    expect(handed).toBe(APP_RANGE_LIMITS.bytesPerSecond / MiB);
+    expect(sent).toHaveLength(1_000 - handed);
+    expect(sent.every(frame => frame.t === "ar-err" && frame.e === "busy")).toBe(true);
+    // Another app of the same contact shares the budget; a session's end does not give it back.
+    expect(get(CHESS, chess, 0, 1)).toBeNull();
+    server.reset();
+    const again = server.serve(CINEMA, "film-id");
+    expect(get(CINEMA, again, 0, 1)).toBeNull();
+    // Once the second has gone, asks are taken again.
+    clock.t += 1_000;
+    expect(get(CINEMA, again, 1)).not.toBeNull();
+  });
+
   it("chunks out of order, or past what was asked, fail the read and cancel it", async () => {
     const { ana, bob, toAna, flush } = pair({ hold: true });
     const serve = ana.serve(CINEMA, "film-id");

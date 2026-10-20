@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { DeviceSetView } from "@ghostly/browser/devices/links";
 import { MAX_DEVICES } from "@ghostly/browser/devices/state";
@@ -55,6 +55,9 @@ export function DevicesSection() {
   // A move under way from this device (WISP 06 § Handoff progress, "on both devices"): one started here whose dialog was
   // closed ("You can keep using Ghostly"), or one the other device started with Use here.
   const running = thisActive && !moving && handoff?.role === "giver" && handoff.step !== "failed" ? handoff : null;
+  // Cancel pressed in those steps: once they go, the keyboard focus goes to that device's row, not to the page.
+  const [refocus, setRefocus] = useState<string | null>(null);
+  const cancelRunning = async (key: string) => { await engine.call("deviceHandoffCancel"); setRefocus(key); };
   const devices = view?.devices ?? [];
   const { answers: checked, check } = useConnectionCheck(devices);
   const full = devices.length >= MAX_DEVICES;
@@ -76,11 +79,12 @@ export function DevicesSection() {
       {/* Where that move stands, with Cancel while nothing has changed yet: the dialog is not the only place that says it. */}
       {running && (
         <div data-testid="handoff-running" className="px-4 py-3.5 text-sm">
-          <HandoffProgress view={running} onCancel={() => void engine.call("deviceHandoffCancel")} />
+          <HandoffProgress view={running} onCancel={() => cancelRunning(running.key)} />
         </div>
       )}
       {devices.map((device) => (
         <DeviceRow key={device.key} device={device} thisActive={thisActive} busy={!!running} checked={checked[device.key]}
+          focus={refocus === device.key} onFocused={() => setRefocus(null)}
           onMove={() => setMoving({ key: device.key, name: device.name })} onCheck={() => void check(device.key)}
           onRemove={() => { setRemoved(null); setRemoving({ key: device.key, name: device.name }); }} />
       ))}
@@ -152,20 +156,28 @@ export function DevicesSection() {
 /**
  * One device: its mark, its name, its state and, for another device, whether its link is connected. "Move to
  * <device>" stays on the row, the main thing to do with a device; the rest is in its menu. While a move runs (`busy`)
- * no other is offered: the engine would refuse it.
+ * no other is offered: the engine would refuse it. `focus`: a move to this device was cancelled from the section, and
+ * once it no longer runs the keyboard focus that was on Cancel comes here (Move to, else the menu).
  */
-function DeviceRow({ device, thisActive, busy, checked, onMove, onCheck, onRemove }: {
-  device: Device; thisActive: boolean; busy: boolean; checked?: string; onMove(): void; onCheck(): void; onRemove(): void;
+function DeviceRow({ device, thisActive, busy, checked, focus, onFocused, onMove, onCheck, onRemove }: {
+  device: Device; thisActive: boolean; busy: boolean; checked?: string; focus?: boolean; onFocused?(): void; onMove(): void; onCheck(): void; onRemove(): void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLDivElement>(null);
+  const move = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLButtonElement>(null);
   const live = device.status === "live";
   const state = device.self ? (device.active ? t("devices.section.thisActive") : t("devices.section.thisStandby"))
     : device.active ? t("devices.section.active") : t("devices.section.standby");
   const canMove = !device.self && live && thisActive && !busy;
   const canCheck = !device.self && live;
   const canRemove = !device.self && thisActive;
+  useEffect(() => {
+    if (!focus || busy) return;
+    onFocused?.();
+    if (!document.activeElement || document.activeElement === document.body) (move.current ?? menu.current)?.focus();
+  }, [focus, busy, onFocused]);
   const menuLabel = t("devices.section.menu", { device: device.name });
   return (
     <Row testId="device-row" leading={<DeviceGlyph name={device.name} active={device.active} />} label={device.name}
@@ -180,10 +192,10 @@ function DeviceRow({ device, thisActive, busy, checked, onMove, onCheck, onRemov
         </>}
         {checked && <span data-testid="device-check-result" role="status" className="block">{checked}</span>}
       </>}>
-      {canMove && <Button data-testid="device-move" onClick={onMove}>{t("devices.handoff.moveTo", { device: device.name })}</Button>}
+      {canMove && <Button ref={move} data-testid="device-move" onClick={onMove}>{t("devices.handoff.moveTo", { device: device.name })}</Button>}
       {(canCheck || canRemove) && (
         <div ref={anchor} className="relative">
-          <button type="button" data-testid="device-menu" aria-haspopup="true" aria-expanded={open} aria-label={menuLabel} title={menuLabel} onClick={() => setOpen((was) => !was)}
+          <button ref={menu} type="button" data-testid="device-menu" aria-haspopup="true" aria-expanded={open} aria-label={menuLabel} title={menuLabel} onClick={() => setOpen((was) => !was)}
             className="grid h-10 w-10 max-md:h-11 max-md:w-11 cursor-pointer place-items-center rounded-lg text-text-secondary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>
           </button>

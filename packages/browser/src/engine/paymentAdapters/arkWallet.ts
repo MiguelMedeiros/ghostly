@@ -186,13 +186,12 @@ export class ArkWallet {
     const boardingAddress=await read("boarding address",()=>adapter.boardingAddress(),this.view.boardingAddress);
     if(this.adapter!==adapter)return;
     if(address!==this.view.address||boardingAddress!==this.view.boardingAddress){this.view={...this.view,configured:true,locked:false,address,boardingAddress};this.changed();}
-    const balance=await read("balance",()=>adapter.balance(),this.view.balance);
-    const incoming=await read("incoming",()=>adapter.incoming(),this.view.incoming);
+    const {balance,incoming}=await read("balance",()=>adapter.balances(),{balance:this.view.balance,incoming:this.view.incoming});
     const {recoverable,sweeping,small}=await read("recoverable",()=>adapter.expired(),{recoverable:this.view.recoverable,sweeping:this.view.sweeping,small:this.view.small});
     // The expiry is for the move between devices only: one not read leaves the last one, and no error on the card.
     const expiresAt=await this.gate.within(Promise.resolve().then(()=>adapter.expiresAt?.())).catch((error)=>{if(error instanceof ModeChanged)throw error;return this.view.expiresAt;});
     if(this.adapter!==adapter)return;
-    const balancesRead=this.view.read||!failed.some((what)=>what==="balance"||what==="incoming"||what==="recoverable");
+    const balancesRead=this.view.read||!failed.some((what)=>what==="balance"||what==="recoverable");
     const before=this.view;
     this.view={configured:true,locked:false,...(balancesRead?{read:true as const}:{}),automatic:!!this.saved?.deviceKey,network:adapter.config.network,provider:adapter.config.provider,address,boardingAddress,incoming,balance,recoverable,sweeping,small,...(expiresAt!==undefined?{expiresAt}:{}),
       error:failed.length?`Could not read the ${failed.join(", ")} from the Ark provider. Last values may be stale.`:undefined};

@@ -31,6 +31,11 @@ export const APP_RANGE_LIMITS = {
   maxRequest: 0xffff_ffff,
   /** Requests a server takes in flight per app; one more is answered `busy`. An asker keeps the rest waiting. */
   inFlight: 4,
+  /**
+   * The bytes a server takes asks for in one second, its apps together: one more is answered `busy`. Counted as they
+   * are asked, so a cancelled one counts as the read it started. Twice the asking app's own budget (16 MiB a second).
+   */
+  bytesPerSecond: 32 * 1024 * 1024,
 } as const;
 
 /**
@@ -179,6 +184,8 @@ export type AppRangeReadError = "not-served" | "changed" | "gone" | "offline" | 
 export interface AppRangeTask {
   readonly app: string;
   readonly request: number;
+  /** The serve id it came under: the page that served it answers it. */
+  readonly serve: string;
   /** What this side's app served, as it named it (a linked file's id). */
   readonly file: string;
   readonly offset: number;
@@ -209,8 +216,9 @@ const slot = (app: string, request: number) => `${app}:${request}`;
 /**
  * The read lane of one chat, both ways (WISP 1200 § A read lane to the contact). As the side that serves it keeps the
  * serve ids it gave out on this session and answers the contact's `ar-get` for those only, at most
- * `APP_RANGE_LIMITS.inFlight` per app (`busy` past it); the bytes themselves are read and sent by the session, which
- * calls `finish` or `fail` for each task. As the side that asks it sends at most `inFlight` requests per app, keeps
+ * `APP_RANGE_LIMITS.inFlight` per app and `bytesPerSecond` asked in all (`busy` past either); the bytes themselves
+ * are read and sent by the session, which calls `finish` or `fail` for each task. As the side that asks it sends at
+ * most `inFlight` requests per app, keeps
  * the rest waiting, and puts each answer back together, in order, from the offset asked. Serves and requests last one
  * session: `reset` ends them all, `closeApp` those of one app.
  */
@@ -222,8 +230,11 @@ export class AppRanges {
   private readonly asking = new Map<string, Asking>();
   private readonly waiting = new Map<string, Asking[]>();
   private nextRequest = 0;
+  /** The asks taken in the last second (when, how many bytes) and their sum: what `bytesPerSecond` counts. Kept across sessions. */
+  private readonly taken: { at: number; bytes: number }[] = [];
+  private takenBytes = 0;
 
-  constructor(private readonly send: (frame: AppRangeFrame) => void, private readonly newServeId = () => toBase64Url(randomBytes(16))) {}
+  constructor(private readonly send: (frame: AppRangeFrame) => void, private readonly newServeId = () => toBase64Url(randomBytes(16)), private readonly now = Date.now) {}
 
   /** Lets the contact's `app` read `file` on this session: the serve id to tell it. */
   serve(app: string, file: string): string {
@@ -258,6 +269,12 @@ export class AppRanges {
     // A request cancelled but not yet settled still counts: a cancel stops the bytes, not the read under them.
     const inFlight = [...this.serving.values(), ...this.draining].filter(task => task.app === app).length;
     if (inFlight >= APP_RANGE_LIMITS.inFlight) { this.send(appRangeErrorFrame(app, request, "busy")); return null; }
+    // Each ask is a read on this device, cancelled or not: past the bytes a second, nothing more is read.
+    const at = this.now();
+    while (this.taken.length && this.taken[0]!.at <= at - 1000) this.takenBytes -= this.taken.shift()!.bytes;
+    if (this.takenBytes + frame.n > APP_RANGE_LIMITS.bytesPerSecond) { this.send(appRangeErrorFrame(app, request, "busy")); return null; }
+    this.taken.push({ at, bytes: frame.n });
+    this.takenBytes += frame.n;
     const task: Serving = { app, request, serve: frame.s, file: serve.file, offset: frame.o, length: frame.n, live: true };
     this.serving.set(slot(app, request), task);
     return task;

@@ -138,6 +138,9 @@ export function webPerson(actor: Actor): Person {
 /**
  * Finds a button (or link) by what a person reads on it, its `title` or its `aria-label`, and clicks it;
  * throws with what there was instead. Runs in the page: WebDriver's selectors are CSS only.
+ * An off button (`disabled`, or `aria-disabled` as the call buttons are) throws too, so `press` waits for it to come
+ * on as a Playwright click does: clicking it would do nothing, and the test would go on as if it had (a call pressed
+ * before the contact's calls are known never rings).
  */
 const PRESS = `
   const [label, within] = arguments;
@@ -145,8 +148,11 @@ const PRESS = `
   if (!root) throw new Error("nothing at " + within);
   const candidates = [...root.querySelectorAll("button, a, [role=button], [role=tab], [role=radio], [role=switch]")];
   const named = (e) => [e.textContent, e.getAttribute("title"), e.getAttribute("aria-label")].some((t) => t && t.trim() === label);
-  const target = candidates.find(named);
-  if (!target) throw new Error("no button " + JSON.stringify(label));
+  const off = (e) => e.disabled || e.getAttribute("aria-disabled") === "true";
+  const found = candidates.filter(named);
+  if (!found.length) throw new Error("no button " + JSON.stringify(label));
+  const target = found.find((e) => !off(e));
+  if (!target) throw new Error("button " + JSON.stringify(label) + " is off: " + (found[0].getAttribute("title") ?? ""));
   target.click();
 `;
 

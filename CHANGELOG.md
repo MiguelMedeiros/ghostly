@@ -4,6 +4,194 @@
 
 <!-- Notes for the next release. A new entry goes in docs/changelog/unreleased/ (one file per change, see docs/changelog/unreleased/README.md), not here: tools/scripts/bump-version.mjs adds those files below at release and turns this heading into the version. Editing a line already here is fine. -->
 
+## 1.5.1
+
+### Security
+
+- Voice messages: the Save on a voice message that will not play, and the CLI's `file save --dir`, save it under the name Ghostly makes for it ("Ghostly voice <date time>"), never under the name the sender gave it.
+- Files: a received file's name can no longer hide its real extension behind a run of blank characters. Blank fillers are removed, and the spaces inside a name are reduced to one.
+- Apps: the side that serves a file over the read lane (`app-ranges/1`) takes at most 32 MiB of requests a second from one contact, a cancelled request counted as the read it started, so a contact can no longer make this device read without a bound.
+
+### For users
+
+**Apps**
+
+- An app card ("Ana opened Chess") now reads in your language in the chat list, in a reply's quote, the pinned bar, Saved and what a screen reader says: "🧩 App: Chess 1.2.0", not the English line and link sent for older apps.
+- In Japanese and Chinese, a long contact name no longer pushes "sharing a file" out of a mini-app's panel header on a phone: only the name is cut.
+
+**Wallets**
+
+- From the keyboard, Send's Scan, Paste and Choose image keep your place: Paste and Choose image keep the focus while they read, and the focus goes from Scan to the camera's Cancel and back.
+
+### Fixed
+
+**Apps**
+
+- On a phone, after Back to the chat, the "Back to Cinema" line under the chat's header says "sharing a file" too, while a mini-app lets your contact read one of your files.
+
+**Chat**
+
+- Taking a file out of several pasted or dropped into a chat with its × from the keyboard keeps the focus on the sheet: on the × now in its place, on the one before it when it was the last, or on the caption once one file is left. It fell to the page, and a screen reader said nothing.
+- An audio file's status line in a chat reads whole: it wraps under its time instead of being cut with "…", which hid its end even on a desktop ("Waiting for your contact to accept · 26.0 MB" lost its size).
+- A chat's Tech Info is a dialog for the keyboard and a screen reader: the focus goes into it, Tab stays inside, Escape closes it, and closing it gives the focus back to ⋮ instead of dropping it to the page.
+- The round Save button on a file that is not a picture (a PDF, a ZIP, a text file…) can be reached with Tab and pressed with Enter or Space again: it was skipped by the keyboard, so only the message's ⋮ → Download could save it without a mouse.
+- A file's or a video's status line in a chat reads whole on a phone: it wraps to a second line instead of being cut with "…", which hid its end ("Paused by your conta…" lost how far the file was, "Waiting for your contact to acc…" its size). Long languages were cut on a desktop too.
+- On a phone, Saved messages and Tasks have a Back to the chat list, and the Chats tab is lit while they are open. Before, they had no Back and no tab lit.
+- A contact's reactions to messages the chat cannot find by their id (a file's or a payment's, or ids that never were) no longer make the app read the whole chat for each one: such a chat is read at most once every 10 seconds, the first at once, and the reactions that came meanwhile land then. Before, 20 of them read a chat of 10,000 messages whole 20 times.
+- A contact or a group member who deletes for everyone many messages in a row, ones that are here too, no longer makes the app read the whole chat for each one: their quotes are looked for at most once every 10 seconds per chat, the first at once. Before, each removal read the chat whole (234 ms in a group of 10,000 messages), up to three times a second per member.
+- A contact or a group member who deletes for everyone messages that are not here (never came, or said again) no longer makes the app read the whole chat for each one: their quotes are looked for at most once every 10 seconds per chat, the first at once. Before, a burst of them, which anyone in the chat could send, read a long chat whole three times a second.
+- A contact's message I had already deleted here, then deleted by its author for everyone, no longer keeps its text in my replies that quote it: the quote says the original was deleted, as it does when the message was still here.
+- Recording a voice message hands-free, Enter on the bin, Pause or Play reached with the keyboard presses that button: Enter on the bin sent the recording you were throwing away. Enter anywhere else still sends, as it does after a click on Resume.
+
+**Groups**
+
+- In a community, Delete for everyone takes the message off every member's device, not only off yours, and a member who catches up later does not get it back.
+- A private group's file that was coming from a member whose app closed mid-way now goes on from another member who has it as soon as one is in reach, from the part already here. Before, it stood still for about 30 seconds after the last byte, even with the sender online all that time.
+- An app with no WebRTC (the CLI, or any app on a VPN) in many private groups no longer stalls every 15 seconds: each group connection waiting for a native listener read every group's whole member list, so twenty groups of fifteen blocked the app for 1.8 seconds per round. It now reads only the group it decides on (about 70 ms).
+- Removed from a group while typing, the keyboard focus moves to the line that says so instead of falling back to the top of the page.
+
+**Everywhere**
+
+- An app over its relays' request budget no longer rebuilds and signs a held-back background packet every 4 seconds: it sends it again when the budget frees room for it (up to a minute). An idle app in several groups spent most of its publishing work on packets the budget refused again. Messages, offers and answers keep their turn as before.
+- Reading a QR from a picture (Open image in Join, Choose image in Send on the Lightning and Cashu cards, or a pasted or dropped screenshot) no longer freezes the app while it looks. Before, a phone photo held the app for most of a second on a desktop, and for seconds on a phone.
+- Scanning a QR with the camera (Join, and Send on the Lightning and Cashu cards) no longer makes the app stutter. Each camera frame is now read off to the side, so the app keeps answering while it looks. Before, every frame held the app for 40 to 220 ms on a desktop, and more on a phone or in low light.
+
+**Wallets**
+
+- Send on the Lightning and Cashu cards now reads a `bitcoin:` link the way the chat does. It refuses a link that must not be paid: one with a `req-` parameter the app does not understand, or an amount it cannot read. It also leaves out a Lightning invoice that is not the same payment as its link (another amount or another network). Before, a scan or a paste of such a link went straight to the review of its invoice.
+
+### For developers
+
+**Apps**
+
+- On the read lane (`app-ranges/1`), a request number the contact cancelled and asks again gets the bytes of its new ask. The page's late answer to the first ask used to go out as the second's (another file's bytes and size), and the first ask kept one of its app's 4 places for the rest of the session.
+
+## 1.5.0
+
+Saved messages, Delete for everyone, a wallet Send that scans a QR code, a tidier chat menu, and apps that let your contact read a file you picked.
+
+### Security
+
+- CLI on Windows: a command sends nothing to the profile's daemon until the daemon has proved itself first, so another account listening on the daemon's pipe gets nothing it could act on.
+- CLI: a contact's web app opened with `ghostly service open` can no longer reach this machine's other services, or the local network, over plain http.
+- Desktop: the sign-in listener serves only a few connections at once, each within a time limit, so a flood of connections can no longer hold it.
+- Communities: a member refuses a membership change that would pass the history's limit or leave no room for everyone to get out, whoever signed it.
+- Communities: a member's leave ends only the admission it was signed for (WISP 903), so a copy of an old leave can no longer take them out again after they rejoin.
+
+### For users
+
+**Apps**
+
+- While a mini-app lets your contact read one of the files you picked for it (a film in Cinema, say), its panel says so under its name: "sharing a file with Ana". It stops as soon as either of you closes the app.
+
+**Chat**
+
+- A chat's ⋮ menu is in groups: Search, Mute and Pin first, then the contact's identities and a bot's Tasks, then the rarer rows, and Delete chat apart at the end. On a phone the rarer rows (Move to folder, Hold messages, Refresh, Tech Info) are behind More…, and Tasks and the count on ⋮ show only while a task or routine is going.
+- Move up and Move down left the chat's menu: put pinned chats in order in the chat list by dragging them, or with Alt+↑ and Alt+↓ on a focused row.
+- A message's delete confirmation, opened from the keyboard, takes the focus on Cancel; Tab and the arrow keys reach Delete, and Escape goes back to the message's ⋮. Before, the focus stayed behind it and Tab never reached Delete.
+- A message of yours has **Delete for everyone** in its ⋮, in a chat and in a group: a text, a task card, a file or a voice message goes from your contact's or every member's devices too, not only from this one, and someone who is away gets it when they are back. Payments can't be taken back this way. An app from before this shows "🗑 Message removed" in its place, and a copy someone saved stays theirs. Delete (only here) works as before.
+- Deleting a message from the keyboard (Delete, or Delete for everyone) leaves the focus in the chat, on the ⋮ of the message now in its place (or the one before it at the end), instead of dropping it to the page.
+- `ghostly message delete <chat|group> <message> --everyone` deletes a message of yours (a text, a card, a file or a voice message) from every member's device, app and CLI, not only this one; a contact or a member who is away gets it when they are back. Payments can't be taken back this way. Without `--everyone`, only this device forgets it, as before.
+- Save a message from its ⋮ menu, in a 1:1 chat or a group, to find it again in the Saved view; the same menu then says Unsave. Saved messages stay with the profile on this device after a restart, and your contacts never see them (public request #3213).
+- A Saved view lists the messages you saved from every chat and group, the last saved first, with the chat, who wrote each one and when. A row opens its chat at the message, and its bookmark button unsaves it. It is reached from above the chat list while something is saved. Saved messages stay with the profile on this device and are never sent (public request #3213).
+- In Saved messages, Unsave from the keyboard moves the focus to the row now in its place (the one before it at the end of the list), or to the empty list, instead of dropping it to the page.
+- In Saved messages, a saved voice message or video reads in the app's language, as the chat list says it, not always in English.
+
+**Wallets**
+
+- Send on the Lightning and Cashu cards works like a phone wallet: scan a QR with the camera, paste, choose a picture of a QR or type. An invoice goes straight to a review with its amount, fee and description, then one Pay. A Lightning address or LNURL asks for the amount, now with your balance and a Max button. Invoices inside a `bitcoin:` link are paid by their Lightning part.
+
+**Everywhere**
+
+- The web app opens a web app a contact shares with you, full screen, on an address of its own, over the chat's live link. A server that hosts the web app turns it on with a wildcard name for those apps (`GHOSTLY_SERVICES_HOST` and `GHOSTLY_SERVICES_APP_ORIGIN` in `infra/docker-compose.yml`); without one, the web app says opening needs the extension or the desktop app, as before. While it is open, the keyboard stays in it (Tab never reaches the chat hidden under it), and closing it puts the focus back on its Open button.
+
+### Fixed
+
+**Android**
+
+- A file shared to Ghostly from another app while the phone is full no longer reads as one Ghostly could not read: the Share to… picker says there is no room on this device for it, and to free some space, then share it again.
+
+**Calls**
+
+- On a phone, the small window of a video call shows the call's clock whole again: it was centred up to the window's right edge, and its last digits ran under your own camera's preview.
+- A call that ends in its small window, from its End call or by your contact while you were on its buttons, gives the keyboard focus back where it was before the call instead of dropping it to the top of the page.
+- On a phone, in a video call, the notice that your contact is sharing their screen is no longer hidden behind your own picture: it reads in full below it.
+
+**Chat**
+
+- A chat running a mini app, or on a call, is marked as on screen again when you come back to it from a group or another chat. Before, it was no longer marked, so another chat could take its native connection while you were using it.
+- Searching the chat list no longer slows the app while chats are busy: each message's text is prepared for the search once, not again every time anything changes (about 100 ms each time with 100,000 messages).
+- On the Desktop, a chat over HyperDHT no longer holds its messages while it is still dialing a contact whose app just went away, and a burst of short messages (a catch-up after a reconnect) no longer closes the chat's connection and loses them.
+- The chat list's reaction line ("You reacted 👍 to …") no longer keeps quoting a message once it is deleted, here or by its author for everyone. It goes back to the reaction before it that still stands, or to the last message. Before, the deleted text stayed in the chat list, and in a chat's stored copy, until a newer reaction came.
+- Saved messages are read again only when a chat or a group comes or goes. Before, a message that moved a group up the list read every saved message again, with each of its rows: with 200 saved, about 10 ms and 108 KB each time, on most group messages.
+- A voice message or audio file that is playing stops, and the bar at the top goes, when you delete or leave the chat or group it is from.
+
+**CLI**
+
+- An argument that takes one of a few words, given another, is a usage error (exit 2) that names it and its words, before the profile opens: `ghostly wallet create weird` says `<type> takes cashu, lightning, arkade, bark, spark, bitcoin, fedimint or usdt, not "weird"`, and so do `wallet remove`, `wallet faucet`, `wallet address`, `chat accept <chat> <method>` and `chat transport <chat> <transport>`. Before, it opened the profile and the API answered `bad_request` (exit 1) in its parameter's words, `type must be one of …`. The socket API keeps its answer.
+- `ghostly task send`/`update`, `routine send`/`update` and `usage send` answer a wrong `--status` or `--state`, or a `--title`, `--step`, `--branch`, `--tag`, `--item`, `--link`, `--name`, `--schedule`, `--cron`, `--run` summary, `--label`, `--account`, `--window` or `--also` that is blank, too long or given too many times, as a usage error (exit 2) that names the flag and says what it takes (`--title takes at most 120 characters, not 130`), as their other flags do. Before, it was `bad_request` (exit 1) in the card's own words, with the whole card in its details. A card given with `--json` is still checked in the card's words.
+- `ghostly message delete <group> <message>` without `--everyone` no longer answers `No chat "<group>"`: it says the name is a group and gives the command that deletes its message, with `--everyone`. The usage line reads `message delete <chat|group> <message> [--everyone]`.
+
+**Devices**
+
+- Cancel on a move to another device keeps the keyboard focus while it runs. Once the move stopped, the focus goes to the move's words, or to that device's Move to in Profile, Devices. It used to drop to the page, so Tab started again from the top. A Cancel the app could not do now says why under the button, where before nothing changed and nothing was said.
+
+**Everywhere**
+
+- In the browser extension, each tab opened or reloaded no longer gets every chat's whole history from the extension's peer: it gets each chat's newest 400 messages, and the rest of a chat when it opens one or searches the chat list. With 50 chats of 2,000 messages that was about 15 to 20 MB of text taken apart again in every tab, before the chats showed.
+- Join's Reload, offered when its QR reader could not be loaded, now brings Ghostly back with Join open and the camera on, instead of on the chat list with Join closed.
+- Turning the network back on, or a device of a device set getting its turn at start, starts the chats as an app start does: the ones live most recently first, a few at a time so the app stays responsive, without reading every chat's history again.
+- Settings → Audio & video's Allow no longer does nothing when the microphone and camera are refused: it says they are blocked and where to allow them. On an iPhone or iPad, where iOS refuses at once with no prompt once Safari's Microphone is set to Deny, the line points to Settings → Apps → Safari, and so do a refused voice message and a refused call. The microphone test and the camera preview say the same when refused.
+- The Reload that Join and the emoji panel offer when a part of Ghostly could not be loaded now says so when Ghostly's server can't be reached, instead of doing nothing without a word.
+
+**Groups**
+
+- A file or voice message sent in a private group by a member whose app had not yet heard that someone joined now reaches the new member too. Before, the new member saw the file's message but it waited for good with "Nobody you are connected to has this file yet", and Ask again did nothing.
+
+**Wallets**
+
+- On Testnet, when a contact pays an invoice from your wallet's Receive screen from its card in your chat, their app now keeps the word that it paid until your app can take it (yours closed or offline, or their payment still going through), and two invoices paid one right after the other are both received. Before, that word was sent once, and a missed one left your screen on "Waiting for the payment…".
+- An ecash token card whose token was already spent elsewhere (by the contact, someone they sent it to, or this device on 1.3.2) reads "Already spent" when you tap Redeem, and no longer offers Redeem. It used to read Redeemed, as if the money had come into your wallet.
+- The Wallets page (its cards and the open wallet) is drawn again only when the wallets change. Before, it was drawn again on every change in the app, up to 20 times a second while a file moved or someone typed in a chat: with every kind of wallet open, about 6 ms of work each time, now none.
+
+### For developers
+
+- `@ghostlytools/sdk/app` types the read lane an app will use to let the same app on the contact's side read a file the person picked: `ghostly.files.serve` and `files.unserve`, and on the other side `ghostly.remote.read` and `remote.stat`, with the new refusal code `not-served` and the limit `remoteReadBytes` (1 MiB). Ghostly does not answer them yet.
+- The read lane through which a contact's mini-app reads a file this side's app serves (`app-ranges/1` in WISP 1200) now has its frames and its binary chunk (kind `0x05`) read and written in `@ghostly/core`, with vectors. Nothing offers it yet: a later change carries it on the session.
+- The first pull request of a batch the merge train lands on dev no longer pays a full CI run of its own: its run started before the next push arrived, so nothing cancelled it, and it tested a tree dev left seconds later. A push to dev whose tree no green run tested now looks at dev's head (once more after 15 s): when dev already holds a newer commit above it and CI has a push run for that commit, it runs only Tauri Backend, as a tested tree does. A landing that stopped there, a force push or any doubt still runs everything. On 2026-10-18 this was 5 batches in 5 hours, about 280 Linux and 30 macOS runner-minutes.
+- CI's four packages test shards take about the same time again. The shard that ran @ghostly/browser took a median 503 s against 150 to 262 s for the others, and set the length of every full CI run: a package was never cut, and browser had grown to over a third of all the packages' test time (one file, groupFilesBack.test.ts, takes 253 s), while the recorded test times were from 2026-10-01. A package heavier than one shard's fair share is now cut by its files across the shards, and the times are recorded again from CI's reports of 2026-10-18: the three shards beside twoPeers plan 707 s of test time each, where they planned 1,048, 649 and 428 s.
+- A page can attach to the engine with only each chat's newest page (`EngineServer.attach(client, read, { newest })`), and ask for one chat's whole history when it needs it (a `{ kind: "history", linkId }` message, which the host hands to `EngineServer.history`: that chat's `messages` event comes back, in order with its changes). A `messages` event that holds only the newest page says so with `more: true`. Nothing attaches this way yet: the extension's pages will, so that opening a tab no longer sends every chat's whole history across (about 15 MB for 50 chats of 2,000 messages, against 0.4 MB for their newest 50).
+- While the merge train holds a batch for company, each held pull request's position comment says so: how many can board, how many the batch waits for, and the time after which it leaves at the train's next run. Before, only the train's log said it, and the comment read "1st" with no reason, like one about to board.
+- The merge train no longer stops the whole line when GitHub has no `refs/pull/<n>/head` for one queued pull request: it fetches that one's head from its branch, and a pull request it cannot fetch at all leaves the line with `queue:failed` and a comment while the rest go on.
+- A batch the merge train holds for company now leaves within about a minute of its time (15 minutes after the oldest could board): the run that holds it has the workflow start the train again then. Before, it waited for GitHub's 5-minute schedule, which GitHub runs only every 10 to 30 minutes, so a held batch could leave up to ~45 minutes late.
+- The npm packages publish with trusted publishing (OIDC) only: `npm-publish.yml` no longer reads an npm token, and docs/RELEASING.md says how the packages refuse one.
+- The security autorelease workflow is retired: a tag ruleset on `v*` now lets only a person create release tags, so a security fix ships in a patch release cut by hand.
+- A page that gets a chat's newest page from the engine (a `messages` event with `more`) keeps it as part of the chat, not the whole of it: what came goes into the chat, and the chat still says how many older messages it left out. `engine.whole(linkId)` says which kind a page has, `engine.askWhole(linkId)` asks the engine for the rest (once per connection), and `engine.keepWhole(linkId)` holds a chat whole for a reader that shows all of it, asking again whenever only its newest page comes. The page asks by itself when the newest page and what the chat holds do not make its whole history together. Nothing sends a newest page yet.
+- On the read lane (`app-ranges/1`), a request the contact cancels keeps its place among its app's 4 in flight until this side has stopped reading and sending it. A loop of `ar-get` and `ar-cancel` used to free each place at once and start a new read of up to 1 MiB every time; past 4 it is now answered `busy`.
+- On the read lane (`app-ranges/1`), an app's requests in flight ask for room again right before each chunk, so a native channel stays at files' line instead of filling to its budget when they all wake on one drain. A chunk the channel refuses is sent again later, as a file's is. It used to be dropped, and the contact's read never settled.
+- The open chat and the chat list's search hold the whole histories they read (`engine.keepWhole`): where the engine sends a page only each chat's newest page, the rest of the chat that opens, or of every chat while a search lasts, is asked for then. Nothing sends a newest page yet.
+
+**Apps**
+
+- A mini-app granted `files` and `chat` can let the same app on the contact's side read one of the files the person picked, in a chat open on both sides: `ghostly.files.serve(id)` gives a serve id to pass along, `files.unserve` ends it, and the contact's app reads it with `ghostly.remote.read(serveId, {offset, length})` (up to 1 MiB a call) and `remote.stat`. The bytes travel on the chat's own connection beside files, not through `chat.send`'s 32 KiB frames.
+- `ghostly.files.serve(id)` looks up the one file it serves, not every file the app keeps: in a library of 100,000 files one serve no longer spends the app's 16 MiB a second of reads, so the next serve and the app's own reads answer in the same second.
+- A mini-app's `ghostly.remote.read` and `remote.stat` wait for the contact only: while one waits, the app's own `file`, `files.read`, `files.list` and `files.serve` answer as before. A contact that never answered a range held every file read of the app until it closed. The contact's reads still go one at a time and count in the app's 16 MiB a second.
+
+**CLI**
+
+- `call start`, `call answer` and `call auto on` refuse a `--rate` no call takes (`--rate 44100`) as a usage error (exit 2) that names the flag and the five rates, before the profile opens. Before, the API answered it with exit 1, `bad_request`, "rate must be 8000, 12000, 16000, 24000 or 48000", and `call answer` only once a call rang.
+- A flag that takes one of a few words, `--network`, `--wait`, `--until`, `chat request --rail` and `chat pay-request --via`, refuses any other word (or "") as a usage error (exit 2) that names the flag and lists its words, before the profile opens: `--network takes mainnet or testnet, not "weird"`. Before, the API answered it after the profile opened, with exit 1, `bad_request`, "network must be one of mainnet, testnet". The socket API keeps its own words.
+- The CLI's README says what `message.deleted` and `group.deleted` carry (`group.deleted` is a group's message deleted, here or for everyone by its author, not the group), and that the secret guard also holds on the memo of `chat pay` and `chat request`.
+- `ghostly saved add|remove <chat|group> <message>` saves and unsaves a message of a chat or a group, and `ghostly saved list` lists the saved ones, the last saved first, each as it is now with its `chat` or `group` and `savedAt`. The marks stay with the profile on this device, never sent; a deleted message drops out (public request #3213).
+
+**Chat**
+
+- WISP 405: a bot can take back a task or routine card it sent by editing its message into a removed card (`{"kind":"removed","id":…,"of":"task"}`). Every app shows no card for it and counts it in no Tasks view; an older app shows its text, "🗑 Task removed: …".
+
+### Thanks
+
+- Thanks to @vforvilela for the security reports fixed in this release.
+
 ## 1.4.5
 
 ### Fixed

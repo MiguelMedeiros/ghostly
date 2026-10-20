@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { parseLightningDestination } from "@ghostly/core";
 import type { LightningAddressInfo, WalletPlatform } from "../../lib/platform";
-import { CASHU_MINT_SOURCE, holdsLess } from "../walletCardData";
+import { CASHU_MINT_SOURCE, holdsLess, spendable } from "../walletCardData";
 import { ConfirmRealMoney } from "../ConfirmRealMoney";
 import { externalLinkProps } from "../../lib/externalLink";
 import { useI18n } from "../../contexts/I18nContext";
@@ -119,6 +119,11 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
   }
 
   const fixed = info.minSat === info.maxSat;
+  // What the paying card holds, and the most of it this address takes (Max): the review still says when the fee
+  // makes it too much.
+  const state = wallet.getState();
+  const holds = state ? spendable(via === "cashu" ? "cashu" : "lightning", state) : undefined;
+  const max = holds === undefined ? undefined : Math.min(holds, info.maxSat);
   // Not a <form>: this panel lives inside the wallet's Send form, and a form in a form submits the page.
   const getInvoice = () => { if (!busy && Number(amount)) void run(async () => {
     const got = await wallet.lightningAddressInvoice(info.id, Number(amount), comment || undefined);
@@ -141,6 +146,10 @@ export function LightningAddressPay({ wallet, text, via, onDone, dense }: { wall
         <span className="text-xs opacity-70 shrink-0">{unit}</span>
       </label>
       {amountField.hint && <p role="alert" className="text-xs m-0 text-danger-ink" data-testid="amount-unclear">{amountField.hint}</p>}
+      {holds !== undefined && <p className={`${muted} flex flex-wrap items-center gap-2`} data-testid="lnurl-balance">
+        {t("wallet.send.balance", { amount: formatAmount(holds, t.language), unit })}
+        {!fixed && max !== undefined && max >= info.minSat && <button type="button" className="rounded-md px-2 py-0.5 font-bold bg-black/20 hover:bg-black/30 cursor-pointer disabled:opacity-40" disabled={busy} data-testid="lnurl-max" onClick={() => setAmount(String(max))}>{t("wallet.send.max")}</button>}
+      </p>}
       {info.commentAllowed > 0 && <input data-testid="lnurl-comment" className={field} placeholder={t("wallet.lightning.commentFor", { to: info.text })} maxLength={info.commentAllowed} value={comment} onChange={(e) => setComment(e.target.value)} {...composition.inputProps} onKeyDown={onEnter} />}
       <div className="flex flex-wrap gap-2">
         <button type="button" className={primary} disabled={!Number(amount)} {...working} data-testid="lnurl-invoice" onClick={getInvoice}>{busy ? t("wallet.lightning.askingInvoice") : t("wallet.lightning.getInvoice")}</button>

@@ -68,6 +68,7 @@
     "audioFailed": "Impossibile connettere la chiamata vocale",
     "audioIncoming": "Chiamata vocale in arrivo",
     "audioMissed": "Chiamata vocale persa",
+    "audioMissedMany": "{{count}} chiamate vocali perse",
     "audioStarted": "Chiamata vocale avviata",
     "audioUnanswered": "Chiamata vocale senza risposta",
     "videoCancelled": "Videochiamata annullata",
@@ -77,6 +78,7 @@
     "videoFailed": "Impossibile connettere la videochiamata",
     "videoIncoming": "Videochiamata in arrivo",
     "videoMissed": "Videochiamata persa",
+    "videoMissedMany": "{{count}} videochiamate perse",
     "videoStarted": "Videochiamata avviata",
     "videoUnanswered": "Videochiamata senza risposta"
   },

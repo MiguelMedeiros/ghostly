@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 // From its own module, not the package: the command table is read by every command, and the package is all of the
 // protocol (~100 ms to load), which a command a daemon answers never needs.
-import { ITEM_STATES, PR_CHECKS, PR_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, cardUrl } from "@ghostly/core/statusCards";
+import { CRON_LINE, ITEM_STATES, PR_CHECKS, PR_STATES, ROUTINE_STATES, RUN_RESULTS, STATUS_CARD_LIMITS, TASK_STATUSES, cardLine, cardUrl } from "@ghostly/core/statusCards";
 import type { OptionSpec, Parsed } from "../args";
 import { CliError, localFileError } from "../errors";
 import { userPath } from "../profiles";
@@ -17,6 +17,8 @@ export interface Command {
   options?: Record<string, OptionSpec>;
   /** Positionals, in order; a trailing `...` one takes the rest joined by spaces. */
   args?: string[];
+  /** The words a positional takes, by its name in `args`: any other is a usage error before the profile opens. */
+  words?: Record<string, readonly string[]>;
   params?: (parsed: Parsed, args: Record<string, string | undefined>) => Record<string, unknown>;
   /**
    * A command that runs here, on files, with no profile or daemon (the publisher tools of WISP 1200): its answer is
@@ -26,15 +28,15 @@ export interface Command {
 }
 
 export const wait: Record<string, OptionSpec> = {
-  wait: { type: "string", description: "none, sent or delivered (default: none with a daemon, sent without)" },
+  wait: { type: "string", choices: ["none", "sent", "delivered"], description: "none, sent or delivered (default: none with a daemon, sent without)" },
   timeout: { type: "number", description: "Seconds to wait (default 30)" },
 };
 /** A group has no receipts: `sent` waits until an edge took the frame (a member's, or one of my hubs'). */
 export const groupWait: Record<string, OptionSpec> = {
-  wait: { type: "string", description: "none or sent: until an edge took it (default none)" },
+  wait: { type: "string", choices: ["none", "sent"], description: "none or sent: until an edge took it (default none)" },
   timeout: { type: "number", description: "Seconds to wait (default 30)" },
 };
-export const net: OptionSpec = { type: "string", description: "mainnet or testnet (default testnet)" };
+export const net: OptionSpec = { type: "string", choices: ["mainnet", "testnet"], description: "mainnet or testnet (default testnet)" };
 export const card: OptionSpec = { type: "string", description: "A Lightning card (its id; default: the network's default)" };
 export const memo: OptionSpec = { type: "string", description: "What it is for (up to 140 characters)" };
 export const confirmReal: OptionSpec = { type: "boolean", description: "Confirm a Mainnet (real money) spend" };
@@ -156,13 +158,40 @@ export const cardOptions: Record<string, OptionSpec> = {
 /** `--link label=https://…` or a bare link, as a card's links. */
 export function cardLinks(values: unknown): { url: string; label?: string }[] | undefined {
   if (!Array.isArray(values) || !values.length) return undefined;
+  given("link", values, STATUS_CARD_LIMITS.links);
   return (values as string[]).map((value) => {
     const eq = value.indexOf("=");
-    return eq > 0 && !value.slice(0, eq).includes(":") ? { label: value.slice(0, eq), url: value.slice(eq + 1) } : { url: value };
+    const link = eq > 0 && !value.slice(0, eq).includes(":") ? { label: value.slice(0, eq), url: value.slice(eq + 1) } : { url: value };
+    if (!cardUrl(link.url)) throw new CliError("usage", `--link takes an https link of at most ${STATUS_CARD_LIMITS.url} characters, or label=link, not ${JSON.stringify(value)}`);
+    cardText("--link's label", link.label, STATUS_CARD_LIMITS.linkLabel, value);
+    return link;
   });
 }
 
-const listed = (words: readonly string[]) => `${words.slice(0, -1).join(", ")} or ${words.at(-1)}`;
+export const listed = (words: readonly string[]) => `${words.slice(0, -1).join(", ")} or ${words.at(-1)}`;
+
+/**
+ * A text flag as the card counts it (one line, the display rules): blank, or longer than `max`, is a usage error (exit 2)
+ * that names the flag. Before, it reached the card's own check and failed as `bad_request` (exit 1) in the card's words
+ * ("Status card: title is at most 120 characters"), the whole card in its details. `shown` is what the flag was given.
+ */
+function cardText(flag: string, value: unknown, max: number, shown = value): void {
+  if (value === undefined) return;
+  const line = cardLine(String(value), Infinity);
+  if (!line) throw new CliError("usage", `${flag} takes text, not ${JSON.stringify(shown)}`);
+  const length = [...line].length;
+  if (length > max) throw new CliError("usage", `${flag} takes at most ${max} characters, not ${length}`);
+}
+
+/** `--status`, `--state`, `--pr-state`, `--pr-checks`: one of their words, or a usage error that lists them. */
+function oneWord(options: Parsed["options"], flag: string, words: readonly string[]): void {
+  if (options[flag] !== undefined && !words.includes(options[flag] as string)) throw new CliError("usage", `--${flag} takes ${listed(words)}, not ${JSON.stringify(options[flag])}`);
+}
+
+/** A flag given more times than the card holds: a usage error that says how many it takes. */
+function given(flag: string, values: unknown, max: number): void {
+  if (Array.isArray(values) && values.length > max) throw new CliError("usage", `--${flag} is given at most ${max} times, not ${values.length}`);
+}
 
 /**
  * `--item state:text` as a task's item. The word before the first colon is the state when it is one lowercase word (and
@@ -173,10 +202,15 @@ const listed = (words: readonly string[]) => `${words.slice(0, -1).join(", ")} o
 export function itemOf(value: string): { state: string; text: string } {
   const colon = value.indexOf(":");
   const word = colon > 0 ? value.slice(0, colon) : "";
-  if (!/^[a-z]+$/.test(word) || value.startsWith("//", colon + 1)) return { state: "pending", text: value };
+  if (!/^[a-z]+$/.test(word) || value.startsWith("//", colon + 1)) {
+    cardText("--item's text", value, STATUS_CARD_LIMITS.line);
+    return { state: "pending", text: value };
+  }
   if (!(ITEM_STATES as readonly string[]).includes(word))
     throw new CliError("usage", `--item takes state:text, and ${JSON.stringify(word)} is not a state: use ${listed(ITEM_STATES)} (pending:<text> keeps a colon in the text), not ${JSON.stringify(value)}`);
-  return { state: word, text: value.slice(colon + 1).trim() };
+  const text = value.slice(colon + 1).trim();
+  cardText("--item's text", text, STATUS_CARD_LIMITS.line, value);
+  return { state: word, text };
 }
 
 /** `--progress`, `--left`: a percent, or a usage error that names the flag. */
@@ -196,6 +230,10 @@ const PR_FLAGS = [["pr-url", "url"], ["pr-number", "number"], ["additions", "add
 export function taskFields(options: Parsed["options"]): Record<string, unknown> {
   const fields: Record<string, unknown> = { ...cardJson(options.json) };
   const set = (key: string, value: unknown) => { if (value !== undefined) fields[key] = value; };
+  cardText("--title", options.title, STATUS_CARD_LIMITS.title);
+  cardText("--step", options.step, STATUS_CARD_LIMITS.line);
+  cardText("--branch", options.branch, STATUS_CARD_LIMITS.branch);
+  for (const [flag, words] of [["status", TASK_STATUSES], ["pr-state", PR_STATES], ["pr-checks", PR_CHECKS]] as const) oneWord(options, flag, words);
   set("id", options.id);
   set("title", options.title);
   set("status", options.status);
@@ -211,14 +249,22 @@ export function taskFields(options: Parsed["options"]): Record<string, unknown> 
     if (Number(match[2]) < 1 || Number(match[1]) > Number(match[2])) throw new CliError("usage", `--steps takes done/total with done at most total, like 2/5, not ${JSON.stringify(options.steps)}`);
   }
   if (options["pr-url"] !== undefined && !cardUrl(options["pr-url"])) throw new CliError("usage", `--pr-url takes an https link of at most ${STATUS_CARD_LIMITS.url} characters, not ${JSON.stringify(options["pr-url"])}`);
-  for (const [flag, words] of [["pr-state", PR_STATES], ["pr-checks", PR_CHECKS]] as const)
-    if (options[flag] !== undefined && !(words as readonly unknown[]).includes(options[flag])) throw new CliError("usage", `--${flag} takes ${listed(words)}, not ${JSON.stringify(options[flag])}`);
   const pr: Record<string, unknown> = {};
   for (const [flag, key] of PR_FLAGS) if (options[flag] !== undefined) pr[key] = options[flag];
   if (Object.keys(pr).length) fields.pr = { ...(fields.pr && typeof fields.pr === "object" ? fields.pr as object : {}), ...pr };
+  given("item", options.item, STATUS_CARD_LIMITS.items);
   if (Array.isArray(options.item) && options.item.length) fields.items = (options.item as string[]).map(itemOf);
-  if (Array.isArray(options.tag) && options.tag.length > STATUS_CARD_LIMITS.tags) throw new CliError("usage", `--tag is given at most ${STATUS_CARD_LIMITS.tags} times, not ${options.tag.length}`);
-  if (Array.isArray(options.tag) && options.tag.length) fields.tags = options.tag as string[];
+  given("tag", options.tag, STATUS_CARD_LIMITS.tags);
+  if (Array.isArray(options.tag) && options.tag.length) {
+    const seen = new Set<string>();
+    for (const tag of options.tag as string[]) {
+      cardText("--tag", tag, STATUS_CARD_LIMITS.tag);
+      const clean = cardLine(tag, Infinity)!;
+      if (seen.has(clean)) throw new CliError("usage", `--tag ${JSON.stringify(clean)} is given twice`);
+      seen.add(clean);
+    }
+    fields.tags = options.tag as string[];
+  }
   set("parent", options.parent);
   const links = cardLinks(options.link);
   if (links) fields.links = links;
@@ -272,12 +318,21 @@ export function runOf(value: unknown): { result: string; summary?: string } | un
   const text = String(value), colon = text.indexOf(":");
   const result = colon === -1 ? text : text.slice(0, colon), summary = colon === -1 ? "" : text.slice(colon + 1).trim();
   if (!(RUN_RESULTS as readonly string[]).includes(result)) throw new CliError("usage", `--run takes ok, failed or skipped, and :a summary after it if you like, not ${JSON.stringify(value)}`);
+  if (summary) cardText("--run's summary", summary, STATUS_CARD_LIMITS.line);
   return { result, ...(summary && { summary }) };
 }
 
 /** A routine's fields from its flags; what was not given is left out. */
 export function routineFields(options: Parsed["options"]): Record<string, unknown> {
   const fields: Record<string, unknown> = { ...cardJson(options.json) };
+  cardText("--name", options.name, STATUS_CARD_LIMITS.title);
+  cardText("--schedule", options.schedule, STATUS_CARD_LIMITS.schedule);
+  if (options.cron !== undefined && !CRON_LINE.test(String(options.cron).trim())) {
+    const length = [...String(options.cron).trim()].length;
+    throw new CliError("usage", length > STATUS_CARD_LIMITS.cron ? `--cron takes at most ${STATUS_CARD_LIMITS.cron} characters, not ${length}`
+      : `--cron takes a cron line of 0-9 A-Z a-z * , / ? # - and spaces, not ${JSON.stringify(options.cron)}`);
+  }
+  oneWord(options, "state", ROUTINE_STATES);
   for (const key of ["id", "name", "schedule", "cron", "state"] as const) if (options[key] !== undefined) fields[key] = options[key];
   const next = cardTime(options.next, "next");
   if (next !== undefined) fields.nextRunAt = next;
@@ -325,6 +380,8 @@ export const taskOptions: Record<string, OptionSpec> = {
 export function usageWindowOf(value: string): { window: string; left: number; resetsAt?: number } {
   const match = /^([^=]+)=(\d+(?:\.\d+)?)(?:@(.+))?$/.exec(value.trim());
   if (!match) throw new CliError("usage", `--also takes window=percent or window=percent@time, like week=80@2026-10-10T00:00:00Z, not ${JSON.stringify(value)}`);
+  cardText("--also's window", match[1], STATUS_CARD_LIMITS.usageWindow, value);
+  if (Number(match[2]) > 100) throw new CliError("usage", `--also takes a percent from 0 to 100, not ${match[2]}`);
   const resetsAt = cardTime(match[3], "also");
   return { window: match[1].trim(), left: Number(match[2]), ...(resetsAt !== undefined && { resetsAt }) };
 }
@@ -334,6 +391,8 @@ export function usageFields(options: Parsed["options"]): Record<string, unknown>
   const fields: Record<string, unknown> = { ...cardJson(options.json) };
   percent(options, "left");
   if (options.left !== undefined && (options.used !== undefined || options.limit !== undefined)) throw new CliError("usage", "--left or --used with --limit, not both");
+  for (const [flag, max] of [["label", STATUS_CARD_LIMITS.usageLabel], ["account", STATUS_CARD_LIMITS.usageLabel], ["window", STATUS_CARD_LIMITS.usageWindow]] as const) cardText(`--${flag}`, options[flag], max);
+  given("also", options.also, STATUS_CARD_LIMITS.usageWindows);
   for (const key of ["id", "left", "used", "limit", "label", "account", "window"] as const) if (options[key] !== undefined) fields[key] = options[key];
   const resets = cardTime(options.resets, "resets");
   if (resets !== undefined) fields.resetsAt = resets;

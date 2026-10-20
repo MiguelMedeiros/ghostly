@@ -5,7 +5,7 @@ import { MessageBubble } from "../../components/MessageBubble";
 import { RoutineStack } from "../../components/chat/RoutineCard";
 import { TasksButton } from "../../components/chat/TasksButton";
 import { jumpToMessage, messageSnippet, quoteFor, replyIndex } from "../../lib/replies";
-import { activeTaskCount, cardEntries, durationIn, panelModel, routineStacks, routineSummary, taskElapsed, type CardRow } from "../../lib/statusCards";
+import { activeTaskCount, cardEntries, durationIn, goingCardCount, panelModel, routineStacks, routineSummary, taskElapsed, type CardRow } from "../../lib/statusCards";
 import type { ChatMessage } from "../../lib/types";
 import { renderApp } from "../render";
 
@@ -373,6 +373,10 @@ describe("the chat's cards", () => {
     const entries = cardEntries(rows);
     expect(entries.map(e => [e.messageId, e.card.id, e.author])).toEqual([["m6", "a", "me"], ["m4", "a", "peer"], ["m2", "b", "peer"], ["m3", "r", "peer"]]);
     expect(activeTaskCount(entries)).toBe(2);
+    // A phone's ⋮ counts the routines not paused too.
+    expect(goingCardCount(entries)).toBe(3);
+    expect(goingCardCount(cardEntries([row("m7", card({ status: "done" })),
+      row("m8", readStatusCard({ kind: "routine", id: "w", name: "Weekly", schedule: "weekly", state: "paused" }))]))).toBe(0);
   });
 });
 

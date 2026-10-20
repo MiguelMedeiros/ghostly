@@ -80,6 +80,8 @@
     "allow": "允许",
     "camera": "摄像头",
     "cameraInfo": "用于通话和拍照。保存在此设备的此资料中。",
+    "denied": "已被阻止。请在浏览器或系统设置中允许麦克风和摄像头。",
+    "deniedIos": "已被 iOS 阻止。请在 设置 → App → Safari浏览器 中允许麦克风(和相机),然后重新打开 Ghostly。",
     "failed": "无法打开。请确认 Ghostly 有权限使用。",
     "level": "麦克风音量",
     "microphone": "麦克风",

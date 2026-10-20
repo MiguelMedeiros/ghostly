@@ -388,6 +388,7 @@ export class Communities {
       const mention = [...history].reverse().find(m => m.mentioned);
       const mentionAt = cameOrWritten(mention?.timestamp, mention ? group.came?.mention : undefined);
       if (mentionAt) this.lastMentionAt.set(group.id, mentionAt);
+      this.host.loaded?.(group.id, history);
       // Admissions in flight did not survive the restart; a joiner keeps its side.
       for (const [, linkId] of this.host.entries(group.id)) if (group.joining?.linkId !== linkId) await this.host.closeEdge(linkId);
       // The edges of the last run stay a while, whatever the topology wants at first (see `reconcile`).
@@ -400,27 +401,35 @@ export class Communities {
   record(groupId: string): StoredGroup | undefined { return this.stored.get(groupId); }
 
   views(): GroupView[] {
-    return [...this.stored.values()].flatMap((group): GroupView[] => {
-      const live = this.live.get(group.id);
-      const base = { id: group.id, profile: "community" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [], memberLinks: {} };
-      const invitation = this.knocking(group, live) ? { linkId: group.joining!.linkId, contact: "", admin: group.joining!.inviter, members: 0, accepted: true, viaLink: true, stage: this.joinStage(group), since: group.joining!.since,
-        ...(this.knockingWith.get(group.id) ? { waiting: this.knockingWith.get(group.id) } : {}) } : undefined;
-      // Removed, and knocking to get back in: still the group kept here (who was in it, its history), the knock beside it.
-      if (invitation && !this.keptWhileKnocking(live)) return [{ ...base, name: groupName(group.joining!.name) ?? live?.session.name ?? "", isAdmin: false, members: [], canSend: false, invitation }];
-      if (!live) return [];
-      const s = live.session, edges = this.host.edges(group.id);
-      const ready = (key: string) => { const id = edges.get(key); return !!id && this.host.linkReady(id, 2); };
-      const hubs = freshHubs(this.hubs(live), this.now()).map(h => h.key);
-      // A name outlives its member's place in the roster, as in a private group: what someone who left wrote is still theirs.
-      const former = Object.entries(s.state.nicks).filter(([key]) => !rosterHas(s.roster, key));
-      return [{ ...base, name: s.name, ...(former.length ? { formerNames: Object.fromEntries(former) } : {}), status: s.status, statusReason: s.state.statusReason, epoch: s.epoch, myKey: s.myKey, isAdmin: s.isAdmin,
-        ...(s.isMember && s.entryKey ? { entryLink: encodeCommunityLink({ g: s.id, host: s.entryKey }) } : {}),
-        canSend: s.canSend, ...(s.picture ? { picture: s.picture } : {}), ...(invitation ? { invitation } : {}),
-        community: { hub: live.hub, hubs: hubs.length, connected: [...edges.keys()].filter(ready).length },
-        members: s.roster.map(([key, role]) => ({ key, role, me: key === s.myKey,
-          nick: key === s.myKey ? undefined : (edges.get(key) && this.host.edgeNick(edges.get(key)!)) || s.state.nicks[key],
-          online: key === s.myKey || ready(key), missing: s.missing(key) })) }];
-    });
+    return [...this.stored.values()].flatMap(group => this.viewOf(group));
+  }
+
+  /** One community's view, as `views()` makes it, without building the others' (`Groups.view`). */
+  view(groupId: string): GroupView | undefined {
+    const group = this.stored.get(groupId);
+    return group && this.viewOf(group)[0];
+  }
+
+  private viewOf(group: StoredGroup): GroupView[] {
+    const live = this.live.get(group.id);
+    const base = { id: group.id, profile: "community" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [], memberLinks: {} };
+    const invitation = this.knocking(group, live) ? { linkId: group.joining!.linkId, contact: "", admin: group.joining!.inviter, members: 0, accepted: true, viaLink: true, stage: this.joinStage(group), since: group.joining!.since,
+      ...(this.knockingWith.get(group.id) ? { waiting: this.knockingWith.get(group.id) } : {}) } : undefined;
+    // Removed, and knocking to get back in: still the group kept here (who was in it, its history), the knock beside it.
+    if (invitation && !this.keptWhileKnocking(live)) return [{ ...base, name: groupName(group.joining!.name) ?? live?.session.name ?? "", isAdmin: false, members: [], canSend: false, invitation }];
+    if (!live) return [];
+    const s = live.session, edges = this.host.edges(group.id);
+    const ready = (key: string) => { const id = edges.get(key); return !!id && this.host.linkReady(id, 2); };
+    const hubs = freshHubs(this.hubs(live), this.now()).map(h => h.key);
+    // A name outlives its member's place in the roster, as in a private group: what someone who left wrote is still theirs.
+    const former = Object.entries(s.state.nicks).filter(([key]) => !rosterHas(s.roster, key));
+    return [{ ...base, name: s.name, ...(former.length ? { formerNames: Object.fromEntries(former) } : {}), status: s.status, statusReason: s.state.statusReason, epoch: s.epoch, myKey: s.myKey, isAdmin: s.isAdmin,
+      ...(s.isMember && s.entryKey ? { entryLink: encodeCommunityLink({ g: s.id, host: s.entryKey }) } : {}),
+      canSend: s.canSend, ...(s.picture ? { picture: s.picture } : {}), ...(invitation ? { invitation } : {}),
+      community: { hub: live.hub, hubs: hubs.length, connected: [...edges.keys()].filter(ready).length },
+      members: s.roster.map(([key, role]) => ({ key, role, me: key === s.myKey,
+        nick: key === s.myKey ? undefined : (edges.get(key) && this.host.edgeNick(edges.get(key)!)) || s.state.nicks[key],
+        online: key === s.myKey || ready(key), missing: s.missing(key) })) }];
   }
 
   messages(groupId: string): Promise<StoredMessage[]> { return this.store.getMessages(MESSAGE_LINK(groupId)); }
