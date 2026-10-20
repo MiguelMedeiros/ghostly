@@ -1027,12 +1027,18 @@ pub fn app_post<R: Runtime>(
 /// Names an app window anew (the Ghostly window only): "Chess · sharing a file with Ana" while the app serves the
 /// contact a file (WISP 1200 § A read lane to the contact), as the web's panel header says it.
 #[tauri::command]
-pub fn app_title<R: Runtime>(app: AppHandle<R>, label: String, title: String) -> Result<(), String> {
+pub fn app_title<R: Runtime>(
+    app: AppHandle<R>,
+    label: String,
+    title: String,
+) -> Result<(), String> {
     if !is_app_label(&label) {
         return Err("Not an app window".into());
     }
     let window = app.get_webview_window(&label).ok_or("No app window")?;
-    window.set_title(&window_title(&title)).map_err(|e| e.to_string())
+    window
+        .set_title(&window_title(&title))
+        .map_err(|e| e.to_string())
 }
 
 /// Closes an app window (the Ghostly window only): the broker stopped the app.
