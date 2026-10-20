@@ -167,6 +167,25 @@ A pin ([400](400-chat.md#pinned-message)) goes on this session once both sides l
 
 `id` is the pinned message's id as both sides know it (a reply's `i`, [above](#replies)), or `""` to unpin; `n` the pinner's number. Either side may pin any message of the chat, its own or the contact's. The reader MUST ignore a frame that breaks these bounds, whose `n` is more than 10 minutes past its clock ([400](400-chat.md#pinned-message)), or that comes while `pin/1` is not agreed. It keeps the pin when it is newer than the one it shows ([400](400-chat.md#pinned-message): the highest `n` wins) and confirms `n` either way, so the pinner stops saying it. It counts pin frames before it reads them and drops those past 10 in 10 seconds, unconfirmed. The pinner keeps its latest pin not confirmed, says it on each new session and again after 30 seconds without a receipt. A pin does not ride on the DHT floor: it waits for the session. Both frames count only on the authenticated session with the pinned contact. Neither carries a message ID: older apps drop both, and a pinner whose contact never says `pin/1` keeps its pin waiting without showing anything odd. Group edges never offer it: groups carry pins in their own frames ([900](900-group-sessions.md)).
 
+### Disappearing messages
+
+**Planned for 1.5, not built** (revision 2026-10-18; what it is, [400](400-chat.md#disappearing-messages)). A chat's timer goes on this session once both sides list `timer/1` in `paired-capabilities`, and the contact confirms the number it took:
+
+```
+{"t":"paired-timer","s":86400,"n":1790000000000}
+{"t":"paired-timered","n":1790000000000}
+```
+
+`s` is the timer in seconds, `0` for off, otherwise from 60 to 31,536,000 (a year); `n` the setter's number, as a pin's: its clock in milliseconds or one past the number of the setting it replaces, whichever is higher, at most 10 minutes past the reader's clock (`pinNumberHolds`). Either side may set it. The reader MUST ignore a frame that breaks these bounds or comes while `timer/1` is not agreed. It keeps the setting when its `n` is higher than the one it has (two with the same `n`: the shorter timer), adds the line to its timeline, and confirms `n` either way. It drops timer frames past 10 in 10 seconds, unconfirmed. The setter keeps its latest setting not confirmed, and says it on each new session and again after 30 seconds without a receipt. Neither frame rides the DHT floor, and neither carries a message ID: older apps drop both. Both count only on the authenticated session with the pinned contact.
+
+Each message sent under a timer carries it as `ttl`, in seconds:
+
+```
+{ "t": "paired-message", "id", "ts", "m", "pv"?, "r"?, "fw"?, "sc"?, "ttl"?: 60..31536000 }
+```
+
+The same `ttl` rides on a file's announcement (`pf-offer` and `pf-start`, [501](501-paired-files.md)) and in a held item's `meta`, for a text or a file ([404](404-store-and-forward.md#bundle)); those documents take it when it is built. A reader drops a `ttl` that is not such a number and keeps the message, which then takes the reader's own setting. It applies the shorter of `ttl` and its own setting. An edit or a removal carries none: it belongs to its message's deadline. A text sent again after a lost session keeps its `ttl`. `ttl` goes to every contact whatever its capabilities; older apps ignore it.
+
 ### Wake-up push
 
 A web app is only a peer while it is open. A contact's message to a closed web app waits (on the DHT, or held, [404](404-store-and-forward.md)) until the app opens by itself. Wake-up push (revision 2026-09-28) lets the sender's own app wake it, with no server of Ghostly's: the browser's push service carries a few encrypted bytes, and the woken app connects and fetches the message itself.
