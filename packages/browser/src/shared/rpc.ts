@@ -583,7 +583,10 @@ export type EngineImplementation = {
 
 export type EngineMethod = keyof EngineApi;
 
-/** A range the contact's app asks of a served file (`app-range`): answered with `appRangeAnswer`. */
+/**
+ * A range the contact's app asks of a served file (`app-range`): answered with `appRangeAnswer` under its `request`, the
+ * engine's own number for this ask (not the contact's on the wire, which it may ask again under once cancelled).
+ */
 export interface AppRangeAsk { app: string; request: number; serve: string; file: string; offset: number; length: number }
 type Params<M extends EngineMethod> = Parameters<EngineApi[M]> extends [infer P] ? P : undefined;
 

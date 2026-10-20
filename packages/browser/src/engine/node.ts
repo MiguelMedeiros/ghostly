@@ -5073,16 +5073,20 @@ export class GhostlyNode implements EngineImplementation {
     return { error: live.link ? live.link.sendAppData(app, data) : "offline" };
   }
 
-  /** Ranges the contact's apps asked, by chat, app and request, until a page answers them. */
+  /** Ranges the contact's apps asked, by chat, app and this engine's number for the ask, until a page answers them. */
   private readonly appRanges = new Map<string, AppRangeTask>();
+  private nextAppRangeAsk = 0;
 
   /**
    * Every task stays until a page answers it, live or not: until the link settles it, it holds one of its app's places
    * (WISP 1200: at most 4 in flight), so the contact gets `busy` rather than more reads while a page is still reading.
+   * The page answers under a number of the engine's, not the contact's: a number the contact cancelled is free for it to
+   * ask again while the page still reads the first ask, whose answer must not go out as the second's.
    */
   private appRangeAsked(linkId: string, task: AppRangeTask): void {
-    this.appRanges.set(`${linkId} ${task.app} ${task.request}`, task);
-    const { app, request, serve, file, offset, length } = task;
+    const request = ++this.nextAppRangeAsk;
+    this.appRanges.set(`${linkId} ${task.app} ${request}`, task);
+    const { app, serve, file, offset, length } = task;
     this.events.onAppRange?.(linkId, { app, request, serve, file, offset, length });
   }
 
