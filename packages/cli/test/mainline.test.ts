@@ -374,3 +374,19 @@ class FakePeerConnection extends EventTarget {
   }
   close() { this.closed = true; this.connectionState = "closed"; this.channel?.close(); }
 }
+
+// agents#1573: a group edge asks before it signs (`publishHeld`). With the DHT a packet goes there whatever the relays'
+// budgets say, so nothing is held; with the relays alone, what they say.
+describe("a publish held before it is signed", () => {
+  it("is never held with the DHT beside the relays, and is what the relays say without it", async () => {
+    const answer = (async () => new Response(null, { status: 204 })) as typeof fetch;
+    const id = createIdentity();
+    const alone = new RelaysAndDht(null, { relays: ["https://a.test"], fetch: answer, log: () => {} });
+    const withDht = new RelaysAndDht({} as Mainline, { relays: ["https://a.test"], fetch: answer, log: () => {} });
+    for (const transport of [alone, withDht]) {
+      for (let i = 0; i < 40; i++) await transport.relays.publish(id, [{ label: "_ts", value: String(i) }]).catch(() => {});
+    }
+    expect(alone.publishHeld(id.pubKeyZ32)).toBeInstanceOf(DiscoveryBudgetError);
+    expect(withDht.publishHeld(id.pubKeyZ32)).toBeNull();
+  });
+});
