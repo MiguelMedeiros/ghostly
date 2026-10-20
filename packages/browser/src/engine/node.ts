@@ -722,6 +722,16 @@ function refusingWhileLimited(transport: PkarrTransport, limited: () => boolean)
   return guarded;
 }
 
+
+/**
+ * My key in an active group, and who is in it, from its one view. A received reaction, edit or pin reads it per frame:
+ * built from every group's sorted views, a 256-frame catch-up in 10 communities of 256 took 11 s, not 1.1 s
+ * (agents#1700).
+ */
+function membershipOf(group: GroupView | undefined): { me: string; members: ReadonlySet<string> } | undefined {
+  return group?.status === "active" && group.myKey ? { me: group.myKey, members: new Set(group.members.map(m => m.key)) } : undefined;
+}
+
 export class GhostlyNode implements EngineImplementation {
   private settings: Settings = DEFAULT_SETTINGS;
   /** Limited mode (`NodeOptions.limited`): on from the start until `leaveLimited()`. */
@@ -1543,8 +1553,8 @@ export class GhostlyNode implements EngineImplementation {
     },
     changed: (chat, id) => this.messagesChanged(chat, [id]),
     membership: groupId => {
-      const membership = this.membership(groupId);
-      return membership && { ...membership, community: this.groups.isCommunityGroup(groupId), admin: !!this.groups.views().find(g => g.id === groupId)?.isAdmin };
+      const view = this.groups.view(groupId), membership = membershipOf(view);
+      return membership && { ...membership, community: this.groups.isCommunityGroup(groupId), admin: !!view?.isAdmin };
     },
     send: (groupId, edit, to) => this.groups.sendEdit(groupId, edit, to),
     remove: (chat, id) => this.forgetGroupMessage(chat, id),
@@ -1590,8 +1600,7 @@ export class GhostlyNode implements EngineImplementation {
 
   /** My key in an active group, and who is in it. */
   private membership(groupId: string): { me: string; members: ReadonlySet<string> } | undefined {
-    const group = this.groups.views().find(g => g.id === groupId);
-    return group?.status === "active" && group.myKey ? { me: group.myKey, members: new Set(group.members.map(m => m.key)) } : undefined;
+    return membershipOf(this.groups.view(groupId));
   }
 
   /** The link payments with `linkId` go over: a chat's or an edge's, or a community member's through the group. */
@@ -4786,7 +4795,7 @@ export class GhostlyNode implements EngineImplementation {
     if (targets.length > FORWARD_TARGETS) throw new Error(`Forward to at most ${FORWARD_TARGETS} chats at once`);
     // A group this device keeps, in it or not: its history is read from here, and one I was removed from still shows it.
     // Sending to a group is what needs being in it.
-    if (linkId.startsWith("group:") ? !this.groups.views().some(g => g.id === linkId.slice("group:".length)) : this.links.get(linkId)?.stored.group !== undefined || !this.links.has(linkId))
+    if (linkId.startsWith("group:") ? !this.groups.view(linkId.slice("group:".length)) : this.links.get(linkId)?.stored.group !== undefined || !this.links.has(linkId))
       throw new Error("Chat not found");
     // Each one by its id: a long chat or group is not read whole for the few forwarded.
     const chosen = await Promise.all(ids.map(id => db.getMessage(linkId, id)));
@@ -4870,7 +4879,7 @@ export class GhostlyNode implements EngineImplementation {
     if (linkId.startsWith("group:")) {
       const groupId = linkId.slice("group:".length);
       // Not a member (removed, say): refused with the reason the group shows, and nothing is kept here.
-      if (!this.membership(groupId)) return { error: this.groups.views().find(g => g.id === groupId)?.statusReason ?? "You are not in this group", refused: true };
+      if (!this.membership(groupId)) return { error: this.groups.view(groupId)?.statusReason ?? "You are not in this group", refused: true };
       const result = await this.reactions.mine(linkId, messageId, emoji);
       return "error" in result ? result : this.sendGroupReaction(groupId, result.reaction);
     }
@@ -4998,7 +5007,7 @@ export class GhostlyNode implements EngineImplementation {
     if (typeof linkId !== "string" || !linkId) return { error: "No chat to pin in" };
     const host = { messages: (chat: string) => db.getMessages(chat), message: (chat: string, id: string) => db.getMessage(chat, id) };
     if (linkId.startsWith("group:")) {
-      const groupId = linkId.slice("group:".length), view = this.groups.views().find(g => g.id === groupId);
+      const groupId = linkId.slice("group:".length), view = this.groups.view(groupId);
       if (!view || view.status !== "active") return { error: "You are not in this group" };
       if (!mayPinIn(view)) return { error: "Only the admin pins in a community" };
       const pin = await myPin(host, linkId, messageId, !!remove, this.groups.pinOf(groupId));
@@ -5200,7 +5209,7 @@ export class GhostlyNode implements EngineImplementation {
    * other edges, so members with no edge to the pinner get it.
    */
   private async receiveGroupPin(groupId: string, member: string, pin: WirePin | null, via?: { from: string; frame: GroupPinFrame }): Promise<void> {
-    const view = this.groups.views().find(g => g.id === groupId);
+    const view = this.groups.view(groupId);
     if (!pin || !view?.myKey || view.status !== "active" || !view.members.some(m => m.key === member)) return;
     if (!mayPin(view.profile, member, view.members.find(m => m.role === "admin")?.key)) return;
     // One that would not be kept (`setPin`'s rule) reads no row.
@@ -5946,7 +5955,7 @@ export class GhostlyNode implements EngineImplementation {
 
   /** A request any member of a group may pay, once (WISP 902 § Payments). */
   requestGroupPayment(params: { groupId: string; amount: number; memo?: string; timestamp: number; rail: "cashu" | "lightning"; network?: WalletNetwork; card?: string }) {
-    const group = this.groups.views().find(g => g.id === params.groupId);
+    const group = this.groups.view(params.groupId);
     if (group?.status !== "active") throw new Error("You are not in this group");
     if (group.members.length < 2) throw new Error("Nobody else is in the group yet");
     return this.desk.requestFromGroup({ ...params, network: this.net(params.network) });

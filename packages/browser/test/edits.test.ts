@@ -683,6 +683,32 @@ describe("what an edit keeps", () => {
   });
 });
 
+// agents#1700: a received reaction, edit or pin read its group's roster from every group's view, built and sorted, twice
+// per edit: a 256-frame catch-up in 10 communities of 256 took 11 s of engine time, not 1.1 s.
+describe("a received group edit or reaction reads its own group", () => {
+  it("from that group's view, once, never every group's", async () => {
+    const me = createIdentity().pubKeyZ32, bob = createIdentity().pubKeyZ32;
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
+    const inner = node as unknown as {
+      groups: { views(): unknown[]; view(groupId: string): unknown };
+      groupEdits: { stop(): void; host: GroupEditsHost };
+      membership(groupId: string): { me: string; members: ReadonlySet<string> } | undefined;
+    };
+    const group = (n: number, admin: boolean) => ({ id: `g${n}`, status: "active", myKey: me, isAdmin: admin, members: [{ key: me }, { key: bob }, { key: `m${n}` }] });
+    const all = Array.from({ length: 10 }, (_, n) => group(n, n === 3));
+    const views = vi.spyOn(inner.groups, "views").mockImplementation(() => all);
+    const view = vi.spyOn(inner.groups, "view").mockImplementation(id => all.find(g => g.id === id));
+    cleanup.push(async () => { inner.groupEdits.stop(); });
+    expect(inner.groupEdits.host.membership("g3")).toEqual({ me, members: new Set([me, bob, "m3"]), community: false, admin: true });
+    expect(inner.groupEdits.host.membership("g4")).toMatchObject({ admin: false });
+    expect(inner.groupEdits.host.membership("gone")).toBeUndefined();
+    expect(inner.membership("g5")).toEqual({ me, members: new Set([me, bob, "m5"]) });
+    expect(views, "every group's views built").not.toHaveBeenCalled();
+    expect(view.mock.calls.map(([id]) => id), "one group's view, once each").toEqual(["g3", "g4", "gone", "g5"]);
+  });
+});
+
 describe("deleting many of my group messages for everyone", () => {
   it("a removal on its way is read from the group's removals, not from the store: 200 in a row read each row once", async () => {
     // Removals go at the pace of edits (10 a window): each flush read every one still waiting from the store, where it is
