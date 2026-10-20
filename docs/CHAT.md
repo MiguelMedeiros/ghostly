@@ -148,7 +148,7 @@ The text is sent as typed. Everything below happens on display, and nothing is r
 
 ## Message details
 
-Double click, or the message's ⋮ → **Details** (#240, `apps/ui/src/components/MessageDetailsPanel.tsx`). On a phone, a long press opens the reaction bar with Details under it (#354). Sections cover identity, path, timing, wire, crypto and delivery, plus file, voice, payment, DHT, group or call when they apply. "Copy all as JSON". Keys are never shown.
+Ctrl+double click (⌘+double click on a Mac), or the message's ⋮ → **Details**; a plain double or triple click selects the words (#240, `apps/ui/src/components/MessageDetailsPanel.tsx`). On a phone, a long press opens the reaction bar with Details under it (#354). Sections cover identity, path, timing, wire, crypto and delivery, plus file, voice, payment, DHT, group or call when they apply. "Copy all as JSON". Keys are never shown.
 
 ## Files
 

@@ -13,7 +13,7 @@ import { renderApp } from "../render";
 // covers: chat.paired.message-details
 
 /**
- * A message's details (WISP 400 § Message details): opened by a double click, a long press or the ⋮ menu, closed by
+ * A message's details (WISP 400 § Message details): opened by a Ctrl/⌘+double click, a long press or the ⋮ menu, closed by
  * Escape or a tap outside. Every section says only what the engine recorded; ids and hashes copy on a click; the
  * whole view copies as JSON; and no key is ever in it.
  */
@@ -42,6 +42,14 @@ function bubble(patch: Partial<ChatMessage> = {}, props: Partial<Parameters<type
 const section = (id: string) => screen.getByTestId("message-details").querySelector<HTMLElement>(`[data-section="${id}"]`);
 const rows = (id: string) => Object.fromEntries([...section(id)!.querySelectorAll<HTMLElement>("[data-testid=message-details-row]")].map(r => [r.dataset.label, r.dataset.value]));
 
+type User = ReturnType<typeof bubble>["user"];
+/** Ctrl+double click (⌘ on a Mac): a plain one is the words' own, it selects them. */
+async function detailsClick(user: User, target: Element, key: "Control" | "Meta" = "Control") {
+  await user.keyboard(`{${key}>}`);
+  await user.dblClick(target);
+  await user.keyboard(`{/${key}}`);
+}
+
 beforeEach(() => {
   fakeEngine.setState({ links: [linkView({ id: "link-1", peerPubKeyZ32: "peer" })] });
   // A file bubble asks the platform for its bytes; there is no IndexedDB here.
@@ -50,10 +58,37 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("opening and closing", () => {
-  it("a double click opens the details, a click outside closes them, and the focus comes back", async () => {
+  it("a plain double or triple click on the words selects them as anywhere else, and opens no details", async () => {
+    fakeEngine.on("messageDetails", () => textView());
+    const { user } = bubble();
+    const words = screen.getByText("hello");
+    await user.dblClick(words);
+    expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
+    await user.tripleClick(words);
+    expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
+    // The browser selects a word on the second press and the line on the third: neither is kept from it.
+    expect(fireEvent.mouseDown(words, { detail: 2 })).toBe(true);
+    expect(fireEvent.mouseDown(words, { detail: 3 })).toBe(true);
+    expect(fakeEngine.callsTo("messageDetails")).toEqual([]);
+  });
+
+  it("Ctrl+double click and ⌘+double click open the details, and the press selects no word under them", async () => {
+    fakeEngine.on("messageDetails", () => textView());
+    const { user } = bubble();
+    const words = screen.getByText("hello");
+    expect(fireEvent.mouseDown(words, { detail: 2, ctrlKey: true })).toBe(false);
+    await detailsClick(user, words, "Meta");
+    expect(await screen.findByTestId("message-details")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
+    await detailsClick(user, words, "Control");
+    expect(await screen.findByTestId("message-details")).toBeInTheDocument();
+  });
+
+  it("a Ctrl+double click opens the details, a click outside closes them, and the focus comes back", async () => {
     fakeEngine.on("messageDetails", () => textView());
     const { user, container } = bubble();
-    await user.dblClick(screen.getByText("hello"));
+    await detailsClick(user, screen.getByText("hello"));
     const panel = await screen.findByTestId("message-details");
     expect(panel).toHaveAttribute("role", "dialog");
     expect(fakeEngine.callsTo("messageDetails")).toEqual([{ linkId: "link-1", messageId: "me_abc" }]);
@@ -64,7 +99,7 @@ describe("opening and closing", () => {
     expect(container.querySelector("[data-message-row]")).not.toHaveAttribute("data-details-open");
   });
 
-  it("a double click on a file's buttons is theirs: Accept, Pause and Cancel open no details; on the file's name it does", async () => {
+  it("a Ctrl+double click on a file's buttons is theirs: Accept, Pause and Cancel open no details; on the file's name it does", async () => {
     fakeEngine.on("messageDetails", () => textView());
     fakeEngine.on("fileAction", () => undefined);
     fakeEngine.update({ transfers: {
@@ -72,14 +107,14 @@ describe("opening and closing", () => {
       "link-1-out-b": { state: "transferring", direction: "out", transferred: 1_000_000, size: 30_000_000 },
     } });
     const offered = bubble({ id: "peer_a", sender: "peer", text: "offered.bin", delivery: undefined, file: { id: "link-1-in-a", name: "offered.bin", size: 30_000_000, mime: "application/octet-stream" } });
-    await offered.user.dblClick(screen.getByTestId("file-accept"));
+    await detailsClick(offered.user, screen.getByTestId("file-accept"));
     expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
-    await offered.user.dblClick(screen.getByTitle("offered.bin"));
+    await detailsClick(offered.user, screen.getByTitle("offered.bin"));
     expect(await screen.findByTestId("message-details")).toBeInTheDocument();
     offered.unmount();
     const moving = bubble({ id: "me_b", text: "moving.bin", delivery: undefined, file: { id: "link-1-out-b", name: "moving.bin", size: 30_000_000, mime: "application/octet-stream" } });
-    await moving.user.dblClick(screen.getByTestId("file-pause"));
-    await moving.user.dblClick(screen.getByTestId("file-cancel"));
+    await detailsClick(moving.user, screen.getByTestId("file-pause"));
+    await detailsClick(moving.user, screen.getByTestId("file-cancel"));
     expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
   });
 
@@ -131,7 +166,7 @@ describe("opening and closing", () => {
   it("without an engine answer the panel still shows what the chat knows", async () => {
     fakeEngine.on("messageDetails", () => { throw new Error("gone"); });
     const { user } = bubble({ delivery: "sent" });
-    await user.dblClick(screen.getByText("hello"));
+    await detailsClick(user,screen.getByText("hello"));
     await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
     expect(rows("identity")).toMatchObject({ "Message id": "me_abc", Kind: "Text", Direction: "Sent by you" });
     expect(rows("delivery")).toMatchObject({ State: "Sent, waiting for the receipt" });
@@ -141,7 +176,7 @@ describe("opening and closing", () => {
   it("Tab and Shift+Tab go round the panel's own buttons, never to the chat behind it", async () => {
     fakeEngine.on("messageDetails", () => textView());
     const { user } = bubble();
-    await user.dblClick(screen.getByText("hello"));
+    await detailsClick(user,screen.getByText("hello"));
     const panel = await screen.findByTestId("message-details");
     await waitFor(() => expect(panel).toHaveAttribute("data-loaded", "yes"));
     const close = screen.getByTestId("message-details-close"), copyAll = screen.getByTestId("message-details-copy-all");
@@ -164,7 +199,7 @@ describe("what it says", () => {
   it("a text sent live: the plain-words line, and the identity, path, timing, wire, crypto and delivery sections", async () => {
     fakeEngine.on("messageDetails", () => textView());
     const { user } = bubble();
-    await user.dblClick(screen.getByText("hello"));
+    await detailsClick(user,screen.getByText("hello"));
     await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
     expect(screen.getByTestId("message-details-summary")).toHaveTextContent("Message sent live over WebRTC, direct, encrypted end to end, receipt in 42 ms.");
     expect(rows("identity")).toMatchObject({ "Message id": "me_abc", Kind: "Text", "Sender key": MY_KEY, "Wire id": "wireidwireidwireidwire", "Chat id": "link-1", "Chat profile": "paired-chat/1", "Text size": "5 bytes" });
@@ -184,7 +219,7 @@ describe("what it says", () => {
       details: { received: { at: 1_700_000_000_300, path: "iroh/1", relayed: true, relays: ["relay.example"], rttMs: 80 }, wire: { frame: "paired-message", protocol: "chat/1", plaintextBytes: 5, wireBytes: 61 } },
     }));
     const { user } = bubble({ id: "peer_x", sender: "peer", delivery: undefined });
-    await user.dblClick(screen.getByText("hello"));
+    await detailsClick(user,screen.getByText("hello"));
     await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
     expect(screen.getByTestId("message-details-summary")).toHaveTextContent("Message received live over Iroh through relay.example, encrypted end to end.");
     expect(rows("path")).toMatchObject({ "Received over": "Iroh through relay.example", Relay: "relay.example" });
@@ -201,7 +236,7 @@ describe("what it says", () => {
     }));
     const { user } = bubble({ id: "peer_x", sender: "peer", delivery: undefined, timestamp: cameAt, sentAt: said });
     expect(screen.getByTestId("message-time")).toHaveAttribute("data-at", String(cameAt));
-    await user.dblClick(screen.getByText("hello"));
+    await detailsClick(user,screen.getByText("hello"));
     await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
     expect(rows("timing")).toMatchObject({ Composed: "2023-11-14T22:15:20.300Z", Received: "2023-11-14T22:13:20.300Z" });
     // A clock behind shows on the bubble as the contact said it.
@@ -218,7 +253,7 @@ describe("what it says", () => {
         dht: { seq: 7, issued: 1_700_000_000_100, expires: 1_700_000_300_100, packetBytes: 412, nonce: "n".repeat(32), recordKey: MY_KEY, records: ["_dm", "_dmk"] } },
     }));
     const { user } = bubble({ delivery: "sent" });
-    await user.dblClick(screen.getByText("hello"));
+    await detailsClick(user,screen.getByText("hello"));
     await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
     expect(screen.getByTestId("message-details-summary")).toHaveTextContent("Message sent on the DHT, sealed end to end, waiting for the receipt.");
     expect(rows("dht")).toMatchObject({ "Record key": MY_KEY, Sequence: "7", "Signed packet": "412 bytes", Nonce: "n".repeat(32), Records: "_dm, _dmk" });
@@ -231,7 +266,7 @@ describe("what it says", () => {
       details: { sends: [{ at: 1_700_000_000_100, path: "webrtc/1", relayed: false, result: "sent" }, { at: 1_700_000_020_100, path: "webrtc/1", relayed: false, result: "failed", error: "closed" }, { at: 1_700_000_050_100, path: "hyperdht/1", relayed: true, result: "sent" }], attempts: 3, sentAt: 1_700_000_050_100 },
     }));
     const { user } = bubble({ delivery: "queued", deliveryError: "No receipt received yet." });
-    await user.dblClick(screen.getByText("hello"));
+    await detailsClick(user,screen.getByText("hello"));
     await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
     expect(screen.getByTestId("message-details-summary")).toHaveTextContent("Message sent 3 times over HyperDHT through a relay without a receipt. It goes again by itself.");
     expect(rows("path").Sends).toContain("WebRTC, direct (sent)");
@@ -248,7 +283,7 @@ describe("what it says", () => {
       file: { id: "f1", name: "haunted house.bin", size: 3_000_000, mime: "application/octet-stream", digest: "ab".repeat(32), protocol: "files/3", state: "done", confirmed: 3_000_000, since: 1_700_000_000_100, storage: "opfs" },
     }));
     const { user } = bubble({ id: "me_1", text: "haunted house.bin", file: { id: "f1", name: "haunted house.bin", size: 3_000_000, mime: "application/octet-stream" }, delivery: undefined });
-    await user.dblClick(screen.getByTestId("message-options").parentElement!.parentElement!);
+    await detailsClick(user,screen.getByTestId("message-options").parentElement!.parentElement!);
     await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
     expect(screen.getByTestId("message-details-kind")).toHaveTextContent("File");
     expect(screen.getByTestId("message-details-summary")).toHaveTextContent("File sent live over WebRTC, direct, encrypted end to end, receipt in 3.90 s.");
@@ -266,7 +301,7 @@ describe("what it says", () => {
       file: { id: "link-1-out-w", name: "Voice message.webm", size: 44_556, mime: "audio/webm", protocol: "files/3", state: "failed", confirmed: 0, since: 1_700_000_000_100, storage: "blob", error, voice: { duration: 8_070, peaks: 64 } },
     }));
     const { user, container } = bubble({ id: "me_v", text: "Voice message.webm", delivery: undefined, file: { id: "link-1-out-w", name: "Voice message.webm", size: 44_556, mime: "audio/webm", voice: { duration: 8_070, peaks: new Array(64).fill(10) } } });
-    await user.dblClick(container.querySelector("[data-message-row]")!);
+    await detailsClick(user,container.querySelector("[data-message-row]")!);
     await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
     expect(screen.getByTestId("message-details-summary")).toHaveTextContent("Voice message not sent: its bytes did not go over HyperDHT, direct.");
     expect(rows("delivery")).toMatchObject({ State: "Not sent: the file did not go", Why: error });
@@ -280,7 +315,7 @@ describe("what it says", () => {
       file: { id: "v1", name: "Voice message.webm", size: 12_000, mime: "audio/webm;codecs=opus", digest: "cd".repeat(32), protocol: "files/2", state: "done", transferred: 12_000, voice: { duration: 3_000, peaks: 64 } },
     }));
     const { user, container } = bubble({ id: "peer_v", sender: "peer", text: "Voice message.webm", delivery: undefined, file: { id: "v1", name: "Voice message.webm", size: 12_000, mime: "audio/webm;codecs=opus", voice: { duration: 3_000, peaks: new Array(64).fill(10) } } });
-    await user.dblClick(container.querySelector("[data-message-row]")!);
+    await detailsClick(user,container.querySelector("[data-message-row]")!);
     await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
     expect(screen.getByTestId("message-details-kind")).toHaveTextContent("Voice message");
     expect(screen.getByTestId("message-details-summary")).toHaveTextContent("Voice message received live over WebRTC, direct, encrypted end to end.");
@@ -295,7 +330,7 @@ describe("what it says", () => {
       payment: { id: "pay-1", kind: "request", direction: "out", amount: 2100, unit: "sat", state: "pending", method: "lightning", network: "lightning", provider: "cashu-mint", mint: "https://mint.example", createdAt: 1_700_000_000_000, invoiceDigest: "ef".repeat(32) },
     }));
     const { user, container } = bubble({ id: "me_p", text: "⚡ Requested 2,100 sats", paymentId: "pay-1", delivery: undefined });
-    await user.dblClick(container.querySelector("[data-message-row]")!);
+    await detailsClick(user,container.querySelector("[data-message-row]")!);
     await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
     expect(screen.getByTestId("message-details-summary")).toHaveTextContent("Payment request sent live over WebRTC, direct, encrypted end to end.");
     expect(rows("payment")).toMatchObject({ "Payment id": "pay-1", Kind: "Request, outgoing", Amount: "2,100 sat", Rail: "lightning · lightning · cashu-mint", State: "pending", Mint: "https://mint.example", "Invoice SHA-256": "ef".repeat(32) });
@@ -309,7 +344,7 @@ describe("what it says", () => {
         wire: { frame: "GHLD bundle", protocol: "hold/1", plaintextBytes: 5, wireBytes: 180 }, hold: { seq: 3, bytes: 180, expires: 1_700_604_800_000 } },
     }));
     const { user } = bubble({ id: "me_h" });
-    await user.dblClick(screen.getByText("hello"));
+    await detailsClick(user,screen.getByText("hello"));
     await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
     expect(screen.getByTestId("message-details-summary")).toHaveTextContent("Message held in your storage, sealed for your contact, picked up 3 h 0 min later.");
     expect(rows("delivery")).toMatchObject({ "Held item": "#3 in the mailbox, 180 bytes sealed" });
@@ -319,7 +354,7 @@ describe("what it says", () => {
 
   it("a call event kept by the app alone says so, and shows the call", async () => {
     const { user, container } = bubble({ id: "system_call_1", sender: "system", text: "Video call ended", delivery: undefined, callEvent: { type: "call_ended", hasVideo: true, duration: 65_000 } }, { peerPubKey: "" });
-    await user.dblClick(container.querySelector("[data-message-row]")!);
+    await detailsClick(user,container.querySelector("[data-message-row]")!);
     await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
     expect(fakeEngine.callsTo("messageDetails")).toEqual([]);
     expect(screen.getByTestId("message-details-summary")).toHaveTextContent("A note kept on this device only. Nothing was sent for it.");
@@ -333,7 +368,7 @@ describe("what it says", () => {
       group: { id: "g", member: PEER_KEY, profile: "mesh" },
     }));
     const { user } = bubble({ id: "g1", sender: "peer", delivery: undefined }, { linkId: "group:g", peerPubKey: "" });
-    await user.dblClick(screen.getByText("hello"));
+    await detailsClick(user,screen.getByText("hello"));
     await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
     expect(fakeEngine.callsTo("messageDetails")).toEqual([{ linkId: "group:g", messageId: "g1" }]);
     expect(rows("group")).toEqual({ "Group id": "g", Profile: "group-mesh/1", "Member key": PEER_KEY });
@@ -345,7 +380,7 @@ describe("copying", () => {
   it("an id copies whole on a click, and the whole view copies as JSON", async () => {
     fakeEngine.on("messageDetails", () => textView());
     const { user } = bubble();
-    await user.dblClick(screen.getByText("hello"));
+    await detailsClick(user,screen.getByText("hello"));
     await waitFor(() => expect(screen.getByTestId("message-details")).toHaveAttribute("data-loaded", "yes"));
     const row = section("identity")!.querySelector<HTMLElement>('[data-label="Sender key"]')!;
     expect(row).toHaveTextContent("mykeyz...32myke");
