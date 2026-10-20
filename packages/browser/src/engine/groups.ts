@@ -361,6 +361,33 @@ export async function unmark(marks: GroupMarks, group: Pick<StoredGroup, "came">
 export interface EntryTimings { pollMs: number; warmPollMs: number; warmMs: number; knockMs: number; slowKnockMs: number; patienceMs: number }
 const ENTRY_TIMINGS: EntryTimings = { pollMs: 5_000, warmPollMs: 2_000, warmMs: 60_000, knockMs: 5_000, slowKnockMs: 20_000, patienceMs: 2 * 60_000 };
 /**
+ * A link join nobody answers (the link replaced or turned off, the group deleted, its admin's app gone) knocks less
+ * often the longer it waits, once past `patienceMs`: a fifth of the wait between knocks, up to this, but no longer than
+ * the joins waiting need (`JOIN_KNOCKS_PER_MINUTE`), and never sooner than `slowKnockMs`. Under `KNOCK_TTL_MS`, so an
+ * admin's app that comes back still finds the knock fresh. Every `slowKnockMs` for good, four such links took 27 of the
+ * app's 30 relay requests a minute, 20 minutes on (bug hunt 1019-0904, 2026-10-20).
+ */
+export const JOIN_KNOCK_WAIT_MAX_MS = 150_000;
+/** The knocks a minute that the link joins nobody answers take between them, an app's private groups and communities together. */
+export const JOIN_KNOCKS_PER_MINUTE = 2;
+/** A join counted as waiting (`countWaitingJoin`) and not counted again this long is gone (joined, given up, forgotten). */
+const WAITING_JOIN_SEEN_MS = 10_000;
+const waitingJoins = new WeakMap<object, Map<string, number>>();
+/** Counts the link join of `groupId` among the waiting ones of `host`'s app while `waiting`, or no longer: how many there are. */
+export function countWaitingJoin(host: object, groupId: string, now: number, waiting: boolean): number {
+  let joins = waitingJoins.get(host);
+  if (!joins) waitingJoins.set(host, joins = new Map());
+  if (waiting) joins.set(groupId, now); else joins.delete(groupId);
+  for (const [id, at] of joins) if (now - at > WAITING_JOIN_SEEN_MS) joins.delete(id);
+  return joins.size;
+}
+/** The wait between a joiner's knocks, `waited` after it opened the link, one of `joins` waiting (`JOIN_KNOCK_WAIT_MAX_MS`). */
+export function joinKnockWait(waited: number, timings: Pick<EntryTimings, "knockMs" | "slowKnockMs" | "patienceMs">, joins: number): number {
+  if (waited <= timings.patienceMs) return timings.knockMs;
+  const share = Math.round(joins * 60_000 / JOIN_KNOCKS_PER_MINUTE);
+  return Math.max(timings.slowKnockMs, Math.min(JOIN_KNOCK_WAIT_MAX_MS, Math.round(waited / 5), share));
+}
+/**
  * A knock still in the record is written again only once it is this old. Everyone holding the link writes the same
  * Pkarr record, so a knock is read back before it is repeated: one that is there and fresh costs a read, not a read
  * and a write to every relay (a joiner waiting for an admin that is away spent its relays' minute on them, and its
@@ -1470,9 +1497,10 @@ export class Groups {
         if (group.declined) { await this.declineOwed(group, now); if (!group.state) continue; }
         if (group.invitation?.takenBack && !group.state) { if (now - group.invitation.takenBack > LEFT_KEPT_MS) await this.forget(group.id, false); continue; }
         if (group.invitation?.entry && !group.state) {
-          const waited = now - group.createdAt, every = waited > this.timings.patienceMs ? this.timings.slowKnockMs : this.timings.knockMs;
           // Once the admin's app is on the entry session, knocking only spends the relays' budget its signaling needs.
           const answered = this.host.linkReady(group.invitation.linkId) || !!this.host.linkSeen?.(group.invitation.linkId);
+          const waited = now - group.createdAt, joins = countWaitingJoin(this.host, group.id, now, !answered && waited > this.timings.patienceMs);
+          const every = joinKnockWait(waited, this.timings, joins);
           if (!answered && (now - (this.lastKnock.get(group.id) ?? 0) >= every || now >= (this.knockCheckAt.get(group.id) ?? Infinity))) await this.knock(group, now).catch(() => {});
           continue;
         }
@@ -1657,10 +1685,11 @@ export class Groups {
       return;
     }
     await this.host.publish(identity, knockRecords(link, mergeKnocks(existing, { key, ts: now }, now)));
-    // Read back in a moment: another joiner writing at the same time may have replaced it.
+    // Read back in a moment: another joiner writing at the same time may have replaced it. Not once nobody has answered
+    // for `patienceMs`: such races come as a link is shared, and the read was a third of each knock nobody would answer.
     const rewrites = (this.knockRewrites.get(group.id) ?? 0) + 1;
     this.knockRewrites.set(group.id, rewrites);
-    if (rewrites <= KNOCK_VERIFIES) this.knockCheckAt.set(group.id, now + KNOCK_VERIFY_MS + gossipStart(key) % KNOCK_VERIFY_SPREAD_MS);
+    if (rewrites <= KNOCK_VERIFIES && now - group.createdAt <= this.timings.patienceMs) this.knockCheckAt.set(group.id, now + KNOCK_VERIFY_MS + gossipStart(key) % KNOCK_VERIFY_SPREAD_MS);
     traceJoin(group.id, "knock.published", { ms: Date.now() - started });
     if (!this.knocked.has(group.id)) { this.knocked.add(group.id); this.host.emit(); }
   }
