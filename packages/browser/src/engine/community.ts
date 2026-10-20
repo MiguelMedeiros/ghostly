@@ -467,10 +467,17 @@ export class Communities {
       // What this device holds may be stale (it was removed while its app was closed): never taken for the answer.
       // It knocks with its own key, and the door says which it is: still in (the welcome names an admission it
       // holds, and nothing changes), or let in again. Alone in the group, there is nobody to ask.
+      // Its member key goes only to the door it knows: a link to another key is anybody's, who would learn which
+      // member knocks and dial it. A member asks its own door instead (none while the link is off).
+      const door = s.entryKey === link.host;
       if (s.status === "active" && s.roster.length === 1) return link.g;
-      if (s.status === "active") { await this.startJoining(link, s.state.seedB64, this.now(), true); return link.g; }
-      // Removed (or its admission lost): let in again by whoever is at the door, with the same key; the history here stays.
-      if (s.status === "removed" || s.status === "lost") { await this.startJoining(link, s.state.seedB64, this.now()); return link.g; }
+      if (s.status === "active") {
+        if (s.entryKey) await this.startJoining(door ? link : { g: link.g, host: s.entryKey }, s.state.seedB64, this.now(), true);
+        return link.g;
+      }
+      // Removed (or its admission lost): let in again by whoever is at the door, with the same key at the door it
+      // knows, else with a fresh one, as any joiner; the history here stays.
+      if (s.status === "removed" || s.status === "lost") { await this.startJoining(link, door ? s.state.seedB64 : dialedKey(link), this.now()); return link.g; }
     }
     if (existing) await this.forget(link.g);
     await this.startJoining(link, dialedKey(link), this.now());

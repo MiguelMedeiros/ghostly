@@ -91,6 +91,44 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     // The app's own storage is untouched by it, and the app still holds its chat.
     expect((await person.page.evaluate(() => Object.keys(localStorage))).filter((key) => !key.startsWith("ghostly-test-")).length).toBeGreaterThan(0);
 
+    // Another site that knows the app's origin posts a form to it while it is open, at the top and into a frame of its
+    // own: neither reaches the contact as this person (the worker forwards only the app's own frames' navigations).
+    const other = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(`<!doctype html><iframe name="inner"></iframe>
+        <form id="framed" method="post" target="inner" action="${out.origin}/api/steal?framed"><input name="a" value="1"></form>
+        <form id="top" method="post" action="${out.origin}/api/steal?top"><input name="a" value="1"></form>
+        <script>document.getElementById("framed").submit(); setTimeout(() => document.getElementById("top").submit(), 500);</script>`);
+    });
+    await new Promise<void>((done) => other.listen(0, "127.0.0.1", done));
+    const elsewhere = await person.page.context().newPage();
+    try {
+      await elsewhere.goto(`http://127.0.0.1:${(other.address() as AddressInfo).port}/`);
+      await elsewhere.waitForURL((at) => at.pathname === "/api/steal", { timeout: 30_000 });
+      await elsewhere.waitForLoadState("load");
+      await person.page.waitForTimeout(2_000);
+    } finally {
+      await elsewhere.close();
+      other.close();
+    }
+    expect(app.seen.filter((r) => r.path.startsWith("/api/steal"))).toEqual([]);
+    await expect(demo.locator("#title")).toHaveText("Hello from the demo");
+
+    // An iPhone on its side (Chromium plays its safe area): ✕, the name and the app clear of the notch on either side
+    // and of the home indicator. The app cannot keep clear of them itself: `env(safe-area-inset-*)` is 0 in its frame.
+    // ✕ was at x=8 under the notch, and the frame ran edge to edge and to the bottom.
+    const viewport = person.page.viewportSize()!;
+    await person.page.setViewportSize({ width: 667, height: 375 });
+    const cdp = await person.page.context().newCDPSession(person.page);
+    await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, right: 47, bottom: 21, left: 47 } });
+    const outside = () => view.evaluate((v) => [v.querySelector("[data-testid=service-view-close]")!, v.querySelector("[data-testid=service-view-frame]")!, v.querySelector("span")!]
+      .map((el) => el.getBoundingClientRect())
+      .filter((r) => r.left < 47 || r.right > innerWidth - 47 || r.bottom > innerHeight - 21)
+      .map((r) => `${Math.round(r.left)}..${Math.round(r.right)} x ${Math.round(r.top)}..${Math.round(r.bottom)} of ${innerWidth}x${innerHeight}`));
+    await expect.poll(outside).toEqual([]);
+    await cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, right: 0, bottom: 0, left: 0 } });
+    await person.page.setViewportSize(viewport);
+
     // Closed: gone, the chat is where it was, and the focus back on Open, not on the page's body.
     const chat = person.page.url();
     await person.page.getByTestId("service-view-close").click();

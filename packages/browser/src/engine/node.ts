@@ -241,7 +241,7 @@ const IROH_WEB_SLOTS = 16;
 const CHAT_NATIVE_SLOTS = 4;
 /**
  * What a group's links (edges, entry sessions) may hold of a transport's listeners where one side has no WebRTC (WISP
- * 902 § Transports). It is also the group links' budget of connections on an app with no WebRTC (`peerRoom`).
+ * 902 § Transports). It is also the least of the group links' budget of connections on an app with no WebRTC (`peerRoom`).
  */
 export const GROUP_NATIVE_SLOTS = NATIVE_SLOTS - CHAT_NATIVE_SLOTS;
 /** The same, of Iroh's listeners where it is the browser build. */
@@ -527,6 +527,11 @@ export interface NodeOptions {
    * and off in every shipped app: a contact names those addresses.
    */
   holdLoopback?: boolean;
+  /**
+   * How a held item or manifest is read from the address the contact chose. Default: `fetch`. The CLI passes one that
+   * connects only to public addresses, which a page cannot check (it has no resolver).
+   */
+  holdFetch?: typeof fetch;
   /** How to reach Pkarr. Default: HTTP relays, the only way out of a browser. */
   transport?: PkarrTransport;
   pollIntervals?: PollIntervals;
@@ -1167,6 +1172,7 @@ export class GhostlyNode implements EngineImplementation {
     },
     receivePaymentRequest: (linkId, request) => this.desk.onPaymentRequest(linkId, request, true),
     changed: () => this.emitState(),
+    fetch: (...request) => (this.options.holdFetch ?? globalThis.fetch)(...request),
     loopbackStorage: () => this.options.holdLoopback === true,
     // Tests shorten the lifetime to watch an item expire; nothing else reads this, and it never lengthens it.
     ttlMs: () => { try { const raw = typeof localStorage !== "undefined" ? localStorage.getItem("ghostly-test-hold-ttl") : null; const ms = raw ? Number(raw) : NaN; return Number.isFinite(ms) && ms > 0 ? ms : undefined; } catch { return undefined; } },
@@ -1429,12 +1435,12 @@ export class GhostlyNode implements EngineImplementation {
     staysOnline: () => this.options.staysOnline ?? (this.options.platform === "desktop" && typeof RTCPeerConnection !== "undefined"),
     peerRoom: groupId => {
       // With no WebRTC, a group's links are native ones, and all the groups together hold what the transport with
-      // most listeners gives them (`groupNativeSlots`): a link needs one.
+      // most listeners free of 1:1 chats gives them (`groupNativeRoom`): a link needs one.
       const native = Object.keys(this.nativeFactories) as NativeTransport[];
       if (typeof RTCPeerConnection === "undefined" && native.length) {
         let held = 0;
         for (const live of this.links.values()) if (live.stored.group && live.stored.group !== groupId && live.link) held++;
-        return Math.max(0, Math.max(...native.map(key => this.groupNativeSlots(key))) - held);
+        return Math.max(0, Math.max(...native.map(key => this.groupNativeRoom(key))) - held);
       }
       const budget = this.options.peerBudget;
       if (budget === undefined) return undefined;
@@ -1457,6 +1463,7 @@ export class GhostlyNode implements EngineImplementation {
     linkBack: linkId => { const live = this.links.get(linkId); return !!live?.lastSyncAt && !!live.presence?.online && presenceSeenAt(live.presence) > live.lastSyncAt; },
     publish: (identity, records, background, door, back) => this.groupTransport.publish(identity, records, { background, door, back }),
     resolve: async (pubKeyZ32, background, door, back) => (await this.groupTransport.resolve(pubKeyZ32, { background, door, back }))?.records ?? null,
+    readHeldBackFor: pubKeyZ32 => this.groupTransport.readHeldBackFor?.(pubKeyZ32),
     expectPeer: linkId => this.links.get(linkId)?.link?.expectPeer(),
     signalIn: (linkId, payload, direct) => !!this.links.get(linkId)?.carried?.accept(payload, direct),
     edgeSignal: linkId => this.links.get(linkId)?.carried?.latest() ?? null,
@@ -2056,7 +2063,7 @@ export class GhostlyNode implements EngineImplementation {
     // What the limited start kept as it was stored: the files of groups this device no longer has go, as at a full start.
     await this.groups.files?.sweep((await db.getGroups()).map((group) => group.id)).catch(() => {});
     await this.leaveLimited(start.readAt ?? null).catch(() => {});
-    if (!this.options.singleDevice && !this.limitedMode && this.networkOn && knownDeviceGate()?.state === "active") void this.startDeviceSet().catch(() => {});
+    if (!this.options.singleDevice && !this.limitedMode && this.networkOn && knownDeviceGate()?.state === "active") void this.startDeviceSet({ justRead: start.readAt !== undefined }).catch(() => {});
   }
 
   private readTurnWhileLimited(after = 30_000): void {
@@ -2077,7 +2084,7 @@ export class GhostlyNode implements EngineImplementation {
         }
         if (outcome && (outcome.kind === "start" || (outcome.kind === "go-on" && !outcome.restricted))) {
           await this.leaveLimited().catch(() => {});
-          if (!this.limitedMode && this.networkOn) void this.startDeviceSet().catch(() => {});
+          if (!this.limitedMode && this.networkOn) void this.startDeviceSet({ justRead: true }).catch(() => {});
           return;
         }
         this.readTurnWhileLimited();
@@ -6313,9 +6320,10 @@ export class GhostlyNode implements EngineImplementation {
   /**
    * The active device's links to the other devices, and its stored turn record put again (WISP 06 § Publishing and
    * reading: "The active device puts its stored bytes at start"). This is also what completes an enrollment that a
-   * crash stopped after the record with the new device was stored and before it was put.
+   * crash stopped after the record with the new device was stored and before it was put. `justRead`: it starts on a good
+   * turn read made a moment before (the read at start, or limited mode's), which counts while it is fresh.
    */
-  private async startDeviceSet(): Promise<void> {
+  private async startDeviceSet({ justRead = false }: { justRead?: boolean } = {}): Promise<void> {
     if (this.shuttingDown) return;
     // This device's signing key, as its record names it: whose the profile's push subscription is (WISP 06 § Push and the phone).
     const own = await readDeviceRecord(databaseName()).catch(() => null);
@@ -6344,13 +6352,18 @@ export class GhostlyNode implements EngineImplementation {
     await recoverEnrollment(databaseName(), this.turnNetwork()).catch(() => false);
     await this.syncDeviceVerifier().catch(() => {});
     const keeper = await this.deviceLinks.turnKeeper();
-    const outcome = await keeper?.check(false);
-    if (outcome?.kind === "go-on" && !outcome.restricted) { this.noteGoodTurn(); await keeper?.stateVerifier().catch(() => null); }
-    // Another device took the turn: the keeper wrote this device's new state. The pages start again into the gate.
-    if (outcome?.kind === "gated" && !this.shuttingDown) {
-      const record = await readDeviceRecord(databaseName());
-      if (record) await this.stopReplaced(viewOf(record));
-      return;
+    // The start's read wrote, put and read back this device's record a moment ago: it is not read again (WISP 06 § When
+    // a device checks: one read at start; each one is a DHT look-up, and a `NetworkOnly` request per relay).
+    if (justRead && this.turnFresh()) await keeper?.stateVerifier().catch(() => null);
+    else {
+      const outcome = await keeper?.check(false);
+      if (outcome?.kind === "go-on" && !outcome.restricted) { this.noteGoodTurn(); await keeper?.stateVerifier().catch(() => null); }
+      // Another device took the turn: the keeper wrote this device's new state. The pages start again into the gate.
+      if (outcome?.kind === "gated" && !this.shuttingDown) {
+        const record = await readDeviceRecord(databaseName());
+        if (record) await this.stopReplaced(viewOf(record));
+        return;
+      }
     }
     // From now on the turn is read every 10 minutes while this device runs, and at once on another device's hint.
     this.watchActiveTurn();
@@ -8076,21 +8089,24 @@ export class GhostlyNode implements EngineImplementation {
   private anchorCheckAt = 0;
 
   /**
-   * A group's edge whose native listener has been up `GROUP_ANCHOR_ANSWER_MS` with no session, and whose member's
-   * packet says it holds none there (or it is away): nobody answers it.
+   * A group's edge whose native listener has been up `GROUP_ANCHOR_ANSWER_MS` with no session, and whose member is there
+   * and says in its packet it holds none for it: nobody answers it. Not one whose member is away: no other edge would
+   * be answered either, and the one passed over gave its listener up and asked for none again once its member came
+   * back, whose texts then came only through another member (a hub with no WebRTC, 2026-10-20); nor did passing stop
+   * while every member was away, a listener moving from edge to edge every few minutes for nothing.
    */
   private unanswered(live: LiveLink, now: number): boolean {
     const link = live.link;
-    if (!link || link.isDataLinkOpen) return false;
+    if (!link || link.isDataLinkOpen || !live.presence.online) return false;
     const up = (Object.keys(this.nativeFactories) as NativeTransport[]).filter(t => link.availableTransports.includes(t)).map(t => live.nativeUpAt?.[t] ?? now);
     if (!up.length || now - Math.min(...up) < GROUP_ANCHOR_ANSWER_MS) return false;
-    return !this.chosenByPeer(live) || !live.presence.online;
+    return !this.chosenByPeer(live);
   }
 
   /**
    * Every few seconds, each group not on screen whose edges run native transports: the one edge it keeps has a
    * listener (or waits for one, `groupNativeWaiting`), and when its member has not answered it in
-   * `GROUP_ANCHOR_ANSWER_MS` (it is away, or it has no listener for it: all its own taken), the group keeps the next
+   * `GROUP_ANCHOR_ANSWER_MS` (it is there with no listener for it: all its own taken), the group keeps the next
    * one instead (hub, then admin, then the member heard from last), whose member answers the edge it keeps
    * (`chosenByPeer`). Not while any edge of the group is live: the group is reachable through it. Every other one passed
    * over lately too: the one it keeps stays, without its listener going back and forth.
@@ -8187,6 +8203,17 @@ export class GhostlyNode implements EngineImplementation {
   /** Of those, what its groups' links may hold, all groups together. */
   private groupNativeSlots(key: NativeTransport): number {
     return this.nativeSlots(key) - CHAT_NATIVE_SLOTS;
+  }
+  /**
+   * The links its groups may have on an app with no WebRTC (`peerRoom`): the transport's listeners that 1:1 chats do
+   * not hold, and what is kept for groups (`groupNativeSlots`) at least. Capped at that alone, a Desktop with no chats
+   * opened four edges in a private group of seven, and the two members left out were never reached, even on screen
+   * with half its listeners free: an edge of the group on screen takes a free listener, or a held one (WISP 902 § Transports).
+   */
+  private groupNativeRoom(key: NativeTransport): number {
+    let chats = 0;
+    for (const live of this.links.values()) if (!live.stored.group && live.link?.availableTransports.includes(key)) chats++;
+    return Math.max(this.groupNativeSlots(key), this.nativeSlots(key) - chats);
   }
 
   /**

@@ -186,12 +186,13 @@ export class EngineServer implements PeerServer {
 
   /**
    * A chat's or group's whole history, to this client alone as a `messages` event, after what is still being sent for it
-   * (a `HistoryRequest`, which the host hands here): what changes while it is read follows it.
+   * (a `HistoryRequest`, which the host hands here): what changes while it is read follows it. A group's, once the groups
+   * are read, as `groupMessages` answers: a group that opens while the engine starts is not left on its newest page.
    */
   async history(client: EngineClientSink, linkId: unknown): Promise<void> {
     if (typeof linkId !== "string" || !this.clients.has(client)) return;
     try {
-      await this.ready;
+      await (linkId.startsWith("group:") ? Promise.race([this.ready, this.node.groupsRead]) : this.ready);
       await this.inOrder(linkId, async () => {
         if (!this.clients.has(client)) return;
         const messages = await this.node.getMessages(linkId);

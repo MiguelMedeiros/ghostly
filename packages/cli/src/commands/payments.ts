@@ -1,5 +1,5 @@
 import { type Command, net, card, memo, confirmReal, force, sats, pairs } from "./shared";
-import { ADDRESS_TYPES, CHAT_METHODS, WALLET_TYPES } from "../words";
+import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "../words";
 
 /** Wallets and payments: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
@@ -20,7 +20,7 @@ export const commands: Record<string, Command> = {
   },
   "chat request": {
     method: "chat.request", usage: "chat request <chat> <sats> [--memo t] [--method m] [--rail cashu|lightning] [--network testnet] [--card <id>] [--force]", summary: "Ask a contact to pay",
-    args: ["chat", "amount"], options: { memo, method: { type: "string", description: "cashu, arkade, usdt, bitcoin, spark, …" }, rail: { type: "string", choices: ["cashu", "lightning"], description: "cashu or lightning" }, network: net, card, force },
+    args: ["chat", "amount"], options: { memo, method: { type: "string", choices: PAY_METHODS, description: "cashu, arkade, usdt, bitcoin, spark, …" }, rail: { type: "string", choices: ["cashu", "lightning"], description: "cashu or lightning" }, network: net, card, force },
     params: ({ options }, a) => ({ chat: a.chat, amount: sats(a.amount), memo: options.memo, method: options.method, rail: options.rail, network: options.network, card: options.card, force: options.force === true }),
   },
   "lightning default": { method: "lightning.default", usage: "lightning default <card> [--network testnet]", summary: "The Lightning card that receives by default", args: ["card"], options: { network: net }, params: ({ options }, { card: c }) => ({ card: c, network: options.network }) },

@@ -6,6 +6,7 @@ import { useI18n } from "../contexts/I18nContext";
 import { FileBubble } from "./FileBubble";
 import { focusLost } from "../lib/focus";
 import { Menu, MenuItem } from "./Menu";
+import { useContextMenu, type MenuPoint } from "../lib/contextMenu";
 import { MessageBoundary } from "./MessageBoundary";
 import { MessageDetailsPanel } from "./MessageDetailsPanel";
 import { VoiceBubble } from "./voice/VoiceBubble";
@@ -65,8 +66,8 @@ interface MessageBubbleProps {
    * their messages, plain. Left out in a group, where a member's own name goes over theirs with a "~".
    */
   contactName?: string;
-  /** Forgets this message on this device. Left out where a chat cannot be edited. */
-  onDelete?: () => void;
+  /** Forgets this message on this device; a rejection is a delete refused (Cancel sending says it). Left out where a chat cannot be edited. */
+  onDelete?: () => void | Promise<void>;
   /** Deletes this message of mine from every member's device (WISP 400 § Delete for everyone). Left out where it can't. */
   onDeleteForEveryone?: () => void;
   /** The engine's link for the message's details; found from `peerPubKey` when left out (groups name theirs). */
@@ -572,9 +573,11 @@ function ForwardItem({ file, sender, onForward }: { file?: ChatFile; sender: "me
  * The deletion is local, so the menu says so before it happens: nothing is sent, and the contact keeps their copy.
  * Both popovers are drawn over the page (the list scrolls and would cut them off) and kept inside the message list.
  */
-function MessageMenu({ onDelete, onDeleteForEveryone, onDetails, onReply, onEdit, onReact, onPin, pinned, onSave, saved, onForward, onSelect, align, download, sender, onCancelSend, onRetry }: {
+function MessageMenu({ onDelete, onDeleteForEveryone, group, onDetails, onReply, onEdit, onReact, onPin, pinned, onSave, saved, onForward, onSelect, align, download, sender, onCancelSend, onRetry }: {
   onDelete?: () => void;
   onDeleteForEveryone?: () => void;
+  /** A group's message: Delete for everyone takes it off the members' devices, not a contact's. */
+  group?: boolean;
   onDetails: () => void;
   /** Answers the message (WISP 400 § Replies): the first row. */
   onReply?: () => void;
@@ -608,6 +611,16 @@ function MessageMenu({ onDelete, onDeleteForEveryone, onDetails, onReply, onEdit
   // Which delete waits for its confirmation: this device's, or everyone's.
   const [confirm, setConfirm] = useState<"here" | "everyone" | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  // A right-click on the message: this menu, at the pointer, with the focus on ⋮ as a click on it would leave it (the
+  // keys work, Escape goes back there). Each one opens it afresh: the press that asked closes a menu open before.
+  const [pointed, setPointed] = useState<MenuPoint & { n: number }>();
+  useContextMenu(ref, "[data-message-row]", (at) => {
+    button.current?.focus({ preventScroll: true });
+    setConfirm(null);
+    setPointed((was) => ({ ...at, n: (was?.n ?? 0) + 1 }));
+    setOpen(true);
+  });
   const side = align === "left" ? "end" : "start";
   // A delete takes this row away with its ⋮, where the confirmation gives the focus back: once the row is gone, the
   // focus goes to the ⋮ of the message now in its place (the one before it at the end), not to the page.
@@ -619,7 +632,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, onDetails, onReply, onEdit
   // A file still on its way stops on both sides when its message is deleted (the engine's deleteMessage): the contact
   // keeps no copy of it, so the hint says what happens instead.
   const { transfer } = useTransfer(download?.file.id);
-  const deleteHint = confirm === "everyone" ? t("chat.deleteForEveryoneHint") : transfer?.state !== "transferring" ? t("chat.deleteMessageHint")
+  const deleteHint = confirm === "everyone" ? t(group ? "chat.deleteForEveryoneGroupHint" : "chat.deleteForEveryoneHint") : transfer?.state !== "transferring" ? t("chat.deleteMessageHint")
     : t(download?.sender === "me" ? "chat.deleteSendingFileHint" : "chat.deleteArrivingFileHint");
   const confirmed = confirm === "everyone" ? onDeleteForEveryone : onDelete;
   const trash = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>;
@@ -627,13 +640,14 @@ function MessageMenu({ onDelete, onDeleteForEveryone, onDetails, onReply, onEdit
   return (
     <div ref={ref} className="relative self-center shrink-0">
       <button
+        ref={button}
         type="button"
         data-testid="message-options"
         title={t("chat.message.options")}
         aria-label={t("chat.message.options")}
         aria-haspopup="true"
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => { setPointed(undefined); setOpen((v) => !v); }}
         // Faint but always reachable by touch; on a pointer it waits for the message to be hovered.
         className={`p-1 rounded-full transition-all cursor-pointer hover:text-text-primary md:group-hover:opacity-100 md:focus-visible:opacity-100 ${
           open || confirm ? "text-text-primary opacity-100" : "text-text-muted max-md:opacity-40 md:opacity-0"
@@ -643,7 +657,7 @@ function MessageMenu({ onDelete, onDeleteForEveryone, onDetails, onReply, onEdit
           <circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" />
         </svg>
       </button>
-      <Menu open={open} onClose={() => setOpen(false)} anchorRef={ref} testId="message-menu" align={side} prefer="up" portal within={MESSAGE_LIST} focusFirst label={t("chat.message.options")}>
+      <Menu key={pointed?.n} open={open} onClose={() => setOpen(false)} anchorRef={ref} testId="message-menu" align={side} prefer="up" portal within={MESSAGE_LIST} at={pointed} focusFirst label={t("chat.message.options")}>
         {onReply && <MenuItem testId="message-reply" onClick={() => { setOpen(false); onReply(); }} icon={<ReplyGlyph />}>
           {t("chat.message.reply")}
         </MenuItem>}
@@ -706,7 +720,8 @@ function MessageMenu({ onDelete, onDeleteForEveryone, onDetails, onReply, onEdit
                   after.current = neighbourOptions(ref.current);
                   confirmed();
                 }}
-                className="px-2 py-0.5 rounded border border-danger/30 bg-danger/20 text-danger-ink text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
+                // Filled, as the other destructive confirmations: red on a pink fill read at 3.98:1 in the light theme.
+                className="px-2 py-0.5 rounded border border-danger-fill bg-danger-fill text-white text-xs font-bold hover:bg-danger-fill/90 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
               >
                 {t("common.delete")}
               </button>
@@ -814,9 +829,12 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // focus stays on the message, so Tab goes on from it.
   useFocusKept(rowRef);
   const openDetails = () => setDetails(true);
-  // A double click on a control in the message (a file's Accept, Pause or Save, a player's Play, a link) is that
-  // control's: two quick clicks on a button do not open the details too.
+  // A plain double or triple click is the words' own: it selects a word or the line, as anywhere else. Ctrl+double
+  // click (⌘ on a Mac) opens the details. On a control in the message (a file's Accept, Pause or Save, a player's
+  // Play, a link) it is that control's: two quick clicks on a button do not open the details too.
+  const detailsKey = (e: React.MouseEvent) => e.ctrlKey || e.metaKey;
   const detailsOnDoubleClick = (e: React.MouseEvent) => {
+    if (!detailsKey(e)) return;
     const control = (e.target as Element).closest("button, a, input, [role=button]");
     if (!control || !e.currentTarget.contains(control)) openDetails();
   };
@@ -870,7 +888,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const cancelSending = () => {
     playCue("deleted", { chat });
     setRefused(null);
-    if (onDelete) { onDelete(); return; }
+    if (onDelete) { void Promise.resolve(onDelete()).catch(refuse(shown)); return; }
     const link = engine.linkByPeer(peerPubKey);
     if (link) void engine.call("deleteMessage", { linkId: link.id, messageId: message.id }).catch(refuse(shown));
   };
@@ -921,8 +939,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     onClickCapture: (e: React.MouseEvent) => { e.preventDefault(); e.stopPropagation(); selection.onToggle?.(); },
   } : {
     ref: rowRef, onDoubleClick: detailsOnDoubleClick, ...mergeHandlers(press, swipe.handlers), "data-details-open": details || undefined, "data-message-id": message.id,
-    // The second click of a double click would select a word of the message under the details.
-    onMouseDown: (e: React.MouseEvent) => { if (e.detail > 1) e.preventDefault(); },
+    // The second click of a Ctrl+double click would select a word of the message under the details.
+    onMouseDown: (e: React.MouseEvent) => { if (e.detail > 1 && detailsKey(e)) e.preventDefault(); },
   };
   const selectBox = selection && (
     <span role="checkbox" aria-checked={selection.selected} aria-disabled={!selection.onToggle || undefined} aria-label={t("chat.forward.select")}
@@ -1002,16 +1020,18 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   // "Botty". In a group the "~" marks the name a member gave themselves, which no contact name of yours replaces.
   const own = contactName ?? (message.nick || peerNick);
   const nick = own && !isMe && (!author || author.first) ? `${contactName === undefined ? "~" : ""}${own}` : "";
+  // Isolated, as on a routine row (RoutineCard.tsx): in a right-to-left chat a Latin name read "Carol~".
+  const nickRun = <bdi>{nick}</bdi>;
   const nickEl = nick ? (
     // A group member's name takes their colour (lib/memberColors.ts), and a tap on it opens who they are.
     <div data-testid="message-nick" data-key={author?.key} className={`${author ? memberText(author.key) : "text-accent-hover"} text-[12.8px] font-medium mb-[2px] leading-[22px]`}>
       {author && onOpenAuthor && !choosing
-        ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="max-w-full cursor-pointer text-start hover:underline">{nick}</button>
-        : nick}
+        ? <button type="button" data-testid="message-nick-open" onClick={onOpenAuthor} onDoubleClick={e => e.stopPropagation()} aria-haspopup="dialog" className="max-w-full cursor-pointer text-start hover:underline">{nickRun}</button>
+        : nickRun}
     </div>
   ) : null;
   const menu = !choosing && (
-    <MessageMenu onDelete={onDelete} onDeleteForEveryone={isMe ? onDeleteForEveryone : undefined} onDetails={openDetails} onReply={onReply} onEdit={isMe ? onEdit : undefined} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved}
+    <MessageMenu onDelete={onDelete} onDeleteForEveryone={isMe ? onDeleteForEveryone : undefined} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={isMe ? onEdit : undefined} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved}
       onForward={onForward} onSelect={onSelect} align={isMe ? "left" : "right"} download={download} sender={isMe ? "me" : "peer"} {...(isMe ? sending : {})} />
   );
 
@@ -1114,7 +1134,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       )}
       {isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {isMe && onReply && <ReplyAction onReply={onReply} />}
-      {isMe && !choosing && <MessageMenu onDelete={onDelete} onDeleteForEveryone={onDeleteForEveryone} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
+      {isMe && !choosing && <MessageMenu onDelete={onDelete} onDeleteForEveryone={onDeleteForEveryone} group={inGroup} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
       {/* A group member's picture at the start of the line (the reading direction's), or its empty place. */}
       {!isMe && author && <SenderAvatar author={author} onOpen={choosing ? undefined : onOpenAuthor} />}
       {/* The bubble, and its reactions under it. */}

@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { CookieJar, openServiceView, serve, serviceLabel } from "../../../../web/src/svc/opener";
-import { closeServiceWindows, setServiceWindowsCloser } from "../../lib/serviceWindows";
+import { closeServiceWindows, hostErrorText, setServiceWindowsCloser } from "../../lib/serviceWindows";
+import { translatorFor } from "../../locales";
 import { SERVICE_VIEW_ID, closeServiceView, isServiceHostname, parseServicesHost, serviceOrigin, type ServiceReply } from "../../../../web/src/svc/protocol";
 import { GhostlyHttpError, type ClientRequest, type ClientResponse } from "@ghostly/core";
 
@@ -70,7 +71,7 @@ function answer(status: number, headers: [string, string][], chunks: string[]): 
   };
 }
 
-const words = { unreachable: "Not reachable", failed: "Failed", close: "Close" };
+const words = { unreachable: "Not reachable", failed: "Failed", close: "Close", callOn: "End the call to open it.", hostError: () => null };
 
 describe("one request from the app, over the contact's link", () => {
   it("goes with the page's headers and the app's cookies, and its answer streams back: cookies kept here, never handed to the page", async () => {
@@ -94,6 +95,23 @@ describe("one request from the app, over the contact's link", () => {
       const { port, replies } = recorder();
       await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null }, async () => { throw error; }, new CookieJar(), words);
       expect(replies).toEqual([{ type: "error", status, text }]);
+    }
+  });
+
+  it("says the contact's machine answering for their app (`x-ghostly-error`) in the profile's words, from this side", async () => {
+    const t = translatorFor("ar");
+    const said = { ...words, hostError: (headers: readonly (readonly [string, string])[]) => hostErrorText(headers, "Demo", t) };
+    for (const [status, code, english, key] of [
+      [502, "unreachable", "The local service is not reachable.", "services.window.notAnswering"],
+      [504, "timeout", "The local service did not answer in time.", "services.window.tooSlow"],
+      [502, "redirect-blocked", "The service redirected outside of the shared target.", "services.window.elsewhere"],
+      [503, "busy", "Too many requests.", "services.window.failed"],
+    ] as const) {
+      const { port, replies } = recorder();
+      await serve(port, { type: "request", method: "GET", path: "/", headers: [], body: null },
+        async () => answer(status, [["content-type", "text/plain; charset=utf-8"], ["x-ghostly-error", code]], [`${english}\n`]), new CookieJar(), said);
+      expect(replies).toEqual([{ type: "error", status, text: t(key, { app: "Demo" }) }]);
+      expect(replies[0]!.type === "error" && replies[0]!.text).not.toContain(english);
     }
   });
 

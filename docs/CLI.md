@@ -133,7 +133,7 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   arguments, so a contact's text cannot reach the shell). A command that exits non-zero is said on stderr and the
   cursor moves past its event: it is not run again.
 - `--webhook <url>` POSTs each event to a local bridge (`127.0.0.1`, `localhost` or `[::1]` only; a redirect is not
-  followed). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
+  followed; no `user:password@` in the URL, so put a token in its path or query). A bridge that is not answering (connection refused, a timeout, a 5xx, 408 or 429) holds the stream: the
   event is tried again, up to a minute apart, until the bridge takes it, and the cursor never moves past it, so a
   bridge restart loses nothing. stderr says so once ("the webhook at … is not answering: holding event N") and again
   when it answers. An event the bridge refuses (another 4xx, or a redirect) is said on stderr and passed.

@@ -381,4 +381,58 @@ describe("AddIdentityDialog", () => {
       expect(engine.callsTo("completeIdentityProof")).toEqual([]);
     });
   });
+
+  /**
+   * Copy on a command or a statement: it is pasted into a terminal next, so "Copied" is said only once it is. A refused
+   * copy leaves the clipboard as it was, and pasting that would run something else.
+   */
+  describe("Copy", () => {
+    const execCommand = document.execCommand;
+    afterEach(() => { vi.restoreAllMocks(); document.execCommand = execCommand; });
+
+    const openCommand = async () => {
+      const { user } = dialog();
+      answerBegin();
+      await user.click(screen.getByTestId("add-identity-ssh-github"));
+      await user.type(screen.getByTestId("add-identity-subject"), "octocat");
+      await user.click(screen.getByTestId("add-identity-start"));
+      const command = await screen.findByTestId("add-identity-copy-0");
+      return { user, command, step: command.closest("li")! };
+    };
+
+    it("a refused copy says so, never Copied, and leaves the command to select", async () => {
+      const { user, command, step } = await openCommand();
+      vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new DOMException("Write permission denied.", "NotAllowedError"));
+      document.execCommand = vi.fn(() => false);
+      await user.click(within(step).getByRole("button", { name: "Copy" }));
+      expect(await within(step).findByTestId("add-identity-copy-error")).toHaveTextContent("Could not copy. Select the text above and copy it yourself.");
+      expect(within(step).queryByRole("button", { name: "Copied" })).not.toBeInTheDocument();
+      expect(command).toHaveClass("select-all");
+    });
+
+    it("with no Clipboard API, copies the older way and says Copied", async () => {
+      const { user, command, step } = await openCommand();
+      vi.spyOn(navigator, "clipboard", "get").mockReturnValue(undefined as unknown as Clipboard);
+      const copied: string[] = [];
+      // The older route copies from a textarea it adds at the end of the page for the moment.
+      document.execCommand = vi.fn(() => { copied.push(document.body.querySelector<HTMLTextAreaElement>(":scope > textarea:last-of-type")!.value); return true; });
+      await user.click(within(step).getByRole("button", { name: "Copy" }));
+      expect(await within(step).findByRole("button", { name: "Copied" })).toBeInTheDocument();
+      expect(copied).toEqual([command.textContent]);
+      expect(within(step).queryByTestId("add-identity-copy-error")).not.toBeInTheDocument();
+    });
+
+    it("a copy that worked says Copied, and takes an earlier refusal away", async () => {
+      const { user, command, step } = await openCommand();
+      vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(new DOMException("Document is not focused.", "NotAllowedError"));
+      document.execCommand = vi.fn(() => false);
+      await user.click(within(step).getByRole("button", { name: "Copy" }));
+      await within(step).findByTestId("add-identity-copy-error");
+      const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+      await user.click(within(step).getByRole("button", { name: "Copy" }));
+      expect(await within(step).findByRole("button", { name: "Copied" })).toBeInTheDocument();
+      expect(writeText).toHaveBeenCalledWith(command.textContent);
+      expect(within(step).queryByTestId("add-identity-copy-error")).not.toBeInTheDocument();
+    });
+  });
 });
