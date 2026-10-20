@@ -207,6 +207,11 @@ describe("file transfer", () => {
       const name = sanitizeFileName(`Invoice-October.pdf${blank.repeat(120)}.exe`);
       expect(name).toMatch(/^Invoice-October\.pdf ?\.exe$/);
     }
+    // A mark that draws nothing (variation selectors, Mongolian and Khmer ones) between the spaces does not keep them
+    // apart; 88 pairs stay under the 200 cap, so shortening alone would keep them all.
+    for (const blank of [" \uFE0F", " \uFE00", "\u3000\uFE00", " \u180B", " \u17B4", " \u{E0100}", "\u3000\u{E0100}"]) {
+      expect(sanitizeFileName(`Invoice-October.pdf${blank.repeat(88)}.exe`)).toBe("Invoice-October.pdf .exe");
+    }
     expect(sanitizeFileName("a\u2003\u2003b\u2009\u00A0c   d.txt")).toBe("a b c d.txt");
     expect(sanitizeFileName("\u3164\u2800")).toBe("file");
   });
