@@ -1,5 +1,5 @@
 import {
-  COMMUNITY_TOPOLOGY, MESH_HUBS, beaconKeys, beaconRecords, lobbyKeys, lobbyRecords, mayBeHub, meshHubs, mergeBeacon, mergeLobby, pickMeshHubs, readBeacon, readLobby, rosterHas,
+  COMMUNITY_TOPOLOGY, MESH_HUBS, beaconKeys, isDiscoveryBudgetError, beaconRecords, lobbyKeys, lobbyRecords, mayBeHub, meshHubs, mergeBeacon, mergeLobby, pickMeshHubs, readBeacon, readLobby, rosterHas,
   type GhostRecord, type GroupCommit, type GroupEdgeFrame, type GroupReactedFrame, type GroupSession, type Hub,
 } from "@ghostly/core";
 import type { StoredGroup } from "../shared/types";
@@ -58,6 +58,19 @@ const GONE_LINGER_MS = 15_000;
  * the 45 s by which two clocks must differ before an entry is moved, so clocks that agree are never moved.
  */
 const HUB_CLOCK_READ_GAP_MS = 75_000;
+/**
+ * A member steps up as a hub only while the beacon lists fewer fresh hubs than `maxHubs` less this. At `maxHubs` less
+ * one, one entry crossing its freshness (a hub whose write the budget held a while) brought a member back up, which
+ * pushed another out, and so on: 14-20 hubs of 20 members for minutes (agents#1691).
+ */
+const STEP_UP_MARGIN = 2;
+/**
+ * Too few hubs: a member steps up after a delay of its own, under this (the same for its key and epoch), and only on a
+ * reading made after it. Every member read the same short beacon in the same minute and stepped up together.
+ */
+const STEP_UP_DELAY_MS = 60_000;
+/** The longest a write of my entry waits for the budget it was told of: within an entry's freshness (90 s). */
+const PUBLISH_WAIT_MAX_MS = 30_000;
 
 /** What a hub says to its edges: the members it has an edge up with, and the members whose apps take no hubs. */
 export interface GroupReachFrame { t: "group-reach"; g: string; k: string[]; l?: string[] }
@@ -78,6 +91,12 @@ interface HubLive {
   lastRead: number;
   lastWrite: number;
   lastTry: number;
+  /** As a hub: no write of my entry before then (the relays' budget held the last one, or the read it needs, back). */
+  publishAfter: number;
+  /** When a relay last answered my read of the beacon (or took my write of it): a held read answers an old packet. */
+  readAt: number;
+  /** Too few hubs: I step up no sooner than this, and on a reading made since (0 while there are enough). */
+  stepUpAt: number;
   hub: boolean;
   hubSince: number;
   /** As a hub: members whose edge is mine → when it was last up (or they asked in my lobby). */
@@ -142,7 +161,7 @@ export class MeshHubs {
     let live = this.live.get(groupId);
     if (!live) {
       const clocks = new HubClocks(() => live!.me, HUB_CLOCK_READ_GAP_MS);
-      this.live.set(groupId, (live = { started: now, epoch: -1, beacon: [], clocks, me: "", firstRead: false, epochRead: false, lastRead: 0, lastWrite: 0, lastTry: 0, hub: false, hubSince: 0,
+      this.live.set(groupId, (live = { started: now, epoch: -1, beacon: [], clocks, me: "", firstRead: false, epochRead: false, lastRead: 0, lastWrite: 0, lastTry: 0, publishAfter: 0, readAt: 0, stepUpAt: 0, hub: false, hubSince: 0,
       members: new Map(), lastLobbyPoll: 0, lobbyBusyUntil: 0, myHubs: [], lobbyWrites: new Map(), hubWaits: new Map(), avoided: new Map(), hubsUp: new Set(),
       seenHubs: new Map(), reach: new Map(), sentReach: "", lastReach: 0, met: new Map(), expect: new Set(), wantedSize: 0, primed: false, gone: new Map(), reactions: new Map(), need: 0, departed: new Set() }));
     }
@@ -324,6 +343,7 @@ export class MeshHubs {
     if (live.epoch !== session.epoch) {
       // A commit moved the beacon: read the new one now, and as a hub say so there at once.
       live.epoch = session.epoch; live.lastRead = 0; live.lastWrite = 0; live.lastTry = 0; live.beacon = []; live.epochRead = false;
+      live.publishAfter = 0; live.stepUpAt = 0; live.readAt = 0;
       live.clocks.restart();
     }
     const policy = session.hubPolicy, me = session.myKey, inRoster = (key: string) => rosterHas(session.roster, key);
@@ -336,14 +356,21 @@ export class MeshHubs {
     const fits = this.fits(groupId, session);
     if (live.hub) live.need = session.others.length;
     // Only on a reading of this epoch's beacon: one the relays' budget held back says nothing of how many hubs there are.
-    if (!live.hub && may && fits && (policy.pin.includes(me) || (live.epochRead && others.length < MESH_HUBS.maxHubs))) {
+    // Fewer hubs than a member keeps edges with: no wait, the group needs them now. Past that, a delay of my own and a
+    // reading made after it that still lists too few, so members that read the same short beacon do not all step up
+    // together, and a hub that stepped up meanwhile is seen.
+    const counted = this.counted(live, session, now), short = live.epochRead && counted < MESH_HUBS.maxHubs - STEP_UP_MARGIN;
+    const needed = counted < MESH_HUBS.hubsPerMember;
+    if (!short || live.hub) live.stepUpAt = 0;
+    else if (!live.stepUpAt) live.stepUpAt = needed ? now : now + stepUpDelay(me, session.epoch);
+    if (!live.hub && may && fits && (policy.pin.includes(me) || (short && now >= live.stepUpAt && (needed || live.readAt >= live.stepUpAt)))) {
       live.hub = true; live.hubSince = now; live.myHubs = []; live.need = session.others.length;
       await this.publish(groupId, session, live, now, true).catch(() => {});
     } else if (live.hub && (!may || !fits || this.full(live, session, now))) {
       live.hub = false; live.members.clear();
       // One hub too many is not in the beacon: nothing to take out of it.
       if (!may || !fits) await this.publish(groupId, session, live, now, false).catch(() => {});
-    } else if (live.hub && now - live.lastTry >= 5_000 && (now - live.lastWrite >= this.timings.beaconEveryMs || !live.beacon.some(h => h.key === me))) {
+    } else if (live.hub && now - live.lastTry >= 5_000 && now >= live.publishAfter && (now - live.lastWrite >= this.timings.beaconEveryMs || !live.beacon.some(h => h.key === me))) {
       await this.publish(groupId, session, live, now, true).catch(() => {});
     }
     if (live.hub) {
@@ -362,7 +389,21 @@ export class MeshHubs {
    */
   private full(live: HubLive, session: GroupSession, now: number): boolean {
     return live.epochRead && !session.hubPolicy.pin.includes(session.myKey) && !live.beacon.some(h => h.key === session.myKey)
-      && this.listed(live, session, now).length >= MESH_HUBS.maxHubs;
+      && this.counted(live, session, now) >= MESH_HUBS.maxHubs;
+  }
+
+  /**
+   * The other hubs there are, as far as stepping up or down goes: the beacon's fresh ones and those a reading showed
+   * fresh within `graceMs`. A hub whose republish the relays' budget held back past the entry's 90 s is still a hub:
+   * counted on fresh entries alone, every such entry brought a member up, and none ever saw enough to step down
+   * (agents#1691: 14-20 hubs of 20 members, beacon writes refused 290 times of 339).
+   */
+  private counted(live: HubLive, session: GroupSession, now: number): number {
+    const keys = new Set(this.listed(live, session, now).map(h => h.key));
+    for (const [key, at] of live.seenHubs) {
+      if (now - at <= this.timings.graceMs && key !== session.myKey && rosterHas(session.roster, key) && !live.departed.has(key)) keys.add(key);
+    }
+    return keys.size;
   }
 
   private shape(live: HubLive): string { return `${live.hub}|${live.myHubs.join(",")}|${[...live.members.keys()].sort().join(",")}|${live.beacon.map(h => h.key).sort().join(",")}`; }
@@ -373,9 +414,18 @@ export class MeshHubs {
     // Nothing there (no hub has written it yet) is a reading; a request that failed (the relays' budget) is not.
     let records: GhostRecord[] | null;
     try { records = await this.host.resolve(keys.identity.pubKeyZ32, true); } catch { return; }
+    // Held back by the relays' budget, the read answers the packet already known, which may be minutes old: no
+    // reading. On it, members stepped up (it listed few hubs) and hubs wrote over the beacon (agents#1691).
+    if (this.held(keys.identity.pubKeyZ32)) return;
     live.beacon = live.clocks.inMyTime(readBeacon(keys, records ?? []), now);
-    live.firstRead = true; live.epochRead = true;
+    live.firstRead = true; live.epochRead = true; live.readAt = now;
     this.noteHubs(live, session, now);
+  }
+
+  /** How long the relays' budget holds the read of this key back: the read that just ended answered no relay's packet. */
+  private held(pubKeyZ32: string): number | undefined {
+    const wait = this.host.readHeldBackFor?.(pubKeyZ32);
+    return wait !== undefined && wait > 0 ? wait : undefined;
   }
 
   private noteHubs(live: HubLive, session: GroupSession, now: number): void {
@@ -394,8 +444,12 @@ export class MeshHubs {
     let existing = live.beacon;
     if (live.lastRead !== now) {
       let records: GhostRecord[] | null;
-      try { records = await this.host.resolve(keys.identity.pubKeyZ32, true); } catch { return; }
+      try { records = await this.host.resolve(keys.identity.pubKeyZ32, true); } catch (error) { this.holdPublish(live, now, error); return; }
+      // A beacon merged from a held reading would write over the hubs written since: no write until a real one.
+      const wait = this.held(keys.identity.pubKeyZ32);
+      if (wait !== undefined) { live.publishAfter = now + wait; return; }
       existing = live.clocks.inMyTime(readBeacon(keys, records ?? []), now);
+      live.readAt = now;
       if (listed) {
         // Pushed out since my last reading: not in again (the next tick steps me down).
         live.beacon = existing; live.lastRead = now; live.firstRead = true; live.epochRead = true;
@@ -407,9 +461,17 @@ export class MeshHubs {
     const hubs = mergeBeacon(existing, session.myKey, listed ? { key: session.myKey, ts: now, load: live.members.size, since: live.hubSince || now } : null, now,
       key => rosterHas(session.roster, key) && !policy.no.includes(key));
     // Each entry as its hub dated it: no hub's entry is dated by another's clock.
-    await this.host.publish(keys.identity, beaconRecords(keys, live.clocks.asWritten(hubs)), true);
-    live.beacon = hubs; live.lastWrite = now; live.lastRead = now; live.firstRead = true; live.epochRead = true;
+    try { await this.host.publish(keys.identity, beaconRecords(keys, live.clocks.asWritten(hubs)), true); } catch (error) { this.holdPublish(live, now, error); throw error; }
+    live.beacon = hubs; live.lastWrite = now; live.lastRead = now; live.readAt = now; live.firstRead = true; live.epochRead = true;
     this.noteHubs(live, session, now);
+  }
+
+  /**
+   * A write of my entry (or the read before it) the relays' budget held back: not tried again every 5 s (each try a
+   * read, held 290 times of 339 on 20 apps: agents#1691), but once the budget says it frees a request.
+   */
+  private holdPublish(live: HubLive, now: number, error: unknown): void {
+    if (isDiscoveryBudgetError(error)) live.publishAfter = now + Math.min(Math.max(error.retryInMs, 5_000), PUBLISH_WAIT_MAX_MS);
   }
 
   /** As a hub: who asked in my lobby, and which of my members are still around. */
@@ -611,3 +673,11 @@ function authorOf(frame: GroupEdgeFrame): string | undefined {
     default: return undefined;
   }
 }
+
+/** A member's own delay before it steps up (`STEP_UP_DELAY_MS`): from its key and the epoch, so members spread out. */
+function stepUpDelay(key: string, epoch: number): number {
+  let hash = epoch | 0;
+  for (let i = 0; i < key.length; i++) hash = (Math.imul(hash, 31) + key.charCodeAt(i)) | 0;
+  return ((hash >>> 0) % STEP_UP_DELAY_MS);
+}
+

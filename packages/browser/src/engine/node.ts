@@ -1457,6 +1457,7 @@ export class GhostlyNode implements EngineImplementation {
     linkBack: linkId => { const live = this.links.get(linkId); return !!live?.lastSyncAt && !!live.presence?.online && presenceSeenAt(live.presence) > live.lastSyncAt; },
     publish: (identity, records, background, door, back) => this.groupTransport.publish(identity, records, { background, door, back }),
     resolve: async (pubKeyZ32, background, door, back) => (await this.groupTransport.resolve(pubKeyZ32, { background, door, back }))?.records ?? null,
+    readHeldBackFor: pubKeyZ32 => this.groupTransport.readHeldBackFor?.(pubKeyZ32),
     expectPeer: linkId => this.links.get(linkId)?.link?.expectPeer(),
     signalIn: (linkId, payload, direct) => !!this.links.get(linkId)?.carried?.accept(payload, direct),
     edgeSignal: linkId => this.links.get(linkId)?.carried?.latest() ?? null,
