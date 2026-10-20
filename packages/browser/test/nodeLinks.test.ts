@@ -782,6 +782,8 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
             const onIroh = () => edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
             await vi.waitFor(() => expect(onIroh()).toEqual([edgeIds[0]]));
             for (const id of edgeIds) linkOf(id).isDataLinkOpen = false;
+            // Each member is there, its packet saying no listener for its edge here (all its own taken).
+            for (const id of edgeIds) { const live = node["links"].get(id)!; live.presence = { ...live.presence, online: true }; }
             // The member heard from last comes after the hub.
             node["links"].get(edgeIds[2])!.lastSyncAt = Date.now() - 1_000;
             const check = () => { node["anchorCheckAt"] = 0; node["retryNative"](); };
@@ -826,6 +828,30 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
             await node["nativeQueues"].get("iroh/1");
             expect(linkOf(edgeIds[0]).releaseEndpoint).not.toHaveBeenCalled();
             expect(onIroh()).toEqual([edgeIds[0]]);
+          });
+
+          it("every member away past twenty seconds: no edge is passed over, and each has its listener when they come back", async () => {
+            // A hub with no WebRTC, its three members stopped for minutes: the edge passed over while they were away gave
+            // its listener up, nothing asked for one again, and its member stayed offline here once back (12 min seen).
+            const { node, linkOf } = await nativeStarted();
+            const { edgeIds } = await groupOf(node, 3);
+            const onIroh = () => edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
+            expect(onIroh()).toEqual(edgeIds);
+            for (const id of edgeIds) {
+              linkOf(id).isDataLinkOpen = false;
+              irohSaid(linkOf(id) as never);
+              const live = node["links"].get(id)!;
+              live.presence = { ...live.presence, online: false };
+              live.nativeUpAt = { "iroh/1": Date.now() - GROUP_ANCHOR_ANSWER_MS - 1 };
+            }
+            const check = () => { node["anchorCheckAt"] = 0; node["retryNative"](); };
+            for (let i = 0; i < 3; i++) { check(); await node["nativeQueues"].get("iroh/1"); }
+            for (const id of edgeIds) expect(linkOf(id).releaseEndpoint).not.toHaveBeenCalled();
+            // Back: each member's packet is there again, and every edge still listens for it.
+            for (const id of edgeIds) { const live = node["links"].get(id)!; live.presence = { ...live.presence, online: true }; }
+            check();
+            await node["nativeQueues"].get("iroh/1");
+            expect(onIroh()).toEqual(edgeIds);
           });
         });
       });
