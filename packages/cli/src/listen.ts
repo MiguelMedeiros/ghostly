@@ -362,9 +362,11 @@ export const PAUSE_HOLD_MS = 60_000;
  * does, so the daemon does not keep a replay and what came live for it while it hangs; resume opens it again after the
  * last event taken.
  * `subscribed`: the first subscription's answer (a journal that cannot be replayed rejects it).
+ * `profile`: a daemon gone longer than a restart takes (`daemon stop`) is said once on stderr, and so is the one that
+ * answers again: the listen waits for it, it does not go silent.
  */
-export function followDaemon(address: DaemonAddress, client: DaemonClient, handle: EventHandler, since: number | undefined, holdMs = PAUSE_HOLD_MS): { subscribed: Promise<unknown>; close(): void } {
-  let current: DaemonClient | null = client;
+export function followDaemon(address: DaemonAddress, client: DaemonClient, handle: EventHandler, since: number | undefined, holdMs = PAUSE_HOLD_MS, profile?: string): { subscribed: Promise<unknown>; close(): void } {
+  let current: DaemonClient | null = client, missedSince = 0, missing = false;
   let holding: ReturnType<typeof setTimeout> | undefined;
   const reconnect = (wait: number) => void (async () => {
     while (!current && !feed.paused) {
@@ -372,7 +374,17 @@ export function followDaemon(address: DaemonAddress, client: DaemonClient, handl
       wait = 1000;
       if (current || feed.paused) return;
       const next = await connectDaemon(address, 1000);
-      if (next) { current = next; await follow(next).catch(() => { if (current === next) current = null; }); }
+      if (next) {
+        missedSince = 0;
+        if (missing) { missing = false; process.stderr.write(`ghostly: the daemon of profile ${profile} answers again\n`); }
+        current = next;
+        await follow(next).catch(() => { if (current === next) current = null; });
+      } else if (profile === undefined) continue;
+      else if (!missedSince) missedSince = Date.now();
+      else if (!missing && Date.now() - missedSince >= 3000) {
+        missing = true;
+        process.stderr.write(`ghostly: the daemon of profile ${profile} stopped; waiting for it to start again (ghostly daemon --detach)\n`);
+      }
     }
   })();
   // A hook still taking events (a slow --exec) keeps the connection; one that took none for `holdMs` lets it go.
