@@ -92,6 +92,8 @@ export class GroupEdits {
   private readonly heard = new Map<string, { at: number; id: string }>();
   /** The connection `resend` last spoke on, per group and member: a new one hears my latest edits again. */
   private readonly resentOn = new Map<string, unknown>();
+  /** The list of my edited messages a paced resend goes on with, and the edge it was read for (`resendNow`). */
+  private readonly keptMine = new Map<string, { edge: unknown; mine: StoredMessage[] }>();
   private readonly resendPace = new Map<string, RateWindow>();
   private readonly resendTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly resending = new Map<string, Promise<void>>();
@@ -348,22 +350,29 @@ export class GroupEdits {
    * A new connection hears my latest `GROUP_EDIT_RESEND` again whatever it heard: one may have come before its message
    * and been dropped. Called again while the edge is the same, it goes on from where it was.
    */
-  resend(groupId: string, to: string): Promise<void> {
+  resend(groupId: string, to: string, paced = false): Promise<void> {
     const key = resendKey(groupId, to);
-    const run = (this.resending.get(key) ?? Promise.resolve()).then(() => this.resendNow(groupId, to));
+    const run = (this.resending.get(key) ?? Promise.resolve()).then(() => this.resendNow(groupId, to, paced));
     const settled = run.catch(() => {}).finally(() => { if (this.resending.get(key) === settled) this.resending.delete(key); });
     this.resending.set(key, settled);
     return run;
   }
 
-  private async resendNow(groupId: string, to: string): Promise<void> {
+  /**
+   * `paced`: the pace's timer goes on with the list of my edited messages read when the edge opened (`keptMine`), on
+   * that same edge. Read again each window, 7 edges with 256 edits each to say read a history of 10,000 rows 112
+   * times at a start, ~5.9 s of a CLI's engine, not 7 (agents#1679). Edits made meanwhile go live (`flush`).
+   */
+  private async resendNow(groupId: string, to: string, paced = false): Promise<void> {
     const key = resendKey(groupId, to), chat = chatOf(groupId);
     clearTimeout(this.resendTimers.get(key));
     this.resendTimers.delete(key);
     const open = () => this.host.edge ? this.host.edge(groupId, to) : true;
     const edge = open(), membership = this.host.membership(groupId);
+    const kept = this.keptMine.get(key);
+    this.keptMine.delete(key);
     if (this.stopped || edge === undefined || !membership || membership.community || !membership.members.has(to)) return;
-    const mine = (await (this.host.history ? this.host.history(chat) : this.host.messages(chat)))
+    const mine = paced && kept?.edge === edge ? kept.mine : (await (this.host.history ? this.host.history(chat) : this.host.messages(chat)))
       .filter(m => m.sender === "me" && m.edit && !m.edit.pending && canEditInGroup(m))
       .sort((a, b) => a.edit!.at - b.edit!.at || (a.id < b.id ? -1 : 1));
     const last = this.heard.get(key);
@@ -377,7 +386,8 @@ export class GroupEdits {
     for (const m of due) {
       if (this.stopped || open() !== edge) return;
       if (!pace.take()) {
-        this.resendTimers.set(key, setTimeout(() => { void this.resend(groupId, to).catch(() => {}); }, Math.max(50, pace.wait())));
+        this.keptMine.set(key, { edge, mine });
+        this.resendTimers.set(key, setTimeout(() => { void this.resend(groupId, to, true).catch(() => {}); }, Math.max(50, pace.wait())));
         return;
       }
       // One that cannot go (its epoch's key is gone) does not hold the others back.
@@ -395,6 +405,7 @@ export class GroupEdits {
     for (const key of [...this.heard.keys()]) if (of(key)) this.heard.delete(key);
     for (const key of [...this.resendPace.keys()]) if (of(key)) this.resendPace.delete(key);
     for (const key of [...this.resentOn.keys()]) if (of(key)) this.resentOn.delete(key);
+    for (const key of [...this.keptMine.keys()]) if (of(key)) this.keptMine.delete(key);
   }
 
   forget(groupId: string): void {
