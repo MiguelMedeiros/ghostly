@@ -2604,7 +2604,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   /** Saves a message on this device, or unsaves it (`engine/saved.ts`): nothing is sent. */
-  saveMessage(params: { linkId: string; messageId: string; remove?: boolean }): Promise<{ error: string | null }> {
+  saveMessage(params: { linkId: string; messageId: string; remove?: boolean }): Promise<{ error: string | null; removed?: boolean }> {
     return this.saved.save(params);
   }
 
