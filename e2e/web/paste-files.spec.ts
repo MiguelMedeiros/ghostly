@@ -62,6 +62,46 @@ test("a pasted screenshot and a dropped file reach the contact", { tag: ["@featu
   for (const name of ["ghost notes.txt", "route.csv"]) await expect(chat(bob).getByTestId("file-bubble").filter({ hasText: name })).toBeVisible();
 });
 
+/** Where the first `needle` inside the element is drawn: its box on the screen, from the text itself. */
+const textBox = (element: ReturnType<Page["getByTestId"]>, needle: string) => element.evaluate((root, find) => {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const at = node.textContent!.indexOf(find);
+    if (at < 0) continue;
+    const range = document.createRange();
+    range.setStart(node, at);
+    range.setEnd(node, at + find.length);
+    const { left, right } = range.getBoundingClientRect();
+    return { left, right };
+  }
+  throw new Error(`"${find}" is not in the element`);
+}, needle);
+
+test("a file named in the other script reads from its start, in the sheet and in the bubble", { tag: ["@feature:app.composer.paste-files", "@feature:files.paired.send"] }, async ({ peer }) => {
+  // In an English app an Arabic name lost its start to the "…" (what the file is), and the sheet split ".png" off it.
+  const [alice, bob] = await Promise.all([peer("alice"), peer("bob", { mobile: true, viewport: { width: 375, height: 740 } })]);
+  await link(alice, bob);
+  await connect(alice, bob);
+
+  expect(await paste(alice.page, "textarea", [{ name: "صورة من الاجتماع.png", type: "image/png", base64: PNG }])).toBe(false);
+  const caption = alice.page.getByTestId("attachment-sheet").getByTestId("attachment-name");
+  await expect(caption).toHaveText(/^صورة من الاجتماع\.png ·\s*\d+\sB$/);
+  // Right to left inside the name, ".png" at its left end; the size after it, on the right as the app reads.
+  const [start, extension, size] = await Promise.all([textBox(caption, "صورة"), textBox(caption, "png"), textBox(caption, "B")]);
+  expect(start.left).toBeGreaterThan(extension.right);
+  expect(size.left).toBeGreaterThan(start.right);
+  await alice.page.keyboard.press("Escape");
+
+  const name = "تقرير الربع الثالث النهائي للمشروع مع كل الملاحق والجداول.pdf";
+  await alice.page.getByTestId("file-input").setInputFiles({ name, mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n") });
+  const shown = chat(bob).getByTestId("file-bubble").getByTestId("file-name");
+  await expect(shown).toHaveText(name, { timeout: 30_000 });
+  // Cut with … on a phone, at its end: its first word is on the screen, inside the name's box.
+  const [box, first] = await Promise.all([shown.evaluate((el) => el.getBoundingClientRect().toJSON() as DOMRect), textBox(shown, "تقرير")]);
+  expect(first.left).toBeGreaterThanOrEqual(box.left - 1);
+  expect(first.right).toBeLessThanOrEqual(box.right + 1);
+});
+
 /**
  * Whether the picture's URL still serves its bytes. Chromium keeps drawing an image whose object URL was revoked after
  * it loaded; WebKit loads it again and shows its broken "?", which is what Miguel saw.

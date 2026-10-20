@@ -226,7 +226,8 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
           </span>
         )}
         <div className="min-w-0 flex-1">
-          <p className="text-[14px] leading-tight truncate m-0" title={file.name}>
+          {/* In its own direction: an Arabic name in an English app was cut at its start, hiding what the file is. */}
+          <p dir="auto" className="text-[14px] leading-tight truncate m-0" title={file.name} data-testid="file-name">
             <Highlight text={file.name} term={highlight} />
           </p>
           {/* The status wraps: cut with … on a phone, it lost its end (how far the file is, its size). */}
