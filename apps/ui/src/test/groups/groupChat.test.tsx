@@ -349,6 +349,24 @@ describe("GroupChat: out of the group", () => {
     expect(screen.getByTestId("group-forget")).toBeInTheDocument();
   });
 
+  it("removed while typing: the focus goes to the line that says so, not to the page, as the field turns off under it", async () => {
+    const { user } = openGroup(active());
+    await user.click(composer());
+    expect(composer()).toHaveFocus();
+    act(() => fakeEngine.update({ groups: [active({ status: "removed", statusReason: "You were removed from this group", canSend: false })] }));
+    expect(composer()).toBeDisabled();
+    expect(screen.getByTestId("group-notice")).toHaveFocus();
+  });
+
+  it("the composer turned off while the focus is elsewhere leaves the focus where it is", async () => {
+    const { user } = openGroup(active());
+    await user.click(screen.getByTestId("group-options"));
+    await user.keyboard("{Escape}");
+    expect(screen.getByTestId("group-options")).toHaveFocus();
+    act(() => fakeEngine.update({ groups: [active({ status: "removed", statusReason: "You were removed from this group", canSend: false })] }));
+    expect(screen.getByTestId("group-options")).toHaveFocus();
+  });
+
   it("says how to come back when removed from a community, and a line when back in", async () => {
     openGroup(active({ profile: "community", status: "removed", statusReason: "You were removed from this group", canSend: false }),
       [stored({ id: "event:4:joined::1", event: "joined", text: "You joined again" })]);

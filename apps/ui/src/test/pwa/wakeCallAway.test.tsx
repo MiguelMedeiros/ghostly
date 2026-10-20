@@ -49,3 +49,44 @@ describe("waking a contact for a call, then leaving the chat", () => {
     layer.remove();
   });
 });
+
+/**
+ * With Ghostly offline (its own switch) no wake-up can go out: the engine refuses it at once. The call buttons said
+ * nothing of it, and a press put up "Ana did not open Ghostly." as if the contact had been woken and stayed away.
+ */
+describe("calling a contact whose app is closed, with Ghostly offline", () => {
+  it("leaves the call buttons off with the reason, and says nothing about the contact", async () => {
+    saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages: [], createdAt: 1_700_000_000_000 });
+    const { user, engine } = renderApp(<Chat sessionId="chat-1" onCallChange={vi.fn()} callLayer={null} visible />);
+    engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("wakeForCall", () => false);
+    act(() => engine.update({
+      settings: { online: false },
+      links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "connecting" }, dataLink: "idle", peerWakes: true } as never)],
+    }));
+
+    const call = await screen.findByTestId("call-audio");
+    expect(call).toHaveAttribute("aria-disabled", "true");
+    expect(call).toHaveAccessibleDescription("Calls need a live connection");
+    await user.click(call);
+    expect(engine.callsTo("wakeForCall")).toEqual([]);
+    expect(screen.queryByTestId("wake-call")).toBeNull();
+  });
+
+  it("or with the device offline: no minute's wait for a wake-up that cannot go", async () => {
+    const offline = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    try {
+      saveSession({ id: "chat-1", profile: "paired-chat/1", mySeedB64: "c2VlZA", peerPubKeyB64: PEER, encKeyB64: "a2V5", label: "Ana", messages: [], createdAt: 1_700_000_000_000 });
+      const { user, engine } = renderApp(<Chat sessionId="chat-1" onCallChange={vi.fn()} callLayer={null} visible />);
+      engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("wakeForCall", () => true);
+      act(() => engine.update({ links: [linkView({ peerPubKeyZ32: PEER, profile: "paired-chat/1", pairing: { status: "connecting" }, dataLink: "idle", peerWakes: true } as never)] }));
+
+      const call = await screen.findByTestId("call-audio");
+      expect(call).toHaveAttribute("aria-disabled", "true");
+      await user.click(call);
+      expect(engine.callsTo("wakeForCall")).toEqual([]);
+      expect(screen.queryByTestId("wake-call")).toBeNull();
+    } finally {
+      offline.mockRestore();
+    }
+  });
+});

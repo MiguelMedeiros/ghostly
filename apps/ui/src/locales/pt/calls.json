@@ -38,6 +38,10 @@
   "outgoing": "Ligando...",
   "reconnecting": "Reconectando...",
   "rejected": "Chamada rejeitada",
+  "relayNoAnswer": "Seu relay não respondeu",
+  "relayNoAnswerNext": "Confira o servidor TURN em Ajustes, Rede. Ocultar meu IP nunca conecta direto.",
+  "relayOnlyOff": "As chamadas ficam desligadas com Ocultar meu IP",
+  "relayOnlyOffNext": "As chamadas deste app ainda não podem usar um relay. Desligue em Ajustes, Rede para ligar.",
   "selfView": "Arraste para mover, puxe um canto para redimensionar, clique duas vezes para restaurar",
   "share": {
     "blocked": "O compartilhamento de tela está bloqueado",

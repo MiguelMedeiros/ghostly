@@ -4,7 +4,7 @@
  */
 import type { AppFrameEvent, AppSendError } from "@ghostly/core";
 import type { MiniAppJson, MiniAppLinkedFile } from "@ghostly/core/miniApp";
-import type { AppsPlatform } from "../platform";
+import type { AppRangeAsk, AppRangesHost, AppsPlatform } from "../platform";
 
 export interface MemoryHostCall {
   op: string;
@@ -30,6 +30,14 @@ export interface MemoryHost extends AppsPlatform {
   nextPick: { path: string; bytes: Uint8Array; modified?: number }[] | "cancel";
   /** The links each app keeps, by reference: the entry, its bytes now (a test changes them to make it `changed`). */
   readonly linked: Map<string, Map<string, { entry: MiniAppLinkedFile; bytes: Uint8Array | null }>>;
+  /** The read lane: what the contact's app serves, by serve id (its bytes), as `remote.read` reads it. */
+  readonly remote: Map<string, Uint8Array>;
+  /** What this side's apps serve now, by serve id. */
+  readonly serves: Map<string, { linkId: string; ref: string; file: string }>;
+  /** What `ranges.serve` answers next (null: it serves). */
+  serveResult: "not-open" | "offline" | "peer-closed" | null;
+  /** The contact's app asks a range of a serve: what the broker answered. */
+  askRange(linkId: string, ask: AppRangeAsk): Promise<Parameters<AppRangesHost["answer"]>[1]>;
 }
 
 /** The chat app id this host gives an app in a chat: not the real derivation, just one per chat and app. */
@@ -49,6 +57,10 @@ export function memoryHost(runnerUrl = "/app-frame.html", netRunnerUrl: string |
     return map;
   };
   const linked: MemoryHost["linked"] = new Map();
+  const remote: MemoryHost["remote"] = new Map(), serves: MemoryHost["serves"] = new Map();
+  const asks = new Set<(linkId: string, ask: AppRangeAsk) => void>();
+  const answers = new Map<string, (answer: Parameters<AppRangesHost["answer"]>[1]) => void>();
+  let nextServe = 0;
   let nextId = 0;
   const linksOf = (ref: string) => {
     let map = linked.get(ref);
@@ -109,6 +121,7 @@ export function memoryHost(runnerUrl = "/app-frame.html", netRunnerUrl: string |
         });
       },
       list: async (ref, _title) => { calls.push({ op: "files.list", ref }); return [...linksOf(ref).values()].map((l) => l.entry); },
+      entry: async (ref, id) => { calls.push({ op: "files.entry", ref, key: id }); return linksOf(ref).get(id)?.entry ?? null; },
       read: async (ref, id, offset, length) => {
         calls.push({ op: "files.read", ref, key: id });
         const link = linksOf(ref).get(id);
@@ -122,6 +135,30 @@ export function memoryHost(runnerUrl = "/app-frame.html", netRunnerUrl: string |
         else linksOf(ref).delete(id);
       },
     },
+    remote,
+    serves,
+    serveResult: null,
+    ranges: {
+      serve: async (linkId, ref, file) => {
+        calls.push({ op: "ranges.serve", ref, linkId, key: file });
+        if (host.serveResult) return { error: host.serveResult };
+        const serve = `serve${String(nextServe++).padStart(17, "0")}`;
+        serves.set(serve, { linkId, ref, file });
+        return { serve };
+      },
+      unserve: async (linkId, serve) => { calls.push({ op: "ranges.unserve", ref: serves.get(serve)?.ref ?? "", linkId, key: serve }); serves.delete(serve); },
+      read: async (linkId, ref, serve, offset, length) => {
+        calls.push({ op: "ranges.read", ref, linkId, key: serve });
+        const bytes = remote.get(serve);
+        return bytes ? { bytes: bytes.slice(offset, offset + length), size: bytes.length } : { error: "not-served" };
+      },
+      onAsk: (listener) => { asks.add(listener); return () => { asks.delete(listener); }; },
+      answer: async (linkId, answer) => { answers.get(`${linkId} ${answer.app} ${answer.request}`)?.(answer); },
+    },
+    askRange: (linkId, ask) => new Promise((resolve) => {
+      answers.set(`${linkId} ${ask.app} ${ask.request}`, resolve);
+      for (const listener of [...asks]) listener(linkId, ask);
+    }),
     receive(linkId, frame) {
       if (!("d" in frame)) {
         if (frame.o === "open") peers.set(`${linkId} ${frame.app}`, { version: frame.v });

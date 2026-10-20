@@ -5,7 +5,8 @@ use serde::Deserialize;
 use std::sync::Mutex;
 
 /// A share from another app, as the Kotlin side copied it: its text, the files it made of the shared streams, in
-/// the app's cache, and the names of those it did not copy, too large to bring in (`left_out`) or not read (`unread`).
+/// the app's cache, and the names of those it did not copy, too large to bring in (`left_out`), not read (`unread`) or
+/// with no room for them on the device (`no_room`).
 #[derive(Deserialize, Default, Clone, Debug, PartialEq)]
 pub struct Shared {
     #[serde(default)]
@@ -18,6 +19,8 @@ pub struct Shared {
     pub left_out: Vec<String>,
     #[serde(default)]
     pub unread: Vec<String>,
+    #[serde(default, rename = "noRoom")]
+    pub no_room: Vec<String>,
 }
 
 impl Shared {
@@ -46,6 +49,7 @@ impl Incoming {
             Some(waiting) if shared.is_notice() => {
                 waiting.left_out.extend(shared.left_out);
                 waiting.unread.extend(shared.unread);
+                waiting.no_room.extend(shared.no_room);
             }
             _ => *held = Some(shared),
         }
@@ -84,11 +88,16 @@ mod tests {
         incoming.put(photo());
         incoming.put(notice(&["VID_1.mp4"], &[]));
         incoming.put(notice(&[], &["DOC_1.pdf"]));
+        incoming.put(Shared {
+            no_room: vec!["VID_2.mp4".into()],
+            ..Shared::default()
+        });
         assert_eq!(
             incoming.take(),
             Some(Shared {
                 left_out: vec!["VID_1.mp4".into()],
                 unread: vec!["DOC_1.pdf".into()],
+                no_room: vec!["VID_2.mp4".into()],
                 ..photo()
             })
         );

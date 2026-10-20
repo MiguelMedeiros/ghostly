@@ -501,6 +501,12 @@ async function runDaemon(g: Globals): Promise<void> {
   print({ daemon: "ready", profile: g.profile, pid: process.pid, socket: g.paths.socket, lastSeq: host.ctx.hub.lastSeq });
 }
 
+/**
+ * `daemon stop` and `restart` wait this long for the daemon's greeting: a daemon of an older release never greets, and
+ * what does not prove itself is stopped as the process that holds the profile (`stopDaemon`), as the stop asked.
+ */
+const STOP_GREETING_MS = 2_000;
+
 async function daemonCommand(argv: string[]): Promise<void> {
   const sub = argv[0] && !argv[0].startsWith("-") ? argv[0] : undefined;
   const parsed = parseArgs(sub ? argv.slice(1) : argv, { detach: { type: "boolean", description: "" }, timeout: { type: "number", description: "" } });
@@ -519,7 +525,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (sub === "stop") {
     knownProfile(g);
     const stopFor = seconds(parsed, 20);
-    const client = await connectDaemon(g.paths);
+    const client = await connectDaemon(g.paths, undefined, { greetingMs: STOP_GREETING_MS });
     if (!client) throw new CliError("not_found", `No daemon runs profile ${g.profile}`);
     print({ stopped: true, pid: await stopDaemon(g, client, stopFor) });
     return;
@@ -527,7 +533,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (sub === "restart") {
     // The running one stops (if one runs), and this command's own code starts in the background.
     const stopFor = seconds(parsed, 20), startFor = seconds(parsed, 60);
-    const client = await connectDaemon(g.paths);
+    const client = await connectDaemon(g.paths, undefined, { greetingMs: STOP_GREETING_MS });
     // The version it ran is asked ahead of the stop, on the same connection, with no deadline of its own: cosmetic,
     // and the stop's deadline ends it (a deadline here, 15 s, closed the connection under a longer stop, which then
     // failed as `unavailable` and never reached the signals).

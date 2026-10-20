@@ -1,7 +1,8 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
+import { voiceDownloadName } from "@ghostly/core";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import type { EngineState } from "@ghostly/browser/shared/types";
 import { callApi, type ApiContext } from "../src/api";
@@ -12,7 +13,8 @@ import { openPersistentIndexedDb } from "../src/runtime/storage";
 
 /**
  * `file save --path` naming a folder: a bad_request that says to name a file or use --dir, never a hint to --force over
- * it (which then failed "is a folder"); an empty --path or --dir is a usage error, not the current folder.
+ * it (which then failed "is a folder"); an empty --path or --dir is a usage error, not the current folder. A voice message
+ * goes into --dir under the name Ghostly makes for it, as the apps' Download does.
  */
 let dir: string;
 beforeAll(async () => {
@@ -22,6 +24,11 @@ beforeAll(async () => {
     id: "chat-one-in-r", linkId: "chat-one", blob: new Blob(["report"]), createdAt: 1, direction: "in",
     metadata: { name: "report.txt", size: 6, mime: "text/plain", timestamp: 1 },
     transfer: { state: "done", transferred: 6, size: 6 },
+  } as never);
+  await fileStore.put({
+    id: "chat-one-in-v", linkId: "chat-one", blob: new Blob(["MZ"]), createdAt: 1, direction: "in",
+    metadata: { name: "Setup.exe", size: 2, mime: "audio/webm", timestamp: 1_700_000_000_000, voice: { duration: 4_200, peaks: [] } },
+    transfer: { state: "done", transferred: 2, size: 2 },
   } as never);
 });
 
@@ -49,6 +56,14 @@ describe("file save to a folder", () => {
     const file = join(dir, "plain.txt");
     writeFileSync(file, "x");
     await expect(callApi(ctx, "file.save", { file: "chat-one-in-r", dir: file })).rejects.toMatchObject({ code: "not_found", message: `${file} is a file, not a folder` });
+  });
+
+  it("a voice message goes into --dir under the name Ghostly makes for it, never the sender's", async () => {
+    const folder = join(dir, "voice");
+    mkdirSync(folder);
+    const name = voiceDownloadName("audio/webm", 1_700_000_000_000);
+    expect(await callApi(ctx, "file.save", { file: "chat-one-in-v", dir: folder })).toMatchObject({ path: join(folder, name) });
+    expect(readdirSync(folder)).toEqual([name]);
   });
 
   it("an empty --path or --dir is a usage error", () => {

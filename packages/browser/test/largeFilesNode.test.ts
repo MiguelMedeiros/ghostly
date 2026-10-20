@@ -463,14 +463,17 @@ it("a file said on the floor and cancelled by its sender before it went live say
   expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "Cancelled by the sender" });
 }, 60_000);
 
-it("a file said on the floor and refused here for no room arrives on the sender's Retry once there is room", async () => {
+it("a file said on the floor and refused here for no room says so here, and arrives on the sender's Retry once there is room", async () => {
   const t = await setup();
   await announce(t, "full-00001", 30_000);
   const fileId = (await db.getMessages(t.id)).find((m) => m.id === "peer_full-00001")!.file!.id;
   left = 10_000;
   t.offer("full-00001", 30_000);
   await vi.waitFor(() => expect(t.records.get("out:full-00001")).toMatchObject({ state: "failed", error: expect.stringContaining("Not enough space") }), { timeout: 10_000 });
-  await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "It was refused here" }));
+  // Why, not only that it was refused, and after a restart too.
+  await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "No room on this device for this file" }));
+  await t.restartApp();
+  expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "No room on this device for this file" });
   // The person frees space; the sender presses Retry, as its bubble says. The file takes over the bubble that ended.
   left = 40 * 1024 ** 3;
   t.files.retry("full-00001");
@@ -480,7 +483,7 @@ it("a file said on the floor and refused here for no room arrives on the sender'
   expect(await (await fileBytes()).digest(fileId)).toBe(digestOf(30_000));
 }, 60_000);
 
-it("a file said on the floor and refused here as one too many waiting arrives on the sender's Retry once the person answered them", async () => {
+it("a file said on the floor and refused here as one too many waiting says so, and arrives on the sender's Retry once the person answered them", async () => {
   const t = await setup();
   await announce(t, "many-00001", 30_000);
   const fileId = (await db.getMessages(t.id)).find((m) => m.id === "peer_many-00001")!.file!.id;
@@ -489,7 +492,7 @@ it("a file said on the floor and refused here as one too many waiting arrives on
   await vi.waitFor(async () => { for (const id of asks) expect((await t.incoming(id))?.transfer).toMatchObject({ stage: "asking" }); }, { timeout: 20_000 });
   t.offer("many-00001", 30_000);
   await vi.waitFor(() => expect(t.records.get("out:many-00001")).toMatchObject({ state: "failed", error: expect.stringContaining("too many files waiting") }), { timeout: 10_000 });
-  await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed" }));
+  await vi.waitFor(() => expect(t.node().getState().transfers[fileId]).toMatchObject({ state: "failed", error: "Too many files are waiting here" }));
   // The person declines the ones waiting; later the sender tries again, as told.
   for (const id of asks) await t.node().fileAction({ linkId: t.id, fileId: (await t.incoming(id))!.fileId, action: "decline" });
   await vi.waitFor(() => { for (const id of asks) expect(t.records.get(`out:${id}`)?.state).toBe("declined"); }, { timeout: 10_000 });
@@ -558,6 +561,27 @@ it("the files that ended in an earlier run are not noted again when the chat con
   const withFour = await restart();
   expect(withFour, "three more finished files cost no read of the history").toBe(withOne);
   expect(await Promise.all(ids.map((id) => completedAt(t, id)))).toEqual(ended);
+}, 120_000);
+
+it("the transfers that finished leave the engine's state: after 100 small files each state carries no more of them than after a few", async () => {
+  const t = await setup();
+  const wireIds = Array.from({ length: 100 }, (_, i) => `many-${String(i).padStart(5, "0")}`);
+  // 60 the contact sends, 40 sent from here.
+  for (const wireId of wireIds.slice(0, 60)) t.offer(wireId, 64);
+  for (const [i, wireId] of wireIds.slice(60).entries()) await put(t, wireId, 64, 100 + i);
+  await vi.waitFor(async () => {
+    const records = await fileStore.listForLink(t.id);
+    expect(records.filter((f) => f.wire3?.state === "done")).toHaveLength(100);
+  }, { timeout: 60_000 });
+  // The last state the engine sends is built once everything settled.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const kept = Object.keys(t.node().getState().transfers);
+  expect(kept.length, "a view for each file that finished").toBeLessThanOrEqual(16);
+  // Each settled once, kept as finished: none comes back as a transfer when the chat connects again.
+  await t.dropContact();
+  await vi.waitFor(() => expect(t.files.live).toBe(true), { timeout: 10_000 });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  expect(Object.keys(t.node().getState().transfers).length).toBeLessThanOrEqual(16);
 }, 120_000);
 
 /** The contact sends a file of generated bytes over files/2, the file format from before files/3. */

@@ -507,6 +507,8 @@ export class GroupSession {
       },
       ...(hooks.handled && { handled: (to: string) => hooks.handled!(to) }),
       active: () => this.state.status === "active",
+      // A member whose app is slow asks again while my last answer still waits there: its messages are not sent twice.
+      key: frame => frame.t === "group-msg" ? frameKey(frame) : undefined,
     });
     this.provisional = new Set((state.provisional ?? []).slice(-GROUP_LIMITS.provisional));
     this.chainMovedAt = this.clock();
@@ -574,13 +576,24 @@ export class GroupSession {
   /** Members other than me, in the current roster. */
   get others(): string[] { return this.roster.map(([k]) => k).filter(k => k !== this.myKey); }
   /**
-   * Whether `key` could read message `messageId` (`<s>:<e>:<n>`) and still can: in the roster of its epoch, and in the
-   * roster now. A holder serves a group file only to such a member (WISP 503 § Asking).
+   * Whether `key` could read message `messageId` (`<s>:<e>:<n>`) and still can: in the roster now, and in the roster of
+   * its epoch or, given the message's time `ts`, in the roster of the epoch its author, behind on the chain, said it
+   * again under (`saidAgainEpoch`): the newest after its own that comes before any `add` dated later than it. That
+   * member read it under its first id. A holder serves a group file only to such a member (WISP 503 § Asking).
    */
-  couldRead(key: string, messageId: string): boolean {
+  couldRead(key: string, messageId: string, ts?: number): boolean {
     const e = Number(messageId.split(":")[1]);
     const then = this.state.chain.find(c => c.e === e);
-    return !!then && rosterHas(then.m, key) && rosterHas(this.roster, key);
+    if (!then || !rosterHas(this.roster, key)) return false;
+    if (rosterHas(then.m, key)) return true;
+    if (ts === undefined) return false;
+    let again: GroupCommit | undefined;
+    for (let later = e + 1; later <= this.epoch; later++) {
+      const c = this.state.chain[later];
+      if (!c || (c.k === "add" && c.ts > ts)) break;
+      again = c;
+    }
+    return !!again && rosterHas(again.m, key);
   }
   role(key: string): GroupRole | undefined { return this.roster.find(([k]) => k === key)?.[1]; }
   /** The group's picture, if it has one. */

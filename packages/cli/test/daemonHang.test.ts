@@ -75,6 +75,19 @@ describe("a daemon that accepts the socket but never answers", () => {
     expect((await check as CliError).code).toBe("unavailable");
   });
 
+  it("a daemon that goes away with the command's lines unread (ECONNRESET) fails the command as unavailable, not with a crash", async () => {
+    const dir = home("reset-daemon");
+    createProfile(dir, "default");
+    const paths = profilePaths(dir, "default");
+    // Reads nothing, and closes once the hello is in: a daemon that stops (a listen whose reader left) under a client.
+    const server: Server = createServer({ pauseOnConnect: true }, (socket) => { setTimeout(() => socket.destroy(), 200); });
+    await new Promise<void>((resolve) => server.listen(paths.socket, resolve));
+    cleanups.push(() => { server.close(); rmSync(paths.socket, { force: true }); });
+    const result = await within(8_000, ["--home", dir, "status"]);
+    expect(error(result, "unavailable", 1).message).toBe("The daemon went away");
+    expect(result.stderr).not.toContain("ECONNRESET");
+  });
+
   it("a command's deadline: a read 15 s, a wait its --timeout or the daemon's default plus 10 s, anything else none", () => {
     expect(answerWithin("status", {})).toBe(15_000);
     expect(answerWithin("chat.list", {})).toBe(15_000);

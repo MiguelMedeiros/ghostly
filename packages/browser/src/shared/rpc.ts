@@ -139,6 +139,7 @@ export interface EngineApi {
   pollNow(params: { linkId: string }): void;
   removeLink(params: { linkId: string }): void;
   renameLink(params: { linkId: string; label: string }): void;
+  /** The chat on screen, or `group:<id>` for a group: it takes native connections first (WISP 902 § Transports). */
   setActiveLink(params: { linkId: string | null }): void;
   /** `refused`: the text was not kept (it cannot be sent this way); any other error leaves it to be sent later. */
   /** `preview`: a link preview made by this app (WISP 401 § Link previews); checked against the text, dropped if off. */
@@ -186,6 +187,21 @@ export interface EngineApi {
    * queue).
    */
   appSend(params: { linkId: string; ref: string; data: unknown; digest?: string }): { error: import("@ghostly/core").AppSendError | null };
+  /**
+   * The read lane (`app-ranges/1`, WISP 1200 § A read lane to the contact): lets the contact's app read `file` (this
+   * side's linked file id) while both have the app open on this session. The serve id, or why not (`not-open`,
+   * `offline`, `peer-closed`). Each range the contact asks comes as an `app-range` event, answered by `appRangeAnswer`.
+   */
+  appServe(params: { linkId: string; ref: string; file: string }): { serve: string } | { error: "not-open" | "offline" | "peer-closed" };
+  /** Ends a serve. */
+  appUnserve(params: { linkId: string; serve: string }): void;
+  /** The bytes of an `app-range` event's request and the file's size, or why it cannot be read. */
+  appRangeAnswer(params: { linkId: string; app: string; request: number; bytes?: Uint8Array; size?: number; error?: "changed" | "gone" }): void;
+  /**
+   * Reads a range of what the contact's app serves: at most 1 MiB, fewer at the end of the file, with the file's size;
+   * or why not (`not-open`, `not-served`, `changed`, `gone`, `offline`, `peer-closed`, `failed`).
+   */
+  appRemoteRead(params: { linkId: string; ref: string; serve: string; offset: number; length: number }): { bytes: Uint8Array; size: number } | { error: string };
   /** One message's details view (WISP 400 § Message details): how it travelled, as stored, plus what the engine knows around it now. */
   messageDetails(params: { linkId: string; messageId: string }): MessageDetailsView | null;
   /** Forgets one message and the bytes of the file it carried. Nothing is sent: the peer keeps its copy. */
@@ -566,6 +582,12 @@ export type EngineImplementation = {
 };
 
 export type EngineMethod = keyof EngineApi;
+
+/**
+ * A range the contact's app asks of a served file (`app-range`): answered with `appRangeAnswer` under its `request`, the
+ * engine's own number for this ask (not the contact's on the wire, which it may ask again under once cancelled).
+ */
+export interface AppRangeAsk { app: string; request: number; serve: string; file: string; offset: number; length: number }
 type Params<M extends EngineMethod> = Parameters<EngineApi[M]> extends [infer P] ? P : undefined;
 
 export interface RpcRequest<M extends EngineMethod = EngineMethod> {
@@ -633,6 +655,8 @@ export type EngineEvent =
   | { kind: "call-signal"; linkId: string; signal: string }
   /** A contact's mini-app frame in a 1:1 chat (`apps/1`, WISP 1200 § In a chat), already checked; never stored. */
   | { kind: "app-frame"; linkId: string; event: import("@ghostly/core").AppFrameEvent }
+  /** The contact's app asks for a range of a file this side's app serves (`appServe`): the page that served it answers. */
+  | { kind: "app-range"; linkId: string; range: AppRangeAsk }
   /** An update check of the installed mini-apps ran (WISP 1200 § Updates, § Takedowns): read them again. */
   | { kind: "apps-checked" }
   /**

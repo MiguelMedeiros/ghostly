@@ -93,13 +93,11 @@ export class EventHub {
     // A journal that cannot be read never keeps the profile from opening: it is set aside and a new one begins.
     try {
       if (existsSync(this.journalPath)) {
-        const { lines, size } = journalTail(this.journalPath);
-        this.journalLines = lines.length;
+        const { seq, lines, size } = journalEnd(this.journalPath);
+        this.journalLines = lines;
         this.journalBytes = size;
-        for (let i = lines.length - 1; i >= 0; i--) {
-          try { this.seq = (JSON.parse(lines[i]) as GhostlyEvent).seq; break; } catch { /* a torn last line */ }
-        }
-        if (size > JOURNAL_MAX_BYTES || lines.length > JOURNAL_KEEP * 2) this.trimJournal();
+        this.seq = seq;
+        if (size > JOURNAL_MAX_BYTES || lines > JOURNAL_KEEP * 2) this.trimJournal();
       }
     } catch (error) {
       process.stderr.write(`ghostly: the event journal could not be read, a new one begins: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -760,6 +758,30 @@ function groupShape(group: GroupView): GroupShape {
 function journalTail(path: string): { lines: string[]; size: number } {
   const { bytes, start, size } = journalWindow(path);
   return { lines: bytes.toString("utf8", start).split("\n").filter(Boolean), size };
+}
+
+/**
+ * What opening needs of the journal: its last seq, its number of lines (as `journalTail` counts them) and its size. The
+ * lines are counted by their bytes and only the last whole one is made into text.
+ */
+function journalEnd(path: string): { seq: number; lines: number; size: number } {
+  const { bytes, start, size } = journalWindow(path);
+  let lines = 0;
+  for (let from = start; from < bytes.length;) {
+    const end = bytes.indexOf(0x0a, from);
+    const stop = end === -1 ? bytes.length : end;
+    if (stop > from) lines++;
+    from = stop + 1;
+  }
+  let seq = 0;
+  for (let stop = bytes.length; stop > start;) {
+    const from = Math.max(start, bytes.lastIndexOf(0x0a, stop - 1) + 1);
+    if (from < stop) {
+      try { seq = (JSON.parse(bytes.toString("utf8", from, stop)) as GhostlyEvent).seq; break; } catch { /* a torn last line */ }
+    }
+    stop = from - 1;
+  }
+  return { seq, lines, size };
 }
 
 /** The bytes of the journal's last `JOURNAL_MAX_BYTES`, `start` where its first whole line begins in them, and its size. */

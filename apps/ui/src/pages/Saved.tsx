@@ -11,6 +11,7 @@ import { JUMP_TO } from "../hooks/useJumpTo";
 import { useMinuteClock } from "../hooks/useMinuteClock";
 import { setSaved, useSavedMessages, useSavedRead } from "../hooks/useSavedMessages";
 import { filePreview, formatListTime, previewText } from "../lib/chatList";
+import { appCardLine } from "../lib/statusCards";
 import { authorName, groupPath } from "../lib/groups";
 
 /*
@@ -40,8 +41,8 @@ export function Saved() {
     const byTarget = new Map<string, ChatTarget>(targets.flatMap((target) => target.target ? [[target.target, target]] : []));
     return saved.flatMap((s): SavedRow[] => {
       const { message } = s, target = byTarget.get(message.linkId);
-      // A voice message or a video in this app's language, as the chat list says it: the history keeps it in English.
-      const text = filePreview(message.file, t) ?? (previewText(message.text, t) || message.file?.name || t("saved.noText"));
+      // A voice message, a video or an app card in this app's language, as the chat list says it: the history keeps it in English.
+      const text = appCardLine(message.card, t) ?? filePreview(message.file, t) ?? (previewText(message.text, t) || message.file?.name || t("saved.noText"));
       if (message.linkId.startsWith("group:")) {
         // A group this device cannot write in is not a target of a forward, and still has its saved messages.
         const group = groups?.find((g) => `group:${g.id}` === message.linkId);

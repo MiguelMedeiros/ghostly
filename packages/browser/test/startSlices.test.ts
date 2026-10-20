@@ -11,6 +11,8 @@ const LINK_MS = 4;
 const busy = (ms: number) => { const until = performance.now() + ms; while (performance.now() < until) { /* the work */ } };
 
 const built = vi.hoisted(() => [] as string[]);
+/** The `lastSeenTimestamp` each link was built with, by chat. */
+const seen = vi.hoisted(() => new Map<string, number | undefined>());
 vi.mock("@ghostly/core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@ghostly/core")>();
   class SlowLink {
@@ -37,6 +39,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
     constructor(readonly options: GhostLinkOptions) {
       busy(LINK_MS);
       built.push((options.params as StoredLink).id);
+      seen.set((options.params as StoredLink).id, options.lastSeenTimestamp);
     }
   }
   return { ...actual, GhostLink: SlowLink };
@@ -44,7 +47,7 @@ vi.mock("@ghostly/core", async (importOriginal) => {
 
 const fixture = { publish: async () => {}, resolve: async () => null, describe: () => ({ protocol: "fixture", relays: [] }) };
 let node: GhostlyNode | undefined;
-afterEach(async () => { await node?.shutdown(); node = undefined; built.length = 0; vi.unstubAllGlobals(); });
+afterEach(async () => { await node?.shutdown(); node = undefined; built.length = 0; seen.clear(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 function chat(i: number, lastLiveAt: number): StoredLink {
   return { id: `chat-${String(i).padStart(2, "0")}`, profile: "paired-chat/1", createdAt: 1, seedB64: createIdentity().seedB64,
@@ -80,6 +83,67 @@ it("a start with 40 saved chats lets the page run between slices of links, most 
   await vi.waitFor(() => expect(page.turns[page.turns.length - 1]).toBe(40));
   const stretches = page.turns.map((n, i) => n - (page.turns[i - 1] ?? 0)).filter((n) => n > 0);
   expect(Math.max(...stretches) * LINK_MS).toBeLessThanOrEqual(30);
+}, 30000);
+
+/** 40 saved chats, each with a message its contact sent over the DHT (`lastSeenTimestamp` 400 + i). */
+async function fortyChats(online: boolean): Promise<void> {
+  await db.putSettings({ online, nick: "", relays: [], iceServers: [], mints: [], mintsInitialized: true });
+  vi.stubGlobal("RTCPeerConnection", undefined);
+  for (let i = 0; i < 40; i++) {
+    const link = chat(i, 1000 + i);
+    await db.putLink(link);
+    await db.putMessage({ linkId: link.id, id: `peer_${i}`, text: "hi", sender: "peer", timestamp: 500 + i, sentAt: 400 + i, via: "pkarr" });
+  }
+}
+
+/** The links built from here on: most recently live first, in slices, and no chat's history read again for them. */
+async function startsAsAStartDoes(start: () => Promise<void>): Promise<void> {
+  expect(built).toHaveLength(0);
+  const reads = vi.spyOn(db, "getMessages");
+  const page = watchPage();
+  await start();
+  expect(built).toHaveLength(40);
+  expect(built.slice(0, 3)).toEqual(["chat-39", "chat-38", "chat-37"]);
+  expect(seen.get("chat-07")).toBe(407);
+  expect(reads.mock.calls.filter(([id]) => id.startsWith("chat-"))).toEqual([]);
+  await vi.waitFor(() => expect(page.turns[page.turns.length - 1]).toBe(40));
+  const stretches = page.turns.map((n, i) => n - (page.turns[i - 1] ?? 0)).filter((n) => n > 0);
+  expect(Math.max(...stretches) * LINK_MS).toBeLessThanOrEqual(30);
+}
+
+/**
+ * The active device of a device set starts in limited mode until its turn read answers, then leaves it: the chats
+ * started then in the order they were stored (a chat live a moment before could be left with no native listener), each
+ * after a second read of its whole history, the start having read them all already.
+ */
+it("leaving limited mode starts the chats as a start does, reading no history again", async () => {
+  await fortyChats(true);
+  node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport: fixture as never, automaticWallets: false, nativeTransports: {}, limited: true });
+  await node.start();
+  await startsAsAStartDoes(() => node!.leaveLimited());
+}, 30000);
+
+it("the network turned on starts the chats as a start does, reading no history again", async () => {
+  await fortyChats(false);
+  node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport: fixture as never, automaticWallets: false, nativeTransports: {} });
+  await node.start();
+  await startsAsAStartDoes(() => node!.updateSettings({ settings: { online: true } }).then(() => {}));
+}, 30000);
+
+it("a chat started again knows the contact's messages over the DHT stored since the start, as a read of its history would", async () => {
+  await fortyChats(true);
+  node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onCallSignal: vi.fn() }, { transport: fixture as never, automaticWallets: false, nativeTransports: {} });
+  await node.start();
+  expect(seen.get("chat-07")).toBe(407);
+  const store = (message: object) => (node as unknown as { storeNewMessage(m: object): Promise<boolean> }).storeNewMessage(message);
+  await store({ linkId: "chat-07", id: "peer_new", text: "again", sender: "peer", timestamp: 900, sentAt: 800, via: "pkarr" });
+  // Neither one of mine nor one over the data link is what the DHT said.
+  await store({ linkId: "chat-07", id: "me_new", text: "mine", sender: "me", timestamp: 2000, via: "pkarr" });
+  await store({ linkId: "chat-07", id: "peer_live", text: "live", sender: "peer", timestamp: 2000, via: "datalink" });
+  await node.updateSettings({ settings: { online: false } });
+  await node.updateSettings({ settings: { online: true } });
+  expect(seen.get("chat-07")).toBe(800);
+  expect(seen.get("chat-07")).toBe(Math.max(...(await db.getMessages("chat-07")).filter((m) => m.sender === "peer" && m.via === "pkarr").map((m) => m.sentAt ?? m.timestamp)));
 }, 30000);
 
 it("a start that goes offline between slices starts no more links", async () => {
