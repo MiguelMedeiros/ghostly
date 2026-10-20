@@ -210,6 +210,7 @@
     "makeAdmin": "Cedi admin",
     "missing": "{{count}} mancanti",
     "missingHint": "Messaggi di questa epoca non ancora arrivati",
+    "missingOne": "{{count}} mancante",
     "needsBothHint": "I gruppi richiedono entrambe le app connesse e aggiornate",
     "needsUpdate": "Serve un Ghostly aggiornato",
     "noContacts": "Tutti i contatti associati sono già dentro, oppure non ne hai ancora.",
