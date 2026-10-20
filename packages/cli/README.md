@@ -492,7 +492,8 @@ directly (every packet to both; reads from the DHT when every relay fails). Test
 '["http://…"]'` the Pkarr relays, `settings set irohRelays '["https://…"]'` the Iroh relays. `GHOSTLY_WEBRTC=0`
 turns WebRTC off, and `GHOSTLY_STUN=0` leaves the apps' public STUN servers out of it (the profile's own `iceServers`
 stay). A daemon offers to be a hub of the private groups past 16 members it is in, since it stays online;
-`GHOSTLY_HUB=0` keeps it a plain member (the admin can still pin it).
+`GHOSTLY_HUB=0` keeps it a plain member (the admin can still pin it). These four switches take `0`/`false`/`off`/`no`
+(or `1`/`true`/`on`/`yes`), in any case; any other value stops the command with a usage error naming the variable.
 
 ### Private networks
 

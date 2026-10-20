@@ -5,6 +5,7 @@ import type { IceServer, PeerConnection, Track } from "node-datachannel";
 import { buildSdpFromSignal, callRtcConfig, extractParamsFromSdp, PAIRED_CALL_CANDIDATES, RTC_CONFIG, type CallIceServer, type CallSignal } from "@ghostly/core";
 import { CallAudio, type OpusCodec } from "./audio";
 import type { CallRate, PlaybackQueue } from "./pcm";
+import { envSwitch } from "../envSwitch";
 
 /**
  * A call's media on Node (WISP 601, WISP 1100 § Calls): libdatachannel (node-datachannel, the same native module
@@ -98,7 +99,7 @@ export function opusCodec(native: OpusNative, rate: CallRate): OpusCodec {
 /** The media stack, or why calls are not available here (the reason the call buttons of the contact's app show). */
 export function loadCallStack(): Promise<CallStack | string> {
   return (loading ??= (async () => {
-    if (process.env.GHOSTLY_WEBRTC === "0") return "Calls are off on this headless Ghostly (GHOSTLY_WEBRTC=0)";
+    try { if (!envSwitch("GHOSTLY_WEBRTC", true)) return "Calls are off on this headless Ghostly (GHOSTLY_WEBRTC=0)"; } catch (error) { return (error as Error).message; }
     try {
       const ndc = (await import("node-datachannel")) as unknown as CallStack["ndc"] & { default?: CallStack["ndc"] };
       const lib = (ndc.PeerConnection ? ndc : ndc.default!) as CallStack["ndc"];
@@ -120,7 +121,7 @@ export function loadCallStack(): Promise<CallStack | string> {
  * apps' calls use them.
  */
 export function callIceServers(extra: readonly CallIceServer[] = [], env = process.env): (string | IceServer)[] {
-  const out: (string | IceServer)[] = env.GHOSTLY_STUN === "0" ? [] : (RTC_CONFIG.iceServers ?? []).flatMap((server) => [server.urls].flat()).slice(0, 2);
+  const out: (string | IceServer)[] = !envSwitch("GHOSTLY_STUN", true, env) ? [] : (RTC_CONFIG.iceServers ?? []).flatMap((server) => [server.urls].flat()).slice(0, 2);
   for (const server of callRtcConfig(extra).iceServers?.slice(RTC_CONFIG.iceServers?.length ?? 0) ?? []) {
     for (const url of [server.urls].flat()) {
       const m = /^(stun|turns?):([^:?\s]+)(?::(\d+))?(?:\?transport=(udp|tcp))?$/i.exec(url);
