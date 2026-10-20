@@ -10,7 +10,10 @@ name: Web image latest
 # A person publishing the draft (docs/RELEASING.md, step 4) starts it. By hand:
 #   gh workflow run web-latest.yml -f tag=v1.0.0
 # The image `:<tag>` has to exist: when the release is published before the
-# Release workflow's build-web is done, run it again once it is.
+# Release workflow's build-web is done, run it again once it is. Any workflow
+# can push to the package, so the tag is used only when its image carries the
+# provenance release.yml attests from that tag (tools/scripts/web-image.mjs),
+# and `latest` moves to that checked digest, not to whatever the tag names.
 
 on:
   release:
@@ -36,6 +39,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      attestations: read
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
@@ -62,13 +66,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Is it release.yml's build of the tag
+        id: verified
+        if: steps.check.outputs.move == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/scripts/web-image.mjs "$TAG" "$GITHUB_REPOSITORY"
+
       - name: Point latest at the release's image
         if: steps.check.outputs.move == 'true'
+        env:
+          REF: ${{ steps.verified.outputs.ref }}
         run: |
           set -euo pipefail
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ghostly-web"
-          docker buildx imagetools create --tag "$image:latest" "$image:$TAG"
-          echo "\`$image:latest\` is now \`$image:$TAG\`." >> "$GITHUB_STEP_SUMMARY"
+          docker buildx imagetools create --tag "$image:latest" "$REF"
+          echo "\`$image:latest\` is now \`$image:$TAG\` (\`$REF\`)." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Say why not
         if: steps.check.outputs.move != 'true'
