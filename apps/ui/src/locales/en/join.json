@@ -22,6 +22,7 @@
   "pasteScreenshot": "Or paste a screenshot of the QR code.",
   "placeholder": "Paste invite…",
   "qrReaderNotLoaded": "The QR reader did not load. Check your connection, then try again.",
+  "qrReaderReload": "The QR reader still did not load. Reload Ghostly to load it.",
   "scan": "Scan QR",
   "submit": "Join chat",
   "title": "Join a chat or group",

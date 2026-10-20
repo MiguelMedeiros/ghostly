@@ -6,6 +6,7 @@ import { memberName } from "../lib/groups";
 import { useI18n } from "../contexts/I18nContext";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
+import { focusPastRow, rowAfter } from "./GroupInvitation";
 
 /**
  * Leaving a group, said before it happens: it goes from this device with its history, and an admin
@@ -18,15 +19,22 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
   const { t } = useI18n();
   const id = useId();
   const dialog = useRef<HTMLDialogElement>(null), cancel = useRef<HTMLButtonElement>(null);
-  const backdrop = useBackdropDismiss(onClose);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
+  // Once the leave went ahead: the chat list's row after the group's, taken as it starts (the group's own row goes with
+  // it). Closed without leaving, undefined.
+  const leaving = useRef<HTMLElement | null | undefined>(undefined);
+  const close = () => { leaving.current = undefined; onClose(); };
+  const backdrop = useBackdropDismiss(close);
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null, opener = returnFocus?.current;
     const element = dialog.current!; element.showModal(); cancel.current?.focus();
     return () => {
       element.close();
-      // Left: the group's page is gone, and nothing here is still connected.
+      // Left: the group's page goes, with what opened this (it may still be there as this closes, the list not yet
+      // shown). The focus goes to the list's next row, or New, as a declined invitation's and a deleted chat's do; it
+      // was left on the page's body.
+      if (leaving.current !== undefined) { focusPastRow(leaving.current, null); return; }
       const back = before && before !== document.body && before.isConnected ? before : opener;
       if (back?.isConnected) back.focus();
     };
@@ -46,10 +54,12 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
   const blockedNext = !community ? "group.leave.blockedNext" : !group.isAdmin ? "group.leave.blockedCommunityNext"
     : forget ? "group.leave.blockedCommunityAdminForgetNext" : "group.leave.blockedCommunityAdminNext";
   const leave = async () => {
+    if (busy) return;
+    leaving.current = rowAfter(group.id);
     setBusy(true); setError(null);
-    try { await onConfirm(); } catch (e) { setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); setBusy(false); }
+    try { await onConfirm(); } catch (e) { leaving.current = undefined; setError(e instanceof Error ? problemText(e, t) : { tone: "error", title: t("group.error.generic") }); setBusy(false); }
   };
-  return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); onClose(); }} aria-labelledby={`${id}-title`} aria-describedby={`${id}-body`}
+  return createPortal(<dialog ref={dialog} {...backdrop} onCancel={e => { e.preventDefault(); close(); }} aria-labelledby={`${id}-title`} aria-describedby={`${id}-body`}
     data-testid="group-leave-dialog" className="m-auto w-[calc(100%_-_2rem)] max-w-sm rounded-2xl border border-border bg-sidebar-bg p-5 text-text-primary shadow-2xl backdrop:bg-black/60">
     <h2 id={`${id}-title`} className="text-base font-semibold">{forget
       ? group.name ? t("group.leave.forgetTitle", { name: group.name }) : t("group.leave.forgetTitleUnnamed")
@@ -65,9 +75,10 @@ export function LeaveGroupDialog({ group, onClose, onConfirm, returnFocus, forge
     </div>
     {error && <Notice problem={error} className="mt-2 text-sm" />}
     <div className="mt-5 flex justify-end gap-2">
-      <button ref={cancel} onClick={onClose} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
-      <button disabled={busy || blocked} onClick={() => void leave()} data-testid="group-leave-confirm"
-        className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger-ink hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger disabled:opacity-40">{forget ? t("group.menu.forget") : t("group.menu.leave")}</button>
+      <button ref={cancel} onClick={close} className="min-h-11 rounded-lg px-4 text-sm hover:bg-surface-hover focus-visible:ring-2 focus-visible:ring-accent">{t("common.cancel")}</button>
+      {/* While it leaves, a press does nothing; not disabled, which would drop the focus to the page (and keep it there if refused). */}
+      <button disabled={blocked} aria-disabled={busy || undefined} onClick={() => void leave()} data-testid="group-leave-confirm"
+        className="min-h-11 rounded-lg bg-danger/15 px-4 text-sm text-danger-ink hover:bg-danger/25 focus-visible:ring-2 focus-visible:ring-danger disabled:opacity-40 aria-disabled:opacity-40">{forget ? t("group.menu.forget") : t("group.menu.leave")}</button>
     </div>
   </dialog>, document.body);
 }

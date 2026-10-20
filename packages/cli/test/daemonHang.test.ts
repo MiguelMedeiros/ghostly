@@ -59,7 +59,7 @@ describe("a daemon that accepts the socket but never answers", () => {
 
   it("the version check sent ahead of a command has no deadline of its own: the command's ends both, as the command's timeout", async () => {
     const { paths } = await wedged("hung-check");
-    const client = (await connectDaemon(paths.socket))!;
+    const client = (await connectDaemon(paths))!;
     expect(client).toBeTruthy();
     // As session() does: the check first, the command behind it on the same connection, only the command with a deadline.
     const check = client.call("status").catch((error: unknown) => error);
@@ -73,6 +73,19 @@ describe("a daemon that accepts the socket but never answers", () => {
     // Ended by the command's deadline closing the connection; nothing waits for it. A deadline of its own, shorter
     // than the command's, closed the connection under the command instead, which then failed as unavailable.
     expect((await check as CliError).code).toBe("unavailable");
+  });
+
+  it("a daemon that goes away with the command's lines unread (ECONNRESET) fails the command as unavailable, not with a crash", async () => {
+    const dir = home("reset-daemon");
+    createProfile(dir, "default");
+    const paths = profilePaths(dir, "default");
+    // Reads nothing, and closes once the hello is in: a daemon that stops (a listen whose reader left) under a client.
+    const server: Server = createServer({ pauseOnConnect: true }, (socket) => { setTimeout(() => socket.destroy(), 200); });
+    await new Promise<void>((resolve) => server.listen(paths.socket, resolve));
+    cleanups.push(() => { server.close(); rmSync(paths.socket, { force: true }); });
+    const result = await within(8_000, ["--home", dir, "status"]);
+    expect(error(result, "unavailable", 1).message).toBe("The daemon went away");
+    expect(result.stderr).not.toContain("ECONNRESET");
   });
 
   it("a command's deadline: a read 15 s, a wait its --timeout or the daemon's default plus 10 s, anything else none", () => {

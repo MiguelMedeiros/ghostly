@@ -79,6 +79,7 @@ export function webOpener({ apps, closeLabel, stoppedLabel = (title) => title, n
           warnStop(entry.title, reason);
           onStop?.(ref, reason);
         },
+        onServing: (on) => { if (chatApp(linkId)?.running === running) updateChatApp(linkId, { serving: on }); },
       });
       setChatApp(linkId, { ref, title: entry.title, shown: true, wide: false, view: entry.view ?? "chat", running });
       return;

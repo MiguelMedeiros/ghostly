@@ -185,8 +185,11 @@ export class FakeTransceiver {
   }
 }
 
-/** An SDP with what `extractParamsFromSdp` reads: ICE credentials, a fingerprint, a setup role and a host and srflx candidate. */
-function fakeSdp(setup: string, kinds: string[], restarts = 0): string {
+/**
+ * An SDP with what `extractParamsFromSdp` reads: ICE credentials, a fingerprint, a setup role and a host and srflx
+ * candidate; with `relay` (the relay policy) a TURN server's relay candidate only, as a browser gathers then.
+ */
+function fakeSdp(setup: string, kinds: string[], restarts = 0, relay = false): string {
   const lines = ["v=0", "o=- 1 2 IN IP4 127.0.0.1", "s=-", "t=0 0"];
   // Each ICE restart has credentials and candidates of its own.
   const round = restarts ? String(restarts) : "";
@@ -194,8 +197,10 @@ function fakeSdp(setup: string, kinds: string[], restarts = 0): string {
   for (const kind of kinds) {
     lines.push(
       `m=${kind} 9 UDP/TLS/RTP/SAVPF 111`,
-      `a=candidate:1 1 udp 2122260223 192.168.1.2 ${port} typ host generation 0`,
-      `a=candidate:2 1 udp 1686052607 203.0.113.9 ${port} typ srflx raddr 192.168.1.2 rport ${port} generation 0`,
+      ...(relay ? [`a=candidate:3 1 udp 41885439 198.51.100.7 ${port} typ relay raddr 203.0.113.9 rport ${port} generation 0`] : [
+        `a=candidate:1 1 udp 2122260223 192.168.1.2 ${port} typ host generation 0`,
+        `a=candidate:2 1 udp 1686052607 203.0.113.9 ${port} typ srflx raddr 192.168.1.2 rport ${port} generation 0`,
+      ]),
       `a=ice-ufrag:fake${round}`,
       `a=ice-pwd:fakefakefakefakefakefake${round}`,
       `a=fingerprint:sha-256 ${Array(32).fill("AB").join(":")}`,
@@ -220,6 +225,8 @@ export class FakePeerConnection extends EventTarget {
   static offline = false;
   /** Restart offers cannot be made at all. */
   static failRestarts = false;
+  /** The TURN server does not answer: a connection on the relay policy gathers nothing. */
+  static turnDown = false;
   private readonly stalls: boolean;
 
   /** How many times ICE restarted on this connection (its own restart offers, and the peer's it was given). */
@@ -249,9 +256,11 @@ export class FakePeerConnection extends EventTarget {
   constructor(readonly config: RTCConfiguration) {
     super();
     FakePeerConnection.instances.push(this);
-    this.stalls = FakePeerConnection.stallGathering > 0;
-    if (this.stalls) FakePeerConnection.stallGathering--;
+    this.stalls = FakePeerConnection.stallGathering > 0 || (this.relay && FakePeerConnection.turnDown);
+    if (FakePeerConnection.stallGathering > 0) FakePeerConnection.stallGathering--;
   }
+
+  private get relay(): boolean { return this.config.iceTransportPolicy === "relay"; }
 
   getConfiguration() { return this.config; }
   getTransceivers() { return [...this.transceivers]; }
@@ -271,13 +280,13 @@ export class FakePeerConnection extends EventTarget {
     if (FakePeerConnection.failRestarts && options.iceRestart) throw new DOMException("No network", "OperationError");
     if (options.iceRestart) this.iceRestarts++;
     const noCandidates = options.iceRestart && FakePeerConnection.offline;
-    const sdp = fakeSdp("actpass", this.transceivers.map((t) => t.receiver.track.kind), this.iceRestarts);
+    const sdp = fakeSdp("actpass", this.transceivers.map((t) => t.receiver.track.kind), this.iceRestarts, this.relay);
     return { type: "offer", sdp: noCandidates ? sdp.replace(/^a=candidate:.*\r\n/gm, "") : sdp };
   }
 
   async createAnswer(): Promise<RTCSessionDescriptionInit> {
     this.assertOpen();
-    return { type: "answer", sdp: fakeSdp("active", this.transceivers.filter((t) => t.mid !== null).map((t) => t.receiver.track.kind), this.iceRestarts) };
+    return { type: "answer", sdp: fakeSdp("active", this.transceivers.filter((t) => t.mid !== null).map((t) => t.receiver.track.kind), this.iceRestarts, this.relay) };
   }
 
   async setLocalDescription(description: RTCSessionDescriptionInit) {
@@ -355,6 +364,7 @@ export function installWebRTCFakes() {
   FakePeerConnection.stallGathering = 0;
   FakePeerConnection.offline = false;
   FakePeerConnection.failRestarts = false;
+  FakePeerConnection.turnDown = false;
   vi.stubGlobal("RTCPeerConnection", FakePeerConnection);
   vi.stubGlobal("MediaStream", FakeMediaStream);
   const previous = Object.getOwnPropertyDescriptor(navigator, "mediaDevices");

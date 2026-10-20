@@ -43,7 +43,9 @@ export interface RequestLike {
  * provider's answer; the worker's own script is the browser's to fetch; the mini-app runner's sandbox is in its
  * server's header (WISP 1200), which a cached copy could lose.
  */
-const NEVER = new Set(["/version.json", "/oidc-callback.html", "/sw.js", "/app-frame.html", "/app-frame-net.html", "/app-frame-unguarded.html"]);
+const NEVER = new Set(["/version.json", "/oidc-callback.html", "/sw.js", "/app-frame.html", "/app-frame-net.html", "/app-frame-unguarded.html",
+  // What a contact's app origin is served (src/svc/): never the app's own, so never in its cache.
+  "/ghostly-services-sw.js", "/_ghostly-svc/bridge.html", "/_ghostly-svc/bridge.js"]);
 
 /** Pages that are the app: its root and its file. Any other path is a static file, or nothing. */
 const APP_PAGES = new Set(["/", "/index.html"]);
@@ -113,9 +115,14 @@ export interface SharedItem {
   text: string;
   url: string;
   files: File[];
+  /** Files left out as too large, by name (`""`: not known, a body over `MAX_SHARE_BYTES` is never read). */
+  leftOut?: string[];
   /** The names of the files past `MAX_SHARED_FILES`, left out: the picker says so. */
   pastLimit?: string[];
 }
+
+/** A share too large to read: nothing of it comes, and the picker says a file was too large. */
+export const TOO_LARGE_SHARE: SharedItem = { title: "", text: "", url: "", files: [], leftOut: [""] };
 
 /** Most files one share brings; larger shares keep their first ones, and name the rest. */
 export const MAX_SHARED_FILES = 32;

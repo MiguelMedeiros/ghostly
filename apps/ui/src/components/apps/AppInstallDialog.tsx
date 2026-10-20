@@ -185,7 +185,8 @@ function Head({ titleId, title, version, tagline, icon, installed }: { titleId: 
       <div className="min-w-0">
         <h2 id={titleId} dir="auto" className="text-lg font-medium text-text-primary break-words">{title}</h2>
         {version && <p className="text-xs text-text-muted">{t("apps.app.version", { version })}</p>}
-        {tagline && <p dir="auto" className="text-sm text-text-secondary">{tagline}</p>}
+        {/* A link or a long word breaks anywhere: unbroken, it pushed the screen sideways on a phone, and cut it off in Arabic. */}
+        {tagline && <p dir="auto" className="text-sm text-text-secondary [overflow-wrap:anywhere]">{tagline}</p>}
       </div>
     </div>
   );
@@ -251,7 +252,7 @@ export function AppInstallDialog({ source, fetched, title, sentBy, onClose, onIn
       {preview && (
         <>
           <Publisher fingerprint={preview.fingerprint} unknown={preview.unknownPublisher} listedBy={preview.listedBy} sentBy={sentBy} builtIn={preview.carried && "carried"} />
-          {preview.manifest.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line">{preview.manifest.description}</p>}
+          {preview.manifest.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{preview.manifest.description}</p>}
           {!blocked && (preview.install === "new" || preview.asks.length > 0) && <Permissions asks={preview.asks} update={preview.install === "update"} />}
           {why && <Line tone="danger" testId="app-install-blocked">{why}</Line>}
           <Privacy from={preview.from} internet={(preview.manifest.permissions as readonly string[]).includes("internet")} carried={preview.carried} />
@@ -304,7 +305,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
   if (removing) {
     return (
       <Shell titleId={titleId} onClose={onClose} testId="app-uninstall">
-        <h2 id={titleId} className="text-lg font-medium text-text-primary">{t("apps.app.uninstallTitle", { title: app.title })}</h2>
+        <h2 id={titleId} className="text-lg font-medium text-text-primary [overflow-wrap:anywhere]">{t("apps.app.uninstallTitle", { title: app.title })}</h2>
         <p className="text-sm text-text-secondary">{t("apps.app.uninstallText")}</p>
         {error && <ErrorLine error={error} />}
         <div className="flex flex-wrap justify-end gap-2">
@@ -319,7 +320,7 @@ export function InstalledAppDialog({ app, onClose, onOpen, onUninstalled }: {
     <Shell titleId={titleId} onClose={onClose} testId="app-details">
       <Head titleId={titleId} title={app.title} version={app.version} tagline={app.tagline} installed={app} />
       <Publisher fingerprint={app.fingerprint} unknown={app.unknownPublisher} listedBy={app.listedBy} builtIn={app.builtIn && "installed"} />
-      {app.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line">{app.description}</p>}
+      {app.description && <p dir="auto" className="text-sm text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{app.description}</p>}
       {why && <Line tone={app.run.status === "needs-files" ? "warning" : "danger"} testId="app-run-line">{why}</Line>}
       {app.equivocation && <Line tone="warning" testId="app-equivocation">{t("apps.install.equivocation", { sequence: String(app.equivocation.sequence) })}</Line>}
       {app.pending && (

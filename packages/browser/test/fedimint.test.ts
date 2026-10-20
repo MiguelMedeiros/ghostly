@@ -11,6 +11,7 @@ import { FedimintLightning, fedimint as fedimintDescriptor } from "../src/engine
 import { isNothingSpentError, providerDescriptorProblems } from "../src/engine/paymentAdapters/providers/types";
 import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import { PaymentDesk } from "../src/engine/payments";
+import { paymentNetwork } from "../src/engine/paymentAdapters/walletInstances";
 import type { CashuWallet } from "../src/engine/wallet";
 import { STORES, openDb, store, transact, wrap } from "../src/shared/idb";
 import type { StoredPayment } from "../src/shared/types";
@@ -359,6 +360,35 @@ describe("Fedimint in a chat", () => {
     expect(desk.payment("t0")).toMatchObject({ state: "failed" });
     expect(lines()).toEqual(["Could not receive Fedimint ecash: These notes were already redeemed"]);
     expect(sent.filter((s) => s.kind === "res" && String(s.frame.id).startsWith("t")).map((s) => s.frame.error)).toEqual(Array(5).fill("These notes were already redeemed"));
+  });
+
+  it("received notes carry their federation's network: test sats are never a Mainnet payment, and older records learn it", async () => {
+    const payee = (network: string | undefined) => ({ inspectNotes: async () => ({ federation: federation.id, amountMsats: 1_200_000 }),
+      redeemNotes: async () => ({ operationId: "op", state: "done" }), redeemState: async () => "done",
+      federation: () => network === undefined ? undefined : { network }, requestFederations: () => [federation.id] }) as unknown as FedimintWallet;
+    const pay = (desk: PaymentDesk, id: string) => desk.onPayment("l", { id, timestamp: 1, amount: { value: "1200", asset: "sat" }, endpoint: [ENDPOINT.fedimint, `notes-${id}`] });
+    for (const [network, expected, line] of [["signet", "testnet", "test sats"], ["regtest", "testnet", "test sats"], ["bitcoin", "mainnet", "sats"]] as const) {
+      const { desk, host } = chat(payee(network));
+      await pay(desk, network);
+      expect(desk.payment(network), network).toMatchObject({ state: "settled", network: expected });
+      expect(paymentNetwork(desk.payment(network)!), network).toBe(expected);
+      expect((host.storeMessage.mock.calls as unknown as [{ text: string }][]).map(([m]) => m.text), network).toEqual([`⚡ 1,200 ${line} on Fedimint`]);
+    }
+
+    // A record written before it carried a network takes its federation's when the wallet is ready; one of a federation
+    // the wallet no longer knows is left as it was.
+    await transact([STORES.payments], (s) => { s[STORES.payments].clear(); });
+    await transact([STORES.payments], (s) => {
+      s[STORES.payments].put({ id: "old", linkId: "l", kind: "payment", direction: "in", amount: 1_200, unit: "sat", state: "settled", createdAt: 1, federation: federation.id, notesDigest: "d" } satisfies StoredPayment);
+      s[STORES.payments].put({ id: "gone", linkId: "l", kind: "payment", direction: "in", amount: 5, unit: "sat", state: "settled", createdAt: 2, federation: "other", notesDigest: "e" } satisfies StoredPayment);
+    });
+    const signet = payee("signet");
+    const { desk } = chat({ ...signet, federation: (id: string) => id === federation.id ? { network: "signet" } : undefined } as unknown as FedimintWallet);
+    await desk.start();
+    await desk.resumeFedimint();
+    expect(desk.payment("old")).toMatchObject({ network: "testnet" });
+    expect(paymentNetwork(desk.payment("old")!)).toBe("testnet");
+    expect(desk.payment("gone")!.network).toBeUndefined();
   });
 
   it("notes the contact refuses come back, and the review closes as failed", async () => {

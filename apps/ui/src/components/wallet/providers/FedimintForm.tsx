@@ -10,7 +10,7 @@ import { formatAmount } from "../../../lib/amount";
  * The Fedimint source's form: one of the federations joined on the Fedimint card (with a gateway module), not an
  * id to type. Joining happens there, with the federation's details shown first.
  */
-export function FedimintForm({ descriptor, busy, onSubmit }: ProviderFormProps) {
+export function FedimintForm({ descriptor, busy, saving = false, onSubmit }: ProviderFormProps) {
   const { t } = useI18n();
   const state = useServicesPlatform()?.wallet?.getState();
   const federations = (state?.fedimint?.federations ?? []).filter((f) => f.lightning);
@@ -21,7 +21,7 @@ export function FedimintForm({ descriptor, busy, onSubmit }: ProviderFormProps) 
     <form className="space-y-3" data-testid={`provider-form-${descriptor.id}`} onSubmit={(e) => { e.preventDefault(); if (federation) onSubmit({ federation }); }}>
       <Select aria-label={t("wallet.source.fedimint.label")} value={federation} onChange={setChosen}
         options={federations.map((f) => ({ value: f.id, label: f.name ?? `${f.id.slice(0, 8)}…`, description: t("wallet.source.fedimint.description", { amount: formatAmount(f.balance, t.language), network: f.network ?? t("wallet.source.fedimint.unknownNetwork") }) }))} />
-      <Button type="submit" variant="primary" disabled={busy || !federation}>{t("wallet.source.fedimint.use")}</Button>
+      <Button type="submit" variant="primary" disabled={busy || !federation} loading={saving}>{t("wallet.source.fedimint.use")}</Button>
     </form>
   );
 }

@@ -64,7 +64,11 @@ function InstalledRow({ app, onDetails, onOpen }: { app: InstalledAppView; onDet
         aria-label={t("apps.page.details", { title: app.title })} aria-describedby={`${versionId} ${hintId}`}>
         <AppIcon installed={app} />
         <span className="min-w-0">
-          <span dir="auto" className="block text-sm text-text-primary truncate">{app.title} <span id={versionId} className="text-text-muted text-xs">{app.version}</span></span>
+          {/* A long title is cut alone: the version stays whole after it. */}
+          <span dir="auto" className="flex items-baseline gap-1 text-sm text-text-primary">
+            <span dir="auto" className="truncate min-w-0">{app.title}</span>{" "}
+            <span id={versionId} className="shrink-0 whitespace-nowrap text-text-muted text-xs">{app.version}</span>
+          </span>
           <HintLine id={hintId} testId="installed-app-hint" className={color} lead={hint.lead} text={hint.text} />
         </span>
       </button>

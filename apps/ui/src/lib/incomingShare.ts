@@ -21,10 +21,12 @@ export interface IncomingShare {
   text: string;
   url: string;
   files: SharedFile[];
-  /** The names of files left out as too large to bring into the page (Android's share); the picker says so. */
+  /** The names of files left out as too large to bring into the page (`""`: name not known); the picker says so. */
   leftOut?: string[];
   /** The names of files Android could not read (a revoked permission, a broken stream); the picker says so. */
   unread?: string[];
+  /** The names of files Android had no room to copy (the device is full); the picker says so. */
+  noRoom?: string[];
   /** The names of files left out past the most one share brings (`MAX_SHARE_FILES`); the picker says so on a line of its own. */
   pastLimit?: string[];
   /**
@@ -51,13 +53,21 @@ export function isEmptyShare(share: IncomingShare): boolean {
 
 /**
  * A share arrived: it waits for a chat to be picked. An empty one is dropped, and never clears one that waits; one
- * that only names files left out (too large, or not read) is said all the same, with the share that waits when there
- * is one.
+ * that only names files left out (too large, not read, no room for them, or past the most one share brings) is said
+ * all the same, with the share that waits when there is one.
  */
 export function receiveShare(share: IncomingShare): void {
   if (isEmptyShare(share)) {
-    if (!share.leftOut?.length && !share.unread?.length) return;
-    pending = pending ? { ...pending, leftOut: [...pending.leftOut ?? [], ...share.leftOut ?? []], unread: [...pending.unread ?? [], ...share.unread ?? []] } : share;
+    if (!share.leftOut?.length && !share.unread?.length && !share.noRoom?.length && !share.pastLimit?.length) return;
+    pending = pending
+      ? {
+        ...pending,
+        leftOut: [...pending.leftOut ?? [], ...share.leftOut ?? []],
+        unread: [...pending.unread ?? [], ...share.unread ?? []],
+        noRoom: [...pending.noRoom ?? [], ...share.noRoom ?? []],
+        pastLimit: [...pending.pastLimit ?? [], ...share.pastLimit ?? []],
+      }
+      : share;
   } else pending = share;
   emit();
 }

@@ -4,7 +4,7 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { useI18n, type Translate } from "../../contexts/I18nContext";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { groupLinkUrl, groupPath, groupStatusText } from "../../lib/groups";
-import { useEngineState } from "../../lib/engineState";
+import { useEngineValue } from "../../lib/engineState";
 import { showJoinNotice } from "../../lib/joinNotice";
 import { NO_ROOM_FOR_CHAT, ensureSession } from "../../lib/storage";
 import { INVITE_REFUSAL_MESSAGE, chatPath, classifyInvite, inviteShareText, readInvite, type JoinOutcome } from "../../lib/url";
@@ -93,16 +93,20 @@ export function InviteEntityCard({ code, mine, from }: { code: string; mine: boo
 export function GroupEntityCard({ link, community, groupId, mine, from }: { link: string; community: boolean; groupId: string; mine: boolean; from?: string }) {
   const { t } = useI18n();
   const nav = useAppNavigation();
-  const state = useEngineState();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Problem | null>(null);
-  // An invitation not yet answered is not membership: it has no status until it is.
-  const known = state?.groups.find(g => g.id === groupId && g.status);
+  // An invitation not yet answered is not membership: it has no status until it is. Only what the card shows of the
+  // group, so a new message in it (or any other engine state) draws nothing here.
+  const known = useEngineValue(state => {
+    const g = state?.groups.find(g => g.id === groupId && g.status);
+    return g && { id: g.id, name: g.name, status: g.status, statusReason: g.statusReason };
+  });
   const group = known?.status === "active" ? known : undefined;
   // Left is a tombstone the link replaces, so it joins as a group never seen does.
   const out = known && !group && known.status !== "left" ? known : undefined;
   const again = community && (out?.status === "removed" || out?.status === "lost");
   const join = async () => {
+    if (busy) return;
     setError(null); setBusy(true);
     try {
       const { groupId: id } = await engine.call("joinGroupByLink", { link });
@@ -122,12 +126,12 @@ export function GroupEntityCard({ link, community, groupId, mine, from }: { link
         <p className="m-0" data-testid="entity-group-out">{out.statusReason ? problemLine(out.statusReason, t) : groupStatusText(out.status!, t)}</p>
         {!community && <p className="m-0" data-testid="entity-group-next">{t("chat.entity.deleteToJoin", { action: t("group.menu.forget") })}</p>}
         <div className="flex flex-wrap items-center gap-1.5">
-          {again && <button type="button" data-testid="entity-group-join" disabled={busy} className={cardButton} onClick={() => void join()}>{busy ? t("chat.entity.joining") : t("chat.entity.joinAgain")}</button>}
+          {again && <button type="button" data-testid="entity-group-join" aria-disabled={busy || undefined} aria-busy={busy || undefined} className={cardButton} onClick={() => void join()}>{busy ? t("chat.entity.joining") : t("chat.entity.joinAgain")}</button>}
           <button type="button" data-testid="entity-group-open" className={cardQuiet} onClick={() => nav.conversation(groupPath(out.id))}>{t("chat.entity.openGroup")}</button>{actions}
         </div>
       </> : <>
         <p className="m-0">{community ? t("chat.entity.communityHint") : t("chat.entity.groupHint")}</p>
-        <div className="flex flex-wrap items-center gap-1.5"><button type="button" data-testid="entity-group-join" disabled={busy} className={cardButton} onClick={() => void join()}>{busy ? t("chat.entity.joining") : t("chat.entity.joinGroup")}</button>{actions}</div>
+        <div className="flex flex-wrap items-center gap-1.5"><button type="button" data-testid="entity-group-join" aria-disabled={busy || undefined} aria-busy={busy || undefined} className={cardButton} onClick={() => void join()}>{busy ? t("chat.entity.joining") : t("chat.entity.joinGroup")}</button>{actions}</div>
       </>}
       {error && <Notice problem={error} className="m-0" ink />}
     </EntityCardFrame>

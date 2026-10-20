@@ -5,6 +5,9 @@
 // plugin), and what Android hands the app (deep links, shares, notification taps, network changes).
 #[cfg(target_os = "android")]
 mod android;
+// The share another app made on Android, until the page takes it (built for tests on every host).
+#[cfg(any(target_os = "android", test))]
+mod android_share;
 #[cfg(desktop)]
 mod app_sandbox;
 #[cfg(desktop)]
@@ -329,6 +332,11 @@ pub fn run() {
                 diagnostics::init(&dir);
             }
             notifications::install(app.handle());
+            #[cfg(target_os = "linux")]
+            {
+                let app = app.handle().clone();
+                exit_on_signals(move || app.exit(0));
+            }
             // Files sent and received in chats, one folder per profile.
             // The local apps each profile shares, allowed by the person in a native dialog: all `local_fetch` may reach.
             app.manage(local_access::LocalAccess::load(
@@ -429,10 +437,14 @@ fn on_page_load<R: tauri::Runtime>(
 /// The native listeners of the page before this one: stopped, their eight places free (`TransportState::page_started`);
 /// its apps' file dialogs: let go. The app windows it opened close (`app_sandbox::page_started`), and so do the
 /// windows of its contacts' apps (`viewer::close_all`): the page there now would answer them for another profile.
+/// The tokens it got to play stored files stop serving them (`StreamGrants::close_all`).
 #[cfg(desktop)]
 fn page_started<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     app_sandbox::page_started(app);
     viewer::close_all(app);
+    if let Some(grants) = app.try_state::<file_stream::StreamGrants>() {
+        grants.close_all();
+    }
     if let Some(transports) = app.try_state::<paired_transport::TransportState>() {
         transports.page_started();
     }
@@ -507,6 +519,43 @@ fn hold_close(window: impl Closing) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(DEPART_MS)).await;
         window.close();
+    });
+}
+
+/// A request to quit from outside the app (a logout or a shutdown sends SIGTERM, a terminal Ctrl+C SIGINT, a closed
+/// terminal SIGHUP): the first one runs `quit`, the app's `app.exit`, so it leaves as its window's close makes it
+/// leave: the page says goodbye (`on_run_event`), the native connections close and the app's notifications leave the
+/// desktop's list. A second one ends the process at once. The handlers are in place when this returns.
+#[cfg(target_os = "linux")]
+fn exit_on_signals(quit: impl FnOnce() + Send + 'static) {
+    use tokio::signal::unix::{signal, SignalKind};
+    let signals = tauri::async_runtime::block_on(async {
+        Ok::<_, std::io::Error>((
+            signal(SignalKind::terminate())?,
+            signal(SignalKind::interrupt())?,
+            signal(SignalKind::hangup())?,
+        ))
+    });
+    let (mut term, mut int, mut hup) = match signals {
+        Ok(signals) => signals,
+        Err(error) => {
+            eprintln!("signals: a SIGTERM will end the app without its goodbye: {error}");
+            return;
+        }
+    };
+    tauri::async_runtime::spawn(async move {
+        let mut quit = Some(quit);
+        loop {
+            let kind = tokio::select! {
+                _ = term.recv() => SignalKind::terminate(),
+                _ = int.recv() => SignalKind::interrupt(),
+                _ = hup.recv() => SignalKind::hangup(),
+            };
+            match quit.take() {
+                Some(quit) => quit(),
+                None => std::process::exit(128 + kind.as_raw_value()),
+            }
+        }
     });
 }
 
@@ -1030,6 +1079,30 @@ mod tests {
         assert_eq!(serve(), tauri::http::StatusCode::FORBIDDEN);
     }
 
+    /// A stored file the page before this one played (another profile's, or the same one before a reload) is served
+    /// no more under its token: that page never closed it, and the page there now did not ask for it.
+    #[test]
+    fn a_new_page_closes_the_file_stream_tokens_the_page_before_got() {
+        let app = app();
+        let dir = std::env::temp_dir().join(format!("ghostly-page-stream-{}", std::process::id()));
+        let files = file_store::FileStore::new(dir.clone());
+        files.append("a", "f", 0, &[1, 2, 3]).unwrap();
+        app.manage(file_stream::StreamGrants::default());
+        let grants = app.state::<file_stream::StreamGrants>();
+        let token = grants.open(&files, "a", "f", "video/mp4").unwrap();
+        let serve = || {
+            let request = tauri::http::Request::builder()
+                .uri(format!("{}://localhost/{token}", file_stream::SCHEME))
+                .body(Vec::new())
+                .unwrap();
+            file_stream::respond(&files, &grants, "main", &request).status()
+        };
+        assert_eq!(serve(), tauri::http::StatusCode::OK);
+        page_started(app.handle());
+        assert_eq!(serve(), tauri::http::StatusCode::NOT_FOUND);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
     /// The Ghostly window closed on Linux or Windows ends the app. By the exit, Tauri has dropped the window and its
     /// page, so the close itself waits while the page is told to say goodbye. (A Mac hides the window instead.)
     #[cfg(not(target_os = "macos"))]
@@ -1077,6 +1150,22 @@ mod tests {
             after >= Duration::from_millis(DEPART_MS),
             "the app exited {after:?} after the close"
         );
+    }
+
+    /// A logout, a shutdown or `kill <pid>` sends SIGTERM: the app is asked to exit (`app.exit`, where the page says
+    /// goodbye as on the window's close), not ended on the spot with all of that skipped.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_sigterm_asks_the_app_to_exit_as_its_window_s_close_does() {
+        let (asked, quit) = std::sync::mpsc::channel();
+        exit_on_signals(move || asked.send(()).unwrap());
+        let sent = std::process::Command::new("kill")
+            .args(["-TERM", &std::process::id().to_string()])
+            .status()
+            .unwrap();
+        assert!(sent.success());
+        quit.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the app was asked to exit");
     }
 
     #[test]
