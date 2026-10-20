@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createIdentity, identityFromSeedB64 } from "../src/identity";
 import { GroupSession, type GroupEdgeFrame, type GroupIncomingMessage, type GroupMessageFrame } from "../src/groupSession";
-import { COMMUNITY_LIMITS, CommunitySession, type CommunityFrame, type CommunityIncomingMessage } from "../src/groupCommunity";
+import { COMMUNITY_LIMITS, CommunitySession, communityCommitHash, shortHash, type CommunityFrame, type CommunityIncomingMessage } from "../src/groupCommunity";
 import { GROUP_FILE_LIMITS, fetchesByItself, groupFileFallback, isGroupMessageId, readGroupFileMeta, readGroupHave, readGroupWant, readGroupWantNo, type GroupFileMeta } from "../src/groupFiles";
 // covers: groups.files.wire
 
@@ -301,6 +301,13 @@ describe("a file in a community", () => {
     expect(bob.couldRead(alice.myKey, id)).toBe(true);
     expect(alice.couldRead(carol.myKey, id)).toBe(false);
     expect(alice.couldRead(bob.myKey, id.replace(/:[0-9a-f]{16}:/, ":ffffffffffffffff:"))).toBe(false);
+    // Asked again once the chain grew past what was replayed for the first answer.
+    for (let i = 0; i < COMMUNITY_LIMITS.window + 1; i++) await alice.rotate();
+    await net.settle();
+    expect(alice.couldRead(bob.myKey, id)).toBe(true);
+    const old = alice.state.chain[alice.state.chain.length - COMMUNITY_LIMITS.window - 2], at = `${old.e}:${shortHash(communityCommitHash(old))}`;
+    expect(alice.couldRead(bob.myKey, `${bob.myKey}:${at}:1`)).toBe(true);
+    expect(alice.couldRead(carol.myKey, `${bob.myKey}:${at}:1`)).toBe(false);
     // Looking the old roster up does not widen whom a frame may come from.
     expect(alice.isRecentMember(carol.myKey)).toBe(false);
   });
