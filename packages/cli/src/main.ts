@@ -716,12 +716,22 @@ async function listenCommand(argv: string[]): Promise<void> {
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
   const since = (parsed.options.since as number | undefined) ?? readCursor(cursor);
+  // A cursor that can no longer be written (a full disk) stops the listener, with the error and its exit code: run on,
+  // a restart would hand every event since again (agents#1710). How it stops is the branch's below.
+  let quit = (code: number): void => { process.exit(code); };
+  const cursorFailed = (error: unknown) => {
+    const failure = localFileError(error, cursor) ?? asCliError(error);
+    process.stderr.write(`ghostly: could not write the cursor ${cursor}: ${failure.message}. Stopped, so that no event is handed twice\n`);
+    print({ error: failure.toJSON() });
+    quit(EXIT[failure.code]);
+  };
   const start = async (call: (method: string, params: Record<string, unknown>) => Promise<unknown>, peerOf: (chat: string) => Promise<string | null>) => {
     return eventHandler({
       types, turns,
       exec: parsed.options.exec as string | undefined,
       webhook: parsed.options.webhook as string | undefined,
       cursor,
+      cursorFailed,
       // With a hook, events go to the hook; --print shows them too.
       print: parsed.options.print === true || (!parsed.options.exec && !parsed.options.webhook),
       write: (line) => process.stdout.write(line + "\n"),
@@ -747,6 +757,7 @@ async function listenCommand(argv: string[]): Promise<void> {
     // longer than a restart takes (`daemon stop`) is said once on stderr, and so is the one that answers again.
     const following = followDaemon(g.paths, client, handle, since, PAUSE_HOLD_MS, g.profile);
     const stop = () => { following.close(); process.exit(0); };
+    quit = (code) => { following.close(); process.exit(code); };
     onReaderGone(stop);
     await following.subscribed;
     process.on("SIGINT", stop);
@@ -761,6 +772,10 @@ async function listenCommand(argv: string[]): Promise<void> {
   const served = await serve(host).catch(async (error) => { await host.close(); throw error; });
   keepServing();
   const stop = stopper(async () => { await served.close(); await host.close(); });
+  quit = (code) => {
+    setTimeout(() => process.exit(code), 20_000).unref();
+    void served.close().then(() => host.close()).finally(() => process.exit(code));
+  };
   host.ctx.stop = stop;
   onStopSignals(stop);
   onReaderGone(stop);
