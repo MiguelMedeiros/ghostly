@@ -191,13 +191,15 @@ nothing, so put the options before `--` (`send bob --wait sent -- -1 today`).
 
 ### Voice notes
 
-`file send <chat> <path> --voice` sends an audio file as a voice note. Its length (`--voice <ms>`) and its 64
-waveform bars (`--peaks 0,40,…`, 0-255) may be given; whatever is not given is measured from the file with the
+`file send <chat> <path> --voice` sends an audio file as a voice note. Its length (`--voice <ms>`, 1 to 900000) and
+its 64 waveform bars (`--peaks 0,40,…`, 0-255, at most 128, only with `--voice`) may be given; whatever is not given is measured from the file with the
 app's own meter (`voicePeaksOf` in packages/core `voice.ts`: a reading every 50 ms, the loudest per bar), so the
 bars look like the app's recordings. WAV, Opus in WebM or Ogg and MP3 are decoded in the CLI (wasm, no native code);
 AAC in MP4/M4A and other kinds need `ffmpeg` on the PATH (`GHOSTLY_FFMPEG` names another). When the sound cannot be
-read, a note with a given length goes out flat with a warning on stderr (the socket API answers `warning`), and one
-without is refused (`bad_request`). `--voice` takes the next word only when it is a number.
+measured here (no `ffmpeg` for its kind), a note with a given length goes out flat with a warning on stderr (the socket
+API answers `warning`), and one without is refused (`bad_request`). A file that is not a voice note is refused with or
+without a length, naming why: empty, not audio (its type, or no sound a decoder finds in it), or longer than 15
+minutes. `--voice` takes the next word only when it is a number.
 
 ### Files a bot receives
 
@@ -232,7 +234,9 @@ arrives until it is back online.
 
 A daemon keeps running the code it started with. After upgrading the CLI, every command that goes through an older
 (or newer) daemon still answers, and says on stderr `ghostly: the daemon runs <version> and this command is
-<version>`. `ghostly daemon restart` stops the running daemon (if one runs) and starts this release's in the
+<version>`. A daemon of a release before 1.5.0 cannot prove it is the profile's daemon (no
+[greeting](#the-socket-api)): commands are refused after 2 s, exit `1`, until `ghostly daemon restart`. A daemon of
+this release that is slow to answer (busy on a long task) is waited for, under each command's own deadline. `ghostly daemon restart` stops the running daemon (if one runs) and starts this release's in the
 background, as `daemon --detach` does. A daemon kept by a service manager (systemd, launchd) is restarted with the
 service manager instead.
 
