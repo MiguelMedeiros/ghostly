@@ -202,6 +202,15 @@ describe("file transfer", () => {
     expect(sanitizeFileName("naïve café 日本.txt")).toBe("naïve café 日本.txt");
   });
 
+  it("keeps at most one space between two parts of a name, so blanks cannot push its extension out of view", () => {
+    for (const blank of ["\u2003", "\u3000", "\u00A0", "\u3164", "\u115F", "\u1160", "\u2800", "\uFFA0", " \u3164"]) {
+      const name = sanitizeFileName(`Invoice-October.pdf${blank.repeat(120)}.exe`);
+      expect(name).toMatch(/^Invoice-October\.pdf ?\.exe$/);
+    }
+    expect(sanitizeFileName("a\u2003\u2003b\u2009\u00A0c   d.txt")).toBe("a b c d.txt");
+    expect(sanitizeFileName("\u3164\u2800")).toBe("file");
+  });
+
   it("serves received bytes as inert unless they are a previewable image", () => {
     expect(safeBlobType("image/png")).toBe("image/png");
     expect(safeBlobType("image/JPEG")).toBe("image/jpeg");
