@@ -573,7 +573,8 @@ export class MeshHubs {
 
   /**
    * As a hub, what the session took for the first time goes on to every other edge that is up: not back where it came
-   * from, nor to its author. Everyone else takes it as a frame handed on (WISP 902 § Catch-up).
+   * from, nor to its author. Everyone else takes it as a frame handed on (WISP 902 § Catch-up); a member, a commit with
+   * the epoch's secret sealed for it when I hold it (`GroupSession.handOnTo`), so it can write at once.
    */
   passOn(groupId: string, session: GroupSession, from: string, frames: GroupEdgeFrame[]): number {
     const live = this.live.get(groupId);
@@ -586,7 +587,7 @@ export class MeshHubs {
       const until = member ? Infinity : removalEpoch(session.state.chain, key);
       for (const frame of frames) {
         if (authorOf(frame) === key || (!member && (frame.t !== "group-commit" || frame.commit.e > until))) continue;
-        try { this.host.sendOnLink(id, frame); sent++; } catch { break; }
+        try { this.host.sendOnLink(id, member ? session.handOnTo(key, frame) : frame); sent++; } catch { break; }
       }
     }
     return sent;
