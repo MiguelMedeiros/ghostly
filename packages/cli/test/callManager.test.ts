@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createSocket } from "node:dgram";
 import { connect, Server, type Socket } from "node:net";
@@ -225,9 +226,11 @@ describe("the audio socket", () => {
   });
 
   it("moves to a private folder in /tmp when the profile's path is too long for a socket, and refuses a shared one", async () => {
+    vi.stubEnv("XDG_RUNTIME_DIR", "");
+    vi.stubEnv("TMPDIR", "/tmp");
     const long = join(tmp(), "x".repeat(120));
     const path = audioSocketPath(long, "abc");
-    expect(path).toMatch(/^\/tmp\/ghostly-calls-[0-9a-f]{24}\/abc\.sock$/);
+    expect(path).toMatch(new RegExp(`^/tmp/ghostly-calls-${process.getuid!()}-[0-9a-f]{24}/abc\\.sock$`));
     expect(audioSocketPath("/home/bot/.ghostly/profiles/p", "abc")).toBe("/home/bot/.ghostly/profiles/p/calls/abc.sock");
     const socket = await AudioSocket.open(path, 48000, { onAudio: () => {} });
     expect(statSync(join(path, "..")).mode & 0o777).toBe(0o700);
@@ -235,6 +238,12 @@ describe("the audio socket", () => {
     chmodSync(join(path, ".."), 0o755);
     await expect(AudioSocket.open(path, 48000, { onAudio: () => {} })).rejects.toThrow(/not a folder of this user's alone/);
     rmSync(join(path, ".."), { recursive: true, force: true });
+    // In the user's own runtime folder when there is one: nobody else can make its folder first.
+    const run = tmp();
+    chmodSync(run, 0o700);
+    vi.stubEnv("XDG_RUNTIME_DIR", run);
+    expect(audioSocketPath(long, "abc")).toBe(join(run, `ghostly-calls-${createHash("sha256").update(long).digest("hex").slice(0, 24)}`, "abc.sock"));
+    vi.unstubAllEnvs();
   });
 
   it("a daemon's manager removes the sockets a crashed one left, in either folder; a one-shot's leaves them", async () => {

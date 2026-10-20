@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { CliError } from "./errors";
+import { runtimePath } from "./privateFolder";
 
 /**
  * Profiles on disk (WISP 1100 § Profiles and files): `<home>/profiles/<name>/`, 0700, one engine store each.
@@ -87,14 +88,15 @@ export function lockPath(dir: string): string {
 
 /**
  * The daemon's socket: in the profile's folder, unless that path is longer than a Unix socket may be (104 bytes on
- * macOS); then in a folder of /tmp named after the profile's, which the daemon makes owner-only and checks before
- * use (`privateFolder`), and whose socket a client connects to only when it is this user's (`ownSocket`).
+ * macOS); then in a folder of the user's runtime folder named after the profile's (`runtimePath`), which the daemon
+ * makes owner-only and checks before use (`privateFolder`), and whose socket a client connects to only when it is this
+ * user's (`ownSocket`).
  */
 function socketPath(dir: string): string {
   const inside = join(dir, "daemon.sock");
   if (process.platform === "win32") return `\\\\.\\pipe\\ghostly-${createHash("sha256").update(dir).digest("hex").slice(0, 24)}`;
   if (Buffer.byteLength(inside) <= 100) return inside;
-  return join("/tmp", `ghostly-${createHash("sha256").update(dir).digest("hex").slice(0, 24)}`, "daemon.sock");
+  return runtimePath("ghostly", dir, "daemon.sock");
 }
 
 function ensureFolder(path: string): void {
