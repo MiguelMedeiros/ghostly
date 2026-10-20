@@ -185,18 +185,20 @@ export async function profileGlance(id: string): Promise<ProfileGlance> {
   return { locked: false, unread: unreadUnder(prefixOf(id)), fresh: peekFresh(id), avatar: await storedAvatar(databaseOf(id)) };
 }
 /**
- * Whether another window's write of this storage key (null: the storage was cleared) can change what `profileGlance(id)`
- * shows: the registry, the peeks, that profile's settings (its lock), one of its chats or read marks. A draft typed in
- * that profile, a mute, a key of any other profile cannot.
+ * What another window's write of this storage key (null: the storage was cleared) can change of `profileGlance(id)`:
+ * all of it (the registry, the peeks, that profile's settings and lock), only its unread count (one of its chats or read
+ * marks), or nothing (a draft typed in that profile, a mute, a key of any other profile).
  */
-export function changesGlance(key: string | null, id: string): boolean {
-  if (key === null || key === registryKey() || key === peekStoreKey() || key === settingsKeyFor(id)) return true;
+export function changesGlance(key: string | null, id: string): "glance" | "unread" | undefined {
+  if (key === null || key === registryKey() || key === peekStoreKey() || key === settingsKeyFor(id)) return "glance";
   const prefix = prefixOf(id);
-  if (!key.startsWith(prefix)) return false;
+  if (!key.startsWith(prefix)) return undefined;
   // As `unreadUnder` reads them: a chat is `<prefix><chat id>`, its read mark `<prefix>read_<chat id>`.
   const rest = key.slice(prefix.length);
-  return !rest.includes("_") || /^read_[^_]+$/.test(rest);
+  return !rest.includes("_") || /^read_[^_]+$/.test(rest) ? "unread" : undefined;
 }
+/** A glance with its unread count read again, without opening the profile's database: a locked or standby one shows none. */
+export const recounted = (id: string, glance: ProfileGlance): ProfileGlance => (glance.locked || glance.standby ? glance : { ...glance, unread: unreadUnder(prefixOf(id)) });
 /** The picture a profile's peer keeps in its settings (WISP 04), if it is the small JPEG the peer accepts. */
 async function storedAvatar(dbName: string): Promise<string | undefined> {
   try {
