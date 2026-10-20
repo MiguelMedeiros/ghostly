@@ -135,7 +135,7 @@ export function NetworkSettings() {
           </button>
           {saved && <span role="status" data-testid="network-saved" className="text-accent text-sm">{t("network.saved")}</span>}
           {error && <span role="alert" data-testid="network-error" className="text-danger text-sm min-w-0 break-words">{error}</span>}
-          <span data-testid="network-protocol" className="text-text-muted text-xs ml-auto min-w-0">{network.protocol}</span>
+          <span data-testid="network-protocol" className="text-text-muted text-xs ms-auto min-w-0">{network.protocol}</span>
         </div>
       </Block>
     </Section>
