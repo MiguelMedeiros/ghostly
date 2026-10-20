@@ -373,10 +373,14 @@ export function GroupChat() {
     // the rest comes in above it, into the page as the view goes up (useRowWindow). Not when the engine already sent this group's history, nor when the
     // group opens on a message further up, which must be there when it opens.
     const linkId = `group:${groupId}`;
-    if (!engine.messages.has(linkId) && !leftScrolledUp(groupId)) {
+    // Its whole history as the engine keeps it on this page: asked for once (the listener below hears it), then kept
+    // current with what changes in it. A group opened again reads nothing from the store, and its next message is a
+    // change, not its whole history read again.
+    const held = engine.history(linkId);
+    if (held) show(held);
+    else if (!engine.messages.has(linkId) && !leftScrolledUp(groupId)) {
       void engine.call("messagePage", { linkId }).then(page => { if (current && !whole) setLoaded({ groupId, list: page.messages }); }).catch(() => {});
     }
-    void engine.call("groupMessages", { groupId }).then(show).catch(() => {});
     const off = engine.onMessages((linkId, list) => { if (linkId === `group:${groupId}`) show(list); });
     // Its list stops following once this group is left: coming back, the engine's copy (with what came meanwhile) is shown.
     return () => { current = false; off(); setLoaded({ groupId: "", list: NO_MESSAGES }); };
