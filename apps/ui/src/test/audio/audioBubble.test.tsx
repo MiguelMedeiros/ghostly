@@ -60,7 +60,7 @@ describe("an audio file in the chat", () => {
       show(song());
       fireEvent.click(screen.getByTestId("audio-play"));
       await flush();
-      expect(session.metadata).toMatchObject({ init: { title: "Ghost Town.mp3", artist: "Ana" } });
+      expect(session.metadata).toMatchObject({ init: { title: "Audio", artist: "Ghostly" } });
       expect(session.playbackState).toBe("playing");
       const audio = loaded(10);
       act(() => handlers.get("pause")!({}));
@@ -75,7 +75,7 @@ describe("an audio file in the chat", () => {
     }
   });
 
-  it("names the person who sent it to the system's media controls in the app's language", async () => {
+  it("names neither the file nor who sent it to the system's media controls, in the app's language", async () => {
     const session = { metadata: null as unknown, playbackState: "none", setActionHandler: vi.fn(), setPositionState: vi.fn() };
     Object.defineProperty(navigator, "mediaSession", { configurable: true, value: session });
     vi.stubGlobal("MediaMetadata", class { constructor(public init: object) {} });
@@ -84,7 +84,7 @@ describe("an audio file in the chat", () => {
       renderApp(<AudioBubble file={song()} sender="me" peerName="Ana" />, { language: "pt" });
       fireEvent.click(screen.getByTestId("audio-play"));
       await flush();
-      expect(session.metadata).toMatchObject({ init: { title: "Ghost Town.mp3", artist: "Você" } });
+      expect(session.metadata).toMatchObject({ init: { title: "Áudio", artist: "Ghostly" } });
     } finally {
       Reflect.deleteProperty(navigator, "mediaSession");
       vi.unstubAllGlobals();
@@ -113,6 +113,14 @@ describe("an audio file in the chat", () => {
     expect(screen.getByTestId("audio-seek")).toBeDisabled();
     expect(screen.queryByTestId("audio-speed")).toBeNull();
     expect(getFile).not.toHaveBeenCalled();
+  });
+
+  it("a name in the other direction than the app's starts at its start, cut at its end", () => {
+    // A <bdi> inside the truncating line took the line's (the page's) direction for the cut: "…g about the release plan.wav".
+    show(song({ name: "تسجيل اجتماع الفريق الأسبوعي.wav" }));
+    const name = screen.getByTestId("audio-name");
+    expect(name).toHaveAttribute("dir", "auto");
+    expect(name).toHaveClass("truncate");
   });
 
   it("plays from its bytes; the seek bar moves it; the time reads position of length", async () => {
@@ -180,7 +188,7 @@ describe("an audio file in the chat", () => {
     const revoke = vi.spyOn(URL, "revokeObjectURL");
     fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
     const voice: ChatFile & { voice: { duration: number; peaks: number[] } } = { id: "chat1-in-voice1", name: "Voice message.webm", size: 900, mime: "audio/webm", voice: { duration: 3000, peaks: [1, 2, 3] } };
-    renderApp(<><AudioBubble file={song()} sender="peer" /><VoiceBubble file={voice} sender="peer" /></>);
+    renderApp(<><AudioBubble file={song()} sender="peer" /><VoiceBubble file={voice} sender="peer" timestamp={1_700_000_000_000} /></>);
     fireEvent.click(screen.getByTestId("audio-play"));
     await flush();
     const url = screen.getByTestId("audio-element").getAttribute("src");

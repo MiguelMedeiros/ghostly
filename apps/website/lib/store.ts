@@ -21,7 +21,12 @@ const bytes = (b64: string) => new Uint8Array(Buffer.from(b64, "base64"));
 
 let memo: { hour: number; view: StoreView } | undefined;
 
-/** The store as the build read it, checked at most once an hour (the clock matters only to `expires`). */
+/**
+ * The store as the build read it. Its bytes do not change while the site runs, so a store that checks out is checked
+ * once (every bundle's hashes and every signature, which held each request of the server for seconds at the format's
+ * limits): only `expired` follows the clock. One that did not check out is read again at most once an hour, as an
+ * `expires` too far ahead comes within reach.
+ */
 export function storeView(): StoreView {
   const snap = snapshot as Snapshot;
   if (snap.source === "none" || !snap.index || !snap.sig) return { ok: false, reason: snap.error ?? "not-read" };
@@ -30,6 +35,11 @@ export function storeView(): StoreView {
   const fixture = snap.source === "fixture";
   const now = fixture && snap.now ? snap.now : Math.floor(Date.now() / 1000);
   const hour = Math.floor(now / 3600);
+  if (memo?.view.ok) {
+    const expired = memo.view.expires < now;
+    if (memo.view.expired !== expired) memo = { hour, view: { ...memo.view, expired } };
+    return memo.view;
+  }
   if (memo?.hour === hour) return memo.view;
   const view = readStore(
     { index: bytes(snap.index), sig: bytes(snap.sig), bundles: Object.fromEntries(Object.entries(snap.bundles).map(([u, b]) => [u, bytes(b)])) },

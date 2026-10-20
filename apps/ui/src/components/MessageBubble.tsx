@@ -1,15 +1,16 @@
-import { publicKeyLabel } from "../lib/publicKeyLabel";
+import { contactTag, publicKeyLabel } from "../lib/publicKeyLabel";
 import React, { memo, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { sameValue } from "../lib/sameValue";
 import { clockTime } from "../lib/time";
 import { useI18n } from "../contexts/I18nContext";
 import { FileBubble } from "./FileBubble";
+import { focusLost } from "../lib/focus";
 import { Menu, MenuItem } from "./Menu";
 import { MessageBoundary } from "./MessageBoundary";
 import { MessageDetailsPanel } from "./MessageDetailsPanel";
 import { VoiceBubble } from "./voice/VoiceBubble";
 import { VideoBubble } from "./video/VideoBubble";
-import { isPlayableAudioType, isPlayableVideoType, shownTime } from "@ghostly/core";
+import { IMAGE_LIMITS, imageSize, isPlayableAudioType, isPlayableVideoType, previewable, shownTime, type ImageMeta } from "@ghostly/core";
 import { AudioBubble } from "./audio/AudioBubble";
 import { InvoiceBubble } from "./InvoiceBubble";
 import { findMoney } from "../lib/money";
@@ -43,12 +44,13 @@ import { DeliveryStatus } from "./chat/DeliveryStatus";
 import { forwardedLabel } from "../lib/forward";
 import { PinIcon } from "./PinIcon";
 import { copyText } from "../lib/shareLink";
-import { pictureLinkUrl } from "../lib/pictureLink";
+import { pictureLinkRead, pictureLinkUrl, type PictureRead } from "../lib/pictureLink";
 import { SenderAvatar, type MessageAuthor } from "./chat/SenderAvatar";
 import { useMemberText } from "../contexts/MemberColorsContext";
 import { AppCardView } from "./apps/AppCardView";
 import { useAppsAvailable } from "../lib/apps/flag";
 import { useInstalledApp } from "../lib/apps/installed";
+import { SavedIcon } from "./saved/SavedIcon";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -64,6 +66,8 @@ interface MessageBubbleProps {
   contactName?: string;
   /** Forgets this message on this device. Left out where a chat cannot be edited. */
   onDelete?: () => void;
+  /** Deletes this message of mine from every member's device (WISP 400 § Delete for everyone). Left out where it can't. */
+  onDeleteForEveryone?: () => void;
   /** The engine's link for the message's details; found from `peerPubKey` when left out (groups name theirs). */
   linkId?: string;
   /** Answers this message: its ⋮ says Reply, a pointer finds a reply button beside it, a finger swipes it right. */
@@ -84,6 +88,9 @@ interface MessageBubbleProps {
   /** Pins this message, or unpins it when it is the chat's pinned one (`pinned`), from its ⋮ (WISP 400 § Pinned message). */
   onPin?: () => void;
   pinned?: boolean;
+  /** Saves this message on this device, or unsaves it when it is saved (`saved`), from its ⋮: the Saved view lists it. */
+  onSave?: () => void;
+  saved?: boolean;
   /** Starts choosing messages with this one chosen: its ⋮, and the bar a long press opens, say Select. */
   onSelect?: () => void;
   /**
@@ -306,19 +313,48 @@ function isWaybackGif(input: string): boolean {
     && !url.search && !url.hash && url.href === input && WAYBACK_GIF_PATH_RE.test(url.pathname);
 }
 const DATA_IMAGE_SAFE_RE = /^data:image\/(png|jpe?g|gif|webp);/i;
+/** The base64 characters that hold a picture's first `IMAGE_LIMITS.headBytes` bytes. */
+const HEAD_CHARS = Math.ceil(IMAGE_LIMITS.headBytes / 3) * 4;
+
+/**
+ * Whether an inline picture may be drawn: only plain base64 whose own bytes say a size `previewable` takes, as a
+ * picture file (FileBubble). A few characters can declare a picture of gigabytes once decoded.
+ */
+function previewableData(url: string): boolean {
+  const comma = url.indexOf(",");
+  if (comma < 0 || !/;\x20*base64$/i.test(url.slice(0, comma))) return false;
+  try {
+    const head = atob(url.slice(comma + 1).replace(/[\t\n\f\r ]/g, "").slice(0, HEAD_CHARS));
+    return previewable(imageSize(Uint8Array.from(head, (c) => c.charCodeAt(0))));
+  } catch {
+    return false;
+  }
+}
 
 type ContentType = "text" | "image";
 
 function detectContentType(text: string): ContentType {
   const trimmed = text.trim();
-  if (DATA_IMAGE_SAFE_RE.test(trimmed)) return "image";
+  if (DATA_IMAGE_SAFE_RE.test(trimmed)) return previewableData(trimmed) ? "image" : "text";
   if (GIPHY_RE.test(trimmed)) return "image";
   if (IMAGE_URL_RE.test(trimmed)) return "image";
   return "text";
 }
 
-/** Pictures that show by themselves: inline data, and the GIF sources the picker uses. */
-const autoLoads = (url: string) => DATA_IMAGE_SAFE_RE.test(url) || GIPHY_RE.test(url) || isWaybackGif(url);
+/** Pictures the page loads itself: inline data, and Giphy's (its own transcodes, never the sender's bytes). */
+const autoLoads = (url: string) => (DATA_IMAGE_SAFE_RE.test(url) && previewableData(url)) || GIPHY_RE.test(url);
+/**
+ * Pictures that need no click: those, and the picker's Wayback Machine GIFs. Anyone can have the archive keep a GIF,
+ * so the app reads those and checks their size first (lib/pictureLink.ts), as any picture link's.
+ */
+const needsNoClick = (url: string) => autoLoads(url) || isWaybackGif(url);
+/**
+ * A read picture's box before it is decoded, as the <img>'s classes size it once it is (at most 330 px and 72% of the
+ * window wide, 330 px high, at least 120 px wide): a picture that lays out late moves nothing under it.
+ */
+const linkPictureBox = ({ width, height }: ImageMeta): React.CSSProperties => ({
+  width: `max(120px, min(${width}px, 330px, 72vw, ${(330 * width) / height}px))`, height: "auto", aspectRatio: `${width} / ${height}`,
+});
 const hostOf = (url: string) => { try { return new URL(url).host; } catch { return "picture"; } };
 
 function isOnlyEmojis(text: string): boolean {
@@ -421,6 +457,15 @@ function CallEventIcon({ type, hasVideo }: { type: string; hasVideo?: boolean })
 
 /** The chat's scrolling list of messages: a message's menus stay inside it (see `Menu`'s `within`). */
 export const MESSAGE_LIST = "[data-message-list]";
+
+/** The ⋮ of the message after the one `from` is in, then of the one before it: where the focus goes once it is deleted. */
+function neighbourOptions(from: HTMLElement | null): HTMLElement[] {
+  const list = from?.closest(MESSAGE_LIST);
+  if (!from || !list) return [];
+  const options = [...list.querySelectorAll<HTMLElement>("[data-message-row] [data-testid=message-options]")];
+  const at = options.findIndex((el) => from.contains(el));
+  return at < 0 ? [] : [options[at + 1], options[at - 1]].filter((el): el is HTMLElement => !!el);
+}
 
 const downloadIcon = (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -526,8 +571,9 @@ function ForwardItem({ file, sender, onForward }: { file?: ChatFile; sender: "me
  * The deletion is local, so the menu says so before it happens: nothing is sent, and the contact keeps their copy.
  * Both popovers are drawn over the page (the list scrolls and would cut them off) and kept inside the message list.
  */
-function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onPin, pinned, onForward, onSelect, align, download, sender, onCancelSend, onRetry }: {
+function MessageMenu({ onDelete, onDeleteForEveryone, onDetails, onReply, onEdit, onReact, onPin, pinned, onSave, saved, onForward, onSelect, align, download, sender, onCancelSend, onRetry }: {
   onDelete?: () => void;
+  onDeleteForEveryone?: () => void;
   onDetails: () => void;
   /** Answers the message (WISP 400 § Replies): the first row. */
   onReply?: () => void;
@@ -538,6 +584,9 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onPin, pin
   /** Pins it, or unpins it (`pinned`) (WISP 400 § Pinned message): after React. */
   onPin?: () => void;
   pinned?: boolean;
+  /** Saves it on this device, or unsaves it (`saved`): after Pin. */
+  onSave?: () => void;
+  saved?: boolean;
   /** Forwards it (WISP 400 § Forwards): after React. */
   onForward?: () => void;
   /** Starts choosing messages, with this one: after Forward. */
@@ -555,14 +604,24 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onPin, pin
   const { t } = useI18n();
   const chat = useCueChat();
   const [open, setOpen] = useState(false);
-  const [confirm, setConfirm] = useState(false);
+  // Which delete waits for its confirmation: this device's, or everyone's.
+  const [confirm, setConfirm] = useState<"here" | "everyone" | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const side = align === "left" ? "end" : "start";
+  // A delete takes this row away with its ⋮, where the confirmation gives the focus back: once the row is gone, the
+  // focus goes to the ⋮ of the message now in its place (the one before it at the end), not to the page.
+  const after = useRef<HTMLElement[]>([]);
+  useEffect(() => () => {
+    const next = after.current;
+    if (next.length && focusLost()) next.find((el) => el.isConnected)?.focus({ preventScroll: true });
+  }, []);
   // A file still on its way stops on both sides when its message is deleted (the engine's deleteMessage): the contact
   // keeps no copy of it, so the hint says what happens instead.
   const { transfer } = useTransfer(download?.file.id);
-  const deleteHint = transfer?.state !== "transferring" ? t("chat.deleteMessageHint")
+  const deleteHint = confirm === "everyone" ? t("chat.deleteForEveryoneHint") : transfer?.state !== "transferring" ? t("chat.deleteMessageHint")
     : t(download?.sender === "me" ? "chat.deleteSendingFileHint" : "chat.deleteArrivingFileHint");
+  const confirmed = confirm === "everyone" ? onDeleteForEveryone : onDelete;
+  const trash = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>;
 
   return (
     <div ref={ref} className="relative self-center shrink-0">
@@ -596,6 +655,9 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onPin, pin
         {onPin && <MenuItem testId="message-pin" onClick={() => { setOpen(false); onPin(); }} icon={<PinIcon active={pinned} size={16} />}>
           {pinned ? t("chat.pinned.unpin") : t("chat.pinned.pin")}
         </MenuItem>}
+        {onSave && <MenuItem testId="message-save" onClick={() => { setOpen(false); onSave(); }} icon={<SavedIcon filled={saved} />}>
+          {saved ? t("saved.unsave") : t("saved.save")}
+        </MenuItem>}
         {onForward && <ForwardItem file={download?.file} sender={sender ?? "me"} onForward={() => { setOpen(false); onForward(); }} />}
         {onSelect && <MenuItem testId="message-select-start" onClick={() => { setOpen(false); onSelect(); }} icon={<SelectGlyph />}>
           {t("chat.forward.select")}
@@ -612,30 +674,36 @@ function MessageMenu({ onDelete, onDetails, onReply, onEdit, onReact, onPin, pin
         {onCancelSend && <MenuItem testId="message-cancel-sending" danger onClick={() => { setOpen(false); onCancelSend(); }} icon={cancelIcon}>
           {t("chat.message.cancelSending")}
         </MenuItem>}
-        {onDelete && !onCancelSend && <MenuItem testId="message-delete" danger onClick={() => { setOpen(false); setConfirm(true); }}
-          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></svg>}>
+        {onDelete && !onCancelSend && <MenuItem testId="message-delete" danger onClick={() => { setOpen(false); setConfirm("here"); }} icon={trash}>
           {t("chat.deleteMessage")}
         </MenuItem>}
+        {onDeleteForEveryone && !onCancelSend && <MenuItem testId="message-delete-everyone" danger onClick={() => { setOpen(false); setConfirm("everyone"); }} icon={trash}>
+          {t("chat.deleteForEveryone")}
+        </MenuItem>}
       </Menu>
-      {onDelete && (
-        <Menu open={confirm} onClose={() => setConfirm(false)} anchorRef={ref} testId="message-delete-menu" align={side} prefer="up" portal within={MESSAGE_LIST} label={t("chat.deleteMessage")}>
+      {confirmed && (
+        <Menu open={!!confirm} onClose={() => setConfirm(null)} anchorRef={ref} testId="message-delete-menu" align={side} prefer="up" portal within={MESSAGE_LIST} focusFirst label={t(confirm === "everyone" ? "chat.deleteForEveryone" : "chat.deleteMessage")}>
           <div className="px-3 py-2 md:w-[210px]">
             <p className="m-0 mb-2 whitespace-normal text-[11px] leading-snug text-text-muted">{deleteHint}</p>
             <div className="flex items-center justify-end gap-2">
+              {/* Rows of the menu: Cancel takes the focus as it opens (Enter at once never deletes), the arrow keys move. */}
               <button
                 type="button"
-                onClick={() => setConfirm(false)}
+                data-menu-item
+                onClick={() => setConfirm(null)}
                 className="px-2 py-0.5 rounded border border-border bg-surface-hover text-text-muted text-xs font-bold hover:text-text-secondary transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
               >
                 {t("common.cancel")}
               </button>
               <button
                 type="button"
+                data-menu-item
                 data-testid="message-delete-confirm"
                 onClick={() => {
-                  setConfirm(false);
+                  setConfirm(null);
                   playCue("deleted", { chat });
-                  onDelete();
+                  after.current = neighbourOptions(ref.current);
+                  confirmed();
                 }}
                 className="px-2 py-0.5 rounded border border-danger/30 bg-danger/20 text-danger-ink text-xs font-bold hover:bg-danger/30 transition-colors cursor-pointer max-md:min-h-10 max-md:px-4"
               >
@@ -666,11 +734,13 @@ export function MessageBubble(props: MessageBubbleProps) {
   latest.current = props;
   const stable = useMemo(() => ({
     onDelete: () => latest.current.onDelete?.(),
+    onDeleteForEveryone: () => latest.current.onDeleteForEveryone?.(),
     onReply: () => latest.current.onReply?.(),
     onEdit: () => latest.current.onEdit?.(),
     onReact: (emoji: string) => latest.current.onReact?.(emoji),
     onForward: () => latest.current.onForward?.(),
     onPin: () => latest.current.onPin?.(),
+    onSave: () => latest.current.onSave?.(),
     onSelect: () => latest.current.onSelect?.(),
     onOpenAuthor: () => latest.current.onOpenAuthor?.(),
     onToggle: () => latest.current.selection?.onToggle?.(),
@@ -684,20 +754,20 @@ export function MessageBubble(props: MessageBubbleProps) {
     <SameBubble
       message={message} peerAck={acked ? message.timestamp : message.timestamp - 1}
       peerPubKey={props.peerPubKey} peerNick={props.peerNick} contactName={props.contactName} linkId={props.linkId} quote={props.quote} names={names}
-      onDelete={props.onDelete && stable.onDelete} onReply={props.onReply && stable.onReply} onEdit={props.onEdit && stable.onEdit}
+      onDelete={props.onDelete && stable.onDelete} onDeleteForEveryone={props.onDeleteForEveryone && stable.onDeleteForEveryone} onReply={props.onReply && stable.onReply} onEdit={props.onEdit && stable.onEdit}
       onReact={props.onReact && stable.onReact} onForward={props.onForward && stable.onForward} onSelect={props.onSelect && stable.onSelect}
-      onPin={props.onPin && stable.onPin} pinned={props.pinned} author={props.author} onOpenAuthor={props.onOpenAuthor && stable.onOpenAuthor}
+      onPin={props.onPin && stable.onPin} pinned={props.pinned} onSave={props.onSave && stable.onSave} saved={props.saved} author={props.author} onOpenAuthor={props.onOpenAuthor && stable.onOpenAuthor}
       reactionName={stable.reactionName} highlight={props.highlight} buttons={props.buttons} compactPress={props.compactPress}
       selection={selection && { selected: selection.selected, ...(selection.onToggle && { onToggle: stable.onToggle }) }}
     />
   );
 }
 
-const CALLBACKS = ["onDelete", "onReply", "onEdit", "onReact", "onForward", "onSelect", "onPin", "onOpenAuthor"] as const;
+const CALLBACKS = ["onDelete", "onDeleteForEveryone", "onReply", "onEdit", "onReact", "onForward", "onSelect", "onPin", "onSave", "onOpenAuthor"] as const;
 
 /** The same bubble to draw: see `MessageBubble`. */
 function sameBubble(a: BubbleViewProps, b: BubbleViewProps): boolean {
-  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.peerNick === b.peerNick && a.contactName === b.contactName && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.compactPress === !b.compactPress
+  return a.peerAck === b.peerAck && a.peerPubKey === b.peerPubKey && a.peerNick === b.peerNick && a.contactName === b.contactName && a.linkId === b.linkId && a.names === b.names && a.highlight === b.highlight && !a.pinned === !b.pinned && !a.saved === !b.saved && !a.compactPress === !b.compactPress
     && CALLBACKS.every(name => !a[name] === !b[name])
     && !a.selection === !b.selection && a.selection?.selected === b.selection?.selected && !a.selection?.onToggle === !b.selection?.onToggle
     && sameValue(a.quote, b.quote) && sameValue(a.author, b.author) && sameValue(a.buttons, b.buttons) && sameValue(a.message, b.message);
@@ -712,11 +782,11 @@ const SameBubble = memo(function SameBubble(props: BubbleViewProps) {
   );
 }, sameBubble);
 
-function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", contactName, onDelete: deleteIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, selection, names, highlight, author, onOpenAuthor, buttons, compactPress }: BubbleViewProps) {
+function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "", contactName, onDelete: deleteIt, onDeleteForEveryone: deleteForEveryoneIt, linkId, onReply: replyIt, quote, onEdit: editIt, onReact: reactIt, reactionName, onForward: forwardIt, onSelect: selectIt, onPin: pinIt, pinned, onSave: saveIt, saved, selection, names, highlight, author, onOpenAuthor, buttons, compactPress }: BubbleViewProps) {
   // While the chat is choosing messages, a row is a checkbox: nothing else on it answers.
   const choosing = !!selection;
-  const onPin = choosing ? undefined : pinIt;
-  const onDelete = choosing ? undefined : deleteIt, onReply = choosing ? undefined : replyIt, onEdit = choosing ? undefined : editIt;
+  const onPin = choosing ? undefined : pinIt, onSave = choosing ? undefined : saveIt;
+  const onDelete = choosing ? undefined : deleteIt, onDeleteForEveryone = choosing ? undefined : deleteForEveryoneIt, onReply = choosing ? undefined : replyIt, onEdit = choosing ? undefined : editIt;
   const onReact = choosing ? undefined : reactIt, onForward = choosing ? undefined : forwardIt, onSelect = choosing ? undefined : selectIt;
   const { t, language, dir } = useI18n();
   const memberText = useMemberText();
@@ -818,19 +888,22 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
   const picture = contentType === "image" && !isSystem && !showsCard(message.card) && !appCard ? message.text.trim() : null;
   // No shell's policy lets the page load a picture from any address but the GIF sources': the app reads the others
   // itself, once asked (my own at once), and the bubble shows what came (lib/pictureLink.ts).
-  const readHere = picture !== null && !autoLoads(picture) && (isMe || revealed) ? picture : null;
-  const [pictureRead, setPictureRead] = useState<{ link: string; url: string } | null>(null);
+  const readHere = picture !== null && !autoLoads(picture) && (isMe || revealed || needsNoClick(picture)) ? picture : null;
+  const [pictureRead, setPictureRead] = useState<{ link: string; read: PictureRead } | null>(null);
   useEffect(() => {
     if (!readHere) return;
     let shown = true;
-    void pictureLinkUrl(readHere).then((url) => {
+    void pictureLinkUrl(readHere).then((read) => {
       if (!shown) return;
-      if (url) setPictureRead({ link: readHere, url });
+      if (read) setPictureRead({ link: readHere, read });
       else setImgError(true);
     });
     return () => { shown = false; };
   }, [readHere]);
-  const pictureSrc = picture === null ? null : autoLoads(picture) ? picture : pictureRead?.link === picture ? pictureRead.url : null;
+  // Read before (the chat opened again, the row drawn again): in the first frame, so nothing above a remembered place
+  // grows after the view went back there.
+  const linkPicture = readHere === null ? undefined : pictureRead?.link === readHere ? pictureRead.read : pictureLinkRead(readHere);
+  const pictureSrc = picture === null ? null : autoLoads(picture) ? picture : linkPicture?.url ?? null;
   const download = message.file && !isSystem
     ? {
       file: message.file, name: downloadName(message.file, message.timestamp), sender: isMe ? "me" as const : "peer" as const,
@@ -937,7 +1010,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
     </div>
   ) : null;
   const menu = !choosing && (
-    <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onEdit={isMe ? onEdit : undefined} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned}
+    <MessageMenu onDelete={onDelete} onDeleteForEveryone={isMe ? onDeleteForEveryone : undefined} onDetails={openDetails} onReply={onReply} onEdit={isMe ? onEdit : undefined} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved}
       onForward={onForward} onSelect={onSelect} align={isMe ? "left" : "right"} download={download} sender={isMe ? "me" : "peer"} {...(isMe ? sending : {})} />
   );
 
@@ -986,7 +1059,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             {edge && <span aria-hidden="true" data-testid="status-card-edge" className={`absolute inset-y-2 start-1 w-[3px] rounded-full opacity-80 ${edge}`} />}
             {quote && <div className="px-2 pt-2"><ReplyQuote quote={quote} /></div>}
             {appCard
-              ? <AppCardView card={appCard} mine={isMe} contact={contactName || peerNick || t("common.anonymous")} linkId={linkId!} peerKey={peerPubKey} time={time} marks={marks} />
+              // A contact with no name goes by what the chat calls them ("Contact · 1kwb54"); "Anonymous" is my own profile's word.
+              ? <AppCardView card={appCard} mine={isMe} contact={contactName || peerNick || t("common.unnamedContact", { key: contactTag(peerPubKey) })} linkId={linkId!} peerKey={peerPubKey} time={time} marks={marks} />
               : <StatusCardView card={card as ShownCard} time={time} marks={marks} end={message.edit?.at ?? message.timestamp} />}
           </div>
           {refusal}
@@ -1039,7 +1113,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       )}
       {isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {isMe && onReply && <ReplyAction onReply={onReply} />}
-      {isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
+      {isMe && !choosing && <MessageMenu onDelete={onDelete} onDeleteForEveryone={onDeleteForEveryone} onDetails={openDetails} onReply={onReply} onEdit={onEdit} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="left" download={download} sender="me" {...sending} />}
       {/* A group member's picture at the start of the line (the reading direction's), or its empty place. */}
       {!isMe && author && <SenderAvatar author={author} onOpen={choosing ? undefined : onOpenAuthor} />}
       {/* The bubble, and its reactions under it. */}
@@ -1085,7 +1159,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         ) : message.file?.voice ? (
           <div className="clearfix">
-            <VoiceBubble file={{ ...message.file, voice: message.file.voice }} sender={isMe ? "me" : "peer"} peerName={message.nick || peerNick || undefined} />
+            <VoiceBubble file={{ ...message.file, voice: message.file.voice }} sender={isMe ? "me" : "peer"} peerName={message.nick || peerNick || undefined} timestamp={message.timestamp} />
             {timestampEl}
           </div>
         ) : message.file && isPlayableVideoType(message.file.mime) ? (
@@ -1108,7 +1182,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
             <InvoiceBubble money={money} mine={isMe} peerPubKey={peerPubKey} />
             {timestampEl}
           </div>
-        ) : contentType === "image" && !isMe && !revealed && !autoLoads(message.text.trim()) ? (
+        ) : contentType === "image" && !isMe && !revealed && !needsNoClick(message.text.trim()) ? (
           // Loading a picture tells its server this device's address: from anywhere but the GIF sources,
           // a contact's picture waits for a click.
           <div className="clearfix">
@@ -1127,8 +1201,8 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
                 src={pictureSrc}
                 alt=""
                 data-testid="picture-link"
-                className={`rounded-[4px] max-w-[min(330px,72vw)] min-w-[120px] max-h-[330px] object-contain block ${pictureLoaded === message.text.trim() ? "" : "min-h-[120px] bg-black/10"}`}
-                style={isWaybackGif(message.text.trim()) ? { imageRendering: "pixelated" } : undefined}
+                className={`rounded-[4px] max-w-[min(330px,72vw)] min-w-[120px] max-h-[330px] object-contain block ${pictureLoaded === message.text.trim() ? "" : linkPicture ? "bg-black/10" : "min-h-[120px] bg-black/10"}`}
+                style={{ ...(linkPicture && linkPictureBox(linkPicture)), ...(isWaybackGif(message.text.trim()) && { imageRendering: "pixelated" }) }}
                 loading="lazy"
                 onLoad={() => setPictureLoaded(message.text.trim())}
                 onError={() => setImgError(true)}
@@ -1169,7 +1243,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
       {refusal}
       <ReactionChips chips={chips} onReact={onReact} align={isMe ? "end" : "start"} />
       </div>
-      {!isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onForward={onForward} onSelect={onSelect} align="right" download={download} sender="peer" />}
+      {!isMe && !choosing && <MessageMenu onDelete={onDelete} onDetails={openDetails} onReply={onReply} onReact={onReact && (() => setBar("button"))} onPin={onPin} pinned={pinned} onSave={onSave} saved={saved} onForward={onForward} onSelect={onSelect} align="right" download={download} sender="peer" />}
       {!isMe && onReply && <ReplyAction onReply={onReply} />}
       {!isMe && onReact && <ReactAction anchorRef={reactRef} open={bar === "button"} onOpen={() => setBar(bar ? null : "button")} />}
       {onReact && <ReactionBar open={!!bar} onClose={() => setBar(null)} anchorRef={bubbleRef} current={myReaction(message.reactions)} onReact={onReact}

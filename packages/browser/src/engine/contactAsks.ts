@@ -5,7 +5,7 @@ import {
 } from "@ghostly/core";
 import { STORES, store, wrap } from "../shared/idb";
 import type { ContactAskView } from "../shared/types";
-import { newDeviceKey, sealSeed, unsealSeed } from "./paymentAdapters/persistence";
+import { openSecret, sealSecret } from "./dataKey";
 import type { SealedProofKey } from "./identities";
 
 /**
@@ -96,6 +96,25 @@ export class ContactAsks {
     return this.serial(() => this.send(params));
   }
 
+  /**
+   * The chat a request made was deleted: the request is taken back. Nothing more goes out for it, its record under the
+   * asker key is replaced by an empty one so an owner who has not read it yet finds nothing, and asking again through
+   * the link is open. The asker key stays, one per profile and link. An owner who already took it keeps it until it ends.
+   */
+  forgetChat(chatId: string): Promise<void> {
+    return this.serial(async () => {
+      const ask = this.asks.find(a => a.chatId === chatId);
+      if (!ask) return;
+      const out = ask.state === "sending" || ask.state === "knocking" || ask.state === "seen";
+      await this.put({ link: ask.link, seed: ask.seed, key: ask.key });
+      this.host.emit();
+      if (!out || !this.host.online()) return;
+      try {
+        await this.host.publish(await this.identity(ask), []);
+      } catch { /* the record fades from the DHT in hours: nothing republishes it */ }
+    });
+  }
+
   /** Looks after every request not yet seen once (the timer does this at its pace). */
   tick(): Promise<void> {
     return this.serial(() => this.look());
@@ -126,7 +145,7 @@ export class ContactAsks {
     const sent = request(chat.inviteCode);
     // A request of before left nothing to reuse: its stamp, its publish and its looks are this request's to make.
     const ask: StoredAsk = {
-      link, key: asker.pubKeyZ32, seed: known?.seed ?? await this.seal(asker),
+      link, key: asker.pubKeyZ32, seed: known?.seed ?? await this.seal(asker, link),
       chatId: chat.linkId, invite: chat.inviteCode, name: sent.name, text: sent.text, issued: now, expires: sent.expires, state: "sending",
     };
     await this.put(ask);
@@ -207,13 +226,13 @@ export class ContactAsks {
     return run;
   }
 
-  private async seal(identity: Identity): Promise<SealedProofKey> {
-    const deviceKey = newDeviceKey();
-    return { sealed: await sealSeed(identity.seedB64, deviceKey), deviceKey };
+  /** An asker key's seed belongs to the link it asks: one ask per link. */
+  private seal(identity: Identity, link: string): Promise<SealedProofKey> {
+    return sealSecret(identity.seedB64, { store: STORES.settings, key: link, field: "contactAsk.seed" });
   }
 
   private async identity(ask: StoredAsk): Promise<Identity> {
-    return identityFromSeedB64(await unsealSeed(ask.seed.sealed, ask.seed.deviceKey));
+    return identityFromSeedB64(await openSecret(ask.seed, { store: STORES.settings, key: ask.link, field: "contactAsk.seed" }));
   }
 
   private async put(ask: StoredAsk): Promise<void> {

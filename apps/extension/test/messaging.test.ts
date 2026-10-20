@@ -183,6 +183,20 @@ describe("the page and the peer talk over the 'ui' port", () => {
     expect(disconnected).toBe(true);
   });
 
+  it("sends a page that connects each chat's newest page, not every whole history, and the rest of one it asks for", async () => {
+    // Every chat's whole history went to each tab opened or reloaded, as JSON: about 20 MiB for 50 chats of 2,000.
+    const { extensionHost } = await world.load("page", () => import("../src/host.ts"));
+    const connection = await extensionHost.connect(() => {}, () => {});
+    const server = engine();
+    expect(server.attachedWith).toEqual([[undefined, { newest: 400 }]]);
+
+    connection.send({ kind: "history", linkId: "chat-1" });
+    await settle();
+    expect(server.histories).toEqual([{ client: server.attached[0], linkId: "chat-1" }]);
+    // Not an engine call.
+    expect(server.handled).toEqual([]);
+  });
+
   it("detaches the page when its port closes", async () => {
     await send({ target: "background", type: "ensure-engine" });
     const port = world.chrome.runtime.connect({ name: "ui" });

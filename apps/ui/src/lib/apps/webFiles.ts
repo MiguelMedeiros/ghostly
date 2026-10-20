@@ -537,6 +537,10 @@ export function webLinkedFiles({ text, picker = browserPicker(), store = null, a
       }
       return [...linksOf(ref).values()].map((link) => link.entry);
     },
+    async entry(ref, id) {
+      await load(ref);
+      return linksOf(ref).get(id)?.entry ?? null;
+    },
     async read(ref, id, offset, length) {
       await load(ref);
       const link = linksOf(ref).get(id);

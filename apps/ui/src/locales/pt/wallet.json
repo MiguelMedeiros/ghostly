@@ -201,6 +201,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "Esta fatura venceu: ninguém consegue pagá-la agora.",
     "invoiceFor": "Fatura de {{amount}}",
     "makePrimary": "Tornar principal",
     "mints": "Mints",
@@ -584,6 +585,17 @@
   "sats": {
     "mainnet": "sats",
     "testnet": "sats de teste"
+  },
+  "send": {
+    "balance": "Saldo: {{amount}} {{unit}}",
+    "cameraUnavailable": "Câmera indisponível. Cole, digite ou escolha uma imagem.",
+    "clipboardEmpty": "Nada para colar. Copie uma fatura ou um endereço antes.",
+    "clipboardUnavailable": "Não foi possível ler a área de transferência. Cole ou digite abaixo.",
+    "image": "Escolher imagem",
+    "max": "Máx.",
+    "noAmount": "Esta fatura não tem valor. Peça uma com o valor.",
+    "paste": "Colar",
+    "scan": "Escanear"
   },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",

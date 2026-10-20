@@ -8,6 +8,19 @@ import { currentProfile } from "../lib/profiles";
 import { DeviceDialog, field, primaryButton } from "./devices/DeviceDialog";
 
 /**
+ * Where the focus goes once the step closes. It opened as the app started, with nothing focused before it, so the
+ * dialog gives the focus back to the page's body: New instead, the first thing a new person does, where the page has it
+ * (the chat list); else the page's main area (a wide screen). Never away from something that took the focus in the meantime.
+ */
+function focusAfter() {
+  const active = document.activeElement;
+  if (active && active !== document.body) return;
+  const next = document.querySelector<HTMLElement>("[data-testid='sidebar-new-chat']");
+  if (next) next.focus();
+  else document.querySelector<HTMLElement>("main[tabindex]")?.focus();
+}
+
+/**
  * "What should people call you?": asked once by a new profile (`lib/nameStep.ts`), on a phone and a wide screen alike.
  * One field, empty, and Skip, which keeps the default: contacts see the anonymous label. Never in a profile with a name
  * already, a restored one, or one this page opened to add to a profile on another device (a device code, or "I already
@@ -40,7 +53,7 @@ export function NameStep() {
   }, [open]);
 
   if (!open) return null;
-  const done = () => { nameStepDone(); setOpen(false); };
+  const done = () => { nameStepDone(); setOpen(false); requestAnimationFrame(focusAfter); };
   const save = () => {
     const chosen = name.replace(/\s+/g, " ").trim().slice(0, 20);
     if (!chosen) return;

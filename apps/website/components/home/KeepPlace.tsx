@@ -113,9 +113,12 @@ class Hold extends Component<{ shape: string }> {
 
   componentDidUpdate(_prev: { shape: string }, _state: unknown, marks: Mark[] | null) {
     if (!marks) return;
-    hold(marks);
-    // Some of the page sizes itself only after this commit (a deck measures its width as it mounts, and renders
-    // again): held once more when that is done, still before the browser paints.
+    // Held once the task is done with the page, not in this commit: a deck mounts at no width, measures itself in a
+    // layout effect and renders again before the task ends. Held here, the page would sit a card's height off
+    // between that render and the next frame, where another task may read it.
+    queueMicrotask(() => hold(marks));
+    // Some of the page sizes itself only in a later task (a deck that measures its width again as it settles): held
+    // once more then, still before the browser paints.
     requestAnimationFrame(() => hold(marks));
   }
 

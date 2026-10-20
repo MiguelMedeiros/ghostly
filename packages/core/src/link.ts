@@ -139,6 +139,13 @@ const PUBLISH_RETRY_MS = 4_000;
  * meanwhile: each refusal keeps it first in line for that request (`WRITE_FIRST_MS`), and costs no request itself.
  */
 const BUDGET_RETRY_MIN_MS = 250;
+/**
+ * A background write the budget held back (`{ background: true }`) is not first in line for anything (`WRITE_FIRST_MS`
+ * is a chat's or a group's write): it goes again when the budget frees one of its share, up to this long. Tried every
+ * 4 s, an idle admin's daemon built and signed 1,041 packets in 9 minutes that the budget refused again (bug hunt,
+ * 2026-10-19). Anything new to say goes at once all the same (`publish`).
+ */
+const BACKGROUND_RETRY_MAX_MS = 60_000;
 /** Two reads are never closer than this, however long the last one took. */
 const MIN_POLL_GAP_MS = 250;
 export const IDLE_THRESHOLD = 60_000;
@@ -283,6 +290,8 @@ export class LinkSession {
   private publishAgain = false;
   /** What waits to go out is the presence heartbeat alone (`PRESENCE_HEARTBEAT`): nothing in the packet changed. */
   private upkeepOnly = false;
+  /** The last write this link asked for was a background one (`retryDelay`). */
+  private wroteInBackground = false;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
   private lastActivity = Date.now();
@@ -473,6 +482,16 @@ export class LinkSession {
     this.watchFrom = this.presence.lastPacketAt;
     this.departedUntil = Date.now() + DEPARTED_READ_MS;
     this.expectPeer();
+  }
+
+  /**
+   * Nothing a read finds can be acted on for a while (a dial waiting out its backoff, whose end has a look of its own):
+   * the windows that look fast for the contact (`expectPeer`, `watchPeer`) end, and the link reads at its pace from the
+   * next read on. An offer of this side's out keeps its window.
+   */
+  calm(): void {
+    if (this.rtcSignal !== null) return;
+    this.fastPollUntil = this.fastStepsAfter = this.expectUntil = this.watchUntil = 0;
   }
 
   /** The data link carries chat and services while it is up. */
@@ -724,6 +743,7 @@ export class LinkSession {
       const takesBack = !rtcSignal && this.rtcSignalOut !== null;
       const options = rtcSignal && rtcSignal !== this.rtcSignalOut ? { signal: true } : this.watching() ? { watch: true }
         : (upkeep && (this.connected || takesBack)) || (!rtcSignal && !awaited) ? { background: true } : undefined;
+      this.wroteInBackground = options?.background === true;
       await this.transport.publish(this.identity, built.records, options);
     } catch (error) {
       const ms = Date.now() - started, waiting = isDiscoveryBudgetError(error);
@@ -751,9 +771,13 @@ export class LinkSession {
     return built.keptMessages;
   }
 
-  /** When a publish that failed goes again: when the relays' budget frees a request, if that held it back. */
+  /**
+   * When a publish that failed goes again: when the relays' budget frees a request, if that held it back; a chat's or a
+   * group's write within `PUBLISH_RETRY_MS` meanwhile, which keeps it first in line, a background one when its share frees.
+   */
   private retryDelay(error: unknown): number {
-    return isDiscoveryBudgetError(error) ? budgetRetryMs(error, BUDGET_RETRY_MIN_MS, PUBLISH_RETRY_MS) : PUBLISH_RETRY_MS;
+    if (!isDiscoveryBudgetError(error)) return PUBLISH_RETRY_MS;
+    return budgetRetryMs(error, BUDGET_RETRY_MIN_MS, this.wroteInBackground ? BACKGROUND_RETRY_MAX_MS : PUBLISH_RETRY_MS);
   }
 
   private discoveryResult(operation: "publish" | "read", error?: unknown): void {

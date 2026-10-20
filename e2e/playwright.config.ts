@@ -85,6 +85,9 @@ export default defineConfig({
         timeout: 5 * 60_000,
         // The suite's build knows the local OIDC issuer (support/oidcIssuer.ts) and carries the SDK example's
         // adapters (web/sdk-plugin.spec.ts); a release build does neither.
-        env: { VITE_OIDC_TEST_ISSUER: OIDC_TEST_ISSUER, VITE_ATPROTO_TEST_PLC: ATPROTO_TEST_PLC, GHOSTLY_PLUGINS: "packages/sdk/examples/adapter/src/index.ts", VITE_APPS_TEST: "1" },
+        // A contact's shared app opens on `<label>.localhost` (web/services-web-open.spec.ts): Chromium sends every
+        // *.localhost to this machine, and `vite preview` serves those names too.
+        env: { VITE_OIDC_TEST_ISSUER: OIDC_TEST_ISSUER, VITE_ATPROTO_TEST_PLC: ATPROTO_TEST_PLC, GHOSTLY_PLUGINS: "packages/sdk/examples/adapter/src/index.ts", VITE_APPS_TEST: "1",
+          VITE_SERVICES_HOST: `http://*.localhost:${port}`, VITE_SERVICES_APP_ORIGIN: `http://localhost:${port}` },
       },
 });

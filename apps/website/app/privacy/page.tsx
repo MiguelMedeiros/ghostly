@@ -189,7 +189,8 @@ export default async function PrivacyPage() {
           </li>
           <li>
             <Term>Pkarr relays.</Term> A browser cannot reach the DHT directly, so it publishes and looks up records
-            through public relays at <Code>pkarr.pubky.app</Code> and <Code>pkarr.pubky.org</Code>. Ghostly Desktop
+            through public relays at <Code>pkarr.pubky.app</Code>, <Code>pkarr.pubky.org</Code> and{" "}
+            <Code>pkarr.miguelmedeiros.dev</Code>. Ghostly Desktop
             reads the DHT directly and publishes to those relays too. The relays see your IP address and the keys you
             publish or look up. Records are signed, and what matters in them is sealed.
           </li>

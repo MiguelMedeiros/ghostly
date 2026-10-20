@@ -61,7 +61,10 @@ export interface BdkConfig {
 const STOP_GAP = 20;
 const PARALLEL = 4;
 const SYNC_TIMEOUT = 90_000;
+/** The pauses before reading the chain again after a failed read; the last read's failure is final. */
+const SYNC_RETRIES = [1_000, 2_000, undefined] as const;
 const HTTP_TIMEOUT = 20_000;
+class TooSlow extends Error { constructor() { super("The Esplora server is too slow"); } }
 /** A reservation outlives an app restart, but not forever: a review saved and then lost cannot lock coins. */
 const RESERVATION_MS = 24 * 3600_000;
 
@@ -268,12 +271,24 @@ export class BdkOnchain implements OnchainProvider {
     if (this.closed) return Promise.reject(new Error("This wallet is closed"));
     if (!force && Date.now() - this.syncedAt < 3_000) return Promise.resolve();
     return this.syncing ??= (async () => {
-      const work = this.scanned
-        ? this.client.sync(this.wallet.start_sync_with_revealed_spks(), PARALLEL)
-        : this.client.full_scan(this.wallet.start_full_scan(), STOP_GAP, PARALLEL);
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const update = await Promise.race([work, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("The Esplora server is too slow")), SYNC_TIMEOUT); })]).finally(() => clearTimeout(timer));
-      if (this.closed) return;
+      const read = () => {
+        const work = this.scanned
+          ? this.client.sync(this.wallet.start_sync_with_revealed_spks(), PARALLEL)
+          : this.client.full_scan(this.wallet.start_full_scan(), STOP_GAP, PARALLEL);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        return Promise.race([work, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new TooSlow()), SYNC_TIMEOUT); })]).finally(() => clearTimeout(timer));
+      };
+      let update: Awaited<ReturnType<typeof read>> | undefined;
+      // A server can stumble for a moment (electrs answers 404 for its newest blocks while it indexes a new
+      // tip): read again a little later before saying it failed. Not after a time-out, or once closed.
+      for (const pause of SYNC_RETRIES) {
+        try { update = await read(); break; }
+        catch (error) {
+          if (pause === undefined || this.closed || error instanceof TooSlow) throw error;
+          await new Promise((resolve) => setTimeout(resolve, pause));
+        }
+      }
+      if (this.closed || !update) return;
       this.wallet.apply_update(update);
       this.scanned = true;
       this.syncedAt = Date.now();

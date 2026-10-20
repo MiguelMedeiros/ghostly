@@ -38,6 +38,10 @@
   "outgoing": "発信中...",
   "reconnecting": "再接続中...",
   "rejected": "通話拒否",
+  "relayNoAnswer": "リレーが応答しませんでした",
+  "relayNoAnswerNext": "設定、ネットワークでTURNサーバーを確認してください。IPを隠す設定では直接接続しません。",
+  "relayOnlyOff": "IPを隠す設定がオンの間、通話はオフです",
+  "relayOnlyOffNext": "このアプリの通話はまだリレーを使えません。通話するには設定、ネットワークでオフにしてください。",
   "selfView": "ドラッグで移動、角を引いてサイズ変更、ダブルクリックで元に戻す",
   "share": {
     "blocked": "画面共有がブロックされています",

@@ -43,6 +43,11 @@ export const GROUP_FILE_LIMITS = {
    */
   haveFrames: 10,
   haveWindowMs: 10_000,
+  /**
+   * `group-have` frames a private group's edge takes from its member in `haveWindowMs`, the rest dropped: twice what it
+   * may send, as frames sent at that pace and late by different delays on the way still come in under it.
+   */
+  haveFramesTaken: 20,
   communityHaveEveryMs: 60_000,
   /**
    * How long a want waits for an offer before the next holder is asked; a transfer that does not move for as long is

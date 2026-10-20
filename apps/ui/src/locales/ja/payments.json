@@ -250,6 +250,7 @@
     "youObject": "あなた"
   },
   "invoice": {
+    "alreadySpent": "使用済み",
     "anyAmount": "金額自由",
     "checking": "確認中…",
     "confirmWhat": "{{amount}} sats（手数料は最大 {{fee}}）",

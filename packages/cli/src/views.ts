@@ -120,7 +120,7 @@ export interface MessageJson {
    * The message this one answers (WISP 400 § Replies). `id`: the original's message id here when it is in this chat
    * (`found`), else the id the reply named. `from`: null when nothing says (only the id came, over the DHT).
    */
-  replyTo?: { id: string; snippet: string; from: "me" | "peer" | null; member?: string; found: boolean; button?: string };
+  replyTo?: { id: string; snippet: string; from: "me" | "peer" | null; member?: string; found: boolean; deleted?: true; button?: string };
   /** Reactions to it, one per person (WISP 400 § Reactions): `by` is `me`, `peer` or a member's key. */
   reactions?: { by: string; emoji: string; at: number }[];
   /** An edited text (WISP 400 § Edits): `text` is the latest version, `edits` its number, `editedAt` when it was made. */
@@ -202,13 +202,18 @@ export function chatMessageJson(message: StoredMessage, link: Pick<LinkView, "pe
 /**
  * A group's message with its author named: mesh and community messages are kept with the member's key only (the
  * name rides on the edge or the roster), so the roster fills `nick` when the message has none, and for an author no
- * longer in it (removed, or back with a new member key) the name the group knew them by.
+ * longer in it (removed, or back with a new member key) the name the group knew them by. A group's own line written
+ * before that name came ("Member a4w9nb5y joined") says it, as the app draws it; before, it kept the key for good.
  */
 export function groupMessageJson(message: StoredMessage, group: Pick<GroupView, "members" | "formerNames"> | undefined): MessageJson {
   const json = messageJson(message);
-  if (json.nick || !message.member) return json;
-  const nick = group?.members.find((m) => m.key === message.member)?.nick ?? group?.formerNames?.[message.member];
-  return nick ? { ...json, nick } : json;
+  if (!message.member) return json;
+  const nick = json.nick ?? group?.members.find((m) => m.key === message.member)?.nick ?? group?.formerNames?.[message.member];
+  if (!nick) return json;
+  // The engine names a member it has no name for yet `Member <first 8 of the key>` (groups.ts, community.ts).
+  const placeholder = `Member ${message.member.slice(0, 8)}`;
+  const text = message.event && json.text.startsWith(`${placeholder} `) ? `${nick}${json.text.slice(placeholder.length)}` : json.text;
+  return { ...json, nick, text };
 }
 
 /**

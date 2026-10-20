@@ -13,7 +13,7 @@
  *   page and caches nothing, and only shows wake-ups (WISP 401 § Wake-up push). A scope per profile gives each
  *   profile a push subscription of its own, so contacts of two profiles cannot tell they share a browser.
  */
-import { CACHE_PREFIX, SHARED_ROUTE, assetAnswer, classify, precacheMode, pushNotice, pushScopeProfile, readShare, readShareBody, type SharedItem } from "./policy";
+import { CACHE_PREFIX, SHARED_ROUTE, assetAnswer, classify, precacheMode, pushNotice, pushScopeProfile, readShare, readShareBody, TOO_LARGE_SHARE, type SharedItem } from "./policy";
 import { readWakeEntry, readWakeText } from "./wakeStore";
 import { readPushDeviceView } from "./deviceState";
 import { deviceNoticeWords } from "./deviceWords";
@@ -112,10 +112,10 @@ function share(event: FetchEvent): void {
   event.respondWith((async () => {
     try {
       // Read with a cap before it is parsed: `formData()` alone would hold a body of any size in memory.
+      // A larger one is held all the same, as a share with nothing in it but that it was too large: the picker says so.
       const body = await readShareBody(event.request);
-      if (!body) throw new Error("share too large");
       const type = event.request.headers.get("content-type") ?? "";
-      const item = readShare(await new Response(body, { headers: { "content-type": type } }).formData());
+      const item = body ? readShare(await new Response(body, { headers: { "content-type": type } }).formData()) : TOO_LARGE_SHARE;
       held?.done();
       held = { item, done };
       setTimeout(() => { if (held?.done === done) { held = null; done(); } }, SHARE_HOLD_MS);

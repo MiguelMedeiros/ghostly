@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { voiceLevel } from "@ghostly/core";
 import { useI18n } from "../contexts/I18nContext";
 import { useMediaDevices } from "../hooks/useMediaDevices";
-import { applySpeaker, canPickSpeaker, chooseDevice, deviceSource, resolveDevice, type DeviceKind, type DeviceList } from "../lib/mediaDevices";
+import { applySpeaker, canPickSpeaker, chooseDevice, deviceSource, isMediaDenied, mediaDeniedText, resolveDevice, type DeviceKind, type DeviceList } from "../lib/mediaDevices";
 import { soundUrl } from "../lib/sounds";
 import { Row, Section } from "./layout";
 import { Select, type SelectOption } from "./ui/Select";
@@ -14,6 +14,10 @@ const TEST_ID = { audioinput: "settings-microphone", videoinput: "settings-camer
 /** The constraint for capturing from `id`: that device exactly, or the default. */
 const from = (id: string | undefined): MediaTrackConstraints | true => (id ? { deviceId: { exact: id } } : true);
 
+/** Why trying a device failed: refused (the page says where to allow it), or it would not open. */
+type Failure = false | "failed" | "denied";
+const failureOf = (error: unknown): Failure => (isMediaDenied(error) ? "denied" : "failed");
+
 /**
  * Settings → Audio & video: which microphone, camera and speaker this profile uses, each with a way to try it.
  * Nothing is asked of the browser until a button is pressed: the level meter, the preview and the device names
@@ -21,7 +25,7 @@ const from = (id: string | undefined): MediaTrackConstraints | true => (id ? { d
  */
 export function MediaSettings() {
   const { t } = useI18n();
-  const { supported, list, choices, allowNames } = useMediaDevices();
+  const { supported, list, choices, allowNames, denied } = useMediaDevices();
   const [preview, setPreview] = useState(false);
   if (!supported) return null;
 
@@ -38,7 +42,8 @@ export function MediaSettings() {
       {/* Names are the page's own browser's to give. A device source names its devices itself: no row that shows
           while its list is on the way and then goes, moving everything under it. */}
       {!source && !list.named && (
-        <Row label={t("settings.media.names")} hint={t("settings.media.namesHint")} testId="settings-media-names">
+        <Row label={t("settings.media.names")} testId="settings-media-names"
+          hint={denied ? <span role="alert" data-testid="settings-media-denied" className="text-danger">{t(mediaDeniedText())}</span> : t("settings.media.namesHint")}>
           <Button data-testid="settings-media-allow" onClick={() => void allowNames()}>{t("settings.media.allow")}</Button>
         </Row>
       )}
@@ -46,7 +51,7 @@ export function MediaSettings() {
         {(id, fail) => hears && <MicrophoneTest id={id} fail={fail} />}
       </DeviceRow>
       <DeviceRow kind="videoinput" list={list} choices={choices} info={t("settings.media.cameraInfo")}
-        below={preview ? (id, fail) => <CameraPreview id={id} fail={(failed) => { fail(failed); if (failed) setPreview(false); }} /> : undefined}>
+        below={preview ? (id, fail) => <CameraPreview id={id} fail={(failure) => { fail(failure); if (failure) setPreview(false); }} /> : undefined}>
         {() => (
           <Button data-testid="settings-camera-preview" aria-pressed={preview} onClick={() => setPreview(!preview)}>
             {preview ? t("settings.media.stop") : t("settings.media.preview")}
@@ -67,15 +72,15 @@ function DeviceRow({ kind, list, choices, info, children, below }: {
   list: DeviceList;
   choices: ReturnType<typeof useMediaDevices>["choices"];
   info: string;
-  /** The row's way to try the device; `fail` says it could not be opened. */
-  children: (id: string | undefined, fail: (failed: boolean) => void) => ReactNode;
+  /** The row's way to try the device; `fail` says it could not be opened, or was refused. */
+  children: (id: string | undefined, fail: (failure: Failure) => void) => ReactNode;
   /** What trying it shows under the row, the whole width (the camera's picture). */
-  below?: (id: string | undefined, fail: (failed: boolean) => void) => ReactNode;
+  below?: (id: string | undefined, fail: (failure: Failure) => void) => ReactNode;
 }) {
   const { t } = useI18n();
   const name = t(NAME_KEY[kind]);
   const { id, missing } = resolveDevice(kind, list, choices);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<Failure>(false);
   const chosen = choices[kind];
   const options: SelectOption[] = [
     { value: "", label: t("settings.media.systemDefault"), description: list.defaults[kind] },
@@ -93,7 +98,7 @@ function DeviceRow({ kind, list, choices, info, children, below }: {
     <div>
       <Row label={name} info={info} testId={`${TEST_ID[kind]}-row`}
         hint={missing ? <span role="status" data-testid={`${TEST_ID[kind]}-missing`}>{t("settings.media.missing", { name: missing })}</span>
-          : failed ? <span role="alert" data-testid={`${TEST_ID[kind]}-failed`} className="text-danger">{t("settings.media.failed")}</span> : undefined}>
+          : failed ? <span role="alert" data-testid={`${TEST_ID[kind]}-failed`} data-failure={failed} className="text-danger">{t(failed === "denied" ? mediaDeniedText() : "settings.media.failed")}</span> : undefined}>
         <Select fit aria-label={name} data-testid={TEST_ID[kind]} value={id ?? ""} options={options} onChange={pick} />
         {children(id, setFailed)}
       </Row>
@@ -128,7 +133,7 @@ async function pageMeter(id: string | undefined, level: (level: number) => void)
 }
 
 /** A level meter on the chosen microphone, while it is on: the page's own, or the device source's. */
-function MicrophoneTest({ id, fail }: { id: string | undefined; fail: (failed: boolean) => void }) {
+function MicrophoneTest({ id, fail }: { id: string | undefined; fail: (failure: Failure) => void }) {
   const { t } = useI18n();
   const [on, setOn] = useState(false);
   const [level, setLevel] = useState(0);
@@ -143,7 +148,7 @@ function MicrophoneTest({ id, fail }: { id: string | undefined; fail: (failed: b
     listen(id, (next) => { if (live) setLevel(next); }).then((stopping) => {
       if (live) stop = stopping;
       else stopping();
-    }, () => { if (live) { fail(true); setOn(false); } });
+    }, (error: unknown) => { if (live) { fail(failureOf(error)); setOn(false); } });
     return () => {
       live = false;
       stop?.();
@@ -165,7 +170,7 @@ function MicrophoneTest({ id, fail }: { id: string | undefined; fail: (failed: b
 }
 
 /** The chosen camera's picture, while it is shown. */
-function CameraPreview({ id, fail }: { id: string | undefined; fail: (failed: boolean) => void }) {
+function CameraPreview({ id, fail }: { id: string | undefined; fail: (failure: Failure) => void }) {
   const { t } = useI18n();
   const video = useRef<HTMLVideoElement>(null);
   const failRef = useRef(fail);
@@ -180,7 +185,7 @@ function CameraPreview({ id, fail }: { id: string | undefined; fail: (failed: bo
       if (!live) { s.getTracks().forEach((track) => track.stop()); return; }
       stream = s;
       if (video.current) { video.current.srcObject = s; void video.current.play?.()?.catch(() => {}); }
-    }, () => { if (live) failRef.current(true); });
+    }, (error: unknown) => { if (live) failRef.current(failureOf(error)); });
     return () => {
       live = false;
       stream?.getTracks().forEach((track) => track.stop());
@@ -194,7 +199,7 @@ function CameraPreview({ id, fail }: { id: string | undefined; fail: (failed: bo
 }
 
 /** A short sound on the chosen speaker: the page's own, or the device source's. */
-function SpeakerTest({ id, fail }: { id: string | undefined; fail: (failed: boolean) => void }) {
+function SpeakerTest({ id, fail }: { id: string | undefined; fail: (failure: Failure) => void }) {
   const { t } = useI18n();
   const play = async () => {
     const source = deviceSource();
@@ -203,7 +208,7 @@ function SpeakerTest({ id, fail }: { id: string | undefined; fail: (failed: bool
         await source.testSpeaker(id);
         fail(false);
       } catch {
-        fail(true);
+        fail("failed");
       }
       return;
     }
@@ -215,7 +220,7 @@ function SpeakerTest({ id, fail }: { id: string | undefined; fail: (failed: bool
       await audio.play();
       fail(false);
     } catch {
-      fail(true);
+      fail("failed");
     }
   };
   return (

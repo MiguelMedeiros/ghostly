@@ -90,6 +90,27 @@ describe("a pasted picture or file", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("a × pressed from the keyboard leaves the focus on the sheet: on the × now there, the one before, or the caption once none is left", async () => {
+    const { user } = composer();
+    const text = (name: string) => new File([name], name, { type: "text/plain" });
+    paste(field(), { files: [text("one.txt"), text("two.txt"), text("three.txt")] });
+    const open = await screen.findByTestId("attachment-sheet");
+    // The first: the next file's × takes its place.
+    within(open).getByRole("button", { name: "Remove one.txt" }).focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(within(open).getByRole("button", { name: "Remove two.txt" }));
+    paste(within(open).getByTestId("attachment-caption"), { files: [text("four.txt")] });
+    // The last: the one before it.
+    within(open).getByRole("button", { name: "Remove four.txt" }).focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(within(open).getByRole("button", { name: "Remove three.txt" }));
+    // One file left has no ×: the caption.
+    await user.keyboard("{Enter}");
+    expect(within(open).getAllByTestId("attachment-item")).toHaveLength(1);
+    expect(within(open).queryByRole("button", { name: /^Remove / })).toBeNull();
+    expect(document.activeElement).toBe(within(open).getByTestId("attachment-caption"));
+  });
+
   it("the first file that cannot go stops the rest and says why; the caption is not sent", async () => {
     onSendFile.mockResolvedValueOnce("That file is too large (max 100.0 MB).");
     const { user } = composer();
@@ -346,6 +367,44 @@ describe("a paste the webview showed nothing of (the desktop app reads the clipb
   it("the web app has no such read: an empty paste is left alone", () => {
     composer();
     expect(paste(field(), {})).toBe(true);
+    expect(paste(field(), { html: `<img src="https://example.com/photo.png">`, text: "https://example.com/photo.png" })).toBe(true);
+  });
+
+  /** What a web browser's Copy image shows WebKitGTK's page: the picture's HTML, no picture; Firefox adds its address as text. */
+  const browserCopy = (html = `<meta charset="utf-8"><img src="https://example.com/photo.png">`) => ({ html });
+  const firefoxCopy = () => ({ html: `<html><body>\n<!--StartFragment--><img src="https://example.com/photo.png" alt="A photo"><!--EndFragment-->\n</body>\n</html>`, text: "https://example.com/photo.png" });
+
+  it("a picture copied in a web browser opens the sheet with the picture the platform reads, not its address", async () => {
+    for (const copy of [browserCopy(), firefoxCopy()]) {
+      fakeEngine.readClipboardFiles = vi.fn(async () => [held(null, [137, 80, 78, 71], "image/png")]);
+      const { unmount } = composer();
+      expect(paste(field(), copy)).toBe(false);
+      const open = await screen.findByTestId("attachment-sheet");
+      expect((await within(open).findByTestId("attachment-name")).textContent).toMatch(/^Pasted image .*\.png · 4 B$/);
+      expect(field().value).toBe("");
+      expect(fakeEngine.readClipboardFiles).toHaveBeenCalledTimes(1);
+      unmount();
+    }
+  });
+
+  it("a browser's picture the platform finds nothing of: its address goes into the draft, or the composer says so", async () => {
+    fakeEngine.readClipboardFiles = vi.fn(async () => []);
+    composer();
+    expect(paste(field(), firefoxCopy())).toBe(false);
+    await waitFor(() => expect(field().value).toBe("https://example.com/photo.png"));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(paste(field(), browserCopy())).toBe(false);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Could not paste those files. Send them with + → Document.");
+    expect(sheet()).toBeNull();
+  });
+
+  it("a rich copy with words beside its picture, or several pictures, stays text and never asks the platform", () => {
+    fakeEngine.readClipboardFiles = vi.fn(async () => []);
+    composer();
+    expect(paste(field(), { html: `<p>Some words</p><img src="https://example.com/photo.png">`, text: "Some words" })).toBe(true);
+    expect(paste(field(), { html: `<img src="https://example.com/a.png"><img src="https://example.com/b.png">` })).toBe(true);
+    expect(paste(field(), { html: `<img src="https://example.com/a.png">`, text: "a caption" })).toBe(true);
+    expect(fakeEngine.readClipboardFiles).not.toHaveBeenCalled();
   });
 });
 

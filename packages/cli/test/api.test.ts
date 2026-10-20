@@ -642,6 +642,19 @@ describe("the engine passthrough", () => {
     expect(await callApi(ctx, "engine.call", { method: "walletCreate", params: { type: "cashu" } })).toEqual({ id: "w" });
   });
 
+  it("refuses Hide my IP from contacts (relayOnly) until the release that shows it", async () => {
+    const { ctx, node } = fake();
+    const updateSettings = vi.fn(async () => undefined);
+    Object.assign(node, { updateSettings });
+    for (const relayOnly of [true, false]) {
+      await expect(callApi(ctx, "engine.call", { method: "updateSettings", params: { settings: { relayOnly } } })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("relayOnly") });
+    }
+    await expect(callApi(ctx, "settings.set", { relayOnly: true })).rejects.toMatchObject({ code: "bad_request" });
+    expect(updateSettings).not.toHaveBeenCalled();
+    await callApi(ctx, "engine.call", { method: "updateSettings", params: { settings: { sendTyping: false } } });
+    expect(updateSettings).toHaveBeenCalledWith({ settings: { sendTyping: false } });
+  });
+
   it("refuses a real-money confirmation it was not given", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "engine.call", { method: "payRequest", params: { linkId: "x", paymentId: "y", confirmedReal: true } })).rejects.toMatchObject({ code: "confirm" });

@@ -131,6 +131,14 @@ describe("the inviter's scene", () => {
       .toEqual(["publishing", "waiting", "answering", "connecting", "live"]);
   });
 
+  it("runs the contact's name in its own direction, so in Arabic a Latin name is cut at its end, not its start", () => {
+    const { engine } = renderApp(<Pairing inviter />);
+    show(published, engine);
+    const name = scene()!.querySelector(".ps-contact")!;
+    expect(name.textContent).toBe("Alice");
+    expect(name.getAttribute("dir")).toBe("auto");
+  });
+
   it("says in words when the invite has waited long, and how long", () => {
     const { engine } = renderApp(<Pairing inviter />);
     show({ ...published, createdAt: Date.now() - 125_000 }, engine);
@@ -340,6 +348,47 @@ describe("the engine's own report (the pairing-progress contract)", () => {
     expect(await screen.findByText("Relay refused")).toBeInTheDocument();
   });
 
+  it("Try again pressed from the keyboard keeps the focus while it runs and after a refusal; a second press is ignored", async () => {
+    const { engine, user } = renderApp(<Pairing inviter />);
+    let refuse!: (error: Error) => void;
+    engine.on("connect", () => new Promise((_, reject) => { refuse = reject; }));
+    show(report({ stage: "failed", reason: "transport", retryable: true }), engine);
+    const button = screen.getByTestId("pairing-retry");
+    act(() => button.focus());
+    await user.keyboard("{Enter}");
+    // `aria-disabled`, not `disabled`: a disabled button drops the focus to the page in a real browser.
+    expect(button).toHaveTextContent("Trying again…");
+    expect(button).not.toBeDisabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("connect")).toHaveLength(1);
+    await act(async () => refuse(new Error("Relay refused")));
+    expect(await screen.findByText("Relay refused")).toBeInTheDocument();
+    expect(button).toHaveFocus();
+    expect(button).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("Try again that moves the stage on takes the focus to the stage's words, not the page", async () => {
+    const { engine, user } = renderApp(<Pairing inviter />);
+    engine.on("connect", () => undefined);
+    show(report({ stage: "failed", reason: "transport", retryable: true }), engine);
+    act(() => screen.getByTestId("pairing-retry").focus());
+    await user.keyboard("{Enter}");
+    show(report({ stage: "knocking", attempt: 2 }), engine);
+    expect(screen.queryByTestId("pairing-failure")).toBeNull();
+    expect(screen.getByTestId("pairing-stage-label")).toHaveFocus();
+  });
+
+  it("a failure that goes by itself leaves the focus where it is", () => {
+    const { engine } = renderApp(<><input data-testid="elsewhere" /><Pairing inviter /></>);
+    show(report({ stage: "failed", reason: "transport", retryable: true }), engine);
+    act(() => screen.getByTestId("elsewhere").focus());
+    show(report({ stage: "knocking", attempt: 2 }), engine);
+    expect(screen.getByTestId("elsewhere")).toHaveFocus();
+  });
+
   it("a failure retrying cannot fix: no Retry, ask for a new invite", () => {
     const { engine } = renderApp(<Pairing inviter />);
     show(report({ stage: "failed", reason: "expired" as PairingProgress["reason"], retryable: false }), engine);
@@ -520,6 +569,18 @@ describe("a pairing that ends on the DHT (WISP 400)", () => {
     expect(within(scene()!).getByRole("alert")).toHaveTextContent("Someone else joined with this invite first.");
     expect(screen.queryByText("the chat")).toBeNull();
   });
+
+  it("after a restart, the chat's link reaching the page before its pairing says the invite was taken: the scene still comes", () => {
+    const createdAt = Date.now() - 60_000;
+    const stored = { ...unstarted, createdAt, peerParticipationKey: "p", textDelivery: "dht" } as Partial<LinkView>;
+    fakeEngine.update({ links: [linkView(stored)] });
+    const { engine } = renderApp(<Chat createdAt={createdAt} />);
+    act(() => engine.update({ links: [linkView(stored)] }));
+    expect(scene()).toBeNull();
+    act(() => engine.update({ links: [linkView({ ...stored, ...published, pairingProgress: { ...taken, startedAt: createdAt } })] }));
+    expect(within(scene()!).getByRole("alert")).toHaveTextContent("Someone else joined with this invite first.");
+    expect(screen.queryByText("the chat")).toBeNull();
+  });
 });
 
 describe("the connected sound", () => {
@@ -684,6 +745,12 @@ describe("motion", () => {
     expect(css).toMatch(/:root\[data-reduce-motion="true"\] \.ps\[data-stage="knocking"\] :is\(\.ps-route-up, \.ps-route-low\)/);
     expect(css).toMatch(/\.ps\[data-paused\] \*, \.ps\[data-paused\] \{ animation-play-state: paused !important; \}/);
     expect(css).toMatch(/\.ps\[data-still\]\[data-stage="knocking"\] :is\(\.ps-route-up, \.ps-route-low\)/);
+  });
+
+  it("in a right-to-left language the icon mirrors as the scene does: this side and the packet's start on the right", () => {
+    const css = readFileSync(join(fileURLToPath(import.meta.url), "../../../components/pairing/pairing-scene.css"), "utf8");
+    expect(css).toMatch(/:root\[dir="rtl"\] \.ps-svg[^{]*\{ transform: scaleX\(-1\); \}/);
+    expect(css).toMatch(/:root\[dir="rtl"\] \.pg[^{]*\{ transform: scaleX\(-1\); \}/);
   });
 });
 

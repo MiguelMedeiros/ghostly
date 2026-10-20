@@ -63,12 +63,18 @@ interface RawStore {
   getAllValues(range: unknown, count: number | undefined, direction: string | undefined): unknown[];
 }
 interface RawDatabase { name: string; version: number; rawObjectStores: Map<string, RawStore>; transactions: unknown[] }
+/** A transaction as fake-indexeddb's scheduler sees it. */
+interface RawScheduled { _started: boolean; _state: string; mode: IDBTransactionMode; _scope: Set<string>; _start(): void; addEventListener(type: string, listener: () => void): void }
+interface SchedulingDatabase { transactions: RawScheduled[]; processTransactions(event?: unknown): void }
+interface SchedulingConnection { _rawDatabase: SchedulingDatabase; transaction(names: string | string[], mode?: IDBTransactionMode, options?: unknown): RawScheduled }
 type RawTransaction = IDBTransaction & { durability?: string; _rollbackLog: unknown[]; _state: string; db: { _rawDatabase: RawDatabase } };
 interface RawClasses {
   Database: new (name: string, version: number) => RawDatabase;
   ObjectStore: new (db: RawDatabase, name: string, keyPath: string | string[] | null, autoIncrement: boolean) => RawStore;
   Index: new (store: RawStore, name: string, keyPath: string | string[], multiEntry: boolean, unique: boolean) => RawIndex;
   RecordStore: new (keysAreUnique: boolean) => RawRecordStore;
+  /** fake-indexeddb's IDBDatabase (a connection). */
+  Connection: { prototype: IDBDatabase };
   /** fake-indexeddb's ConstraintError, which a tree throws for a key already there. */
   constraintError: new () => Error;
 }
@@ -153,6 +159,7 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
   const classes = await probeClasses(factory);
   dropIndexEntriesByRecord(classes, (a, b) => factory.cmp(a, b));
   readWithoutCopy(classes);
+  startInOnePass(classes);
   const order = keyOrder((a, b) => factory.cmp(a, b));
 
   // Found before it is opened: opening makes it, and a snapshot that names it needs the file it named.
@@ -299,12 +306,8 @@ export async function openPersistentIndexedDb(dir: string, options: StoreOptions
     const dispatched = dispatch.call(this, event);
     // fake-indexeddb keeps every transaction a database ever ran in its list (its scheduler only skips the finished
     // ones), each with its requests, results and rollback log: a daemon's heap grew by about 100 KB a message, without
-    // end. Nothing looks for a finished one there again, so it goes once its last event is out.
-    if ((event.type === "complete" || event.type === "abort") && this._state === "finished") {
-      const list = this.db._rawDatabase.transactions;
-      const at = list.indexOf(this);
-      if (at >= 0) list.splice(at, 1);
-    }
+    // end. Nothing looks for a finished one there again, so it goes once its last event is out (`dropEnded`).
+    if ((event.type === "complete" || event.type === "abort") && this._state === "finished") dropEnded(this.db._rawDatabase, this);
     return dispatched;
   };
   const deleteDatabase = factory.deleteDatabase.bind(factory);
@@ -586,6 +589,7 @@ async function probeClasses(factory: IDBFactory): Promise<RawClasses> {
     ObjectStore: rawStore.constructor as RawClasses["ObjectStore"],
     Index: rawStore.rawIndexes.get("i")!.constructor as RawClasses["Index"],
     RecordStore: rawStore.records.constructor as RawClasses["RecordStore"],
+    Connection: db.constructor as RawClasses["Connection"],
     constraintError: Error,
   };
   // The error a tree throws for a put with no overwrite on a key it has: fake-indexeddb's own (not exported).
@@ -671,6 +675,96 @@ function readWithoutCopy(classes: RawClasses) {
     }
     return values;
   };
+}
+
+/** Transactions whose last event is out, by database, and dropped from its list at the next turn: all at once. */
+const ended = new WeakMap<object, Set<unknown>>();
+
+/** A finished transaction's place in its database's list, given back: one walk of the list for all that ended in a turn. */
+function dropEnded(db: { transactions: unknown[] }, transaction: unknown) {
+  let gone = ended.get(db);
+  if (gone) { gone.add(transaction); return; }
+  ended.set(db, (gone = new Set([transaction])));
+  setImmediate(() => {
+    ended.delete(db);
+    const list = db.transactions;
+    let kept = 0;
+    for (const held of list) if (!gone.has(held)) list[kept++] = held;
+    list.length = kept;
+  });
+}
+
+/** The classes whose scheduler starts every transaction it can in one pass: shared by every store opened. */
+const onePass = new WeakSet<object>();
+
+/** A database's scheduling: a pass asked for, and how many transactions the last one left waiting. */
+interface Scheduling { asked: boolean; blocked: number }
+
+/**
+ * fake-indexeddb's scheduler runs at every transaction's start and end, checks each waiting transaction against every
+ * running one and every one waiting before it, and starts one per pass; and each transaction made looks through every
+ * other one for an upgrade running. A burst of reads (a look at each queued text) cost the square of their number, the
+ * cube with a write waiting among them, and held the event loop all along (2,000 reads around a write: 19 s).
+ *
+ * A pass here walks the transactions once, in order, and starts each one that may run: a write once no running
+ * transaction shares a store with it, a read once no running write does, neither behind a waiting one that shares a
+ * store with it (the order IndexedDB keeps). The passes asked for before one runs are that one, and a transaction's end
+ * asks for none while nothing waits. A transaction made while no upgrade of its database runs skips the look for one.
+ * Databases made before this (the probe's) keep fake-indexeddb's scheduler: each binds the one it is made with.
+ */
+function startInOnePass(classes: RawClasses) {
+  const proto = classes.Database.prototype as unknown as SchedulingDatabase;
+  if (onePass.has(proto)) return;
+  onePass.add(proto);
+  const scheduling = new WeakMap<SchedulingDatabase, Scheduling>();
+  // Called with no event when a transaction is made, with its `complete` or `abort` when one ends.
+  proto.processTransactions = function (this: SchedulingDatabase, event?: unknown) {
+    let state = scheduling.get(this);
+    if (!state) scheduling.set(this, (state = { asked: false, blocked: 0 }));
+    if (state.asked || (event !== undefined && !state.blocked)) return;
+    state.asked = true;
+    setImmediate(() => { state.asked = false; startRunnable(this, state); });
+  };
+
+  const connection = classes.Connection.prototype as unknown as SchedulingConnection;
+  const { transaction } = connection;
+  const upgrades = new WeakMap<SchedulingDatabase, number>();
+  connection.transaction = function (this: SchedulingConnection, names, mode, options) {
+    const raw = this._rawDatabase;
+    if (mode === "versionchange") {
+      const made = transaction.call(this, names, mode, options);
+      upgrades.set(raw, (upgrades.get(raw) ?? 0) + 1);
+      const done = () => { upgrades.set(raw, upgrades.get(raw)! - 1); };
+      made.addEventListener("complete", done);
+      made.addEventListener("abort", done);
+      return made;
+    }
+    if (upgrades.get(raw)) return transaction.call(this, names, mode, options);
+    // No upgrade runs: the look for one finds nothing in an empty list as in the whole one. The new transaction joins it.
+    const list = raw.transactions;
+    raw.transactions = [];
+    try { return transaction.call(this, names, mode, options); } finally { list.push(...raw.transactions); raw.transactions = list; }
+  };
+}
+
+function startRunnable(db: SchedulingDatabase, state: Scheduling) {
+  state.blocked = 0;
+  const writing = new Set<string>(), reading = new Set<string>(), blocked = new Set<string>();
+  const holds = (scope: Set<string>, stores: Set<string>) => { for (const store of scope) if (stores.has(store)) return true; return false; };
+  const take = (transaction: RawScheduled) => { for (const store of transaction._scope) (transaction.mode === "readonly" ? reading : writing).add(store); };
+  // A copy: a transaction that ends as it starts (no request) leaves the list at once (see `dispatchEvent`).
+  const list = db.transactions.filter((transaction) => transaction._state !== "finished");
+  for (const transaction of list) if (transaction._started) take(transaction);
+  for (const transaction of list) {
+    // Started above, or ended since (aborted by what an earlier one's start ran).
+    if (transaction._started || transaction._state === "finished") continue;
+    const free = !holds(transaction._scope, blocked) && !holds(transaction._scope, writing) && (transaction.mode === "readonly" || !holds(transaction._scope, reading));
+    if (!free) { for (const store of transaction._scope) blocked.add(store); state.blocked++; continue; }
+    take(transaction);
+    transaction.addEventListener("complete", db.processTransactions);
+    transaction.addEventListener("abort", db.processTransactions);
+    transaction._start();
+  }
 }
 
 /** Drops from an index the entries of records that left its store, and gives back the ones it dropped. */
