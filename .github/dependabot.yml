@@ -19,6 +19,15 @@ updates:
       # The stable 0.1.x (2025-10) is a year older, but semver ranks it above 0.0.0-canary;
       # drop once a stable release embeds fedimint 0.12 or later.
       - dependency-name: "@fedimint/*"
+      # The Tauri CLI refuses to build when an npm package and its crate (@tauri-apps/api and tauri,
+      # @tauri-apps/plugin-<name> and tauri-plugin-<name>) are on different minor versions, and no group
+      # spans npm and cargo. A minor bump arrives in the cargo pull request alone: land it with
+      # `npm install @tauri-apps/<package>@^<the crate's version>` at the root committed on its branch,
+      # package.json and package-lock.json. Patch updates still come here, the check reads major.minor.
+      - dependency-name: "@tauri-apps/api"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "@tauri-apps/plugin-*"
+        update-types: ["version-update:semver-minor"]
     groups:
       npm:
         patterns: ["*"]

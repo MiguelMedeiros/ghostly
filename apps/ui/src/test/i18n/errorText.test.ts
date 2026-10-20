@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { ENGINE_ERRORS, engineText, type EngineErrorCode } from "@ghostly/core";
 import { ERROR_RULES, errorText, knownErrorParts, rawError } from "../../lib/errorText";
 import { english } from "../../lib/english";
+import { failedReason, failedStatus } from "../../lib/fileStatus";
 import { problemText } from "../../lib/problemText";
 import { translateWith } from "../../locales/translate";
 import { LANGUAGES, LOCALES } from "./locales";
@@ -67,6 +68,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Transport change cancelled", `${CORE}/ghostlink.ts`],
   ["Transport preferences do not overlap. Enable fallback or choose the same supported transport on both sides.", `${CORE}/transportSwitch.ts`],
   ["Peer native address unavailable; reconnect WebRTC once to exchange endpoints", `${CORE}/ghostlink.ts`],
+  ["Peer native address unavailable; the contact's app has not given it yet", `${CORE}/ghostlink.ts`],
   ["Native connection limit reached", "native/transports/hyperdht/endpoint.mjs"],
   ["HyperDHT handshake timed out", "native/transports/hyperdht/endpoint.mjs"],
   ["Noise handshake failed", "native/transports/hyperdht/endpoint.mjs"],
@@ -134,6 +136,7 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Not from Android's main thread", "apps/desktop/src/android.rs"],
   ["Ghostly is starting…", `${BROWSER}/platform/engine.ts`],
   ["Lost the Ghostly peer", `${BROWSER}/platform/engine.ts`],
+  ["This device has no room left to save this", `${BROWSER}/shared/idb.ts`],
   ["Ghostly is still starting. Try again in a moment.", `${BROWSER}/platform/services.ts`],
   ["Ghostly needs your permission to reach that local address", `${BROWSER}/platform/services.ts`],
   ["Pick a Lightning card first", `${BROWSER}/platform/services.ts`],
@@ -161,6 +164,12 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["Could not store the file: This device has no space left for the file", `${CORE}/chatFiles.ts`, "Could not store the file: "],
   ["Could not store the file: The stored copy is gone", `${CORE}/chatFiles.ts`, "Could not store the file: "],
   ["Your contact could not take this file", `${CORE}/chatFiles.ts`],
+  ["Cancelled by the sender", `${CORE}/chatFiles.ts`],
+  // A file said on the DHT floor that ended here before it came (engine/fileDesk.ts `floorRefusal`, `sweep`).
+  ["No room on this device for this file", `${BROWSER}/engine/fileDesk.ts`],
+  ["Too many files are waiting here", `${BROWSER}/engine/fileDesk.ts`],
+  ["It was refused here", `${BROWSER}/engine/fileDesk.ts`],
+  ["It did not come within a week", `${BROWSER}/engine/fileDesk.ts`],
   ["That file is too large (max 64 MB).", `${BROWSER}/platform/services.ts`, "That file is too large (max "],
   // A file forwarded that is still arriving here, or whose bytes are gone (a copy of mine that failed, "Not sent").
   ["The file has not arrived yet", `${BROWSER}/engine/forwards.ts`],
@@ -451,6 +460,8 @@ const SAMPLES: readonly (readonly [string, string, string?])[] = [
   ["GitHub: octo-cat does not list the key that signed (SHA256:abc)", `${BROWSER}/proofs/providers/ssh.ts`, " does not list the key that signed ("],
   ["Enter at least one relay address (https://…)", `${BROWSER}/engine/node.ts`],
   ["Enter at least one relay address (wss://…)", `${BROWSER}/nostr/relay.ts`],
+  ["Add a TURN server first", `${BROWSER}/engine/node.ts`],
+  ["Hide my IP from contacts needs a TURN server. Turn it off first", `${BROWSER}/engine/node.ts`],
   ["Use an https:// relay address: http://relay.example.org/", `${BROWSER}/platform/irohWeb.ts`, "Use an https:// relay address: ${value}"],
   ["Use an https:// relay address: http://push.example.org/", `${BROWSER}/shared/pushRelay.ts`, "Use an https:// relay address: ${url}"],
   ["Not a relay address: https://relay.example.org/?key=1", `${BROWSER}/platform/irohWeb.ts`, "Not a relay address: ${value}"],
@@ -548,6 +559,21 @@ describe("errors in the app's language", () => {
     expect(knownErrorParts(changed, pt)).toEqual({ title: "Não foi possível ler o arquivo", next: "Envie de novo ou escolha o arquivo outra vez.", detail: changed });
   });
 
+  it.each(LANGUAGES)("a file said on the floor that ended here says why and what to do in %s, never the engine's English", (language) => {
+    const t = translators[language];
+    const file = { id: "L-in-abc", name: "x.bin", size: 30_000, mime: "application/octet-stream" };
+    // As fileDesk.ts `withdrawn` keeps it: failed, with no direction.
+    const bubble = (error: string) => {
+      const transfer = { state: "failed", transferred: 0, size: 30_000, error } as const;
+      return { status: failedStatus(file, transfer, t), info: failedReason(transfer, t) };
+    };
+    expect(bubble("No room on this device for this file")).toEqual({ status: t("errors.files.noRoomHere"), info: { text: t("errors.files.floor.noRoomNext") } });
+    expect(bubble("Too many files are waiting here")).toEqual({ status: t("errors.files.floor.tooMany"), info: { text: t("errors.files.floor.tooManyNext") } });
+    expect(bubble("It was refused here")).toEqual({ status: t("errors.files.floor.refused"), info: { text: t("errors.files.askAgain") } });
+    expect(bubble("It did not come within a week")).toEqual({ status: t("errors.files.floor.notInAWeek"), info: { text: t("errors.files.askAgain") } });
+    expect(bubble("Cancelled by the sender")).toEqual({ status: t("chat.file.cancelled"), info: { text: t("errors.files.askAgain") } });
+  });
+
   it("a group's file every holder served damaged says so, and that the group is asked again, not a contact", () => {
     const damaged = "Every copy of this file arrived damaged and was deleted. Ask for it again later.";
     expect(knownErrorParts(damaged, translators.pt)).toEqual({ title: "O arquivo chegou danificado", next: "Peça de novo ao grupo mais tarde." });
@@ -568,6 +594,12 @@ describe("errors in the app's language", () => {
     expect(knownErrorParts(refused, english)).toEqual({ title: "Can't check which device is active", next: "This works once the check does. Check your connection." });
   });
 
+  it("a write the device had no room for says so and that nothing was saved, in the language, not an empty error", () => {
+    const full = Object.assign(new Error("This device has no room left to save this"), { name: "QuotaExceededError" });
+    expect(knownErrorParts(full, english)).toEqual({ title: "No room left on this device", next: "Nothing was saved. Free some space, then try again." });
+    expect(knownErrorParts(full, translators.pt)).toEqual({ title: "Não há mais espaço neste dispositivo", next: "Nada foi salvo. Libere espaço e tente de novo." });
+  });
+
   it("an Invite or a Remove on a device where managing the group is off points at the group's Turn on, in the language", () => {
     const off = new Error("Managing this group is off on this device. Turn on Manage groups from this device first.");
     expect(knownErrorParts(off, english)).toEqual({ title: "Managing this group is off on this device", next: "Turn it on first: Manage groups from this device, on the group's page." });
@@ -580,6 +612,14 @@ describe("errors in the app's language", () => {
     expect(knownErrorParts(away, translators.pt)).toEqual({ title: "Este contato está offline", next: "Convide quando ele estiver online." });
     const old = new Error("Their app does not take part in groups: they need an updated Ghostly first.");
     expect(knownErrorParts(old, english)).toEqual({ title: "Their app needs an update first", next: "Their app needs groups (an updated Ghostly)." });
+  });
+
+  it("a contact's unknown native address with no WebRTC between the two apps says it comes from them, not to reconnect over WebRTC", () => {
+    const withRtc = new Error("Peer native address unavailable; reconnect WebRTC once to exchange endpoints");
+    expect(knownErrorParts(withRtc, english)?.next).toBe("Reconnect over WebRTC once to exchange it.");
+    const noRtc = new Error("Peer native address unavailable; the contact's app has not given it yet");
+    expect(knownErrorParts(noRtc, english)).toEqual({ title: "Your contact's address for this transport isn't known yet", next: "It comes once your contact opens this chat in their app.", detail: noRtc.message });
+    expect(knownErrorParts(noRtc, translators.pt)?.next).toBe("Chega quando o contato abrir esta conversa no app.");
   });
 
   it("a part of Ghostly that did not load is said in the language, not in the browser's English", () => {

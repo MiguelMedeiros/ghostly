@@ -212,6 +212,20 @@ async function useTestNetwork(page: Page, relay: string, iroh: string | undefine
   await expect(newChat(page)).toBeAttached();
 }
 
+/**
+ * The page as on a device with no audio output: no Web Audio, so the app's sounds (apps/ui/src/lib/sounds.ts) never
+ * open one. Their context starts at the first tap and runs for every sound, a message's or a chat going live, until
+ * 5 s after it (`SOUNDS_IDLE_MS`): an AAudio stream the emulator's audio HAL fails every write of (it has no audio
+ * output, `-noaudio` or not), and with a video decoding meanwhile (files.spec.ts's video test, about one run in three)
+ * the emulator froze and was lost. Before the first tap: the context is made then (`new AudioContext()` throwing is
+ * "no audio device" there, and no sound plays).
+ */
+async function withoutWebAudio(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    for (const name of ["AudioContext", "webkitAudioContext"]) delete (window as unknown as Record<string, unknown>)[name];
+  });
+}
+
 /** "New chat": the list's own button on a phone (the tab bar may have one too). */
 export const newChat = (page: Page) => page.locator('[title="New chat"]').filter({ visible: true }).first();
 
@@ -286,6 +300,7 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
       page.setDefaultTimeout(60_000);
       page.on("pageerror", (error) => console.log(`  [android] ${error.message}`));
       await expect(newChat(page), "the UI rendered").toBeAttached({ timeout: 120_000 });
+      await withoutWebAudio(page);
       await useTestNetwork(page, relayUrl, iroh);
     } catch (error) {
       // The start itself failed: what the device said is all there is to go on.

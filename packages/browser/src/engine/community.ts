@@ -388,6 +388,7 @@ export class Communities {
       const mention = [...history].reverse().find(m => m.mentioned);
       const mentionAt = cameOrWritten(mention?.timestamp, mention ? group.came?.mention : undefined);
       if (mentionAt) this.lastMentionAt.set(group.id, mentionAt);
+      this.host.loaded?.(group.id, history);
       // Admissions in flight did not survive the restart; a joiner keeps its side.
       for (const [, linkId] of this.host.entries(group.id)) if (group.joining?.linkId !== linkId) await this.host.closeEdge(linkId);
       // The edges of the last run stay a while, whatever the topology wants at first (see `reconcile`).
@@ -400,27 +401,35 @@ export class Communities {
   record(groupId: string): StoredGroup | undefined { return this.stored.get(groupId); }
 
   views(): GroupView[] {
-    return [...this.stored.values()].flatMap((group): GroupView[] => {
-      const live = this.live.get(group.id);
-      const base = { id: group.id, profile: "community" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [], memberLinks: {} };
-      const invitation = this.knocking(group, live) ? { linkId: group.joining!.linkId, contact: "", admin: group.joining!.inviter, members: 0, accepted: true, viaLink: true, stage: this.joinStage(group), since: group.joining!.since,
-        ...(this.knockingWith.get(group.id) ? { waiting: this.knockingWith.get(group.id) } : {}) } : undefined;
-      // Removed, and knocking to get back in: still the group kept here (who was in it, its history), the knock beside it.
-      if (invitation && !this.keptWhileKnocking(live)) return [{ ...base, name: groupName(group.joining!.name) ?? live?.session.name ?? "", isAdmin: false, members: [], canSend: false, invitation }];
-      if (!live) return [];
-      const s = live.session, edges = this.host.edges(group.id);
-      const ready = (key: string) => { const id = edges.get(key); return !!id && this.host.linkReady(id, 2); };
-      const hubs = freshHubs(this.hubs(live), this.now()).map(h => h.key);
-      // A name outlives its member's place in the roster, as in a private group: what someone who left wrote is still theirs.
-      const former = Object.entries(s.state.nicks).filter(([key]) => !rosterHas(s.roster, key));
-      return [{ ...base, name: s.name, ...(former.length ? { formerNames: Object.fromEntries(former) } : {}), status: s.status, statusReason: s.state.statusReason, epoch: s.epoch, myKey: s.myKey, isAdmin: s.isAdmin,
-        ...(s.isMember && s.entryKey ? { entryLink: encodeCommunityLink({ g: s.id, host: s.entryKey }) } : {}),
-        canSend: s.canSend, ...(s.picture ? { picture: s.picture } : {}), ...(invitation ? { invitation } : {}),
-        community: { hub: live.hub, hubs: hubs.length, connected: [...edges.keys()].filter(ready).length },
-        members: s.roster.map(([key, role]) => ({ key, role, me: key === s.myKey,
-          nick: key === s.myKey ? undefined : (edges.get(key) && this.host.edgeNick(edges.get(key)!)) || s.state.nicks[key],
-          online: key === s.myKey || ready(key), missing: s.missing(key) })) }];
-    });
+    return [...this.stored.values()].flatMap(group => this.viewOf(group));
+  }
+
+  /** One community's view, as `views()` makes it, without building the others' (`Groups.view`). */
+  view(groupId: string): GroupView | undefined {
+    const group = this.stored.get(groupId);
+    return group && this.viewOf(group)[0];
+  }
+
+  private viewOf(group: StoredGroup): GroupView[] {
+    const live = this.live.get(group.id);
+    const base = { id: group.id, profile: "community" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [], memberLinks: {} };
+    const invitation = this.knocking(group, live) ? { linkId: group.joining!.linkId, contact: "", admin: group.joining!.inviter, members: 0, accepted: true, viaLink: true, stage: this.joinStage(group), since: group.joining!.since,
+      ...(this.knockingWith.get(group.id) ? { waiting: this.knockingWith.get(group.id) } : {}) } : undefined;
+    // Removed, and knocking to get back in: still the group kept here (who was in it, its history), the knock beside it.
+    if (invitation && !this.keptWhileKnocking(live)) return [{ ...base, name: groupName(group.joining!.name) ?? live?.session.name ?? "", isAdmin: false, members: [], canSend: false, invitation }];
+    if (!live) return [];
+    const s = live.session, edges = this.host.edges(group.id);
+    const ready = (key: string) => { const id = edges.get(key); return !!id && this.host.linkReady(id, 2); };
+    const hubs = freshHubs(this.hubs(live), this.now()).map(h => h.key);
+    // A name outlives its member's place in the roster, as in a private group: what someone who left wrote is still theirs.
+    const former = Object.entries(s.state.nicks).filter(([key]) => !rosterHas(s.roster, key));
+    return [{ ...base, name: s.name, ...(former.length ? { formerNames: Object.fromEntries(former) } : {}), status: s.status, statusReason: s.state.statusReason, epoch: s.epoch, myKey: s.myKey, isAdmin: s.isAdmin,
+      ...(s.isMember && s.entryKey ? { entryLink: encodeCommunityLink({ g: s.id, host: s.entryKey }) } : {}),
+      canSend: s.canSend, ...(s.picture ? { picture: s.picture } : {}), ...(invitation ? { invitation } : {}),
+      community: { hub: live.hub, hubs: hubs.length, connected: [...edges.keys()].filter(ready).length },
+      members: s.roster.map(([key, role]) => ({ key, role, me: key === s.myKey,
+        nick: key === s.myKey ? undefined : (edges.get(key) && this.host.edgeNick(edges.get(key)!)) || s.state.nicks[key],
+        online: key === s.myKey || ready(key), missing: s.missing(key) })) }];
   }
 
   messages(groupId: string): Promise<StoredMessage[]> { return this.store.getMessages(MESSAGE_LINK(groupId)); }
@@ -458,10 +467,17 @@ export class Communities {
       // What this device holds may be stale (it was removed while its app was closed): never taken for the answer.
       // It knocks with its own key, and the door says which it is: still in (the welcome names an admission it
       // holds, and nothing changes), or let in again. Alone in the group, there is nobody to ask.
+      // Its member key goes only to the door it knows: a link to another key is anybody's, who would learn which
+      // member knocks and dial it. A member asks its own door instead (none while the link is off).
+      const door = s.entryKey === link.host;
       if (s.status === "active" && s.roster.length === 1) return link.g;
-      if (s.status === "active") { await this.startJoining(link, s.state.seedB64, this.now(), true); return link.g; }
-      // Removed (or its admission lost): let in again by whoever is at the door, with the same key; the history here stays.
-      if (s.status === "removed" || s.status === "lost") { await this.startJoining(link, s.state.seedB64, this.now()); return link.g; }
+      if (s.status === "active") {
+        if (s.entryKey) await this.startJoining(door ? link : { g: link.g, host: s.entryKey }, s.state.seedB64, this.now(), true);
+        return link.g;
+      }
+      // Removed (or its admission lost): let in again by whoever is at the door, with the same key at the door it
+      // knows, else with a fresh one, as any joiner; the history here stays.
+      if (s.status === "removed" || s.status === "lost") { await this.startJoining(link, door ? s.state.seedB64 : dialedKey(link), this.now()); return link.g; }
     }
     if (existing) await this.forget(link.g);
     await this.startJoining(link, dialedKey(link), this.now());
@@ -542,7 +558,7 @@ export class Communities {
   async sendEdit(groupId: string, edit: GroupEdit): Promise<string | null> {
     const live = this.live.get(groupId);
     if (!live) return "You are not in this group yet";
-    const result = await live.session.sendEdit({ id: edit.id, v: edit.e, ts: edit.ts, text: edit.m, mentions: edit.k, ...(edit.sc && { card: edit.sc }) }, this.host.myNick?.(), this.now());
+    const result = await live.session.sendEdit({ id: edit.id, v: edit.e, ts: edit.ts, text: edit.m, mentions: edit.k, ...(edit.sc && { card: edit.sc }), ...(edit.rm && { remove: true }) }, this.host.myNick?.(), this.now());
     if ("error" in result) return result.error;
     // The edit rides in a frame of its own: what takes that frame (now, or in a catch-up later) takes the edit.
     const key = editKey(edit.id, edit.e);
@@ -1392,9 +1408,17 @@ export class Communities {
    * communities while its 30 chats signaled got back into them one at a time, 4 to 10 minutes, one not at all in 16: its
    * entry went unwritten, the other hubs took it for gone (`hubDead`) and its members asked them (bug hunt, 2026-10-14).
    * Not a hub alone in the beacon: nobody carries the group without it, and its door's looks stay background ones.
+   *
+   * Alone as my last reading of the beacon said, and only while that reading is fresh. One that aged out says nothing of
+   * now: judged by my clock against it, every hub it listed went stale, and I was alone. An app back from a restart as a
+   * member of a community whose hubs did not list it read the beacon once (its way back); its edge stayed down while its
+   * other links took its relays' budget, its reading aged out, it stepped up as a hub "alone", and its readings and its
+   * entry went as background looks the relays held: it never read the beacon again, nobody listed it, and it was not
+   * back in that community in 10 minutes (bug hunt, 2026-10-17).
    */
   private wayBack(groupId: string, live: Live): boolean {
-    if (live.hub && !freshHubs(this.hubs(live), this.now()).some(h => h.key !== live.session.myKey)) return false;
+    const read = live.beaconAt, now = this.now();
+    if (live.hub && now - read < COMMUNITY_TOPOLOGY.beaconFreshMs && !freshHubs(this.hubs(live), read).some(h => h.key !== live.session.myKey)) return false;
     return ![...this.host.edges(groupId).values()].some(id => this.host.linkReady(id, 2));
   }
 
@@ -1436,7 +1460,10 @@ export class Communities {
     // reads the beacon (a closed app stays listed until its entry goes stale; a new hub waits a minute). A hub
     // with no other in sight is the door at once, before its own entry is listed: a new group's first hub, whose
     // beacon write waited for the relays' budget while another group's link signaled, answered no knock for a minute.
-    const hubs = doorHubs(this.hubs(live), now, s.myKey);
+    // Not a hub of a few seconds that knows of another (the one that let it in, whose entry may be the one held back):
+    // both at the door alone answered the same knocks, and two joiners let in by each forked the chain.
+    const known = [...live.seenHubs.keys()].filter(key => key !== s.myKey && this.recentHub(live, key) && !this.gone(live, key));
+    const hubs = doorHubs(this.hubs(live), now, s.myKey, { since: live.hubSince, known });
     if (!hubs.includes(s.myKey)) return;
     const door = [...hubs].sort()[0], doorSig = [...hubs].sort().join(",");
     // Just became the door (the one before went): whatever knocked meanwhile, in any record.
@@ -1811,7 +1838,7 @@ export class Communities {
         const timestamp = m.timestamp;
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
         // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself.
-        const file = m.file && this.files ? await this.files.announced(id, { id: m.id, sender: m.sender, file: m.file }, session.myKey) : undefined;
+        const file = m.file && this.files ? await this.files.announced(id, { id: m.id, sender: m.sender, ts: m.timestamp, file: m.file }, session.myKey) : undefined;
         // Its place is taken as the store is called, before anything is awaited: the line order follows it from there.
         const placing = this.lineOrder.placing(MESSAGE_LINK(id), { id: m.id, epoch: m.epoch, line: false }, this.now());
         const stored = await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: file ? groupFileText(m.text, m.file!) : m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",

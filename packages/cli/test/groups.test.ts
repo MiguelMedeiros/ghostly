@@ -78,6 +78,22 @@ describe("a group message names its author", () => {
     expect(groupMessageJson(message("h", { sender: "me", member: "mekey" }), group).from).toBe("me");
   });
 
+  it("a membership line written before the member's name came says the name known now, as the app shows it", () => {
+    const key = "a4w9nb5yqx";
+    const roster = { ...group, members: [...group.members, { key, role: "member", me: false, online: true, missing: 0, nick: "Bob" }], formerNames: { oldkey12: "Carol" } } as GroupView;
+    const line = (event: StoredMessage["event"], text: string, member: string, fields: Partial<StoredMessage> = {}) =>
+      groupMessageJson(message(`event:1:${event}:1`, { event, text, member, ...fields }), roster).text;
+    expect(line("joined", "Member a4w9nb5y joined", key)).toBe("Bob joined");
+    expect(line("left", "Member a4w9nb5y left", key)).toBe("Bob left");
+    expect(line("gone", "Member oldkey12 is no longer a member", "oldkey12")).toBe("Carol is no longer a member");
+    // The row's own name wins, as for `nick`; a line already named, or a member nobody has named, stays as stored.
+    expect(line("joined", "Member bokey joined", "bokey", { nick: "Bo" })).toBe("Bo joined");
+    expect(line("joined", "Ana joined", "anakey")).toBe("Ana joined");
+    expect(line("joined", "Member bokey joined", "bokey")).toBe("Member bokey joined");
+    // A text that only happens to start like a placeholder is no event line: kept.
+    expect(groupMessageJson(message("i", { text: "Member a4w9nb5y joined", member: key }), roster).text).toBe("Member a4w9nb5y joined");
+  });
+
   it("in group history", async () => {
     const { ctx } = fake([message("a", { member: "anakey" }), message("b", { member: "bokey", timestamp: 2 })]);
     const page = await callApi(ctx, "group.history", { group: "Crew" }) as { messages: { id: string; nick: string | null; member: string }[] };

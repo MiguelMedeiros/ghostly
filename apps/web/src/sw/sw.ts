@@ -13,7 +13,7 @@
  *   page and caches nothing, and only shows wake-ups (WISP 401 § Wake-up push). A scope per profile gives each
  *   profile a push subscription of its own, so contacts of two profiles cannot tell they share a browser.
  */
-import { CACHE_PREFIX, SHARED_ROUTE, assetAnswer, classify, precacheMode, pushNotice, pushScopeProfile, readShare, readShareBody, type SharedItem } from "./policy";
+import { CACHE_PREFIX, SHARED_ROUTE, assetAnswer, classify, precacheMode, pushNotice, pushScopeProfile, readShare, readShareBody, TOO_LARGE_SHARE, type SharedItem } from "./policy";
 import { readWakeEntry, readWakeText } from "./wakeStore";
 import { readPushDeviceView } from "./deviceState";
 import { deviceNoticeWords } from "./deviceWords";
@@ -106,19 +106,24 @@ async function tellBuildGone(): Promise<void> {
 
 let held: { item: SharedItem; done: () => void } | null = null;
 
+/** Holds a share for the page that asks for it, in place of one held before; `done` once it is taken or dropped. */
+function hold(item: SharedItem, done: () => void): void {
+  held?.done();
+  held = { item, done };
+  setTimeout(() => { if (held?.done === done) { held = null; done(); } }, SHARE_HOLD_MS);
+}
+
 function share(event: FetchEvent): void {
   let done = () => {};
   const delivered = new Promise<void>((resolve) => { done = resolve; });
   event.respondWith((async () => {
     try {
       // Read with a cap before it is parsed: `formData()` alone would hold a body of any size in memory.
+      // A larger one is held all the same, as a share with nothing in it but that it was too large: the picker says so.
       const body = await readShareBody(event.request);
-      if (!body) throw new Error("share too large");
       const type = event.request.headers.get("content-type") ?? "";
-      const item = readShare(await new Response(body, { headers: { "content-type": type } }).formData());
-      held?.done();
-      held = { item, done };
-      setTimeout(() => { if (held?.done === done) { held = null; done(); } }, SHARE_HOLD_MS);
+      const item = body ? readShare(await new Response(body, { headers: { "content-type": type } }).formData()) : TOO_LARGE_SHARE;
+      hold(item, done);
     } catch {
       done();
     }
@@ -135,6 +140,12 @@ worker.addEventListener("message", (event) => {
   if (message.type === "open-notification") {
     if (PUSH_PROFILE === null || typeof message.tag !== "string") return;
     event.waitUntil(worker.registration.getNotifications({ tag: message.tag }).then(([shown]) => (shown ? openFrom(shown) : undefined)));
+    return;
+  }
+  if (message.type === "share-keep") {
+    if (PUSH_PROFILE !== null || !message.item || typeof message.item !== "object") return;
+    // The worker stays up while it waits again, as a share just posted does.
+    event.waitUntil(new Promise<void>((resolve) => hold(message.item, resolve)));
     return;
   }
   const source = event.source;

@@ -43,12 +43,23 @@ export const GROUP_FILE_LIMITS = {
    */
   haveFrames: 10,
   haveWindowMs: 10_000,
+  /**
+   * `group-have` frames a private group's edge takes from its member in `haveWindowMs`, the rest dropped: twice what it
+   * may send, as frames sent at that pace and late by different delays on the way still come in under it.
+   */
+  haveFramesTaken: 20,
   communityHaveEveryMs: 60_000,
   /**
    * How long a want waits for an offer before the next holder is asked; a transfer that does not move for as long is
    * left for the next holder too.
    */
   wantWaitMs: 30_000,
+  /**
+   * A holder that served a file this long, at a pace that leaves more than `wantWaitMs` to go, is left for another that
+   * said it holds the file since (its place free): the next one goes on from the bytes stored. A phone's slow upload
+   * then holds up no member that a free holder could serve.
+   */
+  slowAfterMs: 5_000,
   /**
    * How long a served transfer with all its bytes confirmed waits for the member's word that its check passed once the
    * member's next want has overtaken it.

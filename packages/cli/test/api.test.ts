@@ -5,6 +5,8 @@ import { callApi, findChat, findGroup, hideStateSecrets, mentionsFor, redactSett
 import { chatOrGroup, findChatOrGroup } from "../src/apiKit";
 import { parseArgs } from "../src/args";
 import { COMMANDS } from "../src/commands";
+import { ENGINE_PARAMS } from "../src/engineMethods";
+import { asCliError } from "../src/errors";
 import type { GhostlyEvent } from "../src/events";
 import { allowlist } from "../src/listen";
 import { chatJson, isLive } from "../src/views";
@@ -640,6 +642,19 @@ describe("the engine passthrough", () => {
     expect(await callApi(ctx, "engine.call", { method: "walletCreate", params: { type: "cashu" } })).toEqual({ id: "w" });
   });
 
+  it("refuses Hide my IP from contacts (relayOnly) until the release that shows it", async () => {
+    const { ctx, node } = fake();
+    const updateSettings = vi.fn(async () => undefined);
+    Object.assign(node, { updateSettings });
+    for (const relayOnly of [true, false]) {
+      await expect(callApi(ctx, "engine.call", { method: "updateSettings", params: { settings: { relayOnly } } })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("relayOnly") });
+    }
+    await expect(callApi(ctx, "settings.set", { relayOnly: true })).rejects.toMatchObject({ code: "bad_request" });
+    expect(updateSettings).not.toHaveBeenCalled();
+    await callApi(ctx, "engine.call", { method: "updateSettings", params: { settings: { sendTyping: false } } });
+    expect(updateSettings).toHaveBeenCalledWith({ settings: { sendTyping: false } });
+  });
+
   it("refuses a real-money confirmation it was not given", async () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "engine.call", { method: "payRequest", params: { linkId: "x", paymentId: "y", confirmedReal: true } })).rejects.toMatchObject({ code: "confirm" });
@@ -677,6 +692,58 @@ describe("the engine passthrough", () => {
     }
     Object.assign(ctx, { mode: "one-shot", stop: undefined });
     expect(await callApi(ctx, "engine.call", { method: "clearProfileData", yes: true })).toEqual({ cleared: { chats: 2, groups: 1 } });
+  });
+
+  it("refuses a call given less than it takes, or a value of the wrong kind, naming what it takes", async () => {
+    const { ctx, node } = fake();
+    // As the engine's own: JavaScript's TypeError on what is not there, or nothing done for a chat it does not find.
+    const renameLink = vi.fn(async ({ linkId, label }: { linkId?: string; label?: string }) => { if (linkId) label!.trim(); });
+    const updateSettings = vi.fn(async ({ settings }: { settings: { nostr?: unknown } }) => { void settings.nostr; });
+    const lnurlResolve = vi.fn(async () => { throw new TypeError("fetch failed"); });
+    Object.assign(node, { renameLink, updateSettings, lnurlResolve });
+    const call = (method: string, params?: unknown) => callApi(ctx, "engine.call", { method, params }).then(() => null, asCliError);
+    const takes = (method: string, why: string) => ({ code: "bad_request", message: `${method} takes ${ENGINE_PARAMS[method]}: ${why} (ghostly engine --list --verbose)` });
+    expect(await call("renameLink")).toMatchObject(takes("renameLink", "no parameters given"));
+    expect(await call("renameLink", {})).toMatchObject(takes("renameLink", "linkId, label missing"));
+    expect(await call("renameLink", { linkId: "c" })).toMatchObject(takes("renameLink", "label missing"));
+    expect(await call("updateSettings", { nick: "x" })).toMatchObject(takes("updateSettings", "settings missing"));
+    expect(renameLink).not.toHaveBeenCalled();
+    expect(updateSettings).not.toHaveBeenCalled();
+    // A number for the text: the engine's words behind it.
+    expect((await call("renameLink", { linkId: "c", label: 5 }))?.toJSON()).toEqual({
+      ...takes("renameLink", "a parameter of the wrong kind"), details: { takes: "{ linkId, label }", rawError: "label.trim is not a function" },
+    });
+    expect(await call("renameLink", { linkId: "c", label: "x" })).toBeNull();
+    // The network failing is not the caller's parameters.
+    expect(await call("lnurlResolve", { text: "a@b.c" })).toMatchObject({ code: "engine", message: "fetch failed" });
+  });
+
+  it("runs send's secret guard on the calls that send a text: a seed, a key or ecash goes only with force", async () => {
+    const seed = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+    const { ctx, node } = fake([msg("m_seed", 5, { text: seed }), msg("m_hi", 6, { text: "hi" })]);
+    Object.assign(node, { editMessage: vi.fn(async () => ({ error: null, messageId: "me_1" })), forwardMessages: vi.fn(async () => ({ results: [] })) });
+    const engine = node as unknown as Record<"sendMessage" | "sendGroupMessage" | "editMessage" | "forwardMessages", ReturnType<typeof vi.fn>>;
+    const calls: [keyof typeof engine, Record<string, unknown>][] = [
+      ["sendMessage", { linkId: "chat-one", text: seed }],
+      ["sendMessage", { linkId: "chat-one", text: "cashuAeyJ0b2tlbiI6W3sicHJvb2ZzIjpbXX1dfQ" }],
+      ["sendMessage", { linkId: "chat-one", text: "", card: { kind: "task", id: "t", title: "x", step: seed } }],
+      ["sendGroupMessage", { groupId: "g", text: seed }],
+      ["sendGroupMessage", { groupId: "g", text: "", card: { kind: "task", id: "t", title: seed } }],
+      ["editMessage", { linkId: "chat-one", messageId: "me_1", text: seed }],
+      ["forwardMessages", { linkId: "chat-one", messageIds: ["m_hi", "m_seed"], to: ["chat-two"] }],
+    ];
+    for (const [method, params] of calls) {
+      await expect(callApi(ctx, "engine.call", { method, params }), method).rejects.toMatchObject({ code: "confirm" });
+    }
+    for (const call of ["sendMessage", "sendGroupMessage", "editMessage", "forwardMessages"] as const) expect(engine[call]).not.toHaveBeenCalled();
+    // A plain text goes as it did; with force, the secret goes too.
+    await callApi(ctx, "engine.call", { method: "sendMessage", params: { linkId: "chat-one", text: "hi" } });
+    await callApi(ctx, "engine.call", { method: "forwardMessages", params: { linkId: "chat-one", messageIds: ["m_hi"], to: ["chat-two"] } });
+    for (const [method, params] of calls) await callApi(ctx, "engine.call", { method, params, force: true });
+    expect(engine.sendMessage).toHaveBeenCalledTimes(4);
+    expect(engine.sendGroupMessage).toHaveBeenCalledTimes(2);
+    expect(engine.editMessage).toHaveBeenCalledOnce();
+    expect(engine.forwardMessages).toHaveBeenCalledTimes(2);
   });
 });
 

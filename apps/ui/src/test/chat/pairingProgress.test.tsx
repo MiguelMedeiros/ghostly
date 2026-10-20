@@ -131,6 +131,14 @@ describe("the inviter's scene", () => {
       .toEqual(["publishing", "waiting", "answering", "connecting", "live"]);
   });
 
+  it("runs the contact's name in its own direction, so in Arabic a Latin name is cut at its end, not its start", () => {
+    const { engine } = renderApp(<Pairing inviter />);
+    show(published, engine);
+    const name = scene()!.querySelector(".ps-contact")!;
+    expect(name.textContent).toBe("Alice");
+    expect(name.getAttribute("dir")).toBe("auto");
+  });
+
   it("says in words when the invite has waited long, and how long", () => {
     const { engine } = renderApp(<Pairing inviter />);
     show({ ...published, createdAt: Date.now() - 125_000 }, engine);
@@ -340,6 +348,47 @@ describe("the engine's own report (the pairing-progress contract)", () => {
     expect(await screen.findByText("Relay refused")).toBeInTheDocument();
   });
 
+  it("Try again pressed from the keyboard keeps the focus while it runs and after a refusal; a second press is ignored", async () => {
+    const { engine, user } = renderApp(<Pairing inviter />);
+    let refuse!: (error: Error) => void;
+    engine.on("connect", () => new Promise((_, reject) => { refuse = reject; }));
+    show(report({ stage: "failed", reason: "transport", retryable: true }), engine);
+    const button = screen.getByTestId("pairing-retry");
+    act(() => button.focus());
+    await user.keyboard("{Enter}");
+    // `aria-disabled`, not `disabled`: a disabled button drops the focus to the page in a real browser.
+    expect(button).toHaveTextContent("Trying again…");
+    expect(button).not.toBeDisabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(engine.callsTo("connect")).toHaveLength(1);
+    await act(async () => refuse(new Error("Relay refused")));
+    expect(await screen.findByText("Relay refused")).toBeInTheDocument();
+    expect(button).toHaveFocus();
+    expect(button).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("Try again that moves the stage on takes the focus to the stage's words, not the page", async () => {
+    const { engine, user } = renderApp(<Pairing inviter />);
+    engine.on("connect", () => undefined);
+    show(report({ stage: "failed", reason: "transport", retryable: true }), engine);
+    act(() => screen.getByTestId("pairing-retry").focus());
+    await user.keyboard("{Enter}");
+    show(report({ stage: "knocking", attempt: 2 }), engine);
+    expect(screen.queryByTestId("pairing-failure")).toBeNull();
+    expect(screen.getByTestId("pairing-stage-label")).toHaveFocus();
+  });
+
+  it("a failure that goes by itself leaves the focus where it is", () => {
+    const { engine } = renderApp(<><input data-testid="elsewhere" /><Pairing inviter /></>);
+    show(report({ stage: "failed", reason: "transport", retryable: true }), engine);
+    act(() => screen.getByTestId("elsewhere").focus());
+    show(report({ stage: "knocking", attempt: 2 }), engine);
+    expect(screen.getByTestId("elsewhere")).toHaveFocus();
+  });
+
   it("a failure retrying cannot fix: no Retry, ask for a new invite", () => {
     const { engine } = renderApp(<Pairing inviter />);
     show(report({ stage: "failed", reason: "expired" as PairingProgress["reason"], retryable: false }), engine);
@@ -376,6 +425,15 @@ describe("the engine's own report (the pairing-progress contract)", () => {
     await user.click(screen.getByTestId("connection-options"));
     await user.click(screen.getByTestId("connection-details-summary"));
     expect(screen.getByTestId("connection-pairing-details")).not.toHaveTextContent("Someone else joined");
+  });
+
+  it("an invite someone else took asks for a new one once: its own words already say it", () => {
+    const { engine } = renderApp(<Pairing inviter={false} />);
+    show(report({ stage: "failed", reason: "taken", retryable: false }), engine);
+    const alert = within(scene()!).getByRole("alert");
+    expect(alert).toHaveTextContent("Someone else joined with this invite first. Ask your contact for a new one.");
+    expect(alert).not.toHaveTextContent("Ask your contact for a new invite.");
+    expect(screen.queryByTestId("pairing-retry")).toBeNull();
   });
 
   it("a slow stage's dial error is behind an ⓘ, not a line in English", async () => {
@@ -460,8 +518,8 @@ describe("texts on the DHT while the scene still pairs (an app with no WebRTC, b
 
 describe("a pairing that ends on the DHT (WISP 400)", () => {
   /** Chat.tsx's split: the pairing in the connection icon while `show`, the scene only while `scene`. */
-  function Chat() {
-    const p = usePairingProgress("peer", { inviter: false, enabled: true, createdAt: Date.now() });
+  function Chat({ createdAt = Date.now() }: { createdAt?: number }) {
+    const p = usePairingProgress("peer", { inviter: false, enabled: true, createdAt });
     return <>
       <ChatConnection peerKey="peer" pairing={p.show && p.progress ? { progress: p.progress } : undefined} />
       {p.scene && p.progress ? <PairingScene progress={p.progress} contact="Alice" retry={() => {}} retrying={false} retryError="" /> : <p>the chat</p>}
@@ -489,6 +547,39 @@ describe("a pairing that ends on the DHT (WISP 400)", () => {
       show(onDht(reason), engine);
       expect(screen.getByTestId("connection-tooltip")).toHaveTextContent(words);
     }
+  });
+
+  const taken = { role: "joiner", stage: "failed", reason: "taken", retryable: false, detail: INVITE_TAKEN, since: Date.now(), startedAt: Date.now(), attempt: 1 } as PairingProgress;
+
+  it("an invite someone else used first, learnt once the chat was on the DHT: the scene comes back to say so", () => {
+    const { engine } = renderApp(<Chat />);
+    show({ ...onDht("waiting"), peerParticipationKey: "p", textDelivery: "dht" }, engine);
+    expect(scene()).toBeNull();
+    show({ ...published, peerParticipationKey: "p", textDelivery: "dht", pairingProgress: taken }, engine);
+    expect(within(scene()!).getByRole("alert")).toHaveTextContent("Someone else joined with this invite first.");
+    expect(screen.getByTestId("connection-options")).not.toHaveAccessibleName("Connection options: On DHT · retrying live");
+  });
+
+  it("after a restart, a chat that pinned its inviter before it learnt the invite was taken still says so", () => {
+    const createdAt = Date.now() - 60_000;
+    const restarted = { ...published, createdAt, peerParticipationKey: "p", textDelivery: "dht", pairingProgress: { ...taken, startedAt: createdAt } } as Partial<LinkView>;
+    fakeEngine.update({ links: [linkView(restarted)] });
+    const { engine } = renderApp(<Chat createdAt={createdAt} />);
+    act(() => engine.update({ links: [linkView(restarted)] }));
+    expect(within(scene()!).getByRole("alert")).toHaveTextContent("Someone else joined with this invite first.");
+    expect(screen.queryByText("the chat")).toBeNull();
+  });
+
+  it("after a restart, the chat's link reaching the page before its pairing says the invite was taken: the scene still comes", () => {
+    const createdAt = Date.now() - 60_000;
+    const stored = { ...unstarted, createdAt, peerParticipationKey: "p", textDelivery: "dht" } as Partial<LinkView>;
+    fakeEngine.update({ links: [linkView(stored)] });
+    const { engine } = renderApp(<Chat createdAt={createdAt} />);
+    act(() => engine.update({ links: [linkView(stored)] }));
+    expect(scene()).toBeNull();
+    act(() => engine.update({ links: [linkView({ ...stored, ...published, pairingProgress: { ...taken, startedAt: createdAt } })] }));
+    expect(within(scene()!).getByRole("alert")).toHaveTextContent("Someone else joined with this invite first.");
+    expect(screen.queryByText("the chat")).toBeNull();
   });
 });
 
@@ -654,6 +745,12 @@ describe("motion", () => {
     expect(css).toMatch(/:root\[data-reduce-motion="true"\] \.ps\[data-stage="knocking"\] :is\(\.ps-route-up, \.ps-route-low\)/);
     expect(css).toMatch(/\.ps\[data-paused\] \*, \.ps\[data-paused\] \{ animation-play-state: paused !important; \}/);
     expect(css).toMatch(/\.ps\[data-still\]\[data-stage="knocking"\] :is\(\.ps-route-up, \.ps-route-low\)/);
+  });
+
+  it("in a right-to-left language the icon mirrors as the scene does: this side and the packet's start on the right", () => {
+    const css = readFileSync(join(fileURLToPath(import.meta.url), "../../../components/pairing/pairing-scene.css"), "utf8");
+    expect(css).toMatch(/:root\[dir="rtl"\] \.ps-svg[^{]*\{ transform: scaleX\(-1\); \}/);
+    expect(css).toMatch(/:root\[dir="rtl"\] \.pg[^{]*\{ transform: scaleX\(-1\); \}/);
   });
 });
 

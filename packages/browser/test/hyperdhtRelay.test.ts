@@ -218,6 +218,32 @@ it("refuses a malformed descriptor and oversized frames", async () => {
   dialled.channel.close();
 }, 60_000);
 
+it("reads a burst of tiny frames in time linear in its bytes, as the Desktop does", async () => {
+  const endpoint = await web();
+  const { default: DHT } = await import("hyperdht");
+  const bootstrap = relay.bootstrap.map(node => { const [host, port] = node.split(":"); return { host, port: Number(port) }; });
+  const dht = new DHT({ bootstrap, host: "127.0.0.1" });
+  try {
+    const frame = (text: string) => { const bytes = Buffer.from(text); const out = Buffer.alloc(4 + bytes.length); out.writeUInt32BE(bytes.length); bytes.copy(out, 4); return out; };
+    const accepted = incoming(endpoint);
+    const socket = dht.connect(Buffer.from((endpoint.descriptor as { publicKey: string }).publicKey, "hex"));
+    socket.on("error", () => {});
+    socket.write(frame("ghostly/paired-chat/1"));
+    const bound = await accepted;
+    const count = 80_000;
+    let heard = 0;
+    const all = new Promise<void>(resolve => { bound.channel.onMessage = () => { if (++heard === count) resolve(); }; });
+    const started = performance.now();
+    socket.write(Buffer.concat(Array.from({ length: count }, () => frame("x"))));
+    await all;
+    // 400 KB of 1-byte frames: copying the rest of the buffer per frame took seconds; the Desktop takes ~60 ms.
+    expect(performance.now() - started).toBeLessThan(1000);
+    socket.destroy();
+  } finally {
+    await dht.destroy();
+  }
+}, 60_000);
+
 it("fails to start, and so is not offered, when the relay cannot be reached", async () => {
   await expect(createRelayedHyperEndpoint(seed(), "ws://127.0.0.1:1")).rejects.toThrow(/relay/i);
   await expect(createRelayedHyperEndpoint(seed(), "ws://relay.example")).rejects.toThrow(/wss/);
@@ -259,6 +285,49 @@ it("drops a client past its listen budget and refuses topic queries, and keeps s
   await own.close();
 }, 60_000);
 
+it("refuses a listen on a key already listened on, by another client or the same one, and keeps serving the client that holds it", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const reasons: string[] = [];
+  const own = await startRelay({ testnet: 2, log: (what: string, why: string) => { reasons.push(`${what} ${why}`); } });
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+  process.on("unhandledRejection", onUnhandled);
+  const { default: DHT } = await import("hyperdht");
+  const { default: RelayedDHT } = await import("@hyperswarm/dht-relay");
+  const { default: WebSocketStream } = await import("@hyperswarm/dht-relay/ws");
+  type RawServer = { listen(keyPair: unknown): Promise<void> };
+  const sockets: WebSocket[] = [];
+  try {
+    const holder = await createRelayedHyperEndpoint(seed(), own.url);
+    const gone = vi.fn();
+    holder.onUnavailable = gone;
+    // Another client, on its own WebSocket: it listens on the holder's key, and twice on a key of its own.
+    const socket = new WebSocket(own.url);
+    sockets.push(socket);
+    const other = new RelayedDHT(new WebSocketStream(true, socket), { custodial: false }) as { createServer(): RawServer };
+    void other.createServer().listen({ publicKey: Buffer.from((holder.descriptor as { publicKey: string }).publicKey, "hex"), secretKey: null });
+    const mine = DHT.keyPair();
+    await other.createServer().listen(mine);
+    void other.createServer().listen(mine);
+    await vi.waitFor(() => expect(unhandled.length + reasons.filter(r => r.startsWith("refused listen")).length).toBe(2), { timeout: 15_000 });
+    expect(unhandled).toEqual([]);
+    expect(reasons.filter(r => r.startsWith("refused listen"))).toEqual(["refused listen KEYPAIR_ALREADY_USED", "refused listen KEYPAIR_ALREADY_USED"]);
+    // Nobody was dropped, and the holder is still reached on its key.
+    expect(own.stats()).toMatchObject({ clients: 2, dropped: 0 });
+    const caller = await createRelayedHyperEndpoint(seed(), own.url.replace("127.0.0.1", "localhost"));
+    const accepted = incoming(holder);
+    const dialled = await caller.connect(holder.descriptor);
+    expect((await accepted).binding).toEqual(dialled.binding);
+    dialled.channel.close();
+    expect(gone).not.toHaveBeenCalled();
+    await Promise.allSettled([holder.close(), caller.close()]);
+  } finally {
+    for (const socket of sockets) socket.close();
+    process.off("unhandledRejection", onUnhandled);
+    await own.close();
+  }
+}, 60_000);
+
 it("frees the slot of a client that neither listens nor dials, one that stops answering pings, and a request that never ends, but keeps a browser", async () => {
   const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
   const { WebSocket: NodeWebSocket } = await import("ws");
@@ -293,6 +362,53 @@ it("frees the slot of a client that neither listens nor dials, one that stops an
   await browser.close();
   await own.close();
 }, 60_000);
+
+it("closes every HyperDHT stream it holds for a client when the client leaves: dials under one alias, and incoming ones never taken", async () => {
+  const { startRelay } = await import("../../../infra/services/hyperdht-relay/relay.mjs");
+  const { default: DHT } = await import("hyperdht");
+  const { default: RelayedDHT } = await import("@hyperswarm/dht-relay");
+  const { default: WebSocketStream } = await import("@hyperswarm/dht-relay/ws");
+  type Stream = { destroyed: boolean; once(event: string, f: () => void): void; on(event: string, f: (...args: unknown[]) => void): void; destroy(): void };
+  const own = await startRelay({ testnet: 2 });
+  const native = new DHT({ bootstrap: own.bootstrap.map((node: string) => { const [host, port] = node.split(":"); return { host, port: Number(port) }; }), host: "127.0.0.1", firewalled: false });
+  const streams: Stream[] = [];
+  const keep = (stream: Stream) => { stream.on("error", () => {}); streams.push(stream); return stream; };
+  const open = (list: Stream[]) => list.filter(stream => !stream.destroyed).length;
+  const client = async () => {
+    const socket = new WebSocket(own.url);
+    await new Promise(resolve => socket.addEventListener("open", resolve));
+    const closed = new Promise(resolve => socket.addEventListener("close", resolve));
+    return { socket, closed, node: new RelayedDHT(new WebSocketStream(true, socket)) as unknown as { _protocol: Record<string, { send(m: unknown): void }>; createServer(): { listen(keyPair: unknown): Promise<void> } } };
+  };
+
+  // Three dials sent under one alias, to a native server.
+  const server = native.createServer();
+  const accepted: Stream[] = [];
+  server.on("connection", (stream: Stream) => accepted.push(keep(stream)));
+  const serverKeys = DHT.keyPair();
+  await server.listen(serverKeys);
+  const dialer = await client();
+  const keyPair = DHT.keyPair();
+  for (let i = 0; i < 3; i++) dialer.node._protocol.connect.send({ custodial: true, alias: 7, publicKey: keyPair.publicKey, secretKey: keyPair.secretKey, remotePublicKey: serverKeys.publicKey });
+  await vi.waitFor(() => expect(open(accepted)).toBe(3), { timeout: 20_000 });
+  dialer.socket.close();
+  await dialer.closed;
+
+  // A listener that never takes the connections it is offered.
+  const listener = await client();
+  listener.node._protocol.connected.send = () => {};
+  const listenKeys = DHT.keyPair();
+  await listener.node.createServer().listen(listenKeys);
+  const dials = [0, 1].map(() => keep(native.connect(listenKeys.publicKey) as Stream));
+  await Promise.all(dials.map(stream => new Promise(resolve => stream.once("open", resolve))));
+  listener.socket.close();
+  await listener.closed;
+
+  await vi.waitFor(() => expect(open(accepted) + open(dials)).toBe(0), { timeout: 15_000 });
+  for (const stream of streams) stream.destroy();
+  await native.destroy();
+  await own.close();
+}, 90_000);
 
 it("carries a whole paired chat between two browsers with WebRTC off, pinned as on any transport", async () => {
   const invitation = createLink();

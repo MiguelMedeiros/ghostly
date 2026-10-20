@@ -75,8 +75,8 @@ export interface LnurlView {
   /** How long a comment may be (LUD-12); 0 when none is taken. */
   commentAllowed: number;
 }
-/** Who an event is about. `mint`: the Cashu mint it went through, when it did. */
-export interface LightningEventOp { paymentId?: string; providerId: string; mint?: string }
+/** Who an event is about. `mint`: the Cashu mint it went through, when it did. `invoice`: what it paid or was paid. */
+export interface LightningEventOp { paymentId?: string; providerId: string; mint?: string; invoice?: string }
 
 export interface LightningEvents {
   changed(): void;
@@ -263,7 +263,7 @@ export class LightningService {
     const hash = decodeBolt11(invoice)?.paymentHash;
     const op = hash ? await this.get("out", hash) : undefined;
     if (op) await this.put({ ...op, state: paid ? "paid" : "failed", settledAt: Date.now() });
-    this.events.resolved({ paymentId: op?.paymentId ?? context.paymentId, providerId: op?.providerId ?? CASHU_MINT_SOURCE, mint: context.mint }, paid);
+    this.events.resolved({ paymentId: op?.paymentId ?? context.paymentId, providerId: op?.providerId ?? CASHU_MINT_SOURCE, mint: context.mint, invoice }, paid);
     await this.loadRecent(); this.events.changed();
   }
 

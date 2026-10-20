@@ -362,8 +362,10 @@ export interface WalletPlatform {
   /**
    * True when paid, false while the payment is pending (or its answer lost). Throws when the sats did not leave. `note`: what it was for, kept with the wallet's record.
    * `confirmedReal`: the person confirmed a Mainnet payment as real money; the engine refuses one without it.
+   * `chat`: the invoice was in a message of this contact's chat; paid on Testnet, they are told (a test mint's invoice
+   * counts only on the payer's word).
    */
-  payQuote(quote: string, mint: string, note?: string, confirmedReal?: boolean): Promise<boolean>;
+  payQuote(quote: string, mint: string, note?: string, confirmedReal?: boolean, chat?: { peerPubKey: string; invoice: string }): Promise<boolean>;
   /**
    * Reads a Lightning address (`name@domain`) or an LNURL and fetches what it asks for. The address's
    * domain learns of the request: say so before calling.
@@ -465,6 +467,24 @@ export interface AppsPlatform {
   };
   /** Linked files, where this client keeps them; absent where it cannot, and `files.*` is then `not-allowed`. */
   linkedFiles?: LinkedFilesHost;
+  /** The read lane to the contact (`app-ranges/1`), where the engine has it; absent: an app gets no `ghostly.remote`. */
+  ranges?: AppRangesHost;
+}
+
+/** A range the contact's app asks of a file an app here serves: `app` is the chat app id, `file` the linked file's id. */
+export interface AppRangeAsk { app: string; request: number; serve: string; file: string; offset: number; length: number }
+
+/**
+ * The read lane of mini-apps in 1:1 chats (WISP 1200 § A read lane to the contact): serving a linked file to the same
+ * app on the contact's side, and reading what that one serves. A refusal is answered as `{error}`, a broker code.
+ */
+export interface AppRangesHost {
+  serve(linkId: string, ref: string, file: string): Promise<{ serve: string } | { error: "not-open" | "offline" | "peer-closed" }>;
+  unserve(linkId: string, serve: string): Promise<void>;
+  read(linkId: string, ref: string, serve: string, offset: number, length: number): Promise<{ bytes: Uint8Array; size: number } | { error: string }>;
+  /** Ranges the contact's apps ask, in every chat: the caller answers those of its own serves. */
+  onAsk(listener: (linkId: string, ask: AppRangeAsk) => void): () => void;
+  answer(linkId: string, answer: { app: string; request: number; bytes?: Uint8Array; size?: number; error?: "changed" | "gone" }): Promise<void>;
 }
 
 /**
@@ -480,6 +500,11 @@ export interface LinkedFilesHost {
   pick(ref: string, title: string, options: { folder: boolean; accept: string[] }, signal?: AbortSignal): Promise<MiniAppLinkedFile[]>;
   /** Every link the app keeps; where the browser must be asked again to read kept ones, the person is asked once (a sheet that goes on `signal`, as pick's). */
   list(ref: string, title: string, signal?: AbortSignal): Promise<MiniAppLinkedFile[]>;
+  /**
+   * One link as `list` gives it (the person is not asked), or null for an id the app does not keep: what `files.serve`
+   * reads, so serving one file of a library does not list every file. Absent: the broker finds it in `list`.
+   */
+  entry?(ref: string, id: string): Promise<MiniAppLinkedFile | null>;
   /** Bytes from `offset`, at most `length`: fewer at the end of the file. A copy the caller owns, which the broker hands to the app (transferred). */
   read(ref: string, id: string, offset: number, length: number): Promise<Uint8Array>;
   /** One link, or all of the app's with "all". */

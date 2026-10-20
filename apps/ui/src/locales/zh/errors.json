@@ -6,6 +6,8 @@
     "lostPeer": "与 Ghostly 节点的连接已断开",
     "noRoom": "此设备没有足够的空间",
     "noRoomNext": "请释放空间后重试。",
+    "noRoomToSave": "此设备已没有剩余空间",
+    "noRoomToSaveNext": "没有保存任何内容。请释放一些空间，然后重试。",
     "partNotLoaded": "Ghostly 的一部分未能加载。",
     "pickCard": "请先选择一张 Lightning 卡片",
     "signerKey": "你的签名器持有的密钥与此身份不同。没有发布任何内容。",
@@ -146,6 +148,13 @@
     "cannotRetry": "此文件无法重试",
     "clipboardUnavailable": "无法读取剪贴板",
     "clipboardUnavailableNext": "请用 + 添加附件。",
+    "floor": {
+      "noRoomNext": "请释放空间，然后请联系人重新发送。",
+      "notInAWeek": "一周内未送达",
+      "refused": "此设备无法接收这个文件",
+      "tooMany": "这里等待处理的文件太多",
+      "tooManyNext": "请先处理等待中的文件，然后请联系人重新发送。"
+    },
     "gone": "此文件已不在这里",
     "noRoom": "联系人的设备空间不足",
     "noRoomHere": "此设备空间不足",
@@ -503,6 +512,12 @@
     "usdtReverted": "交易已回滚",
     "usdtRevertedNext": "没有发送代币；gas 已花费。"
   },
+  "relayOnly": {
+    "keepsTurn": "隐藏 IP 需要这个 TURN 服务器",
+    "keepsTurnNext": "请先关闭它，再移除服务器。",
+    "needsTurn": "请先添加 TURN 服务器",
+    "needsTurnNext": "在上方保存一个，然后再开启。"
+  },
   "relays": {
     "atLeastOne": "请至少输入一个中继地址",
     "notAddress": "这不是中继地址：{{address}}",
@@ -532,6 +547,7 @@
     "listenerReleased": "已为另一个聊天暂停。打开此聊天即可恢复。",
     "noAddress": "尚不知道联系人在此传输方式上的地址",
     "noAddressNext": "先通过 WebRTC 重新连接一次以交换地址。",
+    "noAddressWait": "联系人在其应用中打开此聊天后即可获得。",
     "noOverlap": "你们的传输方式选择不一致",
     "noOverlapNext": "打开备用，或在两边选择相同的传输方式。",
     "noneConnected": "没有传输方式能连接",

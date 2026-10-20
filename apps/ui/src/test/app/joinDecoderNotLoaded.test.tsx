@@ -40,14 +40,15 @@ describe("Join when its QR decoder does not load", () => {
     const track = { stop: vi.fn() };
     vi.stubGlobal("navigator", { ...navigator, mediaDevices: { getUserMedia: vi.fn(async () => ({ getTracks: () => [track] })) } });
     renderApp(<JoinDialog onJoin={() => {}} onClose={() => {}} autoScan />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("The QR reader did not load. Check your connection, then try again.");
+    // One page for the whole file: the reader failed before, so the notice says to reload (joinReaderReload.test.tsx).
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^The QR reader (still )?did not load\./);
     expect(track.stop).toHaveBeenCalled();
   });
 
   it("on Add this device too", async () => {
     vi.stubGlobal("navigator", { ...navigator, mediaDevices: { getUserMedia: vi.fn(async () => ({ getTracks: () => [{ stop() {} }] })) } });
     renderApp(<JoinDialog onJoin={() => {}} onClose={() => {}} onDevice={async () => {}} autoScan />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("The QR reader did not load.");
+    expect(await screen.findByRole("alert")).toHaveTextContent(/^The QR reader (still )?did not load\./);
   });
 
   it("a camera that does not start is still said as such", async () => {

@@ -1,6 +1,6 @@
 [package]
 name = "ghostly"
-version = "1.3.3"
+version = "1.5.2"
 edition = "2021"
 
 # The app is a library (src/lib.rs) that src/main.rs runs on Desktop; Android and iOS load it as a shared or static
@@ -36,7 +36,8 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 url = "2"
 cookie = "0.18"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
-tokio = { version = "1", features = ["rt", "sync", "time", "process", "io-util", "macros"] }
+# `signal`: a SIGTERM, SIGINT or SIGHUP quits the app as its window's close does (src/lib.rs `exit_on_signals`).
+tokio = { version = "1", features = ["rt", "sync", "time", "process", "io-util", "macros", "signal"] }
 tauri-plugin-notification = "2"
 # `png` writes a pasted picture out (clipboard.rs).
 png = "0.18"
@@ -52,7 +53,9 @@ tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "net", "
 
 # Desktop only (Android and iOS have neither): the updater plugin, and the system clipboard.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-updater = "2"
+# Without its `zip` feature: the updates we publish are an installer (Windows `-setup.exe`), an AppImage and a macOS
+# `.app.tar.gz` (tar is always on for macOS), never an archive to unpack (tools/scripts/updater-manifest.mjs).
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 # `image-data`: a picture on the clipboard, for a paste of files (clipboard.rs).
 arboard = { version = "3.6.1", default-features = false, features = ["image-data", "wayland-data-control"] }
 

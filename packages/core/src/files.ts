@@ -36,6 +36,11 @@ export interface FileInfo {
   reply?: WireReply;
   /** How many times it has been forwarded (`fw`, WISP 401 § Forwards): files/2, files/3 and held items; older apps ignore it. */
   forwarded?: number;
+  /**
+   * The chat app id of the mini-app that sent this file ahead (`app`, WISP 1200 § Sending a film ahead): files/3 only;
+   * older apps ignore it and keep the file as any file.
+   */
+  app?: string;
 }
 
 /** Where a platform puts incoming bytes: memory, IndexedDB, disk. */
@@ -65,6 +70,13 @@ const MAX_NAME_LENGTH = 200;
 const INVISIBLE = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 
 /**
+ * Characters that draw as blank but are not spaces: the Hangul fillers, the braille blank, the combining grapheme
+ * joiner. A run of them, or of spaces (em space and the like), would push the real extension out of view:
+ * "Invoice.pdf" + 120 blanks + ".exe" reads as a PDF in a truncated bubble.
+ */
+const BLANK = /[\u034F\u115F\u1160\u2800\u3164\uFFA0]/gu;
+
+/**
  * Names Windows keeps for devices, whatever the case, with any extension, and with spaces before the dot:
  * "CON", "nul.txt", "COM1 .log" open a device there, not a file.
  */
@@ -83,7 +95,7 @@ function shorten(name: string): string {
 
 /** A file name is display text and a download suggestion, never a path. */
 export function sanitizeFileName(name: string): string {
-  const visible = name.replace(INVISIBLE, "").replace(/[/\\:]/g, "");
+  const visible = name.replace(INVISIBLE, "").replace(BLANK, "").replace(/[/\\:]/g, "").replace(/\s+/gu, " ");
   // Whitespace before the dots must not hide them: " .bashrc" is a dotfile too.
   const clean = shorten(visible.replace(/^[\s.]+/, "").trim());
   if (WINDOWS_DEVICE.test(clean)) return shorten("_" + clean);

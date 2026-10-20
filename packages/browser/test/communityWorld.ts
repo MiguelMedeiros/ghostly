@@ -62,6 +62,9 @@ export interface Peer {
   spent: number[];
   spentBackground: number[];
   refused: number;
+  /** With `heldReads`: the packet this app last read or wrote per key, and until when a read of it is held back. */
+  known: Map<string, GhostRecord[]>;
+  heldUntil: Map<string, number>;
   /** When a link write of this app was last refused, while it waits for the budget. */
   writeWaiting?: number;
   /** An app from before hubs (`paired-groups` 3): it keeps every private group a full mesh and does not announce version 4. */
@@ -80,6 +83,50 @@ export interface Peer {
   heldElsewhere?: number;
   /** What its engine runs on: kept for `restart`, which starts a new engine on it. */
   host: GroupsHost;
+}
+
+/** Numbers in [0, 1) from a seed (xorshift32): the same ones every run. */
+export function seededRandom(seed: number): () => number {
+  let x = Math.imul(seed, 2654435761) >>> 0 || 1;
+  return () => { x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0; return x / 2 ** 32; };
+}
+
+/**
+ * A world that runs the same way every time, from `seed`: the keys, nonces and ids its engines draw
+ * (`crypto.getRandomValues`, `crypto.randomUUID`) come from the seed, and the wall clock reads the world's clock, as
+ * an app's engine and its device's clock agree. Give the world `seededRandom` too (its engines' own random waits).
+ * A run under a relays' budget is chaotic: which edge gets a minute's requests first, a hub entry a second staler than
+ * another. With random keys and waits, a test of one went a different way each run, and failed one run in three in
+ * ways no run could repeat (bug hunt, 2026-10-17). Call before adding peers; returns what puts the globals back.
+ */
+export function sameRun(world: CommunityWorld, seed: number, start = Date.UTC(2026, 9, 1)): () => void {
+  const next = seededRandom(seed ^ 0x5bd1e995), byte = () => Math.floor(next() * 256);
+  const cr = globalThis.crypto, now = Date.now;
+  const own = (["getRandomValues", "randomUUID"] as const).map(key => [key, Object.getOwnPropertyDescriptor(cr, key)] as const);
+  const random = cr.getRandomValues.bind(cr);
+  cr.getRandomValues = (<T extends ArrayBufferView | null>(array: T): T => {
+    // The curves' scalar blinding draws as many bytes as a key derivation or a signature does, and its products do not
+    // depend on them: from the seed, a public key the process derived before (`identityFromSeed` keeps them) left the
+    // next keys and nonces in other bytes, and a test run twice in one process went two ways.
+    const limit = Error.stackTraceLimit;
+    Error.stackTraceLimit = 6;
+    const blinding = new Error().stack?.includes("@noble/");
+    Error.stackTraceLimit = limit;
+    if (blinding) return random(array);
+    const bytes = new Uint8Array(array!.buffer, array!.byteOffset, array!.byteLength);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = byte();
+    return array;
+  }) as typeof cr.getRandomValues;
+  cr.randomUUID = (() => {
+    const hex = Array.from({ length: 16 }, byte).map((b, i) => (i === 6 ? 0x40 | (b & 15) : i === 8 ? 0x80 | (b & 63) : b).toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }) as typeof cr.randomUUID;
+  world.now = start;
+  Date.now = () => world.now;
+  return () => {
+    for (const [key, descriptor] of own) if (descriptor) Object.defineProperty(cr, key, descriptor); else delete (cr as unknown as Record<string, unknown>)[key];
+    Date.now = now;
+  };
 }
 
 function memoryStore(messages: StoredMessage[]): GroupStore {
@@ -123,6 +170,16 @@ export class CommunityWorld {
    * second see (each read is done before any of their writes lands). Writes land at once, as before.
    */
   readsFromStepStart: ((key: string) => boolean) | null = null;
+  /**
+   * As the engine's relay client does (relay.ts `resolve`): a read the budget holds back answers the packet this app
+   * already knows of the key (its last reading, or its own write), with nothing in the answer to say it is old; only
+   * `readHeldBackFor` says the read was held. A write the budget holds back is a `DiscoveryBudgetError`. Without it, a
+   * held read fails, which no engine code mistakes for a reading (agents#1691: the World hid the hubs' pile-up).
+   */
+  heldReads = false;
+  /** With `heldReads`: background reads and writes the relays' budget holds back besides the World's own count (a test says which). */
+  holdRead: ((peer: Peer, key: string) => boolean) | null = null;
+  holdWrite: ((peer: Peer, key: string) => boolean) | null = null;
   private stepStart = new Map<string, GhostRecord[]>();
   /** An edge that was up and dropped looks "seen" from its side alone, as the engine's does while it dials again. */
   redialSeen = false;
@@ -172,7 +229,7 @@ export class CommunityWorld {
     const links = new Map<string, Edge>();
     const messages: StoredMessage[] = [];
     const places = new Map<number, string>();
-    const peer: Peer = { name, groups: null as unknown as Groups, store: memoryStore(messages), messages, links, online: true, nick: name, sent: { frames: 0, bytes: 0 }, spent: [], spentBackground: [], refused: 0, host: null as unknown as GroupsHost, ...app };
+    const peer: Peer = { name, groups: null as unknown as Groups, store: memoryStore(messages), messages, links, online: true, nick: name, sent: { frames: 0, bytes: 0 }, spent: [], spentBackground: [], refused: 0, known: new Map(), heldUntil: new Map(), host: null as unknown as GroupsHost, ...app };
     const host: GroupsHost = {
       sendOnLink: (linkId, frame) => {
         const edge = links.get(linkId), there = edge && this.counterpart(edge);
@@ -227,18 +284,33 @@ export class CommunityWorld {
         this.pkarrOps++;
         this.onPkarr?.(peer, "publish", identity.pubKeyZ32, !!background, !!door);
         if (background && this.holdBackground?.(peer)) throw new DiscoveryBudgetError(1_000);
-        if (!this.spend(peer, 2, background, true, `publish${background ? " bg" : ""}`)) throw new Error("Discovery request budget reached; retry shortly");
+        if (this.heldReads && background && this.holdWrite?.(peer, identity.pubKeyZ32)) throw new DiscoveryBudgetError(5_000);
+        if (!this.spend(peer, 2, background, true, `publish${background ? " bg" : ""}`)) {
+          if (this.heldReads) throw new DiscoveryBudgetError(5_000);
+          throw new Error("Discovery request budget reached; retry shortly");
+        }
         if (peer.online) this.pkarr.set(identity.pubKeyZ32, structuredClone(records));
+        if (this.heldReads) peer.known.set(identity.pubKeyZ32, structuredClone(records));
       },
       resolve: async (key, background, door) => {
         this.pkarrOps++;
         this.onPkarr?.(peer, "resolve", key, !!background, !!door);
         if (this.failRead?.(peer, key)) throw new Error("No Pkarr relay reachable");
         if (background && this.holdBackground?.(peer)) throw new DiscoveryBudgetError(1_000);
-        if (!this.spend(peer, 1, background, false, `resolve${background ? " bg" : ""}`)) throw new Error("No Pkarr relay reachable");
+        if ((this.heldReads && background && this.holdRead?.(peer, key)) || !this.spend(peer, 1, background, false, `resolve${background ? " bg" : ""}`)) {
+          const known = peer.known.get(key);
+          if (!this.heldReads) throw new Error("No Pkarr relay reachable");
+          peer.heldUntil.set(key, this.now + 5_000);
+          if (!known) throw new DiscoveryBudgetError(5_000);
+          return structuredClone(known);
+        }
         const store = this.readsFromStepStart?.(key) ? this.stepStart : this.pkarr;
-        return peer.online ? structuredClone(store.get(key) ?? null) : null;
+        const found = peer.online ? structuredClone(store.get(key) ?? null) : null;
+        peer.heldUntil.delete(key);
+        if (found) peer.known.set(key, structuredClone(found));
+        return found;
       },
+      readHeldBackFor: key => { const until = peer.heldUntil.get(key); return until !== undefined && until > this.now ? until - this.now : undefined; },
       // A row given a place above another goes just before it; any other, to the end.
       storeMessage: async (message, _live, place) => {
         if (messages.some(m => m.id === message.id)) return false;

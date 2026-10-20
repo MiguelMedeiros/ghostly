@@ -38,6 +38,10 @@
   "outgoing": "Chiamata in corso...",
   "reconnecting": "Riconnessione...",
   "rejected": "Chiamata rifiutata",
+  "relayNoAnswer": "Il tuo relay non ha risposto",
+  "relayNoAnswerNext": "Controlla il server TURN in Impostazioni, Rete. Nascondi il mio IP non si connette mai in diretta.",
+  "relayOnlyOff": "Le chiamate sono disattivate con Nascondi il mio IP",
+  "relayOnlyOffNext": "Le chiamate di questa app non possono ancora usare un relay. Disattivalo in Impostazioni, Rete per chiamare.",
   "selfView": "Trascina per spostare, tira un angolo per ridimensionare, doppio clic per ripristinare",
   "share": {
     "blocked": "La condivisione dello schermo è bloccata",
@@ -64,6 +68,7 @@
     "audioFailed": "Impossibile connettere la chiamata vocale",
     "audioIncoming": "Chiamata vocale in arrivo",
     "audioMissed": "Chiamata vocale persa",
+    "audioMissedMany": "{{count}} chiamate vocali perse",
     "audioStarted": "Chiamata vocale avviata",
     "audioUnanswered": "Chiamata vocale senza risposta",
     "videoCancelled": "Videochiamata annullata",
@@ -73,6 +78,7 @@
     "videoFailed": "Impossibile connettere la videochiamata",
     "videoIncoming": "Videochiamata in arrivo",
     "videoMissed": "Videochiamata persa",
+    "videoMissedMany": "{{count}} videochiamate perse",
     "videoStarted": "Videochiamata avviata",
     "videoUnanswered": "Videochiamata senza risposta"
   },

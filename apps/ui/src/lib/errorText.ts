@@ -104,6 +104,8 @@ const RULES: readonly Rule[] = [
   // A call whose storage write the browser refused for want of space (engine/server.ts): a group made, a text sent. A
   // forward's copy that found no room (engine/forwards.ts forwardError) says Desktop's io error the same way.
   { match: /^Not enough space on this device \((?:QuotaExceededError(?:: [\s\S]*)?|No space left on device[\s\S]*)\)$/, key: "errors.app.noRoom", next: "errors.app.noRoomNext", detail: true },
+  // A write the browser threw away for want of room (packages/browser/src/shared/idb.ts `committed`).
+  exact("This device has no room left to save this", "errors.app.noRoomToSave", "errors.app.noRoomToSaveNext"),
   // A call refused in limited mode (packages/browser/src/engine/node.ts LIMITED_MODE_ERROR): the banner's own words, and what to do.
   exact("Ghostly could not check which device is active yet. This works once it can.", "devices.limited.title", "errors.app.limitedNext"),
   exact("Ghostly needs your permission to reach that local address", "errors.app.localAddress"),
@@ -129,6 +131,13 @@ const RULES: readonly Rule[] = [
   // status, the next step behind the ⓘ. The system's reason for a file not stored stays English, as the detail.
   exact("The file arrived damaged and was deleted. Ask for it again.", "errors.files.refused.damaged", "errors.files.askAgain"),
   exact("The offer expired", "errors.files.offerExpired", "errors.files.askAgain"),
+  exact("Cancelled by the sender", "chat.file.cancelled", "errors.files.askAgain"),
+  // A file said on the DHT floor that ended here before it came (packages/browser engine/fileDesk.ts): why this device
+  // refused its offer, or its week ran out. Its sender still has it, and its next offer takes the bubble over.
+  exact("No room on this device for this file", "errors.files.noRoomHere", "errors.files.floor.noRoomNext"),
+  exact("Too many files are waiting here", "errors.files.floor.tooMany", "errors.files.floor.tooManyNext"),
+  exact("It was refused here", "errors.files.floor.refused", "errors.files.askAgain"),
+  exact("It did not come within a week", "errors.files.floor.notInAWeek", "errors.files.askAgain"),
   // A group's file every holder served damaged (packages/browser groupFiles.ts DAMAGED): the group is asked, not a contact.
   exact("Every copy of this file arrived damaged and was deleted. Ask for it again later.", "errors.files.refused.damaged", "errors.files.askGroupAgain"),
   { match: /^Could not store the file: (?:This device has no space left for the file|QuotaExceededError[\s\S]*|[\s\S]*No space left on device[\s\S]*)$/, key: "errors.files.noRoomHere", next: "errors.files.noRoomHereNext", detail: true },
@@ -174,6 +183,8 @@ const RULES: readonly Rule[] = [
   exact("Transport change cancelled", "errors.transport.switchCancelled"),
   { ...exact("Transport preferences do not overlap. Enable fallback or choose the same supported transport on both sides.", "errors.transport.noOverlap", "errors.transport.noOverlapNext"), detail: true },
   { match: /^Peer native address unavailable(?:; reconnect WebRTC once to exchange endpoints)?$/, key: "errors.transport.noAddress", next: "errors.transport.noAddressNext", detail: true },
+  // No WebRTC between the two apps: the contact's app says it once it uses the chat; no WebRTC session can ask for it.
+  { match: /^Peer native address unavailable; the contact's app has not given it yet$/, key: "errors.transport.noAddress", next: "errors.transport.noAddressWait", detail: true },
   // A native dial that failed (native/transports/hyperdht/endpoint.mjs, apps/desktop paired_transport.rs).
   { match: /^Native connection limit reached$/, key: "errors.transport.slotsFull", next: "errors.transport.slotsFullNext", detail: true },
   { match: /^HyperDHT handshake timed out$/, key: "errors.transport.handshakeTimedOut", detail: true },
@@ -543,6 +554,9 @@ const RULES: readonly Rule[] = [
   { match: /^https:\/\/\S+ names no Ghostly proof$/, key: "errors.proof.fileNoProof", detail: true },
   { match: /^[^:]+: (?<login>\S+) does not list the key that signed \([^)]*\)$/, key: "errors.proof.keyNotListed", detail: true },
   { match: /^Enter at least one relay address \((?:https|wss):\/\/…\)$/, key: "errors.relays.atLeastOne" },
+  // "Hide my IP from contacts" without the TURN server it needs (packages/browser/src/engine/node.ts, updateSettings).
+  { match: /^Add a TURN server first$/, key: "errors.relayOnly.needsTurn", next: "errors.relayOnly.needsTurnNext" },
+  { match: /^Hide my IP from contacts needs a TURN server\. Turn it off first$/, key: "errors.relayOnly.keepsTurn", next: "errors.relayOnly.keepsTurnNext" },
   // An Iroh, push or Nostr relay refused (packages/browser/src/platform/irohWeb.ts, shared/pushRelay.ts, nostr/relay.ts):
   // the address typed stays in the line, which has no ⓘ.
   { match: /^Use an https:\/\/ relay address: (?<address>\S+)$/, key: "errors.relays.useHttps" },

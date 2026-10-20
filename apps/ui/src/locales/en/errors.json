@@ -6,6 +6,8 @@
     "lostPeer": "Lost the Ghostly peer",
     "noRoom": "Not enough space on this device",
     "noRoomNext": "Free some space, then try again.",
+    "noRoomToSave": "No room left on this device",
+    "noRoomToSaveNext": "Nothing was saved. Free some space, then try again.",
     "partNotLoaded": "Part of Ghostly did not load.",
     "pickCard": "Pick a Lightning card first",
     "signerKey": "Your signer holds a different key than this identity. Nothing was published.",
@@ -146,6 +148,13 @@
     "cannotRetry": "This file cannot be retried",
     "clipboardUnavailable": "The clipboard cannot be read",
     "clipboardUnavailableNext": "Attach it with +.",
+    "floor": {
+      "noRoomNext": "Free some space, then ask your contact to send it again.",
+      "notInAWeek": "It did not come within a week",
+      "refused": "This device could not take this file",
+      "tooMany": "Too many files are waiting here",
+      "tooManyNext": "Answer the files waiting for you, then ask your contact to send it again."
+    },
     "gone": "This file is no longer here",
     "noRoom": "No room on your contact's device",
     "noRoomHere": "No room on this device",
@@ -503,6 +512,12 @@
     "usdtReverted": "The transaction was reverted",
     "usdtRevertedNext": "No tokens were sent; the gas was spent."
   },
+  "relayOnly": {
+    "keepsTurn": "Hide my IP needs this TURN server",
+    "keepsTurnNext": "Turn it off first, then remove the server.",
+    "needsTurn": "Add a TURN server first",
+    "needsTurnNext": "Save one above, then turn this on."
+  },
   "relays": {
     "atLeastOne": "Enter at least one relay address",
     "notAddress": "Not a relay address: {{address}}",
@@ -532,6 +547,7 @@
     "listenerReleased": "Paused for another chat. Open this chat to resume.",
     "noAddress": "Your contact's address for this transport isn't known yet",
     "noAddressNext": "Reconnect over WebRTC once to exchange it.",
+    "noAddressWait": "It comes once your contact opens this chat in their app.",
     "noOverlap": "Your transport choices don't match",
     "noOverlapNext": "Turn Fallback on, or choose the same transport on both sides.",
     "noneConnected": "No transport could connect",

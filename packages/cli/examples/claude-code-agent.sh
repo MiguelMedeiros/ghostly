@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A Claude Code agent on Ghostly: each turn (a message from an allowed contact, or a mention in an allowed group)
-# wakes `claude -p` with the turn on stdin, shows "thinking" meanwhile, and sends its answer as a reply.
+# wakes `claude -p` with the turn on stdin, reacts 👀 and shows "thinking" meanwhile, and sends its answer as a reply.
 #
 #   GHOSTLY_AGENT_FROM="owner"      ./claude-code-agent.sh    # chats (id, prefix, name) or contact keys
 #   GHOSTLY_AGENT_GROUPS="team"     ./claude-code-agent.sh    # groups, where only a mention wakes it
@@ -26,6 +26,9 @@ if [ "${1:-}" = "--turn" ]; then   # one turn, as `listen --exec` hands it over
   mkdir -p "$dir"; cd "$dir"
   more=(); [ -e .started ] && more=(--continue); touch .started
   if [ -z "$chat" ] && [ -z "$member" ]; then more=(); fi   # an author we cannot tell apart: a fresh conversation
+  # 👀 at once: the person sees the message was read before the answer is ready.
+  if [ -n "$chat" ]; then ghostly react "$chat" "$id" 👀 >/dev/null || true
+  else ghostly group react "$group" "$id" 👀 >/dev/null 2>&1 || true; fi
   # A private group shows it too; a community does not carry typing yet (the error is ignored).
   if [ -n "$chat" ]; then ghostly typing "$chat" --kind thinking --status "Thinking" --for 600 >/dev/null || true
   else ghostly group typing "$group" --kind thinking --status "Thinking" --for 600 >/dev/null 2>&1 || true; fi

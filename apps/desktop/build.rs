@@ -8,6 +8,7 @@ const COMMANDS: &[&str] = &[
     "app_open",
     "app_post",
     "bitcoind_rpc",
+    "close_service_windows",
     "create_keypair",
     "decrypt_text",
     "device_state_read",

@@ -6,6 +6,8 @@
     "lostPeer": "Le pair Ghostly a été perdu",
     "noRoom": "Pas assez d'espace sur cet appareil",
     "noRoomNext": "Libérez de l'espace, puis réessayez.",
+    "noRoomToSave": "Plus d'espace sur cet appareil",
+    "noRoomToSaveNext": "Rien n'a été enregistré. Libérez de l'espace, puis réessayez.",
     "partNotLoaded": "Une partie de Ghostly ne s'est pas chargée.",
     "pickCard": "Choisissez d'abord une carte Lightning",
     "signerKey": "Votre signataire détient une autre clé que cette identité. Rien n'a été publié.",
@@ -146,6 +148,13 @@
     "cannotRetry": "Ce fichier ne peut pas être renvoyé",
     "clipboardUnavailable": "Impossible de lire le presse-papiers",
     "clipboardUnavailableNext": "Joignez-le avec +.",
+    "floor": {
+      "noRoomNext": "Libérez de la place, puis demandez à votre contact de le renvoyer.",
+      "notInAWeek": "Il n'est pas arrivé en une semaine",
+      "refused": "Cet appareil n'a pas pu recevoir ce fichier",
+      "tooMany": "Trop de fichiers attendent ici",
+      "tooManyNext": "Répondez aux fichiers qui vous attendent, puis demandez à votre contact de le renvoyer."
+    },
     "gone": "Ce fichier n'est plus là",
     "noRoom": "Pas de place sur l'appareil de votre contact",
     "noRoomHere": "Plus de place sur cet appareil",
@@ -503,6 +512,12 @@
     "usdtReverted": "La transaction a été annulée",
     "usdtRevertedNext": "Aucun jeton n'a été envoyé ; le gas a été dépensé."
   },
+  "relayOnly": {
+    "keepsTurn": "Masquer mon IP a besoin de ce serveur TURN",
+    "keepsTurnNext": "Désactivez-le d'abord, puis retirez le serveur.",
+    "needsTurn": "Ajoutez d'abord un serveur TURN",
+    "needsTurnNext": "Enregistrez-en un ci-dessus, puis activez ceci."
+  },
   "relays": {
     "atLeastOne": "Saisissez au moins une adresse de relais",
     "notAddress": "Ce n'est pas une adresse de relais : {{address}}",
@@ -532,6 +547,7 @@
     "listenerReleased": "En pause pour une autre discussion. Ouvrez celle-ci pour reprendre.",
     "noAddress": "L'adresse de votre contact pour ce transport n'est pas encore connue",
     "noAddressNext": "Reconnectez-vous une fois par WebRTC pour l'échanger.",
+    "noAddressWait": "Elle arrive quand votre contact ouvre cette discussion dans son app.",
     "noOverlap": "Vos choix de transport ne correspondent pas",
     "noOverlapNext": "Activez le Secours, ou choisissez le même transport des deux côtés.",
     "noneConnected": "Aucun transport n'a pu se connecter",

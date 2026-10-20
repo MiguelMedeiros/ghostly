@@ -99,6 +99,8 @@ pub mod viewer {
         _response: ServiceResponse,
     ) {
     }
+
+    pub fn close_all<R: tauri::Runtime>(_app: &tauri::AppHandle<R>) {}
 }
 
 pub mod app_sandbox {

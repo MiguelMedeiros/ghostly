@@ -43,6 +43,9 @@ export const WEBSITE_INPUTS = [
   "docs/CLI.md",
   "docs/AI-AGENTS.md",
   "packages/cli/SKILL.md",
+  "packages/cli/README.md",
+  // llms.test.mjs checks the install line against the CLI's package name.
+  "packages/cli/package.json",
   // Quoted on /developers: sync-references.mjs's excerpt().
   "packages/core/src/invite.ts",
   "packages/core/src/pairedTransports.ts",
@@ -85,10 +88,15 @@ export const PACKAGES_READ_FROM_SITE = [
   "apps/website/lib/invite.ts",
   // packages/browser's atprotoOAuth test: the client metadata the site serves.
   "apps/website/public/oauth/",
-  // packages/cli's agentDocs test: every command the agents guide (and its prompt) and the agents page teach.
+  // packages/cli's agentDocs test: every command the agents guide (and its prompt) and the agents page teach, and the
+  // guides and pages that point to the voice agent.
   "docs/AI-AGENTS.md",
   "apps/website/content/agents.ts",
-  // packages/browser's websiteStore test: the store pages' reader, its copy of core's, the build's reader and the test store.
+  "docs/CLI.md",
+  "apps/website/content/cli.ts",
+  "apps/website/scripts/llms.mjs",
+  // packages/browser's websiteStore and websiteStoreOnce tests: the store pages' store and reader, its copy of core's, the build's reader and the test store.
+  "apps/website/lib/store.ts",
   "apps/website/lib/storeRead.ts",
   "apps/website/lib/appsGate.ts",
   "apps/website/lib/latestRelease.ts",
@@ -109,7 +117,7 @@ export const TESTED_PAGES = 3;
  * commit holds the tree of a head whose CI Success passed one landing earlier. A batch of N lands as N pushes, one per
  * pull request: only the last holds the tree of the batch's head. The others hold the tree of a commit below it, which
  * no run tested whole, and a landing may stop there (one of the rest changed or left the line, GitHub refused it, the
- * train's run ended): those pushes run all of CI. A run counts when:
+ * train's run ended): those pushes run all of CI, unless dev has already moved past them (supersededBy). A run counts when:
  * - its head has that tree, and its "CI Success" (not the draft's) passed in its latest attempt;
  * - it ran dev's own ci.yml: its head is a branch of this repository, and every pull request ever opened from that
  *   branch (closed ones too: the batch has closed by the time dev's last push runs, and its run's `pull_requests` is
@@ -143,6 +151,34 @@ export async function testedAs({ sha, tree, repo, api }) {
   return null;
 }
 
+/** How long a push to dev that is still dev's head waits before it asks once more: the train lands a batch's pushes 3 to 6 s apart. */
+export const SETTLE_MS = 15_000;
+
+/**
+ * The CI run of a newer push to dev that holds this one, or null. A batch's first landing starts its run before the next
+ * push arrives, so the `push-dev` concurrency group cannot cancel it, and its tree (dev and the first pull request) is
+ * one no run tested: it would run all of CI for a state dev left seconds later. The run of a newer head waits in the
+ * same group (GitHub keeps the newest waiting one) and tests a tree that holds this commit, so this push need not. It
+ * counts only when dev's head is newer, this commit is below it (`compare` says the head is ahead, not diverged: a force
+ * push counts as no), and CI has a push run for that head. A landing that stopped here leaves dev's head on this commit:
+ * it runs everything. Asked again once after `settle`, for a push whose plan starts before the next one lands.
+ * @param {{ sha: string, api: (path: string) => Promise<any>, settle?: () => Promise<void> }} push
+ * @returns {Promise<string | null>} the newer run's address
+ */
+export async function supersededBy({ sha, api, settle = () => new Promise((r) => setTimeout(r, SETTLE_MS)) }) {
+  const ask = async () => {
+    const head = (await api("branches/dev")).commit?.sha;
+    if (!head || head === sha) return null;
+    if ((await api(`compare/${sha}...${head}`)).status !== "ahead") return null;
+    const { workflow_runs: runs } = await api(`actions/workflows/ci.yml/runs?event=push&branch=dev&head_sha=${head}&per_page=10`);
+    return runs.find((r) => r.head_sha === head && r.path === ".github/workflows/ci.yml")?.html_url ?? null;
+  };
+  const first = await ask();
+  if (first) return first;
+  await settle();
+  return ask();
+}
+
 // A writer's base change, and GitHub's own when the old base branch was deleted (it tried: failed counts too).
 const BASE_CHANGES = new Set(["base_ref_changed", "automatic_base_change_succeeded", "automatic_base_change_failed"]);
 
@@ -162,12 +198,18 @@ async function retargeted(api, pulls) {
 
 /**
  * @param {string[] | null} files  null: the files are not known (a push, a list too long to read): every path gate is on
- * @param {{ draft: boolean, tested?: boolean }} options  tested: a push to dev whose tree a green run already tested
+ * @param {{ draft: boolean, tested?: boolean, superseded?: boolean }} options  tested: a push to dev whose tree a green
+ *   run already tested; superseded: one a newer push's run covers (supersededBy), planned as tested
  */
-export function plan(files, { draft, tested = false }) {
+export function plan(files, { draft, tested = false, superseded = false }) {
   // Only Tauri Backend runs: only a push to dev saves the Cargo cache that pull requests restore.
-  if (tested) {
-    const why = ["This tree already passed CI Success: only Tauri Backend runs, to keep the Cargo cache saved"];
+  if (tested || superseded) {
+    tested = true;
+    const why = [
+      superseded
+        ? "dev already moved past this commit, and the newer head's run tests a tree that holds it: only Tauri Backend runs, to keep the Cargo cache saved"
+        : "This tree already passed CI Success: only Tauri Backend runs, to keep the Cargo cache saved",
+    ];
     return { rust: true, website: false, website_e2e: false, app: false, packages: false, full: false, affected: false, tested, why };
   }
   const why = [];
@@ -204,6 +246,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const tree = process.argv.find((a) => a.startsWith("--tree="))?.slice("--tree=".length);
   let files = null;
   let tested = false;
+  let superseded = false;
   if (tree) {
     const base = `${process.env.GITHUB_API_URL ?? "https://api.github.com"}/repos/${process.env.GITHUB_REPOSITORY}/`;
     const api = async (path) => {
@@ -217,13 +260,21 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       return null;
     });
     if (run) console.log(`::notice::Tested as ${run}`);
-    else console.log("No green pull request run has this tree: everything runs");
     tested = Boolean(run);
+    if (!tested) {
+      const newer = await supersededBy({ sha: process.env.GITHUB_SHA, api }).catch((e) => {
+        console.log(`::notice::Could not read whether dev moved past this commit (${e.message}): everything runs`);
+        return undefined;
+      });
+      if (newer) console.log(`::notice::No green pull request run has this tree, but dev moved past it: ${newer} tests a tree that holds it`);
+      else if (newer === null) console.log("No green pull request run has this tree, and dev has not moved past it: everything runs");
+      superseded = Boolean(newer);
+    }
   } else if (!process.argv.includes("--all")) {
     files = (await new Response(process.stdin).text()).split("\n").filter(Boolean);
     if (!files.length) throw new Error("no changed files on stdin");
   }
-  const { why, ...jobs } = plan(files, { draft, tested });
+  const { why, ...jobs } = plan(files, { draft, tested, superseded });
   for (const line of why) console.log(`::notice::${line}`);
   const lines = Object.entries(jobs).map(([job, run]) => `${job}=${run}`);
   console.log(lines.join("\n"));

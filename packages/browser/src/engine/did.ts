@@ -2,9 +2,9 @@ import {
   bytesEqual, createIdentity, didDhtDocument, didDhtFromPublicKey, encodeDidDhtDeactivated, encodeDidDhtPacket, fromBase64Url, identityFromSeed, PacketTooLargeError,
   signDidDhtPacket, toBase64Url, toZ32, type DidDhtDocument,
 } from "@ghostly/core";
-import { STORES, store, wrap } from "../shared/idb";
+import { STORES, store, wrap, committed } from "../shared/idb";
 import type { ProfileDidView } from "../shared/types";
-import { newDeviceKey, sealSeed, unsealSeed } from "./paymentAdapters/persistence";
+import { openSecret, sealSecret, whenDataKeyDropped } from "./dataKey";
 import type { SealedProofKey } from "./identities";
 
 /**
@@ -38,6 +38,7 @@ export interface ProfileDidHost {
 }
 
 const KEY = "profileDid";
+const SEED_AT = { store: STORES.settings, key: KEY, field: "did.seed" };
 /** Mainline keeps a mutable item about two hours: the same packet goes out again every hour. */
 export const DID_REPUBLISH_MS = 60 * 60_000;
 /** After start, once the chats had their first go at the relays. */
@@ -57,6 +58,7 @@ export class ProfileDid {
   private running = false;
   private inFlight: Promise<void> | null = null;
   private again = false;
+  private unlisten: (() => void) | undefined;
 
   constructor(private host: ProfileDidHost) {}
 
@@ -65,9 +67,8 @@ export class ProfileDid {
     const found = await wrap<StoredProfileDid | undefined>((await store(STORES.settings, "readonly")).get(KEY));
     if (found) { this.stored = found; return; }
     const identity = createIdentity();
-    const deviceKey = newDeviceKey();
     const made: StoredProfileDid = {
-      seed: { sealed: await sealSeed(identity.seedB64, deviceKey), deviceKey },
+      seed: await sealSecret(identity.seedB64, SEED_AT),
       publicKey: toBase64Url(identity.publicKey),
       createdAt: Date.now(),
       listed: [],
@@ -78,6 +79,7 @@ export class ProfileDid {
 
   start(): void {
     this.running = true;
+    this.unlisten ??= whenDataKeyDropped(() => this.forgetSeed());
     this.schedule(FIRST_PUBLISH_MS);
   }
 
@@ -85,6 +87,12 @@ export class ProfileDid {
     this.running = false;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    this.unlisten?.();
+    this.unlisten = undefined;
+    this.forgetSeed();
+  }
+
+  private forgetSeed(): void {
     this.seed?.fill(0);
     this.seed = null;
   }
@@ -192,7 +200,7 @@ export class ProfileDid {
     const previous = this.stored?.published;
     if (!this.stored || !previous) return;
     const seq = Math.max(Math.floor(Date.now() / 1000), previous.seq + 1);
-    const identity = identityFromSeed(fromBase64Url(await unsealSeed(this.stored.seed.sealed, this.stored.seed.deviceKey)));
+    const identity = identityFromSeed(fromBase64Url(await openSecret(this.stored.seed, SEED_AT)));
     await this.host.publish(toZ32(this.publicKey()), signDidDhtPacket(identity, encodeDidDhtDeactivated(this.publicKey()), seq));
   }
 
@@ -229,12 +237,12 @@ export class ProfileDid {
   }
 
   private async unsealed(): Promise<Uint8Array> {
-    this.seed ??= fromBase64Url(await unsealSeed(this.stored!.seed.sealed, this.stored!.seed.deviceKey));
+    this.seed ??= fromBase64Url(await openSecret(this.stored!.seed, SEED_AT));
     return this.seed;
   }
 
   private async save(next: StoredProfileDid): Promise<void> {
-    await wrap((await store(STORES.settings, "readwrite")).put(next, KEY));
+    await committed((await store(STORES.settings, "readwrite")).put(next, KEY));
     this.stored = next;
   }
 }

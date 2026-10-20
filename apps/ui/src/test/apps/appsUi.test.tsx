@@ -2,7 +2,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { appCardId, statusCardText, type AppCard } from "@ghostly/core";
-import type { AppPreview, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
+import type { AppPreview, AppStorePreview, AppStoreSummary, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import type { LinkView } from "@ghostly/browser/shared/types";
 import { MessageBubble } from "../../components/MessageBubble";
 import { MessageInput } from "../../components/MessageInput";
@@ -20,6 +20,7 @@ import { appsAvailable, forgetAppsAvailable, webKitAppLeak } from "../../lib/app
 import { forgetInstalledApps } from "../../lib/apps/installed";
 import type { ChatMessage } from "../../lib/types";
 import { fakeEngine, linkView } from "../fakeEngine";
+import { shownInName } from "../labelInName";
 import { renderApp } from "../render";
 
 // covers: apps.page, apps.chat.card, apps.built-in
@@ -48,6 +49,8 @@ const preview = (patch: Partial<AppPreview> = {}): AppPreview => ({
     entry: "index.html", permissions: ["chat"], runtime: { host: ">=1.2", clients: ["web", "desktop"] }, license: "MIT", files: [] },
   ...patch,
 });
+/** An installed app's row: named with its title, version and line as it shows them, then "details". */
+const detailsOf = (title: string) => new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} .*: details$`);
 
 const cardMessage = (patch: Partial<ChatMessage> = {}): ChatMessage =>
   ({ id: "m1", text: statusCardText(CARD), card: CARD, sender: "peer", timestamp: 1_700_000_000_000, ...patch });
@@ -289,6 +292,18 @@ describe("with the apps flag on", () => {
     expect(fetches).toEqual([]);
   });
 
+  it("names a contact with no name as the chat does, not Anonymous, on the card and its install screen", async () => {
+    fakeEngine.on("appList", () => []).on("appPreview", () => preview());
+    // The chat of a contact with no name passes none (Chat.tsx), and calls them "Contact · <the start of their key>".
+    const { user } = renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" peerNick="" contactName="" linkId="link-1" />);
+    act(() => fakeEngine.update({ links: [ana(true)] }));
+    const card = await screen.findByTestId("app-card");
+    expect(card).toHaveTextContent("Contact · peer opened it here");
+    expect(card).not.toHaveTextContent("Anonymous");
+    await user.click(within(card).getByTestId("app-card-install"));
+    expect(await within(await screen.findByTestId("app-install")).findByTestId("app-sent-by")).toHaveTextContent("Sent by Contact · peer");
+  });
+
   it("says the app needs you both online while the contact is not live, and Open once installed", async () => {
     fakeEngine.on("appList", () => [installed()]);
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
@@ -453,6 +468,53 @@ describe("with the apps flag on", () => {
     expect(asked).toEqual([{ url: "http://example.com/github.com/app.ghostlyapp" }]);
   });
 
+  it("Enter in the field while Check runs reads the link once: the busy Check takes no second press", async () => {
+    const asked: unknown[] = [];
+    fakeEngine.on("appPreview", (params) => { asked.push(params); return new Promise<AppPreview>(() => {}); });
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    await user.type(screen.getByTestId("apps-add-url"), "https://github.com/ana/chess{Enter}");
+    await waitFor(() => expect(screen.getByTestId("apps-add-check")).toHaveAttribute("aria-busy", "true"));
+    await user.type(screen.getByTestId("apps-add-url"), "{Enter}");
+    await user.click(screen.getByTestId("apps-add-check"));
+    expect(asked).toEqual([{ url: "https://github.com/ana/chess" }]);
+  });
+
+  it("a link edited while Check runs drops the old link's answer: no store or app of it shows, and Add store adds the new one", async () => {
+    const OLD = "https://raw.githubusercontent.com/ana/old/HEAD/ghostly-store.json";
+    const NEW = "https://raw.githubusercontent.com/ana/new/HEAD/ghostly-store.json";
+    const answers = new Map<string, (found: AppStorePreview) => void>();
+    let answerApp!: (found: AppPreview) => void;
+    const added: unknown[] = [];
+    fakeEngine.on("appStorePreview", ({ url }) => new Promise((resolve) => answers.set(url, resolve)))
+      .on("appStoreAdd", (params) => { added.push(params); return {} as AppStoreSummary; })
+      .on("appPreview", () => new Promise((resolve) => { answerApp = resolve; }));
+    const store = (url: string, name: string): AppStorePreview => ({ url, key: name, name, kind: "curated", sequence: 1, apps: 1, fingerprint: "abcd efgh", expires: 9e9, expired: false });
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    const field = screen.getByTestId("apps-add-url");
+    await user.type(field, OLD);
+    await user.click(screen.getByTestId("apps-add-check"));
+    // The person fixes the link before the old one answers.
+    await user.clear(field);
+    await user.type(field, NEW);
+    await act(async () => answers.get(OLD)!(store(OLD, "Old store")));
+    expect(screen.queryByTestId("apps-add-store")).not.toBeInTheDocument();
+    expect(screen.getByTestId("apps-add-check")).toHaveTextContent("Check");
+
+    await user.click(screen.getByTestId("apps-add-check"));
+    await act(async () => answers.get(NEW)!(store(NEW, "New store")));
+    expect(await screen.findByTestId("apps-add-store")).toHaveTextContent("New store");
+    await user.click(screen.getByTestId("apps-add-store-confirm"));
+    expect(added).toEqual([{ url: NEW, key: "New store" }]);
+
+    // An app link edited while it is read: its install screen does not open for the link the field no longer holds.
+    await user.clear(field);
+    await user.type(field, "https://github.com/ana/chess");
+    await user.click(screen.getByTestId("apps-add-check"));
+    await user.type(field, "-two");
+    await act(async () => answerApp(preview()));
+    expect(screen.queryByTestId("app-install")).not.toBeInTheDocument();
+  });
+
   it("words that are no link get the dialog's own error, not the browser's validation bubble", async () => {
     const asked: unknown[] = [];
     const refuse = (params: unknown) => { asked.push(params); throw new Error("host: Apps are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS"); };
@@ -539,7 +601,9 @@ describe("with the apps flag on", () => {
     const refresh = await screen.findByTestId("app-store-refresh");
     await user.click(refresh);
     expect(refresh).toHaveAttribute("aria-busy", "true");
-    expect(refresh).toBeDisabled();
+    expect(refresh).toHaveAttribute("aria-disabled", "true");
+    await user.click(refresh);
+    expect(fakeEngine.callsTo("appStoreRefresh")).toHaveLength(1);
     expect(within(refresh).getByTestId("button-spinner")).toBeInTheDocument();
     expect(refresh).toHaveTextContent("Refresh");
     await act(async () => { finish(); });
@@ -571,7 +635,7 @@ describe("with the apps flag on", () => {
     expect(screen.getByTestId("app-store")).toHaveTextContent("Ghostly");
     expect(screen.getByTestId("app-store")).toHaveTextContent("Curated");
     expect(appCalls()).toContain("appCheckUpdates");
-    await user.click(within(row).getByRole("button", { name: "Chess: details" }));
+    await user.click(within(row).getByRole("button", { name: detailsOf("Chess") }));
     expect(screen.getByTestId("app-store-line")).toHaveTextContent("In Ghostly");
     await user.click(screen.getByTestId("app-uninstall-open"));
     expect(screen.getByTestId("app-uninstall")).toHaveTextContent("Export the data first");
@@ -585,12 +649,20 @@ describe("with the apps flag on", () => {
     expect(fetches).toEqual([]);
   });
 
-  it("an installed app's row is named for its details and describes its version and line, so a stopped app says so to a screen reader", async () => {
+  it("an installed app's row is named with all it shows, then details, so a stopped app says so to a screen reader", async () => {
     const run = { status: "removed" as const, by: [{ store: "s", name: "Ghostly", reason: "Malware", at: 1 }] };
     fakeEngine.on("appList", () => [installed({ run })]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
     renderApp(<Apps />, { route: "/apps" });
-    const details = within(await screen.findByTestId("installed-app")).getByRole("button", { name: "Chess: details" });
-    expect(details).toHaveAccessibleDescription("1.2.0 Stopped");
+    const details = within(await screen.findByTestId("installed-app")).getByRole("button", { name: "Chess 1.2.0 Stopped: details" });
+    expect(details).toHaveAccessibleName(shownInName(details));
+  });
+
+  it("an installed app's row holds its title, version and line in its name, in the order it shows them (Label in Name)", async () => {
+    fakeEngine.on("appList", () => [installed()]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
+    renderApp(<Apps />, { route: "/apps" });
+    const details = within(await screen.findByTestId("installed-app")).getByRole("button", { name: /^Chess 1\.2\.0 / });
+    expect(details).toHaveAccessibleName("Chess 1.2.0 Unknown publisher · Play chess with a contact: details");
+    expect(details).toHaveAccessibleName(shownInName(details));
   });
 
   it("the focus goes to Add once an uninstalled app's row or a removed store's block is gone, not lost on the page", async () => {
@@ -600,7 +672,7 @@ describe("with the apps flag on", () => {
     fakeEngine.on("appList", () => apps).on("appStoreList", () => stores).on("appCheckUpdates", () => [])
       .on("appUninstall", () => { apps = []; return undefined; }).on("appStoreRemove", () => { stores = []; return undefined; });
     const { user } = renderApp(<Apps />, { route: "/apps" });
-    await user.click(within(await screen.findByTestId("installed-app")).getByRole("button", { name: "Chess: details" }));
+    await user.click(within(await screen.findByTestId("installed-app")).getByRole("button", { name: detailsOf("Chess") }));
     await user.click(screen.getByTestId("app-uninstall-open"));
     await user.click(screen.getByTestId("app-uninstall-confirm"));
     await waitFor(() => expect(screen.queryByTestId("installed-app")).not.toBeInTheDocument());
@@ -649,11 +721,41 @@ describe("with the apps flag on", () => {
     expect(screen.getByText("Ghostly")).toHaveAttribute("dir", "auto");
     expect(screen.getByText("Snake")).toHaveAttribute("dir", "auto");
     expect(screen.getByText("Eat, grow.")).toHaveAttribute("dir", "auto");
-    await user.click(within(row).getByRole("button", { name: `${title}: details` }));
+    await user.click(within(row).getByRole("button", { name: detailsOf(title) }));
     const details = screen.getByTestId("app-details");
     expect(within(details).getByRole("heading", { name: title })).toHaveAttribute("dir", "auto");
     expect(within(details).getByText("Play chess with a contact")).toHaveAttribute("dir", "auto");
     expect(within(details).getByText("Chess for two.")).toHaveAttribute("dir", "auto");
+  });
+
+  it("breaks a publisher's or a store's word with no space anywhere, so on a phone it pushes no screen sideways (nor cuts it off in Arabic)", async () => {
+    // 80 characters, a tagline's limit, with nowhere to break: a link, a German compound, a name in Latin letters.
+    const long = `https://example.com/${"a".repeat(60)}`;
+    const wraps = (el: HTMLElement) => expect(el.className).toContain("[overflow-wrap:anywhere]");
+    fakeEngine.on("appPreview", () => preview({ manifest: { ...preview().manifest, tagline: long, description: `${long}2` } }));
+    const install = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
+    const sheet = await screen.findByTestId("app-install");
+    await within(sheet).findByText(long);
+    wraps(within(sheet).getByText(long));
+    wraps(within(sheet).getByText(`${long}2`));
+    install.unmount();
+
+    const app = installed({ title: long, tagline: `${long}3`, description: `${long}4` });
+    const details = renderApp(<InstalledAppDialog app={app} onClose={() => {}} onOpen={() => {}} />);
+    wraps(within(screen.getByTestId("app-details")).getByText(`${long}3`));
+    wraps(within(screen.getByTestId("app-details")).getByText(`${long}4`));
+    await details.user.click(screen.getByTestId("app-uninstall-open"));
+    wraps(within(screen.getByTestId("app-uninstall")).getByRole("heading"));
+    details.unmount();
+
+    fakeEngine.on("appStorePreview", () => ({ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json",
+      name: `${long}5`, description: `${long}6`, kind: "curated", sequence: 1, expires: 2_000_000_000, expired: false, apps: 1 }));
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    await user.type(screen.getByTestId("apps-add-url"), "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json");
+    await user.click(screen.getByTestId("apps-add-check"));
+    const store = await screen.findByTestId("apps-add-store");
+    wraps(within(store).getByText(`${long}5`));
+    wraps(within(store).getByText(`${long}6`));
   });
 
   it("a store's apps show without a tap when it is the only store or lists a few; a long list beside others waits behind its name, which says it opens", async () => {
@@ -750,6 +852,32 @@ describe("with the apps flag on", () => {
     fakeEngine.on("appList", () => []);
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
     expect(await screen.findByTestId("app-card-title")).toHaveAttribute("dir", "auto");
+  });
+
+  // A title may have 40 characters: cut as one text with the version, a phone showed no version at all.
+  const LONG = "Schachweltmeisterschaftsvorbereitungsapp";
+  const BETA = "1.2.0-beta.12";
+
+  it("a card with a long title cuts the title alone and keeps the version whole after it", async () => {
+    fakeEngine.on("appList", () => []);
+    const card: AppCard = { ...CARD, title: LONG, version: BETA };
+    renderApp(<MessageBubble message={cardMessage({ card, text: statusCardText(card) })} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    const title = await screen.findByTestId("app-card-title");
+    expect(title).toHaveTextContent(`${LONG} ${BETA}`);
+    expect(within(title).getByText(LONG)).toHaveClass("truncate", "min-w-0");
+    expect(within(title).getByText(BETA)).toHaveClass("shrink-0", "whitespace-nowrap");
+    expect(within(title).getByText(LONG)).not.toContainElement(within(title).getByText(BETA));
+  });
+
+  it("an installed app with a long title cuts the title alone in its row and keeps the version whole after it", async () => {
+    fakeEngine.on("appList", () => [installed({ title: LONG, version: BETA })]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
+    renderApp(<Apps />, { route: "/apps" });
+    const row = await screen.findByTestId("installed-app");
+    expect(within(row).getByText(LONG)).toHaveClass("truncate", "min-w-0");
+    expect(within(row).getByText(BETA)).toHaveClass("shrink-0", "whitespace-nowrap");
+    expect(within(row).getByText(LONG)).not.toContainElement(within(row).getByText(BETA));
+    // The version stays in the details button's name, right after the title, as the row shows it.
+    expect(within(row).getByRole("button", { name: detailsOf(`${LONG} ${BETA}`) })).toBeInTheDocument();
   });
 });
 
@@ -858,7 +986,7 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     const row = await screen.findByTestId("installed-app");
     expect(within(row).getByTestId("installed-app-hint")).toHaveTextContent(/^Play chess with a contact$/);
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    await user.click(within(row).getByRole("button", { name: "Chess: details" }));
+    await user.click(within(row).getByRole("button", { name: detailsOf("Chess") }));
     const details = await screen.findByTestId("app-details");
     expect(within(details).getByTestId("app-publisher-name")).toHaveTextContent("Publisher");
     expect(within(details).getByTestId("app-store-line")).toHaveTextContent("Comes with Ghostly");
@@ -873,7 +1001,7 @@ describe("an app that comes with Ghostly (WISP 1200 § Built-in apps)", () => {
     expect(within(row).getByTestId("installed-app-hint")).toHaveTextContent("Unknown publisher · Play chess with a contact");
     // The tagline reads in its own direction, apart from Ghostly's words.
     expect(within(row).getByText("Play chess with a contact")).toHaveAttribute("dir", "auto");
-    await user.click(within(row).getByRole("button", { name: "Chess: details" }));
+    await user.click(within(row).getByRole("button", { name: detailsOf("Chess") }));
     const details = await screen.findByTestId("app-details");
     expect(within(details).getByTestId("app-publisher-name")).toHaveTextContent("Unknown publisher");
     expect(within(details).getByTestId("app-store-line")).toHaveTextContent("Not in any of your stores");

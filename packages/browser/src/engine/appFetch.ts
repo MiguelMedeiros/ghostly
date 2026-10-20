@@ -49,12 +49,15 @@ export class AppFetchError extends Error {
 /**
  * Reads a URL of the list: its bytes, at most `maxBytes`. With `peek`, the first `maxBytes` bytes and no more, the rest
  * left unread (a bundle's manifest, to see whether it is newer before reading all of it). `signal` stops a read whose
- * bytes nobody will use any more (`network`).
+ * bytes nobody will use any more (`network`). `revalidate`: a file every update check reads again (a store's index and
+ * its sig, `ghostly-revoke.json`), kept by the browser and asked again with its ETag every time, so an unchanged one is
+ * an empty 304 and never a copy the host was not asked about. Anything else is not kept by the browser (a bundle is
+ * kept in file storage, a peek is a range).
  */
-export type AppFetcher = (url: string, options: { maxBytes: number; peek?: boolean; signal?: AbortSignal }) => Promise<Uint8Array>;
+export type AppFetcher = (url: string, options: { maxBytes: number; peek?: boolean; revalidate?: boolean; signal?: AbortSignal }) => Promise<Uint8Array>;
 
 export function boundedAppFetch(options: { fetcher?: typeof fetch; online?: () => boolean; timeoutMs?: number; idleMs?: number; totalMs?: number } = {}): AppFetcher {
-  return async (url, { maxBytes, peek = false, signal: stopped }) => {
+  return async (url, { maxBytes, peek = false, revalidate = false, signal: stopped }) => {
     if (!isAppFetchUrl(url)) throw new AppFetchError("host", "Apps are read only from raw.githubusercontent.com, or from cdn.jsdelivr.net at a commit, over HTTPS");
     if (options.online && !options.online()) throw new AppFetchError("offline", "Offline");
     if (stopped?.aborted) throw new AppFetchError("network", "The read was stopped");
@@ -76,7 +79,7 @@ export function boundedAppFetch(options: { fetcher?: typeof fetch; online?: () =
     try {
       response = await fetcher(url, {
         signal,
-        credentials: "omit", referrerPolicy: "no-referrer", cache: "no-store", redirect: "error",
+        credentials: "omit", referrerPolicy: "no-referrer", cache: revalidate && !peek ? "no-cache" : "no-store", redirect: "error",
         ...(peek && { headers: { range: `bytes=0-${maxBytes - 1}` } }),
       });
     } catch (error) {

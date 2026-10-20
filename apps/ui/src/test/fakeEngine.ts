@@ -1,6 +1,6 @@
 import { setBrowserHost, type BrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { EngineApi, EngineEvent, EngineMethod, RpcRequest, RpcResponse } from "@ghostly/browser/shared/rpc";
+import type { ClientMessage, EngineApi, EngineEvent, EngineMethod, RpcRequest, RpcResponse } from "@ghostly/browser/shared/rpc";
 import type { EngineState, GroupView, LinkView, NetworkWalletsView, PaymentView, StoredMessage, WalletOffer, WalletView } from "@ghostly/browser/shared/types";
 import { WALLET_TYPES } from "@ghostly/browser/shared/types";
 import { walletInstances } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
@@ -149,6 +149,8 @@ export class FakeEngine implements BrowserHost {
   state: EngineState = engineState();
   /** Every request, in order. */
   readonly calls: { method: EngineMethod; params: unknown }[] = [];
+  /** The chats whose whole history a page asked for (`HistoryRequest`), in order. */
+  readonly historyAsks: string[] = [];
   openPaymentLink?: BrowserHost["openPaymentLink"];
   /** The desktop host's window full screen (Linux), when a test gives one. */
   fullscreenWindow?: BrowserHost["fullscreenWindow"];
@@ -171,7 +173,23 @@ export class FakeEngine implements BrowserHost {
   async connect(onMessage: (message: EngineEvent | RpcResponse) => void) {
     this.send = onMessage;
     onMessage({ kind: "state", state: this.state });
-    return { send: (request: RpcRequest) => this.handle(request) };
+    return { send: (request: ClientMessage) => (request.kind === "history" ? this.history(request.linkId) : this.handle(request)) };
+  }
+
+  /** A page asks for a history: recorded; a group's is answered as the peer does, from the `groupMessages` handler. */
+  private history(linkId: string): void {
+    this.historyAsks.push(linkId);
+    if (!linkId.startsWith("group:")) return;
+    // Looked up when it runs, as a call's handler is: a test may set it right after the page asked.
+    queueMicrotask(async () => {
+      const handler = this.handlers.get("groupMessages") as Handler<"groupMessages"> | undefined;
+      if (!handler) return;
+      try {
+        this.messages(linkId, await handler({ groupId: linkId.slice("group:".length) }));
+      } catch {
+        // The peer sends nothing for a history it could not read.
+      }
+    });
   }
 
   requestLocalAccess = async () => false;
@@ -203,12 +221,20 @@ export class FakeEngine implements BrowserHost {
     this.send?.(event);
   }
 
-  messages(linkId: string, messages: StoredMessage[]): void {
-    this.emit({ kind: "messages", linkId, messages });
+  messages(linkId: string, messages: StoredMessage[], deleted?: string[]): void {
+    this.emit({ kind: "messages", linkId, messages, ...(deleted && { deleted }) });
+  }
+
+  /** A chat's newest page only, as the peer sends it to a page attached with `newest`: older rows left out. */
+  newestPage(linkId: string, messages: StoredMessage[]): void {
+    this.emit({ kind: "messages", linkId, messages, more: true });
   }
 
   reset(): void {
+    // Each test is a page of its own: it holds none of the histories the last one was sent.
+    engine.forgetHistories();
     this.calls.length = 0;
+    this.historyAsks.length = 0;
     this.handlers.clear();
     this.openPaymentLink = undefined;
     this.fullscreenWindow = undefined;

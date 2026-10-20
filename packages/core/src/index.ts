@@ -48,6 +48,7 @@ export * from "./pairedCapabilities";
 export * from "./pairedCalls";
 export * from "./pairedTyping";
 export * from "./pairedApps";
+export * from "./pairedAppRanges";
 export * from "./webPush";
 export * from "./pairedWake";
 export * from "./pairedEdits";

@@ -6,7 +6,7 @@ import {
   type AppStoreRead,
   type AppStoreView, type AppViewMode, type AppVersion, type JsonValue, type SignedAppRevocation,
 } from "@ghostly/core";
-import { APP_STORAGE_SCOPE_INDEX, STORES, openDb, store, wrap } from "../shared/idb";
+import { APP_STORAGE_SCOPE_INDEX, STORES, openDb, store, wrap, committed } from "../shared/idb";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf, fileSpace, type FileBytes, type FileBytesKind } from "../shared/fileBytes";
 import { APP_FETCH_LIMITS, AppFetchError, appPasteUrl, besideUrl, isAppFetchUrl, isGitHubPage, type AppFetcher } from "./appFetch";
 import { BUILT_IN_APPS, DEFAULT_APP_STORES, type BuiltInApp } from "./appDefaults";
@@ -85,6 +85,8 @@ const STAGED = { max: 4, ms: 10 * 60 * 1000 } as const;
 const BUNDLES_KEPT = { min: 2, ms: 60 * 1000 } as const;
 /** The first bytes of a bundle: magic, the manifest's length and the largest manifest. */
 const PEEK_BYTES = APP_BUNDLE_MAGIC.length + 4 + APP_BUNDLE_LIMITS.manifestBytes;
+/** What a peek reads first: the magic, the length and any usual manifest (about 1 KiB). A longer one is read to its end after. */
+const PEEK_FIRST_BYTES = 4 * 1024;
 
 const bundleId = (digest: string) => `app-${digest}`;
 
@@ -417,6 +419,14 @@ export function peekAppManifest(bytes: Uint8Array): { ref: string; sequence: num
   } catch { return null; }
 }
 
+/** Where a bundle's manifest ends, from its first bytes, or null when they are not a bundle's or name a manifest too long. */
+function peekManifestEnd(bytes: Uint8Array): number | null {
+  const magic = utf8Encode(APP_BUNDLE_MAGIC);
+  if (bytes.length < magic.length + 4 || !magic.every((b, i) => bytes[i] === b)) return null;
+  const end = magic.length + 4 + new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(magic.length);
+  return end <= PEEK_BYTES ? end : null;
+}
+
 export class Apps {
   private readonly staged = new Map<string, Staged>();
   /** Bundles read back and checked, by digest, least recently used first (`BUNDLES_KEPT`): the ones running are read once, not on every `file`. */
@@ -644,7 +654,7 @@ export class Apps {
     if (app) await this.stillRunnable(app, digest);
   }
   private async putApp(app: InstalledApp): Promise<void> {
-    try { await wrap((await store(STORES.apps, "readwrite")).put(app)); } finally { this.held.delete(app.ref); }
+    try { await committed((await store(STORES.apps, "readwrite")).put(app)); } finally { this.held.delete(app.ref); }
   }
   /**
    * Writes an app's record back only while that install is still there (the same `installedAt`), read and written in
@@ -678,7 +688,7 @@ export class Apps {
   private async writeStores(write: (records: IDBObjectStore) => IDBRequest, apply: (held: Map<string, AddedAppStore>) => void): Promise<void> {
     const before = this.records();
     const written = before.then(async (held) => {
-      await wrap(write(await store(STORES.appStores, "readwrite")));
+      await committed(write(await store(STORES.appStores, "readwrite")));
       apply(held);
       this.views = null;
     });
@@ -841,6 +851,18 @@ export class Apps {
   }
 
   /**
+   * The manifest at the start of the bundle at `url`, unchecked (`peekAppManifest`): its first `PEEK_FIRST_BYTES`, and
+   * only for a longer manifest a second read from the start to exactly its end (from the start: one file's bytes, even
+   * when it changed between the two).
+   */
+  private async peekAt(url: string): Promise<ReturnType<typeof peekAppManifest>> {
+    const first = await this.host.fetch(url, { maxBytes: PEEK_FIRST_BYTES, peek: true });
+    const end = peekManifestEnd(first);
+    if (end === null || end <= first.length || first.length < PEEK_FIRST_BYTES) return peekAppManifest(first);
+    return peekAppManifest(await this.host.fetch(url, { maxBytes: end, peek: true }));
+  }
+
+  /**
    * Reads the index at `url`. With the index held for this store, bytes equal to it (by digest) are the held index: its
    * signature and every revocation in it were checked when it was read, so only its expiry is taken again. Any other
    * index is read with a pause every few ms (the engine shares the page's thread, and an index holds up to 4096
@@ -850,7 +872,7 @@ export class Apps {
   private async readStoreAt(url: string, heldKey?: string, held?: Pick<AddedAppStore, "index" | "digest">): Promise<AppStoreRead> {
     // Read side by side; the first of the two that fails stops the other, whose bytes nobody would use.
     const stop = new AbortController();
-    const read = (at: string, maxBytes: number) => this.host.fetch(at, { maxBytes, signal: stop.signal }).catch((error: unknown) => { stop.abort(); throw error; });
+    const read = (at: string, maxBytes: number) => this.host.fetch(at, { maxBytes, revalidate: true, signal: stop.signal }).catch((error: unknown) => { stop.abort(); throw error; });
     const [indexBytes, sigBytes] = await Promise.all([
       read(url, APP_FETCH_LIMITS.storeIndexBytes),
       read(besideUrl(url, "ghostly-store.sig"), APP_FETCH_LIMITS.sigBytes),
@@ -877,7 +899,7 @@ export class Apps {
       if (read.has(url)) continue;
       read.add(url);
       try {
-        const file = await this.readRevocationsFile(await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes }));
+        const file = await this.readRevocationsFile(await this.host.fetch(url, { maxBytes: APP_FETCH_LIMITS.revocationsBytes, revalidate: true }));
         if (file) (out ??= []).push(...file.filter((r) => r.statement.app === ref));
       } catch { /* not published there, or not reachable now */ }
     }
@@ -1297,7 +1319,7 @@ export class Apps {
         for (const url of (app.manifest.sources ?? []).filter(isAppFetchUrl)) {
           if (candidates.has(url)) continue;
           try {
-            const peek = peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true }));
+            const peek = await this.peekAt(url);
             if (peek && newer(peek)) candidates.set(url, { holds: peek });
           } catch { /* this source does not answer now */ }
         }
@@ -1313,7 +1335,7 @@ export class Apps {
         let holds = want.holds;
         if (want.peek) {
           let peek: ReturnType<typeof peekAppManifest>;
-          try { peek = peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true })); } catch { continue; }
+          try { peek = await this.peekAt(url); } catch { continue; }
           if (!peek || !newer(peek) || (want.digest !== undefined && peek.digest !== want.digest)) {
             if (want.miss) this.listingMisses.set(...want.miss);
             continue;
@@ -1419,7 +1441,7 @@ export class Apps {
     for (const url of new Set(urls.filter(isAppFetchUrl))) {
       // Peeked first, as the update check does: a URL that holds another version (its publisher moved on, a repository's
       // HEAD) is not read whole only to be skipped, at every open and every check.
-      try { if (peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true }))?.digest !== app.digest) continue; } catch { continue; }
+      try { if ((await this.peekAt(url))?.digest !== app.digest) continue; } catch { continue; }
       let fetched: { bundle: AppBundle; bytes: Uint8Array };
       try { fetched = await this.fetchBundle(url); } catch { continue; }
       if (fetched.bundle.digest !== app.digest) continue;
@@ -1650,7 +1672,7 @@ export class Apps {
         fail("not-installed", "This app is not installed");
       }
       writing.put({ ref: app.ref, scope: where, key: name, value: text, size } satisfies AppStorageRow);
-      await wrap(writing.put(counterRow(app.ref, where, next)));
+      await committed(writing.put(counterRow(app.ref, where, next)));
       this.usage.set(`${app.ref}\0${where}`, next);
     });
   }
@@ -1665,7 +1687,7 @@ export class Apps {
       const next = plus(used, countOf(old, -1));
       const writing = await store(STORES.appStorage, "readwrite");
       writing.delete([app.ref, where, name]);
-      await (next.rows ? wrap(writing.put(counterRow(app.ref, where, next))) : wrap(writing.delete([app.ref, where, COUNT_KEY])));
+      await (next.rows ? committed(writing.put(counterRow(app.ref, where, next))) : committed(writing.delete([app.ref, where, COUNT_KEY])));
       this.usage.set(`${app.ref}\0${where}`, next);
     });
   }

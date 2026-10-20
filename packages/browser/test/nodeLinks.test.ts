@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { LIMITS, createIdentity, dhtFileId, type FileSink, type GhostLinkOptions } from "@ghostly/core";
-import { GROUP_IROH_WEB_SLOTS, GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS, type NodeOptions } from "../src/engine/node";
+import { GROUP_ANCHOR_ANSWER_MS, GROUP_IROH_WEB_SLOTS, GROUP_NATIVE_SLOTS, GhostlyNode, NATIVE_HOLD_MS, RESUME_SPENT_MS, type NodeOptions } from "../src/engine/node";
 import { db } from "../src/engine/db";
 import { setJoinTraceSink } from "../src/engine/joinTrace";
 import { EditQueue } from "../src/engine/edits";
@@ -593,12 +593,241 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
         node.setActiveLink({ linkId: null });
       });
 
+      it("on a network that blocks direct connections (a VPN), a chat whose contact has WebRTC takes one too: WebRTC is no way there", async () => {
+        // An app behind a VPN that drops UDP, its eight listeners held by contacts with no WebRTC: the chat with a contact
+        // that has WebRTC (a CLI) went down with the VPN and had nothing else to go live on, for as long as the VPN was on.
+        vi.stubGlobal("RTCPeerConnection", class {});
+        onTestFinished(() => { vi.unstubAllGlobals(); });
+        const record = (transports: string[]) => ({ rev: 1, issued: Date.now(), author: createIdentity().pubKeyZ32, versions: [1], transports,
+          capabilities: [], extensions: [], descriptors: {}, name: "" });
+        const { node, holders, nine } = await allLive([10, 9, 8, 7, 6, 5, 4, 3], { capsState: { rev: 1, peer: record(["iroh/1", "webrtc/1"]) } });
+        // This device's own WebRTC attempts gathered no public candidate: no STUN server answers through the VPN.
+        const directPath = node["directPath"] as { note(peer: string, evidence: string): void; blocked: boolean };
+        directPath.note(createIdentity().pubKeyZ32, "no-public");
+        directPath.note(createIdentity().pubKeyZ32, "no-public");
+        expect(directPath.blocked).toBe(true);
+        await nine.options.events.onMessage({ id: "dht-1", text: "are you there?", timestamp: Date.now(), via: "pkarr" });
+        await node["nativeQueue"];
+        expect(nine.registerEndpoint).toHaveBeenCalled();
+        expect(yielded(holders)).toEqual([holders[0]]);
+      });
+
       it("a text over the DHT in a chat not on screen takes one too: a bot has no chat on screen", async () => {
         const { node, holders, nine } = await allLive([3, 4, 5, 6, 7, 8, 9, 10]);
         await nine.options.events.onMessage({ id: "dht-1", text: "are you there?", timestamp: Date.now(), via: "pkarr" });
         await node["nativeQueue"];
         expect(nine.registerEndpoint).toHaveBeenCalled();
         expect(yielded(holders)).toEqual([holders[7]]);
+      });
+
+      describe("groups take listeners least recently used first, as chats do (WISP 902 § Transports)", () => {
+        /** A group's edges toward these many members, each reached only natively (an app with no WebRTC, or a VPN). */
+        async function groupOf(node: GhostlyNode, members: number, options: { hub?: number; used?: boolean } = {}) {
+          const { groupId } = await node.createGroup({ name: "Plaza" });
+          const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+          const keys = Array.from({ length: members }, () => createIdentity().pubKeyZ32);
+          // A member the group's beacon names as a hub.
+          if (options.hub !== undefined) {
+            const groups = node["groups"] as { view(id: string): { id: string; members: unknown[] } | undefined };
+            const view = groups.view.bind(groups);
+            vi.spyOn(groups, "view").mockImplementation((id) => { const g = view(id); return !g || g.id !== groupId ? g
+              : { ...g, members: [...g.members, { key: keys[options.hub!], role: "member", me: false, online: false, missing: 0, hub: true }] }; });
+          }
+          // A text in it a moment ago: it was in use more lately than the chats, each quiet for minutes.
+          if (options.used) expect((await node.sendGroupMessage({ groupId, text: "hi" })).error).toBeNull();
+          const edgeIds: string[] = [];
+          for (const key of keys) edgeIds.push(await openEdge(node, state, key));
+          await node["nativeQueues"].get("iroh/1");
+          return { groupId, edgeIds };
+        }
+
+        it("a group opened takes listeners for its edges from the chats unused longest, with every listener held by a chat", async () => {
+          // A Mac on a VPN (2026-10-18): eight chats held the eight listeners, and no group edge ever got one: "0 of 2 reachable".
+          const { node, linkOf, holders } = await allLive([4, 12, 3, 9, 5, 2.5, 6, 3]);
+          const { groupId, edgeIds } = await groupOf(node, 3);
+          const onIroh = () => edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
+          node.setActiveLink({ linkId: `group:${groupId}` });
+          await vi.waitFor(() => expect(onIroh()).toHaveLength(3));
+          expect(new Set(yielded(holders))).toEqual(new Set([holders[1], holders[3], holders[6]]));
+          node.setActiveLink({ linkId: null });
+        });
+
+        it("a group not on screen keeps one edge, to its hub; opened, it takes more as chats unused for two minutes let theirs go", async () => {
+          const { node, linkOf, holders } = await allLive([10, 9, 8, 7, 6, 1, 1, 1]);
+          const { groupId, edgeIds } = await groupOf(node, 10, { hub: 4, used: true });
+          const onIroh = () => edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
+          await vi.waitFor(() => expect(onIroh()).toEqual([edgeIds[4]]));
+          expect(yielded(holders)).toEqual([holders[0]]);
+          const waiting = () => edgeIds.filter((id) => (node["edgeView"](groupId, linkOf(id).options.params.groupPeer!) as GroupEdgeView | undefined)?.noSlot);
+          expect(waiting()).toHaveLength(9);
+          // Opened: four more, from the chats quiet longest; the three used a minute ago keep theirs.
+          node.setActiveLink({ linkId: `group:${groupId}` });
+          await vi.waitFor(() => expect(onIroh()).toHaveLength(5));
+          await node["nativeQueues"].get("iroh/1");
+          expect(new Set(yielded(holders))).toEqual(new Set(holders.slice(0, 5)));
+          expect(onIroh()).toContain(edgeIds[4]);
+          node.setActiveLink({ linkId: null });
+        });
+
+        it("a group not on screen keeps the edge to the member seen last when it has no hub", async () => {
+          const { node, linkOf } = await allLive([10, 9, 8, 7, 6, 1, 1, 1]);
+          const { groupId } = await node.createGroup({ name: "Plaza" });
+          expect((await node.sendGroupMessage({ groupId, text: "hi" })).error).toBeNull();
+          const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+          // Two edges whose members were heard from before any listener was free, the second one later.
+          vi.spyOn(node["groups"], "tick").mockResolvedValue();
+          const [early, late] = [createIdentity().pubKeyZ32, createIdentity().pubKeyZ32];
+          const made = [early, late].map((key) => node["openEdge"](state as never, key));
+          const edgeIds = await Promise.all(made);
+          await node["nativeQueues"].get("iroh/1");
+          const onIroh = () => edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
+          // Whichever took the floor first, the member seen last ends up holding it.
+          const now = Date.now();
+          node["links"].get(edgeIds[0])!.lastSyncAt = now - 60_000;
+          node["links"].get(edgeIds[1])!.lastSyncAt = now - 1_000;
+          for (const id of edgeIds) linkOf(id).availableTransports = ["webrtc/1"];
+          node["groupNativeRetryAt"] = 0;
+          for (const id of edgeIds) node["groupNativeWaiting"].add(id);
+          node["retryNative"]();
+          await vi.waitFor(() => expect(onIroh()).toEqual([edgeIds[1]]));
+        });
+
+        it("no thrash: a chat and a group both used within two minutes do not take each other's listener", async () => {
+          const { node, linkOf, holders } = await allLive([10, 1, 1, 1, 1, 1, 1, 1]);
+          const { groupId, edgeIds: [edge] } = await groupOf(node, 1);
+          node.setActiveLink({ linkId: `group:${groupId}` });
+          await vi.waitFor(() => expect(linkOf(edge).availableTransports).toContain("iroh/1"));
+          expect(yielded(holders)).toEqual([holders[0]]);
+          // Back to the chat it took from, a moment later: the group was on screen just now, and keeps its edge.
+          const chat = holders[0].options.params.id;
+          node.setActiveLink({ linkId: chat });
+          await node["nativeQueues"].get("iroh/1");
+          expect(linkOf(edge).availableTransports).toContain("iroh/1");
+          expect(holders[0].registerEndpoint).toHaveBeenCalledOnce();
+          // And back to the group: the chat was just used too, and nothing moves.
+          node.setActiveLink({ linkId: `group:${groupId}` });
+          await node["nativeQueues"].get("iroh/1");
+          expect(linkOf(edge).availableTransports).toContain("iroh/1");
+          expect(holders[0].registerEndpoint).toHaveBeenCalledOnce();
+          expect(yielded(holders)).toEqual([holders[0]]);
+          node.setActiveLink({ linkId: null });
+        });
+
+        it("a retry with many groups' edges waiting reads the view of each group it decides on, never every group's per edge", async () => {
+          // A CLI bot in many groups: each waiting edge's turn, per transport, built every group's whole view, every 15 s
+          // (1.8 s at twenty groups of fifteen members).
+          const { node } = await allLive([10, 9, 8, 7, 6, 5, 4, 3]);
+          for (let i = 0; i < 5; i++) await groupOf(node, 4);
+          expect(node["groupNativeWaiting"].size).toBeGreaterThan(10);
+          const groups = node["groups"];
+          const views = vi.spyOn(groups, "views"), view = vi.spyOn(groups, "view");
+          node["groupNativeRetryAt"] = 0;
+          node["anchorCheckAt"] = 0;
+          node["retryNative"]();
+          await node["nativeQueues"].get("iroh/1");
+          expect(view).toHaveBeenCalled();
+          expect(views).not.toHaveBeenCalled();
+        });
+
+        describe("both ends keep the same edge (ghostly-agents#1437)", () => {
+          type Edge = Holder;
+          const irohSaid = (edge: Edge) => edge.options.events.onPacketTransports(["iroh/1"], { "iroh/1": { id: "cd".repeat(32), relay: "https://relay.test./", addresses: [] } } as never);
+          /** An admin with these many chats live and three groups of two members each, made one after another. */
+          async function admin(chats: number) {
+            const started = await nativeStarted(...older().slice(0, chats));
+            const linkOf = (id: string) => started.linkOf(id) as unknown as Edge;
+            const groups = [];
+            for (let i = 0; i < 3; i++) groups.push(await groupOf(started.node, 2));
+            await started.node["nativeQueues"].get("iroh/1");
+            const onIroh = (ids: string[]) => ids.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
+            return { ...started, linkOf, groups, onIroh };
+          }
+
+          it("the admin answers the edge its third group's member keeps to it, past its own four group listeners", async () => {
+            // Zero's lab (bh-zero50): groups one and two held the admin's four group listeners, its third group kept
+            // the edge to the other member, and the edge the member kept to the admin met "no slot" for good.
+            const { node, linkOf, groups, onIroh } = await admin(2);
+            const [, , [first, second]] = groups.map((g) => g.edgeIds);
+            expect(onIroh(groups.flatMap((g) => g.edgeIds))).toHaveLength(5);
+            expect(onIroh([first, second])).toEqual([first]);
+            // Each member's packet says it holds a listener on its edge to the admin: the one it keeps.
+            irohSaid(linkOf(first));
+            irohSaid(linkOf(second));
+            await vi.waitFor(() => expect(onIroh([second])).toEqual([second]));
+            await node["nativeQueues"].get("iroh/1");
+            expect(onIroh(groups.flatMap((g) => g.edgeIds))).toHaveLength(6);
+          });
+
+          it("with every listener taken, it takes one from its own edge past a group's one, never from a chat", async () => {
+            const { node, linkOf, groups, onIroh } = await admin(3);
+            const chats = older().slice(0, 3).map((r) => linkOf(r.id));
+            for (const chat of chats) chat.canReleaseEndpoint.mockReturnValue(false);
+            const [[a1, a2], [b1, b2], [, second]] = groups.map((g) => g.edgeIds);
+            // Three chats, four group listeners and the third group's own: all eight taken.
+            expect(onIroh([a1, a2, b1, b2])).toHaveLength(4);
+            expect(onIroh([second])).toEqual([]);
+            irohSaid(linkOf(groups[2].edgeIds[0]));
+            irohSaid(linkOf(second));
+            await vi.waitFor(() => expect(onIroh([second])).toEqual([second]));
+            // One of the edges past their group's one gave its listener up, and no chat did.
+            expect(onIroh([a2, b2])).toHaveLength(1);
+            expect(onIroh([a1, b1])).toHaveLength(2);
+            for (const chat of chats) expect(chat.releaseEndpoint).not.toHaveBeenCalled();
+            await node["nativeQueues"].get("iroh/1");
+          });
+
+          it("a member whose kept edge gets no answer in twenty seconds keeps the next one, and the first gives its listener up", async () => {
+            const { node, linkOf } = await allLive([10, 9, 8, 7, 6, 1, 1, 1]);
+            const { groupId, edgeIds } = await groupOf(node, 3, { hub: 0, used: true });
+            const onIroh = () => edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
+            await vi.waitFor(() => expect(onIroh()).toEqual([edgeIds[0]]));
+            for (const id of edgeIds) linkOf(id).isDataLinkOpen = false;
+            // The member heard from last comes after the hub.
+            node["links"].get(edgeIds[2])!.lastSyncAt = Date.now() - 1_000;
+            const check = () => { node["anchorCheckAt"] = 0; node["retryNative"](); };
+            // Up for less than twenty seconds: it waits.
+            check();
+            expect(onIroh()).toEqual([edgeIds[0]]);
+            node["links"].get(edgeIds[0])!.nativeUpAt = { "iroh/1": Date.now() - GROUP_ANCHOR_ANSWER_MS - 1 };
+            check();
+            await vi.waitFor(() => expect(onIroh()).toEqual([edgeIds[2]]));
+            expect(linkOf(edgeIds[0]).releaseEndpoint).toHaveBeenCalledWith("iroh/1");
+            expect(node["groupEdgesByRank"](groupId, undefined)[0].stored.id).toBe(edgeIds[2]);
+            // That one goes unanswered too: the group keeps the last one left.
+            node["links"].get(edgeIds[2])!.nativeUpAt = { "iroh/1": Date.now() - GROUP_ANCHOR_ANSWER_MS - 1 };
+            check();
+            await vi.waitFor(() => expect(onIroh()).toEqual([edgeIds[1]]));
+            // Every other one passed over lately: the last stays, its listener kept.
+            node["links"].get(edgeIds[1])!.nativeUpAt = { "iroh/1": Date.now() - GROUP_ANCHOR_ANSWER_MS - 1 };
+            check();
+            await node["nativeQueues"].get("iroh/1");
+            expect(onIroh()).toEqual([edgeIds[1]]);
+            expect(linkOf(edgeIds[1]).releaseEndpoint).not.toHaveBeenCalled();
+          });
+
+          it("no move while the member holds a listener for it and is there, nor while another edge of the group is live", async () => {
+            const { node, linkOf } = await allLive([10, 9, 8, 7, 6, 1, 1, 1]);
+            const { edgeIds } = await groupOf(node, 3, { hub: 0, used: true });
+            const onIroh = () => edgeIds.filter((id) => linkOf(id).availableTransports.includes("iroh/1"));
+            await vi.waitFor(() => expect(onIroh()).toEqual([edgeIds[0]]));
+            for (const id of edgeIds) linkOf(id).isDataLinkOpen = false;
+            const hub = node["links"].get(edgeIds[0])!;
+            hub.nativeUpAt = { "iroh/1": Date.now() - GROUP_ANCHOR_ANSWER_MS - 1 };
+            irohSaid(linkOf(edgeIds[0]));
+            hub.presence = { ...hub.presence, online: true };
+            const check = () => { node["anchorCheckAt"] = 0; node["retryNative"](); };
+            check();
+            await node["nativeQueues"].get("iroh/1");
+            expect(linkOf(edgeIds[0]).releaseEndpoint).not.toHaveBeenCalled();
+            // Away, with another edge of the group live: the group is reachable through that one.
+            hub.presence = { ...hub.presence, online: false };
+            linkOf(edgeIds[1]).isDataLinkOpen = true;
+            check();
+            await node["nativeQueues"].get("iroh/1");
+            expect(linkOf(edgeIds[0]).releaseEndpoint).not.toHaveBeenCalled();
+            expect(onIroh()).toEqual([edgeIds[0]]);
+          });
+        });
       });
     });
   });
@@ -1378,6 +1607,25 @@ describe("private groups through the engine", () => {
     expect(edge().options.resume).toBe("webrtc/1");
   });
 
+  it("an edge's link counts a member never seen from when the edge was made, not from each start, as a chat's does", async () => {
+    // Counted from each start, an edge to a member away for a day (no packet at the relays) was read every 4 s for the
+    // first ten minutes of every start, as an invite just sent: 16 such members of a group asked the relays for 240 a minute.
+    const { node } = await started();
+    const { groupId } = await node.createGroup({ name: "Plaza" });
+    const state = (await db.getGroups()).find((g) => g.id === groupId)!.community;
+    const edgeId = await openEdge(node, state, createIdentity().pubKeyZ32);
+    const edge = () => links.filter((l) => l.options.params.id === edgeId).at(-1)!;
+    // Made just now (a member just admitted): its join is still awaited.
+    expect(edge().options.madeAt).toBe((await saved(edgeId))!.createdAt);
+    // Made a month ago: after a restart, nothing is awaited.
+    const monthAgo = Date.now() - 30 * 86_400_000;
+    await db.putLink({ ...(await saved(edgeId))!, createdAt: monthAgo });
+    await node.shutdown();
+    nodes.splice(nodes.indexOf(node), 1);
+    await started();
+    expect(edge().options.madeAt).toBe(monthAgo);
+  });
+
   // covers: groups.native-links
   describe("native transports on a group's links (WISP 902 § Transports)", () => {
     const endpoint = () => ({ transport: "iroh/1" as const, descriptor: { id: "ab".repeat(32), relay: "https://relay.test./", addresses: [] },
@@ -1819,7 +2067,7 @@ describe("private groups through the engine", () => {
       expect(host.peerRoom(groupId)).toBeUndefined();
     });
 
-    it("an app whose Iroh is the browser build holds twelve Iroh listeners for group links: six members with no WebRTC are all reached, the thirteenth waits", async () => {
+    it("an app whose Iroh is the browser build holds twelve Iroh listeners for group links, and answers past them the edge each member keeps to it", async () => {
       // As the CLI runs (the web app the same, its HyperDHT through a relay): Iroh's wasm, HyperDHT of its own, WebRTC.
       vi.stubGlobal("RTCPeerConnection", class {});
       onTestFinished(() => { vi.unstubAllGlobals(); });
@@ -1848,9 +2096,12 @@ describe("private groups through the engine", () => {
       // HyperDHT keeps its four: a link needs one native transport, and none of the six waits.
       await vi.waitFor(() => expect(running("hyperdht/1")).toHaveLength(GROUP_NATIVE_SLOTS));
       expect(waiting()).toHaveLength(0);
+      // Thirteen in all, each keeping its edge to its admin (its packet says it listens there): each is answered, past
+      // the twelve a group's other edges may hold (ghostly-agents#1437), on one transport each.
       await join(7);
-      await vi.waitFor(() => expect(waiting()).toHaveLength(1));
-      expect(running("iroh/1")).toHaveLength(GROUP_IROH_WEB_SLOTS);
+      await vi.waitFor(() => expect(running("iroh/1")).toHaveLength(GROUP_IROH_WEB_SLOTS + 1));
+      await node["nativeQueues"].get("hyperdht/1");
+      expect(waiting()).toHaveLength(0);
       expect(running("hyperdht/1")).toHaveLength(GROUP_NATIVE_SLOTS);
       // With no WebRTC (GHOSTLY_WEBRTC=0), those twelve are what its groups may hold in all.
       vi.unstubAllGlobals();

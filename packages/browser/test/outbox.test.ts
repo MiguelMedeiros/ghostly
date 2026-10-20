@@ -371,6 +371,48 @@ describe("what waits for the chat to carry it (WISP 400, \"Sends when live\")", 
   });
 });
 
+// agents#1693: each turn's 30 s escape (TURN_MS) was armed when the turn was queued, not when it began. Behind one slow
+// turn, every turn queued before its 30th second then started at once: a link drop with hundreds of texts awaiting
+// receipts ran 45 whole-chat reads together, and the daemon's heap went past 1 GB (the contact's died at 4 GB).
+describe("turns behind a slow one", () => {
+  /** `n` texts sent at once into a chat whose every read of its history takes `readMs`; the most reads at a time. */
+  async function burst(n: number, readMs: number) {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const rows: StoredMessage[] = Array.from({ length: n }, (_, i) => {
+      const wireId = `t${String(i).padStart(21, "0")}`;
+      return { linkId: "turns", id: `me_${wireId}`, wireId, text: `m${i}`, sender: "me", timestamp: i + 1, via: "datalink", delivery: "sending" };
+    });
+    let reading = 0, most = 0, reads = 0;
+    const read = async () => {
+      reading++; reads++; most = Math.max(most, reading);
+      await new Promise(done => setTimeout(done, readMs));
+      reading--;
+      return rows.map(row => ({ ...row }));
+    };
+    const store = { read, update: async (id: string, delivery: NonNullable<StoredMessage["delivery"]>, error?: string) => {
+      const row = rows.find(r => r.id === id);
+      if (row && row.delivery !== "delivered") Object.assign(row, { delivery, deliveryError: error });
+    } };
+    // Receipts are awaited for a day: only the sends' own turns run here.
+    const box = new Outbox(store, async () => null, 86_400_000, undefined, { resender: { ready: () => true } });
+    const sends = rows.map(row => box.transmit(row.id));
+    await vi.advanceTimersByTimeAsync(n * (readMs + 1_000) + 60_000);
+    await Promise.all(sends);
+    return { most, reads };
+  }
+
+  it("a turn that outlives its 30 s lets one more start, not every turn queued behind it", async () => {
+    const { most, reads } = await burst(40, 35_000);
+    expect(reads).toBeGreaterThanOrEqual(40);
+    expect(most).toBeLessThanOrEqual(2);
+  }, 30_000);
+
+  it("turns shorter than 30 s run one at a time", async () => {
+    const { most } = await burst(40, 1_000);
+    expect(most).toBe(1);
+  }, 30_000);
+});
+
 describe("a chat with many queued messages and the contact away", () => {
   /** `n` queued DHT texts in a store that counts its reads of the whole chat, on fake timers; `ready`: whether the chat can carry text. */
   async function many(n: number, ready: boolean) {
@@ -388,7 +430,7 @@ describe("a chat with many queued messages and the contact away", () => {
     const send = vi.fn(async () => null);
     const box = new Outbox(store, send, 20_000, undefined, { resender: { ready: () => ready } });
     await box.recover();
-    return { rows, read, send, box };
+    return { rows, read, get, send, box };
   }
 
   it("reads the chat's history once per check, not once per older message it looks at", async () => {
@@ -399,6 +441,78 @@ describe("a chat with many queued messages and the contact away", () => {
     expect(send).not.toHaveBeenCalled();
     expect(rows.every(r => r.delivery === "queued")).toBe(true);
     expect(read.mock.calls.length, "a whole-history read per check, not per message looked at").toBeLessThanOrEqual(n);
+    await box.stop();
+  });
+
+  it("waiting for an away contact costs one look at the chat per backoff step, not one read per pair of texts", async () => {
+    const n = 300, { rows, read, get, send, box } = await many(n, false);
+    // Every step of the backoff, then two more of its last one.
+    for (const step of [...RESEND_POLICY.backoffMs, 300_000, 300_000]) {
+      read.mockClear();
+      get.mockClear();
+      await vi.advanceTimersByTimeAsync(step);
+      expect(send).not.toHaveBeenCalled();
+      expect(read.mock.calls.length, `whole-chat reads after ${step} ms`).toBeLessThanOrEqual(1);
+      expect(get.mock.calls.length, `one-message reads after ${step} ms`).toBe(0);
+    }
+    expect(rows.every(r => r.delivery === "queued")).toBe(true);
+    await box.stop();
+  });
+
+  it("texts written one after the other to an away contact share their checks from the first backoff step on", async () => {
+    const { rows, read, get, send, box } = await many(0, false);
+    for (let i = 0; i < 300; i++) {
+      const wireId = `w${String(i).padStart(21, "0")}`;
+      // As the engine keeps a text the chat cannot carry now.
+      rows.push({ linkId: "many", id: `me_${wireId}`, wireId, text: `m${i}`, sender: "me", timestamp: Date.now(), via: "datalink", delivery: "waiting" });
+      await box.wait(`me_${wireId}`, "Sent when your contact is reachable.");
+      // As a bot writes them over the socket, a few milliseconds apart.
+      await vi.advanceTimersByTimeAsync(9);
+    }
+    expect(rows.every(r => r.delivery === "waiting")).toBe(true);
+    for (const step of RESEND_POLICY.backoffMs) {
+      read.mockClear();
+      get.mockClear();
+      await vi.advanceTimersByTimeAsync(step);
+      expect(read.mock.calls.length + get.mock.calls.length, `store reads after ${step} ms`).toBeLessThanOrEqual(1);
+    }
+    expect(send).not.toHaveBeenCalled();
+    await box.stop();
+  });
+
+  it("a text written while hundreds wait for the away contact does not read each of them again", async () => {
+    const n = 300, { rows, read, get, send, box } = await many(n, false);
+    const wireId = `w${String(n).padStart(21, "0")}`;
+    rows.push({ linkId: "many", id: `me_${wireId}`, wireId, text: "new", sender: "me", timestamp: n + 1, via: "pkarr", delivery: "sending" });
+    read.mockClear();
+    get.mockClear();
+    await box.transmit(`me_${wireId}`);
+    expect(send).not.toHaveBeenCalled();
+    expect(rows[n].delivery,"it waits behind the older ones").toBe("waiting");
+    expect(read.mock.calls.length + get.mock.calls.length, "store reads for one new text").toBeLessThanOrEqual(2);
+    await box.stop();
+  });
+
+  it("the oldest goes first once the chat can carry text again, after rounds of waiting", async () => {
+    let ready = false;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const rows: StoredMessage[] = Array.from({ length: 20 }, (_, i) => {
+      const wireId = `w${String(i).padStart(21, "0")}`;
+      return { linkId: "many", id: `me_${wireId}`, wireId, text: `m${i}`, sender: "me", timestamp: i + 1, via: "pkarr", delivery: "queued" };
+    });
+    const store = { read: async () => rows.map(row => ({ ...row })), get: async (id: string) => { const row = rows.find(r => r.id === id); return row && { ...row }; },
+      update: async (id: string, delivery: NonNullable<StoredMessage["delivery"]>, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>) => {
+        const row = rows.find(r => r.id === id);
+        if (row && row.delivery !== "delivered") Object.assign(row, extra, { delivery, deliveryError: error });
+      } };
+    const sent: string[] = [];
+    const box = new Outbox(store, async m => { sent.push(m.text!); return null; }, 20_000, undefined, { resender: { ready: () => ready } });
+    await box.recover();
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs[0] + RESEND_POLICY.backoffMs[1]);
+    ready = true;
+    // No flush: the next backoff step finds the chat able to carry them.
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs[2]);
+    expect(sent).toEqual(rows.map(r => r.text));
     await box.stop();
   });
 
@@ -413,5 +527,39 @@ describe("a chat with many queued messages and the contact away", () => {
     expect(rows.every(r => r.delivery === "delivered")).toBe(true);
     expect(read.mock.calls.length, "a receipt must not read the chat's history once there is nothing left to send").toBe(0);
     await box.stop();
+  });
+
+  it("a contact back to hundreds of waiting texts: the receipts that come during the catch-up do not each read the history again", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    let ready = false;
+    const n = 200, rows: StoredMessage[] = Array.from({ length: n }, (_, i) => {
+      const wireId = `w${String(i).padStart(21, "0")}`;
+      return { linkId: "many", id: `me_${wireId}`, wireId, text: `m${i}`, sender: "me", timestamp: i + 1, via: "datalink", delivery: "waiting" };
+    });
+    // Each store call takes a moment, as an IndexedDB transaction does: the look spans the receipts.
+    const tick = () => new Promise(resolve => setTimeout(resolve, 1));
+    const read = vi.fn(async () => { await tick(); return rows.map(row => ({ ...row })); });
+    const store = { read, get: async (id: string) => { await tick(); const row = rows.find(r => r.id === id); return row && { ...row }; },
+      update: async (id: string, delivery: NonNullable<StoredMessage["delivery"]>, error?: string, extra?: Partial<Pick<StoredMessage, "via" | "resendUntil">>) => {
+        await tick();
+        const row = rows.find(r => r.id === id);
+        if (row && row.delivery !== "delivered") Object.assign(row, extra, { delivery, deliveryError: error });
+      } };
+    // The contact's receipt comes back a moment after each send, while the look goes on.
+    const send = vi.fn(async (m: StoredMessage) => { setTimeout(() => void box.received(m.wireId!), 2); return null; });
+    const box = new Outbox(store, send, 20_000, undefined, { resender: { ready: () => ready } });
+    const recovered = box.recover();
+    await vi.advanceTimersByTimeAsync(10);
+    await recovered;
+    read.mockClear();
+    ready = true;
+    void box.flush({ reopened: true });
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(rows.every(r => r.delivery === "delivered")).toBe(true);
+    expect(send).toHaveBeenCalledTimes(n);
+    expect(read.mock.calls.length, "whole-chat reads for the whole catch-up").toBeLessThanOrEqual(3);
+    const stopped = box.stop();
+    await vi.advanceTimersByTimeAsync(10);
+    await stopped;
   });
 });

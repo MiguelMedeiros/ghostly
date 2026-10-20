@@ -6,7 +6,7 @@ import type { EngineState } from "@ghostly/browser/shared/types";
 import { normalizeMintUrl } from "@ghostly/browser/engine/wallet";
 import { callApi, type ApiContext } from "../src/api";
 import { asCliError } from "../src/errors";
-import { invoiceNetwork } from "../src/wallets";
+import { invoiceNetwork, paymentJson } from "../src/wallets";
 // covers: headless.wallets, headless.payments, headless.engine-passthrough
 
 /** The wallet and payment methods over a fake engine: what they refuse before the engine is asked. */
@@ -218,6 +218,13 @@ describe("real money", () => {
     expect(invoiceNetwork("lightning:LNTBS1pxyz")).toBe("testnet");
     expect(invoiceNetwork("lnbcrt500n1pxyz")).toBe("testnet");
     expect(invoiceNetwork("hello")).toBeNull();
+  });
+
+  it("a received Fedimint payment says its network and fedimint as its method", () => {
+    const received = { id: "p", linkId: "l", kind: "payment", direction: "in", amount: 1_200, unit: "sat", state: "settled", createdAt: 1, federation: "f" } as const;
+    expect(paymentJson({ ...received, network: "testnet" })).toMatchObject({ network: "testnet", method: "fedimint" });
+    expect(paymentJson({ ...received, network: "mainnet" })).toMatchObject({ network: "mainnet", method: "fedimint" });
+    expect(paymentJson({ id: "r", linkId: "l", kind: "request", direction: "out", amount: 5, unit: "sat", state: "pending", createdAt: 1, federations: ["f"], invoice: "lntbs1x", network: "testnet" }).method).toBe("fedimint");
   });
 
   it("no spend on Mainnet without confirmReal, and confirmedReal only with it", async () => {
