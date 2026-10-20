@@ -7,7 +7,7 @@ import {
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage } from "../shared/types";
 import { groupReply } from "../shared/replies";
-import { FramesTaken, arrivalNow, cameAt, cameOrWritten, editKey, eventTime, mentionAt, mentionFields, noteCame, peerMessageAt, type GroupStore, type GroupsHost } from "./groups";
+import { FramesTaken, arrivalNow, cameAt, editKey, dropMarks, eventTime, loadMarks, markCame, mentionAt, mentionFields, noteCame, peerMessageAt, unmark, type GroupMarks, type GroupStore, type MarkedBy, type GroupsHost } from "./groups";
 import { GroupLineOrder } from "./groupLineOrder";
 import { HubClocks } from "./hubClocks";
 import { traceJoin } from "./joinTrace";
@@ -319,6 +319,8 @@ export class Communities {
   /** The latest message from another member, per group: what makes it unread in the list. */
   private readonly lastPeerMessageAt = new Map<string, number>();
   private readonly lastMentionAt = new Map<string, number>();
+  /** The maps above, and what moved them last (`markCame`, `unmark`). */
+  private readonly marks: GroupMarks = { lastMessageAt: this.lastMessageAt, lastPeerMessageAt: this.lastPeerMessageAt, lastMentionAt: this.lastMentionAt, by: new Map() };
   private readonly refused = new Map<string, number>();
   private readonly lastKnock = new Map<string, number>();
   /** Joiners: groups whose knock is out (published), and the knock record it is in. */
@@ -379,15 +381,8 @@ export class Communities {
       this.stored.set(group.id, group);
       if (group.community) this.attach(group.community);
       // Messages only, as while the app runs: a membership line or a payment's note moves neither the list nor unread.
-      const history = await this.store.getMessages(MESSAGE_LINK(group.id)), said = history.filter(m => !m.event && !m.groupPay);
-      const last = said[said.length - 1], lastPeer = [...said].reverse().find(m => m.sender !== "me");
-      if (last) this.lastMessageAt.set(group.id, last.timestamp);
-      // A message that came later than it was written counts from when it came, as it did while the app ran (`noteCame`).
-      const peerAt = cameOrWritten(lastPeer?.timestamp, lastPeer ? group.came?.peer : undefined);
-      if (peerAt) this.lastPeerMessageAt.set(group.id, peerAt);
-      const mention = [...history].reverse().find(m => m.mentioned);
-      const mentionAt = cameOrWritten(mention?.timestamp, mention ? group.came?.mention : undefined);
-      if (mentionAt) this.lastMentionAt.set(group.id, mentionAt);
+      const history = await this.store.getMessages(MESSAGE_LINK(group.id));
+      loadMarks(this.marks, group, history);
       this.host.loaded?.(group.id, history);
       // Admissions in flight did not survive the restart; a joiner keeps its side.
       for (const [, linkId] of this.host.entries(group.id)) if (group.joining?.linkId !== linkId) await this.host.closeEdge(linkId);
@@ -399,6 +394,15 @@ export class Communities {
 
   /** A community as kept here, to change in place and save (`Groups.setPin`). */
   record(groupId: string): StoredGroup | undefined { return this.stored.get(groupId); }
+
+  /** What moved this group's marks last (`markCame`). */
+  markedBy(groupId: string): MarkedBy | undefined { return this.marks.by.get(groupId); }
+
+  /** A message deleted for everyone left this device: the marks it set go back (`unmark` in groups.ts). */
+  async unmark(groupId: string, removed: StoredMessage): Promise<void> {
+    const group = this.stored.get(groupId);
+    if (await unmark(this.marks, group, groupId, () => this.store.getMessages(MESSAGE_LINK(groupId)), removed) && group) await this.store.putGroup(group);
+  }
 
   views(): GroupView[] {
     return [...this.stored.values()].flatMap(group => this.viewOf(group));
@@ -667,9 +671,7 @@ export class Communities {
     if (live?.hub) await this.publishBeacon(groupId, live, this.now(), false).catch(() => {});
     this.live.delete(groupId);
     this.stored.delete(groupId);
-    this.lastMessageAt.delete(groupId);
-    this.lastPeerMessageAt.delete(groupId);
-    this.lastMentionAt.delete(groupId);
+    dropMarks(this.marks, groupId);
     this.knockingWith.delete(groupId);
     this.knockRead.delete(groupId);
     this.lineOrder.forget(MESSAGE_LINK(groupId));
@@ -1845,10 +1847,10 @@ export class Communities {
         const stored = await this.host.storeMessage({ linkId: MESSAGE_LINK(id), id: m.id, text: file ? groupFileText(m.text, m.file!) : m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }) });
         placing(stored !== false);
+        // A copy of a line deleted for everyone, refused: it moves no mark (agents#1645).
+        if (stored === false && this.stored.get(id)?.removedIds?.includes(m.id)) return;
         const came = m.sender === session.myKey ? timestamp : cameAt(timestamp, stored, arrivalNow(this.now()));
-        this.lastMessageAt.set(id, Math.max(this.lastMessageAt.get(id) ?? 0, came));
-        if (mentioned) this.lastMentionAt.set(id, Math.max(this.lastMentionAt.get(id) ?? 0, came));
-        if (m.sender !== session.myKey) this.lastPeerMessageAt.set(id, Math.max(this.lastPeerMessageAt.get(id) ?? 0, came));
+        markCame(this.marks, id, m.id, came, m.sender !== session.myKey, mentioned);
         noteCame(this.stored.get(id), came, m.sender !== session.myKey, mentioned);
       },
       // Outside the session's queue, in order: what they carry (a payment) may send through the session again.
