@@ -128,6 +128,9 @@
       "knocked": "Demande laissée pour l'app de l'admin",
       "knockedCommunity": "Demande envoyée au groupe"
     },
+    "tryAgain": "Réessayer",
+    "unanswered": "Ce lien n'a pas répondu",
+    "unansweredBody": "Personne ne vous a fait entrer en une heure, alors cette app a cessé de frapper. Le lien a peut-être été remplacé ou désactivé : demandez le lien actuel, ou réessayez.",
     "waiting": "En attente d'être admis"
   },
   "leave": {

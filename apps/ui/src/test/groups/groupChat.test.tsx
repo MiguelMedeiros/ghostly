@@ -249,6 +249,18 @@ describe("GroupChat: joining through a link", () => {
     expect(hint).not.toHaveTextContent("link was replaced");
   });
 
+  it("a link nobody answered for an hour: says so, no longer spins, and Try again knocks again", async () => {
+    const { user, engine } = openGroup(groupView({ createdAt: Date.now() - 2 * 60 * 60_000, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "knocked", unanswered: true } }));
+    engine.on("acceptGroupInvitation", () => undefined);
+    const card = screen.getByTestId("group-joining");
+    expect(card).toHaveTextContent("This link did not answer");
+    expect(card).toHaveTextContent("Nobody let you in for an hour, so this app stopped knocking.");
+    expect(card.querySelector(".animate-spin")).toBeNull();
+    expect(screen.queryByTestId("group-joining-stale")).not.toBeInTheDocument();
+    await user.click(within(card).getByTestId("group-link-retry"));
+    expect(engine.callsTo("acceptGroupInvitation")).toEqual([{ groupId: "group-1" }]);
+  });
+
   it("a knock someone answered is not told the link may be old", () => {
     openGroup(groupView({ createdAt: Date.now() - 10 * 60_000, canSend: false, invitation: { linkId: "", contact: "", admin: "", members: 0, accepted: true, viaLink: true, stage: "answered" } }));
     expect(screen.getByTestId("group-joining")).toHaveTextContent("The admin's app saw you knock");

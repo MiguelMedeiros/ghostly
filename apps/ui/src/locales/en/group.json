@@ -128,6 +128,9 @@
       "knocked": "Knock left for the admin's app",
       "knockedCommunity": "Knock sent to the group"
     },
+    "tryAgain": "Try again",
+    "unanswered": "This link did not answer",
+    "unansweredBody": "Nobody let you in for an hour, so this app stopped knocking. The link may have been replaced or turned off: ask for the current one, or try again.",
     "waiting": "Waiting to be let in"
   },
   "leave": {
