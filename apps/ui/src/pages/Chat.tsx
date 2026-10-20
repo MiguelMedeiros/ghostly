@@ -44,6 +44,7 @@ import { MessageBubble } from "../components/MessageBubble";
 import { MessageInput } from "../components/MessageInput";
 import { messageSnippet, quoteFor, replyIndex, replyTarget, sentReply, type NameOf } from "../lib/replies";
 import { buttonsViews, compactPresses } from "../lib/buttons";
+import { ChatOnScreen } from "../lib/chatOnScreen";
 import { replySnippet, type RoutineCard } from "@ghostly/core";
 import { composerServices } from "../components/composer/servicesRow";
 import { CallButtons } from "../components/CallButtons";
@@ -491,6 +492,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   const [showMute, setShowMute] = useState(false);
   const [showFolders, setShowFolders] = useState(false);
   const [showTechInfo, setShowTechInfo] = useState(false);
+  // Off screen (another chat opened while this one stays loaded), its Tech info closes, as a message's details do (`ChatOnScreen`).
+  useEffect(() => { if (!visible) setShowTechInfo(false); }, [visible]);
   const labelInputRef = useRef<HTMLInputElement>(null), nameRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null), optionsRef = useRef<HTMLButtonElement>(null);
 
@@ -740,6 +743,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
 
   return (
     // The chat's column, and beside it (over it when narrow) the contact's identities: the page is their container.
+    <ChatOnScreen.Provider value={visible}>
     <CueChat.Provider value={sessionId}>
     <NowPlayingChat.Provider value={playingChat}>
     <div className="chat-pane flex-1 h-full">
@@ -1267,6 +1271,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     </div>
     </NowPlayingChat.Provider>
     </CueChat.Provider>
+    </ChatOnScreen.Provider>
   );
 }
 
