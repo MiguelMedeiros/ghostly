@@ -365,6 +365,22 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     expect(damaged()).toBe(1);
   });
 
+  // agents#1672: past its day's bytes (`serveBytesPerDay`) the author answered `busy`, and every member's file read
+  // "Busy, trying again soon" until the next UTC midnight.
+  it("a file whose only holder served its day says so, not that it tries again soon", async () => {
+    const t = new FilesWorld();
+    const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
+    limits.serveBytesPerDay = 120_000;
+    const one = await t.send(alice, id, pattern(100_000, 1));
+    await t.world.until(() => t.done(bob, id, one.messageId), 60_000);
+    const two = await t.send(alice, id, pattern(100_000, 2));
+    await t.world.until(() => t.seen.some(s => s.from === "alice" && s.to === "bob" && s.frame.t === "group-want-no"), 60_000);
+    await t.world.run(1_000);
+    expect([...new Set(t.seen.filter(s => s.frame.t === "group-want-no").map(s => s.frame.why))]).toEqual(["day"]);
+    expect(t.got(bob, id, two.messageId).transfer).toMatchObject({ state: "transferring", stage: "waiting", wait: "day",
+      note: "Its holders have shared all they can today; it comes when another member has it, or tomorrow" });
+  });
+
   it("a file that cannot come says why: its only holder busy, or its bytes damaged (with Ask again)", async () => {
     const t = new FilesWorld();
     const { peers: [alice, bob], id } = await t.mesh(["alice", "bob"]);
@@ -793,7 +809,7 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     limits.serveBytesPerDay = 150_000;
     t.say(carol, alice, id, { t: "group-want", g: id, id: two.messageId });
     await t.world.run(1_000);
-    expect(answers("carol")).toEqual(["busy"]);
+    expect(answers("carol")).toEqual(["day"]);
   });
 
   it(`a member's app sends at most ${GROUP_FILE_LIMITS.announceTaken} files in ${GROUP_FILE_LIMITS.announceWindowMs / 60_000} minutes, so every one it sends reaches the others as a file`, async () => {
@@ -1097,8 +1113,8 @@ describe("a file in a private group", { timeout: 120_000 }, () => {
     // The day is spent: nobody else is served either.
     for (const p of [bob, carol]) t.say(p, alice, id, { t: "group-want", g: id, id: messageId });
     await t.world.run(1_000);
-    expect(answers("bob")).toEqual(["offer", "offer", "busy"]);
-    expect(answers("carol")).toEqual(["busy"]);
+    expect(answers("bob")).toEqual(["offer", "offer", "day"]);
+    expect(answers("carol")).toEqual(["day"]);
   });
 
   const servedToday = (p: Peer) => (p.groups.files as unknown as { served: { bytes: number } }).served.bytes;

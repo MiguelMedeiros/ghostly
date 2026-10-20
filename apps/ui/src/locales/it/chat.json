@@ -140,6 +140,7 @@
     "busySize": "Occupato, nuovo tentativo a breve · {{size}}",
     "cancelled": "Annullato",
     "damaged": "Arrivato danneggiato · {{size}}",
+    "daySpent": "Hanno già condiviso tutto il possibile oggi, arriva da un altro membro o domani · {{size}}",
     "decline": "Rifiuta",
     "declined": "Rifiutato",
     "gone": "Non più disponibile",
