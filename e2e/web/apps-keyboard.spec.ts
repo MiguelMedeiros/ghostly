@@ -42,7 +42,7 @@ test("a store's Refresh and Uninstall's Export keep the keyboard focus once thei
 
   await listed.getByTestId("app-listing-install").click();
   await ana.page.getByTestId("app-install-confirm").click();
-  await ana.page.getByTestId("installed-app").getByRole("button", { name: `${store.title}: details` }).click();
+  await ana.page.getByTestId("installed-app").getByRole("button", { name: store.title }).click();
   await ana.page.getByTestId("app-uninstall-open").click();
   const exportButton = ana.page.getByTestId("app-export");
   await exportButton.focus();

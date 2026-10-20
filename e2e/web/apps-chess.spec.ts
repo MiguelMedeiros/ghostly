@@ -379,7 +379,7 @@ test("Chess 1.0.2 updates to 2.3.1 only once the person agrees to share their na
   await expect(row).toContainText("1.0.2");
 
   // Its details say what the new version asks for on top of what was granted: `name`, and nothing else.
-  await row.getByRole("button", { name: /Chess: details/ }).click();
+  await row.getByRole("button", { name: /^Chess .*: details$/ }).click();
   const details = ana.page.getByTestId("app-details");
   const update = details.getByTestId("app-update");
   await expect(update).toContainText(`Version ${CHESS.manifest.version} is ready.`);
@@ -410,7 +410,7 @@ test("a version a store removed stays stopped until Run anyway", { tag: ["@featu
   await expect(row.getByTestId("installed-app-hint")).toHaveText("Stopped");
   await expect(row.getByTestId("installed-app-open")).toHaveCount(0);
 
-  await row.getByRole("button", { name: /Chess: details/ }).click();
+  await row.getByRole("button", { name: /^Chess .*: details$/ }).click();
   const details = ana.page.getByTestId("app-details");
   await expect(details.getByTestId("app-run-line")).toHaveText(`Removed by ${STORE_NAME}: Sends your moves to a server`);
   await expect(details.getByTestId("app-open")).toHaveCount(0);
@@ -418,7 +418,7 @@ test("a version a store removed stays stopped until Run anyway", { tag: ["@featu
   await expect(miniApp(ana.page)).toBeHidden();
 
   // Run anyway, the person's own choice: it runs.
-  await row.getByRole("button", { name: /Chess: details/ }).click();
+  await row.getByRole("button", { name: /^Chess .*: details$/ }).click();
   await details.getByTestId("app-run-anyway").click();
   await expect(miniApp(ana.page)).toBeVisible();
   await expect(chessStatus(ana.page)).toHaveText("White to move");
@@ -440,7 +440,7 @@ test("a version its publisher revoked never runs", { tag: ["@feature:apps.chess.
   const row = ana.page.getByTestId("installed-app");
   await expect(row.getByTestId("installed-app-hint")).toHaveText("Stopped");
   await expect(row.getByTestId("installed-app-open")).toHaveCount(0);
-  await row.getByRole("button", { name: /Chess: details/ }).click();
+  await row.getByRole("button", { name: /^Chess .*: details$/ }).click();
   const details = ana.page.getByTestId("app-details");
   await expect(details.getByTestId("app-run-line")).toHaveText("Its publisher revoked this version.");
   await expect(details.getByTestId("app-open")).toHaveCount(0);
