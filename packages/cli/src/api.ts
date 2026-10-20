@@ -840,6 +840,8 @@ function editRefused(message: StoredMessage | undefined, ref: string, where: "ch
 async function saveMark(ctx: ApiContext, params: Params, remove: boolean) {
   const target = chatOrGroup(ctx, str(params, "chat", true)), messageId = str(params, "message", true);
   const result = await node(ctx).saveMessage({ linkId: target.linkId, messageId, remove });
+  // An unsave whose id names neither a saved message nor one of the chat's (a typo): said, with where the ids are.
+  if (result.error && remove && /not in this chat/.test(result.error)) throw new CliError("not_found", `No saved message ${JSON.stringify(messageId)} in this chat (ghostly saved list shows the saved ones)`);
   if (result.error) throw new CliError(/not in this chat/.test(result.error) ? "not_found" : "bad_request", result.error);
   return { [target.group ? "group" : "chat"]: target.id, messageId, saved: !remove };
 }
