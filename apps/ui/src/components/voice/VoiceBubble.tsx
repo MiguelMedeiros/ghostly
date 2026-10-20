@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
-import { formatVoiceDuration, sanitizeFileName, type VoiceMeta } from "@ghostly/core";
+import { formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
@@ -28,7 +28,7 @@ import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry
 import { Waveform } from "./Waveform";
 import "./voice.css";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
-import { downloadFile } from "../../lib/fileDownload";
+import { downloadFile, downloadName } from "../../lib/fileDownload";
 
 type PlayState = "idle" | "loading" | "playing" | "paused";
 
@@ -50,7 +50,7 @@ function describeFailure(what: string, error: unknown): string {
  * received — a mark until it has been listened to. The bytes are read only when it first
  * plays; the waveform was measured by the sender, so nothing is decoded to draw it.
  */
-export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile & { voice: VoiceMeta }; sender: "me" | "peer"; peerName?: string }) {
+export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file: ChatFile & { voice: VoiceMeta }; sender: "me" | "peer"; peerName?: string; timestamp: number }) {
   const t = useT();
   const peerName = named ?? t("pairing.contact");
   const { platform, transfer, restoring } = useTransfer(file.id);
@@ -447,12 +447,13 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   };
   /**
    * Save on one that will not play here: the same path as Download in the message's menu, the system's save dialog
-   * where there is one. The link's own download is only the web's fallback: the desktop WebView saves nothing from it.
+   * where there is one, under the name Ghostly makes for it (never the sender's). The link's own download is only the
+   * web's fallback: the desktop WebView saves nothing from it.
    */
   const save = (event: MouseEvent) => {
     if (!platform) return;
     event.preventDefault();
-    void downloadFile(platform, file, sanitizeFileName(file.name))
+    void downloadFile(platform, file, downloadName(file, timestamp))
       .then(async (result) => {
         if (result !== "missing" || !mountedRef.current) return;
         const leftOut = (await fileHeld(platform, file.id, false)) === "left-out";
@@ -563,7 +564,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
       {problem && (
         <p className="text-[12px] text-danger-ink m-0 mt-1 px-1" role="alert" data-testid="voice-problem" data-error={failure ?? undefined}>
           {problem}{" "}
-          {saveUrl && <a href={saveUrl} download={file.name} onClick={save} data-testid="voice-save" className="underline text-inherit">{t("common.save")}</a>}
+          {saveUrl && <a href={saveUrl} download={downloadName(file, timestamp)} onClick={save} data-testid="voice-save" className="underline text-inherit">{t("common.save")}</a>}
         </p>
       )}
       {(reason || hint) && why && <WhyText id={whyId} testId="voice-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}

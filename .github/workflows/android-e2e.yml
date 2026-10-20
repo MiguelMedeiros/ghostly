@@ -47,7 +47,7 @@ jobs:
           cache: "npm"
 
       - name: Setup JDK 17
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: "17"
@@ -147,6 +147,10 @@ jobs:
 
       # The emulator as android-native.yml's smoke test boots it. One line: the run's logcat is kept whatever the
       # specs did, and their exit status is the step's.
+      # - The logcat is streamed to the file while the specs run, not read after them: an emulator that is lost
+      #   mid-run (files.spec.ts's video test, about one run in three) leaves its last lines there.
+      # - `timeout` on the screenshot after the specs: with no emulator left, adb waits for a device until the job's
+      #   timeout, and nothing is uploaded.
       - name: Android e2e
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         env:
@@ -159,7 +163,7 @@ jobs:
           target: google_apis
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
-          script: mkdir -p test-results/android-run; npx playwright test -c e2e/android/playwright.config.ts --workers 1; status=$?; adb logcat -d -v time > test-results/android-run/logcat.txt; adb exec-out screencap -p > test-results/android-run/device.png; exit $status
+          script: mkdir -p test-results/android-run; (adb logcat -v time > test-results/android-run/logcat.txt 2>&1 &); npx playwright test -c e2e/android/playwright.config.ts --workers 1; status=$?; timeout 60 adb exec-out screencap -p > test-results/android-run/device.png; exit $status
 
       - name: Upload the results
         if: ${{ !cancelled() }}

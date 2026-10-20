@@ -29,120 +29,88 @@ function chats() {
 const names = () => screen.getAllByTestId("chat-row-name").map(n => n.textContent);
 const rowOf = (name: string) => screen.getAllByTestId("chat-row").find(r => within(r).getByTestId("chat-row-name").textContent === name)!;
 
-describe("a pinned chat's place, from the chat's ⋮", () => {
-  function openChat(id: string) {
-    const utils = renderApp(<Chat sessionId={id} visible onCallChange={() => {}} callLayer={null} />);
-    utils.engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("sendMessage", () => ({ error: null }));
-    utils.engine.update({ links: [linkView({ peerPubKeyZ32: key(id), profile: "paired-chat/1", pairing: { status: "ready" } } as never)] });
-    return utils;
-  }
-  const menu = async (user: ReturnType<typeof renderApp>["user"]) => {
-    await user.click(screen.getByTestId("chat-options"));
-    return within(await screen.findByTestId("chat-options-menu"));
-  };
+describe("a pinned chat's place, from the keyboard in the list", () => {
+  function Where() { return <p data-testid="where">{useLocation().pathname}</p>; }
+  const list = (language?: "pt") => renderApp(<UpdateProvider><Sidebar /><Routes><Route path="*" element={<Where />} /></Routes></UpdateProvider>, language ? { language } : undefined);
+  const opener = (name: string) => within(rowOf(name)).getByTestId("chat-row-open");
 
   beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); });
   afterEach(() => { vi.useRealTimers(); });
 
-  it("moves it down and up one place, says the new place to a screen reader, and stops at the ends", async () => {
+  it("the chat's ⋮ has no Move up or Move down: the place is the list's", async () => {
     chats();
-    expect(pinnedOrder()).toEqual(["a", "b", "c"]);
-    const { user } = openChat("a");
-    let rows = await menu(user);
-    const up = rows.getByTestId("chat-pin-up");
-    expect(up).toHaveTextContent("Move up");
-    expect(up).toBeDisabled();
-    expect(up).toHaveAttribute("title", "Already first");
-    // Dimmed, too: a phone shows no tooltip.
-    expect(up).toHaveClass("disabled:opacity-40");
-    expect(rows.getByTestId("chat-pin-down")).toBeEnabled();
-    // Right under Unpin: the place is the pin's.
-    const items = [...screen.getByTestId("chat-options-menu").querySelectorAll("[data-menu-item]")].map(i => i.textContent);
-    expect(items.slice(0, 3)).toEqual(["Unpin chat", "Move up", "Move down"]);
+    const utils = renderApp(<Chat sessionId="a" visible onCallChange={() => {}} callLayer={null} />);
+    utils.engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("sendMessage", () => ({ error: null }));
+    utils.engine.update({ links: [linkView({ peerPubKeyZ32: key("a"), profile: "paired-chat/1", pairing: { status: "ready" } } as never)] });
+    await utils.user.click(screen.getByTestId("chat-options"));
+    const menu = within(await screen.findByTestId("chat-options-menu"));
+    expect(menu.getByTestId("chat-pin-toggle")).toHaveTextContent("Unpin chat");
+    for (const id of ["chat-pin-up", "chat-pin-down"]) expect(menu.queryByTestId(id), id).not.toBeInTheDocument();
+  });
 
-    await user.click(rows.getByTestId("chat-pin-down"));
+  it("Alt+↓ and Alt+↑ on a focused pinned row move it one place, keep the focus on it, say the new place, and stop at the ends", async () => {
+    chats();
+    const { user } = list();
+    expect(names()).toEqual(["Ana", "Ben", "Cy", "Dee"]);
+    expect(opener("Ana")).toHaveAttribute("aria-keyshortcuts", "Alt+ArrowUp Alt+ArrowDown");
+    opener("Ana").focus();
+    await user.keyboard("{Alt>}{ArrowDown}{/Alt}");
     expect(pinnedOrder()).toEqual(["b", "a", "c"]);
-    expect(screen.queryByTestId("chat-options-menu")).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(names()).toEqual(["Ben", "Ana", "Cy", "Dee"]));
+    expect(opener("Ana")).toHaveFocus();
     const said = screen.getByTestId("chat-pin-announcement");
     expect(said).toHaveAttribute("aria-live", "polite");
     expect(said).toHaveTextContent("Moved to place 2 of 3 pinned chats");
     await act(() => vi.advanceTimersByTimeAsync(ANNOUNCE_CLEAR_MS + 10));
     expect(said).toBeEmptyDOMElement();
 
-    rows = await menu(user);
-    expect(rows.getByTestId("chat-pin-up")).toBeEnabled();
-    await user.click(rows.getByTestId("chat-pin-down"));
-    expect(pinnedOrder()).toEqual(["b", "c", "a"]);
+    await user.keyboard("{Alt>}{ArrowDown}{/Alt}");
+    await vi.waitFor(() => expect(names()).toEqual(["Ben", "Cy", "Ana", "Dee"]));
+    expect(opener("Ana")).toHaveFocus();
     expect(said).toHaveTextContent("Moved to place 3 of 3 pinned chats");
-
-    rows = await menu(user);
-    const down = rows.getByTestId("chat-pin-down");
-    expect(down).toBeDisabled();
-    expect(down).toHaveAttribute("title", "Already last");
-    await user.click(rows.getByTestId("chat-pin-up"));
+    // The last pinned chat goes no further: never among the others.
+    await user.keyboard("{Alt>}{ArrowDown}{/Alt}");
+    expect(pinnedOrder()).toEqual(["b", "c", "a"]);
+    await user.keyboard("{Alt>}{ArrowUp}{/Alt}");
     expect(pinnedOrder()).toEqual(["b", "a", "c"]);
+    // Nothing opened on the way.
+    expect(screen.getByTestId("where")).toHaveTextContent("/");
   });
 
-  it("in a folder, is its place among the folder's pinned chats; the others keep theirs", async () => {
+  it("an arrow alone, or a chat that is not pinned, moves nothing", async () => {
     chats();
-    const folder = createFolder("Agents")!;
-    setChatFolder("a", folder.id);
-    setChatFolder("c", folder.id);
-    // Cy is the last of its folder's two (Ana, Cy), with Ben, in no folder, between them in the whole order.
-    const { user } = openChat("c");
-    const rows = await menu(user);
-    expect(rows.getByTestId("chat-pin-down")).toBeDisabled();
-    await user.click(rows.getByTestId("chat-pin-up"));
-    expect(screen.getByTestId("chat-pin-announcement")).toHaveTextContent("Moved to place 1 of 2 pinned chats");
-    // One press put it above Ana: it did not stop behind Ben, who is not shown with them.
-    expect(pinnedOrder()).toEqual(["c", "a", "b"]);
-    expect((await menu(user)).getByTestId("chat-pin-up")).toBeDisabled();
-  });
-
-  it("offers no move to the only pinned chat of its folder, nor to the only one in no folder", async () => {
-    chats();
-    const folder = createFolder("Agents")!;
-    setChatFolder("a", folder.id);
-    setChatFolder("c", folder.id);
-    const { user } = openChat("b");
-    const rows = await menu(user);
-    expect(rows.getByTestId("chat-pin-toggle")).toHaveTextContent("Unpin chat");
-    expect(rows.queryByTestId("chat-pin-up")).not.toBeInTheDocument();
-  });
-
-  it("moves with the keys: the rows are the menu's, a disabled one is passed over", async () => {
-    chats();
-    const { user } = openChat("a");
-    const rows = await menu(user);
-    rows.getByText("Unpin chat").closest("button")!.focus();
+    const { user } = list();
+    opener("Ana").focus();
     await user.keyboard("{ArrowDown}");
-    expect(rows.getByTestId("chat-pin-down")).toHaveFocus();
-    await user.keyboard("{Enter}");
-    expect(pinnedOrder()).toEqual(["b", "a", "c"]);
+    await user.keyboard("{Control>}{ArrowDown}{/Control}");
+    expect(pinnedOrder()).toEqual(["a", "b", "c"]);
+    expect(opener("Dee")).not.toHaveAttribute("aria-keyshortcuts");
+    opener("Dee").focus();
+    await user.keyboard("{Alt>}{ArrowUp}{/Alt}");
+    expect(pinnedOrder()).toEqual(["a", "b", "c"]);
+    expect(names()).toEqual(["Ana", "Ben", "Cy", "Dee"]);
   });
 
-  it("offers no move to a chat that is not pinned, nor to the only pinned one", async () => {
+  it("with a folder, moves a row among its part's rows, pinned or not, and says its place among them", async () => {
     chats();
-    const { user, unmount } = openChat("d");
-    let rows = await menu(user);
-    expect(rows.getByText("Pin chat")).toBeInTheDocument();
-    expect(rows.queryByTestId("chat-pin-up")).not.toBeInTheDocument();
-    unmount();
-    setSessionPinned("b", false);
-    setSessionPinned("c", false);
-    const again = openChat("a");
-    rows = await menu(again.user);
-    expect(rows.getByText("Unpin chat")).toBeInTheDocument();
-    expect(rows.queryByTestId("chat-pin-down")).not.toBeInTheDocument();
+    const agents = createFolder("Agents")!;
+    setChatFolder("a", agents.id);
+    const { user } = list();
+    expect(names()).toEqual(["Ana", "Ben", "Cy", "Dee"]);
+    opener("Dee").focus();
+    await user.keyboard("{Alt>}{ArrowUp}{/Alt}");
+    await vi.waitFor(() => expect(names()).toEqual(["Ana", "Ben", "Dee", "Cy"]));
+    expect(sectionOrder(undefined)).toEqual(["b", "d", "c"]);
+    expect(pinnedOrder()).toEqual(["a", "b", "c"]);
+    expect(opener("Dee")).toHaveFocus();
+    expect(screen.getByTestId("chat-pin-announcement")).toHaveTextContent("Moved to place 2 of 3");
   });
 
   it("says it in the app's language", async () => {
     chats();
-    const utils = renderApp(<Chat sessionId="a" visible onCallChange={() => {}} callLayer={null} />, { language: "pt" });
-    utils.engine.on("ensureLink", () => ({ linkId: "link-1" })).on("setActiveLink", () => undefined).on("sendMessage", () => ({ error: null }));
-    utils.engine.update({ links: [linkView({ peerPubKeyZ32: key("a"), profile: "paired-chat/1", pairing: { status: "ready" } } as never)] });
-    const rows = await menu(utils.user);
-    await utils.user.click(rows.getByText("Mover para baixo"));
+    const { user } = list("pt");
+    opener("Ana").focus();
+    await user.keyboard("{Alt>}{ArrowDown}{/Alt}");
     expect(screen.getByTestId("chat-pin-announcement")).toHaveTextContent("Movida para a posição 2 de 3 conversas fixadas");
   });
 });

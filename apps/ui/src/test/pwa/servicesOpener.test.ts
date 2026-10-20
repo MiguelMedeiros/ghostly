@@ -132,12 +132,49 @@ describe("a contact's app shown over the app", () => {
     expect(document.getElementById(SERVICE_VIEW_ID)?.getAttribute("aria-label")).toBe("two");
   });
 
+  it("reads the app's name in its own direction: in the Arabic app a Latin name is cut at its end, not its start", async () => {
+    document.documentElement.dir = "rtl";
+    try {
+      await open("A very long name for the demo app shared here");
+      const name = [...document.getElementById(SERVICE_VIEW_ID)!.querySelectorAll("span")].find((el) => el.textContent === "A very long name for the demo app shared here");
+      expect(name?.getAttribute("dir")).toBe("auto");
+    } finally {
+      document.documentElement.removeAttribute("dir");
+    }
+  });
+
   it("closes when the profile locks (the lock screen's closeServiceWindows), as Desktop's windows do", async () => {
     setServiceWindowsCloser(closeServiceView);
     await open("one");
     expect(document.getElementById(SERVICE_VIEW_ID)).not.toBeNull();
     closeServiceWindows();
     expect(document.getElementById(SERVICE_VIEW_ID)).toBeNull();
+  });
+
+  it("holds the keyboard while open: the app under it is out of reach, and closing gives the focus back to Open", async () => {
+    // The app's page, its Open button focused, and a part of it that was already out of reach.
+    const app = document.createElement("div");
+    const opener = document.createElement("button");
+    app.append(opener);
+    const hidden = document.createElement("div");
+    hidden.setAttribute("inert", "");
+    document.body.append(app, hidden);
+    try {
+      opener.focus();
+      await open("one");
+      expect(document.activeElement?.getAttribute("data-testid")).toBe("service-view-close");
+      // Tab cannot leave the view for the chat hidden under it.
+      expect(app.hasAttribute("inert")).toBe(true);
+      expect(document.getElementById(SERVICE_VIEW_ID)?.hasAttribute("inert")).toBe(false);
+
+      closeServiceView();
+      expect(document.activeElement).toBe(opener);
+      expect(app.hasAttribute("inert")).toBe(false);
+      expect(hidden.hasAttribute("inert")).toBe(true);
+    } finally {
+      app.remove();
+      hidden.remove();
+    }
   });
 
   describe("and Back (Android's back gesture, the browser's)", () => {

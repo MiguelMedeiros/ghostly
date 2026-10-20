@@ -3,15 +3,18 @@ import { ANNOUNCE_CLEAR_MS } from "../components/chat/MessageAnnouncer";
 import { useI18n } from "../contexts/I18nContext";
 import type { PinnedPlace } from "../lib/storage";
 
-/** The line a screen reader hears after a move, and what says it: `[text, announce]`. It empties, so the same place twice is said twice. */
-export function usePinMoveNote(): [string, (place: PinnedPlace | undefined) => void] {
+/**
+ * The line a screen reader hears after a move, and what says it: `[text, announce]`. It empties, so the same place twice
+ * is said twice. `rows`: the place is among a part of the list's rows (pinned or not), not among the pinned chats.
+ */
+export function usePinMoveNote(): [string, (place: PinnedPlace | undefined, rows?: boolean) => void] {
   const { t } = useI18n();
   const [text, setText] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
-  const announce = useCallback((place: PinnedPlace | undefined) => {
+  const announce = useCallback((place: PinnedPlace | undefined, rows?: boolean) => {
     if (!place) return;
-    setText(t("chat.announce.pinMoved", { place: place.index + 1, count: place.count }));
+    setText(t(rows ? "chat.announce.rowMoved" : "chat.announce.pinMoved", { place: place.index + 1, count: place.count }));
     clearTimeout(timer.current);
     timer.current = setTimeout(() => setText(""), ANNOUNCE_CLEAR_MS);
   }, [t]);

@@ -145,6 +145,8 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   close.style.cssText = "min-width:40px;min-height:40px;border:0;border-radius:8px;background:transparent;color:inherit;font-size:18px;cursor:pointer";
   const name = document.createElement("span");
   name.textContent = options.title;
+  // The contact's name for it, in its own direction: a Latin name in the Arabic app is cut at its end, not its start.
+  name.dir = "auto";
   name.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
   bar.append(close, name);
   const frame = document.createElement("iframe");
@@ -169,12 +171,19 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     channel.port1.onmessage = (request) => { if (request.ports[0]) void serve(request.ports[0], request.data, options.send, jar, options.words); };
     frame.contentWindow!.postMessage({ type: BRIDGE_PORT }, origin, [channel.port2]);
   };
+  // A dialog over the whole app: the app under it is out of the keyboard's reach while it is open (Tab never lands on
+  // the hidden chat), and closing it gives the focus back to what had it (the Open button), not to the page's body.
+  const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const shut = [...document.body.children].filter((el) => !el.hasAttribute("inert"));
   const end = () => {
     removeEventListener("message", onMessage);
     removeEventListener("keydown", onKey);
     removeEventListener("popstate", onPop);
     for (const port of ports) port.close();
     view.remove();
+    for (const el of shut) el.removeAttribute("inert");
+    const active = document.activeElement;
+    if (before?.isConnected && (!active || active === document.body)) before.focus({ preventScroll: true });
     // Closed by ✕, Escape or the lock: its entry goes too, back to the one the app was on.
     if (!handingOver && isViewEntry(history.state)) leaveViewEntry();
   };
@@ -187,6 +196,7 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   close.addEventListener("click", end);
   view.addEventListener(SERVICE_VIEW_CLOSE, end);
   frame.src = `${origin}${BRIDGE_PAGE}`;
+  for (const el of shut) el.setAttribute("inert", "");
   document.body.append(view);
   close.focus();
 }

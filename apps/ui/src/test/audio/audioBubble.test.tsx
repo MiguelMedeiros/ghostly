@@ -188,7 +188,7 @@ describe("an audio file in the chat", () => {
     const revoke = vi.spyOn(URL, "revokeObjectURL");
     fakeEngine.update({ links: [linkView({ id: "chat1" })], transfers: {} });
     const voice: ChatFile & { voice: { duration: number; peaks: number[] } } = { id: "chat1-in-voice1", name: "Voice message.webm", size: 900, mime: "audio/webm", voice: { duration: 3000, peaks: [1, 2, 3] } };
-    renderApp(<><AudioBubble file={song()} sender="peer" /><VoiceBubble file={voice} sender="peer" /></>);
+    renderApp(<><AudioBubble file={song()} sender="peer" /><VoiceBubble file={voice} sender="peer" timestamp={1_700_000_000_000} /></>);
     fireEvent.click(screen.getByTestId("audio-play"));
     await flush();
     const url = screen.getByTestId("audio-element").getAttribute("src");

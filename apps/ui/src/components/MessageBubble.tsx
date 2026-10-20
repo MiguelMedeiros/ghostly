@@ -1159,7 +1159,7 @@ function MessageBubbleView({ message, peerAck = 0, peerPubKey = "", peerNick = "
           </div>
         ) : message.file?.voice ? (
           <div className="clearfix">
-            <VoiceBubble file={{ ...message.file, voice: message.file.voice }} sender={isMe ? "me" : "peer"} peerName={message.nick || peerNick || undefined} />
+            <VoiceBubble file={{ ...message.file, voice: message.file.voice }} sender={isMe ? "me" : "peer"} peerName={message.nick || peerNick || undefined} timestamp={message.timestamp} />
             {timestampEl}
           </div>
         ) : message.file && isPlayableVideoType(message.file.mime) ? (

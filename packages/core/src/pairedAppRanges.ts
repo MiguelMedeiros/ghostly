@@ -1,4 +1,4 @@
-import { fromBase64Url, toBase64Url } from "./bytes";
+import { concatBytes, fromBase64Url, randomBytes, toBase64Url } from "./bytes";
 import { isChatAppId } from "./pairedApps";
 
 /**
@@ -29,6 +29,13 @@ export const APP_RANGE_LIMITS = {
   chunkBytes: 16 * 1024,
   /** The largest request number: it is 4 bytes in a binary chunk. */
   maxRequest: 0xffff_ffff,
+  /** Requests a server takes in flight per app; one more is answered `busy`. An asker keeps the rest waiting. */
+  inFlight: 4,
+  /**
+   * The bytes a server takes asks for in one second, its apps together: one more is answered `busy`. Counted as they
+   * are asked, so a cancelled one counts as the read it started. Twice the asking app's own budget (16 MiB a second).
+   */
+  bytesPerSecond: 32 * 1024 * 1024,
 } as const;
 
 /**
@@ -168,4 +175,220 @@ export function decodeAppRangeData(message: Uint8Array): { a: string; r: number;
   // Past 2^53 - 1 an offset is no longer a whole number here.
   if (high > 0x1fffff) return null;
   return { a: toBase64Url(message.slice(1, 17)), r: view.getUint32(17), o: high * 2 ** 32 + view.getUint32(25), data: message.subarray(HEAD) };
+}
+
+/** Why a read of the contact's file failed, as the app hears it (a broker code). */
+export type AppRangeReadError = "not-served" | "changed" | "gone" | "offline" | "peer-closed" | "failed";
+
+/** A request of the contact's to answer: read `length` bytes of `file` at `offset`, send them, then `finish`. */
+export interface AppRangeTask {
+  readonly app: string;
+  readonly request: number;
+  /** The serve id it came under: the page that served it answers it. */
+  readonly serve: string;
+  /** What this side's app served, as it named it (a linked file's id). */
+  readonly file: string;
+  readonly offset: number;
+  readonly length: number;
+  /**
+   * False once the asker cancelled, the app closed or the session ended: send nothing more for it. A task the asker
+   * cancelled still holds its place among the app's `inFlight` until it is settled (`finish`, `fail` or `release`).
+   */
+  readonly live: boolean;
+}
+
+interface Serving { app: string; request: number; serve: string; file: string; offset: number; length: number; live: boolean }
+
+interface Asking {
+  app: string;
+  serve: string;
+  offset: number;
+  length: number;
+  request?: number;
+  chunks: Uint8Array[];
+  got: number;
+  resolve(read: { bytes: Uint8Array; size: number }): void;
+  reject(error: Error): void;
+}
+
+const slot = (app: string, request: number) => `${app}:${request}`;
+
+/**
+ * The read lane of one chat, both ways (WISP 1200 § A read lane to the contact). As the side that serves it keeps the
+ * serve ids it gave out on this session and answers the contact's `ar-get` for those only, at most
+ * `APP_RANGE_LIMITS.inFlight` per app and `bytesPerSecond` asked in all (`busy` past either); the bytes themselves
+ * are read and sent by the session, which calls `finish` or `fail` for each task. As the side that asks it sends at
+ * most `inFlight` requests per app, keeps
+ * the rest waiting, and puts each answer back together, in order, from the offset asked. Serves and requests last one
+ * session: `reset` ends them all, `closeApp` those of one app.
+ */
+export class AppRanges {
+  private readonly serves = new Map<string, { app: string; file: string }>();
+  private readonly serving = new Map<string, Serving>();
+  /** Tasks cancelled or unserved that the session is still reading or sending: each counts in its app's `inFlight` until settled. */
+  private readonly draining = new Set<Serving>();
+  private readonly asking = new Map<string, Asking>();
+  private readonly waiting = new Map<string, Asking[]>();
+  private nextRequest = 0;
+  /** The asks taken in the last second (when, how many bytes) and their sum: what `bytesPerSecond` counts. Kept across sessions. */
+  private readonly taken: { at: number; bytes: number }[] = [];
+  private takenBytes = 0;
+
+  constructor(private readonly send: (frame: AppRangeFrame) => void, private readonly newServeId = () => toBase64Url(randomBytes(16)), private readonly now = Date.now) {}
+
+  /** Lets the contact's `app` read `file` on this session: the serve id to tell it. */
+  serve(app: string, file: string): string {
+    if (!isChatAppId(app)) throw new Error("Not a chat app id");
+    let id = this.newServeId();
+    while (this.serves.has(id)) id = this.newServeId();
+    this.serves.set(id, { app, file });
+    return id;
+  }
+
+  /** Ends one serve: requests under it still being sent stop. False when it was not served. */
+  unserve(serveId: string): boolean {
+    const serve = this.serves.get(serveId);
+    if (!serve) return false;
+    this.serves.delete(serveId);
+    for (const task of this.serving.values()) if (task.serve === serveId) this.drop(task, true);
+    return true;
+  }
+
+  /** The serve ids `app` has given out on this session (what the panel's "Sharing with" line shows). */
+  servesOf(app: string): string[] {
+    return [...this.serves].filter(([, serve]) => serve.app === app).map(([id]) => id);
+  }
+
+  /** An `ar-get` from the contact: the task to read and send, or null when it was refused (the refusal is sent) or dropped. */
+  receiveGet(frame: Extract<AppRangeFrame, { t: "ar-get" }>): AppRangeTask | null {
+    const { a: app, r: request } = frame;
+    // A request number still in flight is the asker's own mistake: answering it would end the first one.
+    if (this.serving.has(slot(app, request))) return null;
+    const serve = this.serves.get(frame.s);
+    if (!serve || serve.app !== app) { this.send(appRangeErrorFrame(app, request, "not-served")); return null; }
+    // A request cancelled but not yet settled still counts: a cancel stops the bytes, not the read under them.
+    const inFlight = [...this.serving.values(), ...this.draining].filter(task => task.app === app).length;
+    if (inFlight >= APP_RANGE_LIMITS.inFlight) { this.send(appRangeErrorFrame(app, request, "busy")); return null; }
+    // Each ask is a read on this device, cancelled or not: past the bytes a second, nothing more is read.
+    const at = this.now();
+    while (this.taken.length && this.taken[0]!.at <= at - 1000) this.takenBytes -= this.taken.shift()!.bytes;
+    if (this.takenBytes + frame.n > APP_RANGE_LIMITS.bytesPerSecond) { this.send(appRangeErrorFrame(app, request, "busy")); return null; }
+    this.taken.push({ at, bytes: frame.n });
+    this.takenBytes += frame.n;
+    const task: Serving = { app, request, serve: frame.s, file: serve.file, offset: frame.o, length: frame.n, live: true };
+    this.serving.set(slot(app, request), task);
+    return task;
+  }
+
+  /** An `ar-cancel` from the contact: that request sends nothing more, and its number frees; its place frees once it is settled. */
+  receiveCancel(frame: Extract<AppRangeFrame, { t: "ar-cancel" }>): void {
+    const task = this.serving.get(slot(frame.a, frame.r));
+    if (task) this.drop(task, true);
+  }
+
+  /** Every byte of `task` was sent: `ar-end` goes with the file's size, unless the task was dropped meanwhile. */
+  finish(task: AppRangeTask, size: number): void {
+    if (this.take(task)) this.send(appRangeEndFrame(task.app, task.request, size));
+  }
+
+  /** The file under `task` could not be read: `ar-err` goes in place of the rest, unless the task was dropped meanwhile. */
+  fail(task: AppRangeTask, error: "changed" | "gone"): void {
+    if (this.take(task)) this.send(appRangeErrorFrame(task.app, task.request, error));
+  }
+
+  /** The session stopped working on `task` without an answer (it is no longer live, or the channel went): its place frees, nothing is sent. */
+  release(task: AppRangeTask): void {
+    this.take(task);
+  }
+
+  /** Reads `length` bytes at `offset` of what the contact's `app` serves as `serve`: the bytes (fewer at the end) and the file's size. */
+  read(app: string, serve: string, offset: number, length: number): Promise<{ bytes: Uint8Array; size: number }> {
+    appRangeGetFrame(app, serve, 0, offset, length);
+    return new Promise((resolve, reject) => {
+      const ask: Asking = { app, serve, offset, length, chunks: [], got: 0, resolve, reject };
+      const queue = this.waiting.get(app) ?? [];
+      queue.push(ask);
+      this.waiting.set(app, queue);
+      this.pump(app);
+    });
+  }
+
+  /** Bytes of a request of ours, from `ar-data` or a binary chunk. Out of order or past what was asked fails the request. */
+  receiveData(app: string, request: number, offset: number, data: Uint8Array): void {
+    const ask = this.asking.get(slot(app, request));
+    if (!ask) return;
+    if (offset !== ask.offset + ask.got || ask.got + data.length > ask.length) {
+      this.send(appRangeCancelFrame(app, request));
+      return this.settle(ask, "failed");
+    }
+    ask.chunks.push(data.slice());
+    ask.got += data.length;
+  }
+
+  /** The contact's `ar-end` or `ar-err` for a request of ours. */
+  receiveAnswer(frame: Extract<AppRangeFrame, { t: "ar-end" | "ar-err" }>): void {
+    const ask = this.asking.get(slot(frame.a, frame.r));
+    if (!ask) return;
+    if (frame.t === "ar-err") return this.settle(ask, (["not-served", "changed", "gone"] as const).find(code => code === frame.e) ?? "failed");
+    // Fewer bytes than asked only at the end of the file, and none past it.
+    if (ask.got !== Math.max(0, Math.min(ask.length, frame.z - ask.offset))) return this.settle(ask, "failed");
+    this.settle(ask);
+    ask.resolve({ bytes: concatBytes(...ask.chunks), size: frame.z });
+  }
+
+  /** `app` closed on either side: its serves end, what it was sending stops and what it asked fails with `error`. */
+  closeApp(app: string, error: AppRangeReadError = "peer-closed"): void {
+    for (const [id, serve] of this.serves) if (serve.app === app) this.serves.delete(id);
+    for (const task of this.serving.values()) if (task.app === app) this.drop(task);
+    for (const task of this.draining) if (task.app === app) this.draining.delete(task);
+    for (const ask of this.waiting.get(app) ?? []) ask.reject(new Error(error));
+    this.waiting.delete(app);
+    for (const ask of this.asking.values()) if (ask.app === app) this.settle(ask, error);
+  }
+
+  /** The session ended: no serve id lasts into the next, and every request fails with `offline`. */
+  reset(): void {
+    const apps = new Set([...this.serves.values()].map(serve => serve.app).concat([...this.serving.values(), ...this.draining].map(task => task.app), [...this.waiting.keys()], [...this.asking.values()].map(ask => ask.app)));
+    for (const app of apps) this.closeApp(app, "offline");
+  }
+
+  /** Stops `task` and frees its request number; `draining` keeps it counted until it is settled. */
+  private drop(task: Serving, draining = false): void {
+    task.live = false;
+    this.serving.delete(slot(task.app, task.request));
+    if (draining) this.draining.add(task);
+  }
+
+  /** Frees `task`'s place; false when it was no longer live (nothing to send for it). */
+  private take(task: AppRangeTask): boolean {
+    if (this.draining.delete(task as Serving)) return false;
+    const held = this.serving.get(slot(task.app, task.request));
+    if (held !== task || !held.live) return false;
+    this.drop(held);
+    return true;
+  }
+
+  /** Ends `ask` (failing it with `error` when given) and sends the next one waiting for its app. */
+  private settle(ask: Asking, error?: AppRangeReadError): void {
+    if (ask.request === undefined || this.asking.get(slot(ask.app, ask.request)) !== ask) return;
+    this.asking.delete(slot(ask.app, ask.request));
+    if (error) ask.reject(new Error(error));
+    this.pump(ask.app);
+  }
+
+  private pump(app: string): void {
+    const queue = this.waiting.get(app);
+    let inFlight = [...this.asking.values()].filter(ask => ask.app === app).length;
+    while (queue?.length && inFlight < APP_RANGE_LIMITS.inFlight) {
+      const ask = queue.shift()!;
+      let request = this.nextRequest;
+      while (this.asking.has(slot(app, request))) request = request === APP_RANGE_LIMITS.maxRequest ? 0 : request + 1;
+      this.nextRequest = request === APP_RANGE_LIMITS.maxRequest ? 0 : request + 1;
+      ask.request = request;
+      this.asking.set(slot(app, request), ask);
+      inFlight++;
+      this.send(appRangeGetFrame(app, ask.serve, request, ask.offset, ask.length));
+    }
+    if (queue && !queue.length) this.waiting.delete(app);
+  }
 }
