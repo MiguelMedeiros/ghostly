@@ -3,7 +3,7 @@ import { identityStatement, type IdentityStatement } from "@ghostly/core";
 import { engine } from "@ghostly/browser/platform/engine";
 import { availableSigners } from "@ghostly/browser/proofs/verify";
 import type { ApprovalRequest, IdentityProofProvider, IdentitySigner, SignerContext, SignerInstructions } from "@ghostly/browser/proofs/contract";
-import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
+import { tabbables, useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { useMoneyCopy } from "../../hooks/useMoneyCopy";
 import { addableProviders, identityPlatform } from "../../lib/identities";
 import { FieldGrid } from "../layout";
@@ -64,11 +64,27 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
   const backdrop = useBackdropDismiss(close);
   useEffect(() => () => abort.current?.abort(), []);
 
+  // Each step replaces the control that led to it, and the focus would fall to the page: the step takes it instead.
+  // The picker gives it to the card that was chosen, the form to its first field, the steps to run to their list.
+  const step = !provider ? "picker" : pending ? "steps" : approval ? "approval" : "form";
+  const shownStep = useRef(step);
+  const chosen = useRef<string | null>(null);
+  const region = useRef<HTMLDivElement>(null), back = useRef<HTMLButtonElement>(null), steps = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    if (shownStep.current === step) return;
+    shownStep.current = step;
+    const at = document.activeElement;
+    if (at && at !== document.body && dialog.current?.contains(at)) return;
+    const card = step === "picker" && chosen.current ? dialog.current?.querySelector<HTMLElement>(`[data-testid="add-identity-${chosen.current}"]`) : null;
+    const target = card ?? (step === "steps" && steps.current?.childElementCount ? steps.current : region.current && tabbables(region.current).find(el => el !== back.current));
+    (target ?? dialog.current)?.focus();
+  }, [step]);
+
   /** Stopped by the person: nothing to do, and nothing was saved. */
   const cancelled = (): Problem => ({ tone: "error", title: t("identities.add.cancelled") });
   const validity = days || provider?.validity.defaultDays || 30;
   const validityOptions = provider ? [...new Set([...VALIDITY.filter(d => d <= provider.validity.maxDays), provider.validity.defaultDays])].sort((a, b) => a - b) : [];
-  const choose = (p: IdentityProofProvider) => { setProvider(p); setSignerId(""); setSubject(p.subject.options?.[0]?.value ?? ""); setDays(0); setError(""); };
+  const choose = (p: IdentityProofProvider) => { chosen.current = p.id; setProvider(p); setSignerId(""); setSubject(p.subject.options?.[0]?.value ?? ""); setDays(0); setError(""); };
 
   async function begin(forSubject: string): Promise<Pending> {
     const { draftId, binding } = await engine.call("beginIdentityProof", { provider: provider!.id, subject: forSubject, validityDays: validity });
@@ -149,7 +165,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
 
         {!provider ? (
           providers.length ? (
-            <div className="space-y-3">
+            <div ref={region} className="space-y-3">
               {basic.length > 0 && <div role="list" aria-label={t("identities.add.kinds")}><FieldGrid min="22rem" max={2}>{basic.map(card)}</FieldGrid></div>}
               {more.length > 0 && <AdvancedProviders open={advanced || !basic.length} onToggle={() => setAdvanced(!advanced)} labels={more.map(p => p.label)}>
                 <FieldGrid min="22rem" max={2}>{more.map(card)}</FieldGrid>
@@ -157,10 +173,10 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             </div>
           ) : <Notice>{t("identities.add.none")}</Notice>
         ) : pending ? (
-          <div className="space-y-3">
+          <div ref={region} className="space-y-3">
             <p className="text-sm text-text-primary"><bdi>{signer?.label}</bdi></p>
             {signer?.kind === "redirect" && <p className="text-sm text-text-secondary">{t("identities.add.redirectHint", { provider: provider!.label })}</p>}
-            <ol className="space-y-3 list-decimal ps-5 text-sm text-text-secondary">
+            <ol ref={steps} tabIndex={-1} data-testid="add-identity-steps" className="space-y-3 list-decimal ps-5 text-sm text-text-secondary focus:outline-none">
               {pending.instructions?.steps.map((step, i) => (
                 <li key={i} className="space-y-2">
                   <p><bdi>{step.text}</bdi></p>
@@ -181,7 +197,7 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             </div>
           </div>
         ) : approval ? (
-          <div className="space-y-4">
+          <div ref={region} className="space-y-4">
             <div className="flex items-center gap-3">
               <ProviderMark provider={provider.id} />
               <p className="min-w-0 flex-1 text-sm text-text-primary"><bdi>{provider.label}</bdi></p>
@@ -189,14 +205,14 @@ export function AddIdentityDialog({ onClose }: { onClose: () => void }) {
             <ApprovalPanel request={approval} onCancel={() => { abort.current?.abort(); setApproval(null); setProgress(""); setError(cancelled()); }} />
           </div>
         ) : (
-          <div className="space-y-4">
+          <div ref={region} className="space-y-4">
             <div className="flex items-center gap-3">
               <ProviderMark provider={provider.id} subject={needsSubject ? subject : undefined} />
               <div className="min-w-0 flex-1 flex flex-wrap items-center gap-x-2 gap-y-1">
                 <p className="text-sm text-text-primary"><bdi>{provider.label}</bdi></p>
                 <CategoryPill provider={provider} />
               </div>
-              <Button disabled={busy} onClick={() => { setProvider(null); setError(""); }}>{t("common.back")}</Button>
+              <Button ref={back} disabled={busy} onClick={() => { setProvider(null); setError(""); }}>{t("common.back")}</Button>
             </div>
             <ProviderAbout provider={provider} testId="add-identity-about" />
             {!previewFirst && signerChoice}
