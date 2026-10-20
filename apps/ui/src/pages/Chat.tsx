@@ -197,6 +197,8 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     setCallSignal,
     setChatFastPoll,
     addSystemMessage,
+    addMissedCallMessage,
+    uncountMissedCall,
     deleteMessage,
     setNick,
   } = useChat(params);
@@ -206,6 +208,10 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     setNick(sharedNick);
   }, [sharedNick, setNick]);
 
+  // A missed call counted on another line: taking it back (a held call that rang after all) takes one off that line.
+  const countedOnRef = useRef(new Map<string, string>());
+  // The chat is on screen: a missed line the person already read may still count the next call (they see it change).
+  const seenRef = useRef(false);
   const addCallEventMessage = useCallback(
     (type: CallEventType, hasVideo: boolean, duration?: number, call?: number) => {
       // Kept in English in the history: the call line is worded in the person's language where it is drawn (MessageBubble).
@@ -233,11 +239,24 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
         },
       };
 
+      if (type === "call_missed") {
+        // A burst of missed calls from the contact is one line ("12 missed calls"), its rung calls' Incoming lines
+        // gone with it (agents#992).
+        const line = addMissedCallMessage(msg, { rang: call !== undefined ? callLineId("call_received", call) : undefined, seen: seenRef.current });
+        if (line && line !== msg.id) countedOnRef.current.set(msg.id, line);
+        return msg.id;
+      }
       addSystemMessage?.(msg);
       return msg.id;
     },
-    [addSystemMessage],
+    [addSystemMessage, addMissedCallMessage],
   );
+  const removeCallEventMessage = useCallback((id: string) => {
+    const line = countedOnRef.current.get(id);
+    if (line === undefined) { deleteMessage(id); return; }
+    countedOnRef.current.delete(id);
+    uncountMissedCall(line);
+  }, [deleteMessage, uncountMissedCall]);
 
   const platform = useServicesPlatform();
   const webrtc = useWebRTC({
@@ -246,7 +265,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
     setFastPoll: setChatFastPoll,
     addCallEventMessage,
     // Only a line of this side's own (a call that lost a glare): the contact never had it, so nothing goes out.
-    removeCallEventMessage: deleteMessage,
+    removeCallEventMessage,
     media: platform?.callMedia?.(),
     // The profile's ICE servers (a TURN relay) serve calls too; a signal on the chat session carries every path.
     iceServers: engine.state?.settings.iceServers,
@@ -569,6 +588,7 @@ export function Chat({ sessionId, visible, onCallChange, callLayer, holdForUnloc
   // Only what is on screen has been read; a chat kept alive by a call has not, nor one in a hidden window (usePageShown).
   const pageShown = usePageShown();
   useEffect(() => {
+    seenRef.current = visible && pageShown;
     if (!visible || !pageShown) return;
     markSessionAsRead(sessionId);
   }, [visible, pageShown, sessionId, messages.length]);
