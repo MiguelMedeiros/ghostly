@@ -144,7 +144,7 @@ export interface FileTransferState {
    * A group's file, `waiting`: why. `nobody` connected has it, its holders are `busy`, or what came was `damaged`
    * (it was dropped; `stalled`, so its person can ask again).
    */
-  wait?: "nobody" | "busy" | "damaged";
+  wait?: "nobody" | "busy" | "day" | "damaged";
   /** The same, in the engine's words. */
   note?: string;
 }

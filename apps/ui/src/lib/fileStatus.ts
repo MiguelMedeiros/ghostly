@@ -111,6 +111,8 @@ export function fileStatus(file: ChatFile, transfer: FileTransferState | null, n
       // A group's file says why it waits: its holders busy, or its bytes damaged; else, as a chat's, for a connection.
       if (transfer.wait === "damaged") return tr("chat.file.damaged", { size });
       if (transfer.wait === "busy") return transfer.transferred > 0 ? tr("chat.file.busyDone", { done }) : tr("chat.file.busySize", { size });
+      // Its holders served all they can today (WISP 503 § Serving limits): no "soon" about it (agents#1672).
+      if (transfer.wait === "day") return tr("chat.file.daySpent", { size });
       return transfer.transferred > 0 ? tr("chat.file.waitingDone", { done }) : tr("chat.file.waitingSize", { size });
     case "asking": return incoming ? tr("chat.file.askingYou", { size }) : tr("chat.file.askingThem", { name: peerName, size });
     case "queued": return incoming ? tr("chat.file.queuedHere", { done }) : tr("chat.file.queuedThere", { name: peerName, done });
