@@ -181,11 +181,12 @@ describe("a community member's catch-up answer goes a slice at a time", { timeou
     await vi.waitFor(() => expect(sent).toHaveLength(3 * slice));
     expect(sent.map(said)).toEqual(whole.slice(0, 3 * slice));
     // Bob's sync again a while later (its edge opened again): the new answer goes after what is left of the first,
-    // without the stored frames still queued there; what went already goes again, in the new answer's order.
+    // without the messages, commits and secrets still queued there, nor the second and third slices', which Bob's app
+    // has not handled yet; the first slice's, handled, go again, and so do the frames sealed or asked afresh.
     now += 10_000;
     await session.handle(bob.session.myKey, clone(sync));
     expect(sent).toHaveLength(3 * slice);
-    const again = whole.filter((w, i) => i < 3 * slice || !w.startsWith("group-msg:"));
+    const again = whole.filter((w, i) => i < slice || !/^group-(msg|commit|secret):/.test(w));
     while (sent.length < whole.length + again.length) {
       await vi.waitFor(() => expect(waits.length).toBeGreaterThan(0));
       waits.shift()!();
@@ -195,9 +196,39 @@ describe("a community member's catch-up answer goes a slice at a time", { timeou
     // Commits and secrets before the frames that need them, as before.
     const [lastNeeded, firstMessage] = needsFirst(whole.map(w => w.split(":")[0]));
     expect(lastNeeded).toBeLessThan(firstMessage);
-    // Nothing is asked after the last slice: the one before it is the only question left.
+    // The last two slices' questions are what is left, and once answered nothing more is asked.
     await sleep(20);
-    expect(waits.length).toBeLessThanOrEqual(1);
+    expect(waits.length).toBeLessThanOrEqual(2);
+    for (const done of waits.splice(0)) done();
+    await sleep(20);
+    expect(waits).toHaveLength(0);
+  });
+
+  it("a member that asks again while my answer still waits in its app is not sent those messages, commits and secrets again; once handled, still missing ones go again", async () => {
+    // Bob's app handles 1 or 2 frames a second and asks again every 5-30 s: each answer went to the queue behind the
+    // last, and 200 missed messages went to it 29-104 times more (318 commits as 610 frames).
+    const { alice, bob, sync } = await awayCommunity(4, 20);
+    let now = Date.now();
+    const waits: ((told: boolean | "late") => void)[] = [];
+    const { session, sent } = await answer(alice, bob.session.myKey, sync, {
+      clock: () => now,
+      handled: () => new Promise<boolean | "late">(resolve => waits.push(resolve)),
+    });
+    const keyed = (frames: CommunityFrame[]) => frames.map(said).filter(w => /^group-(msg|commit|secret):/.test(w));
+    const first = keyed(sent.splice(0));
+    expect(first).toHaveLength(4 + 21 + 1);
+    // Asked again, the answer still in Bob's app (its pong late): none of those again.
+    waits.shift()!("late");
+    await sleep(0);
+    now += 10_000;
+    await session.handle(bob.session.myKey, clone(sync));
+    expect(keyed(sent.splice(0))).toEqual([]);
+    // Bob's app handled them and still lacks them (lost on the way): the next sync has them again.
+    for (const done of waits.splice(0)) done(true);
+    await sleep(0);
+    now += 10_000;
+    await session.handle(bob.session.myKey, clone(sync));
+    expect(keyed(sent)).toEqual(first);
   });
 
   it("an app that cannot say waits a pause between slices; an edge that takes no frame ends the answer", async () => {
