@@ -267,6 +267,13 @@ export function noteCame(group: Pick<StoredGroup, "came"> | undefined, came: num
 /** What `load` starts the unread marks from: the history's own times, or when its latest came if that was later. */
 export const cameOrWritten = (written: number | undefined, came: number | undefined): number | undefined =>
   written === undefined && came === undefined ? undefined : Math.max(written ?? 0, came ?? 0);
+/** Every key that was a member of the group at some epoch of its chain. */
+export function everMembers(session: Pick<GroupSession, "state">): Set<string> {
+  const keys = new Set<string>();
+  for (const commit of session.state.chain) if (commit) for (const [key] of commit.m) keys.add(key);
+  return keys;
+}
+
 /** The view's `lastPeerMessageAt`, when there is one. */
 export const peerMessageAt = (map: Map<string, number>, groupId: string): { lastPeerMessageAt?: number } => {
   const at = map.get(groupId);
@@ -1664,10 +1671,16 @@ export class Groups {
     const knocks = readKnocks(entry.link, (await this.host.resolve(knockIdentity(entry.link).pubKeyZ32)) ?? []);
     traceJoin(group.id, "knocks.read", { ms: Date.now() - started, knocks: knocks.length });
     let pending = this.pendingEntries.get(group.id);
+    let ever: Set<string> | undefined;
     for (const { key, ts } of knocks) {
       // A member let in whose welcome never reached it knocks again: its session opens again for the welcome (`rewelcome`).
       const again = this.unwelcomed(group, session, key);
       if (now - ts > KNOCK_TTL_MS || (rosterHas(session.roster, key) && !again) || this.refused.has(key) || pending?.has(key) || key === entry.link.host) continue;
+      // A member who left or was removed: its knock, from when it joined, stays in the record for up to `KNOCK_TTL_MS`,
+      // and a joiner's key is new for every join (`dialedKey`), so it is no one asking now. Answered, it opened an entry
+      // session nobody answers, which held one of the `MAX_PENDING_ENTRIES` places for `ENTRY_TIMEOUT_MS`: in a group
+      // members come and go by, the next person to open the link waited 1-3 minutes, not 3 s (agents#1667).
+      if (!again && (ever ??= everMembers(session)).has(key)) continue;
       // Sent its welcome again lately: its knock opens no session (and keeps the link's reads at their pace) until it may be again.
       if (again && this.rewelcomedLately(group.id, key)) continue;
       const entryIds = new Set(this.host.entries(group.id).values());
