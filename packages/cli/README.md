@@ -390,11 +390,15 @@ receive|address|redeem`, `wallet.mint.add`, `lightning.default|rename`, `pay`, `
 `{"method":"<engine call>","params":{…},"confirmReal":false,"yes":false}` for anything else the app does. Parameters are the
 commands' (see `src/api.ts`). Errors: `{"id":…,"error":{"code","message","details"?}}` with the codes above.
 
-Before its first request, a program can check that the socket is the profile's daemon and not a process that opened
-its path first (on Windows the socket is a named pipe, which any account of the machine may open): send
+The daemon's first line on every connection is `{"greeting":{"pid":…,"at":…,"proof":"<hex>"}}`, which a program
+that does not check it can skip. Before it writes anything, a program can check that the socket is the profile's
+daemon and not a process that opened its path first (on Windows the socket is a named pipe, which any account of the
+machine may open): the greeting's `proof` is HMAC-SHA256 over `ghostly-greeting:<pid>:<at>` keyed with the 32 bytes
+(hex) in `daemon.secret` in the profile's folder, which the daemon writes anew, 0600, at every start; `at` (ms) is
+recent and `pid` is the one in `daemon.lock`. Then send
 `{"id":"hello","method":"daemon.hello","params":{"nonce":"<16 random bytes, hex>"}}`; the answer's `proof` is
-HMAC-SHA256 over `ghostly-daemon:<nonce>` keyed with the 32 bytes (hex) in `daemon.secret` in the profile's folder,
-which the daemon writes anew, 0600, at every start. The CLI sends nothing else until that proof matches.
+HMAC-SHA256 over `ghostly-daemon:<nonce>` with the same key. The CLI writes nothing until the greeting checks out,
+and nothing but the hello until its proof matches.
 
 ## Calls
 

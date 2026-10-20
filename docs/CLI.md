@@ -99,9 +99,11 @@ One JSON object per line each way:
 A connection takes one `events.subscribe`: a second on it is refused (`bad_request`), and a new stream is a new
 connection.
 
-Every command's first line on the socket is a `daemon.hello` with a nonce, and nothing else goes until the answer
-proves, with the secret the daemon writes in the profile's folder (`daemon.secret`, 0600, new at every start), that
-it is the profile's daemon: on Windows the socket is a named pipe whose name another account could open first. What
+The daemon speaks first on the socket: a greeting that proves, with the secret it writes in the profile's folder
+(`daemon.secret`, 0600, new at every start), its pid and the time. A command writes nothing until that checks out,
+then a `daemon.hello` with a nonce, and nothing else until the answer proves the same over that nonce: on Windows the
+socket is a named pipe whose name another account could open first, and a privileged one could impersonate a client
+that writes to it. What
 cannot prove it is refused (`refused`); a daemon of an older release cannot either, and `ghostly daemon restart` stops
 it through the process that holds the profile and starts this release's.
 

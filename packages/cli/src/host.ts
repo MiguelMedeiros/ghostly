@@ -7,7 +7,7 @@ import { announceJoins } from "./announce";
 import { reportAppFrames } from "./appEvents";
 import { callApi, type ApiContext } from "./api";
 import { CallManager } from "./calls/manager";
-import { HELLO, newDaemonSecret, proof } from "./daemonProof";
+import { greeting, HELLO, newDaemonSecret, proof, removeDaemonSecret } from "./daemonProof";
 import { asCliError, CliError } from "./errors";
 import { EventHub, type GhostlyEvent } from "./events";
 import { resumeHolds } from "./holds";
@@ -104,7 +104,8 @@ interface Request { id?: unknown; method?: unknown; params?: unknown }
 
 /**
  * The local control API over the profile's Unix socket (0600 in the 0700 profile folder): one JSON object per line
- * each way. `events.subscribe` turns a connection into a stream of `{"event": …}` lines. `daemon.hello` answers a
+ * each way. `events.subscribe` turns a connection into a stream of `{"event": …}` lines. The first line of every
+ * connection is the daemon's `{"greeting": …}`, written before it reads anything, and `daemon.hello` answers a
  * client's nonce with the proof that this is the profile's daemon (`daemonProof.ts`).
  */
 export interface Served {
@@ -142,6 +143,8 @@ export async function serve(host: Host): Promise<Served> {
   return {
     server,
     close: () => (closing ??= new Promise<void>((resolve) => {
+      // First: a greeting copied from this daemon proves nothing once it has stopped.
+      removeDaemonSecret(ctx.runtime.paths.dir);
       server.close(() => resolve());
       for (const socket of sockets) socket.end();
       setTimeout(() => { for (const socket of sockets) socket.destroy(); }, 500).unref();
@@ -199,6 +202,8 @@ function connection(ctx: ApiContext, socket: Socket, secret: Buffer): void {
   socket.on("drain", () => { limit = MAX_UNREAD; });
   socket.on("close", unsubscribe);
   socket.on("error", () => {});
+  // Before anything is read: a client writes nothing until this proves the daemon (`provesGreeting`).
+  write(greeting(secret));
   const lines = createInterface({ input: socket, crlfDelay: Infinity });
   // readline passes on its input's errors: a client that went away with lines still unread (ECONNRESET) is no error.
   lines.on("error", () => {});
