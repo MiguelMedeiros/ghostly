@@ -67,6 +67,10 @@ describe("the account switcher on the account bar", () => {
     expect(opener).toHaveAttribute("aria-expanded", "true");
 
     const current = within(menu()).getByTestId("profile-switcher-current");
+    // agents#1655: in Arabic its name starts at the start edge, and "Open profile"'s chevron points to the end.
+    expect(current).toHaveClass("text-start");
+    expect(current).not.toHaveClass("text-left");
+    expect(current.querySelector("svg")).toHaveClass("rtl:-scale-x-100");
     expect(current).toHaveAttribute("role", "menuitem");
     expect(current).toHaveAccessibleName("Personal, Miguel, current profile. Open profile");
     expect(within(menu()).queryAllByTestId("profile-switcher-item")).toHaveLength(0);
