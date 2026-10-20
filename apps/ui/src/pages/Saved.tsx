@@ -114,7 +114,7 @@ const SavedItem = memo(function SavedItem({ row, index, now, onOpen, onUnsave }:
           {row.author !== row.chat && <bdi data-testid="saved-author" className="min-w-0 truncate">{row.author}</bdi>}
           <span className="ms-auto shrink-0 tabular-nums">{time}</span>
         </span>
-        <bdi data-testid="saved-text" className="line-clamp-2 text-sm text-text-primary">{row.text}</bdi>
+        <bdi data-testid="saved-text" className="line-clamp-2 text-sm text-text-primary [overflow-wrap:anywhere]">{row.text}</bdi>
       </button>
       <button type="button" data-testid="saved-unsave" onClick={() => onUnsave(row, index)} aria-label={t("saved.unsave")} title={t("saved.unsave")}
         className="grid w-12 shrink-0 cursor-pointer place-items-center text-accent hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent">

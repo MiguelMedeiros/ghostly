@@ -76,6 +76,15 @@ describe("the Saved view", () => {
     await waitFor(() => expect(texts()).toEqual(["🧩 应用：Chess 1.2.0"]));
   });
 
+  it("breaks a long unbroken text (a link) inside the word, so it wraps to two lines and ends in …, not cut at the row's edge", async () => {
+    const link = `https://example.com/${"releaseplan".repeat(16)}`;
+    profile([saved(message("link-1", "peer_1", { text: link }))]);
+    await waitFor(() => expect(texts()).toEqual([link]));
+    const text = screen.getByTestId("saved-text");
+    expect(text).toHaveClass("line-clamp-2");
+    expect(text.className).toContain("[overflow-wrap:anywhere]");
+  });
+
   it("opens a message's chat on the message", async () => {
     const { user } = profile([saved(message("group:g1", "k:1", { member: "hermes-key" })), saved(message("link-1", "peer_2"))]);
     const rows = await screen.findAllByTestId("saved-row");
