@@ -68,6 +68,7 @@
     "audioFailed": "L'appel audio n'a pas pu se connecter",
     "audioIncoming": "Appel audio entrant",
     "audioMissed": "Appel audio manqué",
+    "audioMissedMany": "{{count}} appels audio manqués",
     "audioStarted": "Appel audio lancé",
     "audioUnanswered": "Appel audio sans réponse",
     "videoCancelled": "Appel vidéo annulé",
@@ -77,6 +78,7 @@
     "videoFailed": "L'appel vidéo n'a pas pu se connecter",
     "videoIncoming": "Appel vidéo entrant",
     "videoMissed": "Appel vidéo manqué",
+    "videoMissedMany": "{{count}} appels vidéo manqués",
     "videoStarted": "Appel vidéo lancé",
     "videoUnanswered": "Appel vidéo sans réponse"
   },

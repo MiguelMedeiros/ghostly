@@ -114,7 +114,7 @@ import {
 } from "@ghostly/core";
 import type { AppRangeAsk, AttentionCue, AttentionEvent, EngineImplementation } from "../shared/rpc";
 import { SavedMessages } from "./saved";
-import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, type StoredFile } from "../shared/idb";
+import { STORES, clearProfileStores, databaseName, fileStore, openDb, store, wrap, committed, type StoredFile } from "../shared/idb";
 import { Apps, type AppDataExport, type AppDataExportText, type AppFileAt, type AppCheckResult, type AppPreview, type AppRunEntry, type AppRunStatus, type AppSource, type AppStorePreview, type AppStoreSummary, type BuiltInAppOffer, type InstalledAppView } from "./apps";
 import { boundedAppFetch } from "./appFetch";
 import { knownDeviceGate, viewOf, type DeviceGateView } from "../devices/gate";
@@ -2006,7 +2006,7 @@ export class GhostlyNode implements EngineImplementation {
   }
 
   private async clearRestoreMark(): Promise<void> {
-    await wrap((await store(STORES.settings, "readwrite")).delete(RESTORE_UNCHECKED_KEY));
+    await committed((await store(STORES.settings, "readwrite")).delete(RESTORE_UNCHECKED_KEY));
   }
 
   /**
@@ -6245,7 +6245,7 @@ export class GhostlyNode implements EngineImplementation {
     if (typeof groupId !== "string" || !groupId) throw new Error("Name the group");
     const next = new Set(this.groupAdminOff);
     if (on) next.delete(groupId); else next.add(groupId);
-    await wrap((await store(STORES.settings, "readwrite")).put({ at: Date.now(), groups: [...next].sort() }, GROUP_ADMIN_OFF_KEY));
+    await committed((await store(STORES.settings, "readwrite")).put({ at: Date.now(), groups: [...next].sort() }, GROUP_ADMIN_OFF_KEY));
     this.groupAdminOff = next;
     this.emitState();
   }
@@ -6306,7 +6306,7 @@ export class GhostlyNode implements EngineImplementation {
 
   /** The one-time session of an enrollment, over the transports a chat uses. */
   private enrollLink(): OpenEnrollChannel {
-    return ghostLinkEnrollChannel({ transport: this.transport, createPeerConnection: this.devicePeerConnection(), nativeTransports: this.nativeFactories, pollIntervals: this.pollIntervals });
+    return ghostLinkEnrollChannel({ transport: this.transport, createPeerConnection: this.devicePeerConnection(), nativeTransports: this.deviceNativeFactories, pollIntervals: this.pollIntervals });
   }
 
   /** What an enrollment may not start without: a profile on several devices, an engine that may use the network. */
@@ -6330,7 +6330,7 @@ export class GhostlyNode implements EngineImplementation {
       this.deviceLinks = new DeviceLinks({
         profile: databaseName(), transport: this.transport, turn: this.turnNetwork(), pollIntervals: this.pollIntervals,
         // Asked each time a link starts its endpoints: a HyperDHT relay set later is used (enrollment gets it fresh too).
-        createPeerConnection: this.devicePeerConnection(), nativeTransports: () => this.nativeFactories, offline: !this.networkOn,
+        createPeerConnection: this.devicePeerConnection(), nativeTransports: () => this.deviceNativeFactories, offline: !this.networkOn,
         onChange: () => { this.emitState(); this.askDeviceRenewals(); this.syncDeviceTokens(); },
         onDeviceWake: (from, target) => this.deviceWakeReceived(from, target),
         pushSend: (request) => this.postPush(request),
@@ -6729,7 +6729,7 @@ export class GhostlyNode implements EngineImplementation {
     }
     try {
       const verifier = await makeHandoffVerifier(password);
-      await wrap((await store(STORES.settings, "readwrite")).put(verifier, GhostlyNode.HANDOFF_VERIFIER));
+      await committed((await store(STORES.settings, "readwrite")).put(verifier, GhostlyNode.HANDOFF_VERIFIER));
       await this.syncDeviceVerifier().catch(() => {});
       await this.stateDeviceVerifier();
     } catch (error) {
@@ -6742,7 +6742,7 @@ export class GhostlyNode implements EngineImplementation {
 
   /** The profile has no verifier any more: its settings, the device state, and what the turn record states. */
   private async dropHandoffVerifier(): Promise<void> {
-    await wrap((await store(STORES.settings, "readwrite")).delete(GhostlyNode.HANDOFF_VERIFIER)).catch(() => {});
+    await committed((await store(STORES.settings, "readwrite")).delete(GhostlyNode.HANDOFF_VERIFIER)).catch(() => {});
     await this.syncDeviceVerifier().catch(() => {});
     await this.stateDeviceVerifier();
   }
@@ -7906,15 +7906,27 @@ export class GhostlyNode implements EngineImplementation {
     this.emitState();
   }
 
-  /** The native transports this engine runs: the host's, Iroh's browser build where it runs in the page, and HyperDHT through a relay where one is set and the host has no HyperDHT of its own. */
+  /**
+   * The native transports this engine runs for its contacts: the host's, Iroh's browser build where it runs in the
+   * page, and HyperDHT through a relay where one is set and the host has no HyperDHT of its own. While "Hide my IP from
+   * contacts" is on, not the host's own: its endpoints tell a contact this device's addresses (an Iroh descriptor lists
+   * them, HyperDHT connects directly); HyperDHT then goes through the relay, as in a browser.
+   */
   private get nativeFactories(): Partial<Record<NativeTransport, (seedB64: string) => Promise<NativeEndpoint>>> {
-    const relay = this.relaysHyperdht ? this.hyperdhtRelay : "";
+    return this.nativeFactoriesFor(this.settings.relayOnly === true);
+  }
+  /** The native transports of this profile's own devices' links: "Hide my IP from contacts" is not about them. */
+  private get deviceNativeFactories(): Partial<Record<NativeTransport, (seedB64: string) => Promise<NativeEndpoint>>> {
+    return this.nativeFactoriesFor(false);
+  }
+  private nativeFactoriesFor(relayOnly: boolean): Partial<Record<NativeTransport, (seedB64: string) => Promise<NativeEndpoint>>> {
+    const relay = relayOnly || this.relaysHyperdhtNatively ? this.hyperdhtRelay : "";
     return {
       // Loaded only now: a browser that never uses a relay never downloads the HyperDHT client.
       ...(relay ? { "hyperdht/1": async (seedB64: string) => (await import("../platform/hyperdhtRelay")).createRelayedHyperEndpoint(seedB64, relay) } : {}),
-      ...this.options.nativeTransports,
+      ...(relayOnly ? {} : this.options.nativeTransports),
       // The host's own Iroh on the person's Iroh relays, read when the endpoint starts; on its own defaults without.
-      ...(this.ownIrohRelays ? { "iroh/1": (seedB64: string) => this.options.nativeTransports!["iroh/1"]!(seedB64, this.settings.irohRelays?.length ? { relays: [...this.settings.irohRelays] } : {}) } : {}),
+      ...(this.ownIrohRelays && !relayOnly ? { "iroh/1": (seedB64: string) => this.options.nativeTransports!["iroh/1"]!(seedB64, this.settings.irohRelays?.length ? { relays: [...this.settings.irohRelays] } : {}) } : {}),
       ...(this.options.irohWeb ? { "iroh/1": (seedB64: string) => createIrohWebEndpoint(seedB64, { relays: this.irohRelays }) } : {}),
     };
   }
@@ -7940,7 +7952,9 @@ export class GhostlyNode implements EngineImplementation {
   /** The HyperDHT relay a browser reaches the HyperDHT through; empty when none is set. */
   private get hyperdhtRelay(): string { return (this.settings.hyperdhtRelay ?? DEFAULT_HYPERDHT_RELAY).trim(); }
   /** HyperDHT goes through the relay here: the host runs none of its own (the Desktop does). */
-  private get relaysHyperdht(): boolean { return !this.options.nativeTransports?.["hyperdht/1"]; }
+  private get relaysHyperdhtNatively(): boolean { return !this.options.nativeTransports?.["hyperdht/1"]; }
+  /** HyperDHT goes through the relay for contacts: the host runs none of its own, or "Hide my IP from contacts" is on. */
+  private get relaysHyperdht(): boolean { return this.relaysHyperdhtNatively || this.settings.relayOnly === true; }
 
   /**
    * Whether a chat keeps native listeners: a contact's, the chat on screen, and one this side joined from a `ghostly1`
