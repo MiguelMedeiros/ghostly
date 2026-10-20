@@ -11,6 +11,7 @@ import { callLevels } from "../lib/voiceLevels";
 import { Menu, MenuItem } from "./Menu";
 import { initial } from "../lib/initial";
 import { errorText } from "../lib/errorText";
+import { callWindowShown } from "../lib/serviceWindows";
 
 interface CallOverlayProps {
   callState: CallState;
@@ -133,6 +134,8 @@ export function CallOverlay({
   // by the contact while the focus was on its Mute, left it on the page body.
   const box = miniWindow.boxProps.ref;
   const opener = useRef<HTMLElement | null>(null);
+  // Over a contact's app too (the web draws it over everything): it closes first, so Mute and End call are in reach.
+  useEffect(callWindowShown, []);
   useTabTrap(box, !mini);
   useEffect(() => {
     const active = document.activeElement as HTMLElement | null;
