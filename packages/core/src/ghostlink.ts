@@ -82,6 +82,12 @@ const AUTO_CONNECT_RETRY_MS = 20_000;
  */
 const INSTANT_FAIL_MS = 100;
 const INSTANT_FAIL_RETRY_MS = 3_000;
+/**
+ * The same for the first dial after the contact came back (`peerPacketArrived`): an app whose network comes back on
+ * publishes before its listener is announced again, and a dial that fast found nobody (HyperDHT's PEER_NOT_FOUND, 200 ms
+ * at 100 ms RTT). Counted, it held the chat 41 s while the app's other chats came back in 1-3 s (DHT-direct lab, 2026-10-19).
+ */
+const BACK_INSTANT_FAIL_MS = 500;
 /** A group link with nothing to dial looks fast for the member's `_tr` on this many attempts, then at its own pace. */
 const PACKET_TRANSPORTS_FAST_ATTEMPTS = 3;
 /** A native transport that fails this many attempts in a row is skipped for `DEMOTE_MS`, while another remains (WISP 100). */
@@ -1023,6 +1029,8 @@ export class GhostLink {
   private wokeUntil = 0;
   /** Back after a restart, the first automatic dial is still to go (`INSTANT_FAIL_MS`). */
   private resumeDial = false;
+  /** The contact is back (`peerPacketArrived`), and the first automatic dial since is still to go (`BACK_INSTANT_FAIL_MS`). */
+  private backDial = false;
   /** That dial failed at once: the next waits `INSTANT_FAIL_RETRY_MS`, not `dialWait`'s backoff. */
   private instantRetry = false;
 
@@ -3070,14 +3078,15 @@ export class GhostLink {
    */
   private autoDial(): void {
     const tries = this.anythingToDial(), started = Date.now();
-    const resumeDial = tries && this.resumeDial;
-    if (tries) this.resumeDial = false;
+    const instantMs = !tries ? 0 : this.resumeDial ? INSTANT_FAIL_MS : this.backDial ? BACK_INSTANT_FAIL_MS : 0;
+    if (tries) this.resumeDial = this.backDial = false;
     this.instantRetry = false;
     this.lastAutoConnectAt = started;
     if (tries) this.autoConnectFailures++;
     void this.dial().catch(error => {
-      // A restart's first dial that failed at once (`INSTANT_FAIL_MS`): once more soon, and it does not count.
-      if (resumeDial && Date.now() - started < INSTANT_FAIL_MS && this.lastAutoConnectAt === started && this.autoConnectFailures > 0) {
+      // A restart's, or a contact back's, first dial that failed at once (`INSTANT_FAIL_MS`, `BACK_INSTANT_FAIL_MS`):
+      // once more soon, and it does not count.
+      if (Date.now() - started < instantMs && this.lastAutoConnectAt === started && this.autoConnectFailures > 0) {
         this.autoConnectFailures--;
         this.instantRetry = true;
         traceLink(this.myPubKeyZ32, "dial-instant-fail", { ms: Date.now() - started });
@@ -4584,6 +4593,7 @@ export class GhostLink {
     traceLink(this.myPubKeyZ32, "peer-back", {});
     this.autoConnectFailures = 0;
     this.lastAutoConnectAt = 0;
+    this.backDial = true;
   }
 
   /**
