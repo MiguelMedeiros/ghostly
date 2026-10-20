@@ -1,6 +1,6 @@
 import { setBrowserHost, type BrowserHost } from "@ghostly/browser/host";
 import { engine } from "@ghostly/browser/platform/engine";
-import type { EngineApi, EngineEvent, EngineMethod, RpcRequest, RpcResponse } from "@ghostly/browser/shared/rpc";
+import type { ClientMessage, EngineApi, EngineEvent, EngineMethod, RpcRequest, RpcResponse } from "@ghostly/browser/shared/rpc";
 import type { EngineState, GroupView, LinkView, NetworkWalletsView, PaymentView, StoredMessage, WalletOffer, WalletView } from "@ghostly/browser/shared/types";
 import { WALLET_TYPES } from "@ghostly/browser/shared/types";
 import { walletInstances } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
@@ -149,6 +149,8 @@ export class FakeEngine implements BrowserHost {
   state: EngineState = engineState();
   /** Every request, in order. */
   readonly calls: { method: EngineMethod; params: unknown }[] = [];
+  /** The chats whose whole history a page asked for (`HistoryRequest`), in order. */
+  readonly historyAsks: string[] = [];
   openPaymentLink?: BrowserHost["openPaymentLink"];
   /** The desktop host's window full screen (Linux), when a test gives one. */
   fullscreenWindow?: BrowserHost["fullscreenWindow"];
@@ -171,7 +173,7 @@ export class FakeEngine implements BrowserHost {
   async connect(onMessage: (message: EngineEvent | RpcResponse) => void) {
     this.send = onMessage;
     onMessage({ kind: "state", state: this.state });
-    return { send: (request: RpcRequest) => this.handle(request) };
+    return { send: (request: ClientMessage) => (request.kind === "history" ? void this.historyAsks.push(request.linkId) : this.handle(request)) };
   }
 
   requestLocalAccess = async () => false;
@@ -207,8 +209,14 @@ export class FakeEngine implements BrowserHost {
     this.emit({ kind: "messages", linkId, messages, ...(deleted && { deleted }) });
   }
 
+  /** A chat's newest page only, as the peer sends it to a page attached with `newest`: older rows left out. */
+  newestPage(linkId: string, messages: StoredMessage[]): void {
+    this.emit({ kind: "messages", linkId, messages, more: true });
+  }
+
   reset(): void {
     this.calls.length = 0;
+    this.historyAsks.length = 0;
     this.handlers.clear();
     this.openPaymentLink = undefined;
     this.fullscreenWindow = undefined;

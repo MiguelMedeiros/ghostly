@@ -333,6 +333,27 @@ describe("the event stream", () => {
     expect(heard).toEqual([10]);
   }, 30_000);
 
+  it("opening learns the last seq and the line count without making the journal into text", async () => {
+    const path = join(dir, "open.jsonl");
+    const text = "é".repeat(1_000);
+    writeFileSync(path, Array.from({ length: 1_000 }, (_, i) => JSON.stringify({ seq: i + 1, id: `x:${i + 1}`, type: "x", at: 1, text }) + "\n").join("") + '{"seq":1001,"id":"x:10');
+    const decode = vi.spyOn(Buffer.prototype, "toString");
+    const h = new EventHub(path, () => 1000, "open");
+    await h.open();
+    const longest = Math.max(0, ...decode.mock.results.map((r) => (typeof r.value === "string" ? r.value.length : 0)));
+    decode.mockRestore();
+    // A torn last line: the seq is the last whole one's.
+    expect(h.lastSeq).toBe(1_000);
+    expect(longest).toBeLessThan(10_000);
+    // The torn line counts as one, as the trim counts it.
+    const many = join(dir, "many.jsonl");
+    writeFileSync(many, Array.from({ length: 20_000 }, (_, i) => JSON.stringify({ seq: i + 1, id: `x:${i + 1}`, type: "x", at: 1 }) + "\n").join("") + "torn");
+    const full = new EventHub(many, () => 1000, "many");
+    await full.open();
+    expect(full.lastSeq).toBe(20_000);
+    expect(readFileSync(many, "utf8").trim().split("\n")).toHaveLength(10_000);
+  });
+
   it("keeps the journal within its bytes however long the events, and still replays its end", async () => {
     const { h, events } = await hub("long.jsonl");
     // Quotes take twice their length in JSON: each event is about 256 KiB of journal.

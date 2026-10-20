@@ -1,11 +1,13 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { decodeBolt11, parseLightningDestination, paymentUri, type PaymentReview as Review } from "@ghostly/core";
+import { paymentUri, type Bolt11Invoice, type PaymentReview as Review } from "@ghostly/core";
 import type { WalletPlatform, WalletState } from "../../lib/platform";
 import { useCountUp } from "../../hooks/useCountUp";
 import { PaymentReview } from "../PaymentReview";
 import { ConfirmRealMoney } from "../ConfirmRealMoney";
 import { Actions, Address, Amount, Block, Button, Notice, Row, Section, Signed, input, type Action } from "./ui";
 import { LightningAddressPay } from "./LightningAddressPay";
+import { SendScan } from "./SendScan";
+import { routeSend } from "../../lib/sendRoute";
 import { RemoveMintConfirm } from "./RemoveMint";
 import { useRun } from "./run";
 import { ButtonGroup, InputGroup, Truncate } from "../layout";
@@ -64,7 +66,7 @@ const shortFee = (t: Translate, ppk: number, testnet: boolean) => (ppk === 0 ? t
 export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = false }: { wallet: WalletPlatform; state: WalletState; rail: "cashu" | "lightning"; onOpenCashu: () => void; focusAmount?: boolean }) {
   const { t } = useI18n();
   const [action, setAction] = useState<Action>("receive");
-  // The amount takes the focus when the person chose this wallet (`focusAmount`) or chose Receive here.
+  // The amount takes the focus when the person chose this wallet (`focusAmount`), chose Receive here or pressed Done.
   const [actionChosen, setActionChosen] = useState(false);
   const { busy, running, error, setError, run } = useRun();
   const [amount, setAmount] = useState("");
@@ -77,6 +79,10 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   const [invoiceExpired, setInvoiceExpired] = useState(false);
   const [payInput, setPayInput] = useState("");
   const [quote, setQuote] = useState<{ quote: string; mint: string; amount: number; feeReserve: number } | null>(null);
+  /** The invoice the quote is for: its description shows in the review. */
+  const [quoted, setQuoted] = useState<Bolt11Invoice | null>(null);
+  /** The last payment's end, shown in Send's place until Done: paid, or on its way. */
+  const [sent, setSent] = useState<string | null>(null);
   /** Real money: Pay opens the second step, and only it pays. */
   const [confirming, setConfirming] = useState(false);
   const [notice, setNotice] = useState("");
@@ -107,20 +113,32 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
   const mintPaid = !!invoiceQuote && state.history.some((tx) => tx.kind === "lightning-in" && tx.quote === invoiceQuote);
   const invoicePaid = invoice !== null && ((viaMint && mintPaid)
     || !!ln?.recent.some((op) => op.direction === "in" && op.paymentHash === paymentHash && op.state === "paid"));
-  const isToken = /^cashu[AB]/i.test(payInput.trim());
+  // What Send was given (typed, pasted, scanned or read from a picture): an invoice, an address or LNURL, a token.
+  const route = routeSend(payInput);
+  const isToken = route.kind === "token";
   const payQuote = (payable: { quote: string; mint: string }, confirmedReal: boolean) => void run(async () => {
     const paid = await wallet.payQuote(payable.quote, payable.mint, undefined, confirmedReal);
-    setQuote(null); setConfirming(false); setPayInput("");
-    setNotice(paid ? t("wallet.cashu.paid") : viaMint ? t("wallet.cashu.pendingMint") : t("wallet.lightning.pending"));
+    setQuote(null); setQuoted(null); setConfirming(false); setPayInput("");
+    setSent(paid ? t("wallet.cashu.paid") : viaMint ? t("wallet.cashu.pendingMint") : t("wallet.lightning.pending"));
   }, "pay");
+  /** The invoice's review: what paying it costs, from the mint or the source. */
+  const quoteFor = (invoice: Bolt11Invoice) => void run(async () => {
+    const got = await wallet.quoteInvoice(invoice.invoice, rail === "cashu" ? "cashu" : undefined);
+    setQuoted(invoice); setQuote(got);
+  }, "send");
+  // A scanned, pasted or pictured invoice with its amount goes straight to its review, as a phone wallet does; anything
+  // else fills the field, where it is shown, asked about or refused as typed text is.
+  const given = (text: string) => {
+    setError(""); setNotice(""); setPayInput(text);
+    const found = routeSend(text);
+    if (found.kind === "invoice") quoteFor(found.invoice);
+  };
   // More than this card holds is never approved: the mint or the node would only refuse it afterwards.
   const over = quote ? holdsLess(rail, state, quote.amount) : undefined;
-  const pasted = isToken ? null : decodeBolt11(payInput);
+  const pasted = route.kind === "invoice" || route.kind === "no-amount" ? route.invoice : null;
   /** A Lightning address or LNURL: resolved and paid step by step, through the same source. */
-  const [destination, destinationError] = (() => {
-    if (isToken || pasted) return [null, ""] as const;
-    try { return [parseLightningDestination(payInput)?.text ?? null, ""] as const; } catch (e) { return [null, problemText(e, t).title] as const; }
-  })();
+  const destination = route.kind === "destination" ? route.text : null;
+  const destinationError = route.kind === "bad-destination" ? problemText(route.error, t).title : "";
 
   // The invoice and the quote take the place of the form that had the focus: the focus goes to their first line, so the
   // keys go on from there (to Copy, to Pay) and a screen reader says what came. Not when it went somewhere else meanwhile.
@@ -152,7 +170,18 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
     setRemovingMint(null);
   };
 
-  const choose = (next: Action) => { setAction(next); setActionChosen(true); setError(""); setNotice(""); setInvoice(null); setQuote(null); setConfirming(false); };
+  // The paid line takes the invoice's place in turn: the focus that was in the invoice goes to Done (Done, then, to the amount).
+  const doneButton = useRef<HTMLButtonElement>(null);
+  // The result takes the review's place: the keys that were on Pay go to its Done.
+  const sentDone = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (sent && (!document.activeElement || document.activeElement === document.body)) sentDone.current?.focus();
+  }, [sent]);
+  useEffect(() => {
+    if (invoicePaid && (!document.activeElement || document.activeElement === document.body)) doneButton.current?.focus();
+  }, [invoicePaid]);
+
+  const choose = (next: Action) => { setAction(next); setActionChosen(true); setError(""); setNotice(""); setInvoice(null); setQuote(null); setQuoted(null); setConfirming(false); setSent(null); };
 
   return (
     <div className="space-y-6">
@@ -197,13 +226,15 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
 
         {action === "receive" && (
           <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
+            {/* Heard only when it was there before its text: it waits, empty, while the invoice shows. */}
+            <p role="status" className="sr-only">{invoicePaid ? t("wallet.cashu.received", { amount: formatAmount(Number(amount), t.language), unit }) : ""}</p>
             {invoicePaid ? (
               <div className="text-center py-3 space-y-3">
                 <svg width="56" height="56" viewBox="0 0 56 56" className="mx-auto text-accent animate-check-ring" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="28" cy="28" r="25" /><polyline points="16 29 25 38 41 20" className="animate-check-draw" />
                 </svg>
-                <p className="text-accent text-sm font-semibold" data-testid="wallet-paid">{t("wallet.cashu.received", { amount: formatAmount(Number(amount), t.language), unit })}</p>
-                <Button onClick={() => { setInvoice(null); setAmount(""); }}>{t("wallet.lightning.done")}</Button>
+                <p className="text-accent text-sm font-semibold" data-testid="wallet-paid" aria-hidden="true">{t("wallet.cashu.received", { amount: formatAmount(Number(amount), t.language), unit })}</p>
+                <Button ref={doneButton} onClick={() => { setInvoice(null); setAmount(""); setActionChosen(true); }}>{t("wallet.lightning.done")}</Button>
               </div>
             ) : invoice && invoiceExpired ? (
               <div className="space-y-3">
@@ -228,22 +259,33 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
 
         {action === "send" && (
           <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
-            {quote ? (
-              <>
+            {sent ? (
+              <div className="text-center py-3 space-y-3" data-testid="wallet-send-result">
+                {sent === t("wallet.cashu.paid") && <svg width="56" height="56" viewBox="0 0 56 56" className="mx-auto text-accent animate-check-ring" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="28" cy="28" r="25" /><polyline points="16 29 25 38 41 20" className="animate-check-draw" />
+                </svg>}
+                <Notice tone="success" testId="wallet-notice" className="text-sm font-semibold">{sent}</Notice>
+                <Button ref={sentDone} data-testid="wallet-send-done" onClick={() => setSent(null)}>{t("wallet.lightning.done")}</Button>
+              </div>
+            ) : quote ? (
+              <div className="space-y-3" data-testid="wallet-pay-review">
                 <p ref={quoteLine} tabIndex={-1} className="text-text-primary text-sm focus:outline-none">{fillNodes(t("wallet.cashu.payLine"), {
                   amount: <b>{sats(quote.amount)}</b>,
                   fees: <span className="text-text-muted"> {t("wallet.lightning.feesUpTo", { fee: formatAmount(quote.feeReserve, t.language) })}</span>,
                 })}</p>
+                {/* A memo is text someone else wrote, in any script: laid out by its own direction. */}
+                {quoted?.description && <p className="text-text-secondary text-sm" data-testid="wallet-pay-description"><bdi>{quoted.description}</bdi></p>}
                 {over !== undefined && <p className="text-danger-ink text-xs" data-testid="wallet-pay-over">{t("payments.composer.tooMuch", { amount: formatAmount(over, t.language), unit })}</p>}
                 {confirming && over === undefined ? <ConfirmRealMoney what={t("wallet.lightning.confirmWhat", { amount: formatAmount(quote.amount, t.language), fee: formatAmount(quote.feeReserve, t.language) })} busy={busy} onSend={() => payQuote(quote, true)} onBack={() => setConfirming(false)} /> : (
                   <ButtonGroup fill>
                     <Button variant="primary" data-testid="wallet-pay-confirm" loading={running === "pay"} disabled={busy || over !== undefined} onClick={() => testnet ? payQuote(quote, false) : setConfirming(true)}>{busy ? t("wallet.lightning.paying") : t("wallet.lightning.pay")}</Button>
-                    <Button onClick={() => setQuote(null)}>{t("common.cancel")}</Button>
+                    <Button onClick={() => { setQuote(null); setQuoted(null); }}>{t("common.cancel")}</Button>
                   </ButtonGroup>
                 )}
-              </>
+              </div>
             ) : (
-              <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); void run(async () => { if (isToken) { const received = await wallet.receiveToken(payInput); setPayInput(""); setNotice(t("wallet.cashu.redeemed", { amount: formatAmount(received, t.language), unit })); } else setQuote(await wallet.quoteInvoice(payInput, rail === "cashu" ? "cashu" : undefined)); }, "send"); }}>
+              <SendScan onText={given} disabled={busy}>
+              <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (isToken) void run(async () => { const received = await wallet.receiveToken(route.text); setPayInput(""); setNotice(t("wallet.cashu.redeemed", { amount: formatAmount(received, t.language), unit })); }, "send"); else if (route.kind === "invoice") quoteFor(route.invoice); }}>
                 <textarea data-testid="wallet-pay-input" className={`${input} font-mono text-xs resize-none`} rows={3} autoFocus
                   placeholder={rail === "cashu" ? t("wallet.cashu.pastePlaceholder") : t("wallet.lightning.pastePlaceholder")} value={payInput} onChange={(e) => setPayInput(e.target.value)} />
                 {destination && <div className="bg-surface-alt rounded-xl p-3 text-text-primary" data-testid="wallet-lnurl"><LightningAddressPay key={destination} wallet={wallet} text={destination} via={rail === "cashu" ? "cashu" : undefined} onDone={() => setPayInput("")} /></div>}
@@ -255,11 +297,12 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                     {pasted.expiresAt * 1000 < Date.now() && <span className="text-danger"> · {t("wallet.lightning.expired")}</span>}
                   </p>
                 )}
-                {!destination && <Button type="submit" variant="primary" className="w-full" loading={running === "send"} disabled={busy || !payInput.trim() || (!isToken && !pasted)}>
+                {!destination && <Button type="submit" variant="primary" className="w-full" loading={running === "send"} disabled={busy || !payInput.trim() || (!isToken && route.kind !== "invoice")}>
                   {busy ? t("wallet.cashu.working") : isToken ? t("wallet.cashu.redeem") : pasted?.amountSat ? t("wallet.cashu.payAmount", { amount: formatAmount(pasted.amountSat, t.language), unit }) : t("wallet.lightning.pay")}
                 </Button>}
-                {destinationError ? <Notice tone="error">{destinationError}</Notice> : payInput.trim() && !isToken && !pasted && !destination ? <Notice tone="error">{t("wallet.lightning.notInvoice")}</Notice> : !destination && <Notice>{t("wallet.cashu.contactHint")}</Notice>}
+                {destinationError ? <Notice tone="error">{destinationError}</Notice> : route.kind === "no-amount" ? <Notice tone="error" testId="wallet-pay-no-amount">{t("wallet.send.noAmount")}</Notice> : route.kind === "refused" ? <Notice tone="error" testId="wallet-pay-refused">{t("payments.formats.unsupported")}</Notice>: route.kind === "unknown" ? <Notice tone="error">{t("wallet.lightning.notInvoice")}</Notice> : !destination && <Notice>{t("wallet.cashu.contactHint")}</Notice>}
               </form>
+              </SendScan>
             )}
           </div>
         )}

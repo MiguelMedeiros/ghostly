@@ -59,6 +59,12 @@ export interface NavStep {
 
 export const isConversation = (path: string) => /^\/(?:chat|group)\/[^/]+$/.test(path);
 
+/**
+ * The places the chat list opens from above its rows (Saved messages, a bot's Tasks). No tab is theirs, so on a phone
+ * they are pages of Chats: Back shown, and the Chats tab lit.
+ */
+export const isChatListPage = (path: string) => path === "/saved" || path === "/tasks";
+
 export function readNav(state: unknown): NavRecord | null {
   const record = state && typeof state === "object" ? (state as Record<string, unknown>)[NAV_KEY] : undefined;
   if (!record || typeof record !== "object") return null;

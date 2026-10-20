@@ -29,6 +29,8 @@ export interface ChatApp {
   running: RunningApp;
   /** Stopped by the client, for this reason: the panel says why until the person closes it (WISP 1200 § Takedowns). */
   stopped?: AppTakedown;
+  /** It lets the contact's app read a file now (WISP 1200 § A read lane to the contact): the header says so. */
+  serving?: boolean;
 }
 
 /** The chat's contact as its header shows them. */
@@ -90,7 +92,7 @@ export function setChatApp(linkId: string, app: ChatApp | null): void {
 }
 
 /** Shows or hides the app in `linkId`, or puts it over the whole chat (`wide`). */
-export function updateChatApp(linkId: string, patch: Partial<Pick<ChatApp, "shown" | "wide">>): void {
+export function updateChatApp(linkId: string, patch: Partial<Pick<ChatApp, "shown" | "wide" | "serving">>): void {
   const app = apps.get(linkId);
   if (!app) return;
   apps.set(linkId, { ...app, ...patch });

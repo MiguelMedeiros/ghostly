@@ -3,7 +3,8 @@
     "message": "{{name}} : {{text}}",
     "messages": "{{count}} nouveaux messages",
     "messagesFrom": "{{count}} nouveaux messages de {{name}}",
-    "pinMoved": "Déplacée à la place {{place}} sur {{count}} discussions épinglées"
+    "pinMoved": "Déplacée à la place {{place}} sur {{count}} discussions épinglées",
+    "rowMoved": "Maintenant à la place {{place}} sur {{count}}"
   },
   "audio": {
     "cantPlay": "Cet appareil ne peut pas lire cet audio ({{format}}). Téléchargez-le pour l'écouter.",
@@ -241,9 +242,9 @@
   "menu": {
     "continueNew": "Continuer dans une nouvelle discussion",
     "hold": "Retenir les messages…",
+    "more": "Plus…",
+    "moreTitle": "Plus d’options",
     "moveDown": "Descendre",
-    "moveFirst": "Déjà en premier",
-    "moveLast": "Déjà en dernier",
     "moveUp": "Monter",
     "pin": "Épingler la discussion",
     "refresh": "Actualiser",

@@ -138,7 +138,7 @@ export function RemoveWalletDialog({ removal, wallet, source, lead, onClose, onR
           <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">{t("wallet.remove.backupFirst")}</h3>
           {removal.backup === "phrase" ? (
             <div className="bg-surface rounded-xl divide-y divide-border">
-              <BackupRows name={WALLET_NAME[type]} busy={backup.busy || busy} run={backup.run} reveal={() => reveal(wallet, type)} exportBackup={(password) => exportBackup(wallet, type, password)} />
+              <BackupRows name={WALLET_NAME[type]} busy={backup.busy || busy} running={backup.running} run={backup.run} reveal={() => reveal(wallet, type)} exportBackup={(password) => exportBackup(wallet, type, password)} />
             </div>
           ) : removal.backup === "tokens" ? (
             <Block>

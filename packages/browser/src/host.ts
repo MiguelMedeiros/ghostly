@@ -1,5 +1,5 @@
 import type { FoundUpdate } from "../../../apps/ui/src/lib/updates";
-import type { EngineEvent, RpcRequest, RpcResponse } from "./shared/rpc";
+import type { ClientMessage, EngineEvent, RpcResponse } from "./shared/rpc";
 import type { OidcPlatform } from "./proofs/oidc/providers";
 import type { OidcWindow } from "./proofs/oidc/flow";
 import type { AtprotoHost } from "./proofs/atproto/oauth";
@@ -11,7 +11,8 @@ import type { CallMedia } from "@ghostly/core";
  * the web app runs it in the page. Everything else is shared.
  */
 export interface EngineConnection {
-  send(request: RpcRequest): void;
+  /** An engine call, or an ask for a chat's whole history (`HistoryRequest`). */
+  send(request: ClientMessage): void;
 }
 
 /**
