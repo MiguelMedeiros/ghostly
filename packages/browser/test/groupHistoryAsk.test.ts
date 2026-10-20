@@ -28,6 +28,7 @@ vi.mock("../src/engine/node", () => ({
       fake.reads.push(linkId);
       return fake.stored.get(linkId) ?? [];
     }
+    deletedIdsOf() { return []; }
     setActiveLink() {}
     appsCloseAll() {}
   },
