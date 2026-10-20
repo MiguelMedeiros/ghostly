@@ -243,6 +243,8 @@ interface Live {
   members: Map<string, number>;
   emptySince: number;
   lastLobbyPoll: number;
+  /** As a hub: my last read of my lobby was held back by the relays' budget until then, and goes again then (`pollLobby`). */
+  lobbyHeldUntil?: number;
   /** As a member: the hubs I want, and when I last wrote in each one's lobby. */
   myHubs: string[];
   lobbyWrites: Map<string, number>;
@@ -858,7 +860,8 @@ export class Communities {
       if (this.hubDropped(groupId, live, others, now)) live.lobbyBusyUntil = Math.max(live.lobbyBusyUntil, now + this.timings.lobbyBusyMs);
       // And so is one whose member I dropped a while ago (`MEMBER_BACK_MS`): its app, opened again, asks there.
       const lobbyEvery = (now < live.lobbyBusyUntil || now < (live.memberBackUntil ?? 0)) && !busy ? this.timings.lobbyPollMs : this.timings.lobbyIdlePollMs;
-      if (now - live.lastLobbyPoll >= lobbyEvery) { live.lastLobbyPoll = now; await this.pollLobby(groupId, live, now); }
+      // A read the relays held back is no reading: again when the hold ends (`lobbyHeldUntil`), not at the next turn.
+      if (now - live.lastLobbyPoll >= lobbyEvery || (!busy && now >= (live.lobbyHeldUntil ?? Infinity))) { live.lastLobbyPoll = now; await this.pollLobby(groupId, live, now); }
       await this.answerKnocks(groupId, live, now, busy);
       await this.commitLeaves(live, others.map(h => h.key), now);
     } else {
@@ -1300,6 +1303,12 @@ export class Communities {
     // With no edge up, where my members ask is my way back (`wayBack`).
     const back = this.wayBack(groupId, live);
     const entries = readLobby(keys, (await this.host.resolve(keys.identity.pubKeyZ32, !back, !back && this.doorBusy(groupId, live, now), back).catch(() => null)) ?? []);
+    // Held back by the relays' budget, the read answered the lobby as I last read it: read again when the hold ends. At
+    // the next turn (30 s while nobody asked), the members of a hub that closed, asking here, waited that long more; at
+    // the busy pace, each read 6 s apart fell in a new hold and answered the lobby as it was 20-40 s before (CLI daemons,
+    // 2026-10-20).
+    const held = this.host.readHeldBackFor?.(keys.identity.pubKeyZ32);
+    live.lobbyHeldUntil = held !== undefined && held > 0 ? now + held : undefined;
     for (const { key, ts } of entries) {
       // A member of the roster gets its edge. A key no commit names may be a member ahead of me on the roster, or one
       // whose admission lost a race, and needs an edge to find out: for a moment, and no member's (`wantAhead`).
