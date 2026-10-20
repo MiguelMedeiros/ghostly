@@ -229,8 +229,9 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
           <p className="text-[14px] leading-tight truncate m-0" title={file.name}>
             <Highlight text={file.name} term={highlight} />
           </p>
+          {/* The status wraps: cut with … on a phone, it lost its end (how far the file is, its size). */}
           <p className={`flex items-center gap-1 text-[11px] m-0 ${failed || missing ? "text-danger-ink" : "text-text-primary/65"}`}>
-            <span className="min-w-0 truncate" data-testid="file-status">{status}</span>
+            <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="file-status">{status}</span>
             {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="file-why" danger={!!reason} />}
           </p>
         </div>
