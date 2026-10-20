@@ -99,6 +99,11 @@ export interface GroupsHost {
    */
   publish(identity: Identity, records: GhostRecord[], background?: boolean, door?: boolean, back?: boolean): Promise<void>;
   resolve(pubKeyZ32: string, background?: boolean, door?: boolean, back?: boolean): Promise<GhostRecord[] | null>;
+  /**
+   * How long the relays' budget still holds back reads of this key (`PkarrTransport.readHeldBackFor`): then the read
+   * that just ended answered the packet already known, which may be old, not a relay's. Absent: reads are not held.
+   */
+  readHeldBackFor?(pubKeyZ32: string): number | undefined;
   /** The other end of this link is due any moment: look fast for it a while (`LinkSession.expectPeer`). */
   expectPeer?(linkId: string): void;
   /**
