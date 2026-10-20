@@ -8,7 +8,7 @@ import { MediaSettings } from "../../components/MediaSettings";
 import { CameraCapture } from "../../components/composer/CameraCapture";
 import { useCallDevices } from "../../hooks/useCallDevices";
 import { useChosenSpeaker } from "../../hooks/useChosenSpeaker";
-import { chooseDevice, followSpeaker, groupDevices, loadDeviceChoices, preferredDevice, resolveDevice, setDeviceSource, type DeviceList, type DeviceSource } from "../../lib/mediaDevices";
+import { chooseDevice, followSpeaker, groupDevices, isMediaDenied, loadDeviceChoices, mediaDeniedText, preferredDevice, resolveDevice, setDeviceSource, type DeviceList, type DeviceSource } from "../../lib/mediaDevices";
 import { getPrefix, setStorageProfile } from "../../lib/storage";
 import { renderApp } from "../render";
 import { choose, optionsOf } from "../select";
@@ -25,6 +25,8 @@ const CAMERA = device("videoinput", "cam-builtin", "FaceTime HD Camera");
 const USB_CAMERA = device("videoinput", "cam-usb", "Logitech C920");
 const SPEAKERS = device("audiooutput", "out-builtin", "MacBook Pro Speakers");
 const HEADPHONES = device("audiooutput", "out-headset", "AirPods");
+const IPHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Mobile/15E148 Safari/604.1";
+const IOS_DENIED = "Blocked by iOS. In Settings → Apps → Safari, allow Microphone (and Camera), then reopen Ghostly.";
 
 /** Engines that can send sound to a chosen speaker have `setSinkId`; happy-dom has none. */
 function speakerChoice() {
@@ -96,6 +98,24 @@ describe("the choices", () => {
   });
 });
 
+describe("a refused microphone or camera", () => {
+  it("is told from a missing one", () => {
+    expect(isMediaDenied(new DOMException("x", "NotAllowedError"))).toBe(true);
+    expect(isMediaDenied(new DOMException("x", "SecurityError"))).toBe(true);
+    expect(isMediaDenied(new DOMException("x", "NotFoundError"))).toBe(false);
+    expect(isMediaDenied(undefined)).toBe(false);
+  });
+
+  it("on an iPhone or iPad points to the Settings app; elsewhere to the browser or system", () => {
+    const MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15";
+    expect(mediaDeniedText(IPHONE, 5)).toBe("settings.media.deniedIos");
+    expect(mediaDeniedText(MAC, 5), "an iPad asking for desktop sites").toBe("settings.media.deniedIos");
+    expect(mediaDeniedText(MAC, 0)).toBe("settings.media.denied");
+    expect(mediaDeniedText(IPHONE.replace("Version/18.6", "CriOS/141.0"), 5), "Chrome on iOS has its own switch").toBe("settings.media.denied");
+    expect(mediaDeniedText("Mozilla/5.0 (Linux; Android 15) Chrome/141.0 Mobile Safari/537.36", 5)).toBe("settings.media.denied");
+  });
+});
+
 describe("Settings → Audio & video", () => {
   it("lists the microphones, cameras and speakers, the default first", async () => {
     speakerChoice();
@@ -158,6 +178,30 @@ describe("Settings → Audio & video", () => {
     expect(devices.liveTracks(), "the microphone and camera are let go at once").toEqual([]);
   });
 
+  it("Allow refused says where to allow them, and Allow asks again", async () => {
+    devices.devices = [device("audioinput", "", ""), device("videoinput", "", "")];
+    const { user } = renderApp(<MediaSettings />);
+    await user.click(await screen.findByTestId("settings-media-allow"));
+    devices.userMedia[0].deny(new DOMException("denied", "NotAllowedError"));
+    expect(await screen.findByTestId("settings-media-denied")).toHaveTextContent("Blocked. Allow the microphone and camera in your browser or system settings.");
+    expect(devices.userMedia, "a refusal is not asked again with fewer devices").toHaveLength(1);
+
+    devices.enumerateDevices.mockImplementation(async () => [BUILT_IN, CAMERA]);
+    await user.click(screen.getByTestId("settings-media-allow"));
+    devices.userMedia[1].grant();
+    await waitFor(() => expect(screen.queryByTestId("settings-media-names")).toBeNull());
+  });
+
+  it("Allow refused on an iPhone points to the Settings app", async () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(IPHONE);
+    devices.devices = [device("audioinput", "", "")];
+    const { user } = renderApp(<MediaSettings />);
+    await user.click(await screen.findByTestId("settings-media-allow"));
+    devices.userMedia[0].deny(new DOMException("denied", "NotAllowedError"));
+    expect(await screen.findByTestId("settings-media-denied")).toHaveTextContent(IOS_DENIED);
+    vi.restoreAllMocks();
+  });
+
   it("tests the chosen microphone with a level meter, and lets it go on Stop", async () => {
     chooseDevice("audioinput", { id: "mic-headset", label: "AirPods" });
     const { user } = renderApp(<MediaSettings />);
@@ -184,7 +228,19 @@ describe("Settings → Audio & video", () => {
     const { user } = renderApp(<MediaSettings />);
     await user.click(await screen.findByTestId("settings-camera-preview"));
     devices.userMedia[0].deny(new DOMException("denied", "NotAllowedError"));
-    expect(await screen.findByTestId("settings-camera-failed")).toBeInTheDocument();
+    expect(await screen.findByTestId("settings-camera-failed")).toHaveTextContent("Blocked. Allow the microphone and camera in your browser or system settings.");
+  });
+
+  it("says so when the microphone test is refused, and when the device is just not there", async () => {
+    const { user } = renderApp(<MediaSettings />);
+    await user.click(await screen.findByTestId("settings-microphone-test"));
+    devices.userMedia[0].deny(new DOMException("denied", "NotAllowedError"));
+    expect(await screen.findByTestId("settings-microphone-failed")).toHaveAttribute("data-failure", "denied");
+
+    await user.click(screen.getByTestId("settings-microphone-test"));
+    await waitFor(() => expect(devices.userMedia).toHaveLength(2));
+    devices.userMedia[1].deny(new DOMException("gone", "NotFoundError"));
+    await waitFor(() => expect(screen.getByTestId("settings-microphone-failed")).toHaveTextContent("Could not open it. Check that Ghostly may use it."));
   });
 
   it("plays the test sound on the chosen speaker", async () => {

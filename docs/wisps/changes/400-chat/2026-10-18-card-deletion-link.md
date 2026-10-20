@@ -1,0 +1,1 @@
+The delete-for-everyone section links a card's deletion to WISP 405 § Deleting a card's message for everyone, and says a card alone is taken back as a removed card (WISP 405 § Removing a card). Nothing on the wire changed.

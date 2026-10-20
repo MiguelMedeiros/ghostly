@@ -226,23 +226,24 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
           </span>
         )}
         <div className="min-w-0 flex-1">
-          <p className="text-[14px] leading-tight truncate m-0" title={file.name}>
+          {/* In its own direction: an Arabic name in an English app was cut at its start, hiding what the file is. */}
+          <p dir="auto" className="text-[14px] leading-tight truncate m-0" title={file.name}>
             <Highlight text={file.name} term={highlight} />
           </p>
+          {/* The status wraps: cut with … on a phone, it lost its end (how far the file is, its size). */}
           <p className={`flex items-center gap-1 text-[11px] m-0 ${failed || missing ? "text-danger-ink" : "text-text-primary/65"}`}>
-            {/* Wraps: on a phone, cut at the bubble's width, it lost its speed and time left. */}
             <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="file-status">{status}</span>
             {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="file-why" danger={!!reason} />}
           </p>
         </div>
         {(blobUrl || saveOnly) && (
-          <a
-            href={blobUrl ?? undefined}
-            download={blobUrl ? file.name : undefined}
-            onClick={(event) => { event.preventDefault(); save(); }}
-            role="button"
+          // A button, not a link to the picture's address: a file that is no picture has none here, and a link
+          // without one is no stop for Tab.
+          <button
+            type="button"
+            onClick={save}
             data-testid="file-save"
-            className={`w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center shrink-0 text-inherit transition-colors cursor-pointer ${watched ? "animate-pop" : ""}`}
+            className={`w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 border-none p-0 flex items-center justify-center shrink-0 text-inherit transition-colors cursor-pointer ${watched ? "animate-pop" : ""}`}
             title={t("common.save")}
             aria-label={t("common.save")}
           >
@@ -251,7 +252,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-          </a>
+          </button>
         )}
       </div>
       {offered && group && (

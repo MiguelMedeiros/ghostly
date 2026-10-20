@@ -201,6 +201,7 @@
       }
     },
     "intent": "{{amount}} {{unit}} · {{state}}",
+    "invoiceExpired": "这张发票已过期：现在没有人能支付它。",
     "invoiceFor": "{{amount}} 的发票",
     "makePrimary": "设为主要",
     "mints": "铸币厂",
@@ -584,6 +585,17 @@
   "sats": {
     "mainnet": "sats",
     "testnet": "测试 sats"
+  },
+  "send": {
+    "balance": "余额：{{amount}} {{unit}}",
+    "cameraUnavailable": "相机不可用。请粘贴、输入或选择图片。",
+    "clipboardEmpty": "没有可粘贴的内容。请先复制发票或地址。",
+    "clipboardUnavailable": "无法读取剪贴板。请在下方粘贴或输入。",
+    "image": "选择图片",
+    "max": "最大",
+    "noAmount": "此发票没有金额。请索取带金额的发票。",
+    "paste": "粘贴",
+    "scan": "扫描"
   },
   "setup": {
     "failed": "{{wallet}}：{{reason}}",

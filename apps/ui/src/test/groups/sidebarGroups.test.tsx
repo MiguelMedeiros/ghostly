@@ -39,6 +39,18 @@ describe("Sidebar: groups in the chat list", () => {
     expect(screen.getByTestId("where")).toHaveTextContent(/^\/$/);
   });
 
+  it("Accept from the keyboard keeps the focus on the invitation's row once its buttons go", async () => {
+    // It was left on the page's body: the next Tab started again from the top.
+    const { user, engine } = sidebar([invitation(), { ...invitation(), id: "group-2" }]);
+    engine.on("acceptGroupInvitation", ({ groupId }) => {
+      fakeEngine.update({ groups: fakeEngine.state.groups.map(g => g.id === groupId ? { ...g, invitation: { ...g.invitation!, accepted: true } } : g) });
+    });
+    within(row()).getByTestId("group-accept").focus();
+    await user.keyboard("{Enter}");
+    expect(within(row()).queryByTestId("group-accept")).not.toBeInTheDocument();
+    expect(within(row()).getByTestId("group-row-open")).toHaveFocus();
+  });
+
   it("declines an invitation", async () => {
     const { user, engine } = sidebar([invitation({ contact: "", members: 1 })]);
     engine.on("declineGroupInvitation", () => undefined);

@@ -146,6 +146,13 @@
     "cannotRetry": "このファイルは再試行できません",
     "clipboardUnavailable": "クリップボードを読み取れません",
     "clipboardUnavailableNext": "+ から添付してください。",
+    "floor": {
+      "noRoomNext": "空き容量を作ってから、相手にもう一度送ってもらってください。",
+      "notInAWeek": "1週間以内に届きませんでした",
+      "refused": "この端末はこのファイルを受け取れませんでした",
+      "tooMany": "ここで待っているファイルが多すぎます",
+      "tooManyNext": "待っているファイルに答えてから、相手にもう一度送ってもらってください。"
+    },
     "gone": "このファイルはもうここにありません",
     "noRoom": "相手のデバイスに空きがありません",
     "noRoomHere": "この端末に空き容量がありません",
@@ -502,6 +509,12 @@
     "usdtRejected": "USDT の RPC が操作を拒否しました",
     "usdtReverted": "トランザクションはリバートされました",
     "usdtRevertedNext": "トークンは送られていません。ガスは消費されました。"
+  },
+  "relayOnly": {
+    "keepsTurn": "IPを隠す設定にはこのTURNサーバーが必要です",
+    "keepsTurnNext": "先にオフにしてから、サーバーを削除してください。",
+    "needsTurn": "先にTURNサーバーを追加してください",
+    "needsTurnNext": "上で保存してから、これをオンにしてください。"
   },
   "relays": {
     "atLeastOne": "リレーのアドレスを 1 つ以上入力してください",

@@ -33,7 +33,8 @@ const feeCap = (amount: number) => Math.max(100, Math.ceil(amount / 100));
 export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: WalletPlatform; state: WalletState; backupNow?: boolean }) {
  const bark = state.bark;
  const { t } = useI18n();
- const { busy, error, run } = useRun();
+ // The button pressed is busy while it works and keeps the keys (`loading`, by the key `run` was given); the others wait.
+ const { busy, running, error, run } = useRun();
  const [action, setAction] = useState<Action>("receive");
  const [via, setVia] = useState<"ark" | "onchain">("ark");
  const [address, setAddress] = useState(""), [amount, setAmount] = useState(""), [review, setReview] = useState<Review | null>(null);
@@ -63,13 +64,13 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
      : <Address value={bark.onchainAddress} qr={bark.onchainAddress ? `bitcoin:${bark.onchainAddress}` : undefined} testId="bark-onchain-address" note={t("wallet.bark.onchainNote")} />}
     {!!bark.onchain && <div className="flex items-center gap-3 rounded-xl bg-yellow-500/10 px-3 py-2" data-testid="bark-onchain">
      <p className="flex-1 text-xs text-warn-ink">{t("wallet.bark.onchain", { amount: formatAmount(bark.onchain, t.language), unit })}</p>
-     <Button data-testid="bark-board" disabled={busy} onClick={() => void run(() => wallet.barkBoard())}>{busy ? t("wallet.bark.moving") : t("wallet.bark.board")}</Button>
+     <Button data-testid="bark-board" disabled={busy} loading={running === "board"} onClick={() => void run(() => wallet.barkBoard(), "board")}>{running === "board" ? t("wallet.bark.moving") : t("wallet.bark.board")}</Button>
     </div>}
    </div>}
    {action === "send" && <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
     <input aria-label={t("wallet.panel.recipient", { wallet: "Bark" })} placeholder={t("wallet.panel.recipientPlaceholder", { wallet: "Bark" })} spellCheck={false} className={`${input} font-mono text-xs`} value={address} onChange={e => setAddress(e.target.value.trim())} />
     <Amount value={amount} onChange={setAmount} unit={unit} />
-    <Button variant="primary" className="w-full" disabled={busy || !!review || !bark.balance || !address || !Number(amount)} onClick={() => void run(async () => { setReview(await wallet.preparePayment({ target: { method: "bark", network: bark.network!, provider: bark.provider!, asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 5 * 60 * 1000 }, amount: Number(amount), feeCap: feeCap(Number(amount)), payee: address })); })}>{bark.balance ? t("wallet.panel.review") : t("wallet.panel.noBalance")}</Button>
+    <Button variant="primary" className="w-full" loading={running === "review"} disabled={busy || !!review || !bark.balance || !address || !Number(amount)} onClick={() => void run(async () => { setReview(await wallet.preparePayment({ target: { method: "bark", network: bark.network!, provider: bark.provider!, asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 5 * 60 * 1000 }, amount: Number(amount), feeCap: feeCap(Number(amount)), payee: address })); }, "review")}>{bark.balance ? t("wallet.panel.review") : t("wallet.panel.noBalance")}</Button>
     <Notice>{t("wallet.bark.approve")}</Notice>
    </div>}
    {review && <PaymentReview key={review.id} review={review} wallet={wallet} onClose={() => setReview(null)} />}
@@ -88,11 +89,11 @@ export function BarkWalletPanel({ wallet, state, backupNow = false }: { wallet: 
    {custom && <Block>
     <input aria-label={t("wallet.bark.serverInput")} className={`${input} font-mono text-xs`} value={provider} onChange={e => setProvider(e.target.value)} spellCheck={false} />
     <input aria-label={t("wallet.bark.esplora")} className={`${input} font-mono text-xs`} value={explorer} onChange={e => setExplorer(e.target.value)} spellCheck={false} />
-    <Button variant="primary" disabled={busy} onClick={() => void run(async () => { await use(network, { provider, explorer }); setCustom(false); })}>{t("wallet.bark.useServer")}</Button>
+    <Button variant="primary" disabled={busy} loading={running === "server"} onClick={() => void run(async () => { await use(network, { provider, explorer }); setCustom(false); }, "server")}>{t("wallet.bark.useServer")}</Button>
    </Block>}
    <Row label={t("wallet.panel.autoRenewal")} hint={t("wallet.bark.renewalHint")}><span className="text-sm text-text-secondary">{t("wallet.panel.on")}</span></Row>
    {bark.terms && <Row label={t("wallet.bark.terms")} hint={t("wallet.bark.termsHint")}><a className="text-sm text-link underline" {...externalLinkProps(bark.terms)} data-testid="bark-terms">{t("wallet.bark.read")}</a></Row>}
-   <BackupRows name="Bark" busy={busy} run={run} canReplace={canReplace} focusFirst={backupNow && real}
+   <BackupRows name="Bark" busy={busy} running={running} run={run} canReplace={canReplace} focusFirst={backupNow && real}
     reveal={async () => (await wallet.barkBackup()).mnemonic} exportBackup={pw => wallet.barkExportBackup(pw)}
     restorePhrase={mnemonic => use(network, { provider: bark.provider, explorer: NETWORKS[network].explorer, mnemonic })} restoreFile={(text, pw) => wallet.barkRestoreBackup(text, pw)} />
    <Notice>{t("wallet.bark.phraseNote")}</Notice></>}

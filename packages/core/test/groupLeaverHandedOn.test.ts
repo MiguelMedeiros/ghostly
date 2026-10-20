@@ -96,7 +96,7 @@ describe("what a member wrote before it left reaches the members who were away",
     expect(mesh.texts(dave)).toEqual(["bob 1", "bob 2", "thanks all, leaving now"]);
   });
 
-  it("a leaver's lines in an answer replaced before they went go in the one that replaced it", async () => {
+  it("a leaver's lines in an answer still going when the member syncs again go, once each", async () => {
     let gate: Promise<CatchUpHandled> = Promise.resolve(true);
     const { mesh, alice, bob, carol, dave } = await daveAway(false, () => gate);
     // Alice and Carol write 40 lines, then Bob his goodbye: last in Carol's answer to Dave, past its first two slices.
@@ -106,7 +106,7 @@ describe("what a member wrote before it left reaches the members who were away",
     await mesh.settle();
     await bob.leave(); await mesh.settle();
     mesh.setEdge(alice.myKey, carol.myKey, false);
-    // Dave's app has not handled the first two slices yet when it syncs again: that answer takes the place of the rest.
+    // Dave's app has not handled the first two slices yet when it syncs again: that answer goes after the rest.
     let handled!: (v: CatchUpHandled) => void;
     gate = new Promise(resolve => { handled = resolve; });
     await mesh.open(dave, carol, { a: [alice.myKey] });

@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { canonicalJsonBytes, toBase64Url, utf8Encode, type SignedAppRevocation } from "@ghostly/core";
+import { APP_BUNDLE_MAGIC, canonicalJsonBytes, toBase64Url, utf8Encode, type SignedAppRevocation } from "@ghostly/core";
 import { fileBytes } from "../src/shared/fileBytes";
 import {
   BUNDLE_URL, FakeNet, NOW_MS, PINNED_URL, PUBLISHER, REPO, STORE_KEY, STORE_URL, appRows, apps, bundle, bundleIds, emptyProfile, keyOf,
@@ -190,6 +190,26 @@ describe("updates", () => {
     const v2 = await bundle({ sequence: 2, sources: [BUNDLE_URL] });
     net.put(BUNDLE_URL, v2.bytes);
     expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+  });
+
+  it("a peek reads the first 4 KiB, and only for a longer manifest the bytes up to its end, not the largest manifest the format allows", async () => {
+    const v1 = await bundle({ sources: [BUNDLE_URL] });
+    net.put(BUNDLE_URL, v1.bytes);
+    const store = apps(net);
+    await store.preview({ url: BUNDLE_URL });
+    await store.install({ digest: v1.digest, grant: ["chat"] });
+    const ranges = () => net.fetch.mock.calls.filter(([url]) => String(url) === BUNDLE_URL).map(([, init]) => ((init?.headers ?? {}) as Record<string, string>).range ?? "whole");
+    net.fetch.mockClear();
+    expect((await store.checkUpdates())[0]!.outcome).toBe("none");
+    expect(ranges(), "a usual manifest: one small read").toEqual(["bytes=0-4095"]);
+    // A manifest past 4 KiB (a long description): read again from the start, to exactly its end.
+    const v2 = await bundle({ sequence: 2, sources: [BUNDLE_URL], description: "♞".repeat(2000) });
+    const end = APP_BUNDLE_MAGIC.length + 4 + new DataView(v2.bytes.buffer, v2.bytes.byteOffset).getUint32(APP_BUNDLE_MAGIC.length);
+    expect(end).toBeGreaterThan(4096);
+    net.put(BUNDLE_URL, v2.bytes);
+    net.fetch.mockClear();
+    expect((await store.checkUpdates())[0]!.outcome).toBe("updated");
+    expect(ranges()).toEqual(["bytes=0-4095", `bytes=0-${end - 1}`, "whole"]);
   });
 
   it("a newer version its publisher revoked beside its source before the check is not installed; the one held keeps running", async () => {

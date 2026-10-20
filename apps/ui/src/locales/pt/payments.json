@@ -250,6 +250,7 @@
     "youObject": "você"
   },
   "invoice": {
+    "alreadySpent": "Já gasto",
     "anyAmount": "Qualquer valor",
     "checking": "Verificando…",
     "confirmWhat": "{{amount}} sats (mais uma taxa de até {{fee}})",

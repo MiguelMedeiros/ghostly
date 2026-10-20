@@ -85,6 +85,8 @@ const STAGED = { max: 4, ms: 10 * 60 * 1000 } as const;
 const BUNDLES_KEPT = { min: 2, ms: 60 * 1000 } as const;
 /** The first bytes of a bundle: magic, the manifest's length and the largest manifest. */
 const PEEK_BYTES = APP_BUNDLE_MAGIC.length + 4 + APP_BUNDLE_LIMITS.manifestBytes;
+/** What a peek reads first: the magic, the length and any usual manifest (about 1 KiB). A longer one is read to its end after. */
+const PEEK_FIRST_BYTES = 4 * 1024;
 
 const bundleId = (digest: string) => `app-${digest}`;
 
@@ -415,6 +417,14 @@ export function peekAppManifest(bytes: Uint8Array): { ref: string; sequence: num
     if (!isAppRef(ref) || typeof manifest.sequence !== "number" || !Number.isSafeInteger(manifest.sequence)) return null;
     return { ref, sequence: manifest.sequence, digest: appDigest(manifestBytes) };
   } catch { return null; }
+}
+
+/** Where a bundle's manifest ends, from its first bytes, or null when they are not a bundle's or name a manifest too long. */
+function peekManifestEnd(bytes: Uint8Array): number | null {
+  const magic = utf8Encode(APP_BUNDLE_MAGIC);
+  if (bytes.length < magic.length + 4 || !magic.every((b, i) => bytes[i] === b)) return null;
+  const end = magic.length + 4 + new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(magic.length);
+  return end <= PEEK_BYTES ? end : null;
 }
 
 export class Apps {
@@ -838,6 +848,18 @@ export class Apps {
     })().finally(() => { this.bundleReads.delete(url); });
     this.bundleReads.set(url, read);
     return read;
+  }
+
+  /**
+   * The manifest at the start of the bundle at `url`, unchecked (`peekAppManifest`): its first `PEEK_FIRST_BYTES`, and
+   * only for a longer manifest a second read from the start to exactly its end (from the start: one file's bytes, even
+   * when it changed between the two).
+   */
+  private async peekAt(url: string): Promise<ReturnType<typeof peekAppManifest>> {
+    const first = await this.host.fetch(url, { maxBytes: PEEK_FIRST_BYTES, peek: true });
+    const end = peekManifestEnd(first);
+    if (end === null || end <= first.length || first.length < PEEK_FIRST_BYTES) return peekAppManifest(first);
+    return peekAppManifest(await this.host.fetch(url, { maxBytes: end, peek: true }));
   }
 
   /**
@@ -1297,7 +1319,7 @@ export class Apps {
         for (const url of (app.manifest.sources ?? []).filter(isAppFetchUrl)) {
           if (candidates.has(url)) continue;
           try {
-            const peek = peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true }));
+            const peek = await this.peekAt(url);
             if (peek && newer(peek)) candidates.set(url, { holds: peek });
           } catch { /* this source does not answer now */ }
         }
@@ -1313,7 +1335,7 @@ export class Apps {
         let holds = want.holds;
         if (want.peek) {
           let peek: ReturnType<typeof peekAppManifest>;
-          try { peek = peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true })); } catch { continue; }
+          try { peek = await this.peekAt(url); } catch { continue; }
           if (!peek || !newer(peek) || (want.digest !== undefined && peek.digest !== want.digest)) {
             if (want.miss) this.listingMisses.set(...want.miss);
             continue;
@@ -1419,7 +1441,7 @@ export class Apps {
     for (const url of new Set(urls.filter(isAppFetchUrl))) {
       // Peeked first, as the update check does: a URL that holds another version (its publisher moved on, a repository's
       // HEAD) is not read whole only to be skipped, at every open and every check.
-      try { if (peekAppManifest(await this.host.fetch(url, { maxBytes: PEEK_BYTES, peek: true }))?.digest !== app.digest) continue; } catch { continue; }
+      try { if ((await this.peekAt(url))?.digest !== app.digest) continue; } catch { continue; }
       let fetched: { bundle: AppBundle; bytes: Uint8Array };
       try { fetched = await this.fetchBundle(url); } catch { continue; }
       if (fetched.bundle.digest !== app.digest) continue;

@@ -744,21 +744,32 @@ function chatKeys(): ChatKeys[] {
   const seen = new Set<string>();
   for (const key of sessionKeys()) {
     seen.add(key);
-    let contact = contacts.get(key);
-    if (!contact) {
-      try {
-        const session = JSON.parse(readKey(key) ?? "null") as ChatSession | null;
-        // As `listSessions` counts a chat.
-        if (!session?.id || !session.mySeedB64 || !session.peerPubKeyB64 || !session.encKeyB64) continue;
-        contacts.set(key, contact = { key, id: session.id, peer: session.peerPubKeyB64, seed: session.mySeedB64 });
-      } catch {
-        continue;
-      }
-    }
-    all.push(contact);
+    const contact = contactOf(key);
+    if (contact) all.push(contact);
   }
   for (const key of contacts.keys()) if (!seen.has(key)) contacts.delete(key);
   return all;
+}
+
+/** The keys of the chat stored under `key`, parsed the first time they are asked for. */
+function contactOf(key: string): ChatKeys | undefined {
+  const known = contacts.get(key);
+  if (known) return known;
+  try {
+    const session = JSON.parse(readKey(key) ?? "null") as ChatSession | null;
+    // As `listSessions` counts a chat.
+    if (!session?.id || !session.mySeedB64 || !session.peerPubKeyB64 || !session.encKeyB64) return undefined;
+    const contact = { key, id: session.id, peer: session.peerPubKeyB64, seed: session.mySeedB64 };
+    contacts.set(key, contact);
+    return contact;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The contact's key in the chat `sessionId`, without reading its messages again: what finds its link in the engine's state. */
+export function sessionPeerKey(sessionId: string): string | undefined {
+  return contactOf(getKey(sessionId))?.peer;
 }
 
 /**

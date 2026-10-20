@@ -3,7 +3,7 @@ import { connect } from "node:net";
 import { openSync, readFileSync, rmSync } from "node:fs";
 import packageJson from "../package.json" with { type: "json" };
 import { GLOBAL_OPTIONS, globalOption, liftGlobals, parseArgs, type OptionSpec, type Parsed } from "./args";
-import { connectDaemon, type DaemonClient } from "./client";
+import { connectDaemon, isNotTheDaemon, type DaemonClient } from "./client";
 import { COMMANDS, idSlot, noMoreThan, positionals, TEXT_COMMANDS } from "./commands";
 import { here } from "./commands/shared";
 import { ENGINE_METHODS, ENGINE_PARAMS, ENGINE_READS, READ_PARAMS, SECRET_RESULTS } from "./engineMethods";
@@ -11,9 +11,9 @@ import { asCliError, CliError, EXIT, localFileError } from "./errors";
 import type { GhostlyEvent } from "./events";
 import type { Host } from "./host";
 import type { RuntimeOptions } from "./runtime/engine";
-import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, readCursor } from "./listen";
+import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, readCursor } from "./listen";
 import { format } from "node:util";
-import { secretsFromStdin, secretValuesWarning } from "./secretInput";
+import { secretsFromStdin, secretValuesWarning, textFromStdin } from "./secretInput";
 import {
   checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
   type ProfilePaths,
@@ -109,7 +109,7 @@ export function chatOnly(method: string, params: Record<string, unknown>): boole
 const READS: ReadonlySet<string> = new Set([
   "status", "profile.get", "settings.get", "events.replay", "chat.list", "chat.get", "chat.history", "chat.details",
   "group.list", "group.get", "group.history", "file.list", "wallet.list", "wallet.history", "payment.list", "identity.list", "identity.providers",
-  "identity.contact", "service.list", "service.peer", "call.list", "app.served", "x401.credential.list",
+  "identity.contact", "service.list", "service.peer", "call.list", "app.served", "x401.credential.list", "saved.list",
 ]);
 
 /** Whether a one-shot for this call opens the profile offline; test/readOnlyCommands.test.ts names every table command. */
@@ -122,13 +122,14 @@ export function readOnly(method: string, params: Record<string, unknown>): boole
 
 /**
  * Calls whose change stays on this device: a chat's name here, a chat removed (nothing goes to the contact), auto-answer
- * (calls.json), a proof dropped, a web app added (shared with no one yet), an x401 key or credential (WISP 3xx: never
+ * (calls.json), a proof dropped, a web app added (shared with no one yet), a message saved or unsaved, an x401 key or credential (WISP 3xx: never
  * shared with a contact). Opened online, each put the profile's records on the relays and waited for them (6 PUT + 4
  * GET, 3.3 s with a relay that takes 1.5 s), and the contacts' apps saw this device come online. `message delete` stays
  * online: it settles a file offer already on the DHT.
  */
 const LOCAL_WRITES: ReadonlySet<string> = new Set([
   "chat.rename", "chat.remove", "call.auto", "identity.cancel", "service.add", "x401.key.new", "x401.credential.add", "x401.credential.remove",
+  "saved.add", "saved.remove",
 ]);
 
 /** Settings of this device only: no contact and no relay hears of them (nick, avatar and the relays' do). */
@@ -167,7 +168,7 @@ function waitsFor(method: string, params: Record<string, unknown>): number | und
 
 async function session(g: Globals, options: RuntimeOptions): Promise<Session> {
   requireProfile(g);
-  const client = await connectDaemon(g.paths.socket);
+  const client = await connectDaemon(g.paths);
   if (client) {
     // The version check goes on the same connection as the command, ahead of it, not before it, and with no deadline
     // of its own: a daemon that does not answer costs the command its own deadline and nothing else (a read gave up
@@ -425,10 +426,11 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       return;
     }
     case "restore": {
-      const [file, name] = parsed.positionals;
-      if (!file || !name) throw new CliError("usage", "ghostly profile restore <file> <new profile> [--passphrase-file f] [--use]");
+      const [given, name] = parsed.positionals;
+      if (!given || !name) throw new CliError("usage", "ghostly profile restore <file> <new profile> [--passphrase-file f] [--use]");
       noMoreThan(2, parsed.positionals, "profile restore <file> <new profile> [--passphrase-file f] [--use]");
       // A backup made without a passphrase says so in its header: none is asked for, and the answer says it was not protected.
+      const file = here(given) as string;
       const { backupFileProtection, restoreProfile } = await import("./backup");
       const protection = await backupFileProtection(file);
       const paths = await restoreProfile(g.home, checkProfileName(name), file, protection === "none" ? undefined : backupPassphrase(parsed.options["passphrase-file"], RESTORE_PASSPHRASE));
@@ -486,7 +488,7 @@ function backupPassphrase(file: unknown, missing = BACKUP_PASSPHRASE): string {
 
 async function runDaemon(g: Globals): Promise<void> {
   requireProfile(g);
-  if (await connectDaemon(g.paths.socket)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
+  if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
   const { keepServing, openHost, serve } = await engineHost();
   const host = await openHost(g.paths, "daemon", VERSION);
   let served: Awaited<ReturnType<typeof serve>>;
@@ -499,6 +501,12 @@ async function runDaemon(g: Globals): Promise<void> {
   print({ daemon: "ready", profile: g.profile, pid: process.pid, socket: g.paths.socket, lastSeq: host.ctx.hub.lastSeq });
 }
 
+/**
+ * `daemon stop` and `restart` wait this long for the daemon's greeting: a daemon of an older release never greets, and
+ * what does not prove itself is stopped as the process that holds the profile (`stopDaemon`), as the stop asked.
+ */
+const STOP_GREETING_MS = 2_000;
+
 async function daemonCommand(argv: string[]): Promise<void> {
   const sub = argv[0] && !argv[0].startsWith("-") ? argv[0] : undefined;
   const parsed = parseArgs(sub ? argv.slice(1) : argv, { detach: { type: "boolean", description: "" }, timeout: { type: "number", description: "" } });
@@ -507,7 +515,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (!sub || ["status", "stop", "restart"].includes(sub)) noMoreThan(0, parsed.positionals, sub ? `daemon ${sub} [--timeout s]` : "daemon [--detach] [--timeout s]");
   if (sub === "status") {
     knownProfile(g);
-    const client = await connectDaemon(g.paths.socket);
+    const client = await connectDaemon(g.paths);
     // The socket, running or not: a program on the socket API (examples/*.mjs) finds it here. It is in the profile's
     // folder, or in /tmp/ghostly-<hash>/ when that path is too long for a socket, so a program cannot guess it.
     if (!client) { print({ running: false, profile: g.profile, socket: g.paths.socket }); return; }
@@ -517,7 +525,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (sub === "stop") {
     knownProfile(g);
     const stopFor = seconds(parsed, 20);
-    const client = await connectDaemon(g.paths.socket);
+    const client = await connectDaemon(g.paths, undefined, { greetingMs: STOP_GREETING_MS });
     if (!client) throw new CliError("not_found", `No daemon runs profile ${g.profile}`);
     print({ stopped: true, pid: await stopDaemon(g, client, stopFor) });
     return;
@@ -525,7 +533,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (sub === "restart") {
     // The running one stops (if one runs), and this command's own code starts in the background.
     const stopFor = seconds(parsed, 20), startFor = seconds(parsed, 60);
-    const client = await connectDaemon(g.paths.socket);
+    const client = await connectDaemon(g.paths, undefined, { greetingMs: STOP_GREETING_MS });
     // The version it ran is asked ahead of the stop, on the same connection, with no deadline of its own: cosmetic,
     // and the stop's deadline ends it (a deadline here, 15 s, closed the connection under a longer stop, which then
     // failed as `unavailable` and never reached the signals).
@@ -561,10 +569,16 @@ async function stopDaemon(g: Globals, client: DaemonClient, seconds: number): Pr
   let pid: number, answered = true;
   try { ({ pid } = await client.call("daemon.stop", {}, { timeoutMs: seconds * 1000 }) as { pid: number }); }
   catch (error) {
-    if (!(error instanceof CliError && error.code === "timeout")) throw error;
+    // What answers on the socket and does not prove it is the profile's daemon is told nothing: a daemon of an older
+    // release (it cannot prove it) is stopped as the process that holds the profile's lock, which only this user
+    // can write. With nobody holding it, what answers is not the daemon, and the refusal stands.
+    const refused = isNotTheDaemon(error);
+    if (!(error instanceof CliError && error.code === "timeout") && !refused) throw error;
     const holder = lockOwner(g.paths);
     if (holder === null) throw error;
-    process.stderr.write(`ghostly: the daemon (process ${holder}) did not answer daemon.stop in ${seconds} s: stopping it with SIGTERM\n`);
+    process.stderr.write(refused
+      ? `ghostly: what answers on the socket did not prove it is this profile's daemon (an older release's cannot): stopping the process that holds the profile (${holder}) with SIGTERM\n`
+      : `ghostly: the daemon (process ${holder}) did not answer daemon.stop in ${seconds} s: stopping it with SIGTERM\n`);
     pid = holder;
     answered = false;
     signal(pid, "SIGTERM");
@@ -608,7 +622,7 @@ function processAlive(pid: number): boolean {
 /** A daemon in the background, running this command's code, once its socket answers. */
 async function startDetached(g: Globals, seconds: number) {
   requireProfile(g);
-  if (await connectDaemon(g.paths.socket)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
+  if (await connectDaemon(g.paths)) throw new CliError("busy", `A daemon already runs profile ${g.profile}`);
   // A one-shot command (or a listen) that opened the profile in process holds it: the child would only log that.
   heldBy(g);
   const log = openSync(g.paths.log, "a", 0o600);
@@ -626,7 +640,7 @@ async function startDetached(g: Globals, seconds: number) {
   while (child.exitCode === null && child.signalCode === null && !spawned.error) {
     const left = until - Date.now();
     if (left <= 0) break;
-    client = await connectDaemon(g.paths.socket, Math.min(500, left));
+    client = await connectDaemon(g.paths, Math.min(500, left));
     if (client) break;
     await new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.min(200, until - Date.now()))));
   }
@@ -680,7 +694,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   if (turns && types.length) throw new CliError("usage", "--turns takes the place of --type: a turn is a message received, or a group message that mentions you");
   checkTypes(types, (line) => process.stderr.write(line + "\n"));
   const from = (parsed.options.from as string[] | undefined) ?? [], groups = (parsed.options.group as string[] | undefined) ?? [];
-  const cursor = parsed.options.cursor as string | undefined;
+  const cursor = here(parsed.options.cursor);
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
   const since = (parsed.options.since as number | undefined) ?? readCursor(cursor);
@@ -702,38 +716,20 @@ async function listenCommand(argv: string[]): Promise<void> {
     });
   };
   requireProfile(g);
-  const client = await connectDaemon(g.paths.socket);
+  const client = await connectDaemon(g.paths);
   if (client) await warnVersion(client);
   if (client) {
     // The subscription takes the connection: a chat's contact key is asked on a connection of its own.
     const handle = await start((m, p) => client.call(m, p), async (chat) => {
-      const c = await connectDaemon(g.paths.socket, 1000);
+      const c = await connectDaemon(g.paths, 1000);
       if (!c) return null;
       try { return ((await c.call("chat.get", { chat }, { timeoutMs: ANSWER_MS })) as { peer?: string }).peer || null; } finally { c.close(); }
     }).catch((error) => { client.close(); throw error; });
-    // Followed until stopped; a daemon that restarts is picked up again after the last event seen, and so is the
-    // subscription the feed closed while the output or the hooks fell behind.
-    let current: DaemonClient | null = client;
-    const reconnect = (wait: number) => void (async () => {
-      while (!current && !feed.paused) {
-        await new Promise((resolve) => setTimeout(resolve, wait));
-        wait = 1000;
-        if (current || feed.paused) return;
-        const next = await connectDaemon(g.paths.socket, 1000);
-        if (next) { current = next; await follow(next).catch(() => { if (current === next) current = null; }); }
-      }
-    })();
-    const feed = new Feed(handle, since, () => { const c = current; current = null; c?.destroy(); }, () => reconnect(0));
-    const follow = async (c: DaemonClient) => {
-      await c.subscribe(feed.since, feed.take, () => {
-        if (current !== c) return;
-        current = null;
-        reconnect(1000);
-      });
-    };
-    const stop = () => { current?.close(); process.exit(0); };
+    // Followed until stopped, past a daemon restart and past a feed that fell behind (`followDaemon`).
+    const following = followDaemon(g.paths, client, handle, since);
+    const stop = () => { following.close(); process.exit(0); };
     onReaderGone(stop);
-    await follow(client);
+    await following.subscribed;
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
     return;
@@ -837,7 +833,9 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
     text = String(parsed.options.text);
   } else if (parsed.options.stdin || (words.length === 0 && !process.stdin.isTTY)) {
     if (text) throw new CliError("usage", "Give the text as arguments or on stdin, not both");
-    text = (await readStdin()).replace(/\n$/, "");
+    // What the note and the give-up name: the command as typed (a name with a space, quoted).
+    const typed = [name, ...[target, ...(message !== undefined ? [message] : [])].map((word) => /^[\w@.:+-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`)].join(" ");
+    text = await textFromStdin(readStdin, typed, parsed.options.stdin === true, (note) => process.stderr.write(`ghostly: ${note}\n`));
   }
   if (!text.trim()) throw new CliError("usage", `No text: ghostly ${spec.usage}`);
   const params: Record<string, unknown> = { [spec.target]: target, text, force: parsed.options.force === true, ...(message !== undefined && { message }) };
@@ -882,10 +880,10 @@ async function identityAddCommand(argv: string[]): Promise<void> {
     if (event.type === "identity.approval" || event.type === "identity.progress") process.stderr.write(JSON.stringify(event) + "\n");
   };
   requireProfile(g);
-  const client = await connectDaemon(g.paths.socket);
+  const client = await connectDaemon(g.paths);
   if (client) {
     await warnVersion(client);
-    const watcher = await connectDaemon(g.paths.socket);
+    const watcher = await connectDaemon(g.paths);
     await watcher?.subscribe(undefined, tell);
     try { print(await client.call("identity.add", params)); } finally { client.close(); watcher?.close(); }
     return;
@@ -962,7 +960,7 @@ async function callPipeCommand(argv: string[]): Promise<void> {
   const parsed = parseArgs(argv, {}, idSlot({ args: ["call...?"] }));
   const g = globals(parsed);
   const ref = parsed.positionals.join(" ") || undefined;
-  const client = await connectDaemon(g.paths.socket);
+  const client = await connectDaemon(g.paths);
   if (!client) throw new CliError("unavailable", `No daemon runs profile ${g.profile}: calls need one (ghostly daemon --detach)`);
   let call: { call: string; audio: { socket: string; rate: number } | null };
   try { call = await client.call("call.get", ref ? { call: ref } : {}, { timeoutMs: ANSWER_MS }) as typeof call; } finally { client.close(); }

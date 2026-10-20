@@ -25,7 +25,8 @@ const DEFAULT_FEE_CAP = 2_000;
 export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; state: WalletState }) {
   const bt = state.bitcoin;
   const { t } = useI18n();
-  const { busy, error, run } = useRun();
+  // The button pressed is busy while it works and keeps the keys (`loading`, by the key `run` was given); the others wait.
+  const { busy, running, error, run } = useRun();
   const [action, setAction] = useState<Action>("receive");
   const [address, setAddress] = useState(""), [amount, setAmount] = useState(""), [feeCap, setFeeCap] = useState(String(DEFAULT_FEE_CAP));
   const [review, setReview] = useState<Review | null>(null);
@@ -61,7 +62,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
           })()}
           {(bt.status === "error" || !!bt.failures) && (
             <div className="flex flex-wrap justify-center gap-2">
-              <Button disabled={busy} data-testid="bitcoin-retry" onClick={() => void run(() => wallet.bitcoinRetrySource())}>{t("wallet.bitcoin.retry")}</Button>
+              <Button disabled={busy} loading={running === "retry"} data-testid="bitcoin-retry" onClick={() => void run(() => wallet.bitcoinRetrySource(), "retry")}>{t("wallet.bitcoin.retry")}</Button>
               {changeableFields(bt).length > 0 && <Button disabled={busy} data-testid="bitcoin-change-server" onClick={() => setChanging(true)}>{t("wallet.bitcoin.changeServer")}</Button>}
             </div>
           )}
@@ -80,7 +81,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
             <div className="bg-surface rounded-xl p-4 space-y-3 animate-fade-in">
               {bt.address ? <Address value={bt.address} qr={`bitcoin:${bt.address}`} testId="bitcoin-address" note={t("wallet.bitcoin.confirmedAfter")} />
                 : <Notice>{t("wallet.bitcoin.askAddress")}</Notice>}
-              <Button disabled={busy} data-testid="bitcoin-new-address" onClick={() => void run(() => wallet.bitcoinReceiveAddress())}>{bt.address ? t("wallet.bitcoin.newAddress") : t("wallet.bitcoin.getAddress")}</Button>
+              <Button disabled={busy} loading={running === "address"} data-testid="bitcoin-new-address" onClick={() => void run(() => wallet.bitcoinReceiveAddress(), "address")}>{bt.address ? t("wallet.bitcoin.newAddress") : t("wallet.bitcoin.getAddress")}</Button>
             </div>
           )}
           {action === "send" && (
@@ -91,9 +92,9 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
                 <input aria-label={t("wallet.bitcoin.maxFeeInput", { unit })} inputMode="numeric" className={`${input} !w-28 shrink-0`} aria-invalid={feeField.hint ? true : undefined} value={feeField.text} onChange={(e) => feeField.change(e.target.value)} /> {unit}
               </label>
               {feeField.hint && <Notice tone="error" testId="amount-unclear">{feeField.hint}</Notice>}
-              <Button variant="primary" className="w-full" disabled={busy || !!review || !address || !Number(amount) || !feeCap} onClick={() => void run(async () => {
+              <Button variant="primary" className="w-full" loading={running === "review"} disabled={busy || !!review || !address || !Number(amount) || !feeCap} onClick={() => void run(async () => {
                 setReview(await wallet.preparePayment({ target: { method: "bitcoin", network: bt.network!, provider: "onchain", asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 15 * 60 * 1000 }, amount: Number(amount), feeCap: Number(feeCap), payee: address }));
-              })}>{t("wallet.panel.review")}</Button>
+              }, "review")}>{t("wallet.panel.review")}</Button>
               <Notice>{t("wallet.bitcoin.reviewNote")}</Notice>
             </div>
           )}
@@ -116,7 +117,7 @@ export function BitcoinWalletPanel({ wallet, state }: { wallet: WalletPlatform; 
       {bt && <SourcePicker kind="onchain" view={bt} onSet={(id, values) => wallet.bitcoinSetSource(id, values)} onClear={() => wallet.bitcoinClearSource()}
         onRetry={() => wallet.bitcoinRetrySource()} onReconfigure={(values) => wallet.bitcoinReconfigureSource(values)} changing={changing} onChanging={setChanging} />}
       {bt?.status === "ready" && (
-        <Section title={t("wallet.panel.settings")}><Row label={t("wallet.bitcoin.refresh")} hint={t("wallet.bitcoin.refreshHint")}><Button disabled={busy} onClick={() => void run(() => wallet.bitcoinRefresh())}>{t("wallet.bitcoin.refreshNow")}</Button></Row></Section>
+        <Section title={t("wallet.panel.settings")}><Row label={t("wallet.bitcoin.refresh")} hint={t("wallet.bitcoin.refreshHint")}><Button disabled={busy} loading={running === "refresh"} onClick={() => void run(() => wallet.bitcoinRefresh(), "refresh")}>{t("wallet.bitcoin.refreshNow")}</Button></Row></Section>
       )}
     </div>
   );

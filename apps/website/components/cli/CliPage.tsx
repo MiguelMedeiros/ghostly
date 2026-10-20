@@ -119,6 +119,11 @@ export function CliPage() {
             </Link>
           </li>
           <li>
+            <a className="link-arrow" href={LINKS.voiceAgent}>
+              {t.links.voiceAgent} ↗
+            </a>
+          </li>
+          <li>
             <IntentLink className="link-arrow" href="/wisps/1100-headless">
               {t.links.wisp} →
             </IntentLink>

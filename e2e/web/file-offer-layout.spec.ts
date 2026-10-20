@@ -33,6 +33,30 @@ test("an offer of a long name with nothing to break at stays inside its bubble o
   await expect(offer).toContainText("(26.0 MB).");
 });
 
+test("a file's status reads whole on a phone: it wraps instead of being cut", { tag: ["@feature:files.large.offer"] }, async ({ peer }, testInfo) => {
+  test.setTimeout(120_000);
+  const alice = await peer("alice", { mobile: true });
+  const bob = await peer("bob");
+  await link(alice, bob);
+  await connect(alice, bob);
+
+  const path = testInfo.outputPath("photos.zip");
+  writeFileSync(path, Buffer.alloc(26 * 1024 * 1024, 7));
+  await alice.page.getByTestId("file-input").setInputFiles(path);
+  await expect(bob.page.getByTestId("file-accept")).toBeVisible({ timeout: 60_000 });
+
+  // The sender's line while the contact decides: longer than the bubble is wide on a 390 px phone.
+  const status = alice.page.getByTestId("file-bubble").filter({ hasText: "photos.zip" }).getByTestId("file-status");
+  await expect(status).toHaveText("Waiting for your contact to accept · 26.0 MB");
+  const box = await status.evaluate((el) => {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    return { cut: el.scrollWidth > el.clientWidth + 1, text: range.getBoundingClientRect().right, bubble: el.closest("[data-testid=file-bubble]")!.getBoundingClientRect().right };
+  });
+  expect(box.cut, "the status is not cut with …").toBe(false);
+  expect(box.text).toBeLessThanOrEqual(box.bubble + 1);
+});
+
 test("a moving file's line on a phone shows its speed and time left whole", { tag: ["@feature:files.large.resume", "@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }, testInfo) => {
   test.setTimeout(150_000);
   const alice = await peer("alice");

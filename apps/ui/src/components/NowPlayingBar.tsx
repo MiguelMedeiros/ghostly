@@ -2,11 +2,22 @@ import { useEffect, useRef, useState } from "react";
 import { formatVideoDuration } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../contexts/I18nContext";
 import { useAppNavigation } from "../hooks/useAppNavigation";
+import { tabbables } from "../hooks/useDismiss";
 import { JUMP_TO } from "../hooks/useJumpTo";
 import { languageTag } from "../lib/documentLanguage";
-import { pauseHeld, resumeHeld, stopHeld, useNowPlaying } from "../lib/nowPlaying";
+import { onNowPlaying, pauseHeld, resumeHeld, stopHeld, useNowPlaying } from "../lib/nowPlaying";
 import { onVoiceRate, voiceRate } from "../lib/voicePlayback";
 import { SpeedPill } from "./voice/VoiceBubble";
+
+/**
+ * The bar is going with the focus in it: the focus goes on first to what Tab reaches after it (the tab bar, or the
+ * open chat or page), or else to the main region, not to the page's body.
+ */
+function focusPast(bar: HTMLElement | null): void {
+  if (!bar?.contains(document.activeElement)) return;
+  const next = tabbables(document.body).find((el) => !bar.contains(el) && bar.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
+  (next ?? bar.closest<HTMLElement>("main[tabindex]"))?.focus();
+}
 
 /**
  * The voice message or audio file playing on away from its chat (lib/nowPlaying.ts): who sent it and where, play and
@@ -21,6 +32,9 @@ export function NowPlayingBar({ className = "" }: { className?: string }) {
   const [rate, setRate] = useState(voiceRate);
   useEffect(() => onVoiceRate(setRate), []);
   const playRef = useRef<HTMLButtonElement>(null);
+  const barRef = useRef<HTMLElement>(null);
+  // It also goes by itself (played to its end, a broken file, another one starting): the focus goes on as Close's does.
+  useEffect(() => onNowPlaying((next) => { if (!next) focusPast(barRef.current); }), []);
   if (!now) return null;
 
   const voice = now.kind === "voice";
@@ -30,9 +44,15 @@ export function NowPlayingBar({ className = "" }: { className?: string }) {
   const open = () => {
     if (now.chat) nav.conversation(now.chat.path, now.messageId ? { [JUMP_TO]: now.messageId } : undefined);
   };
+  // Close goes with the bar: the focus goes on first.
+  const close = () => {
+    focusPast(barRef.current);
+    stopHeld();
+  };
 
   return (
     <section
+      ref={barRef}
       role="region"
       aria-label={t("chat.nowPlaying.label")}
       data-testid="now-playing"
@@ -62,10 +82,13 @@ export function NowPlayingBar({ className = "" }: { className?: string }) {
         onClick={open}
         className="flex-1 min-w-0 flex flex-col items-start text-start bg-transparent border-none p-0 rounded cursor-pointer disabled:cursor-default focus-visible:outline-2 focus-visible:outline-accent"
       >
-        <span className="max-w-full truncate text-[13px] font-medium leading-tight" data-testid="now-playing-from">
-          <bdi>{now.from}</bdi>{where && <> · <bdi>{where}</bdi></>}
+        {/* Each name in its own direction on the element that cuts it: a <bdi> inside a truncating box is cut from the
+            box's (the page's) side, so a Latin name in the Arabic app lost its start. */}
+        <span className="flex max-w-full min-w-0 text-[13px] font-medium leading-tight" data-testid="now-playing-from">
+          <span dir="auto" className="min-w-0 truncate">{now.from}</span>
+          {where && <><span className="shrink-0 whitespace-pre"> · </span><span dir="auto" className="min-w-0 truncate">{where}</span></>}
         </span>
-        <span className="max-w-full truncate text-[12px] text-text-muted leading-tight" data-testid="now-playing-title"><bdi>{now.title}</bdi></span>
+        <span dir="auto" className="max-w-full truncate text-[12px] text-text-muted leading-tight" data-testid="now-playing-title">{now.title}</span>
       </button>
       <span className="shrink-0 text-[12px] text-text-muted tabular-nums" data-testid="now-playing-time">
         <span aria-hidden="true">{now.duration > 0 ? `${position} / ${duration}` : position}</span>
@@ -80,7 +103,7 @@ export function NowPlayingBar({ className = "" }: { className?: string }) {
         data-testid="now-playing-close"
         aria-label={t("chat.nowPlaying.close")}
         title={t("chat.nowPlaying.close")}
-        onClick={stopHeld}
+        onClick={close}
         className="w-8 h-8 shrink-0 flex items-center justify-center rounded-full bg-transparent border-none text-text-muted cursor-pointer hover:bg-surface-hover hover:text-text-primary focus-visible:outline-2 focus-visible:outline-accent"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>

@@ -4,7 +4,7 @@ import type { MessageReply } from "@ghostly/browser/shared/types";
 import { revealMessage } from "../hooks/useRowWindow";
 import { reducedMotion } from "./motion";
 import { filePreview } from "./chatList";
-import { cardLine, showsCard } from "./statusCards";
+import { appCardLine, cardLine, showsCard } from "./statusCards";
 import type { ChatFile, ChatMessage } from "./types";
 import { englishT, type Translate } from "../locales/translate";
 
@@ -43,7 +43,7 @@ export type Quotable = ReplyTarget & { sender: string; text: string; member?: st
  */
 export function messageSnippet(message: { text: string; card?: StatusCard; file?: ChatFile }, t: Translate = englishT): string {
   if (showsCard(message.card)) return replySnippet(cardLine(message.card));
-  return replySnippet(filePreview(message.file, t) ?? message.text);
+  return replySnippet(appCardLine(message.card, t) ?? filePreview(message.file, t) ?? message.text);
 }
 
 /** A chat's messages by their id here and by the id a reply names (`replyRef`). */

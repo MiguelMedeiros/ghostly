@@ -6,6 +6,7 @@ import {
   type GhostRecord, type PeerPresence, type PollIntervals, type GroupEdit, type GroupIncomingEdit, type GroupMention, type WireReply, type StatusCard, type WireReaction, type WirePin, type GroupPinFrame, type GroupCommit, type GroupEdgeFrame, type GroupEntryLink, type GroupMetaChange, type GroupState, type Identity, type Roster, type TypingActivity,
 } from "@ghostly/core";
 import type { GroupEvent, GroupJoinStage, GroupView, StoredGroup, StoredMessage, StoredPin } from "../shared/types";
+import type { Removal } from "./removals";
 import { groupReply } from "../shared/replies";
 import { pinOfFormerMember, pinView } from "./pins";
 import { db } from "./db";
@@ -262,16 +263,12 @@ export const peerMessageAt = (map: Map<string, number>, groupId: string): { last
 
 /**
  * How often a group's link is looked at (`warmPollMs` for `warmMs` after it was handed out or someone
- * knocked: people open a link in the minutes after it is shared, and in bursts), and a joiner knocks;
- * `slowKnockMs` once it has waited `patienceMs`.
+ * knocked: people open a link soon after it is shared, and in bursts), and a joiner knocks;
+ * `slowKnockMs` once it has waited `patienceMs`. A minute, as a community's door (`knockWarmMs`): each warm
+ * link reads 30 times a minute, so ten minutes of three links just shared took the app's whole relay budget.
  */
 export interface EntryTimings { pollMs: number; warmPollMs: number; warmMs: number; knockMs: number; slowKnockMs: number; patienceMs: number }
-const ENTRY_TIMINGS: EntryTimings = { pollMs: 5_000, warmPollMs: 2_000, warmMs: 10 * 60_000, knockMs: 5_000, slowKnockMs: 20_000, patienceMs: 2 * 60_000 };
-/**
- * The slowest a quiet link is looked at while the admin's other links share `pollMs` with it, as a community's door
- * does (`otherHubKnockPollMs`): an admin with three links on read the relays 36 times a minute for knocks, for good.
- */
-const LINK_SHARED_MOST_MS = 15_000;
+const ENTRY_TIMINGS: EntryTimings = { pollMs: 5_000, warmPollMs: 2_000, warmMs: 60_000, knockMs: 5_000, slowKnockMs: 20_000, patienceMs: 2 * 60_000 };
 /**
  * A knock still in the record is written again only once it is this old. Everyone holding the link writes the same
  * Pkarr record, so a knock is read back before it is repeated: one that is there and fresh costs a read, not a read
@@ -298,6 +295,8 @@ const MAX_PENDING_ENTRIES = 4;
 const ENTRY_TIMEOUT_MS = 3 * 60_000;
 /** A joiner refused (its app cannot follow the group) is not answered again for this long. */
 const REFUSED_FOR_MS = 10 * 60_000;
+/** Messages deleted for everyone a group remembers, so a copy that comes again stays gone: as many as a chat's deleted ids. */
+export const MAX_REMOVED_IDS = 500;
 /**
  * A joiner whose entry session timed out (the relays failing, its app closed a moment) is answered again after this,
  * doubling with each timeout in a row up to `REFUSED_FOR_MS`: a slow network is no refusal.
@@ -441,6 +440,8 @@ export class Groups {
   /** Admin side: entry sessions of a member key that timed out in a row, and when the last did. */
   private readonly entryTimeouts = new Map<string, { count: number; at: number }>();
   private readonly lastPoll = new Map<string, number>();
+  /** Admin side: when a link nobody is using was last read. Those links share one `pollMs` between them, read in turn. */
+  private lastQuietPoll = 0;
   /** Admin side: until when a group's link is looked at the warm pace. */
   private readonly warmUntil = new Map<string, number>();
   private readonly lastKnock = new Map<string, number>();
@@ -622,47 +623,62 @@ export class Groups {
   private record(groupId: string): StoredGroup | undefined { return this.isCommunity(groupId) ? this.communities.record(groupId) : this.stored.get(groupId); }
 
   views(): GroupView[] {
-    return [...this.meshViews(), ...this.communities.views()].map(view => {
-      const pin = pinView(this.record(view.id)?.pin);
-      return pin ? { ...view, pin } : view;
-    }).sort((a, b) => Math.max(b.lastMessageAt, b.createdAt) - Math.max(a.lastMessageAt, a.createdAt));
+    return [...this.meshViews(), ...this.communities.views()].map(view => this.pinned(view))
+      .sort((a, b) => Math.max(b.lastMessageAt, b.createdAt) - Math.max(a.lastMessageAt, a.createdAt));
+  }
+
+  /**
+   * One group's view, as `views()` makes it, without building every other group's: the engine's native-listener
+   * decisions read it per edge, and all groups' views per edge grew with groups × members squared.
+   */
+  view(groupId: string): GroupView | undefined {
+    const view = this.isCommunity(groupId) ? this.communities.view(groupId) : this.meshView(this.stored.get(groupId));
+    return view && this.pinned(view);
+  }
+
+  private pinned(view: GroupView): GroupView {
+    const pin = pinView(this.record(view.id)?.pin);
+    return pin ? { ...view, pin } : view;
   }
 
   private meshViews(): GroupView[] {
-    return [...this.stored.values()].filter(group => !group.left && (group.invitation || this.sessions.has(group.id))).map(group => {
-      const session = this.sessions.get(group.id);
-      const edges = this.host.edges(group.id);
-      // A chat stays in `contacts` after its member is removed or leaves (the removal notice goes over it): only a member still in the roster counts.
-      const contacts = Object.entries(group.contacts ?? {}).filter(([key]) => !session || rosterHas(session.roster, key));
-      const base = { id: group.id, profile: "mesh" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [...(this.invited.get(group.id) ?? [])],
-        memberLinks: Object.fromEntries(contacts.map(([key, linkId]) => [linkId, key])) };
-      if (!session) {
-        const invitation = group.invitation!;
-        return { ...base, name: groupName(invitation.name) ?? "", isAdmin: false, members: [], canSend: false, ...(group.formerNames ? { formerNames: group.formerNames } : {}),
-          invitation: { linkId: invitation.linkId, contact: this.host.contactName(invitation.linkId) ?? "", admin: invitation.admin, members: Math.min(Math.max(invitation.n, 0), GROUP_MEMBER_CAP.max), accepted: !!invitation.seedB64,
-            ...(this.acceptSaid.get(group.id)?.unanswered ? { unanswered: true } : {}), ...(invitation.takenBack ? { takenBack: true } : {}),
-            ...(invitation.entry ? { viaLink: true, stage: this.joinStage(group) } : {}) } };
-      }
-      const nicks = session.state.nicks;
-      const entry = session.isAdmin ? this.entryOf(group) : undefined;
-      const now = this.now(), onHubs = this.hubs.active(group.id, session, now);
-      const hubKeys = new Set(onHubs ? this.hubs.hubs(group.id, session, now) : []), policy = session.hubPolicy;
-      if (onHubs && this.hubs.isHub(group.id)) hubKeys.add(session.myKey);
-      const typing = this.typings.view(session);
-      // A name outlives its member's place in the roster: the messages stay, and are still theirs.
-      const former = Object.entries(nicks).filter(([key]) => !rosterHas(session.roster, key));
-      return { ...base, name: session.name, ...(former.length ? { formerNames: Object.fromEntries(former) } : {}), status: session.status, statusReason: session.state.statusReason, epoch: session.epoch, myKey: session.myKey, isAdmin: session.isAdmin,
-        ...(entry ? { entryLink: encodeGroupEntryLink(entry.link) } : {}), ...(session.picture ? { picture: session.picture } : {}),
-        canSend: session.status === "active" && session.readableEpochs.includes(session.epoch),
-        ...(onHubs ? { hubs: { hub: this.hubs.isHub(group.id) } } : {}), ...(typing ? { typing } : {}),
-        members: session.roster.map(([key, role]) => {
-          const edge = edges.get(key);
-          const direct = key === session.myKey || (!!edge && this.host.linkReady(edge)), viaHub = !direct && onHubs && this.hubs.viaHub(group.id, session, key, now);
-          const hubRole = policy.pin.includes(key) ? "pin" as const : policy.no.includes(key) ? "exclude" as const : undefined;
-          return { key, role, me: key === session.myKey, nick: key === session.myKey ? undefined : (edge && this.host.edgeNick(edge)) || nicks[key],
-            online: direct || viaHub, ...(viaHub ? { viaHub } : {}), ...(hubKeys.has(key) ? { hub: true } : {}), ...(hubRole ? { hubRole } : {}), missing: session.missing(key, this.gapsGone.get(group.id)?.get(key)?.[session.epoch]) };
-        }) };
-    }).sort((a, b) => Math.max(b.lastMessageAt, b.createdAt) - Math.max(a.lastMessageAt, a.createdAt));
+    return [...this.stored.values()].flatMap(group => this.meshView(group) ?? []);
+  }
+
+  private meshView(group: StoredGroup | undefined): GroupView | undefined {
+    if (!group || group.left || !(group.invitation || this.sessions.has(group.id))) return undefined;
+    const session = this.sessions.get(group.id);
+    const edges = this.host.edges(group.id);
+    // A chat stays in `contacts` after its member is removed or leaves (the removal notice goes over it): only a member still in the roster counts.
+    const contacts = Object.entries(group.contacts ?? {}).filter(([key]) => !session || rosterHas(session.roster, key));
+    const base = { id: group.id, profile: "mesh" as const, createdAt: group.createdAt, lastMessageAt: this.lastMessageAt.get(group.id) ?? 0, ...peerMessageAt(this.lastPeerMessageAt, group.id), ...mentionAt(this.lastMentionAt, group.id), invited: [...(this.invited.get(group.id) ?? [])],
+      memberLinks: Object.fromEntries(contacts.map(([key, linkId]) => [linkId, key])) };
+    if (!session) {
+      const invitation = group.invitation!;
+      return { ...base, name: groupName(invitation.name) ?? "", isAdmin: false, members: [], canSend: false, ...(group.formerNames ? { formerNames: group.formerNames } : {}),
+        invitation: { linkId: invitation.linkId, contact: this.host.contactName(invitation.linkId) ?? "", admin: invitation.admin, members: Math.min(Math.max(invitation.n, 0), GROUP_MEMBER_CAP.max), accepted: !!invitation.seedB64,
+          ...(this.acceptSaid.get(group.id)?.unanswered ? { unanswered: true } : {}), ...(invitation.takenBack ? { takenBack: true } : {}),
+          ...(invitation.entry ? { viaLink: true, stage: this.joinStage(group) } : {}) } };
+    }
+    const nicks = session.state.nicks;
+    const entry = session.isAdmin ? this.entryOf(group) : undefined;
+    const now = this.now(), onHubs = this.hubs.active(group.id, session, now);
+    const hubKeys = new Set(onHubs ? this.hubs.hubs(group.id, session, now) : []), policy = session.hubPolicy;
+    if (onHubs && this.hubs.isHub(group.id)) hubKeys.add(session.myKey);
+    const typing = this.typings.view(session);
+    // A name outlives its member's place in the roster: the messages stay, and are still theirs.
+    const former = Object.entries(nicks).filter(([key]) => !rosterHas(session.roster, key));
+    return { ...base, name: session.name, ...(former.length ? { formerNames: Object.fromEntries(former) } : {}), status: session.status, statusReason: session.state.statusReason, epoch: session.epoch, myKey: session.myKey, isAdmin: session.isAdmin,
+      ...(entry ? { entryLink: encodeGroupEntryLink(entry.link) } : {}), ...(session.picture ? { picture: session.picture } : {}),
+      canSend: session.status === "active" && session.readableEpochs.includes(session.epoch),
+      ...(onHubs ? { hubs: { hub: this.hubs.isHub(group.id) } } : {}), ...(typing ? { typing } : {}),
+      members: session.roster.map(([key, role]) => {
+        const edge = edges.get(key);
+        const direct = key === session.myKey || (!!edge && this.host.linkReady(edge)), viaHub = !direct && onHubs && this.hubs.viaHub(group.id, session, key, now);
+        const hubRole = policy.pin.includes(key) ? "pin" as const : policy.no.includes(key) ? "exclude" as const : undefined;
+        return { key, role, me: key === session.myKey, nick: key === session.myKey ? undefined : (edge && this.host.edgeNick(edge)) || nicks[key],
+          online: direct || viaHub, ...(viaHub ? { viaHub } : {}), ...(hubKeys.has(key) ? { hub: true } : {}), ...(hubRole ? { hubRole } : {}), missing: session.missing(key, this.gapsGone.get(group.id)?.get(key)?.[session.epoch]) };
+      }) };
   }
 
   messages(groupId: string): Promise<StoredMessage[]> { return this.store.getMessages(MESSAGE_LINK(groupId)); }
@@ -706,7 +722,7 @@ export class Groups {
     if (this.isCommunity(groupId)) return this.communities.sendEdit(groupId, edit);
     const session = this.sessions.get(groupId);
     if (!session) return "You are not in this group";
-    const result = await session.sendEdit(edit.id, { v: edit.e, ts: edit.ts, text: edit.m, mentions: edit.k, ...(edit.sc && { card: edit.sc }) }, to);
+    const result = await session.sendEdit(edit.id, { v: edit.e, ts: edit.ts, text: edit.m, mentions: edit.k, ...(edit.sc && { card: edit.sc }), ...(edit.rm && { remove: true }) }, to);
     return "error" in result ? result.error : null;
   }
   /** Resolves once the community frames received so far were handed to the engine (tests). */
@@ -942,7 +958,7 @@ export class Groups {
     if (this.isCommunity(groupId)) return this.communities.fileMembership(groupId);
     const session = this.sessions.get(groupId);
     if (session?.status !== "active") return undefined;
-    return { me: session.myKey, community: false, inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId) => session.couldRead(key, messageId) };
+    return { me: session.myKey, community: false, inRoster: key => rosterHas(session.roster, key), couldRead: (key, messageId, ts) => session.couldRead(key, messageId, ts) };
   }
 
   /**
@@ -1099,6 +1115,37 @@ export class Groups {
     const commit = frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-commit" ? (frame as { commit?: { e?: unknown } }).commit : undefined;
     return typeof commit?.e === "number" && commit.e <= removalEpoch(session.state.chain, key);
   }
+  /** My removals on their way in a group (`engine/removals.ts`), a private group's or a community's. */
+  removals(groupId: string): readonly Removal[] {
+    return this.record(groupId)?.removals ?? [];
+  }
+
+  async setRemovals(groupId: string, removals: Removal[]): Promise<void> {
+    const group = this.record(groupId);
+    if (!group) return;
+    group.removals = removals;
+    await this.store.putGroup(group);
+  }
+
+  /** A member's message its author deleted for everyone (WISP 400 § Delete for everyone): a copy that comes again is not kept. */
+  isRemoved(groupId: string, messageId: string): boolean {
+    return !!this.record(groupId)?.removedIds?.includes(messageId);
+  }
+
+  /**
+   * Its author deleted a message for everyone: noted so (the newest `MAX_REMOVED_IDS`, also when the message is not here
+   * yet, so it is taken as gone when it comes), and its file goes from this device.
+   */
+  async removed(groupId: string, messageId: string): Promise<void> {
+    const group = this.record(groupId);
+    if (!group) return;
+    if (!group.removedIds?.includes(messageId)) {
+      group.removedIds = [...(group.removedIds ?? []), messageId].slice(-MAX_REMOVED_IDS);
+      await this.store.putGroup(group);
+    }
+    await this.files?.forget(groupId, messageId);
+  }
+
   /** The connection of an edge opened. One kept to tell a removed member closes a while after, whatever its app says or does not say. */
   edgeOpen(groupId: string, peerKey: string): void {
     const group = this.stored.get(groupId), farewell = group?.farewells?.[peerKey];
@@ -1306,8 +1353,9 @@ export class Groups {
     try {
       this.authorOrder.tick(now);
       this.lineOrder.tick(now);
-      // Links nobody is using share one pace (`LINK_SHARED_MOST_MS`): one alone is read every `pollMs`, as before.
-      const links = Math.max(1, [...this.stored.values()].filter(g => g.entry && !g.left && this.sessions.get(g.id)?.isAdmin).length);
+      // Links nobody is using share one pace: one of them is read every `pollMs`, the one read longest ago, so they
+      // cost the relays what one link alone does, whatever their number, and each waits its turn (`n` links: `n` × 5 s).
+      const quiet: string[] = [];
       for (const group of [...this.stored.values()]) {
         if (group.left) {
           if (now - group.left.at > LEFT_KEPT_MS) await this.forget(group.id);
@@ -1336,10 +1384,20 @@ export class Groups {
           const linkId = this.host.entries(group.id).get(key);
           if (linkId) await this.host.closeEdge(linkId);
         }
-        const every = now < (this.warmUntil.get(group.id) ?? 0) ? this.timings.warmPollMs : Math.max(this.timings.pollMs, Math.min(this.timings.pollMs * links, LINK_SHARED_MOST_MS));
         // With every entry session taken, or no room, a knock read now could open nothing: its requests go to the edges.
         const busy = (pending?.size ?? 0) >= MAX_PENDING_ENTRIES || session.roster.length + (pending?.size ?? 0) >= GROUP_MEMBER_CAP.max;
-        if (!busy && now - (this.lastPoll.get(group.id) ?? 0) >= every) { this.lastPoll.set(group.id, now); await this.answerKnocks(group, session, now).catch(() => {}); }
+        const since = now - (this.lastPoll.get(group.id) ?? 0);
+        if (busy) continue;
+        if (now >= (this.warmUntil.get(group.id) ?? 0)) { if (since >= this.timings.pollMs) quiet.push(group.id); }
+        else if (since >= this.timings.warmPollMs) { this.lastPoll.set(group.id, now); await this.answerKnocks(group, session, now).catch(() => {}); }
+      }
+      if (quiet.length && now - this.lastQuietPoll >= this.timings.pollMs) {
+        const groupId = quiet.reduce((a, b) => (this.lastPoll.get(b) ?? 0) < (this.lastPoll.get(a) ?? 0) ? b : a);
+        const group = this.stored.get(groupId), session = this.sessions.get(groupId);
+        if (group?.entry && !group.left && session?.isAdmin) {
+          this.lastQuietPoll = now; this.lastPoll.set(groupId, now);
+          await this.answerKnocks(group, session, now).catch(() => {});
+        }
       }
       for (const [key, until] of this.refused) if (until <= now) this.refused.delete(key);
       for (const [key, { at }] of this.entryTimeouts) if (now - at > 60 * 60_000) this.entryTimeouts.delete(key);
@@ -2406,7 +2464,7 @@ export class Groups {
         const timestamp = m.timestamp;
         const mentioned = m.sender !== session.myKey && mentionsMember(m.mentions, session.myKey);
         // A file it announces (WISP 503): kept here, and fetched now when it is one this device takes by itself.
-        const file = m.file && this.files ? await this.files.announced(state.id, { id: m.id, sender: m.sender, file: m.file }, session.myKey) : undefined;
+        const file = m.file && this.files ? await this.files.announced(state.id, { id: m.id, sender: m.sender, ts: m.timestamp, file: m.file }, session.myKey) : undefined;
         const message: StoredMessage = { linkId: MESSAGE_LINK(state.id), id: m.id, text: file ? groupFileText(m.text, m.file!) : m.text, sender: m.sender === session.myKey ? "me" : "peer", member: m.sender, timestamp, via: "datalink",
           ...mentionFields(m.mentions, mentioned), ...(m.reply && { replyTo: groupReply(m.reply, session.myKey) }), ...(m.forwarded && { forwarded: m.forwarded }), ...(m.card && { card: m.card }), ...(file && { file }),
           ...(m.frame && { frame: m.frame }) };
