@@ -16,18 +16,23 @@ export const qrReaderFailures = () => decoderFailures;
 /** The largest picture a QR is read from, opened, dropped or pasted. */
 export const QR_IMAGE_MAX = 12 * 1024 * 1024;
 
-/** The QR in a picture, or null when it shows none. Throws `QrReaderNotLoaded`, or what reading the picture threw. */
+/**
+ * The QR in a picture, or null when it shows none. Throws `QrReaderNotLoaded`, or what reading the picture threw.
+ * Decoded in a worker: on the page a phone photo held the app for seconds. Where the worker fails, on the page.
+ */
 export async function readQrImage(file: Blob): Promise<string | null> {
   const jsQR = await qrDecoder();
   const bitmap = await createImageBitmap(file);
+  const decode = frameDecoder(jsQR);
   try {
     const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
     const canvas = document.createElement("canvas"); canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
     const context = canvas.getContext("2d", { willReadFrequently: true })!;
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    const data = context.getImageData(0, 0, canvas.width, canvas.height);
-    return jsQR(data.data, data.width, data.height, { inversionAttempts: "attemptBoth" })?.data ?? null;
-  } finally { bitmap.close(); }
+    const pixels = () => { context.drawImage(bitmap, 0, 0, canvas.width, canvas.height); return context.getImageData(0, 0, canvas.width, canvas.height); };
+    const text = await decode(pixels());
+    // The pixels went to the worker that failed: drawn again for the page.
+    return text !== undefined ? text : (await decode(pixels())) ?? null;
+  } finally { decode.close(); bitmap.close(); }
 }
 
 /** The camera that faces away, for scanning; the caller stops its tracks. */
@@ -52,7 +57,7 @@ export function scanQrFrames(element: HTMLVideoElement, jsQR: Awaited<ReturnType
       context.drawImage(element, 0, 0, canvas.width, canvas.height);
       const text = await decode(context.getImageData(0, 0, canvas.width, canvas.height));
       if (!live()) { decode.close(); return; }
-      if (text !== null && found(text)) { decode.close(); return; }
+      if (typeof text === "string" && found(text)) { decode.close(); return; }
     }
     window.setTimeout(() => void tick(), 160);
   };
@@ -60,17 +65,18 @@ export function scanQrFrames(element: HTMLVideoElement, jsQR: Awaited<ReturnType
 }
 
 /**
- * One frame at a time to the worker (its pixels handed over, not copied), or to `jsQR` on the page. A worker that fails
- * (its script did not load) answers its frame with nothing, and the frames after it are decoded on the page.
+ * One frame at a time to the worker (its pixels handed over, not copied), or to `jsQR` on the page: the QR's text, or
+ * null when it shows none. A worker that fails (its script did not load) answers its frame with `undefined`, not read,
+ * and the frames after it are decoded on the page.
  */
 function frameDecoder(jsQR: Awaited<ReturnType<typeof qrDecoder>>) {
   let worker: Worker | null = null;
   try { worker = new Worker(new URL("./qrFrames.worker.ts", import.meta.url), { type: "module" }); } catch { /* decoded on the page */ }
-  let answer: ((text: string | null) => void) | null = null;
-  const answered = (text: string | null) => { const resolve = answer; answer = null; resolve?.(text); };
+  let answer: ((text: string | null | undefined) => void) | null = null;
+  const answered = (text: string | null | undefined) => { const resolve = answer; answer = null; resolve?.(text); };
   worker?.addEventListener("message", (event: MessageEvent<{ text: string | null }>) => answered(event.data.text));
-  worker?.addEventListener("error", () => { worker?.terminate(); worker = null; answered(null); });
-  const decode = (pixels: ImageData): Promise<string | null> => {
+  worker?.addEventListener("error", () => { worker?.terminate(); worker = null; answered(undefined); });
+  const decode = (pixels: ImageData): Promise<string | null | undefined> => {
     if (!worker) return Promise.resolve(jsQR(pixels.data, pixels.width, pixels.height, { inversionAttempts: "attemptBoth" })?.data ?? null);
     const to = worker;
     return new Promise((resolve) => {
