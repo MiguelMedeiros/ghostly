@@ -697,6 +697,9 @@ export const LIMITED_MODE_METHODS: ReadonlySet<string> = new Set<keyof EngineApi
   "setActiveLink", "renameLink", "updateSettings", "disconnect",
   "sendMessage", "editMessage", "react", "pinMessage", "forwardMessages", "messageDetails", "messagePage",
   "sendGroupMessage", "groupMessages", "statusCardIndex", "setTyping", "setGroupTyping", "setFastPoll", "exportLinks", "walletBackupReminder",
+  // Saved messages are marks on this device only, a settings record (`engine/saved.ts`): nothing is sent. Refused,
+  // the Saved page stayed blank with no word and Save did nothing (agents#1694).
+  "savedMessages", "saveMessage",
   // A restored copy whose read found a tombstone: only the person can start it as a profile of its own.
   "deviceRestoreStartOwn",
 ]);

@@ -228,6 +228,10 @@ describe("what the pages may call in limited mode", () => {
     for (const method of ["deleteMessage", "retryMessage"]) expect((await call(method, { linkId: "x", messageId: "y" })).error, method).toBe(LIMITED_MODE_ERROR);
     expect((await call("updateSettings", { settings: { nick: "Ana" } })).error).toBeUndefined();
     expect((await call("setActiveLink", { linkId: null })).error).toBeUndefined();
+    // Saved messages are marks on this device: listed and set in limited mode too (agents#1694).
+    expect((await call("savedMessages")).error).toBeUndefined();
+    expect((await call("saveMessage", { linkId: "x", messageId: "y" })).error).toBeUndefined();
+    expect((await call("saveMessage", { linkId: "x", messageId: "y", remove: true })).error).toBeUndefined();
     expect(calls).toEqual([]);
     // A list of what is allowed: a method added later is refused until someone decides.
     expect((await call("aMethodOfTomorrow")).error).toMatch(/Unknown method|could not check/);
