@@ -272,7 +272,8 @@ describe("a hub and an edge to someone out of the roster", () => {
   const roster = (...keys: string[]) => keys.map((key, i) => [key, i ? "member" : "admin"]);
   const chain = [roster(admin), roster(admin, hub, gone), roster(admin, hub, gone, member), roster(admin, hub, member), roster(admin, hub, member)]
     .map((m, e) => ({ e, m, by: admin })) as unknown as GroupCommit[];
-  const session = { roster: chain[4].m, myKey: hub, state: { chain } } as unknown as GroupSession;
+  const session = { roster: chain[4].m, myKey: hub, state: { chain },
+    handOnTo: (to: string, frame: GroupEdgeFrame) => frame.t === "group-commit" ? { ...frame, secret: `sealed for ${to}` } : frame } as unknown as GroupSession;
 
   function hubs() {
     const sent: { to: string; frame: { t: string; commit?: { e: number } } }[] = [];
@@ -298,6 +299,13 @@ describe("a hub and an edge to someone out of the roster", () => {
     mesh.passOn("g", session, admin, [commit(3), commit(4), message]);
     expect(sent.filter(s => s.to === "e-gone").map(s => [s.frame.t, s.frame.commit?.e])).toEqual([["group-commit", 3]]);
     expect(sent.filter(s => s.to === "e-member").map(s => s.frame.t)).toEqual(["group-commit", "group-commit", "group-msg"]);
+  });
+
+  it("passes a commit on to a member with the epoch's secret sealed for it, and none to someone taken out", () => {
+    const { mesh, sent } = hubs();
+    mesh.passOn("g", session, admin, [{ t: "group-commit", g: "g", commit: chain[3] } as unknown as GroupEdgeFrame]);
+    const secrets = Object.fromEntries(sent.map(s => [s.to, (s.frame as { secret?: string }).secret]));
+    expect(secrets).toEqual({ "e-member": `sealed for ${member}`, "e-gone": undefined });
   });
 
   it("does not tell it whom the hub reaches", () => {
