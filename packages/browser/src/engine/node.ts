@@ -205,7 +205,7 @@ import { AUTHOR_ORDER_ROOM } from "./groupAuthorOrder";
 import { edgeView } from "./groupEdges";
 import { GroupPayments } from "./groupPayments";
 import { Reactions,groupReactionsToResend, latestReaction, noteAfterChange, noteIfStanding } from "./reactions";
-import { mayPinIn, myPin, pinView, pinnedRow } from "./pins";
+import { mayPinIn, myPin, pinView, pinnedRow, type PinsHost } from "./pins";
 import { GroupEdits } from "./groupEdits";
 import { CommunityPay, groupLinkId, parsePayLink } from "./communityPay";
 import { mayReach } from "./serviceAccess";
@@ -1377,18 +1377,28 @@ export class GhostlyNode implements EngineImplementation {
     for (const pc of this.chatPeers) if (pc.connectionState === "closed") this.chatPeers.delete(pc);
     return this.chatPeers.size;
   }
+  /**
+   * The rows of a 1:1 chat a wire id may name besides `peer_`/`me_` and that id: a file of mine is `me_<its time>` and a
+   * payment `me_` or `peer_` and its time, as `fileMessage` and `paymentMessage` read them. What a reaction, a reply or a
+   * pin names is read so, alone, before a chat is read whole.
+   */
+  private async rowsNamed(chat: string, id: string): Promise<string[]> {
+    const file = await fileStore.get(GhostlyNode.outgoingFileId(chat, id)).catch(() => undefined);
+    const payment = this.desk.payment(paymentAlias(id, chat)) ?? this.desk.payment(id);
+    return [
+      ...(file?.linkId === chat && file.metadata ? [`me_${file.metadata.timestamp}`] : []),
+      ...(payment?.linkId === chat ? [`me_${payment.createdAt}`, `peer_${payment.createdAt}`] : []),
+    ];
+  }
+  private readonly pinsHost: PinsHost = {
+    messages: chat => db.getMessages(chat),
+    message: (chat, id) => db.getMessage(chat, id),
+    rows: (chat, id) => this.rowsNamed(chat, id),
+  };
   private readonly reactions = new Reactions({
     messages: chat => db.getMessages(chat),
     message: (chat, id) => db.getMessage(chat, id),
-    // A file of mine is `me_<its time>` and a payment `me_` or `peer_` and its time, as `fileMessage` and `paymentMessage` read them.
-    rows: async (chat, id) => {
-      const file = await fileStore.get(GhostlyNode.outgoingFileId(chat, id)).catch(() => undefined);
-      const payment = this.desk.payment(paymentAlias(id, chat)) ?? this.desk.payment(id);
-      return [
-        ...(file?.linkId === chat && file.metadata ? [`me_${file.metadata.timestamp}`] : []),
-        ...(payment?.linkId === chat ? [`me_${payment.createdAt}`, `peer_${payment.createdAt}`] : []),
-      ];
-    },
+    rows: (chat, id) => this.rowsNamed(chat, id),
     patch: (chat, id, change) => db.patchMessage(chat, id, change),
     changed: async (chat, id, note) => {
       const shown = this.reactionNotes.get(chat);
@@ -3448,14 +3458,14 @@ export class GhostlyNode implements EngineImplementation {
    * The message of a chat a reply answers, by its id here or the id both sides know it by (`replyRef`): what the
    * reply keeps of it, or why there is nothing to reply to. A group's reply needs the author's member key too.
    * Read alone by its id, or a chat's `peer_`/`me_` row for a wire id, as `resolveReply` does: a group's message goes
-   * by its row's id, so a miss there is not here; a chat's other rows (a file's, a payment's) are looked for in the
-   * whole chat.
+   * by its row's id, so a miss there is not here; a chat's file of mine or payment is read alone by its time
+   * (`rowsNamed`), and any other row is looked for in the whole chat.
    */
   private async replyFor(linkId: string, messageId: unknown): Promise<MessageReply | string> {
     if (typeof messageId !== "string" || !messageId) return "No message to reply to";
     const group = linkId.startsWith("group:");
     let original = await db.getMessage(linkId, messageId);
-    for (const rowId of group ? [] : [`peer_${messageId}`, `me_${messageId}`]) {
+    for (const rowId of group || original ? [] : [`peer_${messageId}`, `me_${messageId}`, ...await this.rowsNamed(linkId, messageId)]) {
       if (original) break;
       const row = await db.getMessage(linkId, rowId);
       if (row && replyRef(row) === messageId) original = row;
@@ -3472,14 +3482,15 @@ export class GhostlyNode implements EngineImplementation {
    * here gives the line and the author (and it is then checked); one not found keeps what the wire said, unchecked.
    * The original is read alone where its id says its row (a group's message id, a chat's `peer_`/`me_` text): a reply
    * costs what a plain message does, however long the chat. A group's row goes by its own id only, so a miss there is
-   * not here; a chat's other rows (a file's, a payment's) are looked for in the whole chat.
+   * not here; a chat's file of mine or payment is read alone by its time (`rowsNamed`), and any other row is looked
+   * for in the whole chat.
    */
   private async resolveReply(message: StoredMessage): Promise<StoredMessage> {
     const reply = message.replyTo;
     if (!reply || reply.messageId) return message;
     const group = message.linkId.startsWith("group:");
     let original: StoredMessage | undefined, history: StoredMessage[] | undefined;
-    for (const rowId of group ? [reply.id] : [`peer_${reply.id}`, `me_${reply.id}`]) {
+    for (const rowId of group ? [reply.id] : [`peer_${reply.id}`, `me_${reply.id}`, ...await this.rowsNamed(message.linkId, reply.id)]) {
       const row = rowId === message.id ? undefined : await db.getMessage(message.linkId, rowId);
       if (row && replyRef(row, group) === reply.id) { original = row; break; }
     }
@@ -5074,7 +5085,7 @@ export class GhostlyNode implements EngineImplementation {
    */
   async pinMessage({ linkId, messageId, remove }: { linkId: string; messageId?: string; remove?: boolean }): Promise<{ error: string | null }> {
     if (typeof linkId !== "string" || !linkId) return { error: "No chat to pin in" };
-    const host = { messages: (chat: string) => db.getMessages(chat), message: (chat: string, id: string) => db.getMessage(chat, id) };
+    const host = this.pinsHost;
     if (linkId.startsWith("group:")) {
       const groupId = linkId.slice("group:".length), view = this.groups.view(groupId);
       if (!view || view.status !== "active") return { error: "You are not in this group" };
@@ -5272,7 +5283,7 @@ export class GhostlyNode implements EngineImplementation {
 
   /** A pin that came, as it is kept: who pinned, and its row when it is here. */
   private async pinCame(chat: string, by: string, pin: WirePin): Promise<StoredPin> {
-    const row = await pinnedRow({ messages: c => db.getMessages(c), message: (c, id) => db.getMessage(c, id) }, chat, pin.id);
+    const row = await pinnedRow(this.pinsHost, chat, pin.id);
     return { id: pin.id, n: pin.n, by, at: Date.now(), ...(row && { messageId: row.id }) };
   }
 
