@@ -16,6 +16,7 @@ import { nodePushSend } from "./pushSend";
 import { openPersistentIndexedDb, type PersistentIndexedDb } from "./storage";
 import { RESTORED_MARK, type ProfilePaths } from "../profiles";
 import { servedApps } from "../appServe";
+import { envSwitch } from "../envSwitch";
 
 /** What runs a profile: its store, the engine and the host around it. */
 export interface Runtime {
@@ -74,7 +75,7 @@ export function irohRelays(env = process.env): string[] | null {
  * `GHOSTLY_STUN=0` leaves them out (a private network, or tests on one machine, where host candidates connect). The
  * profile's own `iceServers` stay.
  */
-export function publicStun(env = process.env): boolean { return env.GHOSTLY_STUN !== "0"; }
+export function publicStun(env = process.env): boolean { return envSwitch("GHOSTLY_STUN", true, env); }
 
 /** An RTC configuration without the apps' public STUN servers. */
 export function withoutPublicStun(config: RTCConfiguration | undefined): RTCConfiguration | undefined {
@@ -93,7 +94,7 @@ export function withoutPublicStun(config: RTCConfiguration | undefined): RTCConf
  * public DHT.
  */
 export function mainlineNetwork(env = process.env): { off: true } | { off: false; bootstrap?: string[]; host?: string } {
-  if (env.GHOSTLY_DHT === "0") return { off: true };
+  if (!envSwitch("GHOSTLY_DHT", true, env)) return { off: true };
   const bootstrap = (env.GHOSTLY_DHT_BOOTSTRAP ?? "").split(",").map((node) => node.trim()).filter(Boolean);
   if (!bootstrap.length && pkarrRelays(env)) return { off: true };
   if (!bootstrap.length) return { off: false };
@@ -107,7 +108,7 @@ export function mainlineNetwork(env = process.env): { off: true } | { off: false
  * `GHOSTLY_WEBRTC=0`, the CLI runs without WebRTC and says so.
  */
 async function installWebRtc(): Promise<boolean> {
-  if (process.env.GHOSTLY_WEBRTC === "0") return false;
+  if (!envSwitch("GHOSTLY_WEBRTC", true)) return false;
   try {
     const polyfill = await import("node-datachannel/polyfill");
     const scope = globalThis as unknown as Record<string, unknown>;
@@ -283,7 +284,7 @@ export async function startRuntime(paths: ProfilePaths, options: RuntimeOptions 
     // build's APPS_ENABLED says.
     apps: apps ? "wire" : false,
     // A daemon stays online: a hub of the large private groups it is in (WISP 902 · Group Mesh § Hubs), unless GHOSTLY_HUB=0.
-    staysOnline: process.env.GHOSTLY_HUB !== "0",
+    staysOnline: envSwitch("GHOSTLY_HUB", true),
     localFetch: nodeLocalFetch,
     // A wake-up goes to a push service only, on public addresses only (./pushSend.ts), as the Desktop's does.
     pushSend: (request) => nodePushSend(request),

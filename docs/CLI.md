@@ -351,7 +351,9 @@ A private network or a test sets `GHOSTLY_PKARR_RELAYS=http://…,…` (the Desk
 relays are then the only ones from the very first publish, the profile's `relays` setting is not used, and the DHT is
 left out unless `GHOSTLY_DHT_BOOTSTRAP` names your own nodes. `GHOSTLY_IROH_RELAYS=https://…,…` (`http://` on
 loopback) pins the Iroh relays the same way, `GHOSTLY_HYPERDHT_BOOTSTRAP=host:port,…` the HyperDHT's bootstrap nodes,
-and `GHOSTLY_STUN=0` leaves the apps' public STUN servers out of WebRTC. The CLI's own tests run with all of them on
+and `GHOSTLY_STUN=0` leaves the apps' public STUN servers out of WebRTC. `GHOSTLY_DHT`, `GHOSTLY_STUN`, `GHOSTLY_WEBRTC`
+and `GHOSTLY_HUB` take `0`/`false`/`off`/`no` or `1`/`true`/`on`/`yes`, in any case; any other value is a usage error
+(exit 2) naming the variable, never a switch left on. The CLI's own tests run with all of them on
 loopback or nowhere (`packages/cli/test/support/network.ts`); `GHOSTLY_TEST_PUBLIC_NET=1` lets a run reach the public
 networks. A new profile publishes within seconds of its first run,
 so without the variable, set `relays` before the first `daemon`
