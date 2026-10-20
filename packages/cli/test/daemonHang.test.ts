@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process";
 import { rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
+import { createInterface } from "node:readline";
 import { afterEach, describe, expect, it } from "vitest";
 import { connectDaemon } from "../src/client";
+import { greeting, HELLO, newDaemonSecret, proof } from "../src/daemonProof";
 import { CliError } from "../src/errors";
 import { answerWithin } from "../src/main";
 import { createProfile, profilePaths } from "../src/profiles";
@@ -14,15 +16,40 @@ describe("a daemon that accepts the socket but never answers", () => {
   afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
 
   /** A profile whose socket accepts the connection, reads nothing and writes nothing: the daemon's event loop wedged. */
-  async function wedged(name: string): Promise<{ dir: string; paths: ReturnType<typeof profilePaths>; received: () => string }> {
+  async function wedged(name: string): Promise<{ dir: string; paths: ReturnType<typeof profilePaths> }> {
     const dir = home(name);
     createProfile(dir, "default");
     const paths = profilePaths(dir, "default");
-    let received = "";
-    const server: Server = createServer((socket) => { socket.on("data", (chunk) => (received += chunk.toString())); socket.on("error", () => {}); });
+    const server: Server = createServer(() => {});
     await new Promise<void>((resolve) => server.listen(paths.socket, resolve));
     cleanups.push(() => { server.close(); rmSync(paths.socket, { force: true }); });
-    return { dir, paths, received: () => received };
+    return { dir, paths };
+  }
+
+  /**
+   * A profile whose daemon greets and proves itself, then answers nothing more: a daemon that wedged (or was stopped
+   * with Ctrl+Z) after the hello. It runs in this process, which holds the profile as a daemon does. `methods`: the
+   * methods it was sent.
+   */
+  async function wedgedAfterHello(name: string): Promise<{ dir: string; methods: string[] }> {
+    const dir = home(name);
+    createProfile(dir, "default");
+    const paths = profilePaths(dir, "default");
+    const secret = newDaemonSecret(paths.dir);
+    writeFileSync(paths.lock, String(process.pid));
+    const methods: string[] = [];
+    const server: Server = createServer((connection) => {
+      connection.on("error", () => {});
+      connection.write(JSON.stringify(greeting(secret)) + "\n");
+      createInterface({ input: connection }).on("line", (line) => {
+        const { id, method, params } = JSON.parse(line) as { id: string; method: string; params: { nonce?: string } };
+        methods.push(method);
+        if (method === HELLO) connection.write(JSON.stringify({ id, result: { proof: proof(secret, "daemon", params.nonce!) } }) + "\n");
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(paths.socket, resolve));
+    cleanups.push(() => { server.close(); rmSync(paths.socket, { force: true }); });
+    return { dir, methods };
   }
 
   /** The command's result, or a failure in `ms` that leaves no `ghostly` behind (the old code hung for ever). */
@@ -44,15 +71,14 @@ describe("a daemon that accepts the socket but never answers", () => {
   });
 
   it("a write gives up when the version check sent first has no answer in 15 s, with code timeout (exit 4), and was never sent", async () => {
-    const { dir, received } = await wedged("hung-write");
+    const { dir, methods } = await wedgedAfterHello("hung-write");
     const started = Date.now();
     const failure = error(await within(25_000, ["--home", dir, "send", "bob", "hi", "--wait", "none"]), "timeout", 4);
     expect(Date.now() - started, "gave up at the check's 15 s, not never").toBeLessThan(20_000);
     expect(failure.message).toMatch(/did not answer in 15 s; nothing was done/);
     expect(failure.message).toContain("ghostly daemon restart");
     // Only the check went out: a daemon that wakes later (SIGCONT) finds no message to send in its socket.
-    expect(received()).toContain('"method":"status"');
-    expect(received()).not.toContain("chat.send");
+    expect(methods).toEqual([HELLO, "status"]);
   }, 30_000);
 
   it("daemon stop ends the process that holds the profile when the daemon does not answer: restart can then start a fresh one", async () => {
