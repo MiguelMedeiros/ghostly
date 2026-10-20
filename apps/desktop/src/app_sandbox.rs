@@ -935,10 +935,7 @@ async fn answer_to(request: &Value, receiver: oneshot::Receiver<Value>) -> Optio
     } else {
         ANSWER_TIMEOUT
     };
-    tokio::time::timeout(wait, receiver)
-        .await
-        .ok()?
-        .ok()
+    tokio::time::timeout(wait, receiver).await.ok()?.ok()
 }
 
 /// A file's bytes for the app window, as base64 in the answer (`"bytes"`, which the runner decodes). Not raw: the
