@@ -157,6 +157,7 @@ import type {
   CardIndexRow,
   SavedMessage,
   MessagePage,
+  MessagePress,
   MessageReply,
   ReactionNote,
   MessageSend,
@@ -865,6 +866,13 @@ export class GhostlyNode implements EngineImplementation {
   private readonly cardEdits = new CardEditPacer();
   /** When each message's buttons were last pressed here (`pressButton`). */
   private readonly pressedAt = new Map<string, number>();
+  /**
+   * The presses taken on each message of mine with a `once` button (`resolveReply`), by chat and message id: each
+   * member's replies that pressed it and the button. Read from the history once, at the message's first press here,
+   * then added to as presses are taken (only `resolveReply` gives a row its press). Rows it names are read again
+   * before they refuse a press: one deleted since answers nothing.
+   */
+  private readonly cardPresses = new Map<string, Map<string, { id: string; button: string }[]>>();
   /** At most one wake-up per contact per `WAKE_INTERVAL_MS` (WISP 401 § Wake-up push). */
   private readonly wakeLimiter = new WakeLimiter();
   /** Call wake-ups have their own, shorter limit: a call is rarer than a message and cannot wait five minutes. */
@@ -3453,12 +3461,39 @@ export class GhostlyNode implements EngineImplementation {
     }
     if (!original) return message;
     const resolved: StoredMessage = { ...message, replyTo: { ...replyToOriginal(original, reply.id), ...(reply.member && !original.member && { member: reply.member }), ...(reply.button && { button: reply.button }) } };
-    // A press on one of my buttons (WISP 406 · Message Buttons), when it is still open for this person. The history
-    // only says whether this person already answered with a `once` button, so it is read when there is such a press
-    // to check: a bot's buttons with no `once` among them take each press as a plain reply costs, however long the chat.
+    // A press on one of my buttons (WISP 406 · Message Buttons), when it is still open for this person. Whether this
+    // person already answered with a `once` button is what the presses taken on that message say (`oncePress`): a bot's
+    // buttons with no `once` among them take each press as a plain reply costs, however long the chat.
     const pressed = buttonPress(resolved, original, []);
-    const press = pressed && messageButtons(original)?.buttons.some(b => b.once) ? buttonPress(resolved, original, history ?? await db.getMessages(message.linkId)) : pressed;
+    const press = pressed && messageButtons(original)?.buttons.some(b => b.once) ? await this.oncePress(resolved, original, history) : pressed;
     return press ? { ...resolved, press } : resolved;
+  }
+
+  /**
+   * A press on a message of mine with a `once` button: refused when this member's earlier press of it with a `once`
+   * button is still here. The history is read at the message's first press only (`cardPresses`); after that, a press
+   * reads that member's earlier presses of it alone, and none when there are none. 255 presses handed back at once
+   * in a 10k-message group read the history 255 times, 15.7 s on the CLI's store, before.
+   */
+  private async oncePress(reply: StoredMessage, original: StoredMessage, history?: StoredMessage[]): Promise<MessagePress | undefined> {
+    const key = `${reply.linkId}\n${original.id}`;
+    let presses = this.cardPresses.get(key);
+    if (!presses) {
+      const read = new Map<string, { id: string; button: string }[]>();
+      for (const row of history ?? await db.getMessages(reply.linkId)) {
+        if (row.sender !== "peer" || row.press?.messageId !== original.id) continue;
+        read.set(row.member ?? "", [...(read.get(row.member ?? "") ?? []), { id: row.id, button: row.press.button }]);
+      }
+      // Two first presses at once both read; the one kept first stays, so no press taken meanwhile is lost.
+      presses = this.cardPresses.get(key) ?? read;
+      this.cardPresses.set(key, presses);
+    }
+    const member = reply.member ?? "", card = messageButtons(original);
+    const earlier = (presses.get(member) ?? []).filter(p => p.id !== reply.id && card?.buttons.find(b => b.id === p.button)?.once).map(p => p.id);
+    const rows = (await db.getMessagesById(reply.linkId, earlier)).filter((row): row is StoredMessage => !!row);
+    const press = buttonPress(reply, original, rows);
+    if (press) presses.set(member, [...(presses.get(member) ?? []).filter(p => p.id !== reply.id), { id: reply.id, button: press.button }]);
+    return press;
   }
 
   /** A paired row's reply as it goes on the wire again (a resend, a hold). */
