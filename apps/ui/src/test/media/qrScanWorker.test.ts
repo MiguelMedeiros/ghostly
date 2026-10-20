@@ -27,10 +27,10 @@ describe("a camera scan decodes its frames away from the page", () => {
   beforeEach(() => {
     FakeWorker.made = []; FakeWorker.refuse = false;
     vi.stubGlobal("Worker", FakeWorker);
-    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
-      const canvas = this;
-      return { drawImage: () => {}, getImageData: () => ({ data: new Uint8ClampedArray(canvas.width * canvas.height * 4), width: canvas.width, height: canvas.height }) } as unknown as CanvasRenderingContext2D;
-    } as typeof HTMLCanvasElement.prototype.getContext);
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => ({
+      drawImage: () => {},
+      getImageData: (_x: number, _y: number, width: number, height: number) => ({ data: new Uint8ClampedArray(width * height * 4), width, height }),
+    }) as unknown as CanvasRenderingContext2D);
   });
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 

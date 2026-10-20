@@ -991,6 +991,7 @@
     "apps/ui/src/lib/profilePeek.ts": ["profiles.peek","profiles.switcher"],
     "apps/ui/src/lib/profiles.ts": ["*"],
     "apps/ui/src/lib/publicKeyLabel.ts": ["chats.list.key-label","chats.list.unnamed-contact","chats.list.rows","groups.*","services.*","proofs.page"],
+    "apps/ui/src/lib/qrFrames.worker.ts": ["wallet.cashu.send-scan","invite.*"],
     "apps/ui/src/lib/qrReader.ts": ["wallet.cashu.send-scan","invite.*"],
     "apps/ui/src/lib/relativeTime.ts": ["groups.*","nostr.*"],
     "apps/ui/src/lib/restoreGuard.ts": ["devices.restore-guard","backup.*"],
