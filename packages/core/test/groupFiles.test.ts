@@ -41,7 +41,11 @@ describe("what an older app shows, and what downloads by itself", () => {
   });
 
   it("voice always; other files up to 8 MiB while the group's automatic files stay within 256 MiB", () => {
-    expect(fetchesByItself(voice, 1e12)).toBe(true);
+    expect(fetchesByItself(voice, 0)).toBe(true);
+    // A voice message is a file like any other here: bounded by the same size, and counted in the group's total.
+    expect(fetchesByItself({ ...voice, size: 30 * 1024 * 1024 }, 0)).toBe(false);
+    expect(fetchesByItself({ ...voice, size: GROUP_FILE_LIMITS.autoBytes + 1 }, 0)).toBe(false);
+    expect(fetchesByItself(voice, GROUP_FILE_LIMITS.autoBytesPerGroup)).toBe(false);
     expect(fetchesByItself({ size: GROUP_FILE_LIMITS.autoBytes }, 0)).toBe(true);
     expect(fetchesByItself({ size: GROUP_FILE_LIMITS.autoBytes + 1 }, 0)).toBe(false);
     expect(fetchesByItself({ size: 1024 }, GROUP_FILE_LIMITS.autoBytesPerGroup - 1023)).toBe(false);
@@ -99,8 +103,8 @@ function mesh() {
     return session;
   };
   const settle = async () => { while (pending.length) { const batch = pending; pending = []; await Promise.all(batch); } };
-  const admit = async (admin: GroupSession) => {
-    const seed = createIdentity().seedB64;
+  /** `seed`: a member let in again, under the key it had. */
+  const admit = async (admin: GroupSession, seed = createIdentity().seedB64) => {
     const welcome = await admin.admit(identityFromSeedB64(seed).pubKeyZ32);
     const invite = admin.inviteFrame();
     const joined = GroupSession.join({ name: invite.name, admin: invite.admin }, welcome.slice(0, -1), welcome[welcome.length - 1], seed);
@@ -184,6 +188,41 @@ describe("a file in a private group", () => {
     await net.settle();
     expect(alice.couldRead(carol.myKey, id)).toBe(false);
     expect(bob.couldRead(alice.myKey, id)).toBe(true);
+  });
+
+  it("given its time, could be read by a member let in after its epoch but before it was written (said again to them), not by one let in after it", async () => {
+    const tick = () => new Promise(r => setTimeout(r, 5));
+    const net = mesh();
+    const alice = net.add(GroupSession.create("Ghosts"));
+    const bob = await net.admit(alice);
+    // Bob, behind on the chain, writes under epoch 1 after Dave (epoch 2) and Erin (epoch 3) were let in.
+    const id = `${bob.myKey}:1:0`;
+    await tick();
+    const before = Date.now();
+    await tick();
+    const dave = await net.admit(alice);
+    const erinSeed = createIdentity().seedB64, erin = await net.admit(alice, erinSeed);
+    await tick();
+    const written = Date.now();
+    expect(alice.couldRead(dave.myKey, id)).toBe(false);
+    expect(alice.couldRead(dave.myKey, id, written)).toBe(true);
+    expect(alice.couldRead(erin.myKey, id, written)).toBe(true);
+    // Written before they were let in: never said again to them.
+    expect(alice.couldRead(dave.myKey, id, before)).toBe(false);
+    // Erin removed: out of the roster now, so no.
+    await tick();
+    await alice.remove(erin.myKey);
+    await net.settle();
+    expect(alice.couldRead(erin.myKey, id, written)).toBe(false);
+    // Let in again after a second message written while she was out: not in the epoch either would be said again under
+    // (the removal's), though she was in an earlier one.
+    await tick();
+    const whileOut = Date.now();
+    await tick();
+    await net.admit(alice, erinSeed);
+    expect(alice.couldRead(erin.myKey, `${bob.myKey}:1:1`, whileOut)).toBe(false);
+    expect(alice.couldRead(erin.myKey, id, written)).toBe(false);
+    expect(alice.couldRead(dave.myKey, `${bob.myKey}:1:1`, whileOut)).toBe(true);
   });
 });
 

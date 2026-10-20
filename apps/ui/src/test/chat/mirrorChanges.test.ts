@@ -41,7 +41,25 @@ async function longChat(id: string) {
   await tick();
   expect(loadSession(id)!.messages).toHaveLength(N);
   reads = 0;
-  return { linkId, row, reads: () => reads };
+  return { linkId, peer, row, reads: () => reads };
+}
+
+/** What happens to chat `id`'s session from now on: its stored text written, parsed, and the page told to read it again. */
+function watchSession(id: string) {
+  const isChat = (text: unknown) => typeof text === "string" && text.startsWith(`{"id":"${id}"`);
+  const parse = vi.spyOn(JSON, "parse");
+  const write = vi.spyOn(localStorage, "setItem");
+  let told = 0;
+  const tell = () => told++;
+  window.addEventListener("session-updated", tell);
+  return {
+    count: () => ({
+      writes: write.mock.calls.filter(([, value]) => isChat(value)).length,
+      parses: parse.mock.calls.filter(([text]) => isChat(text)).length,
+      told,
+    }),
+    stop: () => { parse.mockRestore(); write.mockRestore(); window.removeEventListener("session-updated", tell); },
+  };
 }
 
 describe("a message arriving in a long open chat", () => {
@@ -68,5 +86,44 @@ describe("a message arriving in a long open chat", () => {
     expect(session.messages).toHaveLength(N);
     expect(session.messages[10]).toMatchObject({ id: "peer_10", reactions });
     expect(session.messages[11].reactions).toBeUndefined();
+  });
+});
+
+describe("a reaction arriving in a long open chat", () => {
+  const reactions = { peer: { e: "👍", n: 1, at: NOW } };
+  const note = { at: NOW, by: "peer", emoji: "👍", snippet: "message 990", mine: false };
+
+  it("costs what an edit does: the row and the chat list's note in one write, no walk over the history", async () => {
+    const { linkId, peer, row, reads } = await longChat("c");
+    const watch = watchSession("c");
+    fakeEngine.emit({ kind: "message-changes", linkId, messages: [row(990, { reactions })], deleted: [] });
+    // The engine's state with the chat's note, before the tick ends.
+    fakeEngine.update({ links: [linkView({ id: linkId, peerPubKeyZ32: peer, profile: "paired-chat/1", lastReaction: note })] });
+    await tick();
+    fakeEngine.update({});
+    await tick();
+    const cost = watch.count();
+    watch.stop();
+    expect(reads()).toBe(0);
+    expect(cost).toEqual({ writes: 1, parses: 1, told: 1 });
+    const session = loadSession("c")!;
+    expect(session.lastReaction).toEqual(note);
+    expect(session.messages[990]).toMatchObject({ id: "peer_990", reactions });
+  });
+
+  it("its note, told after the row was mirrored, is written once and leaves the history mirrored", async () => {
+    const { linkId, peer, row, reads } = await longChat("d");
+    const watch = watchSession("d");
+    fakeEngine.emit({ kind: "message-changes", linkId, messages: [row(990, { reactions })], deleted: [] });
+    await tick();
+    fakeEngine.update({ links: [linkView({ id: linkId, peerPubKeyZ32: peer, profile: "paired-chat/1", lastReaction: note })] });
+    await tick();
+    fakeEngine.update({});
+    await tick();
+    const cost = watch.count();
+    watch.stop();
+    expect(reads()).toBe(0);
+    expect(cost).toEqual({ writes: 2, parses: 2, told: 2 });
+    expect(loadSession("d")!.lastReaction).toEqual(note);
   });
 });

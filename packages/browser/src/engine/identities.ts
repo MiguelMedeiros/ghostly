@@ -4,14 +4,16 @@ import {
   type IdentityBinding, type IdentityLedger, type IdentityScope, type ReceivedIdentity, type IdentityStatement, type LocalIdentityProof, type VerifiedIdentity,
 } from "@ghostly/core";
 import { STORES, store, transact, wrap } from "../shared/idb";
-import { newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./paymentAdapters/persistence";
+import { openSecret, sealSecret, whenDataKeyDropped, type SealedSecret } from "./dataKey";
 import type { IdentityProofProvider } from "../proofs/contract";
-import { identityProviders } from "../proofs/registry";
+import { loadedIdentityProviders, loadIdentityProviders } from "../proofs/load";
 import { boundedIdentityFetch, verifyIdentity } from "../proofs/verify";
 import type { IdentityProofView, LinkIdentitiesView, PublicProfileView } from "../shared/types";
 
-/** A proof key's seed, sealed with a device key like the wallet seeds. It never leaves the profile. */
-export interface SealedProofKey { sealed: EncryptedSeed; deviceKey: string }
+/** A proof key's seed, sealed like the wallet seeds (`dataKey.ts`). It never leaves the profile. */
+export type SealedProofKey = SealedSecret;
+/** Where a proof key's seed belongs: by proof id, so it still opens once the proof moved to the revocations. */
+const proofKeyAt = (id: string) => ({ store: STORES.settings, key: id, field: "identityProof.seed" });
 
 /** A proof of this profile, as stored. */
 export interface StoredIdentityProof {
@@ -72,6 +74,7 @@ export class IdentityProofs {
   /** Unsealed proof-key seeds, by proof id, for this run only. */
   private seeds = new Map<string, Uint8Array>();
   private timers: ReturnType<typeof setTimeout>[] = [];
+  private unlisten: (() => void) | undefined;
   private drafts = new Map<string, { binding: IdentityBinding; seed: Uint8Array; at: number }>();
   private exchanges = new Map<string, IdentityExchange>();
   private errors = new Map<string, string>();
@@ -79,16 +82,19 @@ export class IdentityProofs {
   private greeted = new Set<string>();
   private readonly fetch: ReturnType<typeof boundedIdentityFetch>;
 
-  constructor(private host: IdentityLinkHost, private providers: () => readonly IdentityProofProvider[] = identityProviders) {
+  constructor(private host: IdentityLinkHost, private providers: () => readonly IdentityProofProvider[] = loadedIdentityProviders) {
     this.fetch = boundedIdentityFetch({ online: host.online });
   }
 
+  /** The profile's proofs, and the providers that check and show them: loaded here, not with the app. */
   async load(): Promise<void> {
+    const providers = loadIdentityProviders();
     const settings = await store(STORES.settings, "readonly");
     [this.proofs, this.revocations] = await Promise.all([
       wrap<StoredIdentityProof[] | undefined>(settings.get(KEY)).then(v => v ?? []),
       wrap<Revocation[] | undefined>(settings.get(REVOCATIONS)).then(v => v ?? []),
     ]);
+    await providers;
   }
   /** Background work: republish revocations, look up the contacts' proofs for revocations. */
   start(): void {
@@ -98,10 +104,16 @@ export class IdentityProofs {
     };
     every(REPUBLISH_MS, 5_000, () => this.republish());
     every(REVOCATION_CHECK_MS, 60_000, () => this.checkRevocations());
+    this.unlisten ??= whenDataKeyDropped(() => this.forgetSeeds());
   }
   stop(): void {
     for (const t of this.timers) clearTimeout(t);
     this.timers = [];
+    this.unlisten?.();
+    this.unlisten = undefined;
+    this.forgetSeeds();
+  }
+  private forgetSeeds(): void {
     for (const seed of this.seeds.values()) seed.fill(0);
     this.seeds.clear();
   }
@@ -113,7 +125,7 @@ export class IdentityProofs {
   }
   private async seedOf(id: string, sealed: SealedProofKey): Promise<Uint8Array> {
     let seed = this.seeds.get(id);
-    if (!seed) { seed = fromBase64Url(await unsealSeed(sealed.sealed, sealed.deviceKey)); this.seeds.set(id, seed); }
+    if (!seed) { seed = fromBase64Url(await openSecret(sealed, proofKeyAt(id))); this.seeds.set(id, seed); }
     return seed;
   }
 
@@ -155,8 +167,7 @@ export class IdentityProofs {
     const verified = await this.verify(statement, JSON.parse(JSON.stringify(evidence ?? null)));
     if (this.proofs.length >= MAX_PROOFS) throw new Error("Remove an identity first");
     this.drafts.delete(draftId);
-    const deviceKey = newDeviceKey();
-    const stored: StoredIdentityProof = { binding: draft.binding, evidence, seed: { sealed: await sealSeed(toBase64Url(draft.seed), deviceKey), deviceKey }, verified, createdAt: Date.now() };
+    const stored: StoredIdentityProof = { binding: draft.binding, evidence, seed: await sealSecret(toBase64Url(draft.seed), proofKeyAt(statement.id)), verified, createdAt: Date.now() };
     this.seeds.set(statement.id, draft.seed);
     await this.save([...this.proofs, stored]);
     return this.viewOf(stored);

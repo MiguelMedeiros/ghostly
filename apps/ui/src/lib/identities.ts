@@ -1,23 +1,44 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
-import { identityProvider, identityProviders } from "@ghostly/browser/proofs/registry";
+import { identityProvidersLoaded, loadedIdentityProviders, loadIdentityProviders, onIdentityProvidersLoaded } from "@ghostly/browser/proofs/load";
 import { availableSigners } from "@ghostly/browser/proofs/verify";
-import { setOwnDidSource } from "@ghostly/browser/proofs/providers/did";
+import { setOwnDidSource } from "@ghostly/browser/proofs/ownDid";
 import type { IdentityPlatform, IdentityProofProvider } from "@ghostly/browser/proofs/contract";
 import type { IdentityStatus, SharedIdentity } from "@ghostly/core";
 import type { LinkView, ReceivedIdentityView } from "@ghostly/browser/shared/types";
 import { currentProfile } from "./profiles";
-import { getPrefix, listSessions } from "./storage";
+import { getPrefix, listShownSessions } from "./storage";
 import type { Language } from "./settings";
 import { formatAt } from "./time";
 import type { ChatSession } from "./types";
 import { english } from "./english";
+import { useEngineState as usePlainEngineState, useEngineValue as usePlainEngineValue } from "./engineState";
 import type { Translate } from "../contexts/I18nContext";
 
-const subscribe = (listener: () => void) => engine.subscribe(listener);
-const snapshot = () => engine.state;
-/** The engine's state, re-rendered on every change. */
-export const useEngineState = () => useSyncExternalStore(subscribe, snapshot);
+const subscribeProviders = (listener: () => void) => {
+  void loadIdentityProviders().catch(() => {});
+  return onIdentityProvidersLoaded(listener);
+};
+/**
+ * The engine's state, re-rendered on every change, for what draws identities: it loads the identity providers (not
+ * part of the app's first load) and renders again once they are there, with their names and short forms.
+ */
+export const useEngineState = () => {
+  useSyncExternalStore(subscribeProviders, identityProvidersLoaded);
+  return usePlainEngineState();
+};
+
+/**
+ * What `select` reads of the engine's state, for what draws identities, drawn again only when that changes by content
+ * (the engine sends its state anew on every change) or when the identity providers load. A chat list draws one per
+ * row (ContactMarks): on the whole state, every row's marks were drawn again on every engine state.
+ */
+export function useEngineValue<T>(select: (state: typeof engine.state) => T): T {
+  useSyncExternalStore(subscribeProviders, identityProvidersLoaded);
+  return usePlainEngineValue(select);
+}
+
+const identityProvider = (id: string) => loadedIdentityProviders().find(p => p.id === id);
 
 // The profile's own Ghostly did:dht is not an external identity: the DID provider refuses it by name.
 setOwnDidSource(() => engine.state?.did?.id);
@@ -49,7 +70,7 @@ export function identityPlatform(): IdentityPlatform {
 /** Providers that can be added here: on this platform, with at least one signer available now. */
 export function addableProviders(): IdentityProofProvider[] {
   const platform = identityPlatform();
-  return identityProviders().filter(p => p.platforms.includes(platform) && availableSigners(p, platform).length > 0);
+  return loadedIdentityProviders().filter(p => p.platforms.includes(platform) && availableSigners(p, platform).length > 0);
 }
 
 export const providerOf = (id: string) => identityProvider(id);
@@ -158,13 +179,20 @@ const subscribeSeen = (listener: () => void) => {
 
 /** Whether the Identities item carries its dot. */
 export function useIdentityAttention(): boolean {
-  const state = useEngineState();
+  const state = usePlainEngineState();
   const seen = useSyncExternalStore(subscribeSeen, rawSeen);
   return unseenAttention(identityAttention(state), parseSeen(seen)).length > 0;
 }
 
-/** The chats by contact key, for a contact's name and a way back into the chat. Read once per render. */
-export const chatsByPeer = (): Map<string, ChatSession> => new Map(listSessions().map(s => [s.peerPubKeyB64, s]));
+/**
+ * The chats by contact key, for a contact's name and a way back into the chat: a contact with two chats gets the one
+ * the list shows first, as `chatNamesForPeer` names them. Read once per render.
+ */
+export function chatsByPeer(): Map<string, ChatSession> {
+  const chats = new Map<string, ChatSession>();
+  for (const s of listShownSessions()) if (!chats.has(s.peerPubKeyB64)) chats.set(s.peerPubKeyB64, s);
+  return chats;
+}
 /** A contact's name as the chat list shows it; undefined when they have none. */
 export const contactName = (chat: Pick<ChatSession, "label" | "nick"> | undefined): string | undefined => chat?.label || chat?.nick || undefined;
 

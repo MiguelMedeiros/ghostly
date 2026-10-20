@@ -1,7 +1,8 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type * as Desktop from "../../../../apps/ui/src/hooks/useBackgroundPoller";
+import { sessionIdForPeer } from "../../../../apps/ui/src/lib/storage";
 import { engine } from "./engine";
-import { sessionForPeer, startSessionSync } from "./sync";
+import { startSessionSync } from "./sync";
 
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const getState = () => engine.state;
@@ -23,8 +24,9 @@ export const useBackgroundPoller: typeof Desktop.useBackgroundPoller = (activeSe
   const syncingSessions = new Set<string>();
   for (const link of state?.links ?? []) {
     if (!link.poll.polling || link.lastSyncAt > 0) continue;
-    const session = sessionForPeer(link.peerPubKeyZ32);
-    if (session && session.id !== activeSessionId) syncingSessions.add(session.id);
+    // By the chats' keys alone: on every render at a start, while each link makes its first read.
+    const id = sessionIdForPeer(link.peerPubKeyZ32);
+    if (id && id !== activeSessionId) syncingSessions.add(id);
   }
   return { syncingSessions, initialSyncComplete };
 };

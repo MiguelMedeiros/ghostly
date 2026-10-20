@@ -8,6 +8,8 @@ export type ToWorker =
   | { type: "share-ready" }
   /** This page opened for a share but another tab of the app holds the peer: give the share to that one. */
   | { type: "share-forward" }
+  /** This page restarts (a profile switch) with a share still in its picker: hold it again for the page that loads next. */
+  | { type: "share-keep"; item: SharedItem }
   /** Opens a wake-up notification's chat as a tap would (the push worker; a page of this origin only). */
   | { type: "open-notification"; tag: string };
 
@@ -17,7 +19,9 @@ export type FromWorker =
   /** Asked for a share, and there is none (it was already taken, or it timed out). */
   | { type: "share-none" }
   /** A wake-up notification was tapped: open this chat, in this profile (switching to it when another is open). */
-  | { type: "open-chat"; path: string; profile: string };
+  | { type: "open-chat"; path: string; profile: string }
+  /** A hashed file of this build is gone from the server: a deploy replaced it, so the page looks for the new version now. */
+  | { type: "build-gone" };
 
 /** How long a shared item waits for the app to ask for it. Past that it is dropped, never stored. */
 export const SHARE_HOLD_MS = 2 * 60_000;

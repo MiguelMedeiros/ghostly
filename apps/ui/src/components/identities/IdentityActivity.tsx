@@ -6,7 +6,7 @@ import { useLoadPublicProfiles } from "../../hooks/usePublicProfileRequest";
 import { externalLinkProps } from "../../lib/externalLink";
 import { shownUrl } from "../../lib/parse";
 import { contactTag } from "../../lib/publicKeyLabel";
-import { listSessions } from "../../lib/storage";
+import { chatNamesForPeer } from "../../lib/storage";
 import { RichText } from "../rich/RichText";
 import { ACTIVITY_NETWORKS } from "./activityNetworks";
 import { ago } from "./contactBadges";
@@ -25,7 +25,7 @@ const fullDate = (seconds: number, language: Language) => formatAt(seconds * 100
 function contactName(linkId: string, links: readonly LinkView[], t: Translate): string {
   const link = links.find(l => l.id === linkId);
   const peer = link?.peerPubKeyZ32;
-  const session = peer ? listSessions().find(s => s.peerPubKeyB64 === peer) : undefined;
+  const session = peer ? chatNamesForPeer(peer) : undefined;
   const face = peer ? contactFace(link?.identities?.received, faceChoice(peer)) : undefined;
   return shownContactName({ nickname: session?.label, face, nick: session?.nick, fallback: t("common.unnamedContact", { key: contactTag(peer ?? linkId) }) }).name;
 }

@@ -4,11 +4,12 @@ import { decodeBolt11 } from "@ghostly/core";
 import type { InvoiceStatus, LightningInvoice, LightningPayResult, LightningPaymentRef, LightningPaymentStatus, LightningProvider, LightningProviderDescriptor } from "./lightning";
 import type { OnchainBalance, OnchainPrepared, OnchainProvider, OnchainProviderDescriptor, OnchainSendRequest, OnchainTx, OnchainTxStatus } from "./onchain";
 import { NothingSpentError, type ProviderField, type ProviderSettings } from "./types";
+import { testBuild } from "../../../shared/features";
 
 /**
  * Fake providers, for unit tests and e2e: they hold regtest "sats" in memory, so they only ever show up in
- * the Testnet mode, and only when `localStorage["ghostly-test-providers"] === "1"` (or a test passes them
- * to the registry itself). No network, no money.
+ * the Testnet mode, and only in a dev or e2e build (`testBuild`) that has `localStorage["ghostly-test-providers"]
+ * === "1"` (or a test passes them to the registry itself); a release build ignores the key. No network, no money.
  *
  * `behaviour` drives the outcome of a spend:
  *  - settle: invoices are paid by themselves after `settleMs`; payments and broadcasts succeed.
@@ -144,7 +145,7 @@ export const fakeLightning: LightningProviderDescriptor = {
   kind: "lightning",
   description: "In-memory regtest node for tests. Holds nothing.",
   networks: ["regtest"],
-  platforms: ["web", "extension", "desktop"],
+  platforms: ["web", "desktop"],
   fields: FIELDS,
   experimental: true,
   validate,
@@ -157,7 +158,7 @@ export const fakeOnchain: OnchainProviderDescriptor = {
   kind: "onchain",
   description: "In-memory regtest wallet for tests. Holds nothing.",
   networks: ["regtest"],
-  platforms: ["web", "extension", "desktop"],
+  platforms: ["web", "desktop"],
   fields: FIELDS,
   experimental: true,
   validate,
@@ -166,5 +167,5 @@ export const fakeOnchain: OnchainProviderDescriptor = {
 
 /** Whether this browser asked for the fake providers (an e2e run sets it before the app starts). */
 export function testProvidersEnabled(): boolean {
-  try { return globalThis.localStorage?.getItem(TEST_PROVIDERS_FLAG) === "1"; } catch { return false; }
+  try { return testBuild() && globalThis.localStorage?.getItem(TEST_PROVIDERS_FLAG) === "1"; } catch { return false; }
 }

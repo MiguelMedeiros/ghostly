@@ -18,8 +18,11 @@ import { setProfileBase } from "./lib/profiles";
 import { restartWhenRestored } from "./lib/restoredPage";
 import { openProfile } from "./lib/profileStart";
 import { listen } from "@tauri-apps/api/event";
-import { setAppOpener } from "./lib/apps/open";
+import { setAppOpener, setLinkedFiles } from "./lib/apps/open";
 import { desktopOpener } from "./lib/apps/desktopOpener";
+import { desktopLinkedFiles } from "./lib/apps/desktopFiles";
+import { pickSheetText } from "./lib/apps/webFiles";
+import { fileSpace } from "@ghostly/browser/shared/fileBytes";
 import { nameInChat } from "./lib/apps/nameInChat";
 import { appWithContact } from "./lib/apps/running";
 import { loadSettings } from "./lib/settings";
@@ -75,13 +78,18 @@ async function boot() {
   // Mini-apps (WISP 1200) open in windows of their own, each with its broker here (lib/apps/desktopOpener.ts).
   // Its window is named after the app and the contact ("Chess with Ana"), in the profile's language.
   const windowTitle = (title: string, linkId: string | null) => appWithContact(title, linkId, translatorFor(loadSettings().language));
-  setAppOpener(desktopOpener({ apps: () => servicesPlatform?.apps, invoke, listen, nameIn: nameInChat, windowTitle }));
+  // Files the person picks for an app granted `files`: the system's dialog, titled in the profile's language, and links
+  // the host keeps per profile (apps/desktop/src/linked_files.rs).
+  const pickTitle = (app: string, folder: boolean) => pickSheetText(translatorFor(loadSettings().language)).ask(app, folder);
+  const linkedFiles = desktopLinkedFiles(invoke, fileSpace, pickTitle);
+  setLinkedFiles(linkedFiles);
+  setAppOpener(desktopOpener({ apps: () => servicesPlatform?.apps, invoke, listen, nameIn: nameInChat, windowTitle, linkedFiles }));
   if (gate.full) startSessionSync();
   addEventListener("pagehide", () => host.announceDeparture());
   // Shown again after that (Back, out of the back/forward cache), the page has no peer: it starts over.
   restartWhenRestored();
   // The app is exiting (apps/desktop's lib.rs `on_run_event`): contacts hear it now, in the moment it waits for this.
-  addEventListener("ghostly-departing", () => host.announceDeparture());
+  addEventListener("ghostly-departing", () => host.announceDeparture({ quitting: true }));
 
   root.render(
     <StrictMode>

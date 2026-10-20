@@ -130,7 +130,12 @@ test("scrolled up, a long chat's older messages come into the page above without
   const scroll = (views: number) => chat(bob).evaluate(async (el, views) => {
     const edges = () => { const rows = el.querySelectorAll<HTMLElement>("[data-message-id]"); return `${rows[0].dataset.messageId}|${rows[rows.length - 1].dataset.messageId}`; };
     const top = el.getBoundingClientRect().top;
+    const was = el.scrollTop;
     el.scrollTop = Math.max(0, el.scrollTop + views * el.clientHeight);
+    // The row as the app finds it on the scroll event (a listener of the capture phase, before the app's): read at once, a
+    // layout can still have rows above at sizes never painted (a row's content-visibility catching up), off by their
+    // difference from where the view lands.
+    if (el.scrollTop !== was) await new Promise(resolve => el.addEventListener("scroll", resolve, { once: true, capture: true }));
     const row = [...el.querySelectorAll<HTMLElement>("[data-message-id]")].find(r => r.getBoundingClientRect().bottom > top + 1)!;
     const id = row.dataset.messageId!, y = row.getBoundingClientRect().top;
     const before = edges();
@@ -141,8 +146,10 @@ test("scrolled up, a long chat's older messages come into the page above without
     let drift = 0;
     const watcher = new ResizeObserver(() => { drift = Math.max(drift, Math.abs(at() - y)); });
     watcher.observe(el.firstElementChild!);
-    // The scroll event, the rows it brings, and what they load (pictures, previews).
-    for (let i = 0; i < 8; i++) await new Promise(requestAnimationFrame);
+    // The rows the scroll brings, and what they load (pictures, previews). Each frame waited for in its resize step, after
+    // the app's observer (a new one reports once, in the next frame): the last reading too sees the view as it is painted.
+    const frame = () => new Promise<void>(resolve => { const once = new ResizeObserver(() => { once.disconnect(); resolve(); }); once.observe(el); });
+    for (let i = 0; i < 8; i++) await frame();
     watcher.disconnect();
     return { moved: edges() !== before, drift: Math.max(drift, Math.abs(at() - y)), rows: el.querySelectorAll("[data-message-id]").length };
   }, views);

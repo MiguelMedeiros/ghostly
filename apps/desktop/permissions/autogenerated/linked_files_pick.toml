@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-linked-files-pick"
+description = "Enables the linked_files_pick command without any pre-configured scope."
+commands.allow = ["linked_files_pick"]
+
+[[permission]]
+identifier = "deny-linked-files-pick"
+description = "Denies the linked_files_pick command without any pre-configured scope."
+commands.deny = ["linked_files_pick"]

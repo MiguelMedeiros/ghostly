@@ -1,12 +1,16 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { MessageInput } from "../../components/MessageInput";
 import { LockScreenProvider } from "../../contexts/LockScreenContext";
+import { loadEmoji } from "../../lib/emoji";
 import { resetGifSearch } from "../../lib/gifSearch";
 import { setStorageProfile as setProfile } from "../../lib/storage";
 import { renderApp } from "../render";
 
 // covers: app.composer.attach, app.composer.expressions, app.emoji-picker, chat.paired.emoji, chat.paired.gifs, chat.paired.gifs.categories, chat.paired.gifs.busy
+
+// The emoji panel's data set, here before any panel opens (its loading: emojiPanelLoad.test.tsx).
+beforeAll(() => loadEmoji());
 
 const viewport = (width: number, height = 800) => (window as unknown as { happyDOM: { setViewport(v: { width: number; height: number }): void } }).happyDOM.setViewport({ width, height });
 
@@ -580,6 +584,25 @@ describe("GIF search while the Internet Archive says to wait", () => {
     await user.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(screen.getByTestId("gif-busy-wait")).toHaveTextContent("Try again in 1:00."));
     expect(screen.getByRole("button", { name: "Try again" })).toBeDisabled();
+  });
+
+  it("counts the wait down from the moment it is on screen", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => rateLimitPage());
+    localStorage.setItem("ghostly_composer_panel_tab", "gif");
+    // The very moment the wait shows, before the page has a chance to do anything else: what a loaded runner sees.
+    const shown = new Promise<void>((resolve) => {
+      const watch = new MutationObserver(() => { if (screen.queryByTestId("gif-busy-wait")) { watch.disconnect(); resolve(); } });
+      watch.observe(document.body, { childList: true, subtree: true });
+    });
+    const { user } = composer();
+    await user.click(smiley());
+    await shown;
+    act(() => { vi.advanceTimersByTime(10_000); });
+    expect(screen.getByTestId("gif-busy-wait")).toHaveTextContent("Try again in 0:20.");
+    act(() => { vi.advanceTimersByTime(20_000); });
+    expect(screen.getByTestId("gif-busy-wait")).toHaveTextContent("You can try again now.");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
   });
 
   it("keeps the wait across categories and panels, shows the GIFs it has, and asks nothing meanwhile", async () => {

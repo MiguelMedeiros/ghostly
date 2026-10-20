@@ -1,0 +1,1 @@
+The encrypted profile is being built: slice 1, the profile key, is in the code as written here (the `ghostly-profile-key` record, its unlock and rewrap, and version 2 sealed fields bound to their place), with no client using it yet (Encrypted profile).

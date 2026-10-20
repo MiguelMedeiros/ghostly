@@ -97,7 +97,9 @@ built-ins. See [docs/SDK.md](../../../../docs/SDK.md) and `packages/browser/src/
 
 2. Add it to `IDENTITY_PROVIDERS` in [registry.ts](registry.ts), the order is the picker's, and give it a
    mark in `apps/ui/src/components/identities/providerMarks.tsx` (`identityProviderIcons.test.tsx` fails for a provider without one).
-   Those are the only shared lines you touch.
+   Those are the only shared lines you touch. The registry is not in the app's first load: the engine and the UI
+   reach the providers through [load.ts](load.ts), so never import `registry.ts` or a provider from code the app
+   starts with (`identityProvidersLazy.test.ts` and the UI's `firstScreen.test.ts` fail if one is).
 3. Tests: run `describeIdentityProof` from [contractSuite.ts](contractSuite.ts)
    (`test/helpers/identityProofContract.ts` re-exports it) against your provider (see
    [identityProofContract.test.ts](../../test/identityProofContract.test.ts)), plus your own: real tool
@@ -241,8 +243,8 @@ ids `identity-proof-subject`, `id-card-name`, `id-card-photo`), `identity-share-
   `ctx.fetch` only, every binding field mattering, malformed evidence, the validity limit, the full share
   with two contacts including a replay to a third, and re-checks.
 - **Fakes** ([testing.ts](testing.ts)): `fake-key` (in-app and external-tool), `fake-account` (attested,
-  redirect), `fake-record` (published, re-checked). In the app only when
-  `localStorage["ghostly-test-identities"] === "1"`.
+  redirect), `fake-record` (published, re-checked). In the app only in a dev or e2e build (`testBuild` in
+  `shared/features.ts`) with `localStorage["ghostly-test-identities"] === "1"`; a release build ignores the key.
 - **e2e**: two peers (`e2e/support/fixtures.ts`), a test signer injected in the page (for Nostr, a NIP-07
   `window.nostr` backed by a key in the test process: `e2e/web/identity-proofs.spec.ts`); never a real
   account. `e2e/web/identity-proof-kinds.spec.ts` drives the paste-back and redirect flows with the fakes.

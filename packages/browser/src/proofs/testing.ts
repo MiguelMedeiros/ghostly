@@ -1,17 +1,19 @@
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { fromBase64Url, toBase64Url, utf8Decode, utf8Encode, type IdentityStatement } from "@ghostly/core";
+import { testBuild } from "../shared/features";
 import type { IdentityProofProvider } from "./contract";
 
 /**
  * Fake identity providers, for unit tests and e2e. No network, no real accounts. They are in the
- * registry only when `localStorage["ghostly-test-identities"] === "1"` (or a test passes them itself).
+ * registry only in a dev or e2e build (`testBuild`) that has `localStorage["ghostly-test-identities"] === "1"`
+ * (or a test passes them itself); a release build ignores the key.
  *
  *  - fake-key      self-custodied: an Ed25519 key held by a fake in-app signer, or signed "outside" and pasted.
  *  - fake-account  provider-attested: a fake issuer signs a token whose nonce is the statement id (like OIDC).
  *  - fake-record   self-custodied, published: a record the verifier fetches through `ctx.fetch` (like DNS).
  */
 export const TEST_IDENTITIES_FLAG = "ghostly-test-identities";
-export const testIdentitiesEnabled = () => { try { return globalThis.localStorage?.getItem(TEST_IDENTITIES_FLAG) === "1"; } catch { return false; } };
+export const testIdentitiesEnabled = () => { try { return testBuild() && globalThis.localStorage?.getItem(TEST_IDENTITIES_FLAG) === "1"; } catch { return false; } };
 
 const HEX64 = /^[a-f0-9]{64}$/;
 const hex = (b: Uint8Array) => Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
@@ -19,8 +21,9 @@ const unhex = (s: string) => Uint8Array.from(s.match(/../g)!, x => parseInt(x, 1
 const normalizeHexKey = (input: string) => { const v = input.trim().toLowerCase(); if (!HEX64.test(v)) throw new Error("Enter 64 hex characters"); return v; };
 const exactKeys = (raw: unknown, keys: string) => !!raw && typeof raw === "object" && !Array.isArray(raw) && Object.keys(raw).sort().join(",") === keys;
 
-/** The key behind the fake in-app signer. Tests may replace it. */
-export const fakeKeyring = { seed: ed25519.utils.randomSecretKey() };
+/** The key behind the fake in-app signer, made on first use so a release start draws no key. Tests may replace it. */
+let fakeSeed: Uint8Array | undefined;
+export const fakeKeyring = { get seed() { return fakeSeed ??= ed25519.utils.randomSecretKey(); }, set seed(value: Uint8Array) { fakeSeed = value; } };
 export const fakeKeySubject = (seed = fakeKeyring.seed) => hex(ed25519.getPublicKey(seed));
 export const fakeKeySign = (statement: IdentityStatement, seed = fakeKeyring.seed) => ({ sig: toBase64Url(ed25519.sign(statement.bytes, seed)) });
 
@@ -28,7 +31,7 @@ export interface FakeKeyEvidence { sig: string }
 export const fakeKey: IdentityProofProvider<FakeKeyEvidence> = {
   id: "fake-key", label: "Test key", category: "self-custodied",
   summary: "Sign with the test key", description: "A test identity: an Ed25519 key held by this page. For tests only.",
-  platforms: ["web", "extension", "desktop"],
+  platforms: ["web", "desktop"],
   subject: { label: "Public key", placeholder: "64 hex characters", normalize: normalizeHexKey, short: k => `${k.slice(0, 8)}…${k.slice(-4)}` },
   publicUri: k => `urn:ghostly-test:${k}`,
   validity: { defaultDays: 30, maxDays: 365 },
@@ -69,7 +72,7 @@ export function fakeAccountToken(statement: IdentityStatement, account = "alice"
 export const fakeAccount: IdentityProofProvider<FakeAccountEvidence> = {
   id: "fake-account", label: "Test account", category: "provider-attested",
   summary: "Log in to the test issuer", description: "A test login provider that vouches for an account. For tests only.",
-  platforms: ["web", "extension", "desktop"],
+  platforms: ["web", "desktop"],
   subject: { label: "Provider", options: [{ value: FAKE_ISSUER, label: "Test issuer" }],
     normalize: input => { if (input.trim() !== FAKE_ISSUER) throw new Error("Unknown test issuer"); return FAKE_ISSUER; } },
   validity: { defaultDays: 30, maxDays: 90 },
@@ -99,7 +102,7 @@ export const fakeRecordText = (statement: IdentityStatement) => `ghostly-proof=$
 export const fakeRecord: IdentityProofProvider<Record<string, never>> = {
   id: "fake-record", label: "Test record", category: "self-custodied",
   summary: "Publish a test record", description: "A test record published where the verifier looks it up, like DNS. For tests only.",
-  platforms: ["web", "extension", "desktop"],
+  platforms: ["web", "desktop"],
   subject: { label: "Name", placeholder: "alice", normalize: input => { const v = input.trim().toLowerCase(); if (!/^[a-z0-9-]{1,63}$/.test(v)) throw new Error("Letters, digits and dashes"); return v; } },
   validity: { defaultDays: 30, maxDays: 365 },
   recheck: { afterSeconds: 3600 },

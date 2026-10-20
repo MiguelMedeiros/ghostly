@@ -57,17 +57,31 @@ it("the payer keeps an on-chain request only when the chat allows it and the tar
   expect(desk.payment("r4")).toMatchObject({ kind: "request", direction: "in", amount: 500, target: { method: "bitcoin", network: "regtest" } });
 });
 
+it("a request is of the network its address is on: one saying another is dropped", async () => {
+  const request = (id: string, t: unknown, network?: "mainnet" | "testnet") => ({ id, timestamp: Date.now(), amount: { value: "50000", asset: "sat" }, endpoints: [[ENDPOINT.bitcoin, JSON.stringify(t)]] as [string, string][], network });
+  const real: PaymentTarget = { ...target(), network: "bitcoin", address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4" };
+  const { desk, host } = setup();
+  await desk.onPaymentRequest("l", request("r1", real, "testnet"));
+  await desk.onPaymentRequest("l", request("r2", target(), "mainnet"));
+  expect([desk.payment("r1"), desk.payment("r2")]).toEqual([undefined, undefined]);
+  expect(host.storeMessage).not.toHaveBeenCalled();
+  await desk.onPaymentRequest("l", request("r3", real, "mainnet"));
+  await desk.onPaymentRequest("l", request("r4", real));
+  await desk.onPaymentRequest("l", request("r5", target(), "testnet"));
+  expect([desk.payment("r3")?.network, desk.payment("r4")?.network, desk.payment("r5")?.network]).toEqual(["mainnet", "mainnet", "testnet"]);
+});
+
 it("the payee's app answers an on-chain ask with an on-chain request, and the payer ties it back", async () => {
   const payee = setup();
   await payee.desk.start();
-  await payee.desk.onPaymentAsk("l", { id: "ask_000001", timestamp: 1, amount: { value: "900", asset: "sat" }, method: "bitcoin" });
+  await payee.desk.onPaymentAsk("l", { id: "ask_000001", timestamp: 1, amount: { value: "900", asset: "sat" }, method: "bitcoin", network: "testnet" });
   expect(payee.sent).toHaveLength(1);
   expect(payee.sent[0].frame).toMatchObject({ ask: "ask_000001", amount: { value: "900", asset: "sat" } });
   expect((payee.sent[0].frame.endpoints as [string, string][])[0][0]).toBe(ENDPOINT.bitcoin);
 
   const payer = setup();
   await payer.desk.start();
-  const { askId } = await payer.desk.ask({ linkId: "l", amount: 900, timestamp: 1, method: "bitcoin" });
+  const { askId } = await payer.desk.ask({ linkId: "l", amount: 900, timestamp: 1, method: "bitcoin", network: "testnet" });
   await payer.desk.onPaymentRequest("l", { ...(payee.sent[0].frame as never), id: "r9", ask: askId });
   expect(payer.desk.payment("r9")?.ask).toBe(askId);
 });

@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { BUILT_BATCHES, PACKAGES_READ_FROM_SITE, TESTED_PAGES,WEBSITE_INPUTS, covers, plan, testedAs } from "../ci-changes.mjs";
+import { PACKAGES_READ_FROM_SITE, TESTED_PAGES, WEBSITE_INPUTS, covers, plan, supersededBy, testedAs } from "../ci-changes.mjs";
 import { FILES as DECK } from "../../../apps/website/scripts/sync-app-deck.mjs";
 import { FILES as STORE_CORE } from "../../../apps/website/scripts/sync-store-core.mjs";
 
@@ -265,58 +265,29 @@ describe("a push to dev whose tree a pull request already tested", () => {
     expect(await testedAs({ sha, tree, repo, api })).toBe("https://github.com/o/r/actions/runs/8");
   });
 
-  // A batch of two lands as two pushes: the first holds the tree of the batch's first commit, which no run has as its head.
-  describe("a push that holds a commit of a green batch, not its head", () => {
+  // A batch of two lands as two pushes: the first holds the tree of the batch's first commit, which no run has as its
+  // head. The landing may stop right there (the second changed or left the line), and then that push is dev's tip.
+  it("does not count a push that holds a commit of a green batch below its head: the landing may stop there", async () => {
     const first = "f".repeat(40);
     const built = [
       { sha: "1".repeat(40), commit: { tree: { sha: first } } },
       { sha: head, commit: { tree: { sha: tree } } },
     ];
-    const batchFake = ({ runs = [run()], commits = built, landedAt = "2026-10-12T21:00:50Z" } = {}) => {
-      const asked: string[] = [];
-      const api = async (path: string) => {
-        asked.push(path);
-        if (path.startsWith("actions/workflows/")) return { workflow_runs: runs };
-        if (path.startsWith("pulls?")) return [into("dev")];
-        if (path.startsWith("issues/")) return [];
-        if (path.startsWith("actions/runs/")) return { jobs: [{ name: "CI Success", conclusion: "success" }] };
-        if (path === `compare/${sha}...${head}`) return { ahead_by: commits.length, behind_by: 1, commits };
-        if (path === `compare/${head}...${sha}`) return { ahead_by: 1, commits: [landed(landedAt)] };
-        throw new Error(path);
-      };
-      return { api, asked };
+    const asked: string[] = [];
+    const api = async (path: string) => {
+      asked.push(path);
+      if (path.startsWith("actions/workflows/")) return { workflow_runs: [run()] };
+      if (path.startsWith("pulls?")) return [into("dev")];
+      if (path.startsWith("issues/")) return [];
+      if (path.startsWith("actions/runs/")) return { jobs: [{ name: "CI Success", conclusion: "success" }] };
+      if (path === `compare/${sha}...${head}`) return { ahead_by: built.length, behind_by: 1, commits: built };
+      if (path === `compare/${head}...${sha}`) return { ahead_by: 1, commits: [landed("2026-10-12T21:00:50Z")] };
+      throw new Error(path);
     };
-
-    it("counts as tested by the batch's run: the push after it holds the batch's head", async () => {
-      const { api, asked } = batchFake();
-      expect(await testedAs({ sha, tree: first, repo, api })).toBe("https://github.com/o/r/actions/runs/7");
-      expect(asked).toContain(`compare/${sha}...${head}`);
-    });
-
-    it("does not count when no commit of the batch holds its tree", async () => {
-      const { api } = batchFake({ commits: [{ sha: head, commit: { tree: { sha: tree } } }] });
-      expect(await testedAs({ sha, tree: first, repo, api })).toBe(null);
-    });
-
-    it("does not count when dev held a commit the batch lacks before its run started", async () => {
-      const { api } = batchFake({ landedAt: "2026-10-12T20:50:00Z" });
-      expect(await testedAs({ sha, tree: first, repo, api })).toBe(null);
-    });
-
-    it("keeps the other checks: a fork's batch-named run is not read", async () => {
-      const { api, asked } = batchFake({ runs: [run({ head_repository: { full_name: "someone/r" } })] });
-      expect(await testedAs({ sha, tree: first, repo, api })).toBe(null);
-      expect(asked).toHaveLength(1);
-    });
-
-    it("only reads the commits of batches, and of the newest BUILT_BATCHES of them", async () => {
-      const lone = run({ id: 9, head_branch: "issue-1-x", head_commit: { tree_id: "x".repeat(40) } });
-      const others = Array.from({ length: BUILT_BATCHES + 2 }, (_, i) => run({ id: 10 + i, head_sha: String(i).repeat(40), head_commit: { tree_id: "x".repeat(40) } }));
-      const { api, asked } = batchFake({ runs: [lone, ...others], commits: [] });
-      expect(await testedAs({ sha, tree: first, repo, api })).toBe(null);
-      expect(asked.filter((p) => p.startsWith("compare/"))).toHaveLength(BUILT_BATCHES);
-      expect(asked).not.toContain(`compare/${sha}...${lone.head_sha}`);
-    });
+    expect(await testedAs({ sha, tree: first, repo, api })).toBe(null);
+    expect(asked).toHaveLength(1);
+    // CI then plans the push as any other: all of it runs.
+    expect(plan(null, { draft: false })).toMatchObject({ full: true, app: true, packages: true, website: true, rust: true, tested: false });
   });
 
   it("reads at most TESTED_PAGES pages, and stops at a short one", async () => {
@@ -327,5 +298,69 @@ describe("a push to dev whose tree a pull request already tested", () => {
     const short = fake({ runs: [[run({ head_branch: "issue-1-x", head_commit: { tree_id: "x".repeat(40) } })], full] });
     expect(await testedAs({ sha, tree, repo, api: short.api })).toBe(null);
     expect(short.asked).toHaveLength(1);
+  });
+});
+
+// A batch of two lands as two pushes 3 to 6 s apart. The first one's run is already going when the second arrives, so
+// the push-dev group cannot cancel it; the second one's run waits in that group and tests a tree that holds the first.
+describe("a push to dev that dev already moved past", () => {
+  const sha = "1".repeat(40);
+  const tip = "2".repeat(40);
+  const ciRun = (over: object = {}) => ({ head_sha: tip, path: ".github/workflows/ci.yml", html_url: "https://github.com/o/r/actions/runs/9", ...over });
+  const fake = ({ heads = [tip], status = "ahead", runs = [ciRun()] }: { heads?: string[]; status?: string; runs?: object[] } = {}) => {
+    const asked: string[] = [];
+    let reads = 0;
+    let settled = 0;
+    const api = async (path: string) => {
+      asked.push(path);
+      if (path === "branches/dev") return { commit: { sha: heads[Math.min(reads++, heads.length - 1)] } };
+      if (path.startsWith("compare/")) return { status };
+      if (path.startsWith("actions/workflows/ci.yml/runs?")) return { workflow_runs: runs };
+      throw new Error(path);
+    };
+    const settle = async () => {
+      settled++;
+    };
+    return { api, asked, settle, settled: () => settled };
+  };
+
+  it("is covered by the newer head's push run, and is planned as tested (only Tauri Backend)", async () => {
+    const { api, asked, settle, settled } = fake();
+    expect(await supersededBy({ sha, api, settle })).toBe("https://github.com/o/r/actions/runs/9");
+    expect(asked).toEqual(["branches/dev", `compare/${sha}...${tip}`, `actions/workflows/ci.yml/runs?event=push&branch=dev&head_sha=${tip}&per_page=10`]);
+    expect(settled()).toBe(0);
+    expect(plan(null, { draft: false, superseded: true })).toMatchObject({ rust: true, website: false, website_e2e: false, app: false, packages: false, full: false, affected: false, tested: true });
+  });
+
+  it("asks once more after settling when its plan starts before the next push lands", async () => {
+    const { api, settle, settled } = fake({ heads: [sha, tip] });
+    expect(await supersededBy({ sha, api, settle })).toBe("https://github.com/o/r/actions/runs/9");
+    expect(settled()).toBe(1);
+  });
+
+  it("runs everything while it is still dev's head: the landing may have stopped there", async () => {
+    const { api, asked, settle, settled } = fake({ heads: [sha] });
+    expect(await supersededBy({ sha, api, settle })).toBe(null);
+    expect(settled()).toBe(1);
+    expect(asked).toEqual(["branches/dev", "branches/dev"]);
+  });
+
+  it("runs everything when dev's head does not hold it (a force push)", async () => {
+    for (const status of ["diverged", "behind", "identical"]) {
+      const { api, settle } = fake({ status });
+      expect(await supersededBy({ sha, api, settle })).toBe(null);
+    }
+  });
+
+  it("runs everything when CI has no push run for the newer head, or only another workflow's", async () => {
+    for (const runs of [[], [ciRun({ head_sha: "3".repeat(40) })], [ciRun({ path: ".github/workflows/other.yml" })]]) {
+      const { api, settle } = fake({ runs });
+      expect(await supersededBy({ sha, api, settle })).toBe(null);
+    }
+  });
+
+  it("says in its plan why it skips, apart from a tested tree", () => {
+    expect(plan(null, { draft: false, superseded: true }).why[0]).toContain("dev already moved past this commit");
+    expect(plan(null, { draft: false, tested: true }).why[0]).toContain("This tree already passed CI Success");
   });
 });

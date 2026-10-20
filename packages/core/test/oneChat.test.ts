@@ -134,6 +134,22 @@ describe("one chat: DHT rendezvous, peer-to-peer upgrade, DHT fallback", () => {
     expect([inviter.link.liveAttempt, joiner.link.liveAttempt]).toEqual([undefined, undefined]);
   }, 120_000);
 
+  it("promises no retry on the answering side after a dial of its own fails: the contact's app is the one that dials again", async () => {
+    rtc.blocked = true;
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitation();
+    const inviter = open(made.inviter, pkarr, { dht: true });
+    await run(2_000);
+    const joiner = open(made.joiner, pkarr, { dht: true });
+    expect(await until(() => inviter.link.pairingProgress?.stage === "on-dht" && joiner.link.pairingProgress?.stage === "on-dht", 60_000)).toBeLessThan(Infinity);
+    const answering = inviter.link.dialer === "contact" ? inviter : joiner;
+    expect(answering.link.dialer).toBe("contact");
+    // A dial of its own (a transport chosen by hand, say) that does not connect.
+    void answering.link.connect(60_000).catch(() => {});
+    expect(await until(() => answering.link.liveAttempt?.side === "dialled", 2 * 60_000)).toBeLessThan(Infinity);
+    expect(answering.link.liveAttempt!.failed.length).toBeGreaterThan(0);
+    expect(answering.link.liveAttempt!.retryAt).toBeUndefined();
+  }, 120_000);
+
   it("dials a native transport the contact's record just named at once, not after the wait failed attempts built up", async () => {
     // No WebRTC between them (Linux Desktop): until the record arrives there is nothing to dial, and every attempt
     // with nothing to try doubles the wait before the next one, up to three minutes.
@@ -281,6 +297,30 @@ describe("one chat: first contact on two paths, one key", () => {
       if (live) for (const side of [inviter, first]) expect(side.link.isDataLinkOpen).toBe(true);
     }, 180_000);
   }
+
+  it("a second joiner that pinned the inviter before it read the invite was taken still says so after a restart, not on the DHT", async () => {
+    rtc.blocked = true;
+    const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitation();
+    const inviter = open(made.inviter, pkarr, { dht: true });
+    await run(2_000);
+    const first = open({ ...made.joiner, seedB64: createIdentity().seedB64 }, pkarr, { dht: true });
+    expect(await until(() => !!inviter.credentials.peerKey, 120_000)).toBeLessThan(Infinity);
+    await run(10_000);
+    const second = open(made.joiner, pkarr, { dht: true, credentials: { seedB64: made.joiner.seedB64, expectedPeerKey: createIdentityKey(made.inviter.seedB64) } });
+    expect(await until(() => !!second.dhtView?.inviteTaken, 8 * 60_000)).toBeLessThan(Infinity);
+    await stop(second);
+    // What the app keeps when its look-up pinned the inviter (from the envelope put out before anyone joined) and the
+    // envelope sealed to the first joiner came after: the pin, and the notice. The engine opens a pinned chat with no
+    // pairing progress of its own (node.ts `pairingProgress`), as an app with none.
+    const credentials = { ...second.credentials, peerKey: createIdentityKey(made.inviter.seedB64), requireSignedSignals: true };
+    const again = open({ ...made.joiner, old: true }, pkarr, { dht: true, credentials, dhtState: second.dhtState });
+    expect(again.link.pairingProgress, "said from the start").toMatchObject({ role: "joiner", stage: "failed", reason: "taken", retryable: false, detail: INVITE_TAKEN });
+    await run(60_000);
+    expect(again.link.pairingProgress, "it stays said").toMatchObject({ stage: "failed", reason: "taken" });
+    expect(again.progress.some(p => p.stage === "on-dht"), "never on the DHT").toBe(false);
+    expect(again.link.validateText("hello?", Date.now(), "AAAAAAAAAAAAAAAAAAAAAA")).toBe(INVITE_TAKEN);
+    for (const side of [inviter, first]) expect(side.dhtView?.inviteTaken).toBeFalsy();
+  }, 240_000);
 
   it("a live chat, then a copy of the invite publishing in the joiner's mailbox with a key of its own: the chat goes on", async () => {
     const pkarr = new MemoryPkarr(DESKTOP_NETWORK), made = invitation();

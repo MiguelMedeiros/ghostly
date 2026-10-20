@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostLink, LIVENESS_MISSED_PINGS, LIVENESS_PING_MS, SWITCH_RETIRE_MS, type GhostLinkEvents, type GhostLinkOptions } from "../src/ghostlink";
 import { createLink, type LinkParams } from "../src/invite";
 import { createIdentity } from "../src/identity";
-import { CHUNK_KIND, encodeChunk, type FrameChannel } from "../src/frames";
+import { CHUNK_KIND, LIMITS, encodeChunk, type FrameChannel } from "../src/frames";
 import { MAX_NICK_LENGTH, sanitizeNick } from "../src/text";
 import { randomBytes, toBase64Url, utf8Decode, utf8Encode } from "../src/bytes";
 import type { HostedHttpService, LocalFetch } from "../src/http";
@@ -11,6 +11,7 @@ import type { BoundChannel, NativeBinding, NativeEndpoint } from "../src/pairedT
 import { signPairedSignal } from "../src/pairedSignal";
 import { createChannelPair } from "./helpers";
 import { SESSION_RECEIVE_PENDING } from "../src/pairedSession";
+import { IDENTITY_FRAME_LIMIT, IDENTITY_FRAME_WINDOW_MS } from "../src/identityProofs";
 
 // covers: chat.paired.session, chat.paired.send, chat.paired.receipts, chat.paired.reconnect, chat.paired.nickname-sync, chat.legacy.send, core.liveness, core.capabilities, transport.switch, payments.chat.frames
 
@@ -220,6 +221,20 @@ describe("paired chat messages from the peer", () => {
     expect(send).not.toHaveBeenCalled();
     send.mockImplementation(() => { throw new Error("closed"); });
     expect(await t.a.sendMessage("hi")).toMatch(/closed before sending/);
+  });
+
+  it("refuses a 16 KiB text whose frame passes the contact's frame limit once JSON escapes it, and the session stays open", async () => {
+    const t = linkedPair();
+    await t.ready();
+    // 16,384 UTF-8 bytes: each U+0001 is six characters in the frame's JSON, ~98 K against the 60 K a session takes.
+    const controls = `j1 ${"\u0001".repeat(16_381)}`;
+    expect(utf8Encode(controls).length).toBe(LIMITS.maxChatMessageBytes);
+    expect(await t.a.sendMessage(controls)).toBe("Message too long once encoded. Shorten it or send it as a file.");
+    // Quotes are two characters each: ~33 K, which goes.
+    const quotes = "\"".repeat(LIMITS.maxChatMessageBytes);
+    expect(await t.a.sendMessage(quotes)).toBeNull();
+    await vi.waitFor(() => expect(t.onMessageB).toHaveBeenCalledWith(expect.objectContaining({ text: quotes })));
+    expect(t.a.isDataLinkOpen && t.b.isDataLinkOpen).toBe(true);
   });
 
   it("remembers at most 128 unacknowledged messages: a receipt for an evicted one is ignored", async () => {
@@ -444,6 +459,32 @@ describe("what a paired peer says about itself", () => {
     await vi.waitFor(() => { expect(t.a.isDataLinkOpen).toBe(true); expect(t.b.isDataLinkOpen).toBe(true); });
     await vi.waitFor(() => expect(peerB.onPeerNick).toHaveBeenLastCalledWith("Alice (new)"));
     expect(peerB.onPeerAvatar).toHaveBeenLastCalledWith(jpegAvatar);
+  });
+
+  it("a name or picture changing without end is read a handful of times a minute, and the newest still counts", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
+    try {
+      const peer = { onPeerNick: vi.fn(), onPeerAvatar: vi.fn() };
+      const t = linkedPair([{}, { events: peer }]);
+      await t.ready();
+      peer.onPeerNick.mockClear(); peer.onPeerAvatar.mockClear();
+      for (let i = 0; i < 100; i++) {
+        t.toB({ t: "paired-nick", n: `Alice ${i}` });
+        t.toB({ t: "paired-avatar", a: i % 2 ? jpegAvatar : "" });
+      }
+      await t.settle("b");
+      // Each was said once as the session opened: five more get through, the rest wait as one.
+      expect(peer.onPeerNick).toHaveBeenCalledTimes(5);
+      expect(peer.onPeerAvatar).toHaveBeenCalledTimes(5);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(peer.onPeerNick).toHaveBeenCalledTimes(6);
+      expect(peer.onPeerNick).toHaveBeenLastCalledWith("Alice 99");
+      expect(peer.onPeerAvatar).toHaveBeenCalledTimes(6);
+      expect(peer.onPeerAvatar).toHaveBeenLastCalledWith(jpegAvatar);
+      expect(t.b.presence.nick).toBe("Alice 99");
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(peer.onPeerNick).toHaveBeenCalledTimes(6);
+    } finally { vi.useRealTimers(); }
   });
 
   it("takes a small JPEG avatar or its removal and ignores anything else", async () => {
@@ -775,6 +816,21 @@ describe("paired proofs", () => {
     expect(() => t.a.sendPeerProof({ t: "proof-x", pad: "x".repeat(8192) })).toThrow("Proof too large");
   });
 
+  it("reads a bounded number of identity frames from the contact per window, dropping the rest", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const onIdentityProof = vi.fn(async () => {});
+    const t = linkedPair([{ events: { onIdentityProof: vi.fn(async () => {}) } }, { events: { onIdentityProof } }]);
+    await t.ready();
+    for (let i = 0; i < IDENTITY_FRAME_LIMIT + 25; i++) t.a.sendIdentityProof({ t: "idp-request", i });
+    await t.settle("b");
+    expect(onIdentityProof).toHaveBeenCalledTimes(IDENTITY_FRAME_LIMIT);
+    vi.setSystemTime(Date.now() + IDENTITY_FRAME_WINDOW_MS);
+    t.a.sendIdentityProof({ t: "idp-request", i: -1 });
+    await t.settle("b");
+    expect(onIdentityProof).toHaveBeenLastCalledWith({ t: "idp-request", i: -1 });
+    vi.useRealTimers();
+  });
+
   it("keeps proof frames away from an app that did not offer proofs, and refuses to send them", async () => {
     const onIdentityProof = vi.fn(async () => {}), onPeerProof = vi.fn(async () => {});
     const t = linkedPair([{ events: { onIdentityProof, onPeerProof } }, {}]);
@@ -1103,6 +1159,22 @@ describe("native transports", () => {
     kept.registerEndpoint(endpoint(dial));
     await expect(kept.connect()).rejects.toThrow(/Peer native address unavailable/);
     expect(dial).not.toHaveBeenCalled();
+  });
+
+  it("with no WebRTC between the two apps, a contact's unknown address is not left to a WebRTC session that cannot happen", async () => {
+    // The contact's app gave this chat's listener to another chat (or never said it): over WebRTC, a session tells it.
+    const NO_RTC = "Peer native address unavailable; the contact's app has not given it yet";
+    const both = makeLink(createLink().mine, { native: { preferred: "iroh/1", fallback: true, peerTransports: ["iroh/1", "webrtc/1"] } });
+    both.registerEndpoint(endpoint());
+    await expect(both.connect()).rejects.toThrow("Peer native address unavailable; reconnect WebRTC once to exchange endpoints");
+    // The contact's app runs no WebRTC (a Linux Desktop, the CLI): it says the address itself, once it uses the chat.
+    const theirs = makeLink(createLink().mine, { native: { preferred: "iroh/1", fallback: false, peerTransports: ["iroh/1"] } });
+    theirs.registerEndpoint(endpoint());
+    await expect(theirs.connect()).rejects.toThrow(NO_RTC);
+    // Nor does this app.
+    const mine = makeLink(createLink().mine, { rtcAvailable: false, native: { preferred: "iroh/1", fallback: false, peerTransports: ["iroh/1", "webrtc/1"] } });
+    mine.registerEndpoint(endpoint());
+    await expect(mine.connect()).rejects.toThrow(NO_RTC);
   });
 });
 

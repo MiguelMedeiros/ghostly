@@ -69,3 +69,42 @@ test("leaving: gone from the list at once, heard by an admin who was away, and t
   await event(carol, "Alice left");
   await expect(carol.page.getByTestId("group-members")).toContainText("1 member");
 });
+
+/**
+ * Leave, or Delete from this device on a group I am in, confirmed from the keyboard: back on the list, the focus is on
+ * the row that followed the group's, or on New after the last, as a deleted chat's and a declined invitation's are. It
+ * was on the page's body, so a screen reader said nothing and the next Tab started from the top. A phone too, where
+ * the list shows only once home.
+ */
+for (const phone of [false, true]) {
+  test(`Leave and Delete from the keyboard put the focus on the list's next row, or New${phone ? " (phone)" : ""}`, { tag: ["@feature:groups.leave", "@feature:groups.forget", ...(phone ? ["@feature:app.mobile-layout"] : [])] }, async ({ peer }) => {
+    const { page } = await peer("alice", phone ? { mobile: true, viewport: { width: 375, height: 667 } } : {});
+    for (const name of ["Older club", "Newer club"]) {
+      await page.goto("/#/");
+      await page.getByTestId("sidebar-new-more").click();
+      await page.getByTestId("new-group").click();
+      await page.getByTestId("new-group-name").fill(name);
+      await page.getByTestId("new-group-create").click();
+      await page.getByTestId("group-share-dialog").getByTestId("group-share-done").click();
+      await expect(page.getByTestId("group-name")).toHaveText(name);
+    }
+    // The newer group is on top: leaving it puts the focus on the older one's row; deleting that one, on New.
+    for (const [item, next] of [["group-leave", "Older club"], ["group-forget", undefined]] as const) {
+      await page.getByTestId("group-options").focus();
+      await page.keyboard.press("Enter");
+      await page.getByTestId(item).focus();
+      await page.keyboard.press("Enter");
+      await page.getByTestId("group-leave-confirm").focus();
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId("group-chat")).toHaveCount(0);
+      if (!next) {
+        await expect(page.getByTestId("sidebar-new-chat")).toBeFocused();
+        break;
+      }
+      const row = page.getByTestId("group-row").filter({ hasText: next });
+      await expect(row.getByTestId("group-row-open")).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(page.getByTestId("group-name")).toHaveText(next);
+    }
+  });
+}

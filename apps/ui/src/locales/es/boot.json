@@ -12,6 +12,7 @@
   "otherTab": "Ghostly ya está abierto en otra pestaña.",
   "otherTabHint": "Ciérrala y esta pestaña toma el relevo.",
   "reload": "Recargar",
+  "reloadUnreachable": "No se puede conectar con el servidor de Ghostly. Comprueba tu conexión y vuelve a cargar.",
   "shared": "Enviado a Ghostly en tu otra pestaña.",
   "sharedHint": "Elige el chat allí. Puedes cerrar esta.",
   "title": "Ghostly no puede ejecutarse en este navegador",

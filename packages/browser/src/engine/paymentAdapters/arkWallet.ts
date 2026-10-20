@@ -1,7 +1,7 @@
 import { generateMnemonic, validateMnemonic } from "@scure/bip39";
 import { awayFrom, refuseAway, requireTurn } from "./away";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
-import { validatePaymentTarget, type PaymentTarget } from "@ghostly/core";
+import { arkAddressPrefix, validatePaymentTarget, type PaymentTarget } from "@ghostly/core";
 import { deleteDatabase, store, STORES, transact, wrap } from "../../shared/idb";
 import type { ArkadeAdapter, ArkConfig } from "./arkade";
 import { newDeviceKey, sealSeed, unsealSeed, type EncryptedSeed } from "./persistence";
@@ -25,7 +25,7 @@ const loadArkade=()=>import("./arkade");
 export const RETIRE_READ_MS=10_000;
 /** Every new profile starts with this wallet: nothing to set up before receiving. */
 export const DEFAULT_ARK = {network:"bitcoin",provider:"https://arkade.computer",explorer:"https://mempool.space/api"} as const satisfies Omit<ArkCreate,"password"|"mnemonic">;
-const checkProviders=(network:ArkConfig["network"],...urls:string[])=>{for(const provider of urls)validatePaymentTarget({method:"arkade",network,provider,asset:"BTC",unit:"sat",address:"configuration",expiresAt:Date.now()+60000});};
+const checkProviders=(network:ArkConfig["network"],...urls:string[])=>{for(const provider of urls)validatePaymentTarget({method:"arkade",network,provider,asset:"BTC",unit:"sat",address:`${arkAddressPrefix(network)}configuration`,expiresAt:Date.now()+60000});};
 /** A Testnet Ark wallet starts on Mutinynet: a public test network with its own Ark server. */
 export const TESTNET_ARK = {network:"mutinynet",provider:"https://mutinynet.arkade.sh",explorer:"https://mutinynet.com/api"} as const satisfies Omit<ArkCreate,"password"|"mnemonic">;
 /** Bitcoin is real money; every other Ark network is for testing. */
@@ -186,13 +186,12 @@ export class ArkWallet {
     const boardingAddress=await read("boarding address",()=>adapter.boardingAddress(),this.view.boardingAddress);
     if(this.adapter!==adapter)return;
     if(address!==this.view.address||boardingAddress!==this.view.boardingAddress){this.view={...this.view,configured:true,locked:false,address,boardingAddress};this.changed();}
-    const balance=await read("balance",()=>adapter.balance(),this.view.balance);
-    const incoming=await read("incoming",()=>adapter.incoming(),this.view.incoming);
+    const {balance,incoming}=await read("balance",()=>adapter.balances(),{balance:this.view.balance,incoming:this.view.incoming});
     const {recoverable,sweeping,small}=await read("recoverable",()=>adapter.expired(),{recoverable:this.view.recoverable,sweeping:this.view.sweeping,small:this.view.small});
     // The expiry is for the move between devices only: one not read leaves the last one, and no error on the card.
     const expiresAt=await this.gate.within(Promise.resolve().then(()=>adapter.expiresAt?.())).catch((error)=>{if(error instanceof ModeChanged)throw error;return this.view.expiresAt;});
     if(this.adapter!==adapter)return;
-    const balancesRead=this.view.read||!failed.some((what)=>what==="balance"||what==="incoming"||what==="recoverable");
+    const balancesRead=this.view.read||!failed.some((what)=>what==="balance"||what==="recoverable");
     const before=this.view;
     this.view={configured:true,locked:false,...(balancesRead?{read:true as const}:{}),automatic:!!this.saved?.deviceKey,network:adapter.config.network,provider:adapter.config.provider,address,boardingAddress,incoming,balance,recoverable,sweeping,small,...(expiresAt!==undefined?{expiresAt}:{}),
       error:failed.length?`Could not read the ${failed.join(", ")} from the Ark provider. Last values may be stale.`:undefined};

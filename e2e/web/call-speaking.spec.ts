@@ -42,9 +42,12 @@ test("a voice call rings the contact's avatar while they speak, and not while th
   await bob.page.screenshot({ path: testInfo.outputPath("speaking-small.png") });
   await bob.page.getByTestId("call-minimize").click();
 
-  // Muted, she sends silence: the ring goes and stays away, through what would have been two beeps.
+  // Muted, she sends silence: the ring goes and stays away, through what would have been two beeps. It goes once a
+  // beep's length passes with none: `data-speaking` is also false between two beeps, and one already on its way when she
+  // muted still rings Bob's side for a moment.
   await alice.page.getByTestId("call-mute").click();
   await expect(avatar(bob)).toHaveAttribute("data-speaking", "false");
+  await expect.poll(async () => (await rings(bob, 1200)).marked, { timeout: 10_000 }).toBe(0);
   expect((await rings(bob, 2500)).marked).toBe(0);
 
   // And it is back with her voice.
@@ -71,7 +74,12 @@ test("with motion reduced the ring is steady: there while the contact speaks, ne
   // The app's own switch does the same as the system's.
   await bob.page.emulateMedia({ reducedMotion: "no-preference" });
   await expect.poll(async () => (await rings(bob, 1500)).widest).toBeGreaterThan(3);
-  await bob.page.evaluate(() => { document.documentElement.dataset.reduceMotion = "true"; });
+  // Reduced motion gives everything a 0.01 ms transition (index.css), the switch's own step of the ring too: sampled
+  // in the frame of the switch, the ring is still at its last width. Sampled once that transition is over.
+  await avatar(bob).evaluate(async (el) => {
+    document.documentElement.dataset.reduceMotion = "true";
+    await Promise.all(el.getAnimations().map((step) => step.finished.catch(() => {})));
+  });
   const switched = await rings(bob, 2500);
   expect(switched.marked).toBeGreaterThan(0);
   expect([switched.narrowest, switched.widest]).toEqual([3, 3]);

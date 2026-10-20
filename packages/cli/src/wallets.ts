@@ -1,10 +1,12 @@
 import { generateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import type { WalletNetwork } from "@ghostly/core";
-import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletType } from "@ghostly/browser/shared/types";
+import type { EngineState, NetworkWalletsView, PaymentView, WalletInstanceView, WalletOffer, WalletType } from "@ghostly/browser/shared/types";
 import { bool, chatOf, inviteTaken, node, num, oneOf, sentAt, state, str, type ApiContext, type Method, type Params } from "./apiKit";
 import { paymentNetwork } from "@ghostly/browser/engine/paymentAdapters/walletInstances";
 import { CliError, type ErrorCode } from "./errors";
+import { ADDRESS_TYPES, CHAT_METHODS, PAY_METHODS, WALLET_TYPES } from "./words";
+import { findSecret } from "../../../apps/ui/src/lib/parse/secrets";
 
 /**
  * Wallets and payments (WISP 1100, phase 2): the app's wallet deck and a chat's payment sheet, as methods. Test
@@ -13,9 +15,6 @@ import { CliError, type ErrorCode } from "./errors";
  */
 
 const NETWORKS = ["mainnet", "testnet"] as const;
-const TYPES = ["cashu", "lightning", "arkade", "bark", "spark", "bitcoin", "fedimint", "usdt"] as const;
-const METHODS = ["cashu", "arkade", "usdt", "bark", "bitcoin", "fedimint", "spark"] as const;
-const CHAT_METHODS = ["cashu", "lightning", ...METHODS.filter((m) => m !== "cashu")] as const;
 
 /**
  * What the app has and a headless Ghostly cannot run yet, and why (WISP 1100 § Wallet SDKs on Node). New offers
@@ -24,6 +23,37 @@ const CHAT_METHODS = ["cashu", "lightning", ...METHODS.filter((m) => m !== "cash
 export const NODE_GAPS: Partial<Record<WalletType, string>> = {
   bark: "Bark's SDK ships a browser build only: its WebAssembly needs a browser window. Use it from the app.",
 };
+
+/** Sources the engine lists that live in a browser page (`window.webln`): a headless Ghostly never offers them. */
+const BROWSER_SOURCES = new Set(["webln"]);
+
+/** The sources of an offer a headless Ghostly can connect. */
+const nodeSources = (offer: WalletOffer | undefined) => offer?.providers?.filter((p) => !BROWSER_SOURCES.has(p.id));
+
+/**
+ * What `wallet create` was given checked against the offer's own form, before the engine is asked: a source, a field
+ * or a flag left out, or one the wallet does not take, is the person's value, said naming the flag. Before, the engine
+ * refused it in the app's words ("Enter connection uri", "Nothing was saved; try again") as `engine`, or the flag was
+ * dropped without a word.
+ */
+function createChecked(type: WalletType, n: WalletNetwork, offer: WalletOffer | undefined, provider: string | undefined, values: Record<string, string>, params: Params): void {
+  if (type !== "lightning" && type !== "bitcoin") {
+    if (provider || Object.keys(values).length) throw new CliError("usage", `--provider and --value name a lightning or bitcoin source: not with ${type}`);
+    if (offer?.needs === "invite" && !str(params, "invite")?.trim()) throw new CliError("bad_request", `${type} needs --invite <fed11…>`);
+    if (offer?.needs === "apiKey" && !str(params, "apiKey")?.trim()) throw new CliError("bad_request", `${type} on ${n} needs --api-key <key> (or api-key=… on --stdin)`);
+    return;
+  }
+  // None offered on this network: the engine says why.
+  const sources = nodeSources(offer);
+  if (!sources?.length) return;
+  if (!provider) throw new CliError("bad_request", `${type} needs --provider: one of ${sources.map((p) => p.id).join(", ")} (ghostly wallet list)`);
+  const source = sources.find((p) => p.id === provider);
+  if (!source) throw new CliError("bad_request", `No ${type} source ${JSON.stringify(provider)} on ${n} (ghostly wallet list)`);
+  const unknown = Object.keys(values).find((name) => !source.fields.some((f) => f.name === name));
+  if (unknown) throw new CliError("bad_request", `${provider} takes no --value ${unknown}: ${source.fields.length ? `its fields are ${source.fields.map((f) => f.name).join(", ")}` : "it has no fields"}`);
+  const missing = source.fields.find((f) => !f.optional && !f.defaults?.[n] && !values[f.name]?.trim());
+  if (missing) throw new CliError("bad_request", `${provider} needs --value ${missing.name}=<${missing.options?.map((o) => o.value).join("|") ?? missing.placeholder ?? missing.label.toLowerCase()}>`);
+}
 
 const network = (params: Params, fallback: WalletNetwork = "testnet") => oneOf(params, "network", NETWORKS, fallback);
 
@@ -92,7 +122,7 @@ export function walletJson(instance: WalletInstanceView, s: EngineState) {
 export function paymentJson(p: PaymentView) {
   return {
     id: p.id, chat: p.linkId, kind: p.kind, direction: p.direction, amount: p.amount, unit: p.unit, memo: p.memo ?? null,
-    state: p.state, error: p.error ?? null, network: paymentNetwork(p), method: p.target?.method ?? (p.invoice ? "lightning" : p.mint || p.mints ? "cashu" : null),
+    state: p.state, error: p.error ?? null, network: paymentNetwork(p), method: p.target?.method ?? (p.federation || p.federations ? "fedimint" : p.invoice ? "lightning" : p.mint || p.mints ? "cashu" : null),
     createdAt: p.createdAt, ...(p.group ? { group: p.group } : {}), ...(p.closed ? { closed: true } : {}), ...(p.txid ? { txid: p.txid } : {}),
   };
 }
@@ -117,6 +147,16 @@ const isLnurl = (text: string) => /^(lightning:)?lnurl[0-9a-z]+$/i.test(text.tri
  * `service add` says; before, it was `engine` (exit 1), which a bot reads as the engine failing and may retry. Read by
  * its shape: the engine's `EngineError` carries `engineCode`.
  */
+/** A payment's memo: the contact reads it as a message's text, so the secret guard of `send` holds (docs/CLI.md § Safety). */
+function memoOf(params: Params, verb: string): string | undefined {
+  const memo = str(params, "memo");
+  if (memo && !bool(params, "force")) {
+    const secret = findSecret(memo);
+    if (secret) throw new CliError("confirm", `The memo looks like ${secret.kind === "cashu" ? "a Cashu token (money anyone who reads it can take)" : "a secret (a seed or a private key)"}; ${verb} with --force if you mean to`, { kind: secret.kind });
+  }
+  return memo || undefined;
+}
+
 function badMintUrl(error: unknown): boolean {
   const code = error instanceof Error ? (error as { engineCode?: unknown }).engineCode : undefined;
   return code === "invalidMintUrl" || code === "mintNotHttps";
@@ -153,13 +193,13 @@ const WALLETS: Record<string, Method> = {
     const offers = (s.wallet.offers ?? []).filter((o) => !only || o.network === only).map((o) => {
       const gap = NODE_GAPS[o.type];
       return { type: o.type, network: o.network, available: o.available && !gap, reason: gap ?? o.reason ?? null, exists: !!o.exists, several: !!o.several, needs: o.needs ?? null,
-        ...(o.providers ? { providers: o.providers.map((p) => ({ id: p.id, label: p.label, fields: p.fields.map((f) => ({ name: f.name, label: f.label, kind: f.kind, optional: !!f.optional })) })) } : {}) };
+        ...(o.providers ? { providers: nodeSources(o)!.map((p) => ({ id: p.id, label: p.label, fields: p.fields.map((f) => ({ name: f.name, label: f.label, kind: f.kind, optional: !!f.optional })) })) } : {}) };
     });
     return { wallets, offers };
   },
 
   async "wallet.create"(ctx, params) {
-    const type = oneOf(params, "type", TYPES, "cashu");
+    const type = oneOf(params, "type", WALLET_TYPES, "cashu");
     const n = network(params);
     const gap = NODE_GAPS[type];
     if (gap) throw new CliError("unavailable", gap);
@@ -169,17 +209,17 @@ const WALLETS: Record<string, Method> = {
     const raw = params.values ?? {};
     if (!raw || typeof raw !== "object" || Array.isArray(raw) || Object.values(raw).some((v) => typeof v !== "string")) throw new CliError("bad_request", "values must be an object of strings");
     Object.assign(values, raw);
-    const provider = str(params, "provider");
-    const offered = state(ctx).wallet.offers?.find((o) => o.type === type && o.network === n)?.providers;
-    if (provider && offered && !offered.some((p) => p.id === provider)) throw new CliError("bad_request", `No ${type} source ${JSON.stringify(provider)} on ${n} (ghostly wallet list)`);
+    // On-chain is BDK unless another source is named.
+    const provider = str(params, "provider") ?? (type === "bitcoin" ? "bdk" : undefined);
     // BDK asks for a recovery phrase and makes a new wallet from one the app draws: here, one drawn now.
-    if (type === "bitcoin" && (provider ?? "bdk") === "bdk" && !values.mnemonic) values.mnemonic = generateMnemonic(wordlist, 128);
-    const made = await node(ctx).walletCreate({ type, network: n, ...(provider ? { providerId: provider } : type === "bitcoin" ? { providerId: "bdk" } : {}), ...(Object.keys(values).length ? { values } : {}), ...(str(params, "invite") ? { invite: str(params, "invite") } : {}), ...(str(params, "apiKey") ? { apiKey: str(params, "apiKey") } : {}) });
+    if (type === "bitcoin" && provider === "bdk" && !values.mnemonic) values.mnemonic = generateMnemonic(wordlist, 128);
+    createChecked(type, n, state(ctx).wallet.offers?.find((o) => o.type === type && o.network === n), provider, values, params);
+    const made = await node(ctx).walletCreate({ type, network: n, ...(provider ? { providerId: provider } : {}), ...(Object.keys(values).length ? { values } : {}), ...(str(params, "invite") ? { invite: str(params, "invite") } : {}), ...(str(params, "apiKey") ? { apiKey: str(params, "apiKey") } : {}) });
     return walletJson(made, state(ctx));
   },
 
   async "wallet.remove"(ctx, params) {
-    const type = oneOf(params, "type", TYPES, "cashu");
+    const type = oneOf(params, "type", WALLET_TYPES, "cashu");
     const n = network(params);
     const card = cardOf(ctx, params, type);
     try {
@@ -194,7 +234,7 @@ const WALLETS: Record<string, Method> = {
   },
 
   async "wallet.faucet"(ctx, params) {
-    const type = oneOf(params, "type", TYPES, "cashu");
+    const type = oneOf(params, "type", WALLET_TYPES, "cashu");
     if (network(params) !== "testnet") throw new CliError("refused", "Test coins are for Testnet wallets only");
     const card = cardOf(ctx, params, type);
     return node(ctx).walletTestCoins({ type, network: "testnet", ...(card ? { card } : {}) });
@@ -218,7 +258,7 @@ const WALLETS: Record<string, Method> = {
   },
 
   async "wallet.address"(ctx, params) {
-    const type = oneOf(params, "type", ["bitcoin", "arkade", "spark", "usdt"] as const, "bitcoin");
+    const type = oneOf(params, "type", ADDRESS_TYPES, "bitcoin");
     const n = network(params);
     if (type === "bitcoin") return { type, network: n, address: await node(ctx).bitcoinReceiveAddress({ network: n }) };
     const view = netView(state(ctx), n);
@@ -280,6 +320,7 @@ const WALLETS: Record<string, Method> = {
 
   /** Ecash to a contact in a chat (the payment sheet's Pay). */
   async "chat.pay"(ctx, params) {
+    const memo = memoOf(params, "pay");
     const link = chatOf(ctx, params);
     inviteTaken(link);
     const amount = num(params, "amount", 0, { min: 1 });
@@ -287,21 +328,22 @@ const WALLETS: Record<string, Method> = {
     const n = network(params);
     if (n === "mainnet" && !bool(params, "confirmReal")) throw new CliError("confirm", "This pays real money (Mainnet): pass --confirm-real to confirm this payment");
     await federationsOpen(ctx);
-    const { paymentId } = await node(ctx).sendPayment({ linkId: link.id, amount, timestamp: sentAt(), network: n, ...(str(params, "memo") ? { memo: str(params, "memo") } : {}), ...real(params) });
+    const { paymentId } = await node(ctx).sendPayment({ linkId: link.id, amount, timestamp: sentAt(), network: n, ...(memo ? { memo } : {}), ...real(params) });
     return { chat: link.id, paymentId };
   },
 
   /** A request in a chat (the payment sheet's Request): the contact's app pays it. */
   async "chat.request"(ctx, params) {
+    const memo = memoOf(params, "request");
     const link = chatOf(ctx, params);
     const amount = num(params, "amount", 0, { min: 1 });
     if (!amount) throw new CliError("bad_request", "amount is required");
-    const method = params.method === undefined ? undefined : oneOf(params, "method", METHODS, "cashu");
+    const method = params.method === undefined ? undefined : oneOf(params, "method", PAY_METHODS, "cashu");
     const rail = params.rail === undefined ? undefined : oneOf(params, "rail", ["cashu", "lightning"] as const, "cashu");
     await federationsOpen(ctx);
     const { paymentId } = await node(ctx).requestPayment({
       linkId: link.id, amount, timestamp: sentAt(), network: network(params),
-      ...(str(params, "memo") ? { memo: str(params, "memo") } : {}), ...(method ? { method } : {}), ...(rail ? { rail } : {}), ...(str(params, "card") ? { card: str(params, "card") } : {}),
+      ...(memo ? { memo } : {}), ...(method ? { method } : {}), ...(rail ? { rail } : {}), ...(str(params, "card") ? { card: str(params, "card") } : {}),
     });
     return { chat: link.id, paymentId };
   },
@@ -329,6 +371,8 @@ const WALLETS: Record<string, Method> = {
     const nets = params.networks === undefined ? undefined : (() => {
       const value = params.networks;
       if (!Array.isArray(value) || !value.every((v) => v === "mainnet" || v === "testnet")) throw new CliError("bad_request", "networks must list mainnet and/or testnet");
+      // An empty list names no network: the method would stay on while it is taken nowhere.
+      if (value.length === 0) throw new CliError("bad_request", "networks must list mainnet and/or testnet: to stop taking it, --off");
       return value as WalletNetwork[];
     })();
     await node(ctx).setChatPaymentMethods({ linkId: link.id, methods: { [method]: on }, ...(nets ? { networks: { [method]: nets } } : {}) });

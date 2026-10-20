@@ -8,7 +8,10 @@
    turns --t into opacity, a translation or a stroke offset, from the shape's
    own --a (start), --b (end), --d (fade-in or duration) and --f (fade-out).
    Those are registered as non-inheriting numbers, so a shape never picks up
-   its parent's times. */
+   its parent's times. While a step plays the clock writes --t only on the
+   shapes whose rule changes at that moment: a rule here that reads --t, or a
+   change to the stretch over which one changes, goes in SPANS in
+   components/dev/stepClock.ts too. */
 
 @property --t {
   syntax: "<number>";
@@ -326,13 +329,11 @@ html.js:not(.calm) .psx {
   stroke-width: 2.5;
   stroke-dasharray: 7 7;
 }
+/* The connecting line marches on the scene's clock (one dash and gap, 14, every 0.9 s), so it moves only while a
+   step plays and rests with the scene: it is gone before either of its steps ends. Looped on its own, it laid out
+   the page at every frame for as long as the explainer was on screen. */
 .psx-dash {
-  animation: psx-dash 0.9s linear infinite;
-}
-@keyframes psx-dash {
-  to {
-    stroke-dashoffset: -14;
-  }
+  stroke-dashoffset: calc(var(--t) * -14 / 0.9);
 }
 .sx-glow {
   fill: none;
@@ -420,8 +421,10 @@ html.js:not(.calm) .psx {
   font-weight: 600;
   fill: var(--muted);
 }
+/* The float and the blink play a few times and rest (fill both): a CSS animation on a shape inside an SVG lays out
+   the page at every frame, so looped they kept the first screen busy for as long as the reader stayed there. */
 .psx-float {
-  animation: psx-float 3.4s ease-in-out infinite;
+  animation: psx-float 3.4s ease-in-out 3 both;
 }
 .psx-float--late {
   animation-delay: -1.7s;
@@ -434,7 +437,7 @@ html.js:not(.calm) .psx {
 .psx-blink {
   transform-box: fill-box;
   transform-origin: center;
-  animation: psx-blink 5.2s infinite;
+  animation: psx-blink 5.2s 2 both;
 }
 @keyframes psx-blink {
   0%,

@@ -42,6 +42,8 @@ const TICK_MS = 30_000;
 /** The contact's pointer is read this often while something is outstanding either way, else rarely. */
 const POLL_BUSY_MS = 30_000;
 const POLL_IDLE_MS = 5 * 60_000;
+/** No two reads of the contact's pointer come closer than this, whatever asked for them. */
+const POLL_GAP_MS = 5_000;
 /** The manifest and its addresses are signed again before they get this old (they live seven days). */
 const RENEW_AFTER_MS = 4 * 24 * 3600_000;
 /** My pointer is published again this often while something is held, in case a relay forgot it. */
@@ -76,6 +78,9 @@ export class HoldEngine {
   /** Chats whose pointer the relays' request budget held back: it goes out as soon as the budget frees a request. */
   private readonly pointerDue = new Set<string>();
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** A read the contact's word asked for, one waiting per chat, and when the last such read went out. */
+  private readonly peerPolls = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly lastPeerPoll = new Map<string, number>();
 
   constructor(private readonly host: HoldHost) {}
 
@@ -92,6 +97,8 @@ export class HoldEngine {
     if (this.timer) clearTimeout(this.timer);
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.timer = this.retryTimer = null;
+    for (const timer of this.peerPolls.values()) clearTimeout(timer);
+    this.peerPolls.clear();
     await Promise.allSettled([...this.chains.values()]);
   }
 
@@ -162,7 +169,26 @@ export class HoldEngine {
       if (said.peerTop !== undefined && said.peerTop > hold.inSeq) this.expecting.set(linkId, said.peerTop);
     });
     this.host.changed();
-    if (this.expecting.has(linkId)) this.wake(linkId);
+    if (this.expecting.has(linkId)) this.peerPoll(linkId);
+  }
+
+  /**
+   * The contact says it holds items for this side: its pointer is read soon, but at the pace the chat's own reads keep.
+   * Only this person's action (`wake`) skips the gap; the contact's word, however often it comes, makes one read wait
+   * per chat, never within `POLL_GAP_MS` of the last read nor within `POLL_BUSY_MS` of the last read it asked for.
+   */
+  private peerPoll(linkId: string): void {
+    if (!this.running || this.peerPolls.has(linkId)) return;
+    const at = Math.max((this.lastPoll.get(linkId) ?? 0) + POLL_GAP_MS, (this.lastPeerPoll.get(linkId) ?? -Infinity) + POLL_BUSY_MS);
+    this.peerPolls.set(linkId, setTimeout(() => {
+      this.peerPolls.delete(linkId);
+      const hold = this.state(linkId);
+      if (!this.running || !this.expecting.has(linkId) || !hold.enabled || !hold.peerAllows || !this.keysFor(linkId)) return;
+      // A read this person asked for went out meanwhile: this one waits its gap again.
+      if ((this.lastPoll.get(linkId) ?? 0) + POLL_GAP_MS > this.now()) return this.peerPoll(linkId);
+      this.lastPeerPoll.set(linkId, this.now());
+      void this.serialize(linkId, () => this.poll(linkId)).catch(() => {});
+    }, Math.max(0, at - this.now())));
   }
   /** Ways of paying the contact allowed at the last session, whatever the hold settings; undefined before any. */
   lastPeerMethods(linkId: string): PaymentMethodName[] | undefined { return this.state(linkId).peerPaymentMethods; }
@@ -296,6 +322,7 @@ export class HoldEngine {
   forgetLink(linkId: string): void {
     this.keyCache.delete(linkId); this.lastPoll.delete(linkId); this.lastPublish.delete(linkId); this.expecting.delete(linkId); this.errors.delete(linkId); this.chains.delete(linkId);
     this.pointerDue.delete(linkId);
+    clearTimeout(this.peerPolls.get(linkId)); this.peerPolls.delete(linkId); this.lastPeerPoll.delete(linkId);
   }
 
   /**
@@ -364,7 +391,7 @@ export class HoldEngine {
       await this.serialize(linkId, () => this.maintain(linkId)).catch(() => {});
       const busy = hold.outbox.some((e) => e.state !== "failed") || this.expecting.has(linkId);
       const due = (this.lastPoll.get(linkId) ?? 0) + (busy ? POLL_BUSY_MS : POLL_IDLE_MS) <= this.now();
-      if (hold.peerAllows && (all || due) && (this.lastPoll.get(linkId) ?? 0) + 5_000 <= this.now()) await this.serialize(linkId, () => this.poll(linkId)).catch(() => {});
+      if (hold.peerAllows && (all || due) && (this.lastPoll.get(linkId) ?? 0) + POLL_GAP_MS <= this.now()) await this.serialize(linkId, () => this.poll(linkId)).catch(() => {});
     }
     if (this.running) this.timer = setTimeout(() => void this.tick(), TICK_MS);
   }

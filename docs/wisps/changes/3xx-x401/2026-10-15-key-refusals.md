@@ -1,0 +1,1 @@
+A credential bound to a key this profile made but that no longer waits for one is refused with what became of that key: it already holds another credential (one credential per key), it was dropped for a newer key, or it went with a removed credential. `x401 key new` prints the id of the key it drops past the 8 waiting as `dropped`.

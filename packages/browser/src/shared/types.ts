@@ -7,6 +7,7 @@ import type { SparkWalletView } from "../engine/paymentAdapters/sparkWallet";
 import type { LightningView } from "../engine/paymentAdapters/providers/lightningService";
 import type { LightningCardView } from "../engine/paymentAdapters/providers/lightningCards";
 import type { BitcoinView } from "../engine/paymentAdapters/providers/bitcoinService";
+import type { Removal } from "../engine/removals";
 import type { PaymentReview, PaymentTarget, VapidKeys, WakeTarget, WalletNetwork } from "@ghostly/core";
 import type { ProviderDescriptorView } from "../engine/paymentAdapters/providers/types";
 import type { CapsState, DeliveryMode, DhtDeliveryState, DhtDeliveryView, HoldKind } from "@ghostly/core";
@@ -78,6 +79,8 @@ export interface StoredLink {
   inviteCode?: string;
   /** Messages deleted on this device, by id, so a republished one is not stored again. */
   deletedIds?: string[];
+  /** My messages I deleted for everyone, their removal on its way to the contact (`engine/removals.ts`). */
+  removals?: Removal[];
   /**
    * Files of mine whose offer went on the DHT floor (WISP 403 § Files) and that were deleted here before they went live,
    * by wire id: the next session that carries files/3 says each is cancelled (`pf-abort`), so the contact's bubble does too.
@@ -153,6 +156,13 @@ export interface StoredGroup {
    * started again still lets them in.
    */
   invited?: Record<string, number>;
+  /**
+   * Members' messages their authors deleted for everyone (WISP 400 § Delete for everyone), by id, the newest
+   * `MAX_REMOVED_IDS`: a copy that comes again (a catch-up, a member handing it on) is not stored again.
+   */
+  removedIds?: string[];
+  /** My messages I deleted for everyone, their removal said to the members and again to an edge that opens (`engine/removals.ts`). */
+  removals?: Removal[];
   /** On the admin's side: the group's link is on, with this entry key seed (`group-entry/1`). */
   entry?: { seedB64: string; createdAt: number };
   state?: GroupState;
@@ -588,6 +598,8 @@ export interface StoredPayment {
   /** Fedimint payments: the federation of the notes, and the client operation that spent (or redeems) them. */
   federation?: string;
   fedimintOp?: string;
+  /** Incoming Fedimint payments: a digest of the notes, kept after they are redeemed or refused, so the same notes sent again under another id are answered from it. */
+  notesDigest?: string;
   requestId?: string;
   /** Requests we pay: a Lightning payment is in flight at the mint, so paying again would pay twice. */
   lightningPending?: boolean;
@@ -656,6 +668,8 @@ export interface WalletTx {
   amount: number;
   fee: number;
   note?: string;
+  /** `lightning-in`: the mint quote of the invoice paid, so the invoice on screen knows it is the one. Absent on older records. */
+  quote?: string;
 }
 
 /** The kinds of wallet a profile can have: each is one card of the deck, on one network. */
@@ -916,6 +930,8 @@ export interface StoredMessage {
    * It belongs to the version it came with: an edit brings its own, or leaves the message a text.
    */
   card?: StatusCard;
+  /** Only on the row a removal of mine reads as to the edit queues (`engine/removals.ts`): never stored, never shown. */
+  removed?: true;
   /**
    * A reply that presses a button of this side's own message (WISP 406 · Message Buttons), as the author's engine took
    * it: set only when the button was open for this person. What `button.pressed` reports.
@@ -945,6 +961,12 @@ export interface CardIndexRow {
   timestamp: number;
   editedAt?: number;
 }
+
+/**
+ * A message saved on this device (`savedMessages`): when it was saved and its row as it is now (an edit shows its latest
+ * version). Kept for the profile here only, never sent.
+ */
+export interface SavedMessage { savedAt: number; message: StoredMessage }
 
 /** A page of a chat's history, oldest first, and whether older messages remain (`messagePage`). */
 export interface MessagePage { messages: StoredMessage[]; more: boolean }
@@ -1171,6 +1193,12 @@ export interface GroupPayNote {
   claims?: string[];
   /** The last note this device said about it, sent again when an edge opens. */
   mine?: GroupPayFrame;
+  /**
+   * Known only from another member's word (a payer's claim, a payee's "paid"): the member it is about (the payee of a
+   * request, the payer of a payment) has not described it. Kept on this device only, never in the group's history,
+   * until that member's own note arrives: nothing is shown as a member's that the member never said.
+   */
+  undescribed?: true;
 }
 
 /** `group-pay` on an edge (WISP 902 § Payments). Old apps drop it. */
@@ -1236,6 +1264,13 @@ export interface Settings {
   /** Extra ICE servers (typically TURN) on top of the built-in STUN set. */
   iceServers: IceServerSetting[];
   /**
+   * "Hide my IP from contacts" (WISP 100 § Relay only): every WebRTC connection to a contact (calls, chat links,
+   * group edges) goes through the TURN server in `iceServers` alone, with no STUN server. On only with a TURN server
+   * (`relayOnlyProblem`). The Desktop offers contacts neither its own Iroh nor its own HyperDHT (HyperDHT goes through
+   * `hyperdhtRelay`, as in a browser); its own devices keep them. Absent means off.
+   */
+  relayOnly?: boolean;
+  /**
    * The Iroh relays a browser build homes on (WISP 102, relay only): a page cannot send UDP, so every Iroh
    * packet goes through one. Absent or empty means the defaults (n0's public relays, as the desktop app's).
    */
@@ -1243,7 +1278,7 @@ export interface Settings {
   /**
    * The HyperDHT relay (wss://) this browser reaches the HyperDHT through, so paired chats can use HyperDHT
    * (WISP 103) beside WebRTC. Empty: none. Absent means the default (shared/hyperdhtRelay.ts). The Desktop
-   * runs HyperDHT itself and ignores it.
+   * runs HyperDHT itself and ignores it, except toward contacts while `relayOnly` is on.
    */
   hyperdhtRelay?: string;
   /** Cashu mints this peer holds ecash at and accepts ecash from. The first is where invoices are created. */
@@ -1467,6 +1502,47 @@ export interface PublicGraphView {
 export interface PublicPostImageView { src?: string; miss?: string; hosts: string[]; width?: number; height?: number }
 
 /** The profile's did:dht (WISP 310-did-dht): its own key, public to everyone, never tied to a chat. */
+/** A request in Requests (WISP 8xx): what the asker said. The name is what it typed, unverified. */
+export interface ContactRequestView {
+  /** The asker key. */
+  id: string;
+  name: string;
+  text: string;
+  receivedAt: number;
+  /** When it ends unanswered. */
+  expires: number;
+}
+
+/** A request this profile sent through someone's contact link (WISP 8xx), shown on the chat made for it. */
+export interface ContactAskView {
+  chatId: string;
+  /**
+   * `sending`, `knocking`: on its way. `seen`: it arrived; the owner accepts it or nothing is said. `off`: the link was
+   * turned off. `ended`: no answer in seven days.
+   */
+  state: "sending" | "knocking" | "seen" | "off" | "ended";
+  expires: number;
+}
+
+/** The profile's contact link (WISP 8xx): what the owner shows and shares. */
+export interface ContactLinkView {
+  /** `ghostly1r…` */
+  code: string;
+  /** `https://ghostly.tools/#ghostly1r…` */
+  link: string;
+  createdAt: number;
+  /** `busy`: too many requests wait; new ones are counted, not read. */
+  state: "open" | "busy";
+  /** Requests waiting in Requests. */
+  waiting: number;
+  /** How many people tried while the link was busy, since the owner last looked; never their names. */
+  missed: number;
+  /** When the link record last went out. */
+  publishedAt?: number;
+  /** Why the last publish failed. */
+  error?: string;
+}
+
 export interface ProfileDidView {
   /** `did:dht:…` */
   id: string;
@@ -1669,6 +1745,11 @@ export interface EngineState {
    */
   restoreCheck?: "checking" | "removed";
   /**
+   * Limited mode only while the active device's read at start is out (WISP 06 § When a device checks): the profile shows
+   * as it is, nothing goes out, and nobody is asked anything until the read answers. Absent otherwise.
+   */
+  startCheck?: true;
+  /**
    * Whose push subscription `settings.wake` is, in a profile on several devices (WISP 06 § Push and the phone): `here`,
    * this device's own; `away`, another device's, given to contacts because this device has none of its own (the page
    * neither replaces nor turns off what is not its own). Absent in a profile on one device, or when nobody said.
@@ -1721,6 +1802,12 @@ export interface EngineState {
   identityProofs: IdentityProofView[];
   /** This profile's public DID. Absent until the engine has loaded it. */
   did?: ProfileDidView;
+  /** This profile's contact link, when it has one. */
+  contactLink?: ContactLinkView;
+  /** The requests its contact link took, newest first. */
+  contactRequests?: ContactRequestView[];
+  /** The requests this profile sent through others' contact links. */
+  contactAsks?: ContactAskView[];
   /** The Nostr social layer: the person's own keys' data and the effective settings. */
   nostr: NostrSocialState;
   /** Private groups and pending invitations (WISP 900). */

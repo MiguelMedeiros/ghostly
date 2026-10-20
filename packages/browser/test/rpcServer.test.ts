@@ -32,9 +32,12 @@ vi.mock("../src/engine/node", () => ({
     start() { return fake.start(); }
     getState() { return this.state; }
     async getMessages(linkId: string) { return [{ id: `${linkId}-1` }]; }
+    deletedIdsOf() { return []; }
     echo(params: unknown) { return { params, self: this === fake.nodes.at(-1) }; }
     async fail() { throw new Error("That payment was refused"); }
     failWithString() { throw "plain refusal"; }
+    // Chromium's IndexedDB write past quota: a DOMException named QuotaExceededError with an empty message.
+    async failFull(message = "") { throw new DOMException(message, "QuotaExceededError"); }
   },
 }));
 
@@ -77,6 +80,17 @@ describe("EngineServer answering calls", () => {
     expect(client.posted).toEqual([
       { kind: "response", id: 3, error: "That payment was refused" },
       { kind: "response", id: 4, error: "plain refusal" },
+    ]);
+  });
+
+  it("says a storage that is full as such, its name kept, when the error's own message is empty (Chromium) or not", async () => {
+    const server = new EngineServer();
+    const client = sink();
+    await server.handle(client, request("failFull", undefined, 5));
+    await server.handle(client, request("failFull", "The quota has been exceeded.", 6));
+    expect(client.posted).toEqual([
+      { kind: "response", id: 5, error: "Not enough space on this device (QuotaExceededError)" },
+      { kind: "response", id: 6, error: "Not enough space on this device (QuotaExceededError: The quota has been exceeded.)" },
     ]);
   });
 

@@ -70,6 +70,15 @@ const watchAudio = (page: Page) =>
 const audioRates = (page: Page) =>
   page.evaluate(() => ((window as unknown as { voiceAudio?: HTMLMediaElement[] }).voiceAudio ?? []).map((audio) => ({ rate: audio.playbackRate, preservesPitch: audio.preservesPitch })));
 
+/** Shift+Tab until the button with this test id has the focus, as a keyboard user reaches it. */
+async function tabBackTo(page: Page, testId: string) {
+  for (let step = 0; step < 8; step++) {
+    await page.keyboard.press("Shift+Tab");
+    if (await page.getByTestId(testId).evaluate((button) => button === document.activeElement)) return;
+  }
+  throw new Error(`Shift+Tab never reached ${testId}`);
+}
+
 /** How many different bar heights a waveform has: a flat line has one. */
 const shapes = (bubble: Locator) =>
   bubble.locator(".voice-wave-base .voice-wave-bar").evaluateAll((bars) => new Set(bars.map((bar) => (bar as HTMLElement).style.height)).size);
@@ -138,6 +147,17 @@ test("voice messages: hold to record, the contact plays it", { tag: ["@feature:f
   const again = voices(bob).last();
   await expect(again).toHaveAttribute("data-played", "true", { timeout: 30_000 });
   expect(await shapes(again)).toBeGreaterThan(3);
+
+  // From the keyboard: Space plays it, and the button keeps the focus while its bytes load, so Space again pauses it
+  // (disabled while loading, it lost the focus to the page and Space scrolled the chat).
+  const play = again.getByTestId("voice-play");
+  await expect(play).toBeEnabled({ timeout: 30_000 });
+  await play.focus();
+  await bob.page.keyboard.press("Space");
+  await expect(again).toHaveAttribute("data-state", "playing");
+  await expect(play).toBeFocused();
+  await bob.page.keyboard.press("Space");
+  await expect(again).toHaveAttribute("data-state", "paused");
 });
 
 /** The chat's row holding the newest bubble of this kind (a voice message, a file). */
@@ -243,6 +263,19 @@ test("voice messages: hands-free with a click, pause and preview, Enter, Esc; th
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("voice-bar")).toHaveCount(0);
 
+  // From the keyboard, Enter on Pause pauses and Enter on the bin throws it away: both sent it (Enter sent from anywhere).
+  await mic(page).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("voice-bar")).toHaveAttribute("data-phase", "recording");
+  await tabBackTo(page, "voice-pause");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("voice-bar")).toHaveAttribute("data-phase", "paused");
+  await tabBackTo(page, "voice-delete");
+  await page.keyboard.press("Enter");
+  await expect(page.getByTestId("voice-bar")).toHaveCount(0);
+  // The focus goes to the mic, not to the page with the bin that held it.
+  await expect(mic(page)).toBeFocused();
+
   // One held, then one hands-free with a pause, a listen and more: two in a row from Alice.
   await hold(page, 1_600);
   await expect(voices(alice)).toHaveCount(1);
@@ -306,4 +339,36 @@ test("voice messages: hands-free with a click, pause and preview, Enter, Esc; th
   await again.getByTestId("voice-play").click();
   await expect(again.getByTestId("voice-speed")).toHaveText("2×");
   await expect.poll(() => audioRates(bob.page)).toEqual([{ rate: 2, preservesPitch: true }]);
+});
+
+test("voice messages: on a phone the recorder's hint stays on the screen in a longer language", { tag: ["@feature:files.voice.record", "@feature:app.mobile-layout", "@feature:app.i18n"] }, async ({ peer }) => {
+  // On one line, "Demasiado corto. Mantén pulsado para grabar, suelta para enviar" ran 36 px past the left edge at 375 px.
+  const [alice, bob] = await Promise.all([peer("voice-hint-alice", { mobile: true, viewport: { width: 320, height: 700 } }), peer("voice-hint-bob")]);
+  await pair(alice, bob);
+  const page = alice.page;
+  await page.evaluate(() => {
+    const settings = JSON.parse(localStorage.getItem("ghostly_app_settings") ?? "{}");
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ ...settings, language: "es" }));
+  });
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("lang", /^es/);
+
+  // A tap on the mic with a finger: the hint says how it works. Down and up in one go: sent one by one, a loaded runner
+  // put 350 ms and more between them, a hold long enough to record and send a voice message instead.
+  await mic(page).evaluate((button) => {
+    const box = button.getBoundingClientRect();
+    const finger = { pointerId: 7, pointerType: "touch", isPrimary: true, button: 0, bubbles: true, cancelable: true, composed: true, clientX: box.x + box.width / 2, clientY: box.y + box.height / 2 };
+    button.dispatchEvent(new PointerEvent("pointerdown", { ...finger, buttons: 1 }));
+    button.dispatchEvent(new PointerEvent("pointerup", { ...finger, buttons: 0 }));
+  });
+  const hint = page.getByTestId("voice-hint");
+  await expect(hint).toHaveText("Mantén pulsado para grabar, suelta para enviar");
+  // Its longest line, in the same box: a hold between 300 and 400 ms, which shows it, is too fine a timing to ask for.
+  const edges = await hint.evaluate((element) => {
+    element.textContent = "Demasiado corto. Mantén pulsado para grabar, suelta para enviar";
+    const box = element.getBoundingClientRect();
+    return { left: box.left, right: box.right, width: document.documentElement.clientWidth };
+  });
+  expect(edges.left).toBeGreaterThanOrEqual(0);
+  expect(edges.right).toBeLessThanOrEqual(edges.width);
 });

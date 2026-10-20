@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RELAY_POLL_INTERVALS, UNUSED_INVITE_WAIT_MAX_MS } from "../src/link";
-import { closeWorld, DESKTOP_NETWORK, invitation, MemoryPkarr, open, untilLive, useFakeWorld } from "./support/pairingWorld";
+import { closeWorld, DESKTOP_NETWORK, invitation, MemoryPkarr, open, rtc, untilLive, useFakeWorld } from "./support/pairingWorld";
 
 // covers: invite.create, invite.code, core.relay-client
 
@@ -15,8 +15,9 @@ afterEach(() => closeWorld());
 it("15 unused invites read a few times a minute between them, and a join on one still goes live", async () => {
   const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
   const made = Array.from({ length: 15 }, () => invitation());
-  // Nothing on screen: each reads at its own pace.
-  const inviters = made.map((m) => open(m.inviter, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS }));
+  // One app, nothing on screen: each reads at its own pace.
+  const app = pkarr.transport();
+  const inviters = made.map((m) => open(m.inviter, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS, transport: app }));
   for (const inviter of inviters) inviter.link.setChatActive(false);
   await vi.advanceTimersByTimeAsync(11 * 60_000);
   const before = pkarr.reads;
@@ -48,7 +49,9 @@ it.each([
     await vi.advanceTimersByTimeAsync(10_000);
     await stopping;
   }
-  const joiners = made.map((m) => open({ ...m.joiner, createdAt: Date.now() }, pkarr, { dht: true, pollIntervals: RELAY_POLL_INTERVALS }));
+  // One app holds the 15 joined chats.
+  const app = pkarr.transport();
+  const joiners = made.map((m) => open({ ...m.joiner, createdAt: Date.now() }, pkarr, { dht: true, pollIntervals: RELAY_POLL_INTERVALS, transport: app }));
   // Off screen once joined.
   for (const joiner of joiners) { joiner.link.setChatActive(false); joiner.link.session.setActive(false); }
   await vi.advanceTimersByTimeAsync(11 * 60_000);
@@ -61,6 +64,35 @@ it.each([
   expect(await untilLive(back, joiners[6], UNUSED_INVITE_WAIT_MAX_MS + 30_000)).toBeLessThan(UNUSED_INVITE_WAIT_MAX_MS + 30_000);
 });
 
+/**
+ * Send an invite, close the app, the friend joins, open the app later (bug hunt 1014-0612): the joined chat's mailbox
+ * was still read at its unused-invite wait (3 minutes for a join 15 minutes old) after its link saw the inviter online,
+ * and the inviter's first text came 127 s after it was back.
+ */
+it("a joined chat whose inviter comes back 15 minutes later reads its mailbox once its link sees the inviter online", async () => {
+  rtc.blocked = true;
+  const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
+  const made = invitation();
+  const gone = open(made.inviter, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS });
+  await vi.advanceTimersByTimeAsync(5_000);
+  const stopping = gone.link.stop();
+  await vi.advanceTimersByTimeAsync(10_000);
+  await stopping;
+  const joiner = open({ ...made.joiner, createdAt: Date.now() }, pkarr, { dht: true, pollIntervals: RELAY_POLL_INTERVALS });
+  joiner.link.setChatActive(false); joiner.link.session.setActive(false);
+  await vi.advanceTimersByTimeAsync(15 * 60_000);
+  const back = open(made.inviter, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS, credentials: gone.credentials, dhtState: gone.dhtState });
+  back.link.setChatActive(false);
+  let seen = Infinity, sent = false;
+  for (const start = Date.now(); Date.now() - start < UNUSED_INVITE_WAIT_MAX_MS * 2 && !joiner.received.some((m) => m.text === "hello-from-alice"); await vi.advanceTimersByTimeAsync(250)) {
+    if (!sent && back.pinned.length) { sent = true; void back.link.sendMessage("hello-from-alice", Date.now(), "firsttextfromalice0001"); }
+    if (seen === Infinity && joiner.link.session.peerPresence.online) seen = Date.now();
+  }
+  expect(seen).toBeLessThan(Infinity);
+  // Read at the first-contact pace once the link sees the inviter, not at the end of the unused-invite wait.
+  expect(Date.now() - seen).toBeLessThan(15_000);
+}, 60_000);
+
 it("15 joined chats whose inviter never answered still read a few times a minute once the app starts again", async () => {
   const pkarr = new MemoryPkarr(DESKTOP_NETWORK);
   const made = Array.from({ length: 15 }, () => invitation());
@@ -69,14 +101,16 @@ it("15 joined chats whose inviter never answered still read a few times a minute
   const stopping = Promise.all(gone.map((inviter) => inviter.link.stop()));
   await vi.advanceTimersByTimeAsync(10_000);
   await stopping;
-  const joined = made.map((m) => open({ ...m.joiner, createdAt: Date.now() }, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS }));
+  // One app holds the 15 joined chats, before and after its restart.
+  const app = pkarr.transport();
+  const joined = made.map((m) => open({ ...m.joiner, createdAt: Date.now() }, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS, transport: app }));
   await vi.advanceTimersByTimeAsync(60_000);
   // The inviter's first envelope pinned it: the chat is saved as paired, and opened so again (no pairing progress).
   expect(joined.every((j) => j.pinned.length === 1 && j.dhtState.unanswered === j.dhtState.peerSequence)).toBe(true);
   const closing = Promise.all(joined.map((j) => j.link.stop()));
   await vi.advanceTimersByTimeAsync(10_000);
   await closing;
-  for (const [i, m] of made.entries()) open({ ...m.joiner, old: true }, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS, credentials: joined[i].credentials, dhtState: joined[i].dhtState });
+  for (const [i, m] of made.entries()) open({ ...m.joiner, old: true }, pkarr, { dht: true, active: false, pollIntervals: RELAY_POLL_INTERVALS, credentials: joined[i].credentials, dhtState: joined[i].dhtState, transport: app });
   await vi.advanceTimersByTimeAsync(11 * 60_000);
   const before = pkarr.reads;
   await vi.advanceTimersByTimeAsync(6 * 60_000);

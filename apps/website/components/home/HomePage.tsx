@@ -14,6 +14,7 @@ import { SpaceSection } from "./SpaceSection";
 import { OpenScene } from "./OpenScene";
 import { Finale } from "./Finale";
 import { LandOnHash } from "./LandOnHash";
+import { KeepPlace } from "./KeepPlace";
 import "@/app/home.css";
 
 /**
@@ -29,6 +30,7 @@ export function HomePage({ version }: { version: string }) {
   return (
     <Shell>
       <LandOnHash />
+      <KeepPlace />
       <StoryRail
         label={t.rail}
         marks={[

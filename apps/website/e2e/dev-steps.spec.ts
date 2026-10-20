@@ -28,9 +28,16 @@ const STEP_IDS = [
 const END = [2.6, 5, 8.6, 11.4, 14.4, 18.2, 22.6, 26.8];
 
 const current = (page: Page) => page.locator('.psx-card[data-state="current"]');
+/** Where the picture rests: the clock writes `--t` on the explainer once it stops. */
 const tValue = (page: Page) =>
   page
     .locator(".psx")
+    .evaluate((el) => Number(getComputedStyle(el).getPropertyValue("--t")));
+/** Where the picture is while a step plays: the connecting line's dashes follow `--t` at every frame. */
+const playhead = (page: Page) =>
+  page
+    .locator(".psx .psx-dash")
+    .first()
     .evaluate((el) => Number(getComputedStyle(el).getPropertyValue("--t")));
 
 async function open(page: Page, path = "/developers") {
@@ -70,7 +77,7 @@ test("next, previous, the dots and the keys move between steps", async ({
   await expect(current(page)).toHaveAttribute("data-step-id", "invite");
   const seen: number[] = [];
   for (let i = 0; i < 6; i++) {
-    seen.push(await tValue(page));
+    seen.push(await playhead(page));
     await page.waitForTimeout(120);
   }
   expect(
@@ -98,7 +105,7 @@ test("next, previous, the dots and the keys move between steps", async ({
   // Replay rewinds the step and plays it again.
   await root.locator('[data-action="replay"]').click();
   await expect
-    .poll(() => tValue(page), { timeout: 4000 })
+    .poll(() => playhead(page), { timeout: 4000 })
     .toBeLessThan(END[4] - 0.5);
   await expect.poll(() => tValue(page), { timeout: 8000 }).toBe(END[4]);
 

@@ -5,8 +5,11 @@
  */
 
 export interface MediaSessionPlayer {
+  /**
+   * What it is ("Voice message", "Audio"), never who sent it or a file's name: the system shows it outside the app
+   * (lock screen, notification shade, Now Playing, the panel), private like every notice (no name).
+   */
   title: string;
-  artist?: string;
   play(): void;
   pause(): void;
   /** Seconds from the start. */
@@ -50,7 +53,7 @@ export function claimMediaSession(id: string, player: MediaSessionPlayer): void 
   if (!media) return;
   owner = id;
   const Metadata = (globalThis as { MediaMetadata?: new (init: object) => unknown }).MediaMetadata;
-  if (Metadata) media.metadata = new Metadata({ title: player.title, artist: player.artist ?? "Ghostly", album: "Ghostly", artwork: artwork() });
+  if (Metadata) media.metadata = new Metadata({ title: player.title, artist: "Ghostly", album: "Ghostly", artwork: artwork() });
   media.playbackState = "playing";
   const set = (action: (typeof ACTIONS)[number], handler: Handler | null) => {
     try { media.setActionHandler(action, handler); } catch { /* an action this browser does not know */ }
@@ -77,6 +80,11 @@ export function mediaSessionPosition(id: string, at: number, duration: number, p
   position = { at, duration };
   if (!(duration > 0) || !Number.isFinite(duration) || !(playbackRate > 0)) return;
   try { media.setPositionState?.({ duration, playbackRate, position: Math.min(Math.max(0, at), duration) }); } catch { /* out of range: left as it was */ }
+}
+
+/** Whoever owns it lets go (the app locks): nothing of a chat stays on the system's controls. */
+export function dropMediaSession(): void {
+  if (owner) releaseMediaSession(owner);
 }
 
 /** `id` stopped for good (ended, or left the screen): the controls go away, unless another player took them. */

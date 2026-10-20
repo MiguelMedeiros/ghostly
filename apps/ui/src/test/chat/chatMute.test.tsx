@@ -217,6 +217,27 @@ describe("AttentionFeedback in a muted chat", () => {
     await waitFor(() => expect(notified()).toBe(4));
   });
 
+  it("shows one system notification per chat for reactions that come together, and a message still its own", async () => {
+    setup();
+    const start = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(start);
+    const notified = () => sound.notice.mock.calls.length;
+    // 25 members react to a message of mine at once; another group's reaction is its own.
+    await send(...Array.from({ length: 25 }, () => event({ linkId: "group:g1", type: "reaction" })), event({ linkId: "group:g2", type: "reaction" }));
+    await new Promise(r => setTimeout(r, 20));
+    expect(notified()).toBe(2);
+    // More inside the burst stay quiet; a message of that group is not a reaction, and shows.
+    clock.mockReturnValue(start + MESSAGE_BURST_MS - 1);
+    await send(event({ linkId: "group:g1", type: "reaction", at: start + MESSAGE_BURST_MS - 1 }));
+    await new Promise(r => setTimeout(r, 20));
+    expect(notified()).toBe(2);
+    await send(event({ linkId: "group:g1", at: start + MESSAGE_BURST_MS - 1 }));
+    await waitFor(() => expect(notified()).toBe(3));
+    clock.mockReturnValue(start + MESSAGE_BURST_MS);
+    await send(event({ linkId: "group:g1", type: "reaction", at: start + MESSAGE_BURST_MS }));
+    await waitFor(() => expect(notified()).toBe(4));
+  });
+
   it("plays one sound and shows one notification for mentions that come together in a chat, a muted one too", async () => {
     setup();
     setChatMute(groupChat("g1"), "forever");

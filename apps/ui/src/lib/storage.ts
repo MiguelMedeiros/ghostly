@@ -24,8 +24,11 @@ export const GHOST_NAMES = [
 ];
 
 export function getRandomGhostName(): string {
-  const index = crypto.getRandomValues(new Uint32Array(1))[0]! % GHOST_NAMES.length;
-  return GHOST_NAMES[index];
+  // Draw again past the largest multiple of the list length, so every name is equally likely.
+  const limit = 2 ** 32 - (2 ** 32 % GHOST_NAMES.length);
+  const draw = new Uint32Array(1);
+  do crypto.getRandomValues(draw); while (draw[0]! >= limit);
+  return GHOST_NAMES[draw[0]! % GHOST_NAMES.length];
 }
 
 export function getGhostName(peerKey: string): string {
@@ -103,13 +106,36 @@ export const STORED_MESSAGES = 200;
 export const ROOM_MESSAGES = 20;
 const gaveRoom = new Set<string>();
 
+/**
+ * Characters of those last messages a chat's stored copy keeps at most, as `STORED_MESSAGES` does with their count: the
+ * newest one whatever its size. A link's thumbnail (~25 K) or a text edited 20 times weighs as much as a hundred plain
+ * messages, and every message that came wrote and parsed again megabytes for a feed's or an agent's chat.
+ */
+export const STORED_CHARS = 100_000;
+
+/** A row's length as stored, by row: a row that changes is a new object (`platform/sync.ts`). */
+const rowChars = new WeakMap<ChatMessage, number>();
+function charsOf(message: ChatMessage): number {
+  let chars = rowChars.get(message);
+  if (chars === undefined) rowChars.set(message, (chars = JSON.stringify(message).length));
+  return chars;
+}
+
+/**
+ * A call's lines a chat keeps: its last ones; an older one goes from this device as a deleted message does
+ * (`dropOldCallLines`). Nothing else keeps them, so its stored copy keeps every one it has (`stored`): a contact who
+ * rang and hung up over and over left two lines a call, thousands, written again with every later message, until
+ * localStorage refused the chat.
+ */
+export const CALL_LINES = STORED_MESSAGES;
+
 /** Per chat: the ids of the messages the engine keeps and the mirror would bring back (`platform/sync.ts`). */
 const inEngine = new Map<string, ReadonlySet<string>>();
 
 /**
  * The messages of this chat the engine keeps, as the mirror would write them into its session: those may leave the
  * session's stored copy, older than its last `STORED_MESSAGES`. Any other (a call's line, a file of mine the chat added
- * itself) stays there whatever its age: nothing else keeps it.
+ * itself) stays there whatever its age: nothing else keeps it. A chat keeps its last `CALL_LINES` call lines only.
  */
 export function setEngineMessages(sessionId: string, ids: ReadonlySet<string>): void {
   inEngine.set(sessionId, ids);
@@ -122,15 +148,20 @@ export function setEngineMessages(sessionId: string, ids: ReadonlySet<string>): 
 const whole = new Map<string, ChatMessage[]>();
 
 /**
- * The session as it is stored: without the messages the engine keeps older than its last `STORED_MESSAGES`, and how
- * many went (`older`), which the unread count needs.
+ * The session as it is stored: without the messages the engine keeps older than its last `STORED_MESSAGES` (or its last
+ * `STORED_CHARS`), and how many went (`older`), which the unread count needs.
  */
 function stored(session: ChatSession): ChatSession {
   const ids = inEngine.get(session.id);
   const all = session.messages;
   const last = gaveRoom.has(session.id) ? ROOM_MESSAGES : STORED_MESSAGES;
-  if (!ids || all.length <= last) return session;
-  const from = all.length - last;
+  if (!ids) return session;
+  let from = all.length;
+  for (let chars = 0; from > 0 && all.length - from < last; from--) {
+    chars += charsOf(all[from - 1]);
+    if (chars > STORED_CHARS && from < all.length) break;
+  }
+  if (!from) return session;
   const keep = all.filter((m, i) => i >= from || !ids.has(m.id));
   if (keep.length === all.length) return session;
   return { ...session, messages: keep, older: (session.older ?? 0) + all.length - keep.length };
@@ -391,8 +422,29 @@ export function addMessages(
     }
   }
 
+  dropOldCallLines(session);
   saveSession(session);
   return session;
+}
+
+/**
+ * Takes out of a session the call lines older than its last `CALL_LINES`, and their places in the unread count as
+ * `deleteMessage` does. All of them are in its list: the stored copy never leaves one out.
+ */
+function dropOldCallLines(session: ChatSession): void {
+  let drop = -CALL_LINES;
+  for (const m of session.messages) if (m.callEvent) drop++;
+  if (drop <= 0) return;
+  const older = session.older ?? 0;
+  const lastRead = getLastReadCount(session.id);
+  let read = lastRead;
+  session.messages = session.messages.filter((m, i) => {
+    if (!m.callEvent || drop <= 0) return true;
+    drop--;
+    if (older + i < lastRead) read--;
+    return false;
+  });
+  if (read !== lastRead) setReadCount(session.id, read);
 }
 
 /**
@@ -692,28 +744,42 @@ function chatKeys(): ChatKeys[] {
   const seen = new Set<string>();
   for (const key of sessionKeys()) {
     seen.add(key);
-    let contact = contacts.get(key);
-    if (!contact) {
-      try {
-        const session = JSON.parse(readKey(key) ?? "null") as ChatSession | null;
-        // As `listSessions` counts a chat.
-        if (!session?.id || !session.mySeedB64 || !session.peerPubKeyB64 || !session.encKeyB64) continue;
-        contacts.set(key, contact = { key, id: session.id, peer: session.peerPubKeyB64, seed: session.mySeedB64 });
-      } catch {
-        continue;
-      }
-    }
-    all.push(contact);
+    const contact = contactOf(key);
+    if (contact) all.push(contact);
   }
   for (const key of contacts.keys()) if (!seen.has(key)) contacts.delete(key);
   return all;
 }
 
-/** Of the chats that match, the one the list shows first (`listSessions` is read only when there are two). */
+/** The keys of the chat stored under `key`, parsed the first time they are asked for. */
+function contactOf(key: string): ChatKeys | undefined {
+  const known = contacts.get(key);
+  if (known) return known;
+  try {
+    const session = JSON.parse(readKey(key) ?? "null") as ChatSession | null;
+    // As `listSessions` counts a chat.
+    if (!session?.id || !session.mySeedB64 || !session.peerPubKeyB64 || !session.encKeyB64) return undefined;
+    const contact = { key, id: session.id, peer: session.peerPubKeyB64, seed: session.mySeedB64 };
+    contacts.set(key, contact);
+    return contact;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The contact's key in the chat `sessionId`, without reading its messages again: what finds its link in the engine's state. */
+export function sessionPeerKey(sessionId: string): string | undefined {
+  return contactOf(getKey(sessionId))?.peer;
+}
+
+/**
+ * Of the chats that match, the one the list shows first: with two, the list's order is read through the page's one
+ * cache (`listShownSessions`), so a chat's stored copy is parsed only when it changed, not per call.
+ */
 function firstOf(matches: ChatKeys[]): ChatKeys | undefined {
   if (matches.length < 2) return matches[0];
   const ids = new Set(matches.map((m) => m.id));
-  const id = listSessions().find((s) => ids.has(s.id))?.id;
+  const id = listShownSessions().find((s) => ids.has(s.id))?.id;
   return matches.find((m) => m.id === id);
 }
 
@@ -811,9 +877,26 @@ function countsAsUnread(message: ChatMessage): boolean {
   return message.sender !== "me" && message.systemEvent?.type !== "join";
 }
 
+/** The most calls one line says it stands for: a stored count past it (a damaged or hand-edited copy) reads as this. */
+export const MAX_CALL_LINE_COUNT = 9_999;
+
+/**
+ * How many calls a call's line stands for (`callEvent.count`): one for a line without a count, as every line written
+ * before it was, and for a count that is not a whole number of at least two. Never more than `MAX_CALL_LINE_COUNT`.
+ */
+export function callLineCount(event: { count?: unknown } | undefined): number {
+  const count = event?.count;
+  if (typeof count !== "number" || !Number.isInteger(count) || count < 2) return 1;
+  return Math.min(count, MAX_CALL_LINE_COUNT);
+}
+
+/** What a message adds to the unread count: a line of several missed calls, each of them (`callLineCount`). */
 function unreadAfter(messages: readonly ChatMessage[], read: number): number {
   let unread = 0;
-  for (let i = Math.max(0, read); i < messages.length; i++) if (countsAsUnread(messages[i]!)) unread++;
+  for (let i = Math.max(0, read); i < messages.length; i++) {
+    const message = messages[i]!;
+    if (countsAsUnread(message)) unread += message.callEvent ? callLineCount(message.callEvent) : 1;
+  }
   return unread;
 }
 

@@ -10,6 +10,7 @@ import { JUMP_TO } from "../hooks/useJumpTo";
 import { useMinuteClock } from "../hooks/useMinuteClock";
 import { useTaskBoard, type TaskBoardData } from "../hooks/useTaskBoard";
 import { RESULT_TONE, sortRoutines, untilIn } from "../lib/statusCards";
+import { getPrefix } from "../lib/storage";
 import { COLUMN_PAGE, boardModel, boardMove, type BoardColumn, type BoardEntry, type BoardGroup, type BoardGrouping, type BoardRoutine } from "../lib/taskBoard";
 
 /*
@@ -21,6 +22,19 @@ import { COLUMN_PAGE, boardModel, boardMove, type BoardColumn, type BoardEntry, 
  */
 
 const GROUPINGS: readonly BoardGrouping[] = ["status", "bot", "chat"];
+
+/**
+ * When the person last cleared the finished tasks ("Clear finished"), on this device and for this profile: the board
+ * leaves out a finished task last changed by then. Nothing is sent and no card is deleted; a bot's next update of one
+ * brings it back.
+ */
+const clearedKey = () => `${getPrefix()}tasks_cleared_at`;
+function readClearedAt(): number | undefined {
+  try { const at = Number(localStorage.getItem(clearedKey())); return at > 0 ? at : undefined; } catch { return undefined; }
+}
+function writeClearedAt(at: number): void {
+  try { localStorage.setItem(clearedKey(), String(at)); } catch { /* storage unavailable: cleared for this visit only */ }
+}
 const icon = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
 
 /** A column's dot, by status: the tones the cards themselves use. */
@@ -125,6 +139,7 @@ export function Tasks() {
   const [tag, setTag] = useState<string>();
   const [info, setInfo] = useState(false);
   const [tab, setTab] = useState(0);
+  const [clearedAt, setClearedAt] = useState(readClearedAt);
   const boardRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const tabsId = useId();
@@ -132,7 +147,8 @@ export function Tasks() {
 
   const statusWord = (status: TaskStatus) => t(`cards.task.status.${status}`);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `statusWord` follows `t`
-  const model = useMemo(() => boardModel(board.tasks, { grouping, filter, tag, now, older, statusWord }), [board.tasks, grouping, filter, tag, now, older, t]);
+  const model = useMemo(() => boardModel(board.tasks, { grouping, filter, tag, now, older, clearedAt, statusWord }), [board.tasks, grouping, filter, tag, now, older, clearedAt, t]);
+  const clearFinished = () => { const at = Date.now(); writeClearedAt(at); setClearedAt(at); };
   const routines = useMemo(() => sortRoutines(board.routines), [board.routines]);
   const nameOf = (group: BoardGroup) => group.label ?? t(`cards.board.column.${group.id as BoardColumn}`);
   const showing = routines.length && (view === "routines" || !board.tasks.length) ? "routines" : "tasks";
@@ -199,6 +215,12 @@ export function Tasks() {
         <>
           <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2">
             <p data-testid="tasks-summary" className="m-0 text-xs text-text-secondary">{summary}</p>
+            {showing === "tasks" && model.finished > 0 && (
+              <button type="button" data-testid="tasks-clear-finished" onClick={clearFinished} title={t("cards.board.clearFinishedHint")}
+                className="cursor-pointer rounded-full px-2.5 py-1 text-xs font-medium text-text-secondary hover:bg-surface-hover hover:text-text-primary focus-visible:outline-2 focus-visible:outline-accent max-md:min-h-9">
+                {t("cards.board.clearFinished")}
+              </button>
+            )}
             {routines.length > 0 && board.tasks.length > 0 && (
               <div role="group" aria-label={t("cards.board.view.label")} className="flex items-center gap-1">
                 <button type="button" data-testid="tasks-view-tasks" aria-pressed={showing === "tasks"} onClick={() => setView("tasks")} className={pill(showing === "tasks")}>{t("cards.board.view.tasks")} <span className="tabular-nums opacity-80">{model.total}</span></button>

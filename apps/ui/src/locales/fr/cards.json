@@ -26,6 +26,8 @@
       "tagsLabel": "Étiquettes :",
       "updatedLabel": "Mise à jour :"
     },
+    "clearFinished": "Effacer les terminées",
+    "clearFinishedHint": "Masque sur cet appareil les tâches terminées, échouées et annulées. La prochaine mise à jour d'un bot en ramène une.",
     "column": {
       "blocked": "Bloquées",
       "closed": "Arrêtées",

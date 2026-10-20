@@ -3,10 +3,12 @@
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} mensagens novas",
     "messagesFrom": "{{count}} mensagens novas de {{name}}",
-    "pinMoved": "Movida para a posição {{place}} de {{count}} conversas fixadas"
+    "pinMoved": "Movida para a posição {{place}} de {{count}} conversas fixadas",
+    "rowMoved": "Agora na posição {{place}} de {{count}}"
   },
   "audio": {
     "cantPlay": "Este aparelho não reproduz este áudio ({{format}}). Baixe para ouvir.",
+    "message": "Áudio",
     "pause": "Pausar áudio",
     "play": "Tocar áudio",
     "position": "Posição no áudio",
@@ -15,8 +17,8 @@
   },
   "compat": {
     "burned": "A conversa foi apagada",
-    "continued": "Convidou o seu contacto para uma nova conversa.",
-    "hint": "Esta conversa foi criada com um código do Ghostly 0.4. Texto e chamadas continuam a funcionar nos dois sentidos; uma nova conversa acrescenta ficheiros, pagamentos e mensagens guardadas.",
+    "continued": "Você convidou seu contato para uma nova conversa.",
+    "hint": "Esta conversa foi criada com um código do Ghostly 0.4. Texto e chamadas continuam funcionando nos dois sentidos; uma nova conversa acrescenta arquivos, pagamentos e mensagens guardadas.",
     "label": "Conversa de compatibilidade · Ghostly antigo",
     "open": "Abrir a nova conversa",
     "overLimit": "Não foi possível publicar a mensagem: limite da DHT excedido.",
@@ -26,6 +28,8 @@
   "connecting": "conectando",
   "createdHere": "Você criou esta conversa",
   "deleteArrivingFileHint": "Apagada só aqui. O arquivo para de chegar; seu contato vê o envio cancelado.",
+  "deleteForEveryone": "Apagar para todos",
+  "deleteForEveryoneHint": "Apagada também nos aparelhos do contato ou do grupo. Um app de antes disso mostra \"Mensagem removida\" no lugar; uma cópia que alguém salvou continua com essa pessoa.",
   "deleteMessage": "Apagar mensagem",
   "deleteMessageHint": "Apagada só aqui. Seu contato continua com a cópia dele.",
   "deleteSendingFileHint": "Apagada só aqui. O envio para; seu contato não vai receber o arquivo.",
@@ -176,11 +180,13 @@
     "messages": "{{count}} mensagens",
     "noChats": "Nenhuma conversa ainda",
     "noMatch": "Nenhuma conversa com esse nome",
+    "partial": "{{sent}} de {{count}} enviadas",
     "pick": "Escolha até {{count}}",
     "search": "Buscar conversas",
     "select": "Selecionar",
     "selected": "{{count}} selecionadas",
     "send": "Enviar",
+    "sentTo": "Enviado para {{names}}",
     "title": "Encaminhar para…"
   },
   "hold": {
@@ -230,14 +236,15 @@
     "noRoom": "Espaço insuficiente: {{size}} livres",
     "noRoomToPlay": "Sem espaço livre em disco para tocar aqui. Baixe o arquivo.",
     "notYet": "Toca depois de enviado.",
+    "positionOf": "{{position}} de {{duration}}",
     "wantsToSend": "{{name}} quer enviar · {{size}} livres"
   },
   "menu": {
     "continueNew": "Continuar numa nova conversa",
     "hold": "Reter mensagens…",
+    "more": "Mais…",
+    "moreTitle": "Mais opções",
     "moveDown": "Mover para baixo",
-    "moveFirst": "Já é a primeira",
-    "moveLast": "Já é a última",
     "moveUp": "Mover para cima",
     "pin": "Fixar conversa",
     "refresh": "Atualizar",
@@ -272,6 +279,11 @@
     "retry": "Enviar de novo"
   },
   "noMessages": "Nenhuma mensagem",
+  "nowPlaying": {
+    "close": "Parar e fechar",
+    "label": "Tocando agora",
+    "open": "Mostrar na conversa"
+  },
   "offline": "offline",
   "online": "online",
   "options": "Opções",
@@ -440,6 +452,7 @@
     "record": "Gravar mensagem de voz",
     "recordHint": "Segure para gravar ou clique para gravar sem as mãos",
     "recorded": "Gravado {{time}}",
+    "recording": "Gravando",
     "sent": "Mensagem de voz enviada",
     "slideCancel": "Deslize para cancelar",
     "speed": "Velocidade {{speed}}",

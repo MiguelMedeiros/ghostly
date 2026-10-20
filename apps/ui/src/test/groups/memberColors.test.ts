@@ -1,9 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MEMBER_TEXT, memberColorIndex, memberText, rosterColors } from "../../lib/memberColors";
+import * as senderRuns from "../../lib/senderRuns";
 import { RUN_GAP_MS, authorsOf } from "../../lib/senderRuns";
+
+// Read through the module: a test of what is not there yet fails on its own, not the whole file.
+const authorsMemo = (...args: Parameters<typeof senderRuns.authorsMemo>) => senderRuns.authorsMemo(...args);
 
 // covers: groups.member-colors
 
@@ -212,5 +216,57 @@ describe("runs of a member's messages (authorsOf)", () => {
     expect(authors.get("1")).toEqual({ key: A, name: "Ana", picture: "data:image/png;base64,AA", first: true, last: true });
     expect(authors.get("2")).toEqual({ key: B, name: "", first: true, last: true });
     expect(authors.get("3")).toEqual({ key: C, name: "Cy", first: true, last: true });
+  });
+
+  it("works out each row's day once, not four date strings a row", () => {
+    // A catch-up into a 10k-message group spent most of its main thread here (two Dates and two toDateString per pair).
+    clock = NOON;
+    const rows = Array.from({ length: 3_000 }, (_, i) => msg(String(i), i % 7 === 6 ? B : A));
+    const RealDate = Date;
+    let made = 0;
+    vi.stubGlobal("Date", class extends RealDate { constructor(...args: ConstructorParameters<typeof Date>) { super(...args); made++; } });
+    const strings = vi.spyOn(RealDate.prototype, "toDateString");
+    try {
+      authorsOf(rows, group, new Set(), () => undefined);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    expect(strings).not.toHaveBeenCalled();
+    expect(made).toBeLessThanOrEqual(rows.length);
+  });
+});
+
+describe("authors kept from one render to the next (authorsMemo)", () => {
+  const A = "a".repeat(52), B = "b".repeat(52);
+  const roster = (nick = "Ana") => ({ members: [{ key: A, nick, role: "member" as const, me: false, online: true, missing: 0 }, { key: B, role: "member" as const, me: false, online: true, missing: 0 }], formerNames: {} });
+  const rows = [{ id: "1", sender: "peer", member: A, timestamp: 1 }, { id: "2", sender: "peer", member: B, timestamp: 2 }, { id: "3", sender: "peer", member: B, timestamp: 3 }];
+
+  it("gives the same answer without working it out again while nothing it reads has changed", () => {
+    const memo = authorsMemo();
+    // The folded rows are memoized on the messages (GroupChat's `stackHeads`): the same map while they stay.
+    const none = new Map<string, string>();
+    const first = memo(rows, none, roster(), new Set(), () => undefined);
+    // Every engine state rebuilds the group and the set of hidden notes: equal ones are the same input.
+    expect(memo(rows, none, roster(), new Set(), () => undefined)).toBe(first);
+    expect(first.get("2")).toMatchObject({ key: B, first: true, last: false });
+  });
+
+  it("works it out again for new rows, a fold, a hidden note, a new name or a new picture", () => {
+    const memo = authorsMemo();
+    const first = memo(rows, new Map(), roster(), new Set(), () => undefined);
+    const more = [...rows, { id: "4", sender: "peer", member: B, timestamp: 4 }];
+    const grown = memo(more, new Map(), roster(), new Set(), () => undefined);
+    expect(grown).not.toBe(first);
+    expect(grown.get("4")).toMatchObject({ first: false, last: true });
+    // Folded under another row: out of the runs.
+    const folded = memo(more, new Map([["4", "3"]]), roster(), new Set(), () => undefined);
+    expect(folded.has("4")).toBe(false);
+    expect(folded.get("3")).toMatchObject({ last: true });
+    const hidden = memo(more, new Map([["4", "3"]]), roster(), new Set(["x"]), () => undefined);
+    expect(hidden).not.toBe(folded);
+    const renamed = memo(more, new Map([["4", "3"]]), roster("Anna"), new Set(["x"]), () => undefined);
+    expect(renamed.get("1")).toMatchObject({ name: "Anna" });
+    const pictured = memo(more, new Map([["4", "3"]]), roster("Anna"), new Set(["x"]), key => key === B ? "data:image/png;base64,AA" : undefined);
+    expect(pictured.get("2")).toMatchObject({ picture: "data:image/png;base64,AA" });
   });
 });

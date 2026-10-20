@@ -41,6 +41,11 @@ describe("GroupChat: what the header says", () => {
     expect(composer()).toBeEnabled();
   });
 
+  it("gives the group's name its own direction, so in Arabic a Latin name is cut at its end, not its start", () => {
+    openGroup(active({ name: "Neighbourhood book club" }));
+    expect(screen.getByTestId("group-name")).toHaveAttribute("dir", "auto");
+  });
+
   it("names a group that has no name", () => {
     openGroup(active({ name: "", members: [members[0]] }));
     expect(screen.getByTestId("group-name")).toHaveTextContent("A group");
@@ -344,6 +349,24 @@ describe("GroupChat: out of the group", () => {
     expect(screen.getByTestId("group-forget")).toBeInTheDocument();
   });
 
+  it("removed while typing: the focus goes to the line that says so, not to the page, as the field turns off under it", async () => {
+    const { user } = openGroup(active());
+    await user.click(composer());
+    expect(composer()).toHaveFocus();
+    act(() => fakeEngine.update({ groups: [active({ status: "removed", statusReason: "You were removed from this group", canSend: false })] }));
+    expect(composer()).toBeDisabled();
+    expect(screen.getByTestId("group-notice")).toHaveFocus();
+  });
+
+  it("the composer turned off while the focus is elsewhere leaves the focus where it is", async () => {
+    const { user } = openGroup(active());
+    await user.click(screen.getByTestId("group-options"));
+    await user.keyboard("{Escape}");
+    expect(screen.getByTestId("group-options")).toHaveFocus();
+    act(() => fakeEngine.update({ groups: [active({ status: "removed", statusReason: "You were removed from this group", canSend: false })] }));
+    expect(screen.getByTestId("group-options")).toHaveFocus();
+  });
+
   it("says how to come back when removed from a community, and a line when back in", async () => {
     openGroup(active({ profile: "community", status: "removed", statusReason: "You were removed from this group", canSend: false }),
       [stored({ id: "event:4:joined::1", event: "joined", text: "You joined again" })]);
@@ -487,6 +510,32 @@ describe("GroupChat: the options menu", () => {
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete from this device" }));
     expect(engine.callsTo("forgetGroup")).toEqual([{ groupId: "group-1" }]);
     expect(await screen.findByText("Chat list")).toBeInTheDocument();
+  });
+
+  it.each([["Leave", "group-leave", "leaveGroup"], ["Delete from this device", "group-forget", "forgetGroup"]] as const)(
+    "%s from the keyboard hands the focus to the next row of the list, or to New after the last", async (_, item, method) => {
+    // It was left on the page's body once home: the next Tab started again from the top.
+    const mine = active({ members: [member({ key: ME, me: true, online: true }), member({ key: ALICE, nick: "Alice", role: "admin", online: true })] });
+    const other = { ...mine, id: "group-2", name: "Others" };
+    fakeEngine.on("groupMessages", () => []).on("updateSettings", () => undefined);
+    for (const [groups, next] of [[[mine, other], "group-2"], [[mine], undefined]] as const) {
+      fakeEngine.update({ groups: [...groups] });
+      const { user, engine, unmount } = renderApp(<UpdateProvider><Sidebar /><Routes>
+        <Route path="/" element={<p>Chat list</p>} />
+        <Route path="/group/:groupId" element={<GroupChat />} />
+      </Routes></UpdateProvider>, { route: "/group/group-1" });
+      engine.on(method, () => { fakeEngine.update({ groups: groups.slice(1) }); });
+      screen.getByTestId("group-options").focus();
+      await user.keyboard("{Enter}");
+      screen.getByTestId(item).focus();
+      await user.keyboard("{Enter}");
+      within(screen.getByTestId("group-leave-dialog")).getByTestId("group-leave-confirm").focus();
+      await user.keyboard("{Enter}");
+      expect(await screen.findByText("Chat list")).toBeInTheDocument();
+      const row = next && screen.getAllByTestId("group-row").find(r => r.dataset.group === next)!;
+      await vi.waitFor(() => expect(row ? within(row).getByTestId("group-row-open") : screen.getByTestId("sidebar-new-chat")).toHaveFocus());
+      unmount();
+    }
   });
 
   it("keeps the admin from deleting the group while no member is online to become admin", async () => {
@@ -695,7 +744,7 @@ describe("GroupChat: leaving", () => {
 
   it("leaves, and goes back to the chat list: the group is gone from it", async () => {
     const { user, engine } = openGroup(active());
-    engine.on("leaveGroup", () => undefined);
+    engine.on("leaveGroup", () => ({}));
     const dialog = await leaveFromMenu(user);
     await user.click(within(dialog).getByTestId("group-leave-confirm"));
     expect(engine.callsTo("leaveGroup")).toEqual([{ groupId: "group-1" }]);
@@ -705,7 +754,7 @@ describe("GroupChat: leaving", () => {
   it("forgets the group's mute with its history: rejoining by link reuses the group id, and it is not muted then", async () => {
     setChatMute(groupChat("group-1"), "forever");
     const { user, engine } = openGroup(active());
-    engine.on("leaveGroup", () => undefined);
+    engine.on("leaveGroup", () => ({}));
     const dialog = await leaveFromMenu(user);
     await user.click(within(dialog).getByTestId("group-leave-confirm"));
     expect(await screen.findByText("Chat list")).toBeInTheDocument();
@@ -714,7 +763,7 @@ describe("GroupChat: leaving", () => {
 
   it("forgets what was typed in it and its read mark: a community rejoined by link had the old words in its field", async () => {
     const { user, engine } = openGroup(active());
-    engine.on("leaveGroup", () => undefined);
+    engine.on("leaveGroup", () => ({}));
     await user.type(composer(), "the door code is 4471");
     expect(getSessionDraft("group:group-1")).toBe("the door code is 4471");
     markGroupRead("group-1");
@@ -957,5 +1006,50 @@ describe("GroupChat: the mark on a message of mine", () => {
     expect(mark).toHaveAccessibleName("Sent");
     await user.click(mark);
     expect(screen.getByTestId("message-delivery-tip")).toHaveTextContent("Sent to the group. Groups have no receipts.");
+  });
+});
+
+describe("GroupChat: the read mark", () => {
+  // Every write is a `storage` event in each other page of the app, and their chat lists redraw for it.
+  it("is written once on opening, not again for engine states where nothing new came", () => {
+    const at = 1_700_000_000_000;
+    const { engine } = openGroup(active({ lastMessageAt: at }));
+    const before = groupReadAt("group-1");
+    expect(before).toBeGreaterThanOrEqual(at);
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    for (let i = 0; i < 20; i++) {
+      act(() => engine.update({ groups: [active({ lastMessageAt: at, members: [members[0], { ...members[1], online: i % 2 === 0 }, members[2]] })] }));
+    }
+    expect(setItem.mock.calls.filter(([key]) => key.includes("group_read_"))).toEqual([]);
+    expect(groupReadAt("group-1")).toBe(before);
+  });
+
+  it("is written again when a new message comes, and once more when a hidden page shows what came meanwhile", () => {
+    let hidden = false;
+    vi.spyOn(document, "visibilityState", "get").mockImplementation(() => (hidden ? "hidden" : "visible"));
+    const at = Date.now() + 60_000; // a member's clock ahead of this one
+    const { engine } = openGroup(active({ lastMessageAt: at }));
+    expect(groupReadAt("group-1")).toBe(at);
+    act(() => engine.update({ groups: [active({ lastMessageAt: at + 1 })] }));
+    expect(groupReadAt("group-1")).toBe(at + 1);
+    hidden = true;
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    act(() => engine.update({ groups: [active({ lastMessageAt: at + 2 })] }));
+    expect(groupReadAt("group-1")).toBe(at + 1);
+    hidden = false;
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(groupReadAt("group-1")).toBe(at + 2);
+  });
+
+  // After a restart a message written before the mark but handed over later has lastMessageAt at its writing time,
+  // lastPeerMessageAt (and lastMentionAt) at its arrival: the list calls it unread, so opening reads it.
+  it("reads a member's message that came after the mark though it was written before", () => {
+    const read = Date.now() + 60_000;
+    markGroupRead("group-1", read);
+    const late = active({ lastMessageAt: read, lastPeerMessageAt: read + 53_000 });
+    const { engine } = openGroup(late);
+    expect(groupReadAt("group-1")).toBe(read + 53_000);
+    act(() => engine.update({ groups: [{ ...late, lastMentionAt: read + 54_000 }] }));
+    expect(groupReadAt("group-1")).toBe(read + 54_000);
   });
 });

@@ -1,0 +1,1 @@
+On a session where both sides list `files/3`, a receiver refuses a new `files/2` file (`pf-cancel`, `target: "sender"`), so every file goes through `files/3`'s consent; a transfer already under way carries on. A `files/2` file larger than the room the receiver has left is refused at `pf-start`. Every Ghostly sender already uses `files/3` when both list it. No new frame.

@@ -16,7 +16,7 @@ vi.mock("@arkade-os/sdk", async (original) => ({ ...await original<object>(), Re
 const arkBalance = { value: 0 };
 vi.mock("../src/engine/paymentAdapters/arkade", () => ({
   ARK_NETWORKS: ["bitcoin", "mutinynet", "signet", "regtest"],
-  ArkadeAdapter: { connect: vi.fn(async (config: { provider: string; network: string }) => ({ config, address: async () => config.network === "bitcoin" ? "ark1me" : "tark1me", balance: async () => arkBalance.value, boardingAddress: async () => "tb1qme", incoming: async () => 0, expired: async () => ({ recoverable: 0, sweeping: 0 }), dispose: vi.fn() })) },
+  ArkadeAdapter: { connect: vi.fn(async (config: { provider: string; network: string }) => ({ config, address: async () => config.network === "bitcoin" ? "ark1me" : "tark1me", balance: async () => arkBalance.value, boardingAddress: async () => "tb1qme", balances: async () => ({ balance: arkBalance.value, incoming: 0 }), expired: async () => ({ recoverable: 0, sweeping: 0 }), dispose: vi.fn() })) },
 }));
 vi.mock("../src/engine/paymentAdapters/usdt", () => ({
   UsdtAdapter: {
@@ -256,6 +256,20 @@ describe("removing a wallet", () => {
 
     await node.walletRemove({ type: "lightning", network: "testnet", card: card.card });
     expect(desk.payment("req-ln")).toMatchObject({ state: "failed", closed: true, error: `you removed the Testnet Lightning card “${name}” it was paid to` });
+  });
+
+  it("an invoice just made is in the next state, and the state the page already has is left as it was", async () => {
+    // On the web the page holds the engine's state itself, and draws the Wallets page again only when the wallets differ
+    // from what it drew (`useWalletPlatform`): written into the state it holds, the new invoice would never show.
+    const { node, started } = engine();
+    await started;
+    const card = await node.walletCreate({ type: "lightning", network: "testnet", providerId: "fake-lightning", values: { token: "a-secret-token" } });
+    await node["refreshWallet"]();
+    const drawn = node.getState().wallet;
+    const before = structuredClone(drawn.networks);
+    await node.walletReceiveLightning({ amount: 30, network: "testnet", card: card.card });
+    await vi.waitFor(() => expect(node.getState().wallet.networks?.testnet.awaiting).toEqual([{ type: "lightning", kind: "invoice", amount: 30, card: card.card }]));
+    expect(drawn.networks).toEqual(before);
   });
 
   it("Cashu with a Lightning payment still in flight at its mint waits for it", async () => {

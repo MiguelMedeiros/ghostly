@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { VOICE_LIMITS, formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
-import { toChosenSpeaker } from "../../lib/mediaDevices";
+import { mediaDeniedText, toChosenSpeaker } from "../../lib/mediaDevices";
 import { MICROPHONE_MESSAGES, MicrophoneError, VoiceRecorder, canRecordVoice, type MicrophoneProblem } from "../../lib/voiceRecorder";
 import { useT, type Translate } from "../../contexts/I18nContext";
 
 /** The microphone's own problems, in the person's language; a browser's words about it stay as they are. */
 function microphoneText(t: Translate, problem: MicrophoneProblem): string {
   switch (problem) {
-    case "denied": return t("chat.voice.micDenied");
+    // On an iPhone or iPad, only the Settings app turns a refused microphone back on: it says where.
+    case "denied": return mediaDeniedText() === "settings.media.deniedIos" ? t("settings.media.deniedIos") : t("chat.voice.micDenied");
     case "unavailable": return t("chat.voice.micUnavailable");
     case "unsupported": return t("chat.voice.micUnsupported");
   }
@@ -70,7 +71,8 @@ const PauseIcon = ({ size = 18 }: { size?: number }) => (
  * Hold to record and release to send; slide sideways to cancel, up to lock. A mouse click (or the
  * keyboard) records hands-free straight away, like WhatsApp Web. Hands-free, the mic becomes the
  * send button at once: one press sends. Beside it: discard, pause (listen back while paused) and
- * resume. Enter sends; Esc discards, asking first once there is more than a few seconds to lose.
+ * resume. Enter sends (on one of those buttons reached from the keyboard, it presses that button);
+ * Esc discards, asking first once there is more than a few seconds to lose.
  */
 export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, onActiveChange }: Props) {
   const t = useT();
@@ -87,6 +89,9 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
 
   const recorderRef = useRef<VoiceRecorder | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  /** The bar's button a pointer pressed, while it keeps the focus that press gave it. */
+  const pressedRef = useRef<Element | null>(null);
   const keepRef = useRef<HTMLButtonElement>(null);
   const gestureRef = useRef<{ id: number; x: number; y: number; at: number; mouse: boolean } | null>(null);
   /** A press on the send button (hands-free): it sends when that pointer lets go on it. */
@@ -134,7 +139,13 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     setPreview(null);
   }, []);
 
+  /** The bar is about to close (or its buttons to turn disabled) under the focus: it goes to the mic, which stays. */
+  const focusOutOfBar = useCallback(() => {
+    if (barRef.current?.contains(document.activeElement)) buttonRef.current?.focus();
+  }, []);
+
   const reset = useCallback(() => {
+    focusOutOfBar();
     stopPreview();
     recorderRef.current = null;
     gestureRef.current = null;
@@ -146,7 +157,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     setElapsed(0);
     setLevels([]);
     setDrag({ x: 0, y: 0 });
-  }, [stopPreview]);
+  }, [focusOutOfBar, stopPreview]);
 
   const cancel = useCallback((why?: string) => {
     recorderRef.current?.cancel();
@@ -164,6 +175,8 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     }
     const locked = modeRef.current === "locked";
     sendingRef.current = true;
+    // Sending turns the bin and Pause disabled before the bar goes.
+    focusOutOfBar();
     setConfirmingBoth(false);
     setPhase("sending");
     stopPreview();
@@ -177,7 +190,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
     } finally {
       sendingRef.current = false;
     }
-  }, [cancel, reset, stopPreview, showHint, onSend, onError, t]);
+  }, [cancel, reset, focusOutOfBar, stopPreview, showHint, onSend, onError, t]);
 
   const begin = useCallback(async (next: Exclude<Mode, "idle">) => {
     if (disabled || recorderRef.current) return;
@@ -198,7 +211,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
       return;
     }
     if (recorderRef.current !== recorder) return;
-    setAnnounce("Recording");
+    setAnnounce(t("chat.voice.recording"));
     if (pendingSendRef.current) { pendingSendRef.current = false; void send(); return; }
     setPhase("recording");
   }, [disabled, unavailable, onError, reset, showHint, send, t]);
@@ -255,6 +268,15 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
 
   useEffect(() => { if (confirming) keepRef.current?.focus(); }, [confirming]);
 
+  /**
+   * One of the bar's buttons, reached from the keyboard: Enter presses it (the bin discards, it does not send).
+   * The one a click left the focus on (Resume, say) is not, so Enter there still sends.
+   */
+  const keyboardOnBarButton = (target: EventTarget | null) => {
+    const button = target instanceof Element ? target.closest("button") : null;
+    return !!button && !!barRef.current?.contains(button) && button !== pressedRef.current;
+  };
+
   // Esc discards, Enter sends: wherever focus is while recording. Asking "discard?", Esc keeps.
   useEffect(() => {
     if (mode === "idle") return;
@@ -265,7 +287,7 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
         return;
       }
       if (event.key === "Escape") { event.preventDefault(); askDiscard(); }
-      else if (event.key === "Enter" && !event.repeat && modeRef.current === "locked") { event.preventDefault(); void send(); }
+      else if (event.key === "Enter" && !event.repeat && modeRef.current === "locked" && !keyboardOnBarButton(event.target)) { event.preventDefault(); void send(); }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -401,7 +423,9 @@ export function VoiceRecorderButton({ onSend, unavailable, disabled, onError, on
   return (
     <>
       {recording && (
-        <div className="voice-bar" data-testid="voice-bar" data-mode={mode} data-phase={phase} data-confirming={confirming || undefined} role="group" aria-label={t("chat.voice.message")}>
+        <div ref={barRef} className="voice-bar" data-testid="voice-bar" data-mode={mode} data-phase={phase} data-confirming={confirming || undefined} role="group" aria-label={t("chat.voice.message")}
+          onPointerDownCapture={(event) => { pressedRef.current = event.target instanceof Element ? event.target.closest("button") : null; }}
+          onBlur={(event) => { if (event.target === pressedRef.current) pressedRef.current = null; }}>
           {confirming ? (
             <div className="voice-confirm" role="alertdialog" aria-label={t("chat.voice.discardAsk")} data-testid="voice-confirm">
               <span className="voice-confirm-text">{t("chat.voice.discardAsk")}</span>

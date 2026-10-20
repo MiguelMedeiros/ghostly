@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-linked-files-pick-cancel"
+description = "Enables the linked_files_pick_cancel command without any pre-configured scope."
+commands.allow = ["linked_files_pick_cancel"]
+
+[[permission]]
+identifier = "deny-linked-files-pick-cancel"
+description = "Denies the linked_files_pick_cancel command without any pre-configured scope."
+commands.deny = ["linked_files_pick_cancel"]

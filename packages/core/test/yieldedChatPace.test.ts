@@ -43,14 +43,20 @@ describe("a chat with no WebRTC that gave its native listener up", () => {
     for (const desk of [yielder, contact]) desk.side.link.session.setActive(false);
     await run(60_000);
 
+    const readsOf = (desk: Desk) => pkarr.readsByKey.get(keyOf(desk)) ?? 0;
+    const atYield = readsOf(yielder), dialsAtYield = native.dials;
     const yielding = yielder.side.link.yieldEndpoint("hyperdht/1", 0);
     await run(2_000);
     expect(await yielding, "the listener is given up").toBe(true);
-    // The yielder's record now lists HyperDHT undescribed, and the contact reads it.
+    // The yielder's record now lists HyperDHT undescribed, and the contact reads it at its next look.
+    await run(18_000);
     contact.side.link.learnPeerTransports(["hyperdht/1"], {}, true);
-    await run(2 * 60_000);
+    await run(2 * 60_000 - 20_000);
+    // The yield is no app quitting: the contact used to watch for it to come back, fast for 30 s and at the active pace
+    // up to 2 min (89 reads). At the background pace: 6 reads, and a few for the record that changed.
+    expect(readsOf(yielder) - atYield, "the contact at the background pace from the yield on").toBeLessThanOrEqual(12);
+    expect(native.dials, "nothing dialled after the yield").toBe(dialsAtYield);
 
-    const readsOf = (desk: Desk) => pkarr.readsByKey.get(keyOf(desk)) ?? 0;
     const before = { yielder: readsOf(yielder), contact: readsOf(contact) };
     const dialsBefore = native.dials;
     await run(5 * 60_000);
@@ -66,5 +72,34 @@ describe("a chat with no WebRTC that gave its native listener up", () => {
     await run(5_000);
     expect(native.dials, "dialled on the new listener").toBeGreaterThan(dialsBefore);
     expect(yielder.side.link.isDataLinkOpen, "live again").toBe(true);
+  }, 120_000);
+
+  it("is not dialled on the listener it gives up when the contact's key dials and reads and dials are fast", async () => {
+    // Reads and dials shorter than the goodbye's wait (YIELD_BYE_MS), as on loopback or a LAN: the contact dialled the
+    // record that still described the listener as soon as it heard the goodbye, the yielder took that dial-in and closed
+    // it with its endpoint, and the contact watched it as an app that quit: 90 reads in 2 min (bug hunt, 2026-10-16).
+    const pkarr = new MemoryPkarr({ ...DESKTOP_NETWORK, readMs: 20 }), native = new NativeWorld(), made = invitationWhere("joiner");
+    native.dialMs = 30; native.latencyMs = 5;
+    const yielder = desktop(native, "ana", open(made.inviter, pkarr, { dht: true, link: { rtcAvailable: false } }));
+    await run(2_000);
+    const contact = desktop(native, "bia", open(made.joiner, pkarr, { dht: true, link: { rtcAvailable: false } }));
+    await run(10_000);
+    yielder.side.link.learnPeerTransports(...record(contact), true);
+    contact.side.link.learnPeerTransports(...record(yielder), true);
+    await run(10_000);
+    expect(yielder.side.link.isDataLinkOpen && contact.side.link.isDataLinkOpen, "live").toBe(true);
+    for (const desk of [yielder, contact]) desk.side.link.session.setActive(false);
+    await run(60_000);
+
+    const readsOf = (desk: Desk) => pkarr.readsByKey.get(keyOf(desk)) ?? 0;
+    const atYield = readsOf(yielder);
+    const yielding = yielder.side.link.yieldEndpoint("hyperdht/1", 0);
+    let reopened = false;
+    for (let i = 0; i < 20; i++) { await run(100); if (contact.side.link.isDataLinkOpen) reopened = true; }
+    expect(await yielding, "the listener is given up").toBe(true);
+    expect(reopened, "no session on the listener being given up").toBe(false);
+    contact.side.link.learnPeerTransports(["hyperdht/1"], {}, true);
+    await run(2 * 60_000 - 2_000);
+    expect(readsOf(yielder) - atYield, "the contact at the background pace from the yield on").toBeLessThanOrEqual(12);
   }, 120_000);
 });

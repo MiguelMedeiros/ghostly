@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { LINK_PREVIEW_LIMITS, canonicalUrl, parseLinkPreview, sanitizePreviewImage, type LinkPreview } from "@ghostly/core";
+import { IMAGE_LIMITS, LINK_PREVIEW_LIMITS, canonicalUrl, imageSize, parseLinkPreview, previewable, sanitizePreviewImage, type LinkPreview } from "@ghostly/core";
 import { isLocalHost, oEmbedEndpoint, parseOEmbed, parseOpenGraph, type PageMeta } from "./parse/linkPreview";
 
 /**
@@ -116,7 +116,8 @@ export function pictureType(bytes: Uint8Array): string | undefined {
 /**
  * The picture a picture link points to, read as a preview's picture is (no cookies, no referrer, public addresses
  * only, 5 MiB at most) and handed over as it came: a bubble shows it from a `blob:` address. Null when it cannot be
- * read (in a browser, a site that lets no other page read it) or is not a PNG, JPEG, GIF or WebP. Never throws.
+ * read (in a browser, a site that lets no other page read it), is not a PNG, JPEG, GIF or WebP, or its bytes do not say
+ * a size `previewable` takes (a few kilobytes can declare gigabytes once decoded). Never throws.
  */
 export async function readPicture(link: string, signal: AbortSignal): Promise<Blob | null> {
   try {
@@ -125,6 +126,7 @@ export async function readPicture(link: string, signal: AbortSignal): Promise<Bl
     const timeout = AbortSignal.timeout(TIMEOUT_MS);
     const picture = await get(url.href, "image", AbortSignal.any ? AbortSignal.any([signal, timeout]) : signal);
     const type = pictureType(picture.body);
+    if (!previewable(imageSize(picture.body.subarray(0, IMAGE_LIMITS.headBytes)))) return null;
     return type ? new Blob([picture.body as BlobPart], { type }) : null;
   } catch {
     return null;

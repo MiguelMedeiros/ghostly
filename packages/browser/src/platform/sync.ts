@@ -1,5 +1,6 @@
 import {
   addMessages,
+  deleteMessage,
   saveSession,
   setEngineMessages,
   STORED_MESSAGES,
@@ -11,7 +12,9 @@ import {
   isSessionKey,
   listShownSessions,
   loadSession,
+  loadShownSession,
   peerDisplayName,
+  sessionIdForPeer,
   sessionLinkParams,
   setSessionPeerNick,
   storedSession,
@@ -19,7 +22,7 @@ import {
   wasDeleted,
 } from "../../../../apps/ui/src/lib/storage";
 import type { ChatMessage, ChatSession } from "../../../../apps/ui/src/lib/types";
-import type { EngineState, LinkView, StoredMessage } from "../shared/types";
+import type { EngineState, LinkView, ReactionNote, StoredMessage } from "../shared/types";
 import { engine, type ListChanges } from "./engine";
 import { replyRef } from "../shared/replies";
 
@@ -64,9 +67,13 @@ function forget(sessionId: string): void {
   forgetShownSession(sessionId);
 }
 
-/** The chat with this contact, as the page's cache holds it: not to be changed in place. */
+/**
+ * The chat with this contact, as the page's cache holds it: not to be changed in place. Found by the chats' keys and
+ * read alone: every link is mid-sync at a start, and a read of every chat per link grew with the square of the chats.
+ */
 export function sessionForPeer(peerPubKeyZ32: string): ChatSession | undefined {
-  return listShownSessions().find((s) => s.peerPubKeyB64 === peerPubKeyZ32);
+  const id = sessionIdForPeer(peerPubKeyZ32);
+  return (id && loadShownSession(id)) || undefined;
 }
 
 export function toChatMessage(message: StoredMessage, peerPubKeyZ32: string, myPubKeyZ32: string, modern = false): ChatMessage {
@@ -163,8 +170,23 @@ function mirrorNew(linkId: string, messages: StoredMessage[], changes?: ListChan
 
 function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: ListChanges): void {
   const link = engine.state?.links.find((l) => l.id === linkId);
-  const shown = link && sessionForPeer(link.peerPubKeyZ32);
+  let shown = link && sessionForPeer(link.peerPubKeyZ32);
   if (!link || !shown) return;
+  // A row the engine says it deleted (its author deleted it for everyone, WISP 400 § Delete for everyone) goes from the
+  // chat as a delete here does: the row, its id kept so it is not taken again, its place in the read count. Only what
+  // the change tick names, or the ids a whole list says the engine deleted (a removal no page heard, as on the
+  // extension with none open): a whole list without a row may be one a page has not caught up with (two pages of the
+  // extension over one storage), and a row the engine never had (a call's line) is the chat's own.
+  const named = changes ? changes.deleted : engine.deletedIds.get(linkId) ?? [];
+  const here = named.length ? new Set(shown.messages.map((m) => m.id)) : undefined;
+  const gone = named.filter((id) => here!.has(id));
+  if (gone.length) {
+    for (const id of gone) deleteMessage(shown.id, id);
+    forget(shown.id);
+    notifySessionsChanged();
+    shown = sessionForPeer(link.peerPubKeyZ32);
+    if (!shown) return;
+  }
   // Changed here (its rows, its sort, what is added), never the one the other readers hold.
   const session: ChatSession = { ...shown, messages: shown.messages.slice() };
 
@@ -177,6 +199,13 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
   setEngineMessages(session.id, engineIds(messages, since));
   // Read without its older messages (this page just loaded): the ones the engine keeps come back below, all of them.
   const partial = !!session.older;
+  // Only the chat's newest page from the engine (the extension's pages, at attach): what it holds goes in, and the
+  // session keeps saying how many older ones it left out. Its whole history is asked for when the page and the session
+  // do not make it together (`reachesBack`): the stored copy would keep rows whose place is not known here for good.
+  const whole = engine.whole(linkId);
+  if (!whole && !reachesBack(session, messages)) engine.askWhole(linkId);
+  // A row of that page from before the first the session holds is one it left out (counted in `older`): not added again.
+  const heldFrom = !whole && partial ? firstHeld(session) : -Infinity;
   const before = partial ? storedSession(session.id) : null;
   const at = since ? placesOf(session.messages, since.messages) : new Map(session.messages.map((m, i) => [m.id, i]));
   const added: ChatMessage[] = [];
@@ -223,49 +252,80 @@ function mirrorMessages(linkId: string, messages: StoredMessage[], changes?: Lis
       session.messages[i!] = next;
       dirty = true;
     }
-    if (previous || !mirrorable(message)) continue;
+    if (previous || !mirrorable(message) || message.timestamp <= heldFrom) continue;
     added.push(mapped());
   }
   if (moved) session.messages.sort((a, b) => a.timestamp - b.timestamp);
-  let changed = dirty;
+  // The chat list's note of a reaction goes in with the row it changed: one write of the chat, not a second one.
+  const noted = noteReaction(session, link);
+  let changed = dirty || noted;
   // A long history stored whole (before its stored copy kept only its last messages) is stored anew: saving writes only
   // what changed, so this writes once. Not again after a mirror that left it stored, nothing written since: that one
   // stored it as it is kept.
-  if (dirty || (!partial && !added.length && session.messages.length > STORED_MESSAGES && !untouched(linkId, session.id))) saveSession(session);
+  if (dirty || noted || (!partial && !added.length && session.messages.length > STORED_MESSAGES && !untouched(linkId, session.id))) saveSession(session);
   if (added.length) {
     const before = session.messages.length;
     // The session read above, as stored (saved just now if a row changed).
-    const updated = addMessages(session.id, added, partial, session);
+    const updated = addMessages(session.id, added, partial && whole, session);
     if (updated) session.messages = updated.messages;
     if (session.messages.length !== before) changed = true;
   }
   if (mirrorPeerNick(session, link)) changed = true;
   if (mirrorIdentityShare(session, link)) changed = true;
-  if (mirrorReaction(session, link)) changed = true;
   if (dirty || added.length || changed) forget(session.id);
   const after = storedSession(session.id);
   mirrored.set(linkId, { messages, sessionId: session.id, stored: after });
-  if (changed && partial && after === before) notifyWholeAgain();
+  if (changed && partial && whole && after === before) notifyWholeAgain();
   else if (changed) notifySessionsChanged();
 }
 
 /**
- * The chat's latest reaction, for the chat list: its note, and its place, as a message would move it. Not a message,
- * so the unread count stays.
+ * Whether a chat's newest page from the engine and what its session holds make its whole history together. A session
+ * that left nothing out holds every row before the page if it starts at or before it (this page had the whole history
+ * already). One that left older rows out (`older`) must hold none from before the page but a call's line (never the
+ * engine's): where those rows are in the engine's history is not known here.
  */
-function mirrorReaction(session: ChatSession, link: LinkView): boolean {
+function reachesBack(session: ChatSession, page: StoredMessage[]): boolean {
+  if (!page.length) return false;
+  const from = page[0].timestamp;
+  if (!session.older) return firstHeld(session) <= from;
+  return firstHeld(session) !== Infinity && session.messages.every((m) => m.timestamp >= from || !!m.callEvent);
+}
+
+/** The time of the oldest message a session holds that is not a call's line; none, Infinity. */
+function firstHeld(session: ChatSession): number {
+  return session.messages.find((m) => !m.callEvent)?.timestamp ?? Infinity;
+}
+
+/**
+ * The chat's latest reaction, for the chat list: its note, and its place, as a message would move it. Not a message,
+ * so the unread count stays. Put on this session, not saved: whoever holds it saves it. A note that quotes a message
+ * deleted here is never kept: the engine's next one (the reaction before it that stands, or none) takes its place.
+ */
+function noteReaction(session: ChatSession, link: LinkView): boolean {
   const note = link.lastReaction;
-  const shown = session.lastReaction;
+  const deleted = (n: ReactionNote | undefined) => !!n?.message && !!session.deletedIds?.includes(n.message);
+  const shown = deleted(session.lastReaction) ? undefined : session.lastReaction;
   // A newer reaction, or the same one whose message was edited since (its line quotes the text).
-  if (!note || note.at < (shown?.at ?? 0) || (note.at === shown?.at && note.snippet === shown.snippet)) return false;
-  const fresh = loadSession(session.id);
-  if (!fresh) return false;
-  fresh.lastReaction = note;
-  fresh.lastSyncAt = Math.max(fresh.lastSyncAt ?? 0, note.at);
-  saveSession(fresh);
+  if (!note || deleted(note) || note.at < (shown?.at ?? 0) || (note.at === shown?.at && note.snippet === shown.snippet)) {
+    if (shown === session.lastReaction) return false;
+    delete session.lastReaction;
+    return true;
+  }
   session.lastReaction = note;
-  forget(session.id);
+  session.lastSyncAt = Math.max(session.lastSyncAt ?? 0, note.at);
   return true;
+}
+
+/**
+ * Saves a write of the sync's own to a chat that changes none of its messages (its mode, its reaction note): the list
+ * last mirrored into it stays mirrored, and the next engine state does not mirror it again over the whole history.
+ */
+function saveKeepingMirrored(linkId: string, session: ChatSession): void {
+  const last = mirrored.get(linkId);
+  const kept = !!last && untouched(linkId, session.id);
+  saveSession(session);
+  if (kept) mirrored.set(linkId, { ...last, stored: storedSession(session.id) });
 }
 
 /**
@@ -343,10 +403,21 @@ async function reconcile(): Promise<void> {
     // Changed here (its delivery mode, its latest reaction or identity share), never the one the other readers hold.
     const session = { ...shown };
     const live = engine.linkByPeer(session.peerPubKeyB64);
-    if (live && session.deliveryMode !== live.deliveryMode) { session.deliveryMode = live.deliveryMode; saveSession(session); forget(session.id); }
-    if (live && mirrorPeerNick(session, live)) renamed = true;
-    if (live && mirrorIdentityShare(session, live)) renamed = true;
-    if (live && mirrorReaction(session, live)) renamed = true;
+    if (live) {
+      // The note of a reaction whose row the change tick still holds goes in with that row, when the tick ends.
+      const waiting = engine.changing(live.id);
+      if (waiting) later = true;
+      const noted = !waiting && noteReaction(session, live);
+      if (noted) renamed = true;
+      if (noted || session.deliveryMode !== live.deliveryMode) {
+        session.deliveryMode = live.deliveryMode;
+        // The session the page's cache holds, as stored: not read again.
+        saveKeepingMirrored(live.id, session);
+        forget(session.id);
+      }
+      if (mirrorPeerNick(session, live)) renamed = true;
+      if (mirrorIdentityShare(session, live)) renamed = true;
+    }
     if (session.profile && live?.pairing?.peerKey && ["ready", "waiting"].includes(live.pairing.status)) forgetInviteCode(session.id);
     if (live) continue;
     later = true;

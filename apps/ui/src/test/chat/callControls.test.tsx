@@ -1,5 +1,5 @@
-import { screen, within } from "@testing-library/react";
-import { useState, type ComponentProps } from "react";
+import { act, screen, within } from "@testing-library/react";
+import { useEffect, useState, type ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { CallButtons } from "../../components/CallButtons";
 import { CallOverlay } from "../../components/CallOverlay";
@@ -33,12 +33,27 @@ describe("the chat header's call buttons", () => {
   it("are off with the reason when the chat cannot call, and off during a call", () => {
     const { rerender } = renderApp(<CallButtons blocked="Calls need a live connection" busy={false} onCall={vi.fn()} />);
     for (const id of ["call-audio", "call-video"]) {
-      expect(screen.getByTestId(id)).toBeDisabled();
+      expect(screen.getByTestId(id)).toHaveAttribute("aria-disabled", "true");
       expect(screen.getByTestId(id)).toHaveAttribute("title", "Calls need a live connection");
     }
 
     rerender(<CallButtons blocked={null} busy onCall={vi.fn()} />);
     for (const id of ["call-audio", "call-video"]) expect(screen.getByTestId(id)).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("when the chat cannot call, can still be reached and say why to a screen reader, and start nothing", async () => {
+    const onCall = vi.fn();
+    const { user } = renderApp(<CallButtons phone blocked="Calls need a live connection" busy={false} onCall={onCall} />);
+    const voice = screen.getByTestId("call-audio");
+    // A phone has no hover: a disabled button would be skipped, and its title never heard.
+    expect(voice).not.toBeDisabled();
+    expect(voice).toHaveAccessibleName("Audio call");
+    expect(voice).toHaveAccessibleDescription("Calls need a live connection");
+    await user.tab();
+    expect(voice).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await user.click(voice);
+    expect(onCall).not.toHaveBeenCalled();
   });
 
   it("keep the keyboard focus during a call, and start no second one", async () => {
@@ -190,6 +205,18 @@ describe("sharing the screen from inside a call", () => {
   });
 });
 
+describe("the contact's name on the call screens", () => {
+  // In the Arabic app a chat named "Ana!" rang as "!Ana" and read "!Ana" in the call window: the name took the page's
+  // direction. It reads in its own, as the chat header's <bdi> does.
+  it("reads in its own direction on the ringing card and in the call window", () => {
+    const { unmount } = renderApp(<IncomingCallNotification peerName="Ana!" hasVideo={false} onAcceptAudio={vi.fn()} onAcceptVideo={vi.fn()} onReject={vi.fn()} />);
+    expect(screen.getByText("Ana!")).toHaveAttribute("dir", "auto");
+    unmount();
+    overlay({ peerName: "Ana!" });
+    expect(screen.getByText("Ana!")).toHaveAttribute("dir", "auto");
+  });
+});
+
 describe("a call for a screen reader and the keys", () => {
   it("rings as a dialog named for the caller: the focus in it, not on Accept, the keys kept in it, back where it was after", async () => {
     const before = document.createElement("textarea");
@@ -263,6 +290,47 @@ describe("a call for a screen reader and the keys", () => {
     localStorage.removeItem("ghostly_call_mini");
   });
 
+  it("ended from its small window, gives the focus back to the call's button, not to the page", async () => {
+    const { user } = renderApp(<ChatWithCall />);
+    await user.tab();
+    await user.keyboard("{Enter}");
+    await user.tab();
+    expect(screen.getByTestId("call-minimize")).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "true");
+
+    screen.getByTestId("call-hang-up").focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByTestId("call-window")).toBeNull();
+    expect(screen.getByTestId("call-audio")).toHaveFocus();
+  });
+
+  it("started in its small window and ended by the contact with the focus in it, gives the focus back", async () => {
+    localStorage.setItem("ghostly_call_mini", "1");
+    const contact = { hangUp: () => {} };
+    function Call() {
+      const [on, setOn] = useState(false);
+      useEffect(() => { contact.hangUp = () => setOn(false); }, []);
+      return (
+        <>
+          <CallButtons blocked={null} busy={on} onCall={() => setOn(true)} />
+          {on && <CallOverlay callState="connected" localStream={null} remoteStream={null} isMuted={false} isVideoOff canSendVideo remoteHasVideo={false}
+            callStartedAt={Date.now()} peerName="Ana" onHangUp={() => setOn(false)} onToggleMute={vi.fn()} onToggleVideo={vi.fn()} />}
+        </>
+      );
+    }
+    const { user } = renderApp(<Call />);
+    await user.tab();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("call-window")).toHaveAttribute("data-mini", "true");
+    screen.getByTestId("call-mute").focus();
+
+    await act(async () => contact.hangUp());
+    expect(screen.queryByTestId("call-window")).toBeNull();
+    expect(screen.getByTestId("call-audio")).toHaveFocus();
+    localStorage.removeItem("ghostly_call_mini");
+  });
+
   it("says the call's state in words as it moves on, never the running clock", () => {
     const { rerender } = overlay({ callState: "offering" });
     // Calling... is the state line itself, read out as it changes; nothing says it twice.
@@ -297,6 +365,29 @@ describe("a call for a screen reader and the keys", () => {
     expect(screen.getByTestId("call-status")).not.toHaveAttribute("data-reconnecting");
     expect(screen.getByTestId("call-status")).not.toHaveTextContent("Reconnecting...");
     expect(screen.getByTestId("call-state-spoken")).toHaveTextContent(/^Connected$/);
+  });
+});
+
+describe("the call's clock", () => {
+  it("counts minutes and seconds, and hours too past the hour: never 65:00", () => {
+    vi.useFakeTimers();
+    try {
+      const second = 1000, minute = 60 * second, hour = 60 * minute;
+      const read = (since: number) => {
+        const { unmount } = overlay({ callStartedAt: Date.now() - since });
+        act(() => { vi.advanceTimersByTime(second); });
+        const text = screen.getByTestId("call-status").textContent;
+        unmount();
+        return text;
+      };
+      expect(read(4 * second)).toBe("Audio call00:05");
+      expect(read(59 * minute + 58 * second)).toBe("Audio call59:59");
+      expect(read(hour - second)).toBe("Audio call1:00:00");
+      expect(read(hour + 5 * minute - second)).toBe("Audio call1:05:00");
+      expect(read(2 * hour + 3 * minute + 8 * second)).toBe("Audio call2:03:09");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

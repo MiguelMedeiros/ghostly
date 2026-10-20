@@ -298,6 +298,8 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
               aria-label={file.name}
               data-testid="video-player"
               className="w-full h-full object-contain block bg-black"
+              // The engine's own menu would copy, open or save the stream's address, a token meant for this window alone.
+              onContextMenu={(event) => event.preventDefault()}
               onPlay={() => claimPlayback(file.id)}
               onPause={() => releasePlayback(file.id)}
               onEnded={() => { resumeAt.current = 0; unload(); }}
@@ -396,7 +398,7 @@ export function VideoBubble({ file, sender, peerName: named }: { file: ChatFile;
           ) : null}
           {status && (
             <p className={`flex items-center gap-1 min-w-0 text-[11px] m-0 ${failed ? "text-danger-ink" : "text-text-primary/65"}`}>
-              <span className="min-w-0 truncate" data-testid="video-status">{status}</span>
+              <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="video-status">{status}</span>
               {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="video-why" danger={!!reason} />}
             </p>
           )}

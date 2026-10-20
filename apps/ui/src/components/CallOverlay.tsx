@@ -66,10 +66,13 @@ function Grips({ handleProps }: { handleProps: (corner: Corner) => Record<string
   );
 }
 
+/** `mm:ss`, or `h:mm:ss` past the hour: an hour and five minutes read 65:00. */
 function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
-  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  const mmss = `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  return h ? `${h}:${mmss}` : mmss;
 }
 
 export function CallOverlay({
@@ -124,18 +127,18 @@ export function CallOverlay({
     { enabled: mini, minWidth: 190, minHeight: 128 },
   );
 
-  // Whole-screen, the call covers its chat: the focus comes into it and Tab stays in it, as with a ringing call, and
-  // what had the focus (the button that started the call) has it back when the call ends. Not in the small window:
-  // the chat beside it is in use.
+  // Whole-screen, the call covers its chat: the focus comes into it and Tab stays in it, as with a ringing call. Not in
+  // the small window: the chat beside it is in use. Either way, what had the focus (the button that started the call)
+  // has it back when the call ends with the focus gone with it: a call ended from the small window's own End call, or
+  // by the contact while the focus was on its Mute, left it on the page body.
   const box = miniWindow.boxProps.ref;
   const opener = useRef<HTMLElement | null>(null);
   useTabTrap(box, !mini);
   useEffect(() => {
-    if (mini) return;
     const active = document.activeElement as HTMLElement | null;
     if (box.current && !box.current.contains(active)) {
       if (active && active !== document.body) opener.current = active;
-      box.current.focus({ preventScroll: true });
+      if (!mini) box.current.focus({ preventScroll: true });
     }
     return () => {
       const before = opener.current;
@@ -273,7 +276,7 @@ export function CallOverlay({
                 {initial(peerName)}
               </span>
             </div>
-            <p className="call-name max-w-full truncate text-text-primary text-lg font-medium">{peerName}</p>
+            <p dir="auto" className="call-name max-w-full truncate text-text-primary text-lg font-medium">{peerName}</p>
           </div>
           {showSelf && (
             <div className="call-peer call-self flex flex-col items-center gap-4">
@@ -300,13 +303,15 @@ export function CallOverlay({
         </p>
       </div>
 
+      {/* On a phone your own picture starts at the top right, 64 to 154 px down (`selfView` above): the notice goes
+          below it, and over it when the picture is dragged or grown there, or "… is sharing their screen" lost its end. */}
       {sharingNotice && (
         <p
           role="status"
           data-testid="call-sharing"
           data-self={isScreenSharing}
           data-peer={remoteIsScreenSharing}
-          className="call-share-notice absolute top-16 max-md:top-[calc(4rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-10 max-w-[calc(100%-2rem)] flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium bg-accent text-on-accent shadow-lg"
+          className="call-share-notice absolute top-16 max-md:top-[calc(10.5rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-20 max-w-[calc(100%-2rem)] flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium bg-accent text-on-accent shadow-lg"
         >
           <svg className="shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <rect x="2" y="4" width="20" height="13" rx="2" />

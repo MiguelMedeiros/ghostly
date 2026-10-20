@@ -63,6 +63,19 @@ export function profileOpenFailure(error: unknown): ProfileOpenFailure {
   return { reason: "failed", supportedVersion: DB_VERSION, ...(detail ? { detail } : {}) };
 }
 
+/**
+ * A failed call as the client hears it (engine/server.ts): the error's message. Only the message travels, so a storage
+ * write the browser refused for want of space (Chromium's QuotaExceededError has an empty message) says so, its name
+ * kept for the ⓘ.
+ */
+export function errorLine(error: unknown): string {
+  if ((error as { name?: unknown } | null)?.name === "QuotaExceededError") {
+    const message = error instanceof Error ? error.message.trim() : "";
+    return `Not enough space on this device (QuotaExceededError${message ? `: ${message}` : ""})`;
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** How long an open that another window blocks may wait for that window to let go before it is said to be blocked. */
 export const OPEN_TIMINGS = { blockedMs: 10_000 };
 
@@ -169,7 +182,8 @@ export interface StoredFile {
    * device fetched it without asking (it counts toward the group's automatic limit), and whether its person asked for it.
    * `digest` is the author's, which the bytes are checked against.
    */
-  group?: { message: string; author: string; auto?: boolean; asked?: boolean; paused?: boolean };
+  /** A group's file (WISP 503): its message, author and the message's time (`ts`, absent on records from before). */
+  group?: { message: string; author: string; ts?: number; auto?: boolean; asked?: boolean; paused?: boolean };
 }
 
 /** The fields of a stored file that change after it is stored: kept in `STORES.fileState`, read over the record's own. */
@@ -275,11 +289,13 @@ export const PROFILE_STORES = [STORES.links, STORES.messages, STORES.files, STOR
 /**
  * Records of the settings store that belong to the profile, not to a wallet: its DID and its key, its identity proofs
  * with their keys and revocations, its own Nostr data, the public profiles it read, the built-in mini-apps it removed
- * (`BUILT_IN_APPS_KEY` of `engine/apps.ts`). A list of what goes rather than of what stays, on purpose: every other
- * record of that store is a wallet's (seeds, configuration, pending operations), and a wallet record a newer version
- * adds must never be deleted by mistake.
+ * (`BUILT_IN_APPS_KEY` of `engine/apps.ts`), its x401 credentials and their keys (`engine/x401.ts`), its contact links
+ * (`engine/contactLinks.ts`), the requests it sent through others' (`engine/contactAsks.ts`) and its saved messages
+ * (`engine/saved.ts`). A list of what goes
+ * rather than of what stays, on purpose: every other record of that store is a wallet's (seeds, configuration, pending
+ * operations), and a wallet record a newer version adds must never be deleted by mistake.
  */
-export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "nostrSocial", "publicProfiles", "appBuiltIns"] as const;
+export const PROFILE_SETTINGS_KEYS = ["profileDid", "identityProofs", "identityRevocations", "nostrSocial", "publicProfiles", "appBuiltIns", "x401Credentials", "contactLinks", "contactAsks", "savedMessages"] as const;
 
 /**
  * The fields of the peer's `settings` record that are a wallet's, kept by "Clear all data": the mint list, the first-run
@@ -324,10 +340,32 @@ export function deleteDatabase(name: string): Promise<void> {
   });
 }
 
+/** A read. A write goes through `committed`: its request's success does not mean the browser kept it. */
 export function wrap<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
+  });
+}
+
+/** What a write the device had no room for says (Chromium's own QuotaExceededError has no message). */
+export const NO_ROOM_TO_SAVE = "This device has no room left to save this";
+
+/**
+ * A write, settled when its transaction is: kept once it commits, refused when it aborts. On a device out of storage
+ * Chromium fires the request's success and then aborts the transaction with QuotaExceededError, so a write awaited on
+ * its request alone reads as saved and is gone. The last request of its transaction: the transaction ends before this
+ * settles. Several in one transaction settle together.
+ */
+export function committed<T>(request: IDBRequest<T>): Promise<T> {
+  const tx = request.transaction!;
+  return new Promise((resolve, reject) => {
+    tx.addEventListener("complete", () => resolve(request.result));
+    tx.addEventListener("abort", () => {
+      const error = tx.error ?? request.error;
+      reject(error?.name === "QuotaExceededError" ? Object.assign(new Error(NO_ROOM_TO_SAVE), { name: "QuotaExceededError", cause: error })
+        : error ?? new Error("The write was not saved"));
+    });
   });
 }
 
@@ -452,6 +490,40 @@ export const fileStore = {
     });
     return ids;
   },
+  /** The id of every stored file whose bytes are a Blob in its record. */
+  async blobIds(): Promise<string[]> {
+    const files = await store(STORES.files, "readonly"), ids: string[] = [];
+    await new Promise<void>((resolve, reject) => {
+      const request = files.openCursor();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return resolve();
+        if ((cursor.value as StoredFile).blob) ids.push(String(cursor.key));
+        cursor.continue();
+      };
+    });
+    return ids;
+  },
+  /**
+   * A file whose Blob was copied to file storage (`kind`, under its id): its record without the Blob from now on. Written
+   * back without the Blob it read, so not what WebKit loses (see above); what changed about it since (`fileState`) stays.
+   * False when the record is gone or holds no Blob any more: the copy is the caller's to remove.
+   */
+  async movedToBytes(id: string, kind: NonNullable<StoredFile["bytes"]>): Promise<boolean> {
+    let moved = false;
+    await transact([STORES.files], stores => {
+      const read = stores[STORES.files].get(id);
+      read.onsuccess = () => {
+        const record = read.result as StoredFile | undefined;
+        if (!record?.blob) return;
+        const { blob: _blob, ...rest } = record;
+        stores[STORES.files].put({ ...rest, bytes: kind } satisfies StoredFile);
+        moved = true;
+      };
+    });
+    return moved;
+  },
   async delete(id: string): Promise<void> {
     await transact([STORES.files, STORES.fileState], stores => {
       stores[STORES.files].delete(id);
@@ -462,6 +534,6 @@ export const fileStore = {
     const tx = (await openDb()).transaction([STORES.files, STORES.fileState], "readwrite");
     const files = tx.objectStore(STORES.files), state = tx.objectStore(STORES.fileState);
     const keys = await wrap(files.index("byLink").getAllKeys(linkId));
-    await Promise.all(keys.flatMap((key) => [wrap(files.delete(key)), wrap(state.delete(key))]));
+    await Promise.all(keys.flatMap((key) => [committed(files.delete(key)), committed(state.delete(key))]));
   },
 };

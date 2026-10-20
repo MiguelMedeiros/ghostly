@@ -38,6 +38,10 @@ export function asCliError(error: unknown): CliError {
   const message = error instanceof Error ? error.message : String(error);
   if (/real money|confirmedReal|Mainnet/i.test(message) && /confirm/i.test(message)) return new CliError("confirm", message);
   if (/other network|cross-network|network does not match/i.test(message)) return new CliError("refused", message);
+  // A member asking for a group's admin-only change, an invitation already answered: not allowed, not the engine failing.
+  if (/^Only the admin |^No invitation to (accept|decline)$/.test(message)) return new CliError("refused", message);
+  // `group invite` into a community: it has no invitations, its link is how people join.
+  if (message === "Share the group's link with them: anyone who opens it joins") return new CliError("bad_request", message);
   return new CliError("engine", message);
 }
 
@@ -81,12 +85,13 @@ function profileOpenError(error: unknown): CliError | undefined {
 /**
  * A file or folder on this machine the command could not open (`file save --dir`, `profile backup --out`): the
  * person's path, not the engine refusing, so it says so with the code a bot branches on. Before, a folder that did
- * not exist was `engine` (exit 1) with Node's `ENOENT: no such file or directory, open '…'`.
+ * not exist was `engine` (exit 1) with Node's `ENOENT: no such file or directory, open '…'`. `file`: the path read, for
+ * an error that names none (a folder read as a file).
  */
-function localFileError(error: unknown): CliError | undefined {
+export function localFileError(error: unknown, file?: string): CliError | undefined {
   if (!error || typeof error !== "object" || typeof (error as { syscall?: unknown }).syscall !== "string") return undefined;
   const { code, path } = error as { code?: unknown; path?: unknown };
-  const where = typeof path === "string" ? path : "the path";
+  const where = typeof path === "string" ? path : file ?? "the path";
   if (code === "ENOENT" || code === "ENOTDIR") return new CliError("not_found", `No such file or folder: ${where}`);
   if (code === "EACCES" || code === "EPERM" || code === "EROFS") return new CliError("refused", `Not allowed to write or read ${where}`);
   if (code === "EISDIR") return new CliError("bad_request", `${where} is a folder: name a file`);

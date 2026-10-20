@@ -566,6 +566,68 @@ describe("apps on a paired session (apps/1)", () => {
     }
   });
 
+  // The same link, and the contact loads an 8 MiB page from this side's shared service meanwhile. A WebRTC channel has
+  // no send budget: the answer refilled it to its 1 MiB high water mark each time it drained to 256 KiB, past the app's
+  // quarter, so before, a Chess move waited 2.6 to 10 s and an app streaming at its limit got 10 KiB/s.
+  it.each([["a Chess move every half second goes at once", "moves"], ["an app streaming at its limit gets about half", "stream"]])(
+    "beside a shared service's answer on a WebRTC channel, %s", async (_, kind) => {
+      const isData = (data: string) => data.startsWith('{"t":"ph","b":') || (data.includes(`"t":"${APP_FRAME}"`) && data.includes('"d":'));
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+      try {
+        const page = async function* () { for (let i = 0; i < 128; i++) yield new Uint8Array(64 * 1024); };
+        const service = { id: "web", target: { origin: "http://localhost:3400", basePath: "" } };
+        const { a, b, app } = pair({
+          a: { servicesSupport: true, getHostedHttpService: id => id === "web" ? service : undefined, localFetch: async () => ({ status: 200, headers: [], body: page() }) },
+          b: { servicesSupport: true }, drop: { a: isData },
+        });
+        await live(a, b);
+        await vi.waitFor(() => expect(a.link.supportsApps && b.link.supportsApps && b.link.supportsServices).toBe(true));
+        a.link.openApp(app, "1.0.0"); b.link.openApp(app, "1.0.0");
+        await vi.waitFor(() => expect(a.link.peerApps.has(app) && b.link.peerApps.has(app)).toBe(true));
+        const channel = (a.link as unknown as { channel: FrameChannel & { bufferedAmount: number } }).channel;
+        // What A sends queues on the channel until the link carries it; it tells it drained at its low water mark.
+        const sent = { body: 0, app: 0 };
+        const send = channel.send.bind(channel);
+        channel.send = (data) => {
+          send(data);
+          const bytes = typeof data === "string" ? data.length : data.byteLength;
+          channel.bufferedAmount += bytes;
+          if (typeof data === "string" && data.startsWith('{"t":"ph","b":')) sent.body += bytes;
+          else if (typeof data === "string" && data.includes(`"t":"${APP_FRAME}"`)) sent.app += bytes;
+        };
+        const drains: (() => void)[] = [];
+        channel.drained = () => channel.bufferedAmount <= LIMITS.sendLowWaterMark ? Promise.resolve() : new Promise<void>((resolve) => { drains.push(resolve); });
+        void b.link.request("web", { method: "GET", path: "/" }).catch(() => {});
+        const tick = 20, rate = 512 * 1024, waits: number[] = [];
+        const due: number[] = [];
+        for (let t = 0; t < 8_000; t += tick) {
+          channel.bufferedAmount = Math.max(0, channel.bufferedAmount - rate * tick / 1000);
+          if (channel.bufferedAmount <= LIMITS.sendLowWaterMark) for (const resolve of drains.splice(0)) resolve();
+          if (kind === "moves") {
+            // A move refused with too-fast is tried again every 20 ms; the next one waits behind it.
+            if (t >= 300 && (t - 300) % 500 === 0) due.push(t);
+            if (due.length > 0 && a.link.sendAppData(app, { from: "e2", to: "e4", note: "x".repeat(160) }) === null) waits.push(t - due.shift()!);
+          } else {
+            while (a.link.sendAppData(app, jsonOf(8 * 1024)) === null) { /* as fast as it is let */ }
+          }
+          await vi.advanceTimersByTimeAsync(tick);
+        }
+        channel.bufferedAmount = 0;
+        for (const resolve of drains.splice(0)) resolve();
+        const carried = 8 * rate;
+        // The answer keeps moving all along.
+        expect(sent.body).toBeGreaterThan(carried * (kind === "moves" ? 0.8 : 0.3));
+        if (kind === "moves") {
+          expect(waits.length).toBeGreaterThanOrEqual(15);
+          expect(Math.max(...waits)).toBeLessThan(1_000);
+        } else {
+          expect(sent.app).toBeGreaterThan(carried * 0.3);
+        }
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
   it("an app that does not offer apps/1 gets no frame, and what it sends is dropped", async () => {
     const { a, b, app } = pair({ b: { appsSupport: false } });
     await live(a, b);

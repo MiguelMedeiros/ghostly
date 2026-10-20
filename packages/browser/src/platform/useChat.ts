@@ -16,6 +16,7 @@ import type { ChatMessage, ChatTechInfo, ConnectionStatus } from "../../../../ap
 import { engine } from "./engine";
 import { notifySessionsChanged, startSessionSync } from "./sync";
 
+const NO_MESSAGES: ChatMessage[] = [];
 const subscribe = (listener: () => void) => engine.subscribe(listener);
 const getState = () => engine.state;
 
@@ -63,8 +64,10 @@ export const useChat: typeof Desktop.useChat = (params) => {
   }, [sessionId, profile, deliveryMode, seedB64, peerPubKey, encKeyB64]);
 
   const reload = useCallback(() => {
-    // Read as the chat list and the sync read it: a chat that changed is parsed once for all of them.
-    if (sessionId) setMessages([...(loadShownSession(sessionId)?.messages ?? [])]);
+    // Read as the chat list and the sync read it: a chat that changed is parsed once for all of them. One that did not
+    // is the same list (the page's cache, never changed in place), so a change in another chat draws nothing here: a new
+    // copy on every `session-updated` drew the open chat and reran its whole-history work for each message elsewhere.
+    if (sessionId) setMessages(loadShownSession(sessionId)?.messages ?? NO_MESSAGES);
   }, [sessionId]);
 
   useEffect(() => setPending([]), [sessionId]);
@@ -112,7 +115,6 @@ export const useChat: typeof Desktop.useChat = (params) => {
 
   useEffect(() => {
     if (!linkId) return;
-    void engine.call("setActiveLink", { linkId }).catch(() => {});
     // An offer that arrived before this chat was open (it may be open because of it).
     const pending = engine.takeCallOffer(linkId);
     if (pending) setIncomingCallSignal(pending);
@@ -121,10 +123,7 @@ export const useChat: typeof Desktop.useChat = (params) => {
       engine.takeCallOffer(linkId);
       setIncomingCallSignal(signal);
     });
-    return () => {
-      off();
-      void engine.call("setActiveLink", { linkId: null }).catch(() => {});
-    };
+    return off;
   }, [linkId]);
 
   /** `replyTo`: the id of the message of this chat the text answers; the engine keeps the reply with it (WISP 400 § Replies). */

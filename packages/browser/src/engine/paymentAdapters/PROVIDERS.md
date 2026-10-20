@@ -22,11 +22,11 @@ Testnet) and on the platforms listed. "Experimental" is the descriptor's `experi
 | `cashu-mint` | Lightning | [cashuMint.ts](providers/cashuMint.ts) | yes | the test mints | web, extension, desktop | not flagged |
 | `fedimint` | Lightning | [fedimint.ts](providers/fedimint.ts) | yes | signet, testnet, regtest, mutinynet | web, extension, desktop | experimental |
 | `breez` | Lightning | [breez.ts](providers/breez.ts) | yes (Breez API key required) | regtest (Breez and Lightspark's, no API key) | web, extension, desktop | experimental |
-| `nwc` | Lightning | [nwc.ts](providers/nwc.ts) | yes | testnet, signet, mutinynet, regtest | web, extension, desktop | not flagged |
+| `nwc` | Lightning | [nwcProvider.ts](providers/nwcProvider.ts), [nwc.ts](providers/nwc.ts) | yes | testnet, signet, mutinynet, regtest | web, extension, desktop | not flagged |
 | `core-lightning` | Lightning | [coreLightning.ts](providers/coreLightning.ts) | yes | testnet, signet, regtest | web, extension, desktop | not flagged |
 | `webln` | Lightning | [webln.ts](providers/webln.ts) | yes | testnet, signet, mutinynet, regtest | web | experimental |
 | `lnd` | Lightning | [lnd.ts](providers/lnd.ts) | yes | testnet, signet, regtest | web, extension, desktop | experimental |
-| `bitcoind` | On-chain | [bitcoind.ts](providers/bitcoind.ts) | yes | testnet, signet, regtest | desktop | experimental |
+| `bitcoind` | On-chain | [bitcoindProvider.ts](providers/bitcoindProvider.ts), [bitcoind.ts](providers/bitcoind.ts) | yes | testnet, signet, regtest | desktop | experimental |
 | `bdk` | On-chain | [bdk.ts](providers/bdk.ts) | no (no phrase backup or fee bump yet) | signet, mutinynet, regtest | web, extension, desktop | experimental |
 
 The ways of paying that are not sources (Cashu, Ark through Arkade or Bark, Spark, Fedimint ecash, USDT) are
@@ -56,7 +56,7 @@ exports.
    descriptor:
 
    ```ts
-   // A shortened version of providers/nwc.ts.
+   // A shortened version of providers/nwcProvider.ts. The client loads in `create`, so it is not in the app's first load.
    export const nwc: LightningProviderDescriptor = {
      id: "nwc",                        // stable: it is stored with the profile
      label: "Nostr Wallet Connect",
@@ -67,7 +67,7 @@ exports.
      fields: [{ name: "uri", label: "Connection URI", kind: "secret", placeholder: "nostr+walletconnect://…" }],
      custodial: true,
      validate({ secrets }) { if (!secrets.uri.startsWith("nostr+walletconnect://")) throw new Error("That is not an NWC URI"); },
-     async create({ config, secrets }, host) { return NwcLightning.connect(secrets.uri, host.signal); },
+     async create({ config, secrets }, host) { const { NwcLightning } = await import("./nwc"); return NwcLightning.connect(secrets.uri, host.signal); },
    };
    ```
 
@@ -285,7 +285,8 @@ Receiving on a Lightning address needs a server the person runs: not provided. S
 - Contract: `packages/browser/test/providerContract.test.ts` runs the shared contract suite against the
   fakes; run it against your provider too.
 - e2e: `localStorage["ghostly-test-providers"] = "1"` (`useFakeProviders(peer)` in `e2e/support/fixtures.ts`)
-  adds the fakes to the pickers, in Testnet only. `e2e/web/wallet-sources.spec.ts` drives the picker, the
+  adds the fakes to the pickers, in Testnet only and only in a dev or e2e build (`testBuild` in
+  `shared/features.ts`; a release build ignores the key). `e2e/web/wallet-sources.spec.ts` drives the picker, the
   Lightning card through a source and the Bitcoin card.
 - A provider that loads WebAssembly (BDK) cannot rely on Vite's ESM `.wasm` import: load the glue and
   instantiate the module yourself on first use (see `providers/bdkSdk.ts`), and read the same file from disk in

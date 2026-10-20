@@ -26,8 +26,12 @@ const PLATFORMS = {
   "tauri-Windows-x64": "windows-x86_64",
 };
 
-/** What the updater can replace in place, best first. A `.deb` is its package manager's. */
-const UPDATABLE = [".app.tar.gz", ".AppImage.tar.gz", ".AppImage", ".nsis.zip", "-setup.exe", ".msi.zip", ".msi"];
+/**
+ * What the updater can replace in place, best first. A `.deb` is its package manager's. No `.nsis.zip`, `.msi.zip`
+ * or `.AppImage.tar.gz`: the app's updater is built without its `zip` feature (apps/desktop/Cargo.toml), so it
+ * cannot unpack them.
+ */
+const UPDATABLE = [".app.tar.gz", ".AppImage", "-setup.exe", ".msi"];
 
 function walk(dir) {
   const found = [];

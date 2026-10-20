@@ -56,23 +56,39 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align = "end", prefer 
   const phone = useIsMobile();
   const ref = useRef<HTMLDivElement>(null);
   useOutsideDismiss(ref, open, onClose, anchorRef);
-  const [place, setPlace] = useState<{ shift: number; up: boolean }>({ shift: 0, up: prefer === "up" });
-  const [fixed, setFixed] = useState<{ left: number; top: number }>();
+  const [place, setPlace] = useState<{ shift: number; up: boolean; room?: number }>({ shift: 0, up: prefer === "up" });
+  const [fixed, setFixed] = useState<{ left: number; top: number; room?: number }>();
 
   useLayoutEffect(() => {
     if (!open || phone) return;
+    /**
+     * Up or down, and how tall it may be: on the side with room for it (the preferred one when both have), else on the
+     * roomier side, as tall as that room, scrolling. A phone on its side has no room either way for a chat's ⋮ menu,
+     * which ran off the screen's bottom edge with nothing to scroll to its last rows.
+     */
+    const side = (opener: DOMRect, height: number, box: ReturnType<typeof bounds>) => {
+      const roomBelow = box.bottom - opener.bottom - GAP - MARGIN, roomAbove = opener.top - box.top - GAP - MARGIN;
+      const below = height <= roomBelow, above = height <= roomAbove;
+      if (below || above) return { up: prefer === "up" ? above : !below };
+      const up = roomAbove > roomBelow;
+      return { up, room: Math.max(0, up ? roomAbove : roomBelow) };
+    };
     const fit = () => {
       const menu = ref.current, anchor = anchorRef.current;
       if (!menu || !anchor) return;
       const box = bounds(anchor, within);
+      // Measured at its own height, without a cap from an earlier fit.
+      const cap = menu.style.maxHeight;
+      menu.style.maxHeight = "";
       if (portal) {
         const rect = menu.getBoundingClientRect(), opener = anchor.getBoundingClientRect();
-        const below = opener.bottom + rect.height + MARGIN <= box.bottom, above = opener.top - rect.height - MARGIN >= box.top;
-        const up = prefer === "up" ? above || !below : !below && above;
+        menu.style.maxHeight = cap;
+        const { up, room } = side(opener, rect.height, box);
+        const height = room ?? rect.height;
         // Lined up with the opener's start or end edge (the end is the left one in a right-to-left page), kept in the bounds.
         const left = (align === "start") === (getComputedStyle(anchor).direction !== "rtl") ? opener.left : opener.right - rect.width;
-        const next = { left: Math.max(box.left + MARGIN, Math.min(left, box.right - MARGIN - rect.width)), top: up ? opener.top - GAP - rect.height : opener.bottom + GAP };
-        setFixed(was => was?.left === next.left && was.top === next.top ? was : next);
+        const next = { left: Math.max(box.left + MARGIN, Math.min(left, box.right - MARGIN - rect.width)), top: up ? opener.top - GAP - height : opener.bottom + GAP, room };
+        setFixed(was => was?.left === next.left && was.top === next.top && was.room === next.room ? was : next);
         return;
       }
       // Measured where it would open without any correction.
@@ -81,10 +97,10 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align = "end", prefer 
       const rect = menu.getBoundingClientRect(), opener = anchor.getBoundingClientRect();
       const left = box.left + MARGIN, right = box.right - MARGIN;
       const shift = rect.left < left ? left - rect.left : rect.right > right ? Math.max(left - rect.left, right - rect.right) : 0;
-      const below = opener.bottom + rect.height + MARGIN <= box.bottom, above = opener.top - rect.height - MARGIN >= box.top;
-      const up = prefer === "up" ? above || !below : !below && above;
+      const { up, room } = side(opener, rect.height, box);
       menu.style.translate = before;
-      setPlace(was => was.shift === shift && was.up === up ? was : { shift, up });
+      menu.style.maxHeight = cap;
+      setPlace(was => was.shift === shift && was.up === up && was.room === room ? was : { shift, up, room });
     };
     fit();
     window.addEventListener("resize", fit);
@@ -143,15 +159,15 @@ function OpenMenu({ open, onClose, anchorRef, testId, id, align = "end", prefer 
 
   if (portal) return createPortal(
     <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
-      style={{ left: fixed?.left ?? 0, top: fixed?.top ?? 0 }}
-      className={`fixed z-50 w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${className}`}>
+      style={{ left: fixed?.left ?? 0, top: fixed?.top ?? 0, maxHeight: fixed?.room }}
+      className={`fixed z-50 w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] ${fixed?.room === undefined ? "" : "overflow-y-auto overscroll-contain"} rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${className}`}>
       {children}
     </div>, document.body);
 
   return (
     <div ref={ref} id={id} data-testid={testId} data-menu="popover" role={label ? "group" : undefined} aria-label={label} onKeyDown={keys}
-      style={{ translate: place.shift ? `${place.shift}px 0` : undefined } as CSSProperties}
-      className={`absolute ${align === "start" ? "start-0" : "end-0"} z-50 w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${place.up ? "bottom-full mb-1" : "top-full mt-1"} ${className}`}>
+      style={{ translate: place.shift ? `${place.shift}px 0` : undefined, maxHeight: place.room } as CSSProperties}
+      className={`absolute ${align === "start" ? "start-0" : "end-0"} z-50 w-max min-w-44 max-w-[min(20rem,calc(100vw-1rem))] ${place.room === undefined ? "" : "overflow-y-auto overscroll-contain"} rounded-lg border border-border bg-surface-alt py-1 shadow-lg animate-fade-in ${place.up ? "bottom-full mb-1" : "top-full mt-1"} ${className}`}>
       {children}
     </div>
   );

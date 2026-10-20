@@ -12,7 +12,7 @@ const info = vi.fn(async () => ({ network: "mutinynet", signerPubkey: `02${"ab".
 vi.mock("@arkade-os/sdk", async (original) => ({ ...await original<object>(), RestArkProvider: class { getInfo = info; } }));
 vi.mock("../src/engine/paymentAdapters/arkade", () => ({
   ARK_NETWORKS: ["bitcoin", "mutinynet", "signet", "regtest"],
-  ArkadeAdapter: { connect: vi.fn(async (config: { provider: string; network: string }) => ({ config, address: async () => config.network === "bitcoin" ? "ark1me" : "tark1me", balance: async () => 0, boardingAddress: async () => "tb1qme", incoming: async () => 0, expired: async () => ({ recoverable: 0, sweeping: 0 }), dispose: vi.fn() })) },
+  ArkadeAdapter: { connect: vi.fn(async (config: { provider: string; network: string }) => ({ config, address: async () => config.network === "bitcoin" ? "ark1me" : "tark1me", balance: async () => 0, boardingAddress: async () => "tb1qme", balances: async () => ({ balance: 0, incoming: 0 }), expired: async () => ({ recoverable: 0, sweeping: 0 }), dispose: vi.fn() })) },
 }));
 const inspect = vi.fn(async (config: object) => ({ ...config, decimals: 6, codeHash: "0xfixture" }));
 vi.mock("../src/engine/paymentAdapters/usdt", () => ({
@@ -88,6 +88,16 @@ describe("one click makes a wallet of a type on a network", () => {
     await expect(node.walletCreate({ type: "cashu", network: "mainnet" })).rejects.toThrow(/^Could not create the Mainnet Cashu wallet: Could not reach .*Nothing was saved; try again\.$/);
     expect(node["settings"].mints).toEqual([]);
     expect(wallets()).toEqual([]);
+  });
+
+  // The app chose the mint: nobody typed an address, so there is none to check ("Check the address: it should be a
+  // Cashu mint" is for a mint added by its URL). Said as any server that did not answer.
+  it("Cashu: the app's own test mint not answering is a host that did not answer, with no address to check", async () => {
+    const { node, reachable, started } = engine();
+    await started;
+    node["settings"].mints = [];
+    reachable.clear();
+    await expect(node.walletCreate({ type: "cashu", network: "testnet" })).rejects.toThrow(`Could not create the Testnet Cashu wallet: Could not reach ${new URL(TEST_MINT).host}. Nothing was saved; try again.`);
   });
 
   it("Ark: Testnet on Mutinynet and Mainnet on Bitcoin, each checked with its server and stored under its own key", async () => {

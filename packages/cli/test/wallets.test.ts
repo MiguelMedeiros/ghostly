@@ -1,11 +1,12 @@
 import { validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { INVITE_TAKEN } from "@ghostly/core";
 import type { EngineState } from "@ghostly/browser/shared/types";
 import { normalizeMintUrl } from "@ghostly/browser/engine/wallet";
 import { callApi, type ApiContext } from "../src/api";
 import { asCliError } from "../src/errors";
-import { invoiceNetwork } from "../src/wallets";
+import { invoiceNetwork, paymentJson } from "../src/wallets";
 // covers: headless.wallets, headless.payments, headless.engine-passthrough
 
 /** The wallet and payment methods over a fake engine: what they refuse before the engine is asked. */
@@ -16,6 +17,8 @@ function fake() {
         { id: "chat-one", label: "Alice", peerPubKeyZ32: "p", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1" },
         // An invite nobody took yet.
         { id: "chat-two", label: "Bob", peerPubKeyZ32: "q", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", inviteCode: "ghostly1code", pairing: { status: "waiting" }, pairingProgress: { stage: "waiting", role: "inviter", startedAt: 1 } },
+        // An invite someone else used first: its inviter seals everything to them.
+        { id: "chat-three", label: "Carol", peerPubKeyZ32: "r", createdAt: 1, lastMessageAt: 0, profile: "paired-chat/1", pairing: { status: "connecting" }, pairingProgress: { stage: "failed", role: "joiner", reason: "taken", retryable: false, startedAt: 1 }, dhtDelivery: { inviteTaken: true }, textDelivery: "dht" },
       ],
       groups: [],
       payments: {
@@ -26,7 +29,16 @@ function fake() {
       wallet: {
         wallets: [{ id: "cashu:testnet", type: "cashu", network: "testnet", config: {} }, { id: "lightning:testnet:cashu", type: "lightning", network: "testnet", config: {}, card: "cashu", name: "Cashu", receive: true }],
         offers: [{ type: "bark", network: "testnet", available: true }, { type: "cashu", network: "testnet", available: true },
-          { type: "bitcoin", network: "testnet", available: true, needs: "provider", providers: [{ id: "bdk", label: "BDK", fields: [] }] }],
+          { type: "bitcoin", network: "testnet", available: true, needs: "provider", providers: [{ id: "bdk", label: "BDK", fields: [
+            { name: "network", label: "Network", kind: "select", options: [{ value: "signet", label: "Signet" }, { value: "regtest", label: "Regtest" }], defaults: { testnet: "signet" } },
+            { name: "esplora", label: "Esplora server", kind: "url", optional: true },
+            { name: "script", label: "Addresses", kind: "select", options: [{ value: "bip84", label: "Native SegWit" }, { value: "bip86", label: "Taproot" }] },
+            { name: "mnemonic", label: "Recovery phrase", kind: "secret" }] }] },
+          { type: "lightning", network: "testnet", available: true, several: true, needs: "provider", providers: [
+            { id: "nwc", label: "Nostr Wallet Connect", fields: [{ name: "uri", label: "Connection URI", kind: "secret", placeholder: "nostr+walletconnect://…" }] },
+            { id: "webln", label: "Browser wallet (WebLN)", fields: [] }] },
+          { type: "fedimint", network: "testnet", available: true, needs: "invite" },
+          { type: "spark", network: "mainnet", available: true, needs: "apiKey" }],
         networks: { testnet: { mints: [], balance: 42, history: [{ id: "h" }], feesPaid: 0, lightnings: [{ card: "cashu", balance: 42, status: "ready" }] }, mainnet: { mints: [], balance: 0, history: [], feesPaid: 0 } },
       },
     }) as unknown as EngineState,
@@ -44,6 +56,7 @@ function fake() {
     walletReceiveToken: vi.fn(async (_: unknown) => ({ amount: 1 })),
     bitcoinReceiveAddress: vi.fn(async (_: unknown) => "tb1q"),
     connect: vi.fn(async (_: unknown) => undefined),
+    setChatPaymentMethods: vi.fn(async (_: unknown) => undefined),
   };
   const ctx = { runtime: { server: { node }, paths: { name: "default" } }, hub: { onEvent: () => () => {}, onState: () => () => {} }, mode: "daemon", version: "t" } as unknown as ApiContext;
   return { ctx, node };
@@ -68,6 +81,28 @@ describe("wallets", () => {
     expect(asked.providerId).toBe("bdk");
     expect(validateMnemonic(asked.values.mnemonic, wordlist)).toBe(true);
     expect(JSON.stringify(made)).not.toContain(asked.values.mnemonic);
+  });
+
+  it("an empty type or network (an unset variable in a script) is refused before the engine, never read as the default", async () => {
+    const { ctx, node } = fake();
+    for (const method of ["wallet.create", "wallet.remove", "wallet.faucet", "wallet.address"]) {
+      await expect(callApi(ctx, method, { type: "" }), method).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/^type must be one of /) });
+    }
+    await expect(callApi(ctx, "wallet.list", { network: "" })).rejects.toMatchObject({ code: "bad_request", message: "network must be one of mainnet, testnet" });
+    expect(node.walletCreate).not.toHaveBeenCalled();
+    expect(node.walletRemove).not.toHaveBeenCalled();
+  });
+
+  it("chat.accept refuses networks that name no network, as it refuses a bogus one, before the engine", async () => {
+    // Found in a bug hunt: `chat accept bob cashu --networks ""` exited 0 and left cashu on no network while methods still said it was on.
+    const { ctx, node } = fake();
+    for (const networks of [[], ["bogus"]]) {
+      await expect(callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", on: true, networks }), JSON.stringify(networks)).rejects.toMatchObject({ code: "bad_request", message: expect.stringMatching(/^networks must list mainnet and\/or testnet/) });
+    }
+    await expect(callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", on: true, networks: [] })).rejects.toThrow(/--off/);
+    expect(node.setChatPaymentMethods).not.toHaveBeenCalled();
+    await callApi(ctx, "chat.accept", { chat: "Alice", method: "cashu", on: true, networks: ["testnet"] });
+    expect(node.setChatPaymentMethods.mock.calls.at(-1)![0]).toEqual({ linkId: "chat-one", methods: { cashu: true }, networks: { cashu: ["testnet"] } });
   });
 
   it("removal holding money needs the person's acceptLoss", async () => {
@@ -140,8 +175,34 @@ describe("wallets", () => {
     const { ctx, node } = fake();
     await expect(callApi(ctx, "wallet.create", { type: "bitcoin", provider: "nope" })).rejects.toMatchObject({ code: "bad_request", message: expect.stringContaining("ghostly wallet list") });
     expect(node.walletCreate).not.toHaveBeenCalled();
-    await callApi(ctx, "wallet.create", { type: "bitcoin", provider: "bdk" });
+    await callApi(ctx, "wallet.create", { type: "bitcoin", provider: "bdk", values: { script: "bip84" } });
     expect(node.walletCreate).toHaveBeenCalledOnce();
+  });
+
+  it("a source or a field left out, or one the wallet does not take, is refused naming the flag, before the engine is asked", async () => {
+    // Found in a bug hunt: each was `engine` (exit 1) in the app's words ("Enter connection uri", "try again"), naming
+    // no flag, or the flag was dropped without a word.
+    const { ctx, node } = fake();
+    const refusal = async (params: Record<string, unknown>) => {
+      const error = asCliError(await callApi(ctx, "wallet.create", params).catch((e: unknown) => e));
+      return { code: error.code, message: error.message };
+    };
+    expect(await refusal({ type: "lightning" })).toEqual({ code: "bad_request", message: "lightning needs --provider: one of nwc (ghostly wallet list)" });
+    expect(await refusal({ type: "lightning", provider: "nwc" })).toEqual({ code: "bad_request", message: "nwc needs --value uri=<nostr+walletconnect://…>" });
+    expect(await refusal({ type: "lightning", provider: "nwc", values: { bogus: "1" } })).toEqual({ code: "bad_request", message: "nwc takes no --value bogus: its fields are uri" });
+    expect(await refusal({ type: "bitcoin", values: { network: "signet" } })).toEqual({ code: "bad_request", message: "bdk needs --value script=<bip84|bip86>" });
+    expect(await refusal({ type: "fedimint" })).toEqual({ code: "bad_request", message: "fedimint needs --invite <fed11…>" });
+    expect(await refusal({ type: "spark", network: "mainnet" })).toEqual({ code: "bad_request", message: "spark on mainnet needs --api-key <key> (or api-key=… on --stdin)" });
+    expect(await refusal({ type: "cashu", provider: "nwc" })).toEqual({ code: "usage", message: "--provider and --value name a lightning or bitcoin source: not with cashu" });
+    expect(await refusal({ type: "cashu", values: { uri: "x" } })).toEqual({ code: "usage", message: "--provider and --value name a lightning or bitcoin source: not with cashu" });
+    // WebLN lives in a browser page: never offered to a headless Ghostly, and refused as one it does not have.
+    expect(await refusal({ type: "lightning", provider: "webln" })).toMatchObject({ code: "bad_request", message: expect.stringContaining("ghostly wallet list") });
+    expect(node.walletCreate).not.toHaveBeenCalled();
+    const listed = await callApi(ctx, "wallet.list", {}) as { offers: { type: string; providers?: { id: string }[] }[] };
+    expect(listed.offers.find((o) => o.type === "lightning")?.providers?.map((p) => p.id)).toEqual(["nwc"]);
+    // Given in full, it reaches the engine.
+    await callApi(ctx, "wallet.create", { type: "lightning", provider: "nwc", values: { uri: "nostr+walletconnect://x" } });
+    expect(node.walletCreate.mock.calls.at(-1)![0]).toMatchObject({ type: "lightning", providerId: "nwc", values: { uri: "nostr+walletconnect://x" } });
   });
 
   it("history takes a whole number of entries", async () => {
@@ -157,6 +218,13 @@ describe("real money", () => {
     expect(invoiceNetwork("lightning:LNTBS1pxyz")).toBe("testnet");
     expect(invoiceNetwork("lnbcrt500n1pxyz")).toBe("testnet");
     expect(invoiceNetwork("hello")).toBeNull();
+  });
+
+  it("a received Fedimint payment says its network and fedimint as its method", () => {
+    const received = { id: "p", linkId: "l", kind: "payment", direction: "in", amount: 1_200, unit: "sat", state: "settled", createdAt: 1, federation: "f" } as const;
+    expect(paymentJson({ ...received, network: "testnet" })).toMatchObject({ network: "testnet", method: "fedimint" });
+    expect(paymentJson({ ...received, network: "mainnet" })).toMatchObject({ network: "mainnet", method: "fedimint" });
+    expect(paymentJson({ id: "r", linkId: "l", kind: "request", direction: "out", amount: 5, unit: "sat", state: "pending", createdAt: 1, federations: ["f"], invoice: "lntbs1x", network: "testnet" }).method).toBe("fedimint");
   });
 
   it("no spend on Mainnet without confirmReal, and confirmedReal only with it", async () => {
@@ -196,6 +264,16 @@ describe("a chat whose invite nobody took", () => {
     expect(node.sendPayment).not.toHaveBeenCalled();
     expect(node.connect).not.toHaveBeenCalled();
     expect(await callApi(ctx, "chat.pay", { chat: "Alice", amount: 10 })).toEqual({ chat: "chat-one", paymentId: "p1" });
+  });
+
+  it("someone else used first: pay and connect refuse at once with the taken sentence, as send does", async () => {
+    // Found in a bug hunt: `chat connect` dialed for 120 s, then answered `timeout`, a code a bot retries.
+    const { ctx, node } = fake();
+    const taken = { code: "refused", message: INVITE_TAKEN };
+    await expect(callApi(ctx, "chat.connect", { chat: "Carol" })).rejects.toMatchObject(taken);
+    await expect(callApi(ctx, "chat.pay", { chat: "Carol", amount: 10 })).rejects.toMatchObject(taken);
+    expect(node.connect).not.toHaveBeenCalled();
+    expect(node.sendPayment).not.toHaveBeenCalled();
   });
 });
 

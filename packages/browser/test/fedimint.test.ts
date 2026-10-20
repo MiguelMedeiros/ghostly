@@ -11,6 +11,7 @@ import { FedimintLightning, fedimint as fedimintDescriptor } from "../src/engine
 import { isNothingSpentError, providerDescriptorProblems } from "../src/engine/paymentAdapters/providers/types";
 import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import { PaymentDesk } from "../src/engine/payments";
+import { paymentNetwork } from "../src/engine/paymentAdapters/walletInstances";
 import type { CashuWallet } from "../src/engine/wallet";
 import { STORES, openDb, store, transact, wrap } from "../src/shared/idb";
 import type { StoredPayment } from "../src/shared/types";
@@ -316,6 +317,78 @@ describe("Fedimint in a chat", () => {
     expect(payerChat.desk.payment("req-1")!.state).toBe("settled");
     expect((await coordinator.reconcile(review.id)).state).toBe("settled");
     expect(fake.spent).toBe(1);
+  });
+
+  it("notes sent again under new ids are answered from what is known: one line, one redeem; refused notes get no '⚡' line", async () => {
+    const payer = await funded(3_000);
+    const bobClient = await (await fake.sdk()()).join({ database: "ghostly-fedimint-bob3.db", mnemonic: "bob", invite: federation.invite, recover: false });
+    const redeems = vi.fn();
+    const bobWallet = { inspectNotes: async (n: string) => ({ federation: federation.id, amountMsats: (await bobClient.parseNotes(n)).amountMsats }),
+      redeemNotes: async (_f: string, n: string, g: string) => { redeems(); const op = await bobClient.redeem(n, g); return { operationId: op, state: await bobClient.redeemState(op, 0) }; },
+      redeemState: (_f: string, op: string) => bobClient.redeemState(op, 0), federation: () => ({ network: "regtest" }), requestFederations: () => [federation.id] } as unknown as FedimintWallet;
+    const { desk, sent, host } = chat(bobWallet);
+    const pay = (id: string, timestamp: number, notes: string) => desk.onPayment("l", { id, timestamp, amount: { value: "1200", asset: "sat" }, endpoint: [ENDPOINT.fedimint, notes] });
+    const lines = () => (host.storeMessage.mock.calls as unknown as [{ text: string }][]).map(([m]) => m.text);
+
+    const { notes } = await payer.spendNotes(federation.id, 1_200);
+    await pay("p0", 1, notes);
+    expect(desk.payment("p0")).toMatchObject({ state: "settled" });
+    for (let i = 1; i <= 20; i++) await pay(`p${i}`, 1 + i, ` ${notes}\n`);
+    expect(redeems).toHaveBeenCalledTimes(1);
+    expect(lines()).toEqual(["⚡ 1,200 test sats on Fedimint"]);
+    expect(desk.payment("p5"), "no record per frame").toBeUndefined();
+    expect(sent.filter((s) => s.kind === "res").map((s) => s.frame.ok)).toEqual([true, ...Array(20).fill(false)]);
+    expect(await bobClient.balance()).toBe(1_200_000);
+
+    // Spelled otherwise (whitespace inside, standard base64): the same notes to the federation, so the same answer.
+    const half = notes.length / 2;
+    const spellings = [`${notes.slice(0, half)} ${notes.slice(half)}`, `${notes.slice(0, half)}\n${notes.slice(half)}`, `${notes.slice(0, half)}\r\n${notes.slice(half)}`,
+      `${notes.slice(0, half)}\t${notes.slice(half)}`, notes.replace(/-/g, "+").replace(/_/g, "/")];
+    expect(spellings.every((s) => s !== notes && fake.findNote(s)), "the federation reads each spelling").toBe(true);
+    for (const [i, spelled] of spellings.entries()) for (let j = 0; j < 4; j++) await pay(`s${i}-${j}`, 50 + i * 4 + j, spelled);
+    expect(redeems).toHaveBeenCalledTimes(1);
+    expect(lines()).toEqual(["⚡ 1,200 test sats on Fedimint"]);
+    expect(desk.payment("s0-0"), "no record per spelling").toBeUndefined();
+    expect(sent.filter((s) => s.kind === "res" && String(s.frame.id).startsWith("s")).map((s) => s.frame.error)).toEqual(Array(20).fill("These notes were already received"));
+
+    // Notes someone else redeemed first: no '⚡' line, one refusal line, and the repeats are not redeemed again.
+    host.storeMessage.mockClear(); redeems.mockClear();
+    const { notes: taken } = await payer.spendNotes(federation.id, 500);
+    await (await (await fake.sdk()()).join({ database: "ghostly-fedimint-eve.db", mnemonic: "eve", invite: federation.invite, recover: false })).redeem(taken, "eve");
+    for (let i = 0; i < 5; i++) await pay(`t${i}`, 100 + i, taken);
+    expect(redeems).toHaveBeenCalledTimes(1);
+    expect(desk.payment("t0")).toMatchObject({ state: "failed" });
+    expect(lines()).toEqual(["Could not receive Fedimint ecash: These notes were already redeemed"]);
+    expect(sent.filter((s) => s.kind === "res" && String(s.frame.id).startsWith("t")).map((s) => s.frame.error)).toEqual(Array(5).fill("These notes were already redeemed"));
+  });
+
+  it("received notes carry their federation's network: test sats are never a Mainnet payment, and older records learn it", async () => {
+    const payee = (network: string | undefined) => ({ inspectNotes: async () => ({ federation: federation.id, amountMsats: 1_200_000 }),
+      redeemNotes: async () => ({ operationId: "op", state: "done" }), redeemState: async () => "done",
+      federation: () => network === undefined ? undefined : { network }, requestFederations: () => [federation.id] }) as unknown as FedimintWallet;
+    const pay = (desk: PaymentDesk, id: string) => desk.onPayment("l", { id, timestamp: 1, amount: { value: "1200", asset: "sat" }, endpoint: [ENDPOINT.fedimint, `notes-${id}`] });
+    for (const [network, expected, line] of [["signet", "testnet", "test sats"], ["regtest", "testnet", "test sats"], ["bitcoin", "mainnet", "sats"]] as const) {
+      const { desk, host } = chat(payee(network));
+      await pay(desk, network);
+      expect(desk.payment(network), network).toMatchObject({ state: "settled", network: expected });
+      expect(paymentNetwork(desk.payment(network)!), network).toBe(expected);
+      expect((host.storeMessage.mock.calls as unknown as [{ text: string }][]).map(([m]) => m.text), network).toEqual([`⚡ 1,200 ${line} on Fedimint`]);
+    }
+
+    // A record written before it carried a network takes its federation's when the wallet is ready; one of a federation
+    // the wallet no longer knows is left as it was.
+    await transact([STORES.payments], (s) => { s[STORES.payments].clear(); });
+    await transact([STORES.payments], (s) => {
+      s[STORES.payments].put({ id: "old", linkId: "l", kind: "payment", direction: "in", amount: 1_200, unit: "sat", state: "settled", createdAt: 1, federation: federation.id, notesDigest: "d" } satisfies StoredPayment);
+      s[STORES.payments].put({ id: "gone", linkId: "l", kind: "payment", direction: "in", amount: 5, unit: "sat", state: "settled", createdAt: 2, federation: "other", notesDigest: "e" } satisfies StoredPayment);
+    });
+    const signet = payee("signet");
+    const { desk } = chat({ ...signet, federation: (id: string) => id === federation.id ? { network: "signet" } : undefined } as unknown as FedimintWallet);
+    await desk.start();
+    await desk.resumeFedimint();
+    expect(desk.payment("old")).toMatchObject({ network: "testnet" });
+    expect(paymentNetwork(desk.payment("old")!)).toBe("testnet");
+    expect(desk.payment("gone")!.network).toBeUndefined();
   });
 
   it("notes the contact refuses come back, and the review closes as failed", async () => {

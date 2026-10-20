@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RACE_DIRECT_MS, TYPING_REFRESH_MS } from "@ghostly/core";
 import { connectDaemon } from "../src/client";
+import { profilePaths } from "../src/profiles";
 import { BIN, error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running, testEnv } from "./support/cli";
 import { dominantHz, tone, wavFile } from "./support/tone";
 // covers: chat.paired.reconnect, headless.buttons, groups.edit, files.large.resend, files.large.request, headless.calls, headless.daemon, headless.chat, headless.events, headless.hooks, headless.groups, headless.one-shot, headless.cli, headless.files, headless.group-admin, headless.identities, headless.services, headless.typing, headless.reactions, headless.edit, headless.forward, chat.forward.files
@@ -481,8 +482,9 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const saved = ok(await as(bob, "file", "save", incoming.id, "--dir", bob));
     expect(sha(saved.path as string)).toBe(sha(small));
     error(await as(bob, "file", "save", incoming.id, "--dir", bob), "confirm", 5);
-    // A name of 124 characters but 364 bytes, over what Linux and macOS take in one name (255): saved shortened, a text
-    // still; an explicit path that long is a bad request naming it, not the engine's ENAMETOOLONG.
+    // A name of 124 characters but 364 bytes, over the 255 bytes Linux takes in one name: saved shortened, a text still.
+    // An explicit path whose name is too long is a bad request naming it, not the engine's ENAMETOOLONG: one over 255
+    // characters too, as macOS (APFS) counts 255 UTF-16 units and takes the 364 bytes above.
     const longName = `${"文".repeat(120)}.txt`;
     ok(await as(alice, "file", "send", "bob", small, "--name", longName));
     const longMessage = await listen.waitFor((e) => e.type === "message.received" && (e.message as { file?: { name: string } }).file?.name === longName);
@@ -493,7 +495,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(Buffer.byteLength(savedName)).toBeLessThanOrEqual(255);
     expect(savedName).toMatch(/^文+\.txt$/);
     expect(sha(savedLong.path as string)).toBe(sha(small));
-    expect(error(await as(bob, "file", "save", longId, "--path", join(bob, longName)), "bad_request", 1).message).toMatch(/too long for this file system/);
+    expect(error(await as(bob, "file", "save", longId, "--path", join(bob, `${"文".repeat(300)}.txt`)), "bad_request", 1).message).toMatch(/too long for this file system/);
     // A name that starts with a dash is saved with a _ first: in the folder it is a file to every tool, never an option.
     ok(await as(alice, "file", "send", "bob", small, "--name=-rf"));
     const dashMessage = await listen.waitFor((e) => e.type === "message.received" && (e.message as { file?: { name: string } }).file?.name === "-rf");
@@ -506,6 +508,10 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     expect(error(await as(bob, "file", "request", incoming.id), "refused", 1).message).toBe("Nothing to ask for: the file is all here");
     error(await as(bob, "file", "resend", incoming.id), "bad_request", 1);
     error(await as(bob, "file", "request", "nochat-in-nothing"), "not_found", 3);
+    // Nor stopped, answered or resumed once it is all here: refused, not an echo of an action that does nothing.
+    for (const action of ["cancel", "decline", "pause"]) expect(error(await as(bob, "file", action, incoming.id), "refused", 1).message).toBe("Nothing to stop: the file is all here");
+    for (const action of ["accept", "resume"]) expect(error(await as(bob, "file", action, incoming.id), "refused", 1).message).toBe("Nothing to ask for: the file is all here");
+    expect(error(await as(alice, "file", "cancel", (sent.file as { id: string }).id), "refused", 1).message).toBe("Nothing to stop: the file is all here");
 
     const large = join(alice, "big.bin");
     writeFileSync(large, randomBytes(26 * 1024 * 1024));
@@ -528,12 +534,13 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     const listed = ok(await as(bob, "file", "list", "alice")).files as { file: { id: string }; transfer: { state: string } | null }[];
     expect(listed.find((f) => f.file.id === incoming.id)?.transfer).toMatchObject({ state: "done", size: 200_000 });
     expect(error(await as(bob, "file", "request", incoming.id), "refused", 1).message).toBe("Nothing to ask for: the file is all here");
+    expect(error(await as(bob, "file", "cancel", incoming.id), "refused", 1).message).toBe("Nothing to stop: the file is all here");
     ok(await as(bob, "chat", "wait", "alice", "--until", "live", "--timeout", "60"));
   });
 
   it("send files all at once, as a bot sends photos: each its own message on both sides", async () => {
     // Over the daemon's socket, every request written at once: many land in the same millisecond.
-    const client = (await connectDaemon(sockets[alice]!))!;
+    const client = (await connectDaemon({ socket: sockets[alice]!, dir: profilePaths(alice, "default").dir }))!;
     const names = Array.from({ length: 20 }, (_, i) => `burst-${i}.txt`);
     try {
       const sent = await Promise.all(names.map((name) => {
@@ -718,7 +725,7 @@ describe("two headless peers", { timeout: 180_000 }, () => {
     // a fresh secret. A picture that is not a JPEG is refused before the engine is asked.
     const fixtures = join(import.meta.dirname, "../../../e2e/support/avatar-fixtures");
     ok(await as(alice, "group", "picture", "Bot crew", join(fixtures, "avatar.jpg")));
-    error(await as(bob, "group", "picture", "Bot crew", join(fixtures, "avatar.jpg")), "engine", 1);
+    error(await as(bob, "group", "picture", "Bot crew", join(fixtures, "avatar.jpg")), "refused", 1);
     error(await as(alice, "group", "picture", "Bot crew", join(fixtures, "avatar.png")), "bad_request", 1);
     const reset = ok(await as(alice, "group", "link", "Bot crew", "--reset"));
     expect(reset.link).toBeTruthy();

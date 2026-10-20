@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildSdpFromSignal, heardCallSignal, parseCallSignal } from "@ghostly/core";
 import type { EngineState, LinkView } from "@ghostly/browser/shared/types";
 import { AudioSocket, audioSocketPath } from "../src/calls/audioSocket";
-import { CallManager, MAX_REDIALS, type CallEngine } from "../src/calls/manager";
+import { CALL_PACE_MS, CallManager, MAX_EARLY_ANSWERS, MAX_REDIALS, type CallEngine } from "../src/calls/manager";
 import { CallMedia, loadCallStack, type CallStack } from "../src/calls/media";
 import { dominantHz, level, tone } from "./support/tone";
 // covers: headless.calls
@@ -27,7 +27,7 @@ afterAll(() => {
 
 interface Side { calls: CallManager; events: { type: string; [k: string]: unknown }[]; signals: (string | null)[]; link: Partial<LinkView> }
 
-function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number }; iceServersB?: { urls: string }[]; earlyAnswerMs?: number } = {}): { a: Side; b: Side } {
+function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () => Promise<CallStack | string>; now?: () => number; nowB?: () => number; delay?: number; maxRedials?: number; stall?: { afterMs: number; endMs: number }; iceServersB?: { urls: string }[]; earlyAnswerMs?: number; callPaceMs?: number } = {}): { a: Side; b: Side } {
   // Each side's clock: the same one unless `nowB` gives the second side its own.
   const nowA = stacks.now ?? Date.now, nowB = stacks.nowB ?? nowA;
   const make = (chat: string): Side => {
@@ -43,7 +43,7 @@ function pairOfManagers(stacks: { a?: () => Promise<CallStack | string>; b?: () 
       if (signal) setTimeout(() => other().calls.onSignal(other().link.id!, heardCallSignal(signal, heardAt())), stacks.delay ?? 5);
     },
   });
-  a.calls = new CallManager({ engine: engine(a, () => b, nowB), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials, stall: stacks.stall });
+  a.calls = new CallManager({ engine: engine(a, () => b, nowB), emit: (type, _id, fields) => a.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.a, now: stacks.now, maxRedials: stacks.maxRedials, stall: stacks.stall, callPaceMs: stacks.callPaceMs });
   b.calls = new CallManager({ engine: engine(b, () => a, nowA, stacks.iceServersB), emit: (type, _id, fields) => b.events.push({ type, ...fields }), profileDir: tmp(), stack: stacks.b, now: stacks.nowB ?? stacks.now, earlyAnswerMs: stacks.earlyAnswerMs });
   return { a, b };
 }
@@ -141,9 +141,9 @@ function deafStack(): (() => Promise<CallStack | string>) & { deaf: (on: boolean
   return Object.assign(stack, { deaf: (on: boolean) => { deaf = on; } });
 }
 
-/** The real media stack, counting the connections it made and the ones still open (not closed). */
-function countingStack(): (() => Promise<CallStack | string>) & { made: () => number; open: () => number } {
-  let made = 0;
+/** The real media stack, counting the connections it made and the ones still open (not closed), and the most open at once. */
+function countingStack(): (() => Promise<CallStack | string>) & { made: () => number; open: () => number; peak: () => number } {
+  let made = 0, peak = 0;
   const open = new Set<object>();
   const stack = async () => {
     const real = await loadCallStack();
@@ -153,13 +153,14 @@ function countingStack(): (() => Promise<CallStack | string>) & { made: () => nu
       const pc = new Real(...args);
       made++;
       open.add(pc);
+      peak = Math.max(peak, open.size);
       const close = pc.close.bind(pc);
       Object.defineProperty(pc, "close", { value: () => { open.delete(pc); close(); } });
       return pc;
     }
     return { ...real, ndc: { ...real.ndc, PeerConnection } as unknown as CallStack["ndc"] };
   };
-  return Object.assign(stack, { made: () => made, open: () => open.size });
+  return Object.assign(stack, { made: () => made, open: () => open.size, peak: () => peak });
 }
 
 /** Runs with these environment variables, then puts back what they were. */
@@ -400,6 +401,29 @@ describe("two call managers", { timeout: 60_000 }, () => {
     stack.deaf(false);
   });
 
+  // Its codecs' delete throwing (a broken Opus module: "memory access out of bounds") went up through the media's close
+  // and stopped the call's end there: no hang-up to the contact, no call.ended, the connection left open.
+  it("a call whose codecs throw as it ends still ends: the contact is told, call.ended goes out, the connection closes", async () => {
+    const counted = countingStack();
+    const throwing = async (): Promise<CallStack | string> => {
+      const real = await counted();
+      if (typeof real === "string") return real;
+      return { ...real, opus: (rate) => {
+        const codec = real.opus(rate);
+        return { encode: codec.encode, decode: codec.decode, delete: () => { codec.delete?.(); throw new RangeError("memory access out of bounds"); } };
+      } };
+    };
+    const { a, b } = pairOfManagers({ b: throwing });
+    b.calls.setAuto({ on: true, from: [], rate: 16000 });
+    await a.calls.start("chat-ab", {});
+    await until(() => (b.calls.list() as { state: string }[])[0]?.state === "connected");
+    await b.calls.hangup(undefined);
+    expect(await until(() => b.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "hangup" });
+    expect(await until(() => a.events.find((e) => e.type === "call.ended"))).toMatchObject({ reason: "remote-hangup" });
+    await until(() => counted.open() === 0);
+    expect(b.calls.list()).toEqual([]);
+  });
+
   it("a hang-up saying the contact could not connect (an app whose microphone was refused) ends a ringing call as failed", async () => {
     const { a, b } = pairOfManagers();
     await a.calls.start("chat-ab", {});
@@ -430,6 +454,55 @@ describe("two call managers", { timeout: 60_000 }, () => {
     await expect(b.calls.answer(undefined, {})).rejects.toMatchObject({ code: "not_found" });
     // The hang-up signal is cleared later, as the apps do; stopping sends nothing more.
     expect(a.signals.at(-1)).toMatch(/"t":"h"/);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  it("a call placed in the hang-up's millisecond rings, and a hang-up in its offer's millisecond ends the ring", async () => {
+    // A clock that stands still, as it does for a bot that redials or cancels at once: each signal is still newer.
+    const at = Date.now();
+    // No pace between calls (`CALL_PACE_MS`): this one is about the signals' timestamps.
+    const { a, b } = pairOfManagers({ now: () => at, callPaceMs: 0 });
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await a.calls.hangup(undefined);
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.filter((e) => e.type === "call.incoming").length === 2, 2000);
+    await a.calls.hangup(undefined);
+    await until(() => b.events.filter((e) => e.type === "call.ended").length === 2, 2000);
+    expect(b.calls.list()).toEqual([]);
+    const sent = a.signals.filter((s): s is string => s !== null).map((s) => (JSON.parse(s) as { ts: number }).ts);
+    expect(sent).toEqual([...sent].sort((x, y) => x - y));
+    expect(new Set(sent).size).toBe(sent.length);
+    await a.calls.stopAll();
+    await b.calls.stopAll();
+  });
+
+  // A bot looping call.start / call.hangup placed 1,375 calls a minute (agents#974): the contact's app keeps each as a
+  // missed call. A call that ended unanswered is followed by the next one no sooner than CALL_PACE_MS.
+  it("a call placed right after this side's last one ended unanswered is refused as busy, with the wait left; after it, or after a declined or answered call, it rings", async () => {
+    let at = Date.now();
+    const { a, b } = pairOfManagers({ now: () => at });
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.find((e) => e.type === "call.incoming"));
+    await a.calls.hangup(undefined);
+    await until(() => b.events.find((e) => e.type === "call.ended"));
+    at += 500;
+    const refused = await a.calls.start("chat-ab", {}).catch((error: unknown) => error);
+    expect(refused).toMatchObject({ code: "busy", details: { retryAfterMs: CALL_PACE_MS - 500 } });
+    expect((refused as Error).message).toBe("Your last call in this chat ended unanswered a moment ago: call again in 1.5 s");
+    // Nothing went to the contact for it, and nothing is on here.
+    expect(b.events.filter((e) => e.type === "call.incoming")).toHaveLength(1);
+    expect(a.calls.list()).toEqual([]);
+    at += CALL_PACE_MS;
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.filter((e) => e.type === "call.incoming").length === 2);
+    // Declined by the contact: no pace, the next call may go at once.
+    await b.calls.hangup(undefined);
+    await until(() => a.events.filter((e) => e.type === "call.ended").length === 2);
+    await a.calls.start("chat-ab", {});
+    await until(() => b.events.filter((e) => e.type === "call.incoming").length === 3);
+    await a.calls.hangup(undefined);
     await a.calls.stopAll();
     await b.calls.stopAll();
   });
@@ -467,7 +540,8 @@ describe("two call managers", { timeout: 60_000 }, () => {
   it("the answer made as a call rings: closed when the call is declined or missed, made again while it rings long, and answered on", async () => {
     await withEnv({ GHOSTLY_STUN: "0" }, async () => {
       const counted = countingStack();
-      const { a, b } = pairOfManagers({ b: counted, earlyAnswerMs: 300 });
+      // No pace between calls (`CALL_PACE_MS`): the caller places one right after the one it hung up.
+      const { a, b } = pairOfManagers({ b: counted, earlyAnswerMs: 300, callPaceMs: 0 });
 
       // Declined: made again a few times while it rang, and none is left open.
       await a.calls.start("chat-ab", {});
@@ -502,6 +576,48 @@ describe("two call managers", { timeout: 60_000 }, () => {
       await a.calls.stopAll();
       await b.calls.stopAll();
     });
+  });
+
+  it("calls that ring and hang up over and over, from one chat or many, make one early answer at a time per chat and MAX_EARLY_ANSWERS in all", async () => {
+    // A STUN server that never answers: each early answer takes HOST_GATHER_MS to make, and outlives its call that long.
+    const silent = createSocket("udp4");
+    await new Promise<void>((bound) => silent.bind(0, "127.0.0.1", bound));
+    try {
+      await withEnv({ GHOSTLY_STUN: "0" }, async () => {
+        const counted = countingStack();
+        const { a, b } = pairOfManagers({ b: counted, iceServersB: [{ urls: `stun:127.0.0.1:${silent.address().port}` }] });
+        await a.calls.start("chat-ab", {});
+        await until(() => b.events.find((e) => e.type === "call.incoming"));
+        const offer = JSON.parse(signalsOf(a, "o")[0]!) as { ts: number };
+        let ts = offer.ts;
+        const ring = (chat: string) => b.calls.onSignal(chat, heardCallSignal(JSON.stringify({ ...offer, ts: ++ts }), Date.now()));
+        const hangUp = (chat: string) => b.calls.onSignal(chat, heardCallSignal(JSON.stringify({ t: "h", ts: ++ts }), Date.now()));
+
+        // One chat: 40 rings, each hung up at once, then one that keeps ringing.
+        for (let i = 0; i < 40; i++) { ring("chat-ba"); hangUp("chat-ba"); }
+        ring("chat-ba");
+        await new Promise((r) => setTimeout(r, 300));
+        expect(counted.peak(), "one early answer at a time for the chat").toBe(1);
+        // The call still ringing gets its own once the one being made is done.
+        await until(() => counted.made() >= 2 && counted.open() === 1 && b.calls.list().length === 1, 10_000);
+        hangUp("chat-ba");
+        await until(() => counted.open() === 0, 10_000);
+
+        // Ten chats at once, each ringing and hanging up 5 times, then ringing.
+        for (let i = 0; i < 5; i++) for (let c = 0; c < 10; c++) { ring(`chat-${c}`); hangUp(`chat-${c}`); }
+        for (let c = 0; c < 10; c++) ring(`chat-${c}`);
+        await new Promise((r) => setTimeout(r, 300));
+        expect(counted.peak()).toBeLessThanOrEqual(MAX_EARLY_ANSWERS);
+        await new Promise((r) => setTimeout(r, 2500));
+        expect(counted.peak()).toBeLessThanOrEqual(MAX_EARLY_ANSWERS);
+        expect(b.calls.list()).toHaveLength(10);
+        await b.calls.stopAll();
+        await a.calls.stopAll();
+        await until(() => counted.open() === 0, 10_000);
+      });
+    } finally {
+      silent.close();
+    }
   });
 
   // Reported 2026-10-01 (a contact whose clock runs two minutes fast): a signal more than two minutes from this clock

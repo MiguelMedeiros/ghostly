@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { MessageInput } from "../../components/MessageInput";
@@ -76,7 +76,9 @@ describe("in the composer", () => {
       sendShareTo("chat-1");
     });
     await screen.findByTestId("attachment-sheet");
-    expect(screen.getByTestId("attachment-caption")).toHaveFocus();
+    // The sheet opens once the share's files are read, outside act(): its effects (the focus into the caption, the
+    // Escape it answers) may run a task after it is in the page.
+    await waitFor(() => expect(screen.getByTestId("attachment-caption")).toHaveFocus());
     await user.keyboard("{Escape}");
     expect(screen.queryByTestId("attachment-sheet")).toBeNull();
     expect(screen.getByPlaceholderText<HTMLTextAreaElement>("Message…")).toHaveFocus();
@@ -239,6 +241,63 @@ describe("the Share to… picker", () => {
     await user.click(screen.getByTestId("share-cancel"));
     expect(incomingShare()).toBeNull();
     expect(screen.getByTestId("where")).toHaveTextContent("/");
+  });
+
+  it("names the files too large to share and how to send them; with nothing else, offers no chat", () => {
+    receiveShare(share({ files: [file("a.png")], leftOut: ["VID_1.mp4"] }));
+    const { unmount } = picker();
+    expect(screen.getByTestId("share-files")).toHaveTextContent("a.png");
+    expect(screen.getByTestId("share-left-out-title")).toHaveTextContent("Too large to share here: VID_1.mp4");
+    expect(screen.getByTestId("share-left-out-next")).toHaveTextContent("Open a chat and send it with + → Document.");
+    expect(screen.getByTestId("share-chat")).toHaveTextContent("Ana");
+    unmount();
+
+    // Only names, with no share waiting: said alone.
+    resetIncomingShare();
+    receiveShare(share({ leftOut: ["VID_1.mp4", "VID_2.mp4"] }));
+    picker();
+    expect(screen.queryByTestId("share-none")).toBeNull();
+    expect(screen.getByTestId("share-left-out-title")).toHaveTextContent("Too large to share here: VID_1.mp4, VID_2.mp4");
+    expect(screen.queryByTestId("share-summary")).toBeNull();
+    expect(screen.queryByTestId("share-chat")).toBeNull();
+    expect(screen.getByTestId("share-cancel")).toBeInTheDocument();
+  });
+
+  it("names the files it could not read apart from those too large, also when that was all of a later share", () => {
+    receiveShare(share({ text: "look", leftOut: ["VID_1.mp4"], unread: ["IMG_2.jpg"] }));
+    // A later share whose only file could not be read: named with the share that waits, which stays.
+    receiveShare(share({ unread: ["IMG_3.jpg"] }));
+    picker();
+    expect(screen.getByTestId("share-text")).toHaveTextContent("look");
+    expect(screen.getByTestId("share-left-out-title")).toHaveTextContent("Too large to share here: VID_1.mp4");
+    expect(screen.getByTestId("share-unread-title")).toHaveTextContent("Couldn't read: IMG_2.jpg, IMG_3.jpg");
+    expect(screen.getByTestId("share-unread-next")).toHaveTextContent("Share it again from its app, or open a chat and send it with + → Document.");
+    expect(screen.getByTestId("share-chat")).toHaveTextContent("Ana");
+  });
+
+  it("a share too large to read (the web app's, over 64 MB): says so without a name, and how to send it", () => {
+    vi.useFakeTimers();
+    try {
+      receiveShare(share({ leftOut: [""] }));
+      picker();
+      act(() => { vi.advanceTimersByTime(6000); });
+      expect(screen.queryByTestId("share-none")).toBeNull();
+      expect(screen.getByTestId("share-left-out-title").textContent).toBe("Too large to share here");
+      expect(screen.getByTestId("share-left-out-next")).toHaveTextContent("Open a chat and send it with + → Document.");
+      expect(screen.queryByTestId("share-chat")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("names the files the device had no room to copy as such, not as unread, also when that was all of a later share", () => {
+    receiveShare(share({ text: "look", noRoom: ["VID_1.mp4"] }));
+    receiveShare(share({ noRoom: ["VID_2.mp4"] }));
+    picker();
+    expect(screen.getByTestId("share-text")).toHaveTextContent("look");
+    expect(screen.getByTestId("share-no-room-title")).toHaveTextContent("No room on this device for: VID_1.mp4, VID_2.mp4");
+    expect(screen.getByTestId("share-no-room-next")).toHaveTextContent("Free some space, then share it again.");
+    expect(screen.queryByTestId("share-unread")).toBeNull();
   });
 
   it("with nothing shared, it says so once it has waited", () => {

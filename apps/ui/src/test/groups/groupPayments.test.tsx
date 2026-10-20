@@ -203,6 +203,7 @@ describe("what a note says", () => {
     ["a request to the group, paid by someone", { from: "*", state: "paid", by: CAROL }, "Alice asked the group", "Paid by Carol"],
     ["a request to the group, paid by me", { from: "*", state: "paid", by: ME }, "Alice asked the group", "Paid by you"],
     ["a request to the group, paid through an invoice nobody claimed", { from: "*", state: "paid" }, "Alice asked the group", "Paid"],
+    ["a request to the group, paid through an invoice, with a name an older app kept", { from: "*", rail: "lightning", state: "paid", by: CAROL }, "Alice asked the group", "Paid"],
     ["an ask answered: the payer started it", { ask: true, from: BOB }, "Bob is paying Alice", "Waiting for payment"],
     ["two members say they paid", { from: "*", claims: [BOB, CAROL] }, "Alice asked the group", "Bob, Carol paid · waiting for Alice's wallet"],
     ["a closed request", { state: "closed" }, "Alice asked Bob", "Closed"],

@@ -50,10 +50,12 @@ import { engine } from "@ghostly/browser/platform/engine";
 import { fileSpace, registerFileBytes } from "@ghostly/browser/shared/fileBytes";
 import { NativeFileBytes, type NativeInvoke } from "@ghostly/browser/shared/fileBytesNative";
 import { setWindowThemeSink } from "../lib/windowTheme";
+import { setServiceWindowsCloser } from "../lib/serviceWindows";
 import { setNameStepUnderTest } from "../lib/nameStep";
 import { appsTestFetch } from "./appsTestFetch";
 import { appsPlatform } from "../lib/apps/flag";
 import { builtInAppOption } from "../lib/apps/builtIns";
+import { androidApp } from "../lib/touchOnly";
 
 /**
  * Ghostly Desktop runs the same peer as the browser clients, in its WebView,
@@ -334,14 +336,17 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   // Every step of a link's way to a live connection goes to the app's log (see `diagnostic_log`), so a
   // pairing that took long can be read back afterwards, step by step.
   setLinkTraceSink((line) => void invoke("diagnostic_log", { line: `link ${line}` }).catch(() => {}));
+  // A contact's app windows close when the profile locks; Rust closes them itself when this page is replaced.
+  setServiceWindowsCloser(() => void invoke("close_service_windows").catch(() => {}));
   listenForAppCommands();
   // Kept running until Rust says which WebKitGTK this is: a sound before the answer must not freeze the page.
   setSoundsRelease(soundsRelease(null));
   void invoke<number[] | null>("webkit_version").then((webkit) => setSoundsRelease(soundsRelease(webkit))).catch(() => {});
   // A new profile asks for a name; never under an e2e suite, which runs no automated browser here (desktopUnderTest).
   setNameStepUnderTest(desktopUnderTest);
-  // Files sent and received are real files in the app's data folder, written and read through Rust.
-  registerFileBytes("native", async () => new NativeFileBytes(invoke as NativeInvoke), true);
+  // Files sent and received are real files in the app's data folder, written and read through Rust. Android's IPC is
+  // JSON only: there the bytes go as base64url.
+  registerFileBytes("native", async () => new NativeFileBytes(invoke as NativeInvoke, { jsonIpc: androidApp() }), true);
   // The unread count, as the web app's icon has it (muted chats left out), on the Dock icon.
   setAppBadgeTarget(dockBadge());
   const apps = desktopApps(appsPlatform());
@@ -401,10 +406,10 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
     // answer per profile: `local_fetch` reaches only an address allowed there. The dialog is in the page's language.
     requestLocalAccess: (_pattern, origin) => invoke<boolean>("local_service_allow", { space: fileSpace(), origin, lang: dialogLanguage() }),
     forgetLocalAccess: (origin) => invoke<void>("local_service_forget", { space: fileSpace(), origin }),
-    async openService(peerPubKeyZ32, serviceId) {
+    async openService(peerPubKeyZ32, serviceId, tag) {
       const service = engine.linkByPeer(peerPubKeyZ32)?.peerServices?.find((s) => s.id === serviceId);
       // Rust says `unreachable` itself for a request this page never answered: the sentence goes with the window.
-      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, title: service?.name ?? serviceId, unreachable: profileT()("services.window.unreachable") });
+      await invoke("open_service_window", { peer: peerPubKeyZ32, service: serviceId, tag, title: service?.name ?? serviceId, unreachable: profileT()("services.window.unreachable") });
     },
   });
   const connect = host.connect;

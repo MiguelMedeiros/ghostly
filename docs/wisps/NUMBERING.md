@@ -1,6 +1,6 @@
 # WISP numbering and compatibility
 
-All 58 specifications have the document status Draft; each says in its header what is implemented, and the [index](README.md) lists them all. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
+All 60 specifications have the document status Draft; each says in its header what is implemented, and the [index](README.md) lists them all. Family numbering was approved on 2026-09-22. This migration is editorial: wire capability names, versions, storage keys and implemented protocol behavior are unchanged.
 
 ## Independent families
 
@@ -9,12 +9,12 @@ All 58 specifications have the document status Draft; each says in its header wh
 | 00-99 | Foundations: process (00), Ghost Core (01), peer keys (02), capabilities (03), local profiles (04), profile backups (05) |
 | 100-199 | Transport negotiation (100), WebRTC (101), Iroh (102), HyperDHT (103) |
 | 200-299 | Payment negotiation (200), Cashu (201), Arkade (202), Lightning (203), Bark (204), Lightning addresses (205), Spark (206), Fedimint (207) |
-| 300-399 | Identity proofs (300; external proofs optional), Nostr (301), domain (304), OpenPGP (305), Bitcoin address (306), SSH (307), the Nostr social layer (309), the profile DID (did:dht, 310), DIDs (311), AT Protocol (Bluesky, 312); Pubky, Keet and OpenID Connect (3xx, numbers to be defined) |
+| 300-399 | Identity proofs (300; external proofs optional), Nostr (301), domain (304), OpenPGP (305), Bitcoin address (306), SSH (307), the Nostr social layer (309), the profile DID (did:dht, 310), DIDs (311), AT Protocol (Bluesky, 312); Pubky, Keet, OpenID Connect and x401 credentials for headless agents (3xx, numbers to be defined) |
 | 400-499 | Chat messaging (400), chat session (401), compatibility chat (402), DHT text (403), store-and-forward for an away contact (404), status cards (405), message buttons (406) |
 | 500-599 | File transfer (500), chat files (501), compatibility file frames (502) |
 | 600-699 | Voice and video (600), WebRTC media (601) |
 | 700-799 | Local services (700), HTTP local service profile (701) |
-| 800-899 | Invite and join (800), invitation profiles (801) |
+| 800-899 | Invite and join (800), invitation profiles (801); public contact links (8xx, number to be defined) |
 | 900-999 | Group session negotiation (900), group mesh (902), group community (903); optional GossipSub distribution (9xx, number to be defined) |
 | 1000-1099 | Storage contract (1000), local file storage (1001), S3-compatible storage (1002) |
 | 1100-1199 | Headless runtime and its local control API (1100); local only, nothing on the wire |
@@ -60,6 +60,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 | 3xx-did-dht | [310](310-did-dht.md) |
 | 3xx-did | [311](311-did.md) |
 | 3xx-atproto | [312](312-atproto.md) |
+| none | [3xx · x401 · number to be defined](3xx-x401.md) |
 | 13 | [400](400-chat.md) |
 | 401 | [401](401-paired-chat.md) |
 | 402 | [402](402-legacy-chat.md) |
@@ -77,6 +78,7 @@ Generated from [numbering.json](numbering.json); edit that source instead of thi
 | 701 | [701](701-http-services.md) |
 | 20 | [800](800-invite-join.md) |
 | 801 | [801](801-invitation-profiles.md) |
+| none | [8xx · contact-links · number to be defined](8xx-contact-links.md) |
 | 21 | [900](900-group-sessions.md) |
 | 9xx-group-mesh | [902](902-group-mesh.md) |
 | 9xx-group-community | [903](903-group-community.md) |

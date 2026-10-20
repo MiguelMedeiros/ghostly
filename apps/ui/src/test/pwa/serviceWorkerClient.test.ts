@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyUpdate, askForShare, forwardShare, listenForShares, openedForShare, prepareUpdate } from "../../../../web/src/pwa/serviceWorker";
-import { incomingShare, resetIncomingShare } from "../../lib/incomingShare";
+import { applyUpdate, askForShare, buildGone, forwardShare, listenForShares, onBuildGone, openedForShare, prepareUpdate } from "../../../../web/src/pwa/serviceWorker";
+import { carryIncomingShare, incomingShare, resetIncomingShare } from "../../lib/incomingShare";
 
 // covers: app.pwa.update, app.pwa.share-target
 
@@ -124,9 +124,37 @@ describe("a share, on the page's side", () => {
     expect(container.started).toBe(true);
     const item = { title: "", text: "hi", url: "", files: [] };
     container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "share", item } }));
-    expect(incomingShare()).toEqual(item);
+    expect(incomingShare()).toMatchObject(item);
     expect(window.location.hash).toBe("#/shared");
     container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "something else" } }));
-    expect(incomingShare()).toEqual(item);
+    expect(incomingShare()).toMatchObject(item);
+  });
+
+  it("still in the picker when the page restarts (a profile switch), it goes back to the worker for the next page", () => {
+    listenForShares();
+    const item = { title: "", text: "", url: "", files: [new File(["hi"], "note.txt", { type: "text/plain" })] };
+    container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "share", item } }));
+    expect(carryIncomingShare()).toBe(true);
+    expect(registration.active!.posted).toEqual([{ type: "share-keep", item }]);
+
+    // No worker controls the page: nothing can keep it.
+    container.controller = null;
+    expect(carryIncomingShare()).toBe(false);
+  });
+
+  it("a build-gone message tells the app to look for the update now, and the page remembers it", () => {
+    listenForShares();
+    let told = 0;
+    const stop = onBuildGone(() => { told++; });
+    expect(buildGone()).toBe(false);
+    container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "build-gone" } }));
+    expect(told).toBe(1);
+    // Remembered for the page's life: every check from now on counts a redeploy of this version as an update.
+    expect(buildGone()).toBe(true);
+    // Fetching the new worker is the check's, once it finds the deploy (prepareUpdate): not a second time here.
+    expect(registration.update).not.toHaveBeenCalled();
+    stop();
+    container.dispatchEvent(Object.assign(new Event("message"), { data: { type: "build-gone" } }));
+    expect(told).toBe(1);
   });
 });

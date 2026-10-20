@@ -72,17 +72,20 @@ export function mergeGroupPay(current: GroupPayNote | undefined, frame: GroupPay
   const initiator = frame.k === "req" ? frame.to : frame.f;
   const fields = fieldsOf(frame);
   if (current && (current.kind !== fields.kind || current.to !== fields.to)) return undefined;
-  let next: GroupPayNote = current ? { ...current } : { ...fields, state: "open" };
-  // Until the initiator's own note arrives, a claim's description stands in for it.
-  if (author === initiator) next = { ...next, ...fields };
+  let next: GroupPayNote = current ? { ...current } : { ...fields, state: "open", ...(author === initiator ? {} : { undescribed: true as const }) };
+  // Until the initiator's own note arrives, a claim's description stands in for it, on this device only: a note
+  // still `undescribed` stays out of the group's history (GroupPayments.write), so no member is shown asking for or
+  // sending what another member made up in their name.
+  if (author === initiator) next = (({ undescribed: _, ...rest }) => rest)({ ...next, ...fields });
   if (frame.k === "req" && author !== frame.to) {
     // A payer's word about its own payment: a claim, not the request's state.
     const claims = frame.st === "sent" ? [...new Set([...(next.claims ?? []), author])].sort() : (next.claims ?? []).filter(k => k !== author);
     next = claims.length ? { ...next, claims } : (({ claims: _, ...rest }) => rest)(next);
   } else if (RANK[frame.st] > RANK[next.state]) next = { ...next, state: frame.st };
   if (frame.st === "paid" && frame.by) next = { ...next, by: frame.by };
-  // An invoice does not say who paid it: when exactly one member says they did, that is who.
-  if (next.state === "paid" && !next.by && next.from === "*" && next.claims?.length === 1) next = { ...next, by: next.claims[0] };
+  // An invoice does not say who paid it, so nobody's word names who did: a member's claim stays a claim, and a payee
+  // that names someone (an older app took a lone claim for the payer) is not believed.
+  if (next.from === "*" && next.rail === "lightning" && next.by) next = (({ by: _, ...rest }) => rest)(next);
   if (next.state === "paid" && next.from !== "*" && !next.by) next = { ...next, by: next.from };
   return JSON.stringify(next) === JSON.stringify(current) ? undefined : next;
 }
@@ -90,25 +93,33 @@ export function mergeGroupPay(current: GroupPayNote | undefined, frame: GroupPay
 /** Where a desk record sits in a group, if it does: the group, and the member at the other end (none for a request to all). */
 export interface Placement { groupId: string; me: string; peer?: string }
 
+const federationOf = (p: PaymentView): string | undefined => p.federation ?? p.federations?.[0];
 const railOf = (p: PaymentView): GroupPayRail =>
-  p.target ? (p.target.method === "cashu" ? "cashu" : p.target.method) : p.invoice && !p.mints?.length && !p.mint ? "lightning" : "cashu";
-const testOf = (p: PaymentView): boolean => p.target
-  ? (p.target.method === "cashu" ? p.target.network === "cashu-test" : p.target.method === "usdt" ? p.unit === "testusdt" : p.target.network !== "bitcoin")
-  : p.mint ? isWorthlessMint(p.mint) : p.mints?.length ? p.mints.every(isWorthlessMint) : false;
+  p.target ? (p.target.method === "cashu" ? "cashu" : p.target.method) : federationOf(p) ? "fedimint" : p.invoice && !p.mints?.length && !p.mint ? "lightning" : "cashu";
+/** Test money as the chat's bubble reads it (paymentIsTest): a target's chain, else the record's network, else a Fedimint federation's network, else its mints. */
+const testOf = (p: PaymentView, federationNetwork: (federation: string) => string | undefined): boolean => {
+  if (p.target) return p.target.method === "cashu" ? p.target.network === "cashu-test" : p.target.method === "usdt" ? p.unit === "testusdt" : p.target.network !== "bitcoin";
+  if (p.network) return p.network === "testnet";
+  const federation = federationOf(p);
+  if (federation) { const network = federationNetwork(federation); return !!network && network !== "bitcoin"; }
+  return p.mint ? isWorthlessMint(p.mint) : p.mints?.length ? p.mints.every(isWorthlessMint) : false;
+};
 
 /**
  * What this device says about one of its own payments in a group, or null when it says nothing (not a group's,
  * or nothing to say yet). `all` is every desk record, to find a request's payments and whether this device paid it.
  */
-export function authoredNote(p: PaymentView, at: Placement, all: readonly PaymentView[], current?: GroupPayNote, memberOf: (linkId: string) => string | undefined = () => undefined): GroupPayFrame | null {
+export function authoredNote(p: PaymentView, at: Placement, all: readonly PaymentView[], current?: GroupPayNote, memberOf: (linkId: string) => string | undefined = () => undefined,
+  federationNetwork: (federation: string) => string | undefined = () => undefined): GroupPayFrame | null {
   const base = { t: "group-pay" as const, g: at.groupId, id: paymentWireId(p.id), v: String(p.amount), u: p.unit, d: p.target?.method === "usdt" ? p.target.decimals ?? 6 : 0, r: railOf(p),
-    ...(testOf(p) ? { x: 1 as const } : {}), ...(p.memo ? { m: p.memo.slice(0, 140) } : {}), ...(p.ask ? { a: 1 as const } : {}), ts: p.createdAt };
+    ...(testOf(p, federationNetwork) ? { x: 1 as const } : {}), ...(p.memo ? { m: p.memo.slice(0, 140) } : {}), ...(p.ask ? { a: 1 as const } : {}), ts: p.createdAt };
   if (p.kind === "request" && p.direction === "out") {
-    // Mine to be paid: open until paid, and who paid it when my wallet knows (ecash comes in on the payer's edge).
+    // Mine to be paid: open until paid, and who paid it when my wallet knows (ecash comes in on the payer's edge);
+    // never from a member's claim, which is only its word.
     const from = p.group ? "*" : at.peer;
     if (!from) return null;
     const payment = all.find(x => x.kind === "payment" && x.direction === "in" && x.requestId === p.id && x.state === "settled");
-    const by = !p.group ? from : payment ? memberOf(payment.linkId) : current?.claims?.length === 1 ? current.claims[0] : undefined;
+    const by = !p.group ? from : payment ? memberOf(payment.linkId) : undefined;
     const st = p.state === "settled" ? "paid" : p.state === "failed" || p.state === "reclaimed" ? "closed" : "open";
     return { ...base, k: "req", f: from, to: at.me, st, ...(st === "paid" && by ? { by } : {}) };
   }
@@ -146,6 +157,8 @@ export interface GroupPaymentsHost {
   messages(groupId: string): Promise<StoredMessage[]>;
   /** Writes (or rewrites) a line of the group's history. */
   putMessage(message: StoredMessage): Promise<void>;
+  /** The network of a federation this device joined ("bitcoin" for real money), for a record that names only its federation. */
+  federationNetwork?(federation: string): string | undefined;
 }
 
 export class GroupPayments {
@@ -162,8 +175,6 @@ export class GroupPayments {
       const notes = await this.load(groupId);
       const next = mergeGroupPay(notes.get(frame.id), frame, author, membership.members);
       if (next) await this.write(groupId, membership.me, next);
-      // A single claim may name who paid my request to the group.
-      await this.author();
     });
   }
 
@@ -194,7 +205,7 @@ export class GroupPayments {
       if (!at) continue;
       const notes = await this.load(at.groupId);
       const current = notes.get(paymentWireId(p.id));
-      const frame = authoredNote(p, at, all, current, linkId => this.host.edgeOf(linkId)?.member);
+      const frame = authoredNote(p, at, all, current, linkId => this.host.edgeOf(linkId)?.member, federation => this.host.federationNetwork?.(federation));
       if (!frame || JSON.stringify(frame) === JSON.stringify(current?.mine)) continue;
       const merged = mergeGroupPay(current, frame, at.me, membership(at.groupId)!.members) ?? current;
       if (!merged) continue;
@@ -222,6 +233,8 @@ export class GroupPayments {
 
   private async write(groupId: string, me: string, note: GroupPayNote): Promise<void> {
     this.notes.get(groupId)?.set(note.id, note);
+    // Shown once the member it is about described it; what others said about it waits here until then.
+    if (note.undescribed) return;
     const initiator = note.kind === "request" ? note.to : note.from;
     await this.host.putMessage({ linkId: `group:${groupId}`, id: NOTE_ID(note.id), text: summary(note), sender: initiator === me ? "me" : "peer", member: initiator,
       timestamp: note.createdAt, via: "datalink", groupPay: note });

@@ -1,7 +1,8 @@
 "use client";
 
-import { memo, useId } from "react";
-import { motion, type MotionValue } from "motion/react";
+import { memo, useEffect, useId, useRef } from "react";
+// Types only: the footer's sleeper is on every page, and so would be the motion library it never moves.
+import type { MotionValue } from "motion/react";
 import { useCalm } from "@/lib/useCalm";
 import { PAIR } from "@/lib/motion";
 import { GHOST_PATH } from "./path";
@@ -90,6 +91,8 @@ function isMotionLook(look: Look): look is { x: MotionValue<number>; y: MotionVa
   return typeof look.x !== "number";
 }
 
+const translate = (x: number, y: number) => `translate(${x}px, ${y}px)`;
+
 export const Ghost = memo(function Ghost({
   who = "boo",
   color,
@@ -113,10 +116,29 @@ export const Ghost = memo(function Ghost({
   const wide = mood === "surprised" || mood === "excited";
   const cheeks = blush ?? (mood === "happy" || mood === "excited");
 
-  // Pupils: plain numbers become a static translate; motion values animate freely.
+  // Pupils: plain numbers become a static translate; motion values (pixels) move them as they change, written straight
+  // to the element as motion's own `style` would.
+  const pupils = useRef<SVGGElement>(null);
   const pupilStyle = isMotionLook(look)
-    ? { x: look.x, y: look.y }
+    ? { transform: translate(look.x.get(), look.y.get()) }
     : { transform: `translate(${(Math.max(-1, Math.min(1, look.x)) * 2.2).toFixed(2)}px, ${(Math.max(-1, Math.min(1, look.y)) * 1.8).toFixed(2)}px)` };
+  const mx = isMotionLook(look) ? look.x : undefined;
+  const my = isMotionLook(look) ? look.y : undefined;
+  // `closed`: a ghost that wakes draws its pupils anew.
+  useEffect(() => {
+    const el = pupils.current;
+    if (!mx || !my || !el) return;
+    const place = () => {
+      el.style.transform = translate(mx.get(), my.get());
+    };
+    place();
+    const offX = mx.on("change", place);
+    const offY = my.on("change", place);
+    return () => {
+      offX();
+      offY();
+    };
+  }, [mx, my, closed]);
 
   return (
     <svg
@@ -148,7 +170,9 @@ export const Ghost = memo(function Ghost({
       <g className="ghost-lean" style={{ transform: `rotate(${tilt}deg)` }}>
         {/* A sleeping ghost's hem is still: a `d` morph lays out and repaints the whole page at every frame for as long
             as the ghost is on screen, and the footer's sleeper is on screen at the end of every page. So is a `still`
-            one's: /brand's row of 7 moods laid out the page 120 times a second (189 ms of main thread a second). */}
+            one's: /brand's row of 7 moods laid out the page 120 times a second (189 ms of main thread a second). An awake
+            one's stirs three times when it appears and rests on the still hem (the last frame): the first screen of
+            /, /roadmap and /developers/agents laid out 60 times a second for as long as the reader stayed there. */}
         {[fill, `url(#sheen-${id})`].map((paint, i) => (
           <path key={i} d={STILL} fill={paint}>
             {!reduce && !closed && !still && (
@@ -156,7 +180,8 @@ export const Ghost = memo(function Ghost({
                 attributeName="d"
                 dur="3.2s"
                 begin={delay}
-                repeatCount="indefinite"
+                repeatCount="3"
+                fill="freeze"
                 values={[...FRAMES, FRAMES[0]].join(";")}
                 calcMode="spline"
                 keySplines={Array(FRAMES.length).fill("0.45 0 0.55 1").join(";")}
@@ -179,10 +204,10 @@ export const Ghost = memo(function Ghost({
                 <ellipse cx="29" cy="36" rx={wide ? 7 : 6} ry={wide ? 7.5 : mood === "lonely" ? 6 : 6.5} fill={INK} />
               )}
               <ellipse cx="51" cy="36" rx={wide ? 7 : 6} ry={wide ? 7.5 : mood === "lonely" ? 6 : 6.5} fill={INK} />
-              <motion.g className="ghost-pupils" style={pupilStyle}>
+              <g ref={pupils} className="ghost-pupils" style={pupilStyle}>
                 {mood !== "wink" && <circle cx="30.5" cy={mood === "lonely" ? 37 : 34} r="2" fill="#fff" />}
                 <circle cx="52.5" cy={mood === "lonely" ? 37 : 34} r="2" fill="#fff" />
-              </motion.g>
+              </g>
             </>
           )}
         </g>

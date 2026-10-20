@@ -39,8 +39,11 @@ export function forwardSecret(messages: readonly ChatMessage[]): SecretFinding |
   return null;
 }
 
-/** What each chat forwarded to got, from the engine: the new messages and the first problem, if any. */
-export interface ForwardOutcome { to: string; messageIds: string[]; error: string | null }
+/**
+ * What each chat forwarded to got, from the engine: the new messages, which of the forwarded ones they came from
+ * (`sent`), and the first problem, if any.
+ */
+export interface ForwardOutcome { to: string; messageIds: string[]; sent?: string[]; error: string | null }
 
 /**
  * Sends messages of a chat (`linkId`, or `group:<id>`) on to others (engine link ids or `group:<id>`), in the order they

@@ -1,4 +1,4 @@
-import { sdpHasCandidates, waitForIceGathering } from "./callSignal";
+import { keepsToRelays, sdpHasCandidates, waitForIceGathering } from "./callSignal";
 import { symmetricNat, type DirectEvidence } from "./directPath";
 import { wrapDataChannel, type FrameChannel } from "./frames";
 import { traceLink } from "./linkTrace";
@@ -90,7 +90,7 @@ const ICE_GATHERING_TIMEOUT_MS = 5_000;
  * rather than 2 s (calls bug hunt, 2026-10-12).
  */
 export const OFFER_HOST_GATHER_MS = 2_000;
-/** The data link keeps collecting this long after the candidate it waited for came (a call keeps 400 ms). */
+/** The data link keeps collecting this long after the candidate it waited for came (a call too). */
 export const DATA_SETTLE_MS = 150;
 /**
  * A connection with no candidate at all by then has stalled: Chromium, rarely and under load, gathers none, and an
@@ -202,7 +202,7 @@ export class DataLink {
 
       this.myOfferTs = Date.now();
       this.sentLacksPublic = !PUBLIC_CANDIDATE.test(pc.localDescription?.sdp ?? "");
-      const signal: RtcSignal = { t: "o", ts: this.myOfferTs, ...extractRtcParams(pc.localDescription!.sdp) };
+      const signal: RtcSignal = { t: "o", ts: this.myOfferTs, ...extractRtcParams(pc.localDescription!.sdp, { relayOnly: keepsToRelays(pc) }) };
       this.options.publishSignal(JSON.stringify(signal));
     } catch {
       this.reset();
@@ -288,6 +288,9 @@ export class DataLink {
     catch { return null; }
   }
 
+  /** The peer connection this link holds now (null when idle): a later one is another attempt. */
+  get connection(): RTCPeerConnection | null { return this.pc; }
+
   close(): void {
     // Given up for another transport that went live while this one had long had both descriptions: evidence all the same.
     const stalled = Date.now() - this.connectingSince >= STALLED_EVIDENCE_MS;
@@ -371,7 +374,7 @@ export class DataLink {
         t: "a",
         ts: Date.now(),
         o: offer.ts,
-        ...extractRtcParams(pc.localDescription!.sdp),
+        ...extractRtcParams(pc.localDescription!.sdp, { relayOnly: keepsToRelays(pc) }),
       };
       this.options.publishSignal(JSON.stringify(signal));
       this.setState("connecting");

@@ -3,16 +3,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ENDPOINT, WALLET_NETWORKS, cashuRequestPayload, type GhostLink, type PaymentTarget } from "@ghostly/core";
 import { PaymentDesk, type DeskLightning } from "../src/engine/payments";
 import type { ArkWallet } from "../src/engine/paymentAdapters/arkWallet";
-import type { CashuWallet } from "../src/engine/wallet";
+import { CashuWallet } from "../src/engine/wallet";
+import { Amount, getEncodedToken, type Proof } from "@cashu/cashu-ts";
 import { STORES, openDb, transact } from "../src/shared/idb";
 import { TEST_MINT } from "../src/shared/mints";
 import { REAL_MONEY_UNCONFIRMED, crossNetwork, paymentNetwork, paymentNetworksOf, walletInstances } from "../src/engine/paymentAdapters/walletInstances";
 import { WrongNetworkError } from "../src/engine/paymentAdapters/modeGate";
 import { GhostlyNode } from "../src/engine/node";
 import type { NetworkWalletsView, StoredPayment } from "../src/shared/types";
+import { invoiceFor } from "./helpers/invoice";
 // covers: wallet.instances.networks, payments.chat.networks
 
 const REAL = "https://mint.minibits.cash/Bitcoin";
+const REAL_INVOICE = invoiceFor(100), TEN_SATS = invoiceFor(10);
 const arkTarget = (network: "bitcoin" | "mutinynet", address = "tark1fresh"): PaymentTarget => ({ method: "arkade", network, provider: network === "bitcoin" ? "https://arkade.computer" : "https://mutinynet.arkade.sh", asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 3_600_000 });
 
 function setup() {
@@ -54,22 +57,22 @@ beforeEach(async () => {
 describe("a payment never crosses networks", () => {
   it("a request of one network is refused by a card of the other, before anything is spent", async () => {
     const { desk, wallet, lightnings } = setup();
-    await desk.onPaymentRequest("l", { id: "real-one", timestamp: 1, amount: { value: "100", asset: "sat" }, endpoints: [[ENDPOINT.bolt11, "lnbc100"], [ENDPOINT.cashu, cashuRequestPayload([REAL])]], network: "mainnet" });
+    await desk.onPaymentRequest("l", { id: "real-one", timestamp: 1, amount: { value: "100", asset: "sat" }, endpoints: [[ENDPOINT.bolt11, REAL_INVOICE], [ENDPOINT.cashu, cashuRequestPayload([REAL])]], network: "mainnet" });
     await expect(desk.payRequest({ linkId: "l", paymentId: "real-one", network: "testnet" })).rejects.toThrow(crossNetwork("testnet", "mainnet"));
     expect(wallet.createToken).not.toHaveBeenCalled();
     expect(lightnings.testnet.pay).not.toHaveBeenCalled();
     expect(lightnings.mainnet.pay).not.toHaveBeenCalled();
     // Paid with no card named, it goes through the request's own network: Mainnet's Lightning, never Testnet's.
     await desk.payRequest({ linkId: "l", paymentId: "real-one", confirmedReal: true });
-    expect(lightnings.mainnet.quote).toHaveBeenCalledWith("lnbc100", undefined);
+    expect(lightnings.mainnet.quote).toHaveBeenCalledWith(REAL_INVOICE, undefined);
     expect(lightnings.testnet.quote).not.toHaveBeenCalled();
   });
 
   it("an incoming request keeps the network it names, else the one its mints, chain or invoice say", async () => {
     const { desk } = setup();
     const req = (id: string, endpoints: [string, string][], network?: "mainnet" | "testnet") => desk.onPaymentRequest("l", { id: `req-${id}`, timestamp: 1, amount: { value: "10", asset: "sat" }, endpoints, network });
-    await req("named", [[ENDPOINT.bolt11, "lnbc10"]], "testnet");
-    await req("test-mint", [[ENDPOINT.bolt11, "lnbc10"], [ENDPOINT.cashu, cashuRequestPayload([TEST_MINT])]]);
+    await req("named", [[ENDPOINT.bolt11, TEN_SATS]], "testnet");
+    await req("test-mint", [[ENDPOINT.bolt11, TEN_SATS], [ENDPOINT.cashu, cashuRequestPayload([TEST_MINT])]]);
     await req("real-mint", [[ENDPOINT.cashu, cashuRequestPayload([REAL])]]);
     await req("ark", [[ENDPOINT.arkade, JSON.stringify(arkTarget("mutinynet"))]]);
     expect(["named", "test-mint", "real-mint", "ark"].map((id) => desk.payment(`req-${id}`)?.network)).toEqual(["testnet", "testnet", "mainnet", "testnet"]);
@@ -190,6 +193,21 @@ describe("a chat's ways of paying, per network", () => {
     // Testnet Lightning is still on: the request carries only the invoice.
     expect(sent.length).toBe(before + 1);
     expect(sent.at(-1)?.frame).toMatchObject({ network: "testnet", endpoints: [[ENDPOINT.bolt11, "lnbc-testnet"]] });
+  });
+
+  it("test ecash behind a cashu:, cashu:// or web+cashu:// prefix is refused unredeemed when Testnet Cashu is off", async () => {
+    const { desk, link, wallet } = setup();
+    (desk as unknown as { host: { acceptsNetwork: unknown } }).host.acceptsNetwork = (_l: string, method: string, network: string) => !(method === "cashu" && network === "testnet");
+    const receiveToken = vi.fn(async () => ({ amount: 500, mint: TEST_MINT, fee: 0 }));
+    // The wallet's own reading of a token, as the app does it.
+    const reader = { getKnownMints: () => [REAL] } as unknown as CashuWallet;
+    Object.assign(wallet, { inspect: (text: string) => CashuWallet.prototype.inspect.call(reader, text), receiveToken });
+    const token = getEncodedToken({ mint: TEST_MINT, unit: "sat", proofs: [{ id: "009a1f293253e41e", amount: Amount.from(500), secret: "s-500", C: `02${"ab".repeat(32)}` } as Proof] });
+    for (const [i, prefix] of ["", "cashu:", "cashu://", "web+cashu://"].entries()) {
+      await desk.onPayment("l", { id: `pay-${i}`, timestamp: i + 1, amount: { value: "500", asset: "sat" }, endpoint: [ENDPOINT.cashu, prefix + token] });
+      expect(link.sendPaymentResult, prefix || "plain").toHaveBeenLastCalledWith(expect.objectContaining({ id: `pay-${i}`, ok: false }));
+    }
+    expect(receiveToken).not.toHaveBeenCalled();
   });
 
   it("a contact that said its networks is offered only those: a Testnet card never goes to a Mainnet-only contact", async () => {

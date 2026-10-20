@@ -7,10 +7,11 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 /**
  * The Desktop's HyperDHT sidecar (native/transports/hyperdht/sidecar.mjs) as the Desktop runs it, on a HyperDHT network
  * of its own on loopback, sending a file to a contact that reads at about 4 MB/s (in its own process). The page's side
- * is modelled as apps/ui's HyperDHT channel: 120 KiB of frames not yet answered `sent`, and a file's 16 KiB chunks
- * while under a quarter of that. A text sent in the middle of the file must not wait behind it.
- * Before, the sidecar answered `sent` as soon as it wrote (its socket's queue always read 0), so the page kept writing
- * and the file piled up in the stream ahead of the text.
+ * is modelled as apps/ui's HyperDHT channel: 120 KiB of frames the host has not taken yet (here, the pipe to the
+ * sidecar), and a file's 16 KiB chunks while under a quarter of that and while the sidecar has not said its socket is
+ * `full` (until `room`). A text sent in the middle of the file must not wait behind it.
+ * Before, the sidecar read its socket's queue as always 0 and never held the page back, so the page kept writing and
+ * the file piled up in the stream ahead of the text.
  */
 
 type Testnet = { bootstrap: { host: string; port: number }[]; destroy(): Promise<void> };
@@ -44,7 +45,9 @@ function child(args: string[], env: NodeJS.ProcessEnv = {}) {
     if (at >= 0) waiters.splice(at, 1)[0].resolve(line);
   });
   return {
-    write: (value: unknown) => proc.stdin.write(JSON.stringify(value) + "\n"),
+    // A sidecar told to stop still says `room` once it drained while it closes (up to 3 s); the page's listener
+    // answers that with more chunks, after afterAll ended the pipe: they are dropped, not written after its end.
+    write: (value: unknown, written?: () => void) => !proc.stdin.writableEnded && proc.stdin.write(JSON.stringify(value) + "\n", written),
     next: (match: (line: Record<string, unknown>) => boolean) => new Promise<Record<string, unknown>>((resolve) => { waiters.push({ match, resolve }); }),
     on: (listen: (line: Record<string, unknown>) => void) => { listeners.push(listen); },
   };
@@ -60,22 +63,25 @@ it("a text sent in the middle of a file reaches a slow contact in under a second
   sidecar.write({ type: "connect", endpoint: 1, descriptor });
   const { id } = await sidecar.next((line) => line.type === "result");
 
-  // The page: frames not yet answered `sent`, by number, and a file's chunks while under a quarter of its budget.
+  // The page: frames the host has not taken, and a file's chunks while under a quarter of its budget and not `full`.
   const budget = 120 * KIB, chunk = new Uint8Array(16 * KIB).fill(7), file = 32 * 1024 * KIB;
-  const unsent = new Map<number, number>();
-  let seq = 0, buffered = 0, offset = 0;
+  let seq = 0, buffered = 0, offset = 0, full = false, over = false;
   const send = (frame: { text: string } | { bytes: string }, size: number) => {
     expect(buffered + size).toBeLessThanOrEqual(budget);
-    unsent.set(++seq, size); buffered += size;
-    sidecar.write({ type: "send", endpoint: 1, id, seq, ...frame });
+    buffered += size;
+    // The host's answer reaches the page as a message of its own, after what the sidecar said before it. A pipe write
+    // the kernel took at once calls back in the same turn: freed there, the page wrote on without reading `full` (up to
+    // 1.5 MiB at a time), and the sidecar's socket could pass what a channel may hold.
+    sidecar.write({ type: "send", endpoint: 1, id, seq: ++seq, ...frame }, () => setImmediate(() => { buffered -= size; more(); }));
   };
   const bytes = Buffer.from(chunk).toString("base64");
-  const more = () => { while (offset < file && buffered < budget / 4) { send({ bytes }, chunk.length); offset += chunk.length; } };
+  const more = () => { while (offset < file && !full && buffered < budget / 4) { send({ bytes }, chunk.length); offset += chunk.length; } };
   sidecar.on((line) => {
+    // Once the test is over, afterAll stops the contact first: the chunks still on their way to the sidecar then go to
+    // a closed connection, and each is an error by design (never a frame lost unseen).
+    if (over) return;
     if (line.type === "error") throw new Error(String(line.message));
-    if (line.type !== "sent") return;
-    buffered -= unsent.get(line.seq as number) ?? 0; unsent.delete(line.seq as number);
-    more();
+    if (line.type === "full" || line.type === "room") { full = line.type === "full"; more(); }
   });
   more();
 
@@ -88,4 +94,5 @@ it("a text sent in the middle of a file reaches a slow contact in under a second
   expect((at as number) - sentAt).toBeLessThan(1_000);
   // The page was held back as the link is: before, it had handed the sidecar all 32 MiB within the 3 s.
   expect(offset).toBeLessThan(file);
+  over = true;
 }, 40_000);
