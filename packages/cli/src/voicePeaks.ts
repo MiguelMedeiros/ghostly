@@ -116,18 +116,25 @@ class Collector implements SoundSink {
 }
 
 /**
- * The waveform and length of the sound in `path`, or why they could not be read. A sound longer than a voice note may
- * be is read only a little past that length: its duration says it is too long, and the send is refused for it.
+ * A file that is not sound: a decoder read it and found none (a WAV without its samples, ffmpeg's "Invalid data
+ * found"). Not one that could not be read here (no ffmpeg, a WAV format not read): that may still be a voice note.
  */
-export async function measureVoice(path: string): Promise<{ voice: VoiceMeasure } | { problem: string }> {
+export class NotSound extends Error {}
+
+/**
+ * The waveform and length of the sound in `path`, or why they could not be read (`notSound` when the file is no sound
+ * at all). A sound longer than a voice note may be is read only a little past that length: its duration says it is
+ * too long, and the send is refused for it.
+ */
+export async function measureVoice(path: string): Promise<{ voice: VoiceMeasure } | { problem: string; notSound?: true }> {
   const meter = new VoiceMeter();
   try {
     await streamSound(path, meter);
   } catch (error) {
-    return { problem: error instanceof Error ? error.message : String(error) };
+    return { problem: error instanceof Error ? error.message : String(error), ...(error instanceof NotSound ? { notSound: true } : {}) };
   }
   const voice = meter.result();
-  return voice ? { voice } : { problem: "no sound in it" };
+  return voice ? { voice } : { problem: "no sound in it", notSound: true };
 }
 
 /** The whole sound in `path`, in memory. */
@@ -149,7 +156,9 @@ export async function streamSound(path: string, sink: SoundSink): Promise<void> 
     await streamFfmpeg(path, sink);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(own ? `${own.message}; ${reason}` : reason, { cause: error });
+    // ffmpeg's word on it, or this module's when ffmpeg could not give one (not here, too slow).
+    const notSound = error instanceof NotSound || own instanceof NotSound;
+    throw new (notSound ? NotSound : Error)(own ? `${own.message}; ${reason}` : reason, { cause: error });
   }
 }
 
@@ -264,7 +273,7 @@ function wavHeader(bytes: Uint8Array): { format: number; channels: number; sampl
       // WAVE_FORMAT_EXTENSIBLE: the real format is the sub-format GUID's first two bytes.
       if (format === 0xfffe && size >= 26) { if (body + 26 > bytes.length) return null; format = view.getUint16(body + 24, true); }
     } else if (id === "data") {
-      if (!channels || !sampleRate || !bits) throw new Error("a WAV without its format");
+      if (!channels || !sampleRate || !bits) throw new NotSound("a WAV without its format");
       const to = size === 0 || size === 0xffffffff ? Infinity : body + size;
       return { format, channels, sampleRate, bits, from: body, to };
     }
@@ -289,7 +298,7 @@ const PIECE_FRAMES = 4096;
 
 function streamWav(bytes: Uint8Array, sink: SoundSink): void {
   const header = wavHeader(bytes);
-  if (!header) throw new Error("a WAV without sound");
+  if (!header) throw new NotSound("a WAV without sound");
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const read = sampleReader(view, header.format, header.bits);
   if (!read) throw new Error(`a WAV in a format not read here (${header.format}, ${header.bits} bit)`);
@@ -304,7 +313,7 @@ async function streamWavFile(file: FileHandle, size: number, sink: SoundSink): P
     header = wavHeader(await readAt(file, 0, Math.min(size, length)));
     if (length >= size || length >= WAV_HEAD_MAX) break;
   }
-  if (!header) throw new Error("a WAV without sound");
+  if (!header) throw new NotSound("a WAV without sound");
   const { format, bits, channels } = header;
   if (!sampleReader(new DataView(new ArrayBuffer(0)), format, bits)) throw new Error(`a WAV in a format not read here (${format}, ${bits} bit)`);
   sink.start(header.sampleRate);
@@ -561,8 +570,8 @@ export function streamFfmpeg(path: string, sink: SoundSink, command = process.en
   return new Promise((resolve, reject) => {
     const child = spawn(command, ["-v", "error", "-nostdin", "-i", path, "-vn", "-f", "wav", "-c:a", "pcm_f32le", "-"], { stdio: ["ignore", "pipe", "pipe"] });
     let errors = "", pending: Buffer = Buffer.alloc(0), header: ReturnType<typeof wavHeader> = null, done = false, failed: Error | null = null;
-    let read: ((at: number) => number) | undefined, left = Infinity;
-    const timer = setTimeout(() => child.kill("SIGKILL"), FFMPEG_TIMEOUT_MS);
+    let read: ((at: number) => number) | undefined, left = Infinity, timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, FFMPEG_TIMEOUT_MS);
     const stop = () => { done = true; child.stdout.removeAllListeners("data"); child.kill("SIGKILL"); };
     child.stdout.on("data", (chunk: Buffer) => {
       if (done) return;
@@ -601,8 +610,12 @@ export function streamFfmpeg(path: string, sink: SoundSink, command = process.en
       if (failed) { reject(failed); return; }
       // Stopped here because the sink had what it wanted: not a failure of ffmpeg's.
       if (done && header) { resolve(); return; }
-      if (code !== 0) { reject(new Error(`ffmpeg could not read it${errors.trim() ? `: ${errors.trim().split("\n")[0]}` : ""}`)); return; }
-      if (!header) { reject(new Error("a WAV without sound")); return; }
+      if (timedOut) { reject(new Error(`ffmpeg took more than ${FFMPEG_TIMEOUT_MS / 60_000} minutes to read it`)); return; }
+      // ffmpeg reads any sound there is: one it could not read is none. Its first line, without the address of the
+      // part that said it ("[in#0 @ 0x57df52217c40] "), which differs on every run.
+      const said = errors.trim().split("\n")[0]!.replace(/\[[^\]]*@ 0x[0-9a-f]+\]\s*/gi, "");
+      if (code !== 0) { reject(new NotSound(`ffmpeg could not read it${said ? `: ${said}` : ""}`)); return; }
+      if (!header) { reject(new NotSound("a WAV without sound")); return; }
       resolve();
     });
   });
