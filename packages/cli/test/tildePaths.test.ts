@@ -29,6 +29,23 @@ describe("a path that starts with ~", { timeout: 60_000 }, () => {
     expect(readdirSync(cwd)).toEqual([]);
   });
 
+  // agents#1603: the publisher tools resolved their paths raw: the one publisher key was written to <cwd>/~/pub.key.
+  it("is in the user's home for the publisher tools too: app init, publish (its key), verify, store sign", async () => {
+    const user = home("tilde-publish"), cwd = home("tilde-publish-cwd");
+    const env = { HOME: user, GHOSTLY_HOME: "" };
+    expect(ok(await ghostly(["app", "init", "~/myapp"], { env, cwd })).dir).toBe(join(user, "myapp"));
+    ok(await ghostly(["app", "publish", "~/myapp", "--key=~/pub.key"], { env, cwd }));
+    expect(existsSync(join(user, "pub.key"))).toBe(true);
+    expect(existsSync(join(user, "myapp", "app.ghostlyapp"))).toBe(true);
+    ok(await ghostly(["app", "verify", "~/myapp/app.ghostlyapp"], { env, cwd }));
+    expect(error(await ghostly(["app", "verify", "~/nope.ghostlyapp"], { env, cwd }), "not_found", 3).message).toContain(join(user, "nope.ghostlyapp"));
+    // store sign's key: made in the home, whatever the index then says.
+    writeFileSync(join(user, "index.json"), "{}");
+    await ghostly(["store", "sign", "~/index.json", "--key=~/store.key"], { env, cwd });
+    expect(existsSync(join(user, "store.key"))).toBe(true);
+    expect(readdirSync(cwd)).toEqual([]);
+  });
+
   it("of another user is a usage error", async () => {
     const user = home("tilde-other"), cwd = home("tilde-other-cwd");
     const env = { HOME: user, GHOSTLY_HOME: "" };
