@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ENDPOINT, ONCHAIN_PROVIDER, type GhostLink, type PaymentTarget } from "@ghostly/core";
-import { PaymentDesk, type DeskBitcoin, type DeskLightning } from "../src/engine/payments";
+import { INVOICE_LOOKS_PER_CHAT, PaymentDesk, type DeskBitcoin, type DeskLightning } from "../src/engine/payments";
 import type { CashuWallet } from "../src/engine/wallet";
 import type { ArkWallet } from "../src/engine/paymentAdapters/arkWallet";
 import type { StoredPayment, StoredQuote } from "../src/shared/types";
@@ -213,6 +213,29 @@ describe("a test mint's invoice waits for the payer's word", () => {
     await payee.onPayment("l", said(a));
     await payee.onPayment("l", said(b));
     expect(wallet.vouch.mock.calls).toEqual([[a], [b]]);
+  });
+
+  // agents#1586: the per-invoice key is the contact's text, so a frame per text was a read of every invoice each.
+  it("a contact saying it paid 2,000 different invoices gets a few looks at the wallet every 3 s, not one each", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const a = fakeInvoice(25, new Uint8Array(32).fill(4));
+      const quotes: StoredQuote[] = [{ quote: "qa", mint: "https://testnut.cashu.space", amount: 25, invoice: a, createdAt: 0, expiresAt: null, held: true }];
+      const wallet = { quotes: vi.fn(async () => quotes), vouch: vi.fn(async () => true) };
+      const { desk: payee } = setup([], { wallet: wallet as unknown as Partial<CashuWallet> });
+      await payee.start();
+      const said = (invoice: string) => ({ id: invoice.slice(-8), timestamp: 1, amount: { value: "1", asset: "sat" }, endpoint: [ENDPOINT.bolt11, invoice] as [string, string] });
+      const reads = () => wallet.quotes.mock.calls.length, before = reads();
+      for (let i = 0; i < 2_000; i++) await payee.onPayment("l", said(`lnbc${i}`));
+      console.log(`INVOICE LOOKS: 2000 frames, ${reads() - before} wallet reads`);
+      expect(reads() - before).toBe(INVOICE_LOOKS_PER_CHAT);
+      // Another chat has looks of its own; and 3 s on, this one's real invoice is let go.
+      await payee.onPayment("m", said("lnbc-other"));
+      expect(reads() - before).toBe(INVOICE_LOOKS_PER_CHAT + 1);
+      vi.advanceTimersByTime(3_000);
+      await payee.onPayment("l", said(a));
+      expect(wallet.vouch).toHaveBeenCalledExactlyOnceWith(a);
+    } finally { vi.useRealTimers(); }
   });
 
   it("the payer's word waits for the payee's app: kept while it is away, said when the chat is up again, then never again", async () => {
