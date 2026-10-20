@@ -642,6 +642,9 @@ const ENGINE: Partial<Record<EngineErrorCode, TranslationKey>> = {
   walletAway: "errors.engine.walletAway",
   walletAwayUnnamed: "errors.engine.walletAwayUnnamed",
   groupTurnUnconfirmed: "errors.engine.groupTurnUnconfirmed",
+  // As the chat's payment line says them (Chat.tsx).
+  contactNoWallet: "chat.payments.noWallet",
+  contactNoPayments: "chat.payments.offOrOld",
 };
 /** The next line of an engine error that has one: what to do, or what is safe. */
 const ENGINE_NEXT: Partial<Record<EngineErrorCode, TranslationKey>> = {
