@@ -28,6 +28,17 @@ export interface ListenOptions {
   turns?: boolean;
   /** The first wait before a webhook is tried again (500 ms), doubled each time up to a minute. */
   retryMs?: number;
+  /**
+   * The cursor could not be written (a full disk): the listener stops. Run on, each event was said on stderr and the
+   * cursor stayed where it was, so a restart handed every event since then again (agents#1710). Without it, said on
+   * stderr per event as before.
+   */
+  cursorFailed?: (error: unknown) => void;
+}
+
+/** The cursor's own write failed, not the event's handling. */
+class CursorError extends Error {
+  constructor(readonly error: unknown) { super(error instanceof Error ? error.message : String(error)); }
 }
 
 /**
@@ -287,11 +298,18 @@ export function eventHandler(options: ListenOptions): EventHandler {
   const webhook = options.webhook ? checkWebhook(options.webhook) : null;
   let chain = Promise.resolve();
   let behind = 0;
+  let stopped = false;
+  const keep = (seq: number) => {
+    if (!options.cursor) return;
+    try { writeCursor(options.cursor, seq); } catch (error) { throw new CursorError(error); }
+  };
   const handle = (event: GhostlyEvent) => {
     const seq = event.seq, type = event.type;
+    if (stopped) return;
     behind++;
     chain = chain.then(async () => {
-      const skip = () => { if (options.cursor) writeCursor(options.cursor, event.seq); };
+      if (stopped) return;
+      const skip = () => keep(event.seq);
       if (!matches(event, options.types)) return skip();
       if (options.allow && !(await options.allow.allows(event))) return skip();
       if (options.turns) {
@@ -312,12 +330,18 @@ export function eventHandler(options: ListenOptions): EventHandler {
       if (full) await options.drained?.();
       // A failed hook (an --exec exiting non-zero, an event the webhook refused) still moves the cursor: one poisonous
       // event must not stop the stream. The failure is on stderr. A webhook not answering never gets here (`post`).
-      if (options.cursor) writeCursor(options.cursor, event.seq);
+      keep(event.seq);
     }).catch((error: unknown) => {
       try {
-        process.stderr.write(`ghostly: event ${seq} (${type}) failed: ${error instanceof Error ? error.message : String(error)}\n`);
-        if (options.cursor) writeCursor(options.cursor, seq);
-      } catch { /* the next event moves the cursor */ }
+        if (!(error instanceof CursorError)) {
+          process.stderr.write(`ghostly: event ${seq} (${type}) failed: ${error instanceof Error ? error.message : String(error)}\n`);
+          keep(seq);
+        } else throw error;
+      } catch (failed) {
+        if (!(failed instanceof CursorError) || !options.cursorFailed) return; // the next event moves the cursor
+        stopped = true;
+        options.cursorFailed(failed.error);
+      }
     }).finally(() => { behind--; });
   };
   return Object.assign(handle, { behind: () => behind, idle: () => chain });

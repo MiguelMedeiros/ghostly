@@ -114,5 +114,11 @@ export function localFileError(error: unknown, file?: string): CliError | undefi
   if (code === "EACCES" || code === "EPERM" || code === "EROFS") return new CliError("refused", `Not allowed to write or read ${where}`);
   if (code === "EISDIR") return new CliError("bad_request", `${where} is a folder: name a file`);
   if (code === "ENAMETOOLONG") return new CliError("bad_request", `A name in ${where} is too long for this file system (at most 255 bytes)`);
+  // A full disk (or a quota) answered Node's raw "ENOSPC: no space left on device, write" as `engine`, naming nothing
+  // (agents#1710). `unavailable`: it works again once there is room, with nothing lost.
+  if (code === "ENOSPC" || code === "EDQUOT") {
+    const at = typeof path === "string" ? path : file;
+    return new CliError("unavailable", at ? `No room left for ${at}: free some space, then try again` : "No room left on the disk: free some space, then try again", { reason: "no_space", errno: code, ...(at && { path: at }) });
+  }
   return undefined;
 }
