@@ -1115,13 +1115,13 @@ export class Groups {
     const commit = frame && typeof frame === "object" && (frame as { t?: unknown }).t === "group-commit" ? (frame as { commit?: { e?: unknown } }).commit : undefined;
     return typeof commit?.e === "number" && commit.e <= removalEpoch(session.state.chain, key);
   }
-  /** My removals on their way in a group (`engine/removals.ts`). */
+  /** My removals on their way in a group (`engine/removals.ts`), a private group's or a community's. */
   removals(groupId: string): readonly Removal[] {
-    return this.stored.get(groupId)?.removals ?? [];
+    return this.record(groupId)?.removals ?? [];
   }
 
   async setRemovals(groupId: string, removals: Removal[]): Promise<void> {
-    const group = this.stored.get(groupId);
+    const group = this.record(groupId);
     if (!group) return;
     group.removals = removals;
     await this.store.putGroup(group);
@@ -1129,7 +1129,7 @@ export class Groups {
 
   /** A member's message its author deleted for everyone (WISP 400 § Delete for everyone): a copy that comes again is not kept. */
   isRemoved(groupId: string, messageId: string): boolean {
-    return !!this.stored.get(groupId)?.removedIds?.includes(messageId);
+    return !!this.record(groupId)?.removedIds?.includes(messageId);
   }
 
   /**
@@ -1137,7 +1137,7 @@ export class Groups {
    * yet, so it is taken as gone when it comes), and its file goes from this device.
    */
   async removed(groupId: string, messageId: string): Promise<void> {
-    const group = this.stored.get(groupId);
+    const group = this.record(groupId);
     if (!group) return;
     if (!group.removedIds?.includes(messageId)) {
       group.removedIds = [...(group.removedIds ?? []), messageId].slice(-MAX_REMOVED_IDS);
