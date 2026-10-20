@@ -2,7 +2,7 @@ import { GROUP_FILE_LIMITS } from "@ghostly/core/groupFiles";
 import { VOICE_LIMITS } from "@ghostly/core/voice";
 import type { Parsed } from "../args";
 import { CliError } from "../errors";
-import { type Command, here, reply } from "./shared";
+import { type Command, here, LONG_WAIT_SECONDS, reply, timeout } from "./shared";
 
 /**
  * `--voice [ms]` and `--peaks`: a length and a waveform a voice note takes, or a usage error (exit 2) that names the flag
@@ -48,7 +48,7 @@ export const commands: Record<string, Command> = {
       if (options.timeout !== undefined && options.wait !== true) throw new CliError("usage", "--timeout is how long --wait waits: not without --wait");
       return {
         chat: a.chat, file: a.file, dir: options.path === undefined ? here(options.dir ?? ".") : undefined, path: here(options.path), force: options.force === true,
-        wait: options.wait === true ? true : undefined, timeout: options.timeout,
+        wait: options.wait === true ? true : undefined, timeout: timeout(options, LONG_WAIT_SECONDS),
       };
     },
   },
@@ -60,6 +60,6 @@ export const commands: Record<string, Command> = {
   "file wait": {
     method: "file.wait", usage: "file wait [<chat>] <file> [--timeout s]", summary: "Wait until a transfer is done (exit 0) or failed (exit 1, with its error)",
     args: ["chat?", "file"], options: { timeout: { type: "number", description: "Seconds (default 300)" } },
-    params: ({ options }, a) => ({ chat: a.chat, file: a.file, timeout: options.timeout }),
+    params: ({ options }, a) => ({ chat: a.chat, file: a.file, timeout: timeout(options, LONG_WAIT_SECONDS) }),
   },
 };
