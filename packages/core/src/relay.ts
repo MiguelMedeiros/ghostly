@@ -1043,6 +1043,9 @@ export class RelayTransport implements PkarrTransport {
 
   readAnsweredAt(pubKeyZ32: string): number | undefined { return this.readAt.get(pubKeyZ32); }
 
+  /** The last read of this key was answered 404 (`HEDGE_MISSING_MS`): a relay takes seconds to say so. */
+  lastReadMissing(pubKeyZ32: string): boolean { return this.missing.has(pubKeyZ32); }
+
   readHeldBackFor(pubKeyZ32: string): number | undefined {
     const held = this.heldBack.get(pubKeyZ32);
     const left = held === undefined ? 0 : held.until - Date.now();
