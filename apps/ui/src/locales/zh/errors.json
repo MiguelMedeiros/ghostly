@@ -266,6 +266,7 @@
     "nobodyForLeave": "没有人在线接收你的退出",
     "nobodyForLeaveNext": "请稍后再试。",
     "notALink": "这不是群组链接",
+    "notALinkNext": "请重新索取链接：复制时可能丢了一个字符。",
     "notIn": "你不在此群组中",
     "notYet": "你还未加入此群组",
     "nothingToSend": "没有可发送的内容",

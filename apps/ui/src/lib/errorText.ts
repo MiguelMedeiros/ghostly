@@ -434,7 +434,7 @@ const RULES: readonly Rule[] = [
   exact("You are the admin and nobody else in the group is online to take over. Try again when a member is, or make someone the admin first.", "errors.group.adminAlone", "errors.group.adminAloneNext"),
   exact("Nobody in the group is connected right now to take your leave. Try again in a moment.", "errors.group.nobodyForLeave", "errors.group.nobodyForLeaveNext"),
   exact("Only the admin can share a link to the group", "errors.group.adminShares"),
-  exact("This is not a link to a group", "errors.group.notALink"),
+  exact("This is not a link to a group", "errors.group.notALink", "errors.group.notALinkNext"),
   exact("You are already joining this group", "errors.group.alreadyJoining"),
   exact("This group is joined with its current link", "errors.group.currentLink"),
   // A group's link the engine refuses for a group already here (engine/groups.ts joinGroupByLink).
