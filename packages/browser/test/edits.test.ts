@@ -846,6 +846,28 @@ describe("deleting many of my group messages for everyone", () => {
     await vi.waitFor(async () => expect((await db.getMessage(chat, reply))?.replyTo).toMatchObject({ snippet: "", messageId: ids[11] }), { timeout: 15_000, interval: 200 });
     expect(reads.mock.calls.filter(([linkId]) => linkId === chat)).toHaveLength(2);
   }, 30_000);
+
+  it("a stop within the sweep's time still clears the quotes of every removal gathered, not only the first", async () => {
+    // Nothing looks again at the next start: a quote left at the stop would keep a removed message's text for good.
+    const me = createIdentity().pubKeyZ32, bob = createIdentity().pubKeyZ32, g = `stop-${crypto.randomUUID()}`, chat = `group:${g}`;
+    const ids = [1, 2, 3].map(n => `${bob}:1:${n}`), replies = [1, 2, 3].map(n => `${me}:1:${n}`);
+    for (const [n, id] of ids.entries()) {
+      await db.addMessage({ linkId: chat, id, text: `secret ${n}`, sender: "peer", member: bob, timestamp: n + 1, via: "datalink" });
+      await db.addMessage({ linkId: chat, id: replies[n], text: `re ${n}`, sender: "me", member: me, timestamp: n + 10, via: "datalink", replyTo: { id, snippet: `secret ${n}`, from: "peer", member: bob, messageId: id } });
+    }
+    const transport = { publish: vi.fn(async () => {}), resolve: vi.fn(async () => null), describe: () => ({ protocol: "in-process", relays: [] }) };
+    const node = new GhostlyNode({ onState: vi.fn(), onMessages: vi.fn(), onMessageChanges: vi.fn(), onCallSignal: vi.fn() }, { transport, automaticWallets: false });
+    const inner = node as unknown as {
+      groups: { removed(groupId: string, id: string): Promise<void> };
+      groupEdits: { receive(groupId: string, sender: string, edit: GroupEdit): Promise<unknown>; host: GroupEditsHost };
+    };
+    vi.spyOn(inner.groups, "removed").mockImplementation(async () => {});
+    vi.spyOn(inner.groupEdits.host, "membership").mockReturnValue({ me, members: new Set([me, bob]), community: false });
+    for (const id of ids) expect(await inner.groupEdits.receive(g, bob, { id, e: 1, ts: 1, m: REMOVED_TEXT, rm: true })).toBe("applied");
+    await node.shutdown();
+    const left = (await db.getMessages(chat)).filter(m => replies.includes(m.id));
+    expect(left.map(m => [m.id, m.replyTo?.snippet])).toEqual(replies.map(id => [id, ""]));
+  });
 });
 
 describe("a delete here", () => {

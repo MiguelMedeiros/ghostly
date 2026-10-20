@@ -2417,7 +2417,6 @@ export class GhostlyNode implements EngineImplementation {
     for (const queue of this.editQueues.values()) queue.stop();
     for (const restore of this.cardRestores.values()) clearTimeout(restore.timer);
     this.cardRestores.clear();
-    this.quoteSweeps.stop();
     this.groupEdits.stop();
     this.reactions.stop();
     this.cardEdits.stop();
@@ -2427,6 +2426,8 @@ export class GhostlyNode implements EngineImplementation {
       links?.stop(),
       // What the last messages of the private groups changed, due within a second: written now, not after the stop.
       this.groups.flush(),
+      // The quotes of messages removed within the last seconds: swept now, or the replies keep their lines (WISP 400).
+      this.quoteSweeps.stop(),
       ...WALLET_NETWORKS.flatMap((network) => [this.arkWallets, this.barkWallets, this.fedimintWallets, this.sparkWallets, this.usdtWallets, this.lightnings, this.bitcoins]
         .map((wallets) => wallets[network].stop())),
       // The Cashu wallet too: its polls would otherwise go on writing after the stop.
