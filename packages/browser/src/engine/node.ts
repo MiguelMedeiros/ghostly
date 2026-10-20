@@ -241,7 +241,7 @@ const IROH_WEB_SLOTS = 16;
 const CHAT_NATIVE_SLOTS = 4;
 /**
  * What a group's links (edges, entry sessions) may hold of a transport's listeners where one side has no WebRTC (WISP
- * 902 § Transports). It is also the group links' budget of connections on an app with no WebRTC (`peerRoom`).
+ * 902 § Transports). It is also the least of the group links' budget of connections on an app with no WebRTC (`peerRoom`).
  */
 export const GROUP_NATIVE_SLOTS = NATIVE_SLOTS - CHAT_NATIVE_SLOTS;
 /** The same, of Iroh's listeners where it is the browser build. */
@@ -1435,12 +1435,12 @@ export class GhostlyNode implements EngineImplementation {
     staysOnline: () => this.options.staysOnline ?? (this.options.platform === "desktop" && typeof RTCPeerConnection !== "undefined"),
     peerRoom: groupId => {
       // With no WebRTC, a group's links are native ones, and all the groups together hold what the transport with
-      // most listeners gives them (`groupNativeSlots`): a link needs one.
+      // most listeners free of 1:1 chats gives them (`groupNativeRoom`): a link needs one.
       const native = Object.keys(this.nativeFactories) as NativeTransport[];
       if (typeof RTCPeerConnection === "undefined" && native.length) {
         let held = 0;
         for (const live of this.links.values()) if (live.stored.group && live.stored.group !== groupId && live.link) held++;
-        return Math.max(0, Math.max(...native.map(key => this.groupNativeSlots(key))) - held);
+        return Math.max(0, Math.max(...native.map(key => this.groupNativeRoom(key))) - held);
       }
       const budget = this.options.peerBudget;
       if (budget === undefined) return undefined;
@@ -8200,6 +8200,17 @@ export class GhostlyNode implements EngineImplementation {
   /** Of those, what its groups' links may hold, all groups together. */
   private groupNativeSlots(key: NativeTransport): number {
     return this.nativeSlots(key) - CHAT_NATIVE_SLOTS;
+  }
+  /**
+   * The links its groups may have on an app with no WebRTC (`peerRoom`): the transport's listeners that 1:1 chats do
+   * not hold, and what is kept for groups (`groupNativeSlots`) at least. Capped at that alone, a Desktop with no chats
+   * opened four edges in a private group of seven, and the two members left out were never reached, even on screen
+   * with half its listeners free: an edge of the group on screen takes a free listener, or a held one (WISP 902 § Transports).
+   */
+  private groupNativeRoom(key: NativeTransport): number {
+    let chats = 0;
+    for (const live of this.links.values()) if (!live.stored.group && live.link?.availableTransports.includes(key)) chats++;
+    return Math.max(this.groupNativeSlots(key), this.nativeSlots(key) - chats);
   }
 
   /**
