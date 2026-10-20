@@ -4687,7 +4687,11 @@ export class GhostlyNode implements EngineImplementation {
     if (!this.links.get(linkId)?.stored.profile || this.links.get(linkId)?.stored.group) throw new Error("Invite a paired contact");
     return this.groups.invite(groupId, linkId);
   }
-  acceptGroupInvitation({ groupId }: { groupId: string }): Promise<void> { return this.groups.accept(groupId); }
+  /** Offline, every chat's link is down: said as this app's state, not as the inviter's (who may well be online). */
+  async acceptGroupInvitation({ groupId }: { groupId: string }): Promise<void> {
+    if (!this.networkOn) throw new Error("Go online to join a group");
+    return this.groups.accept(groupId);
+  }
   declineGroupInvitation({ groupId }: { groupId: string }): Promise<void> { return this.groups.decline(groupId); }
   async enableGroupLink({ groupId, reset }: { groupId: string; reset?: boolean }): Promise<{ link: string }> { return { link: await this.groups.enableLink(groupId, reset === true) }; }
   disableGroupLink({ groupId }: { groupId: string }): Promise<void> { return this.groups.disableLink(groupId); }
