@@ -157,7 +157,7 @@ for (const kind of ["ark", "usdt"] as const) {
     await transact([STORES.settings], (s) => { s[STORES.settings].put(mainnet, `${kind}Wallet-mode-mainnet`); s[STORES.settings].put(testnet, `${kind}Wallet-mode-testnet`); });
     const slow = deferred<{ dispose: () => Promise<void> }>();
     const quick = kind === "ark"
-      ? { config: testnet.config, address: async () => "tark1me", boardingAddress: async () => "tb1pme", balance: async () => 0, incoming: async () => 0, expired: async () => ({ recoverable: 0, sweeping: 0 }), dispose: async () => {} }
+      ? { config: testnet.config, address: async () => "tark1me", boardingAddress: async () => "tb1pme", balance: async () => 0, balances: async () => ({ balance: 0, incoming: 0 }), expired: async () => ({ recoverable: 0, sweeping: 0 }), dispose: async () => {} }
       : { config: testnet.config, address: async () => "0xme", balances: async () => ({ balance: "0", gasBalance: "0" }), dispose: async () => {} };
     const connect = vi.spyOn(kind === "ark" ? ArkadeAdapter : UsdtAdapter, "connect")
       .mockImplementation(((config: { network: string }) => config.network === (kind === "ark" ? "bitcoin" : "ethereum") ? slow.promise : Promise.resolve(quick)) as never);
@@ -220,8 +220,8 @@ it("ark: expired coins wait for the server's sweep, then show as recoverable, an
     const recover = vi.fn(async () => { state.balance += state.recoverable - 4; state.recoverable = 0; return "txid"; });
     const adapter = {
       config: { network: "regtest", provider: "http://127.0.0.1:43010" },
-      address: async () => "tark1me", boardingAddress: async () => "bcrt1me", incoming: async () => 0,
-      balance: async () => state.balance, expired: async () => ({ recoverable: state.recoverable, sweeping: state.sweeping }), recover, dispose: async () => {},
+      address: async () => "tark1me", boardingAddress: async () => "bcrt1me",
+      balance: async () => state.balance, balances: async () => ({ balance: state.balance, incoming: 0 }), expired: async () => ({ recoverable: state.recoverable, sweeping: state.sweeping }), recover, dispose: async () => {},
     };
     const wallet = new ArkWallet("testnet", vi.fn());
     wallet.adapter = adapter as never;
