@@ -28,6 +28,12 @@ export interface DataLinkOptions {
   createPeerConnection: () => RTCPeerConnection;
   /** Publishes (or clears, with null) my `_rtc` record. */
   publishSignal: (signal: string | null) => void;
+  /**
+   * Whether a signal of this side went out in this attempt: a relay (or the authenticated channel) took it. An answer
+   * the relays' budget held back the whole attempt never reached the offerer, so its failing says nothing of the
+   * network (agents#1637). Left out: every signal counts as out.
+   */
+  signalOut?: () => boolean;
   /** Signaling in progress (or over): look fast for the peer's signal. `offer`: for the answer to this side's offer. */
   setFastPoll: (fast: boolean, offer?: boolean) => void;
   onOpen: (channel: FrameChannel) => void;
@@ -316,6 +322,9 @@ export class DataLink {
    */
   private directEvidence(): DirectEvidence | null {
     if (this.state !== "connecting" || !this.pc) return null;
+    // This side answered, and no answer of its got out: the offerer never had one to try (agents#1637). An offer
+    // answered went out, as its answer says.
+    if (!this.myOfferTs && this.options.signalOut?.() === false) return null;
     const local = this.pc.localDescription?.sdp ?? "";
     return !PUBLIC_CANDIDATE.test(local) ? "no-public" : symmetricNat(local) ? "symmetric" : this.myOfferTs ? "no-path" : null;
   }

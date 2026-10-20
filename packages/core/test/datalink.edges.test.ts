@@ -999,6 +999,30 @@ describe("DataLink says what each attempt showed about direct connections (direc
     expect(onDirect).not.toHaveBeenCalled();
   });
 
+  // agents#1637: a hub's edges answered their members' offers while 12 chats' publishes took the relays' budget. No
+  // answer got out, the attempts ended, and each was taken for a network with no public candidate: the edge went native
+  // for the run, with no listener free, and the member was not reached again (~17 min).
+  it("an answer the relays never took says nothing of the network when the attempt ends", async () => {
+    const onDirect = vi.fn();
+    let out = false;
+    const b = link("bbbb", "aaaa", () => {}, { onDirect, offerStanding: () => true, signalOut: () => out });
+    await b.dl.handleSignal(JSON.stringify(offerFrom()));
+    for (let again = 0; again <= REANSWERS; again++) {
+      b.pc().setConnectionState("failed");
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(b.dl.state).toBe("idle");
+    expect(onDirect).not.toHaveBeenCalled();
+    // The same attempt with its answer out says what it always did.
+    out = true;
+    await b.dl.handleSignal(JSON.stringify(offerFrom({ ts: Date.now() + 1 })));
+    for (let again = 0; again <= REANSWERS; again++) {
+      b.pc().setConnectionState("failed");
+      await vi.advanceTimersByTimeAsync(0);
+    }
+    expect(onDirect.mock.calls).toEqual([["no-public"]]);
+  });
+
   it("a connection that gathers no candidate at all, every time, says this device has no public candidate", async () => {
     const onDirect = vi.fn();
     const a = link("aaaa", "bbbb", pc => { pc.stalls = true; pc.iceGatheringState = "gathering"; }, { onDirect });

@@ -363,6 +363,13 @@ export class LinkSession {
   }
 
   /** The `_rtc` signal the peer's packet carries, as last read: null when it carries none. */
+  /** This side's WebRTC signal set is not in the packet the relays last took yet (the budget holds it back, say). */
+  get rtcSignalWaiting(): boolean { return this.rtcSignal !== null && this.rtcSignal !== this.rtcSignalOut; }
+  /** The packet the relays last took carries a WebRTC signal of this side: the attempt's answer, or an earlier one of it. */
+  get rtcSignalPublished(): boolean { return this.rtcSignalOut !== null; }
+  /** The first read of this run is done (it found the packet, or that there is none). */
+  get polledOnce(): boolean { return this.firstPollDone; }
+
   get peerSignal(): string | null {
     return this.peerRtcSignal;
   }
