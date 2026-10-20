@@ -26,8 +26,11 @@ export interface PeerServer {
   detach(client: PeerClientSink): void;
   handle(client: PeerClientSink, request: RpcRequest): Promise<void>;
   /** Says goodbye and stops, as the page or the document goes away. */
-  stop(): Promise<void>;
+  stop(options?: PeerStopOptions): Promise<void>;
 }
+
+/** `quitting`: the app itself quits (the Desktop app exits), not a page that may be reloading. */
+export interface PeerStopOptions { quitting?: boolean }
 
 /**
  * The small engine of a standby: the turn record and the device links (later parts of WISP 06). It gets the gate it

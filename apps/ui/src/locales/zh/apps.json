@@ -162,6 +162,8 @@
     "beside": "显示聊天",
     "full": "全宽",
     "resume": "返回 {{title}}",
+    "resumeSharing": "正在共享文件",
+    "sharingWith": "正在与 {{name}} 共享文件",
     "stoppedRemoved": "{{title}} 已停止：{{store}} 移除了此版本",
     "stoppedRevoked": "{{title}} 已停止：其作者撤销了此版本",
     "with": "与 {{name}} 的 {{title}}",

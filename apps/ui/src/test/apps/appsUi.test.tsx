@@ -717,6 +717,36 @@ describe("with the apps flag on", () => {
     expect(within(details).getByText("Chess for two.")).toHaveAttribute("dir", "auto");
   });
 
+  it("breaks a publisher's or a store's word with no space anywhere, so on a phone it pushes no screen sideways (nor cuts it off in Arabic)", async () => {
+    // 80 characters, a tagline's limit, with nowhere to break: a link, a German compound, a name in Latin letters.
+    const long = `https://example.com/${"a".repeat(60)}`;
+    const wraps = (el: HTMLElement) => expect(el.className).toContain("[overflow-wrap:anywhere]");
+    fakeEngine.on("appPreview", () => preview({ manifest: { ...preview().manifest, tagline: long, description: `${long}2` } }));
+    const install = renderApp(<AppInstallDialog source={{ url: URL_ }} onClose={() => {}} />);
+    const sheet = await screen.findByTestId("app-install");
+    await within(sheet).findByText(long);
+    wraps(within(sheet).getByText(long));
+    wraps(within(sheet).getByText(`${long}2`));
+    install.unmount();
+
+    const app = installed({ title: long, tagline: `${long}3`, description: `${long}4` });
+    const details = renderApp(<InstalledAppDialog app={app} onClose={() => {}} onOpen={() => {}} />);
+    wraps(within(screen.getByTestId("app-details")).getByText(`${long}3`));
+    wraps(within(screen.getByTestId("app-details")).getByText(`${long}4`));
+    await details.user.click(screen.getByTestId("app-uninstall-open"));
+    wraps(within(screen.getByTestId("app-uninstall")).getByRole("heading"));
+    details.unmount();
+
+    fakeEngine.on("appStorePreview", () => ({ key: "s", fingerprint: "abcd efgh ijkl mnop", url: "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json",
+      name: `${long}5`, description: `${long}6`, kind: "curated", sequence: 1, expires: 2_000_000_000, expired: false, apps: 1 }));
+    const { user } = renderApp(<AddAppDialog onClose={() => {}} onStoreAdded={() => {}} />);
+    await user.type(screen.getByTestId("apps-add-url"), "https://raw.githubusercontent.com/g/s/HEAD/ghostly-store.json");
+    await user.click(screen.getByTestId("apps-add-check"));
+    const store = await screen.findByTestId("apps-add-store");
+    wraps(within(store).getByText(`${long}5`));
+    wraps(within(store).getByText(`${long}6`));
+  });
+
   it("a store's apps show without a tap when it is the only store or lists a few; a long list beside others waits behind its name, which says it opens", async () => {
     const listings = (n: number, name: string) => Array.from({ length: n }, (_, i) => ({ ref: `${KEY}/${name}${i}`, sequence: 1, digest: DIGEST, urls: [URL_], title: `${name} ${i}`, tagline: "A game" }));
     const store = (key: string, name: string, n: number) => ({ key, fingerprint: "abcd efgh ijkl mnop", url: `https://raw.githubusercontent.com/g/${key}/HEAD/ghostly-store.json`, preloaded: false,
@@ -811,6 +841,32 @@ describe("with the apps flag on", () => {
     fakeEngine.on("appList", () => []);
     renderApp(<MessageBubble message={cardMessage()} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
     expect(await screen.findByTestId("app-card-title")).toHaveAttribute("dir", "auto");
+  });
+
+  // A title may have 40 characters: cut as one text with the version, a phone showed no version at all.
+  const LONG = "Schachweltmeisterschaftsvorbereitungsapp";
+  const BETA = "1.2.0-beta.12";
+
+  it("a card with a long title cuts the title alone and keeps the version whole after it", async () => {
+    fakeEngine.on("appList", () => []);
+    const card: AppCard = { ...CARD, title: LONG, version: BETA };
+    renderApp(<MessageBubble message={cardMessage({ card, text: statusCardText(card) })} peerPubKey="peer" contactName="Ana" linkId="link-1" />);
+    const title = await screen.findByTestId("app-card-title");
+    expect(title).toHaveTextContent(`${LONG} ${BETA}`);
+    expect(within(title).getByText(LONG)).toHaveClass("truncate", "min-w-0");
+    expect(within(title).getByText(BETA)).toHaveClass("shrink-0", "whitespace-nowrap");
+    expect(within(title).getByText(LONG)).not.toContainElement(within(title).getByText(BETA));
+  });
+
+  it("an installed app with a long title cuts the title alone in its row and keeps the version whole after it", async () => {
+    fakeEngine.on("appList", () => [installed({ title: LONG, version: BETA })]).on("appStoreList", () => []).on("appCheckUpdates", () => []);
+    renderApp(<Apps />, { route: "/apps" });
+    const row = await screen.findByTestId("installed-app");
+    expect(within(row).getByText(LONG)).toHaveClass("truncate", "min-w-0");
+    expect(within(row).getByText(BETA)).toHaveClass("shrink-0", "whitespace-nowrap");
+    expect(within(row).getByText(LONG)).not.toContainElement(within(row).getByText(BETA));
+    // Still the details button's description, as before.
+    expect(within(row).getByRole("button", { name: `${LONG}: details` })).toHaveAccessibleDescription(new RegExp(`^${BETA.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   });
 });
 

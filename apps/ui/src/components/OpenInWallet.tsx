@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useI18n } from "../contexts/I18nContext";
-import { useServicesPlatform } from "../hooks/useServicesPlatform";
+import { servicesPlatform } from "../lib/platform";
 import { rawError } from "../lib/errorText";
 import { type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
@@ -12,7 +12,8 @@ import { Notice } from "./ui/Notice";
  */
 export function OpenInWallet({ uri, className, title, testId, children }: { uri: string; className?: string; title?: string; testId?: string; children: ReactNode }) {
   const { t } = useI18n();
-  const platform = useServicesPlatform();
+  // Only its click asks the platform: it does not draw again on every engine state, as a subscription would have it.
+  const platform = servicesPlatform;
   const [error, setError] = useState<Problem | null>(null);
   return <>
     <a className={className} href={uri} title={title} data-testid={testId}

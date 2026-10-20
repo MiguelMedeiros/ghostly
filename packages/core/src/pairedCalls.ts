@@ -84,16 +84,18 @@ export class PairedCalls {
 
   /**
    * This app is going away: a call it placed or answered is hung up, as its person would (its latest signal an
-   * offer, an answer, or a picture change, which only a call on sends), and the contact's call still ringing here is
-   * declined, so the caller stops ringing for nobody. Returns the hang-up to send before the goodbye, or null when no
-   * call is on. Our own call is read by its kind, not its age: a call outlasts its offer's freshness.
+   * offer, an answer, or a picture change, which only a call on sends). `declineRinging` (the app quits: the Desktop app
+   * or a CLI daemon) also declines the contact's call still ringing here, so the caller stops ringing for nobody; a web
+   * page that goes (a reload looks the same as a close) leaves it ringing, so the reopened page rings again. Returns
+   * the hang-up to send before the goodbye, or null when no call is on. Our own call is read by its kind, not its age:
+   * a call outlasts its offer's freshness.
    */
-  hangUp(): PairedCallFrame | null {
+  hangUp(options: { declineRinging?: boolean } = {}): PairedCallFrame | null {
     let said: { t?: unknown; ts?: unknown } = {};
     if (this.latest) try { said = JSON.parse(this.latest.signal); } catch { /* no signal of ours */ }
     const ours = said.t === "o" || said.t === "a" || said.t === "v" || said.t === "r";
     const peer = this.peer;
-    const ringing = peer?.kind === "o" && peer.at > this.saidAt && this.now() - peer.at <= CALL_SIGNAL_MAX_AGE_MS ? peer : null;
+    const ringing = options.declineRinging === true && peer?.kind === "o" && peer.at > this.saidAt && this.now() - peer.at <= CALL_SIGNAL_MAX_AGE_MS ? peer : null;
     if (!ours && !ringing) return null;
     const ts = Math.max(this.now(), typeof said.ts === "number" ? said.ts + 1 : 0, ringing ? ringing.ts + 1 : 0);
     return this.set(JSON.stringify({ t: "h", ts }));

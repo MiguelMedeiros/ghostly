@@ -110,6 +110,24 @@ describe("What should people call you?", () => {
     expect(screen.queryByTestId("name-step")).toBeNull();
   });
 
+  it("Save, Skip or Escape leave the focus on New, not on the page's body", async () => {
+    for (const close of ["save", "skip", "escape"] as const) {
+      localStorage.clear();
+      localStorage.setItem(NAME_STEP_TEST_KEY, "on");
+      askNameIn("");
+      const { user, unmount } = renderApp(<><button data-testid="sidebar-new-chat">New</button><NameStep /></>);
+      await settle();
+      const input = await screen.findByTestId("name-step-input");
+      input.focus();
+      if (close === "save") { await user.type(input, "Boo"); await user.keyboard("{Enter}"); }
+      else if (close === "skip") await user.click(screen.getByTestId("name-step-skip"));
+      else screen.getByTestId("name-step").dispatchEvent(new Event("cancel", { cancelable: true }));
+      await waitFor(() => expect(screen.queryByTestId("name-step")).toBeNull());
+      await waitFor(() => expect(document.activeElement, close).toBe(screen.getByTestId("sidebar-new-chat")));
+      unmount();
+    }
+  });
+
   it("is never asked without the mark", async () => {
     // A profile that has run before: its settings are saved.
     localStorage.setItem(settingsKeyFor(""), JSON.stringify({ language: "en" }));

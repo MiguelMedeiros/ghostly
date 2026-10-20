@@ -3,10 +3,12 @@
     "message": "{{name}}: {{text}}",
     "messages": "{{count}} new messages",
     "messagesFrom": "{{count}} new messages from {{name}}",
-    "pinMoved": "Moved to place {{place}} of {{count}} pinned chats"
+    "pinMoved": "Moved to place {{place}} of {{count}} pinned chats",
+    "rowMoved": "Moved to place {{place}} of {{count}}"
   },
   "audio": {
     "cantPlay": "This device can't play this audio ({{format}}). Download it to listen.",
+    "message": "Audio",
     "pause": "Pause audio",
     "play": "Play audio",
     "position": "Position in audio",
@@ -26,6 +28,8 @@
   "connecting": "connecting",
   "createdHere": "You created this chat",
   "deleteArrivingFileHint": "Deleted only here. The file stops arriving; your contact sees it cancelled.",
+  "deleteForEveryone": "Delete for everyone",
+  "deleteForEveryoneHint": "Deleted from your contact's or the group's devices too. An app from before this shows \"Message removed\" instead; a copy someone saved stays theirs.",
   "deleteMessage": "Delete message",
   "deleteMessageHint": "Deleted only here. Your contact keeps their copy.",
   "deleteSendingFileHint": "Deleted only here. Sending stops; your contact won't get the file.",
@@ -238,9 +242,9 @@
   "menu": {
     "continueNew": "Continue in a new chat",
     "hold": "Hold messages…",
+    "more": "More…",
+    "moreTitle": "More options",
     "moveDown": "Move down",
-    "moveFirst": "Already first",
-    "moveLast": "Already last",
     "moveUp": "Move up",
     "pin": "Pin chat",
     "refresh": "Refresh",

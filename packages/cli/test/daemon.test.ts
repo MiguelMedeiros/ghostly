@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import packageJson from "../package.json" with { type: "json" };
+import { greeting, newDaemonSecret, proof } from "../src/daemonProof";
 import { createProfile, lockOwner, profilePaths } from "../src/profiles";
 import { error, ghostly, home, hyperdhtTestnet, localRelay, ok, Running } from "./support/cli";
 // covers: headless.daemon, headless.cli
@@ -31,12 +32,18 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
   it("a command warns on stderr when the daemon runs another release, and still answers", async () => {
     const other = home("old-daemon");
     createProfile(other, "default");
-    const socket = profilePaths(other, "default").socket;
+    const { socket, dir: profileDir } = profilePaths(other, "default");
+    // A daemon of another release that has the greeting and the hello already: it proves itself, then answers as an
+    // older one. It runs in this process, which holds the profile as a daemon does.
+    const secret = newDaemonSecret(profileDir);
+    writeFileSync(profilePaths(other, "default").lock, String(process.pid));
     const methods: string[] = [];
     const server: Server = createServer((connection) => {
+      connection.write(JSON.stringify(greeting(secret)) + "\n");
       createInterface({ input: connection }).on("line", (line) => {
-        const { id, method } = JSON.parse(line) as { id: number; method: string };
+        const { id, method, params } = JSON.parse(line) as { id: number; method: string; params: { nonce?: string } };
         methods.push(method);
+        if (method === "daemon.hello") { connection.write(JSON.stringify({ id, result: { proof: proof(secret, "daemon", params.nonce!) } }) + "\n"); return; }
         connection.write(JSON.stringify({ id, result: method === "status" ? { version: "0.0.1", profile: "default" } : { chats: [] } }) + "\n");
       });
     });
@@ -46,7 +53,7 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
       expect(ok(listed)).toEqual({ chats: [] });
       expect(listed.stderr).toContain(`the daemon runs 0.0.1 and this command is ${packageJson.version}`);
       expect(listed.stderr).toContain("ghostly daemon restart");
-      expect(methods).toEqual(["status", "chat.list"]);
+      expect(methods).toEqual(["daemon.hello", "status", "chat.list"]);
     } finally {
       server.close();
       rmSync(socket, { force: true });
@@ -224,8 +231,11 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
         listen.child.stdout!.destroy();
         const poke = await ghostly(["--home", piped, "invite", "create", "--label", "poke"], { env: slowEnv });
         // Through a daemon the poke is answered, whoever stopped reading. With none, the listen is the profile's daemon:
-        // the poke's own event stops it, and with it the connection the poke still waits on.
+        // the poke's own event stops it, and with it the connection the poke still waits on. Or an event `--since 0` replays
+        // from the pass before stopped it already: its socket is gone and its profile not freed yet, so the poke finds the
+        // profile in use by the listen.
         if (withDaemon || poke.code === 0) ok(poke);
+        else if ((poke.json.error as { code?: string } | undefined)?.code === "busy") expect(error(poke, "busy", 1).message).toContain(`in use by process ${listen.child.pid}`);
         else expect(error(poke, "unavailable", 1).message).toBe("The daemon went away");
         expect(await listen.exited(20_000), `${withDaemon ? "through a daemon" : "no daemon"}: ${listen.stderr}`).toBe(0);
         expect(listen.stderr).not.toContain("EPIPE");

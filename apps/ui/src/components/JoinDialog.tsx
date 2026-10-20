@@ -5,7 +5,7 @@ import { enrollErrorKey, failureKey, offerDeviceLink } from "../lib/devices";
 import { INVITE_REFUSAL_MESSAGE, classifyInvite, readInvite } from "../lib/url";
 import { showJoinNotice } from "../lib/joinNotice";
 import { pasteShortcut, readClipboardText } from "../lib/clipboard";
-import { dragHasFiles, droppedFiles, pastedFiles, pasteNamesFiles, pasteShowsNothing, platformPastedImage } from "../lib/pastedFiles";
+import { dragHasFiles, droppedFiles, pastedFiles, pasteIsPictureOnly, pasteNamesFiles, pasteShowsNothing, platformPastedImage } from "../lib/pastedFiles";
 import { rawError } from "../lib/errorText";
 import { touchOnly } from "../lib/touchOnly";
 import { useI18n } from "../contexts/I18nContext";
@@ -13,16 +13,7 @@ import type { SessionKeys } from "../lib/storage";
 import { problemText, type Problem } from "../lib/problemText";
 import { Notice } from "./ui/Notice";
 import { ReloadButton } from "./ui/ReloadButton";
-
-/**
- * The QR decoder (about 127 KiB), loaded when a scan or a picture read first needs it, not with the first screen.
- * Loaded once; a load that failed is tried again the next time. A load that failed (offline, or a deploy replaced the
- * chunk under an open tab) is said as such, never as the camera or the picture. Once it failed again, the notice says
- * to reload, with Reload: Chromium keeps a failed import for as long as the page lives.
- */
-class QrReaderNotLoaded extends Error {}
-let decoder: Promise<typeof import("jsqr").default> | null = null, decoderFailures = 0;
-const qrDecoder = () => (decoder ??= import("jsqr").then((module) => module.default, (cause: unknown) => { decoder = null; decoderFailures++; throw new QrReaderNotLoaded(String(cause)); }));
+import { QR_IMAGE_MAX as IMAGE_MAX, QrReaderNotLoaded, qrCamera, qrDecoder, qrReaderFailures, readQrImage, scanQrFrames } from "../lib/qrReader";
 
 /**
  * Scanned data is only parsed as an invite; never opened as a URL or executed. A picture pasted or dropped on the
@@ -64,7 +55,7 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
   // The notice for a QR reader that did not load; once it failed again, the one Reload goes with.
   const [reloadProblem, setReloadProblem] = useState<Problem | null>(null);
   const readerFailed = (): Problem => {
-    if (decoderFailures < 2) return said(t("join.qrReaderNotLoaded"));
+    if (qrReaderFailures() < 2) return said(t("join.qrReaderNotLoaded"));
     const problem = said(t("join.qrReaderReload"));
     setReloadProblem(problem);
     return problem;
@@ -147,28 +138,14 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     const decoding = qrDecoder();
     decoding.catch(() => {});
     try {
-      if (!navigator.mediaDevices?.getUserMedia) throw new Error("unsupported");
-      const camera = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+      const camera = await qrCamera();
       if (current !== generation.current) { camera.getTracks().forEach(track => track.stop()); return; }
       stream.current = camera; setScanning(true); setStarting(false);
       const element = video.current!;
       element.srcObject = camera; await element.play();
       const jsQR = await decoding;
       if (current !== generation.current || closed.current) return;
-      const canvas = document.createElement("canvas"), context = canvas.getContext("2d", { willReadFrequently: true })!;
-      const tick = () => {
-        if (current !== generation.current) return;
-        if (element.readyState >= 2 && element.videoWidth) {
-          const scale = Math.min(1, 960 / element.videoWidth);
-          canvas.width = Math.round(element.videoWidth * scale); canvas.height = Math.round(element.videoHeight * scale);
-          context.drawImage(element, 0, 0, canvas.width, canvas.height);
-          const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-          const qr = jsQR(pixels.data, pixels.width, pixels.height, { inversionAttempts: "attemptBoth" });
-          if (qr) { accept(qr.data); if (joined.current) return; }
-        }
-        window.setTimeout(tick, 160);
-      };
-      tick();
+      scanQrFrames(element, jsQR, () => current === generation.current, (data) => { accept(data); return joined.current; });
     } catch (cause) {
       if (current !== generation.current) return;
       stop();
@@ -185,18 +162,9 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     busyRef.current = true; setBusy(true);
     const current = generation.current;
     try {
-      const jsQR = await qrDecoder();
-      const bitmap = await createImageBitmap(file);
-      try {
-        const scale = Math.min(1, 2048 / Math.max(bitmap.width, bitmap.height));
-        const canvas = document.createElement("canvas"); canvas.width = Math.round(bitmap.width * scale); canvas.height = Math.round(bitmap.height * scale);
-        const context = canvas.getContext("2d", { willReadFrequently: true })!;
-        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-        const data = context.getImageData(0, 0, canvas.width, canvas.height);
-        const qr = jsQR(data.data, data.width, data.height, { inversionAttempts: "attemptBoth" });
-        if (current !== generation.current) return;
-        if (qr) accept(qr.data); else setError({ tone: "error", title: t("join.noQr") });
-      } finally { bitmap.close(); }
+      const qr = await readQrImage(file);
+      if (current !== generation.current) return;
+      if (qr !== null) accept(qr); else setError({ tone: "error", title: t("join.noQr") });
     } catch (cause) { if (current === generation.current) setError(cause instanceof QrReaderNotLoaded ? readerFailed() : { tone: "error", title: t("join.imageFailed") }); }
     finally { if (current === generation.current && !closed.current) { busyRef.current = false; setBusy(false); } }
   };
@@ -205,13 +173,15 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
   const pastedImage = (event: ClipboardEvent) => {
     const image = pastedFiles(event.clipboardData)?.find(file => file.type.startsWith("image/"));
     if (image) { event.preventDefault(); void readImage(image); return; }
-    // The Linux app's webview shows the page nothing of a copied picture (no files, no text): the app reads it.
-    if (busyRef.current || joined.current || closed.current || !pasteShowsNothing(event.clipboardData)) return;
+    // The Linux app's webview shows the page nothing of a copied picture (no files, no text; a browser's copy, its HTML
+    // and address only): the app reads it.
+    const picture = pasteIsPictureOnly(event.clipboardData);
+    if (busyRef.current || joined.current || closed.current || !(picture || pasteShowsNothing(event.clipboardData))) return;
     const reading = platformPastedImage(IMAGE_MAX);
     if (!reading) return;
     event.preventDefault();
     stop(); setError(null); busyRef.current = true; setBusy(true);
-    const current = generation.current, named = pasteNamesFiles(event.clipboardData);
+    const current = generation.current, named = picture || pasteNamesFiles(event.clipboardData);
     const ended = () => { if (current !== generation.current || closed.current) return false; busyRef.current = false; setBusy(false); return true; };
     reading.then(found => {
       if (!ended()) return;
@@ -266,7 +236,8 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
       <p className="mt-2 text-center text-xs text-text-secondary">{t("join.pasteScreenshot")}</p>
     </>}
     {error && <Notice problem={error} className="mt-3 text-sm" />}
-    {error && error === reloadProblem && <ReloadButton testId="join-reload" className={`${button} mt-3 w-full border border-border aria-disabled:opacity-60 aria-disabled:cursor-not-allowed`} />}
+    {/* A chat's Join comes back open, the camera on (`#/scan`, the "Scan invite" shortcut); a device's code where it was. */}
+    {error && error === reloadProblem && <ReloadButton testId="join-reload" to={onDevice ? undefined : "#/scan"} className={`${button} mt-3 w-full border border-border aria-disabled:opacity-60 aria-disabled:cursor-not-allowed`} noteClassName="mt-2 text-center text-sm text-text-secondary" />}
     {own && <div data-testid="join-own-invite" className="mt-3 rounded-lg border border-border bg-input-bg p-3">
       <p role="alert" className="text-sm text-text-primary">{t("join.own")}</p>
       <button type="button" data-testid="join-open-chat" onClick={() => { joined.current = true; stop(); (onOpenChat ?? onClose)(own); }} className={`${button} mt-3 w-full bg-accent text-panel-header`}>{t("join.openChat")}</button>
@@ -277,9 +248,6 @@ export function JoinDialog({ onJoin, onOpenChat, onJoinGroup, onDevice, onClose,
     </form>}
   </dialog>;
 }
-
-/** The largest picture a QR is read from, opened, dropped or pasted. */
-const IMAGE_MAX = 12 * 1024 * 1024;
 
 /** A line of the app's own as an error notice. */
 const said = (title: string): Problem => ({ tone: "error", title });

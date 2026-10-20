@@ -354,8 +354,10 @@ ghostly service add docs http://127.0.0.1:8080     # a web app on this machine
 ghostly service share <service id> alice           # alice may open it; nobody else
 ```
 
-A call's audio is raw PCM on its own Unix socket, 48 kHz by default; see `examples/call-echo.mjs`. Making an identity
-proof needs a person who holds the key: leave that to the owner.
+A call's audio is raw PCM on its own Unix socket, 48 kHz by default; see `examples/call-echo.mjs`. To answer calls by
+voice, clone [ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) rather than writing one: it listens, transcribes, asks Claude
+and speaks the reply (ElevenLabs), and its `AGENTS.md` walks an agent through the setup. Making an identity proof
+needs a person who holds the key: leave that to the owner.
 
 ## Rules the CLI enforces
 
