@@ -188,6 +188,7 @@ import type { WakeSubscription } from "../shared/types";
 import { forgetWallet, mainnetBalances, markBackedUp, observeBalances, putOff, type BackupReminders } from "../shared/backupReminder";
 import { withoutFrame, type MessageChanges } from "../shared/messageChanges";
 import { pairedWireReply, receivedPairedReply, replyRef, replyTo as replyToOriginal } from "../shared/replies";
+import { paymentAlias } from "../shared/paymentIds";
 import { buttonPress, buttonsState, messageButtons } from "../shared/buttons";
 import { canEdit, canRemove, isJoinNotice, takesPeerEdit, withEdit } from "../shared/edits";
 import { CardEditPacer, EditBuffer, EditQueue } from "./edits";
@@ -1379,6 +1380,15 @@ export class GhostlyNode implements EngineImplementation {
   private readonly reactions = new Reactions({
     messages: chat => db.getMessages(chat),
     message: (chat, id) => db.getMessage(chat, id),
+    // A file of mine is `me_<its time>` and a payment `me_` or `peer_` and its time, as `fileMessage` and `paymentMessage` read them.
+    rows: async (chat, id) => {
+      const file = await fileStore.get(GhostlyNode.outgoingFileId(chat, id)).catch(() => undefined);
+      const payment = this.desk.payment(paymentAlias(id, chat)) ?? this.desk.payment(id);
+      return [
+        ...(file?.linkId === chat && file.metadata ? [`me_${file.metadata.timestamp}`] : []),
+        ...(payment?.linkId === chat ? [`me_${payment.createdAt}`, `peer_${payment.createdAt}`] : []),
+      ];
+    },
     patch: (chat, id, change) => db.patchMessage(chat, id, change),
     changed: async (chat, id, note) => {
       const shown = this.reactionNotes.get(chat);
