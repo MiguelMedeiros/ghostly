@@ -2,7 +2,7 @@ import { memo, useCallback, useId, useMemo, useRef, useState, useSyncExternalSto
 import type { GroupView } from "@ghostly/browser/shared/types";
 import { PeerAvatar } from "./Avatar";
 import { GroupAvatar } from "./GroupAvatar";
-import { answerable, InvitationButtons, TakenBackDelete, invitationLine, useInvitationAnswer } from "./GroupInvitation";
+import { answerable, InvitationButtons, InvitationRefusal, TakenBackDelete, invitationLine, useInvitationAnswer } from "./GroupInvitation";
 import { ContactMarks, FaceCorner } from "./identities/ContactMarks";
 import { useChosenProfile, type ContactFace } from "./identities/contactFace";
 import { PinIcon } from "./PinIcon";
@@ -450,7 +450,7 @@ const SameGroupRow = memo(function SameGroupRow({ group, active, density, onOpen
         {/* Taken back: nothing to answer, only to clear away (it says nothing to whoever took it back). */}
         {invitation?.takenBack && <div className="mt-1.5 flex gap-2"><TakenBackDelete busy={busy} answer={answer} /></div>}
         {invitation && answerable(invitation) && <div className="mt-1.5 flex gap-2"><InvitationButtons busy={busy} answer={answer} /></div>}
-        {invitation && refused && <p role="status" data-testid="group-answer-refused" className="mt-1 text-xs text-danger">{refused}</p>}
+        {invitation && refused && <InvitationRefusal refused={refused} className="mt-1" />}
       </div>
     </div>
   );
