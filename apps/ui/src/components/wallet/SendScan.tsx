@@ -87,7 +87,10 @@ export function SendScan({ onText, disabled = false, children }: { onText: (text
 
   // `aria-disabled`, not disabled: a disabled control gives up the keyboard's focus while it runs (as wallet/ui.tsx's Button).
   const off = disabled || busy;
-  const button = "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent aria-disabled:opacity-40 aria-disabled:cursor-not-allowed";
+  const control = "inline-flex min-h-11 items-center justify-center rounded-lg text-sm font-semibold cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent aria-disabled:opacity-40 aria-disabled:cursor-not-allowed";
+  // A third of a phone's card each: the icon above its label, as a phone wallet's row, or the label is cut ("Scansiona"
+  // past its button, "スキャン" broken in two).
+  const tile = `${control} flex-col gap-1 p-2 text-center leading-tight`;
   return (
     <div className="space-y-3" data-testid="wallet-send-scan"
       // A screenshot of a QR, pasted or dropped: read as Choose image reads one. A paste of text is left to the field.
@@ -95,17 +98,17 @@ export function SendScan({ onText, disabled = false, children }: { onText: (text
       onDragOver={(event) => { if (dragHasFiles(event.dataTransfer)) event.preventDefault(); }}
       onDrop={(event) => { if (!dragHasFiles(event.dataTransfer)) return; event.preventDefault(); const file = droppedFiles(event.dataTransfer)[0]; if (file?.type.startsWith("image/")) { if (!off) void image(file); } else if (file) setError(t("join.imageFailed")); }}>
       <video ref={video} muted playsInline aria-label={t("join.cameraPreview")} className={`${scanning ? "block" : "hidden"} aspect-square w-full max-w-xs mx-auto rounded-xl bg-black object-cover`} />
-      {scanning ? <button ref={stopButton} type="button" onClick={stop} className={`${button} w-full border border-border`} data-testid="wallet-send-scan-stop">{t("common.cancel")}</button> : (
+      {scanning ? <button ref={stopButton} type="button" onClick={stop} className={`${control} gap-2 px-3 py-2 w-full border border-border`} data-testid="wallet-send-scan-stop">{t("common.cancel")}</button> : (
         <div className="grid grid-cols-3 gap-2">
-          <button ref={scanButton} type="button" aria-disabled={off || undefined} onClick={() => { if (!off) void scan(); }} className={`${button} bg-accent text-on-accent`} data-testid="wallet-send-camera">
+          <button ref={scanButton} type="button" aria-disabled={off || undefined} onClick={() => { if (!off) void scan(); }} className={`${tile} bg-accent text-on-accent`} data-testid="wallet-send-camera">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><rect x="7" y="7" width="3" height="3"/><rect x="14" y="7" width="3" height="3"/><rect x="7" y="14" width="3" height="3"/><path d="M14 14h3v3h-3z"/></svg>
             {t("wallet.send.scan")}
           </button>
-          <button type="button" aria-disabled={off || undefined} onClick={() => { if (!off) void paste(); }} className={`${button} border border-border text-text-secondary`} data-testid="wallet-send-paste">
+          <button type="button" aria-disabled={off || undefined} onClick={() => { if (!off) void paste(); }} className={`${tile} border border-border text-text-secondary`} data-testid="wallet-send-paste">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/></svg>
             {t("wallet.send.paste")}
           </button>
-          <label className={`${button} border border-border text-text-secondary focus-within:ring-2 focus-within:ring-accent ${off ? "opacity-40 cursor-not-allowed" : ""}`}>
+          <label className={`${tile} border border-border text-text-secondary focus-within:ring-2 focus-within:ring-accent ${off ? "opacity-40 cursor-not-allowed" : ""}`}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8" cy="8" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
             {t("wallet.send.image")}<input aria-disabled={off || undefined} onClick={(event) => { if (off) event.preventDefault(); }} aria-label={t("wallet.send.image")} data-testid="wallet-send-image" type="file" accept="image/*" className="sr-only" onChange={(event) => { void image(event.target.files?.[0]); event.target.value = ""; }} />
           </label>

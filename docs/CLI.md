@@ -138,6 +138,9 @@ call of the app's engine. `ghostly engine --list` and `ghostly engine <method> '
   bridge restart loses nothing. stderr says so once ("the webhook at … is not answering: holding event N") and again
   when it answers. An event the bridge refuses (another 4xx, or a redirect) is said on stderr and passed.
 - With no daemon running, `listen` becomes the daemon, so a hook can answer with `ghostly send`.
+- A `listen` started while a daemon runs follows that daemon across a `daemon restart`. When the daemon stays gone
+  (`daemon stop`), it says so once on stderr and waits; it says again when a daemon answers, and goes on from the last
+  event it took.
 - A reader that stops reading the output, or a hook that falls behind, holds `listen` back: about 1,000 events
   ahead it stops taking more and goes on from the last one once they are handled. The journal keeps what comes
   meanwhile (past 10,000 events or 16 MiB, an `events.gap` says what was dropped).
@@ -246,7 +249,9 @@ Errors print `{"error":{"code","message"}}` and exit with 1 (failed), 2 (usage),
 5 (needs `--force`, `--yes` or `--confirm-real`). A daemon that does not answer a read or `daemon status` within 15
 seconds (`daemon status --timeout s` sets its own), or a command that waits (`chat wait`, `file wait`, `--wait`)
 within its `--timeout` (or the default, 60, 300 and 30 s) plus 10 seconds, is a timeout too (exit 4,
-`details.method`). `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
+`details.method`). Any other command (`send`, `react`, `invite create`, `settings set` and the like) is sent only
+once the daemon has answered `status`: one that has not in 15 seconds is a timeout as well, and the command was not
+sent, so the daemon does not act on it when it wakes. `ghostly daemon restart` starts a fresh one: a daemon that does not answer `daemon stop` within
 its `--timeout` (default 20 s) is ended with SIGTERM, and SIGKILL after as long again (on Windows the first ends it:
 there is no second). A daemon kept by a service manager (systemd, launchd) is restarted with the manager instead: it
 starts its own again, and the one `restart` started would race it for the profile.

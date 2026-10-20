@@ -39,7 +39,7 @@ vi.mock("../src/engine/paymentAdapters/arkade", () => ({
   ArkadeAdapter: {
     connect: vi.fn(async (config: object, mnemonic: string) => {
       const read = <T>(what: string, value: T) => async () => { if (fx.arkFails.has(what)) throw new Error(`${what} unavailable`); return value; };
-      const adapter = { config, mnemonic, address: read("address", `ark1${mnemonic.split(" ")[0]}`), boardingAddress: read("boarding address", "bc1qboarding"), balance: async () => { if (fx.arkFails.has("balance")) throw new Error("balance unavailable"); return fx.funds.get(mnemonic) ?? 0; }, incoming: read("incoming", 0), expired: read("recoverable", { recoverable: 0, sweeping: 0 }), requestAddress: async () => "ark1request", recover: async () => "f".repeat(64), dispose: vi.fn() };
+      const adapter = { config, mnemonic, address: read("address", `ark1${mnemonic.split(" ")[0]}`), boardingAddress: read("boarding address", "bc1qboarding"), balance: async () => { if (fx.arkFails.has("balance")) throw new Error("balance unavailable"); return fx.funds.get(mnemonic) ?? 0; }, balances: async () => { if (fx.arkFails.has("balance")) throw new Error("balance unavailable"); return { balance: fx.funds.get(mnemonic) ?? 0, incoming: 0 }; }, expired: read("recoverable", { recoverable: 0, sweeping: 0 }), requestAddress: async () => "ark1request", recover: async () => "f".repeat(64), dispose: vi.fn() };
       fx.adapters.push(adapter);
       return adapter;
     }),
@@ -298,9 +298,9 @@ describe("the Ark wallet's seed", () => {
   it("shows what it could read and says what it could not, logging no phrase", async () => {
     const wallet = new ArkWallet("mainnet", () => {}); await wallet.start(); await wallet.ensureReady(true);
     const mnemonic = connected(ArkadeAdapter.connect);
-    fx.arkFails.add("balance").add("incoming");
+    fx.arkFails.add("balance").add("recoverable");
     await wallet.refresh();
-    expect(wallet.view).toMatchObject({ locked: false, address: `ark1${mnemonic.split(" ")[0]}`, error: "Could not read the balance, incoming from the Ark provider. Last values may be stale." });
+    expect(wallet.view).toMatchObject({ locked: false, address: `ark1${mnemonic.split(" ")[0]}`, error: "Could not read the balance, recoverable from the Ark provider. Last values may be stale." });
     expect(logged.some((line) => line.startsWith("Ark balance:"))).toBe(true);
     expect(leaks(mnemonic, wallet.view)).toEqual([]);
     await expect(wallet.target()).resolves.toMatchObject({ method: "arkade", network: "bitcoin", provider: DEFAULT_ARK.provider, asset: "BTC", unit: "sat", address: "ark1request" });
