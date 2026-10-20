@@ -7151,7 +7151,8 @@ export class GhostlyNode implements EngineImplementation {
     try { await db.putLink(stored); }
     catch (error) { this.links.delete(id); throw error; }
     if (this.networkOn) this.startLink(id);
-    if (expectPeer) this.links.get(id)?.link?.expectPeer();
+    // A member a hub just let in, or the hub that let it in: nothing reaches it until this edge is up (agents#1740).
+    if (expectPeer) this.links.get(id)?.link?.expectPeer(true);
     return id;
   }
 
