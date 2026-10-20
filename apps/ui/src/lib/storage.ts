@@ -820,25 +820,49 @@ export function chatNamesForPeer(peerPubKeyB64: string): { label?: string; nick?
   return { label: known.label, nick: known.nick };
 }
 
+/** Per storage prefix, per chat's key: the stored text and what it counts, `after[i]` the unread from message `i` on. */
+const unreadCounts = new Map<string, Map<string, { raw: string; id?: string; older: number; after: number[] }>>();
+
 /**
  * Unread messages in the chats kept under a storage prefix: another profile's, read without starting it
- * (the account bar's switcher). Same count as the chat list's: messages since the last read one.
+ * (the account bar's switcher). Same count as the chat list's: messages since the last read one. A chat's stored copy
+ * is parsed again only when it changed.
  */
 export function unreadUnder(prefix: string): number {
   let unread = 0;
+  const known = unreadCounts.get(prefix);
+  const counts = new Map<string, { raw: string; id?: string; older: number; after: number[] }>();
   for (let i = 0; i < localStorage.length; i++) {
     try {
       const key = localStorage.key(i);
       if (!key?.startsWith(prefix) || key.slice(prefix.length).includes("_")) continue;
-      const session = JSON.parse(localStorage.getItem(key) ?? "null") as ChatSession | null;
-      if (!session?.id || !session.mySeedB64 || !session.peerPubKeyB64 || !session.encKeyB64 || !Array.isArray(session.messages)) continue;
-      const read = parseInt(localStorage.getItem(`${prefix}read_${session.id}`) ?? "0", 10) || 0;
-      unread += unreadAfter(session.messages, read - (session.older ?? 0));
+      const raw = localStorage.getItem(key);
+      if (raw === null) continue;
+      let chat = known?.get(key);
+      if (chat?.raw !== raw) chat = countsOf(raw);
+      counts.set(key, chat);
+      if (!chat.id) continue;
+      const read = parseInt(localStorage.getItem(`${prefix}read_${chat.id}`) ?? "0", 10) || 0;
+      unread += chat.after[Math.min(Math.max(0, read - chat.older), chat.after.length - 1)]!;
     } catch {
       continue;
     }
   }
+  unreadCounts.set(prefix, counts);
   return unread;
+}
+
+/** A stored chat's unread counts from each message on; no `id` when the text is not a chat. */
+function countsOf(raw: string): { raw: string; id?: string; older: number; after: number[] } {
+  try {
+    const session = JSON.parse(raw) as ChatSession | null;
+    if (!session?.id || !session.mySeedB64 || !session.peerPubKeyB64 || !session.encKeyB64 || !Array.isArray(session.messages)) return { raw, older: 0, after: [0] };
+    const after = new Array<number>(session.messages.length + 1).fill(0);
+    for (let i = session.messages.length - 1; i >= 0; i--) after[i] = after[i + 1]! + unreadWeight(session.messages[i]!);
+    return { raw, id: session.id, older: session.older ?? 0, after };
+  } catch {
+    return { raw, older: 0, after: [0] };
+  }
 }
 
 export function getLastReadCount(sessionId: string): number {
@@ -971,11 +995,12 @@ export function uncountMissedCall(sessionId: string, line: string): ChatSession 
 function unreadAfter(messages: readonly ChatMessage[], read: number): number {
   let unread = 0;
   for (let i = Math.max(0, read); i < messages.length; i++) {
-    const message = messages[i]!;
-    if (countsAsUnread(message)) unread += message.callEvent ? callLineCount(message.callEvent) : 1;
+    unread += unreadWeight(messages[i]!);
   }
   return unread;
 }
+/** What a message adds to a chat's unread count: a call line as many calls as it holds. */
+const unreadWeight = (message: ChatMessage) => (countsAsUnread(message) ? (message.callEvent ? callLineCount(message.callEvent) : 1) : 0);
 
 export function getUnreadCount(session: ChatSession): number {
   // A session read without its older messages counts from its first one kept.
