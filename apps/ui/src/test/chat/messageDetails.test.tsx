@@ -96,7 +96,7 @@ describe("opening and closing", () => {
       return <ChatOnScreen.Provider value={visible}><div className={visible ? "" : "hidden"}><MessageBubble message={message()} peerPubKey="peer" onDelete={() => {}} /></div></ChatOnScreen.Provider>;
     }
     const { user } = renderApp(<Loaded />);
-    await detailsClick(user, screen.getByText("hello"));
+    await user.dblClick(screen.getByText("hello"));
     expect(await screen.findByTestId("message-details")).toBeInTheDocument();
     act(() => show(false));
     await waitFor(() => expect(screen.queryByTestId("message-details")).not.toBeInTheDocument());
@@ -104,7 +104,7 @@ describe("opening and closing", () => {
     // Back on screen, they stay closed until asked again.
     act(() => show(true));
     expect(screen.queryByTestId("message-details")).not.toBeInTheDocument();
-    await detailsClick(user, screen.getByText("hello"));
+    await user.dblClick(screen.getByText("hello"));
     expect(await screen.findByTestId("message-details")).toBeInTheDocument();
   });
 
