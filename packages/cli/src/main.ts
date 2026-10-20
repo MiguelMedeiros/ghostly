@@ -271,12 +271,34 @@ const SPECIAL: [usage: string, summary: string, options?: Record<string, OptionS
   ["version", "This CLI's version (also ghostly --version)"],
 ];
 
+/** A command's words before its arguments: "group send", "send", "engine". */
+const wordsOf = (usage: string) => usage.split(" ").filter((w) => /^[a-z][\w-]*$/.test(w)).slice(0, 2);
+
+/**
+ * `rows`, then each of `more` beside the rows of its first word: after the last of them (`group send` with the group
+ * commands, `identity add` with the identity ones), or at the end when none has that word. They were all appended after
+ * the table: `group send` 106 lines below the group block, `identity add` 60 below its own (agents#1606).
+ */
+function beside(rows: [string, string][], more: [string, string][]): [string, string][] {
+  const out = [...rows];
+  for (const row of more) {
+    const [first, second] = wordsOf(row[0]);
+    let at = -1;
+    if (second !== undefined) for (let i = out.length - 1; i >= 0; i--) if (wordsOf(out[i][0])[0] === first && wordsOf(out[i][0]).length > 1) { at = i; break; }
+    out.splice(at < 0 ? out.length : at + 1, 0, row);
+  }
+  return out;
+}
+
 function help(): string {
   const rows: [string, string][] = [
-    ...SPECIAL.slice(0, 7).map(([usage, summary]) => [usage, summary] as [string, string]),
-    ...Object.values(COMMANDS).filter((c) => c.method !== "events.replay").map((c) => [c.usage, c.summary] as [string, string]),
-    ...Object.values(TEXT_COMMANDS).map((c) => [c.usage, c.summary] as [string, string]),
-    ...SPECIAL.slice(7).map(([usage, summary]) => [usage, summary] as [string, string]),
+    ...beside([
+      ...SPECIAL.slice(0, 7).map(([usage, summary]) => [usage, summary] as [string, string]),
+      ...Object.values(COMMANDS).filter((c) => c.method !== "events.replay").map((c) => [c.usage, c.summary] as [string, string]),
+    ], [
+      ...Object.values(TEXT_COMMANDS).map((c) => [c.usage, c.summary] as [string, string]),
+      ...SPECIAL.slice(7).map(([usage, summary]) => [usage, summary] as [string, string]),
+    ]),
     [COMMANDS.events.usage, COMMANDS.events.summary],
   ];
   const width = 58;
