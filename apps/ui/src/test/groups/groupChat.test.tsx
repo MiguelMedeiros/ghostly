@@ -358,6 +358,25 @@ describe("GroupChat: out of the group", () => {
     expect(screen.getByTestId("group-notice")).toHaveFocus();
   });
 
+  // agents#1739: a private group past 16 turns its composer off for a moment on every join, leave or removal. The focus
+  // went to ⋮ and stayed there: "lo there" opened its menu instead of going into the message.
+  it("off for a moment on a group still active: the focus stays in the field and the next keys go into the message", async () => {
+    for (const profile of ["mesh", "community"] as const) {
+      const { user, unmount } = openGroup(active({ profile }));
+      await user.click(composer());
+      // The draft is the group's: the first round's text is still there.
+      await user.clear(composer());
+      await user.keyboard("hel");
+      act(() => fakeEngine.update({ groups: [active({ profile, canSend: false })] }));
+      act(() => fakeEngine.update({ groups: [active({ profile })] }));
+      expect(composer(), profile).toHaveFocus();
+      await user.keyboard("lo there");
+      expect(composer()).toHaveValue("hello there");
+      expect(screen.queryByTestId("group-options-menu")).not.toBeInTheDocument();
+      unmount();
+    }
+  });
+
   it("the composer turned off while the focus is elsewhere leaves the focus where it is", async () => {
     const { user } = openGroup(active());
     await user.click(screen.getByTestId("group-options"));
