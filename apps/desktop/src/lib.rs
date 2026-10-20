@@ -116,6 +116,7 @@ macro_rules! commands {
             app_sandbox::app_focus,
             app_sandbox::app_open,
             app_sandbox::app_post,
+            app_sandbox::app_title,
             clipboard::incoming_share_done,
             clipboard::incoming_share_take,
             clipboard::read_clipboard_files,
@@ -828,9 +829,9 @@ mod tests {
             assert!(!may_call("app-1", command), "{command}");
             assert!(may_call("main", command), "{command}");
         }
-        // The Ghostly window's side of the broker: it opens app windows, answers them, brings them to the front and
-        // closes them; an app window does none of that.
-        for command in ["app_open", "app_post", "app_focus", "app_close"] {
+        // The Ghostly window's side of the broker: it opens app windows, answers them, brings them to the front, names
+        // them and closes them; an app window does none of that.
+        for command in ["app_open", "app_post", "app_focus", "app_title", "app_close"] {
             assert!(registered().iter().any(|c| c == command), "{command}");
             assert!(may_call("main", command), "{command}");
             for label in ["app-1", "app-0123456789abcdef", "svc-1"] {
