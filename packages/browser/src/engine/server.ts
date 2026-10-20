@@ -103,7 +103,7 @@ export class EngineServer implements PeerServer {
         if (sent.has(link.id)) continue;
         await this.inOrder(link.id, async () => {
           if (!this.clients.has(client)) return;
-          client.post(scope.newest ? await this.newestOf(link.id, scope.newest) : { kind: "messages", linkId: link.id, messages: await this.node.getMessages(link.id) });
+          client.post(scope.newest ? await this.newestOf(link.id, scope.newest) : this.historyEvent(link.id, await this.node.getMessages(link.id)));
           this.histories.get(client)?.add(link.id);
         });
       }
@@ -181,7 +181,7 @@ export class EngineServer implements PeerServer {
   /** A chat's newest page, as a `messages` event: `more` when older rows are left out. */
   private async newestOf(linkId: string, limit: number): Promise<EngineEvent> {
     const page = await this.node.messagePage({ linkId, limit });
-    return { kind: "messages", linkId, messages: page.messages, ...(page.more ? { more: true as const } : {}) };
+    return this.historyEvent(linkId, page.messages, page.more);
   }
 
   /**
@@ -195,7 +195,7 @@ export class EngineServer implements PeerServer {
       await this.inOrder(linkId, async () => {
         if (!this.clients.has(client)) return;
         const messages = await this.node.getMessages(linkId);
-        if (this.clients.has(client) && this.post(client, { kind: "messages", linkId, messages })) this.histories.get(client)?.add(linkId);
+        if (this.clients.has(client) && this.post(client, this.historyEvent(linkId, messages))) this.histories.get(client)?.add(linkId);
       });
     } catch {
       // The peer never started (the client was told at its attach), or the read failed: nothing is sent.
@@ -213,8 +213,17 @@ export class EngineServer implements PeerServer {
     return running;
   }
 
+  /**
+   * A history (whole, or its newest page with `more`) as a client gets it: with the ids the engine deleted in it, which
+   * a list cannot show.
+   */
+  private historyEvent(linkId: string, messages: StoredMessage[], more?: boolean): EngineEvent {
+    const deleted = this.node.deletedIdsOf(linkId);
+    return { kind: "messages", linkId, messages, ...(more ? { more: true as const } : {}), ...(deleted.length > 0 && { deleted }) };
+  }
+
   private sendHistory(linkId: string, messages: StoredMessage[]): void {
-    this.broadcast({ kind: "messages", linkId, messages });
+    this.broadcast(this.historyEvent(linkId, messages));
     for (const client of this.clients) this.histories.get(client)?.add(linkId);
   }
 
@@ -229,7 +238,7 @@ export class EngineServer implements PeerServer {
     return this.node.getMessages(linkId).then((messages) => {
       for (const client of behind) {
         if (!this.clients.has(client)) continue;
-        if (this.post(client, { kind: "messages", linkId, messages })) this.histories.get(client)?.add(linkId);
+        if (this.post(client, this.historyEvent(linkId, messages))) this.histories.get(client)?.add(linkId);
       }
     });
   }

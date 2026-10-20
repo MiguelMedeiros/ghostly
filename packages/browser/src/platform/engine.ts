@@ -33,6 +33,8 @@ export type MessagesListener = (linkId: string, messages: StoredMessage[], chang
 class EngineClient {
   state: EngineState | null = null;
   readonly messages = new Map<string, StoredMessage[]>();
+  /** Per chat, the ids the engine deleted in it, as its last whole history said (the `messages` event's `deleted`). */
+  readonly deletedIds = new Map<string, readonly string[]>();
   /** The chats whose list here is only their newest page (a `messages` event with `more`): the peer has older rows. */
   private readonly partial = new Set<string>();
   /** The partial chats whose whole history this connection asked for (`askWhole`), once each. */
@@ -229,6 +231,8 @@ class EngineClient {
           this.asked.delete(message.linkId);
         }
         this.messages.set(message.linkId, message.messages);
+        if (message.deleted?.length) this.deletedIds.set(message.linkId, message.deleted);
+        else this.deletedIds.delete(message.linkId);
         for (const listener of this.messageListeners) listener(message.linkId, message.messages);
         if (this.kept.has(message.linkId)) this.askWhole(message.linkId);
         break;

@@ -32,6 +32,7 @@ vi.mock("../src/engine/node", () => ({
     start() { return fake.start(); }
     getState() { return this.state; }
     async getMessages(linkId: string) { return [{ id: `${linkId}-1` }]; }
+    deletedIdsOf() { return []; }
     echo(params: unknown) { return { params, self: this === fake.nodes.at(-1) }; }
     async fail() { throw new Error("That payment was refused"); }
     failWithString() { throw "plain refusal"; }
