@@ -36,4 +36,19 @@ describe("a path that starts with ~", { timeout: 60_000 }, () => {
     expect(error(await ghostly(["profile", "list"], { env: { ...env, GHOSTLY_HOME: "~bob" }, cwd }), "usage", 2).message).toBe("~bob: ~user is not read here: write the folder in full");
     expect(readdirSync(cwd)).toEqual([]);
   });
+
+  // agents#1604: since #3218 every name that starts with ~ was refused as "~user", a real ~notes.txt too.
+  it("that is a file's own name (~notes.txt, Office's ~$report.docx) is that file here", async () => {
+    const user = home("tilde-name"), cwd = home("tilde-name-cwd");
+    const env = { HOME: user, GHOSTLY_HOME: "" };
+    ok(await ghostly(["--home=~/bots", "profile", "create", "bot"], { env, cwd }));
+    writeFileSync(join(cwd, "~notes.txt"), "not a picture");
+    // Read as the file it is: refused for what it holds, not for its name.
+    expect(error(await ghostly(["--home=~/bots", "-p", "bot", "profile", "picture", "~notes.txt"], { env, cwd }), "bad_request", 1).message).not.toMatch(/~user/);
+    // One not there yet is a file of this folder too; ~user/… not there is still refused.
+    const missing = await ghostly(["--home=~/bots", "-p", "bot", "profile", "picture", "~$report.jpg"], { env, cwd });
+    expect(missing.code).not.toBe(2);
+    expect(missing.stdout).not.toMatch(/~user/);
+    expect(error(await ghostly(["--home=~/bots", "-p", "bot", "profile", "picture", "~bob/x.jpg"], { env, cwd }), "usage", 2).message).toBe("~bob/x.jpg: ~user is not read here: write the path in full");
+  });
 });
