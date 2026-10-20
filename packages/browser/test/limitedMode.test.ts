@@ -133,13 +133,48 @@ describe("limited mode", () => {
     expect(made.calls).toEqual([]);
   });
 
-  it("a message cannot be sent to the network, and joining, calling and new chats are refused by the engine as when offline", async () => {
+  it("a message is not sent to the network, and joining, calling and new chats are refused by the engine as when offline", async () => {
     const link = await profile();
     const made = engine(true);
     await made.node.start();
-    expect(await made.node.sendMessage({ linkId: link.id, text: "hello" })).toMatchObject({ error: "You are offline" });
     await expect(made.node.connect({ linkId: link.id })).rejects.toThrow("offline");
     expect(made.calls).toEqual([]);
+  });
+
+  // agents#1721: the banner says "Messages you write wait until then", a group's text did, and a 1:1 chat's was refused
+  // as "You are offline" (no row kept, the text back in the field).
+  it("a chat's text, a reply and a forward wait as a chat's do for a contact away, sent once the check works", async () => {
+    const link = await profile();
+    const other = chat();
+    await db.putLink(other);
+    const made = engine(true);
+    await made.node.start();
+    const sent = await made.node.sendMessage({ linkId: link.id, text: "running 10 min late" });
+    expect(sent).toMatchObject({ error: null, messageId: expect.stringMatching(/^me_/) });
+    const reply = await made.node.sendMessage({ linkId: link.id, text: "ok", replyTo: sent.messageId });
+    expect(reply.error).toBeNull();
+    const forwarded = await made.node.forwardMessages({ linkId: link.id, messageIds: [sent.messageId!], to: [other.id] });
+    expect(forwarded.results).toEqual([expect.objectContaining({ to: other.id, error: null, sent: [sent.messageId] })]);
+    const rows = await db.getMessages(link.id);
+    expect(rows.map((m) => [m.text, m.delivery, m.deliveryError])).toEqual([
+      ["running 10 min late", "waiting", "Sent once Ghostly can check which device is active."],
+      ["ok", "waiting", "Sent once Ghostly can check which device is active."],
+    ]);
+    expect(rows[1]!.replyTo).toMatchObject({ messageId: sent.messageId });
+    expect((await db.getMessages(other.id)).map((m) => [m.text, m.delivery])).toEqual([["running 10 min late", "waiting"]]);
+    // Nothing went out; each is in its chat's outbox, which sends a waiting text once the chat is live, as for a
+    // contact away (`Outbox.wait`).
+    expect(made.calls).toEqual([]);
+    expect([...(made.inner.outboxes as Map<string, unknown>).keys()].sort()).toEqual([link.id, other.id].sort());
+  });
+
+  it("outside limited mode, a chat with no link is still offline", async () => {
+    const link = await profile();
+    await db.putSettings({ online: false } as never);
+    const made = engine(false);
+    await made.node.start();
+    expect(await made.node.sendMessage({ linkId: link.id, text: "hello" })).toMatchObject({ error: "You are offline" });
+    expect(await db.getMessages(link.id)).toEqual([]);
   });
 
   it("the first good read leaves it: the wallets start, every chat is dialled, hold storage runs, and publishing works again", async () => {
