@@ -41,6 +41,24 @@ class SharedCopiesTest {
   }
 
   @Test
+  fun aCopyOntoAFullDiskIsNoRoomNotUnread() {
+    // A full disk as the JVM and Android say it, also when wrapped.
+    val full = try {
+      java.io.FileOutputStream("/dev/full").use { it.write(ByteArray(1)); it.flush() }
+      null
+    } catch (e: java.io.IOException) {
+      e
+    }
+    if (full != null) assertEquals(true, SharedCopies.noRoom(full))
+    assertEquals(true, SharedCopies.noRoom(java.io.IOException("write failed: ENOSPC (No space left on device)")))
+    assertEquals(true, SharedCopies.noRoom(RuntimeException("copy", java.io.IOException("write failed: EDQUOT (Disk quota exceeded)"))))
+    // What the other app's stream did: not read, as before.
+    assertEquals(false, SharedCopies.noRoom(SecurityException("Permission Denial: reading content://media/external/video/1")))
+    assertEquals(false, SharedCopies.noRoom(java.io.IOException("No stream for content://x/1")))
+    assertEquals(false, SharedCopies.noRoom(java.io.FileNotFoundException()))
+  }
+
+  @Test
   fun aStartLeavesOnlySharesTakenSinceIt() {
     val root = temp.newFolder("shared")
     for (share in listOf("900", "1000", "1001", "junk")) copy(root, share, 0, "f")

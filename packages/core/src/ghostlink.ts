@@ -46,14 +46,15 @@ import { EXPECT_PEER_MS, OFFER_FAST_MS, WATCH_PEER_MS, LinkSession, presenceSeen
 import type { ResolvedLink } from "./records";
 import { servicesFromWire, servicesToWire, type ServiceAd } from "./services";
 import { PairedHttp, type PairedHttpBodies } from "./pairedHttp";
-import { CALLS_CAPABILITY, FILES_CAPABILITY, FILES_BINARY_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, APPS_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
+import { CALLS_CAPABILITY, FILES_CAPABILITY, FILES_BINARY_CAPABILITY, KNOWN_SESSION_CAPABILITIES, SERVICES_CAPABILITY, SESSION_CAPABILITIES_FRAME, SessionCapabilities, TYPING_CAPABILITY, REACTIONS_CAPABILITY, EDIT_CAPABILITY, WAKE_SESSION_CAPABILITY, PIN_CAPABILITY, STATUS_CARD_CAPABILITY, BUTTONS_CAPABILITY, UPGRADE_CAPABILITY, APPS_CAPABILITY, APP_RANGES_CAPABILITY, type SessionCapability } from "./pairedCapabilities";
 import { APP_DATA_MAX_BYTES, APP_FRAME, APP_RESUME_GRACE_MS, AppSessions, appDataBytes, appCloseFrame, appDataFrame, appOpenFrame, type AppFrameEvent, type AppSendError } from "./pairedApps";
+import { APP_RANGE_DATA_KIND, APP_RANGE_FRAMES, APP_RANGE_LIMITS, AppRanges, appRangeChunk, appRangeDataFrame, appRangeErrorFrame, decodeAppRangeData, encodeAppRangeData, readAppRangeFrame, type AppRangeTask } from "./pairedAppRanges";
 import { WAKE_FRAME, parseWakeFrame, wakeFrame, type WakeTarget } from "./pairedWake";
 import { REACTED_FRAME, REACTION_FRAME, REACTION_LIMITS, ReactionWindow, parseReactedFrame, parseReactionFrame, reactedFrame, reactionFrame, type WireReaction } from "./reactions";
 import { PINNED_FRAME, PIN_FRAME, PIN_LIMITS, parsePinFrame, parsePinnedFrame, pinFrame, pinnedFrame, type WirePin } from "./pins";
 import { TYPING_FRAME, TypingReceiver, TypingSender, type TypingActivity } from "./pairedTyping";
 import { EDIT_FRAME, EDIT_RATE_WINDOW_MS, EDIT_RECEIVE_LIMIT, EDITED_FRAME, RateWindow, dhtEditId, editFrame, editedFrame, parseEditFrame, parseEditedFrame, validEditMessage, validEditNumber, type WireEdit } from "./pairedEdits";
-import { FILE_FRAMES, decodeFileData, encodeFileData } from "./chatFiles";
+import { FILE_FRAMES, FILE_LIMITS, decodeFileData, encodeFileData } from "./chatFiles";
 import { PAIRED_CALL_FRAME, PairedCalls, parsePairedCallFrame } from "./pairedCalls";
 import { heardCallSignal } from "./callSignal";
 import { traceLink } from "./linkTrace";
@@ -491,6 +492,13 @@ export interface GhostLinkEvents {
   onAppFrame?(event: AppFrameEvent): void;
   /** Both sides offer `apps/1` on the open session (true), or no longer (false). */
   onAppsSupport?(supported: boolean): void;
+  /**
+   * The contact's app asks for a range of a file this side's app serves (`app-ranges/1`): read it and give the bytes to
+   * `sendAppRange`, or say why not with `failAppRange`. Already checked against the serve ids and the requests in
+   * flight; `task.live` turns false when it no longer matters. Settle every task, live or not, with one of the two: a
+   * task the contact cancelled holds its place among the app's requests in flight until then.
+   */
+  onAppRangeTask?(task: AppRangeTask): void;
   onStatus?(status: LinkStatus): void;
   onDataLinkState?(state: DataLinkState): void;
   /** What a WebRTC attempt of this link said about direct connections from this device (`directPath.ts`). */
@@ -625,6 +633,11 @@ export interface GhostLinkOptions {
    * side (WISP 1200 § In a chat). Behind the apps feature flag.
    */
   appsSupport?: boolean;
+  /**
+   * With `appsSupport`, offer `app-ranges/1`: the contact's app reads, in ranges, a file this side's app serves, and
+   * the other way (WISP 1200 § A read lane to the contact). The owner's `onAppRangeTask` then reads the bytes.
+   */
+  appRangesSupport?: boolean;
   /**
    * The apps this side has open in this chat (chat app id to version), kept by the caller across this link's restarts.
    * Each new session says `open` for each. Without it the link keeps its own.
@@ -828,6 +841,8 @@ export class GhostLink {
   private readonly typingReceiver = new TypingReceiver((typing, activity) => this.options.events?.onPeerTyping?.(typing, activity));
   /** Mini-apps on this session (`apps/1`): this side's open apps (kept across sessions), the peer's, the limits. */
   private readonly apps: AppSessions;
+  /** The read lane on this session (`app-ranges/1`): what this side serves and what it asked; none of it outlives the session. */
+  private readonly appRanges = new AppRanges(frame => { if (this.supportsAppRanges && this.channel) try { this.channel.send(JSON.stringify(frame)); } catch { /* the session is going: reset ends it */ } });
   /** Reaction frames the contact may send per window; the rest go unconfirmed and come again. */
   private readonly reactionsReceived = new ReactionWindow(REACTION_LIMITS.receive);
   /** Pin frames the contact may send per window; the rest go unconfirmed and come again. */
@@ -1547,8 +1562,11 @@ export class GhostLink {
     return this.mergePresence(this.session.peerPresence);
   }
 
-  /** Someone else used the invite first, and this side never pinned its inviter: there is nobody to pair with. */
-  get takenFromUs(): boolean { return !this.options.pairing?.credentials.peerKey && !!this.dht?.inviteTaken; }
+  /**
+   * Someone else used the invite first: there is nobody to pair with, whether or not this side's look-up pinned its
+   * inviter from the envelope put out before anyone joined (said only while unproven: never live, nothing confirmed).
+   */
+  get takenFromUs(): boolean { return !!this.dht?.inviteTaken; }
   /**
    * The session runs on the joiner's link key, which every copy of the invite derives: while the invite is taken from
    * this side, its packets there read as those of whoever joined first. Republished every 4 minutes, they kept that
@@ -2986,9 +3004,9 @@ export class GhostLink {
   private maybeAutoConnect(presence: PeerPresence): void {
     // Stopping (its loops end after an await): a poll finishing meanwhile must not dial again.
     if (this.stopped || this.leaving || this.yielding || this.streamBlocked || this.keyStopped || !this.options.autoConnect || !presence.online || this.channel || this.dialing || this.dataLink.state !== "idle") return;
-    // The invite was taken before this side pinned anyone: its inviter answers nobody here, and neither a dial nor a fast
-    // look for its offer is worth the relays' budget at each of its heartbeats (bug hunt 1014-1317). The mailbox's slow
-    // read still hears it if it was not so (`untaken`), and dials go again then.
+    // The invite was taken, before or after a look-up pinned the inviter: its inviter answers nobody here, and neither a
+    // dial nor a fast look for its offer is worth the relays' budget at each of its heartbeats (bug hunts 1014-1317,
+    // 1017-0534). The mailbox's slow read still hears it if it was not so (`untaken`), and dials go again then.
     if (this.takenFromUs) return;
     // On the DHT the chat is usable: layer 1 is retried at the background pace (WISP 100), not the pairing's.
     // A pin over the DHT alone changes nothing here: the joiner still knocks and the inviter still answers.
@@ -3306,6 +3324,7 @@ export class GhostLink {
     if (this.options.buttonsSupport) offered.push(BUTTONS_CAPABILITY);
     if (this.options.upgradeSupport) offered.push(UPGRADE_CAPABILITY);
     if (this.options.appsSupport) offered.push(APPS_CAPABILITY);
+    if (this.options.appsSupport && this.options.appRangesSupport) offered.push(APP_RANGES_CAPABILITY);
     if (this.options.deviceCapabilities) offered.push(...this.options.deviceCapabilities);
     return offered;
   }
@@ -3439,6 +3458,7 @@ export class GhostLink {
   closeApp(app: string): void {
     const frame = JSON.stringify(appCloseFrame(app));
     if (!this.apps.open.delete(app)) return;
+    this.appRanges.closeApp(app, "offline");
     if (this.supportsApps && this.channel) try { this.channel.send(frame); } catch { /* the session is going: the contact hears it ended */ }
   }
   /**
@@ -3467,8 +3487,92 @@ export class GhostLink {
     if (files) files.appAhead = Math.min(files.appAhead + frame.length, APP_AHEAD_OF_FILES + APP_DATA_MAX_BYTES);
     return null;
   }
+  /** Both sides offer `app-ranges/1` (and `apps/1`) on the open session: an app's files can be read from the other side. */
+  get supportsAppRanges(): boolean { return this.supportsApps && this.sessionCapabilities.agreed(APP_RANGES_CAPABILITY); }
+  /** Why the read lane cannot be used for `app` now, or null when it can: open on both sides, on a live session that has it. */
+  private appRangesRefusal(app: string): "not-open" | "offline" | "peer-closed" | null {
+    if (!this.apps.open.has(app)) return "not-open";
+    if (!this.channel || !this.isDataLinkOpen) return "offline";
+    return this.supportsAppRanges && this.apps.peerOpen.has(app) ? null : "peer-closed";
+  }
+  /**
+   * Lets the contact's `app` read `file` (what this side's app calls it) for as long as both have the app open on this
+   * session: the serve id to tell it, or why not.
+   */
+  serveAppFile(app: string, file: string): { serve: string } | { error: "not-open" | "offline" | "peer-closed" } {
+    const error = this.appRangesRefusal(app);
+    return error ? { error } : { serve: this.appRanges.serve(app, file) };
+  }
+  /** Ends a serve; false when it was not served (any more). */
+  unserveAppFile(serve: string): boolean { return this.appRanges.unserve(serve); }
+  /** The serve ids `app` has given out on this session. */
+  appServes(app: string): string[] { return this.appRanges.servesOf(app); }
+  /**
+   * Reads `length` bytes at `offset` of what the contact's `app` serves as `serve`: the bytes (fewer at the end of the
+   * file) and the file's size. Rejects with an `Error` whose message is an `AppRangeReadError` or `not-open`.
+   */
+  readAppRange(app: string, serve: string, offset: number, length: number): Promise<{ bytes: Uint8Array; size: number }> {
+    const error = this.appRangesRefusal(app);
+    return error ? Promise.reject(new Error(error)) : this.appRanges.read(app, serve, offset, length);
+  }
+  /**
+   * The bytes `task` asked for (fewer at the end of the file, none past it) and the file's size: sent in chunks as the
+   * channel has room, sharing files' line (`filesWritable`), as binary messages where `files/4` is agreed, then
+   * `ar-end`. Stops when the task is no longer live or the session changes.
+   */
+  async sendAppRange(task: AppRangeTask, bytes: Uint8Array, size: number): Promise<void> {
+    bytes = bytes.subarray(0, task.length);
+    const channel = this.channel;
+    try {
+      if (!channel) return;
+      for (let at = 0; at < bytes.length; at += APP_RANGE_LIMITS.chunkBytes) {
+        // Room is asked again right before the send: the app's other requests wake on the same drain, and each that
+        // sent first took some of it, so they would all send at once and fill a native channel past its budget.
+        for (let room = this.filesWritable(); room; room = this.channel === channel ? this.filesWritable() : undefined) await room;
+        if (!task.live || this.channel !== channel || !this.supportsAppRanges) return;
+        const chunk = bytes.subarray(at, at + APP_RANGE_LIMITS.chunkBytes);
+        const message = this.supportsBinaryFiles ? encodeAppRangeData(task.app, task.request, task.offset + at, chunk) : JSON.stringify(appRangeDataFrame(task.app, task.request, task.offset + at, chunk));
+        try { channel.send(message); } catch {
+          // A full channel (files beside it woke on the same drain) is tried again later, as a file's chunk is: given up
+          // on, the contact's read would wait for good. A session that ends drops the task, which stops this.
+          await new Promise(resolve => setTimeout(resolve, FILE_LIMITS.sendRetryMs));
+          at -= APP_RANGE_LIMITS.chunkBytes;
+          continue;
+        }
+        this.filesWrote(channel, typeof message === "string" ? message.length : message.byteLength);
+      }
+      this.appRanges.finish(task, size);
+    } finally {
+      // Stopped early or not, the task's place among its app's requests in flight frees now.
+      this.appRanges.release(task);
+    }
+  }
+  /** `task`'s file cannot be read: `changed` or `gone` goes in place of its bytes (nothing once it is no longer live, but its place frees). */
+  failAppRange(task: AppRangeTask, error: "changed" | "gone"): void { this.appRanges.fail(task, error); }
+  /** An `ar-*` frame from the contact, on a session that agreed `app-ranges/1`. */
+  private receiveAppRange(frame: Record<string, unknown>): void {
+    const read = readAppRangeFrame(frame);
+    if (!read.ok) return;
+    const ranges = read.frame;
+    switch (ranges.t) {
+      case "ar-get": {
+        // Only for an app open on both sides (WISP 1200 § A read lane to the contact): any other is not served.
+        if (this.appRangesRefusal(ranges.a)) {
+          try { this.channel?.send(JSON.stringify(appRangeErrorFrame(ranges.a, ranges.r, "not-served"))); } catch { /* the session is going */ }
+          return;
+        }
+        const task = this.appRanges.receiveGet(ranges);
+        if (task) this.options.events?.onAppRangeTask?.(task);
+        return;
+      }
+      case "ar-cancel": return this.appRanges.receiveCancel(ranges);
+      case "ar-data": return this.appRanges.receiveData(ranges.a, ranges.r, ranges.o, appRangeChunk(ranges.d)!);
+      default: return this.appRanges.receiveAnswer(ranges);
+    }
+  }
   /** What the contact had open is gone (`apps/1` is no longer agreed, or this link stopped): each app hears it now. */
   private appsEnded(): void {
+    this.appRanges.reset();
     if (this.appsGrace) { clearTimeout(this.appsGrace); this.appsGrace = null; }
     for (const event of this.apps.sessionEnded()) this.options.events?.onAppFrame?.(event);
   }
@@ -3479,6 +3583,8 @@ export class GhostLink {
    * hears only that open, not a close first; one not said again by then is closed with `offline`.
    */
   private appsSuspended(): void {
+    // Serve ids and requests last one session, even where the apps are held across it.
+    this.appRanges.reset();
     this.apps.sessionSuspended();
     if (!this.apps.holding || this.appsGrace) return;
     this.appsGrace = setTimeout(() => {
@@ -3616,6 +3722,7 @@ export class GhostLink {
       if (!this.supportsApps) this.appsEnded();
       this.options.events?.onAppsSupport?.(this.supportsApps);
     }
+    if (changed.includes(APP_RANGES_CAPABILITY) && !this.supportsAppRanges) this.appRanges.reset();
     const devices = this.options.deviceCapabilities;
     if (devices && changed.some(capability => (devices as readonly string[]).includes(capability))) this.options.events?.onDeviceCapabilities?.(devices.filter(capability => this.supportsDevice(capability)));
     this.emitPairingState();
@@ -4028,6 +4135,12 @@ export class GhostLink {
           // Anything from the peer shows the session is alive.
           this.unansweredPings = 0; this.heardFromPeer(); this.framesHeard++;
           if (typeof data !== "string") {
+            // app-ranges/1 beside files/4: a served file's bytes, for a request of this side's.
+            if (data[0] === APP_RANGE_DATA_KIND) {
+              const range = this.supportsAppRanges && this.supportsBinaryFiles ? decodeAppRangeData(data) : null;
+              if (range) this.appRanges.receiveData(range.a, range.r, range.o, range.data);
+              return;
+            }
             // files/4: a file's bytes. Any other binary message, or one nobody agreed to, is dropped (WISP 100).
             const chunk = this.supportsBinaryFiles ? decodeFileData(data) : null;
             if (!chunk) return;
@@ -4115,7 +4228,14 @@ export class GhostLink {
             // Only once both said apps/1; counted per app before it is read (WISP 1200 § In a chat).
             if (!this.supportsApps) return;
             const event = this.apps.receive(frame);
+            // The contact's app closed: what it served here ends, and so does what it was reading.
+            if (event && "o" in event && event.o === "close") this.appRanges.closeApp(event.app);
             if (event) this.options.events?.onAppFrame?.(event);
+            return;
+          }
+          if (APP_RANGE_FRAMES.has(String(frame?.t))) {
+            // Only once both said app-ranges/1; every request is checked against this session's serves (WISP 1200).
+            if (this.supportsAppRanges) this.receiveAppRange(frame);
             return;
           }
           if (frame?.t === REACTION_FRAME) {

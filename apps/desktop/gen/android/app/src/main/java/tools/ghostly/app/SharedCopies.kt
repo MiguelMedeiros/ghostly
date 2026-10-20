@@ -25,6 +25,16 @@ object SharedCopies {
    */
   fun nothingIn(title: String, text: String, files: Int): Boolean = files == 0 && text.isBlank() && title.isBlank()
 
+  /**
+   * Whether a copy failed for want of room on the device (ENOSPC, EDQUOT; Android's "write failed: ENOSPC (No space
+   * left on device)", the JVM's "No space left on device"), not for the stream it read: sharing it again fails the
+   * same way until there is space, so the page says so apart from what it could not read.
+   */
+  fun noRoom(error: Throwable): Boolean =
+    generateSequence(error) { it.cause }.take(8).any { NO_ROOM.containsMatchIn(it.message ?: "") }
+
+  private val NO_ROOM = Regex("ENOSPC|EDQUOT|No space left on device|Disk quota exceeded")
+
   /** What earlier runs left under the root: everything but the folders of shares numbered after `since`. */
   fun stale(root: File, since: Long): List<File> =
     root.listFiles()?.filter { (it.name.toLongOrNull() ?: Long.MIN_VALUE) <= since } ?: emptyList()

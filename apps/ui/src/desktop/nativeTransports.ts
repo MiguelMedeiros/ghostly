@@ -4,26 +4,30 @@ import { fromBase64, irohDescriptor, irohRelayUrl, toBase64, type BoundChannel, 
 /** A frame Rust hands the page: text, or a binary message (HyperDHT only) in base64. */
 type Event = { type: "open"; id: number; binding: NativeBinding; incoming: boolean }
   | { type: "frame"; id: number; text: string } | { type: "frame"; id: number; bytes: string } | { type: "closed"; id: number }
-  /** HyperDHT: the runtime wrote frame `seq` and its socket has room for more, or (`unsent`) it could not send it. */
-  | { type: "sent"; id: number; seq: number } | { type: "unsent"; id: number; seq: number }
+  /**
+   * HyperDHT: the connection's socket in the runtime holds more than it should (`full`) or has room again (`room`), or
+   * (`unsent`) it could not send frame `seq`. A frame that found room is answered by nothing.
+   */
+  | { type: "full"; id: number } | { type: "room"; id: number } | { type: "unsent"; id: number; seq: number }
   /** The endpoint itself ended in Rust (HyperDHT: its runtime died or dropped it). */
   | { type: "stopped" }
   /** The endpoint's own address came to be another (Iroh: it homed on a relay, the network changed). */
   | { type: "address"; descriptor: unknown };
 
 /**
- * Ordered IPC writes and bounded buffering before the session installs its reader. Iroh's frames count against the send
- * budget until Rust answered; HyperDHT's until its runtime says it sent them (`sent`), while the next ones go on, so a
- * frame costs no round trip to the runtime.
+ * Ordered IPC writes and bounded buffering before the session installs its reader. A frame counts against the send
+ * budget until Rust answered (HyperDHT: once it queued it for the runtime). While HyperDHT's runtime says the
+ * connection's socket is full, a file's quarter of the budget counts as well, so a file waits and a message still
+ * fits: the runtime speaks only then, as a word back for every frame cost a file about a fifth of its speed.
  */
 class NativeChannel implements FrameChannel {
   private reader: FrameChannel["onMessage"] = null;
   private buffered: (string | Uint8Array)[] = [];
   private queue = Promise.resolve();
   private closed = false;
-  /** HyperDHT: frames the runtime has not said it sent, by number, with their size. */
-  private unsent = new Map<number, number>();
   private seq = 0;
+  /** HyperDHT: the runtime said the connection's socket is full, and not yet that it has room. */
+  private full = false;
   private waiting: (() => void)[] = [];
   bufferedAmount = 0;
   readonly sendBudget = 120 * 1024;
@@ -56,18 +60,19 @@ class NativeChannel implements FrameChannel {
       return;
     }
     const seq = ++this.seq;
-    this.unsent.set(seq, data.length);
     // Rust answers once it queued the frame for the runtime: the chain keeps them in order, not waiting on the network.
     this.queue = this.queue.then(async () => {
       if (!this.closed) await invoke("paired_hyperdht_send", { endpointId: this.endpointId(), connectionId: this.id, seq, ...frame });
-    }).catch(() => this.close());
+    }).catch(() => this.close()).finally(() => { this.bufferedAmount -= data.length; this.wake(); });
   }
-  /** HyperDHT: the runtime sent frame `seq`. */
-  sent(seq: number) {
-    const size = this.unsent.get(seq);
-    if (size === undefined) return;
-    this.unsent.delete(seq);
-    this.bufferedAmount -= size;
+  /** HyperDHT: the runtime's socket for this connection is full (`true`) or has room again. */
+  held(full: boolean) {
+    if (this.closed || full === this.full) return;
+    this.full = full;
+    this.bufferedAmount += (full ? 1 : -1) * this.sendBudget / 4;
+    this.wake();
+  }
+  private wake() {
     if (this.bufferedAmount < this.sendBudget / 4) for (const resolve of this.waiting.splice(0)) resolve();
   }
   /** Iroh: once Rust answered every send. HyperDHT: once under a quarter of the budget, what a file may hold in it. */
@@ -79,8 +84,7 @@ class NativeChannel implements FrameChannel {
   close() {
     if (this.closed) return;
     this.closed = true; this.buffered = [];
-    for (const size of this.unsent.values()) this.bufferedAmount -= size;
-    this.unsent.clear();
+    if (this.full) { this.full = false; this.bufferedAmount -= this.sendBudget / 4; }
     for (const resolve of this.waiting.splice(0)) resolve();
     void invoke(this.kind === "iroh" ? "paired_native_close" : "paired_hyperdht_close", { endpointId: this.endpointId(), connectionId: this.id }).catch(() => {});
     this.onClose?.();
@@ -119,7 +123,7 @@ export async function createNativeEndpoint(seedB64: string, kind: "iroh" | "hype
         else early.push(bound);
       }
     } else if (event.type === "frame") (connections.get(event.id)?.channel as NativeChannel | undefined)?.receive("bytes" in event ? fromBase64(event.bytes) : event.text);
-    else if (event.type === "sent") (connections.get(event.id)?.channel as NativeChannel | undefined)?.sent(event.seq);
+    else if (event.type === "full" || event.type === "room") (connections.get(event.id)?.channel as NativeChannel | undefined)?.held(event.type === "full");
     else if (event.type === "unsent") connections.get(event.id)?.channel.close();
     else if (event.type === "stopped") { ended = true; gone(); }
     else if (event.type === "address") {

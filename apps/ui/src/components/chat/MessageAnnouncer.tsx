@@ -5,7 +5,7 @@ import { filePreview, previewText } from "../../lib/chatList";
 import { servicesPlatform } from "../../lib/platform";
 import type { ChatFile } from "../../lib/types";
 import { paymentLine } from "../paymentWords";
-import { cardLine, showsCard } from "../../lib/statusCards";
+import { appCardLine, cardLine, showsCard } from "../../lib/statusCards";
 
 /** What the announcer reads of a message: a 1:1 chat's and a group's both have it. */
 export interface Announceable {
@@ -38,7 +38,7 @@ function spoken(message: Announceable, t: Translate): string {
   if (showsCard(message.card)) return cardLine(message.card);
   const wallet = message.paymentId ? servicesPlatform?.wallet : undefined;
   const payment = wallet?.getPayment(message.paymentId!);
-  return payment ? paymentLine(t, payment, wallet!.getState()) : filePreview(message.file, t) ?? previewText(message.text, t);
+  return payment ? paymentLine(t, payment, wallet!.getState()) : appCardLine(message.card, t) ?? filePreview(message.file, t) ?? previewText(message.text, t);
 }
 
 const short = (text: string) => {

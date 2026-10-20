@@ -586,6 +586,17 @@
     "mainnet": "sats",
     "testnet": "sats de test"
   },
+  "send": {
+    "balance": "Solde : {{amount}} {{unit}}",
+    "cameraUnavailable": "Caméra indisponible. Collez, saisissez ou choisissez une image.",
+    "clipboardEmpty": "Rien à coller. Copiez d'abord une facture ou une adresse.",
+    "clipboardUnavailable": "Impossible de lire le presse-papiers. Collez ou saisissez ci-dessous.",
+    "image": "Choisir une image",
+    "max": "Max",
+    "noAmount": "Cette facture n'a pas de montant. Demandez-en une avec le montant.",
+    "paste": "Coller",
+    "scan": "Scanner"
+  },
   "setup": {
     "failed": "{{wallet}} : {{reason}}",
     "progress": "Création de vos portefeuilles Mainnet…",

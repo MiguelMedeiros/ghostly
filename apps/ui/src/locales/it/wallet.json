@@ -586,6 +586,17 @@
     "mainnet": "sats",
     "testnet": "sats di prova"
   },
+  "send": {
+    "balance": "Saldo: {{amount}} {{unit}}",
+    "cameraUnavailable": "Fotocamera non disponibile. Incolla, scrivi o scegli un'immagine.",
+    "clipboardEmpty": "Niente da incollare. Copia prima una fattura o un indirizzo.",
+    "clipboardUnavailable": "Impossibile leggere gli appunti. Incolla o scrivi qui sotto.",
+    "image": "Scegli immagine",
+    "max": "Max",
+    "noAmount": "Questa fattura non ha un importo. Chiedine una con l'importo.",
+    "paste": "Incolla",
+    "scan": "Scansiona"
+  },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",
     "progress": "Creo i tuoi portafogli Mainnet…",

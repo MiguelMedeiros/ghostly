@@ -38,6 +38,10 @@
   "outgoing": "Calling...",
   "reconnecting": "Reconnecting...",
   "rejected": "Call rejected",
+  "relayNoAnswer": "Your relay did not answer",
+  "relayNoAnswerNext": "Check the TURN server in Settings, Network. Hide my IP never connects directly.",
+  "relayOnlyOff": "Calls are off while Hide my IP is on",
+  "relayOnlyOffNext": "This app's calls cannot use a relay yet. Turn it off in Settings, Network to call.",
   "selfView": "Drag to move, pull a corner to resize, double-click to reset",
   "share": {
     "blocked": "Screen sharing is blocked",

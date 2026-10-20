@@ -1264,9 +1264,10 @@ export interface Settings {
   /** Extra ICE servers (typically TURN) on top of the built-in STUN set. */
   iceServers: IceServerSetting[];
   /**
-   * "Hide my IP from contacts" (WISP 100 § Relay only): no direct path to a contact. The Desktop offers contacts
-   * neither its own Iroh nor its own HyperDHT (HyperDHT goes through `hyperdhtRelay`, as in a browser); its own
-   * devices keep them. Absent means off.
+   * "Hide my IP from contacts" (WISP 100 § Relay only): every WebRTC connection to a contact (calls, chat links,
+   * group edges) goes through the TURN server in `iceServers` alone, with no STUN server. On only with a TURN server
+   * (`relayOnlyProblem`). The Desktop offers contacts neither its own Iroh nor its own HyperDHT (HyperDHT goes through
+   * `hyperdhtRelay`, as in a browser); its own devices keep them. Absent means off.
    */
   relayOnly?: boolean;
   /**
@@ -1743,6 +1744,11 @@ export interface EngineState {
    * device set moved after a removal, and only the person can start the copy as a profile of its own.
    */
   restoreCheck?: "checking" | "removed";
+  /**
+   * Limited mode only while the active device's read at start is out (WISP 06 § When a device checks): the profile shows
+   * as it is, nothing goes out, and nobody is asked anything until the read answers. Absent otherwise.
+   */
+  startCheck?: true;
   /**
    * Whose push subscription `settings.wake` is, in a profile on several devices (WISP 06 § Push and the phone): `here`,
    * this device's own; `away`, another device's, given to contacts because this device has none of its own (the page

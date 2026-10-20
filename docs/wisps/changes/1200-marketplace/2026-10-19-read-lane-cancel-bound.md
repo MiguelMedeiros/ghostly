@@ -1,0 +1,1 @@
+Read lane limits: a request the asker cancelled (or one under a serve that ended) keeps its place among the app's 4 in flight until the serving side has stopped reading and sending it, so a loop of `ar-get` and `ar-cancel` meets `busy` past 4.

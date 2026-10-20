@@ -13,7 +13,7 @@ import type { Host } from "./host";
 import type { RuntimeOptions } from "./runtime/engine";
 import { allowlist, checkCursor, checkTypes, checkWebhook, eventHandler, Feed, followDaemon, readCursor } from "./listen";
 import { format } from "node:util";
-import { secretsFromStdin, secretValuesWarning } from "./secretInput";
+import { secretsFromStdin, secretValuesWarning, textFromStdin } from "./secretInput";
 import {
   checkProfileName, checkShownName, createProfile, currentProfile, DEFAULT_PROFILE, ghostlyHome, listProfiles, lockOwner, profileExists, profilePaths, selectProfile,
   type ProfilePaths,
@@ -426,10 +426,11 @@ async function profileCommand(sub: string | undefined, argv: string[]): Promise<
       return;
     }
     case "restore": {
-      const [file, name] = parsed.positionals;
-      if (!file || !name) throw new CliError("usage", "ghostly profile restore <file> <new profile> [--passphrase-file f] [--use]");
+      const [given, name] = parsed.positionals;
+      if (!given || !name) throw new CliError("usage", "ghostly profile restore <file> <new profile> [--passphrase-file f] [--use]");
       noMoreThan(2, parsed.positionals, "profile restore <file> <new profile> [--passphrase-file f] [--use]");
       // A backup made without a passphrase says so in its header: none is asked for, and the answer says it was not protected.
+      const file = here(given) as string;
       const { backupFileProtection, restoreProfile } = await import("./backup");
       const protection = await backupFileProtection(file);
       const paths = await restoreProfile(g.home, checkProfileName(name), file, protection === "none" ? undefined : backupPassphrase(parsed.options["passphrase-file"], RESTORE_PASSPHRASE));
@@ -500,6 +501,12 @@ async function runDaemon(g: Globals): Promise<void> {
   print({ daemon: "ready", profile: g.profile, pid: process.pid, socket: g.paths.socket, lastSeq: host.ctx.hub.lastSeq });
 }
 
+/**
+ * `daemon stop` and `restart` wait this long for the daemon's greeting: a daemon of an older release never greets, and
+ * what does not prove itself is stopped as the process that holds the profile (`stopDaemon`), as the stop asked.
+ */
+const STOP_GREETING_MS = 2_000;
+
 async function daemonCommand(argv: string[]): Promise<void> {
   const sub = argv[0] && !argv[0].startsWith("-") ? argv[0] : undefined;
   const parsed = parseArgs(sub ? argv.slice(1) : argv, { detach: { type: "boolean", description: "" }, timeout: { type: "number", description: "" } });
@@ -518,7 +525,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (sub === "stop") {
     knownProfile(g);
     const stopFor = seconds(parsed, 20);
-    const client = await connectDaemon(g.paths);
+    const client = await connectDaemon(g.paths, undefined, { greetingMs: STOP_GREETING_MS });
     if (!client) throw new CliError("not_found", `No daemon runs profile ${g.profile}`);
     print({ stopped: true, pid: await stopDaemon(g, client, stopFor) });
     return;
@@ -526,7 +533,7 @@ async function daemonCommand(argv: string[]): Promise<void> {
   if (sub === "restart") {
     // The running one stops (if one runs), and this command's own code starts in the background.
     const stopFor = seconds(parsed, 20), startFor = seconds(parsed, 60);
-    const client = await connectDaemon(g.paths);
+    const client = await connectDaemon(g.paths, undefined, { greetingMs: STOP_GREETING_MS });
     // The version it ran is asked ahead of the stop, on the same connection, with no deadline of its own: cosmetic,
     // and the stop's deadline ends it (a deadline here, 15 s, closed the connection under a longer stop, which then
     // failed as `unavailable` and never reached the signals).
@@ -687,7 +694,7 @@ async function listenCommand(argv: string[]): Promise<void> {
   if (turns && types.length) throw new CliError("usage", "--turns takes the place of --type: a turn is a message received, or a group message that mentions you");
   checkTypes(types, (line) => process.stderr.write(line + "\n"));
   const from = (parsed.options.from as string[] | undefined) ?? [], groups = (parsed.options.group as string[] | undefined) ?? [];
-  const cursor = parsed.options.cursor as string | undefined;
+  const cursor = here(parsed.options.cursor);
   // Before the profile opens: a cursor that cannot be written is no per-event warning.
   checkCursor(cursor);
   const since = (parsed.options.since as number | undefined) ?? readCursor(cursor);
@@ -826,7 +833,9 @@ async function textCommand(name: string, argv: string[]): Promise<void> {
     text = String(parsed.options.text);
   } else if (parsed.options.stdin || (words.length === 0 && !process.stdin.isTTY)) {
     if (text) throw new CliError("usage", "Give the text as arguments or on stdin, not both");
-    text = (await readStdin()).replace(/\n$/, "");
+    // What the note and the give-up name: the command as typed (a name with a space, quoted).
+    const typed = [name, ...[target, ...(message !== undefined ? [message] : [])].map((word) => /^[\w@.:+-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`)].join(" ");
+    text = await textFromStdin(readStdin, typed, parsed.options.stdin === true, (note) => process.stderr.write(`ghostly: ${note}\n`));
   }
   if (!text.trim()) throw new CliError("usage", `No text: ghostly ${spec.usage}`);
   const params: Record<string, unknown> = { [spec.target]: target, text, force: parsed.options.force === true, ...(message !== undefined && { message }) };

@@ -31,6 +31,9 @@ export type ReactionOutcome = "applied" | "stale" | "waiting" | "dropped";
 
 const isGroup = (chat: string) => chat.startsWith("group:");
 
+/** How often a 1:1 chat is read whole for received reactions its rows' ids did not find (`Reactions.find`). */
+export const REACTION_LOOKUP_MS = 10_000;
+
 /** The row a reaction names in a chat: the id both sides know it by (`replyRef`). */
 export function reactionTarget(messages: readonly StoredMessage[], id: string, group: boolean): StoredMessage | undefined {
   return messages.find(m => replyRef(m, group) === id);
@@ -99,6 +102,8 @@ export class Reactions {
    * out. It only has to grow, so a row deleted since leaves it too high and nothing is wrong.
    */
   private readonly last = new Map<string, number>();
+  /** Per 1:1 chat: when it was last read whole for a received reaction, and the read of those that waited meanwhile. */
+  private readonly lookups = new Map<string, { at: number; timer?: ReturnType<typeof setTimeout> }>();
 
   constructor(private readonly host: ReactionsHost) {}
 
@@ -153,7 +158,7 @@ export class Reactions {
 
   private take(chat: string, by: string, reaction: WireReaction): Promise<ReactionOutcome> {
     return this.run(async () => {
-      const target = await this.find(chat, reaction.id);
+      const target = await this.find(chat, reaction.id, true);
       if (!target) return this.wait(chat, by, reaction);
       if (!reactionIsNewer(target.reactions?.[by], reaction.n)) return "stale";
       await this.write(chat, target, by, reaction);
@@ -215,6 +220,8 @@ export class Reactions {
   stop(): void {
     this.stopped = true;
     this.dropHeld();
+    for (const state of this.lookups.values()) clearTimeout(state.timer);
+    this.lookups.clear();
   }
 
   private dropHeld(chat?: string): void {
@@ -247,9 +254,11 @@ export class Reactions {
   /**
    * The row a received reaction names. Most often the row of that id (a group's), or of `peer_` or `me_` and that id (a
    * chat's): those are read alone. Any other (a file's, a payment's, one not here yet) is looked for in the whole chat;
-   * in a group there is no other, since a row that takes a reaction goes by its own id there.
+   * in a group there is no other, since a row that takes a reaction goes by its own id there. A `received` one is looked
+   * for so at most once a `REACTION_LOOKUP_MS` per chat, since the contact can name ids that never were: one that comes
+   * meanwhile waits, and the next read finds what waited (`lookUpWaiting`).
    */
-  private async find(chat: string, id: string): Promise<StoredMessage | undefined> {
+  private async find(chat: string, id: string, received = false): Promise<StoredMessage | undefined> {
     const group = isGroup(chat);
     if (this.host.message) {
       for (const rowId of group ? [id] : [`peer_${id}`, `me_${id}`]) {
@@ -257,8 +266,36 @@ export class Reactions {
         if (row && replyRef(row, group) === id) return row;
       }
       if (group) return undefined;
+      if (received && !this.lookupDue(chat)) return undefined;
     }
     return reactionTarget(await this.host.messages(chat), id, group);
+  }
+
+  /** Whether a received reaction may read the chat whole now; if not, a read of those that wait is due when it may. */
+  private lookupDue(chat: string): boolean {
+    const now = this.now();
+    let state = this.lookups.get(chat);
+    if (!state) this.lookups.set(chat, state = { at: -Infinity });
+    if (now - state.at >= REACTION_LOOKUP_MS) { state.at = now; return true; }
+    if (!state.timer && !this.stopped) {
+      const due = state;
+      due.timer = setTimeout(() => { due.timer = undefined; void this.lookUpWaiting(chat, due).catch(() => {}); }, due.at + REACTION_LOOKUP_MS - now);
+    }
+    return false;
+  }
+
+  /** The chat read whole once for the reactions that wait in it: those whose row it has land, newest last. */
+  private lookUpWaiting(chat: string, due: { at: number }): Promise<void> {
+    return this.run(async () => {
+      const now = this.now(), list = (this.waiting.get(chat) ?? []).filter(w => w.until > now);
+      if (this.stopped || this.lookups.get(chat) !== due || !list.length) return;
+      due.at = now;
+      const messages = await this.host.messages(chat);
+      const found = list.flatMap(w => { const target = reactionTarget(messages, w.reaction.id, false); return target ? [{ ...w, target }] : []; });
+      if (!found.length) return;
+      this.waiting.set(chat, list.filter(w => !found.some(f => f.by === w.by && f.reaction === w.reaction)));
+      for (const { target, by, reaction } of found.sort((a, b) => a.reaction.n - b.reaction.n)) await this.write(chat, target, by, reaction);
+    });
   }
 
   /** A chat is gone: nothing waits for it any more, and my highest number in it is read again if it comes back. */
@@ -266,6 +303,8 @@ export class Reactions {
     this.dropHeld(chat);
     this.waiting.delete(chat);
     this.last.delete(chat);
+    clearTimeout(this.lookups.get(chat)?.timer);
+    this.lookups.delete(chat);
   }
 
   private wait(chat: string, by: string, reaction: WireReaction): ReactionOutcome {

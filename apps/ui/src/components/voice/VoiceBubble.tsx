@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
-import { formatVoiceDuration, sanitizeFileName, type VoiceMeta } from "@ghostly/core";
+import { formatVoiceDuration, type VoiceMeta } from "@ghostly/core";
 import { useOptionalI18n, useT } from "../../contexts/I18nContext";
 import { useFocusKept } from "../../hooks/useFocusKept";
 import { useTransfer } from "../../hooks/useServicesPlatform";
@@ -28,12 +28,14 @@ import { ProgressRing, RoundRetry, WhyButton, WhyText } from "../chat/RoundRetry
 import { Waveform } from "./Waveform";
 import "./voice.css";
 import { problemLine, saveProblemLine } from "../../lib/problemText";
-import { downloadFile } from "../../lib/fileDownload";
+import { downloadFile, downloadName } from "../../lib/fileDownload";
 
 type PlayState = "idle" | "loading" | "playing" | "paused";
 
 const FORMATS: Record<string, string> = { "audio/webm": "WebM", "audio/ogg": "Ogg", "audio/mp4": "M4A", "audio/x-m4a": "M4A", "audio/mpeg": "MP3", "audio/aac": "AAC", "audio/wav": "WAV" };
 const formatOf = (mime: string) => FORMATS[mime.split(";")[0]!.trim().toLowerCase()] ?? (mime || "unknown");
+/** How often the waveform moves while it plays: as often as the time label does. The knob's glide (voice.css) lasts as long. */
+const PROGRESS_STEP_MS = 250;
 
 /** What went wrong, for whoever debugs the next failure: the console in dev builds, `data-error` always. */
 function describeFailure(what: string, error: unknown): string {
@@ -48,7 +50,7 @@ function describeFailure(what: string, error: unknown): string {
  * received — a mark until it has been listened to. The bytes are read only when it first
  * plays; the waveform was measured by the sender, so nothing is decoded to draw it.
  */
-export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile & { voice: VoiceMeta }; sender: "me" | "peer"; peerName?: string }) {
+export function VoiceBubble({ file, sender, peerName: named, timestamp }: { file: ChatFile & { voice: VoiceMeta }; sender: "me" | "peer"; peerName?: string; timestamp: number }) {
   const t = useT();
   const peerName = named ?? t("pairing.contact");
   const { platform, transfer, restoring } = useTransfer(file.id);
@@ -86,7 +88,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   const listenRef = useRef<AbortController | null>(null);
   const blobRef = useRef<Blob | null>(null);
   const urlsRef = useRef<string[]>([]);
-  const frameRef = useRef(0);
+  const stepRef = useRef(0);
   const positionRef = useRef(position);
   /** The message it is in, found when it starts: the bar's tap opens the chat there. */
   const messageRef = useRef<string | undefined>(undefined);
@@ -136,16 +138,19 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
     waveRef.current?.style.setProperty("--voice-progress", String(Math.min(1, Math.max(0, at / Math.max(0.001, seconds)))));
   }, [seconds]);
 
-  const stopFrames = () => cancelAnimationFrame(frameRef.current);
+  const stopSteps = () => clearInterval(stepRef.current);
+  /**
+   * The waveform follows the sound at the time label's pace, not every frame: each step is a style recalc and a
+   * layout of the page. The knob glides between steps on the compositor (voice.css, `.voice-wave-knob`).
+   */
   const followAudio = useCallback(() => {
-    stopFrames();
+    stopSteps();
     const tick = () => {
       const audio = audioRef.current;
-      if (!audio || audio.paused) return;
+      if (!audio || audio.paused) { stopSteps(); return; }
       showProgress(audio.currentTime);
-      frameRef.current = requestAnimationFrame(tick);
     };
-    frameRef.current = requestAnimationFrame(tick);
+    stepRef.current = window.setInterval(tick, PROGRESS_STEP_MS);
   }, [showProgress]);
 
   /** The recording decoded by Web Audio and played as WAV, when `<audio>` has no decoder for its own type. Once. */
@@ -169,7 +174,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
       mediaSessionPosition(file.id, audio.currentTime, seconds, audio.playbackRate);
     }, { signal });
     audio.addEventListener("ended", () => {
-      stopFrames();
+      stopSteps();
       releasePlayback(file.id);
       forgetPosition(file.id);
       setState("idle");
@@ -180,8 +185,8 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
       playNextVoice(rootRef.current);
     }, { signal });
     audio.addEventListener("pause", () => {
-      stopFrames();
-      // Where it stopped, not where the last frame drew it: it goes on from there, here or after the chat was away.
+      stopSteps();
+      // Where it stopped, not where the last step drew it: it goes on from there, here or after the chat was away.
       showProgress(audio.currentTime);
       setState((s) => (s === "playing" ? "paused" : s));
       mediaSessionState(file.id, "paused");
@@ -190,7 +195,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
       report("media element", audio.error);
       if (startingRef.current) return;
       // Broke off while playing.
-      stopFrames();
+      stopSteps();
       releasePlayback(file.id);
       setState("idle");
       giveUp(t("chat.voice.couldNotPlay"));
@@ -361,7 +366,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   useLayoutEffect(() => () => {
     turnRef.current += 1;
     wantedRef.current = false;
-    stopFrames();
+    stopSteps();
     listenRef.current?.abort();
     const audio = audioRef.current;
     const urls = urlsRef.current;
@@ -442,12 +447,13 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
   };
   /**
    * Save on one that will not play here: the same path as Download in the message's menu, the system's save dialog
-   * where there is one. The link's own download is only the web's fallback: the desktop WebView saves nothing from it.
+   * where there is one, under the name Ghostly makes for it (never the sender's). The link's own download is only the
+   * web's fallback: the desktop WebView saves nothing from it.
    */
   const save = (event: MouseEvent) => {
     if (!platform) return;
     event.preventDefault();
-    void downloadFile(platform, file, sanitizeFileName(file.name))
+    void downloadFile(platform, file, downloadName(file, timestamp))
       .then(async (result) => {
         if (result !== "missing" || !mountedRef.current) return;
         const leftOut = (await fileHeld(platform, file.id, false)) === "left-out";
@@ -513,6 +519,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
             aria-valuenow={Math.round(position)}
             aria-valuetext={t("chat.media.positionOf", { position: formatVoiceDuration(position * 1000), duration: formatVoiceDuration(file.voice.duration) })}
             data-testid="voice-waveform"
+            data-gliding={state === "playing" || undefined}
             className={ready ? "cursor-pointer" : "opacity-50"}
             onPointerDown={onScrubStart}
             onPointerMove={onScrubMove}
@@ -557,7 +564,7 @@ export function VoiceBubble({ file, sender, peerName: named }: { file: ChatFile 
       {problem && (
         <p className="text-[12px] text-danger-ink m-0 mt-1 px-1" role="alert" data-testid="voice-problem" data-error={failure ?? undefined}>
           {problem}{" "}
-          {saveUrl && <a href={saveUrl} download={file.name} onClick={save} data-testid="voice-save" className="underline text-inherit">{t("common.save")}</a>}
+          {saveUrl && <a href={saveUrl} download={downloadName(file, timestamp)} onClick={save} data-testid="voice-save" className="underline text-inherit">{t("common.save")}</a>}
         </p>
       )}
       {(reason || hint) && why && <WhyText id={whyId} testId="voice-why-text" english={reason?.english}>{reason?.text ?? hint}</WhyText>}
