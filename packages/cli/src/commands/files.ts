@@ -1,6 +1,27 @@
 import { GROUP_FILE_LIMITS } from "@ghostly/core/groupFiles";
+import { VOICE_LIMITS } from "@ghostly/core/voice";
+import type { Parsed } from "../args";
 import { CliError } from "../errors";
 import { type Command, here, LONG_WAIT_SECONDS, reply, timeout } from "./shared";
+
+/**
+ * `--voice [ms]` and `--peaks`: a length and a waveform a voice note takes, or a usage error (exit 2) that names the flag
+ * before the profile opens. Before, the API answered them once it had opened ("voice must be a number from 1 to
+ * 9007199254740991", or one sentence for every case), and `--peaks` without `--voice` was dropped without a word.
+ */
+function voiceOf(options: Parsed["options"]): { voice?: number | true; peaks?: string[] } {
+  const { voice, peaks } = options;
+  if (typeof voice === "number" && !(Number.isInteger(voice) && voice >= 1 && voice <= VOICE_LIMITS.maxDurationMs)) {
+    throw new CliError("usage", `--voice takes a length in milliseconds from 1 to ${VOICE_LIMITS.maxDurationMs} (${VOICE_LIMITS.maxDurationMs / 60_000} minutes), not ${voice}`);
+  }
+  if (typeof peaks !== "string") return { voice: voice as number | true | undefined, peaks: undefined };
+  if (voice === undefined) throw new CliError("usage", "--peaks is a voice note's waveform: not without --voice");
+  const bars = peaks.split(",");
+  if (bars.length > VOICE_LIMITS.maxBars || !bars.every((bar) => /^\d{1,3}$/.test(bar.trim()) && Number(bar) <= 255)) {
+    throw new CliError("usage", `--peaks takes up to ${VOICE_LIMITS.maxBars} numbers from 0 to 255, comma-separated, not ${JSON.stringify(peaks)}`);
+  }
+  return { voice: voice as number | true, peaks: bars };
+}
 
 /** Files: one entry per command, in alphabetical order (test/commands.test.ts checks). */
 export const commands: Record<string, Command> = {
@@ -34,7 +55,7 @@ export const commands: Record<string, Command> = {
   "file send": {
     method: "file.send", usage: "file send <chat|group> <path> [--name n] [--mime t] [--voice [ms] [--peaks 0,40,…]] [--reply <message>]", summary: `Send a file (or, with --voice, a voice note), as a reply with --reply; to a group, every member's app fetches it (up to ${GROUP_FILE_LIMITS.maxBytes / 1024 / 1024} MiB)`,
     args: ["chat", "path"], options: { name: { type: "string", description: "The name the contact (or the group) sees" }, mime: { type: "string", description: "Its type (default: from the extension)" }, voice: { type: "number", optionalValue: true, description: "A voice note; its length in milliseconds (default: measured from the sound)" }, peaks: { type: "string", description: "Loudness bars 0-255, comma-separated (default: measured from the sound)" }, reply },
-    params: ({ options }, a) => ({ chat: a.chat, path: here(a.path), name: options.name, mime: options.mime, voice: options.voice, peaks: typeof options.peaks === "string" ? options.peaks.split(",") : undefined, reply: options.reply }),
+    params: ({ options }, a) => ({ chat: a.chat, path: here(a.path), name: options.name, mime: options.mime, ...voiceOf(options), reply: options.reply }),
   },
   "file wait": {
     method: "file.wait", usage: "file wait [<chat>] <file> [--timeout s]", summary: "Wait until a transfer is done (exit 0) or failed (exit 1, with its error)",

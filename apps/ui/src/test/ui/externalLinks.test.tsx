@@ -8,6 +8,7 @@ import { HomeProjectLinks } from "../../components/HomeProjectLinks";
 import { OpenFailureNotice } from "../../components/OpenFailureNotice";
 import { UpdateBanner } from "../../components/UpdateBanner";
 import { desktopUrl, externalLinkProps } from "../../lib/externalLink";
+import { shownInName } from "../labelInName";
 import { renderApp } from "../render";
 
 // covers: app.external-links, app.project-links, app.android.refusals
@@ -181,6 +182,14 @@ describe("links that had no way out on Desktop", () => {
     tauri.invoke.mockResolvedValue(undefined);
     click(screen.getByRole("link", { name: "GitHub" }));
     await waitFor(() => expect(screen.queryByTestId("home-link-failed")).not.toBeInTheDocument());
+  });
+
+  it("Home's version link is named with the version it shows, so \"click v0.4.0\" finds it", async () => {
+    renderApp(<HomeProjectLinks />);
+    const version = await screen.findByRole("link", { name: /^v0\.4\.0/ });
+    expect(version).toHaveTextContent("v0.4.0");
+    expect(version).toHaveAccessibleName(shownInName(version));
+    expect(version).toHaveAccessibleDescription("View this release");
   });
 
   it("Android: no app for the link reads as the app's notice in the person's language, the reason behind the ⓘ", async () => {

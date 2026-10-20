@@ -257,12 +257,14 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
     const orphan = home("listen-orphan");
     ok(await ghostly(["--home", orphan, "settings", "set", "relays", JSON.stringify([relay.url])], { env }));
     ok(await ghostly(["--home", orphan, "daemon", "--detach"], { env }));
-    const listen = new Running(["--home", orphan, "listen"], env);
+    // From the journal's start: on a loaded host the listen subscribes after the invite's `chat.created` is out, and a
+    // live-only listen never sees it.
+    const listen = new Running(["--home", orphan, "listen", "--since", "0"], env);
     const gone = "ghostly: the daemon of profile default stopped; waiting for it to start again (ghostly daemon --detach)\n";
     const back = "ghostly: the daemon of profile default answers again\n";
     try {
       ok(await ghostly(["--home", orphan, "invite", "create", "--label", "first"], { env }));
-      await listen.waitFor((l) => l.type === "chat.created");
+      const created = await listen.waitFor((l) => l.type === "chat.created");
       ok(await ghostly(["--home", orphan, "daemon", "stop"], { env }));
       const until = Date.now() + 15_000;
       while (!listen.stderr.includes(gone) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100));
@@ -271,7 +273,7 @@ describe("the daemon's version", { timeout: 120_000 }, () => {
       expect(listen.stderr).toBe(gone);
       expect(listen.child.exitCode).toBeNull();
       ok(await ghostly(["--home", orphan, "daemon", "--detach"], { env }));
-      await listen.waitFor((l) => l.type === "daemon.started");
+      await listen.waitFor((l) => l.type === "daemon.started" && (l.seq as number) > (created.seq as number));
       expect(listen.stderr).toBe(gone + back);
     } finally {
       await listen.stop();

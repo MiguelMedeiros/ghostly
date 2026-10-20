@@ -1,6 +1,6 @@
 "use client";
 
-import { Component } from "react";
+import { Component, useEffect } from "react";
 import { useCards, usePortrait } from "./stage";
 
 /** A step's title, in every shape of the chapter. */
@@ -15,14 +15,14 @@ const STEPS = ".scene-steps, .scene-static-steps";
 const PARTS = [".scene-visual, .scene-static-figure", TITLE, STEP, STEPS, ".eyebrow"];
 
 /** One element on the way from what is at the middle of the screen up to the page, the point of it to keep (`f` of
- * the way down it) and where on the screen that point was. */
-type Mark = { el: Element; f: number; at: number; home: string | null; part: string | null; i: number };
+ * the way down it) and where on the screen that point was. `el` is null for a mark kept over a reload. */
+type Mark = { el: Element | null; id: string | null; f: number; at: number; home: string | null; part: string | null; i: number };
 
 function marked(el: Element, f: number, at: number): Mark {
   const section = el.closest("section[id]");
   const part = PARTS.find((sel) => el.matches(sel)) ?? null;
   const i = section && part ? Array.prototype.indexOf.call(section.querySelectorAll(part), el) : -1;
-  return { el, f, at, home: section?.id ?? null, part, i };
+  return { el, id: el.id || null, f, at, home: section?.id ?? null, part, i };
 }
 
 /** What sits at the middle of the screen, from the innermost element out. None while a link to a section is still
@@ -73,12 +73,12 @@ function nearest(items: HTMLCollection, y: number): Element | null {
 
 /** The same thing in the page as it is now: the element itself if it stayed, else its part of the chapter, else its id. */
 function find(m: Mark): Element | null {
-  if (m.el.isConnected) return m.el;
+  if (m.el?.isConnected) return m.el;
   if (m.part && m.home && m.i >= 0) {
     const same = document.getElementById(m.home)?.querySelectorAll(m.part)[m.i];
     if (same) return same;
   }
-  return m.el.id ? document.getElementById(m.el.id) : null;
+  return m.id ? document.getElementById(m.id) : null;
 }
 
 function hold(marks: Mark[]) {
@@ -92,16 +92,132 @@ function hold(marks: Mark[]) {
   }
 }
 
+/** Where the reader was when the page went away (a reload, a page of another site), for this tab. */
+const PLACE_KEY = "ghostly.home.place";
+
+/** How long after the page starts a change of height still sends the reader back to their place (as LandOnHash). */
+const SETTLE_MS = 4000;
+
+const TOUCHED = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+
+/** The place this page load takes the reader back to: undefined until read, null once there (or none). */
+let place: Mark[] | null | undefined;
+
+/**
+ * On the way out, what is at the middle of the screen, by its part of the chapter (the element does not outlive the
+ * page), and the browser told not to restore the offset itself: it would restore it into the server's page, whose
+ * chapters have another shape and height (stage.tsx), and the reader would land elsewhere.
+ */
+function save() {
+  // Still taking the reader back: the place kept is still theirs.
+  if (place) return;
+  // A wide window with a mouse has the server's page: there the offset is the reader's place, to the frame of a film.
+  // Read from the head's flags (layout.tsx), as the page's own fold does: in pagehide Chromium reads `(pointer: coarse)`
+  // as false on a touch screen.
+  const { touch, orient } = document.documentElement.dataset;
+  const served = touch === undefined && orient === undefined;
+  const marks = served ? null : mark()?.filter((m) => (m.part && m.home && m.i >= 0) || m.id);
+  try {
+    if (!marks?.length) {
+      sessionStorage.removeItem(PLACE_KEY);
+      return;
+    }
+    sessionStorage.setItem(PLACE_KEY, JSON.stringify({ path: location.pathname, marks: marks.map((m) => ({ ...m, el: null })) }));
+  } catch {
+    // Without storage, the browser restores the offset as before.
+    return;
+  }
+  history.scrollRestoration = "manual";
+}
+
+/** The place kept by `save` when this page is that page again (a reload, a step back from another site). */
+function saved(): Mark[] | null {
+  const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+  if (history.scrollRestoration !== "manual" || (nav?.type !== "reload" && nav?.type !== "back_forward")) return null;
+  try {
+    const kept = JSON.parse(sessionStorage.getItem(PLACE_KEY) ?? "null") as { path?: string; marks?: Mark[] } | null;
+    return kept?.path === location.pathname && Array.isArray(kept.marks) && kept.marks.length ? kept.marks : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The browser restores offsets again for the pages after this one (once it is done loading this one). */
+function auto() {
+  const set = () => (history.scrollRestoration = "auto");
+  if (document.readyState === "complete") set();
+  else window.addEventListener("load", set, { once: true });
+}
+
+/**
+ * Takes the reader back to the place `save` kept, in the page as it is now, and holds it there while the page
+ * settles (each change of its height, a block that rose into place); it stops the moment the reader scrolls, taps or
+ * types. A reader who already did, before the page ran, stays where they went.
+ */
+function goBack(): () => void {
+  if (place === undefined) place = saved();
+  const marks = place;
+  if (!marks || document.documentElement.classList.contains("landed")) {
+    place = null;
+    auto();
+    return () => {};
+  }
+  const again = () => hold(marks);
+  const ro = new ResizeObserver(again);
+  let done = false;
+  const stop = () => {
+    if (done) return;
+    done = true;
+    delete document.documentElement.dataset.landing;
+    ro.disconnect();
+    window.clearTimeout(timer);
+    document.removeEventListener("transitionend", again);
+    for (const type of TOUCHED) window.removeEventListener(type, there);
+    auto();
+  };
+  // There, by time or by the reader: a later mount of the page (a step back inside the site) does not go back again.
+  const there = () => {
+    place = null;
+    stop();
+  };
+  const timer = window.setTimeout(there, SETTLE_MS);
+  // While the reader is being taken back, nothing else holds a place (mark).
+  document.documentElement.dataset.landing = "1";
+  for (const type of TOUCHED) window.addEventListener(type, there, { passive: true });
+  document.addEventListener("transitionend", again);
+  ro.observe(document.body);
+  again();
+  return stop;
+}
+
 /**
  * The server draws the story for a wide window with a mouse (stage.tsx), and on a phone the chapters take their
  * phone shape once the page runs: a reader who has already scrolled into the story would see it jump, the page
  * above them a different height. In the commit that changes the shape, this notes what is at the middle of the
  * screen before the chapters change and scrolls it back to the middle (a step: its title back where it was) before
  * the browser paints. A reader at the top stays at the top.
+ *
+ * A reload (or a step back from another site) would restore the reader's offset into the server's page, then hold
+ * what that offset shows there, a place the reader never saw: the page keeps the reader's place by what was on screen
+ * instead (save) and takes them back to it once it runs (goBack).
  */
 export function KeepPlace() {
   const cards = useCards();
   const portrait = usePortrait();
+  useEffect(() => {
+    // Back from the browser's page cache, the page is as the reader left it: the browser may restore offsets again.
+    const shown = (e: PageTransitionEvent) => {
+      if (e.persisted) history.scrollRestoration = "auto";
+    };
+    window.addEventListener("pagehide", save);
+    window.addEventListener("pageshow", shown);
+    const stop = goBack();
+    return () => {
+      window.removeEventListener("pagehide", save);
+      window.removeEventListener("pageshow", shown);
+      stop();
+    };
+  }, []);
   return <Hold shape={`${cards}:${portrait}`} />;
 }
 
