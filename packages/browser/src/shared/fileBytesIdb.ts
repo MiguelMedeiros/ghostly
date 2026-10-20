@@ -1,5 +1,5 @@
 import { sha256 } from "@noble/hashes/sha2.js";
-import { STORES, openDb, wrap } from "./idb";
+import { STORES, openDb, wrap, committed } from "./idb";
 import { FILE_BYTES_STEP, checkFileId, digestText, type FileBytes } from "./fileBytes";
 
 /** One piece of a file. Every piece but the last is exactly `FILE_BYTES_STEP` long. */
@@ -43,7 +43,7 @@ export class IdbFileBytes implements FileBytes {
   }
 
   private async put(chunk: Chunk): Promise<void> {
-    await wrap((await chunks("readwrite")).put(chunk));
+    await committed((await chunks("readwrite")).put(chunk));
   }
 
   /** The piece being filled, loaded from storage the first time a file is written. */
@@ -142,7 +142,7 @@ export class IdbFileBytes implements FileBytes {
       const keep = Math.floor(size / STEP), rest = size % STEP;
       const store = await chunks("readwrite");
       await Promise.all(pieces.filter((piece) => piece.index > keep || (piece.index === keep && rest === 0))
-        .map((piece) => wrap(store.delete([id, piece.index]))));
+        .map((piece) => committed(store.delete([id, piece.index]))));
       const cut = pieces.find((piece) => piece.index === keep);
       if (cut && rest > 0 && cut.length > rest) {
         const stored = (await wrap((await chunks("readonly")).get([id, keep]))) as Chunk;
@@ -199,14 +199,14 @@ export class IdbFileBytes implements FileBytes {
     checkFileId(id);
     return this.serial(id, async () => {
       this.tails.delete(id);
-      await wrap((await chunks("readwrite")).delete(range(id)));
+      await committed((await chunks("readwrite")).delete(range(id)));
     });
   }
 
   async removeWhere(prefix: string): Promise<void> {
     for (const id of [...this.tails.keys()]) if (id.startsWith(prefix)) this.tails.delete(id);
     const store = await chunks("readwrite");
-    await wrap(prefix ? store.delete(IDBKeyRange.bound([prefix, 0], [`${prefix}￿`, Infinity])) : store.clear());
+    await committed(prefix ? store.delete(IDBKeyRange.bound([prefix, 0], [`${prefix}￿`, Infinity])) : store.clear());
   }
 
   async room(): Promise<number | null> {

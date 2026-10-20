@@ -416,6 +416,34 @@ describe("the reactions store", () => {
     expect(whole).not.toHaveBeenCalled();
   });
 
+  it("a contact's reactions not found by their row read the chat whole once a while, not once each, and still land", async () => {
+    // A contact can name ids that never were at the session's pace: each read a long chat whole.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const rows = [
+        row({ linkId: "chat", id: "me_1", sender: "me", text: "a file", wireId: "fileWireId01" }),
+        row({ linkId: "chat", id: "me_2", sender: "me", text: "another file", wireId: "fileWireId02" }),
+      ];
+      const { reactions, host, tick } = memory(rows);
+      Object.assign(host, { message: async (chat: string, id: string) => rows.find(r => r.linkId === chat && r.id === id) });
+      const whole = vi.spyOn(host, "messages");
+      expect(await reactions.receive("chat", "peer", { id: "fileWireId01", e: "👍", n: 1 })).toBe("applied");
+      for (let i = 0; i < 20; i++) expect(await reactions.receive("chat", "peer", { id: `neverHere${i}`.padEnd(16, "x"), e: "👍", n: 2 + i })).toBe("waiting");
+      expect(whole).toHaveBeenCalledOnce();
+      // A file's row named by its wire id meanwhile waits for the next read, with the others.
+      expect(await reactions.receive("chat", "peer", { id: "fileWireId02", e: "❤️", n: 30 })).toBe("waiting");
+      // Ten seconds on: one read for all that waited.
+      tick(10_000);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(whole).toHaveBeenCalledTimes(2);
+      expect(rows.map(r => r.reactions?.peer?.e)).toEqual(["👍", "❤️"]);
+      expect(rows[1].reactions?.peer).toMatchObject({ n: 30 });
+      // Taken from the wait: it does not land again when its row is stored.
+      await reactions.stored(rows[1]);
+      expect(whole).toHaveBeenCalledTimes(2);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("has room for so many waiting per sender in a chat", async () => {
     const { reactions, tick } = memory([]);
     for (let i = 0; i < REACTION_LIMITS.buffer; i++) {

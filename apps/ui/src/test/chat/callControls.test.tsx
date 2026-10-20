@@ -368,6 +368,29 @@ describe("a call for a screen reader and the keys", () => {
   });
 });
 
+describe("the call's clock", () => {
+  it("counts minutes and seconds, and hours too past the hour: never 65:00", () => {
+    vi.useFakeTimers();
+    try {
+      const second = 1000, minute = 60 * second, hour = 60 * minute;
+      const read = (since: number) => {
+        const { unmount } = overlay({ callStartedAt: Date.now() - since });
+        act(() => { vi.advanceTimersByTime(second); });
+        const text = screen.getByTestId("call-status").textContent;
+        unmount();
+        return text;
+      };
+      expect(read(4 * second)).toBe("Audio call00:05");
+      expect(read(59 * minute + 58 * second)).toBe("Audio call59:59");
+      expect(read(hour - second)).toBe("Audio call1:00:00");
+      expect(read(hour + 5 * minute - second)).toBe("Audio call1:05:00");
+      expect(read(2 * hour + 3 * minute + 8 * second)).toBe("Audio call2:03:09");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("a call ringing while you are on another (End and answer)", () => {
   it("offers End and answer and Decline only, named for a screen reader and under each button, with the keys kept in it", async () => {
     const onAcceptAudio = vi.fn(), onAcceptVideo = vi.fn(), onReject = vi.fn();

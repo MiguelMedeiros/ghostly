@@ -586,6 +586,17 @@
     "mainnet": "sats",
     "testnet": "sats de prueba"
   },
+  "send": {
+    "balance": "Saldo: {{amount}} {{unit}}",
+    "cameraUnavailable": "Cámara no disponible. Pega, escribe o elige una imagen.",
+    "clipboardEmpty": "Nada que pegar. Copia antes una factura o una dirección.",
+    "clipboardUnavailable": "No se pudo leer el portapapeles. Pégalo o escríbelo abajo.",
+    "image": "Elegir imagen",
+    "max": "Máx.",
+    "noAmount": "Esta factura no tiene importe. Pide una con el importe.",
+    "paste": "Pegar",
+    "scan": "Escanear"
+  },
   "setup": {
     "failed": "{{wallet}}: {{reason}}",
     "progress": "Creando tus billeteras de Mainnet…",

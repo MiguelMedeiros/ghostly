@@ -55,6 +55,7 @@ import { setNameStepUnderTest } from "../lib/nameStep";
 import { appsTestFetch } from "./appsTestFetch";
 import { appsPlatform } from "../lib/apps/flag";
 import { builtInAppOption } from "../lib/apps/builtIns";
+import { androidApp } from "../lib/touchOnly";
 
 /**
  * Ghostly Desktop runs the same peer as the browser clients, in its WebView,
@@ -343,8 +344,9 @@ export function createDesktopHost(version: string, calls: NativeCallSupport | nu
   void invoke<number[] | null>("webkit_version").then((webkit) => setSoundsRelease(soundsRelease(webkit))).catch(() => {});
   // A new profile asks for a name; never under an e2e suite, which runs no automated browser here (desktopUnderTest).
   setNameStepUnderTest(desktopUnderTest);
-  // Files sent and received are real files in the app's data folder, written and read through Rust.
-  registerFileBytes("native", async () => new NativeFileBytes(invoke as NativeInvoke), true);
+  // Files sent and received are real files in the app's data folder, written and read through Rust. Android's IPC is
+  // JSON only: there the bytes go as base64url.
+  registerFileBytes("native", async () => new NativeFileBytes(invoke as NativeInvoke, { jsonIpc: androidApp() }), true);
   // The unread count, as the web app's icon has it (muted chats left out), on the Dock icon.
   setAppBadgeTarget(dockBadge());
   const apps = desktopApps(appsPlatform());

@@ -90,4 +90,15 @@ test("voice messages: on a phone the now-playing bar sits above the tab bar", { 
   // Closed: it stops, and the bar goes.
   await bar.getByTestId("now-playing-close").click();
   await expect(bar).toHaveCount(0);
+
+  // Played to its end with the focus on the bar's pause: the focus goes on to the tabs, not to the page's body.
+  await bob.page.goBack();
+  const replay = chat(bob).getByTestId("voice-bubble").last();
+  await replay.getByTestId("voice-play").click();
+  await expect(replay).toHaveAttribute("data-state", "playing");
+  await bob.page.evaluate(() => { location.hash = "#/"; });
+  await expect(bar).toHaveAttribute("data-state", "playing");
+  await bar.getByTestId("now-playing-play").focus();
+  await expect(bar).toHaveCount(0, { timeout: 15_000 });
+  expect(await tabs.evaluate((tabBar) => tabBar.contains(document.activeElement))).toBe(true);
 });

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -6,6 +6,7 @@ import { connectDaemon } from "../src/client";
 import type { GhostlyEvent } from "../src/events";
 import { serve, type Host } from "../src/host";
 import { followDaemon, MAX_BEHIND, type EventHandler } from "../src/listen";
+import { lockPath } from "../src/profiles";
 // covers: headless.daemon
 
 const root = mkdtempSync(join(tmpdir(), "gh-catchup-"));
@@ -44,6 +45,8 @@ function slowHandler(gate: Promise<void> = Promise.resolve(), step: (done: () =>
 async function served(name: string, hub: ReturnType<typeof countingHub>["hub"]) {
   const dir = join(root, name);
   mkdirSync(dir, { mode: 0o700 });
+  // Held by this process, as a daemon holds its profile: the client checks its greeting's pid against the lock.
+  writeFileSync(lockPath(dir), String(process.pid));
   const s = await serve({ ctx: { runtime: { paths: { dir, socket: join(dir, "daemon.sock") } }, hub } } as unknown as Host);
   return { ...s, address: { dir, socket: join(dir, "daemon.sock") } };
 }

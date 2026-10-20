@@ -114,9 +114,34 @@ test("a person on the web opens the web app a bot shares, on an origin of its ow
     expect(app.seen.filter((r) => r.path.startsWith("/api/steal"))).toEqual([]);
     await expect(demo.locator("#title")).toHaveText("Hello from the demo");
 
-    // Closed: gone, and the chat is where it was.
+    // Closed: gone, the chat is where it was, and the focus back on Open, not on the page's body.
+    const chat = person.page.url();
     await person.page.getByTestId("service-view-close").click();
     await expect(view).toHaveCount(0);
+    await expect(person.page.getByPlaceholder("Message…")).toBeEnabled();
+    await expect(person.page).toHaveURL(chat);
+    await expect(open).toBeFocused();
+
+    // With the keyboard: Tab stays in the view, never on the chat hidden under it; Escape closes it, back on Open.
+    await person.page.keyboard.press("Enter");
+    await expect(view).toBeVisible();
+    await expect(person.page.getByTestId("service-view-close")).toBeFocused();
+    for (let i = 0; i < 5; i++) {
+      await person.page.keyboard.press("Tab");
+      expect(await person.page.evaluate(() => { const el = document.activeElement; return !el || el === document.body || !!el.closest("#ghostly-service-view"); })).toBe(true);
+    }
+    await person.page.getByTestId("service-view-close").focus();
+    await person.page.keyboard.press("Escape");
+    await expect(view).toHaveCount(0);
+    await expect(open).toBeFocused();
+    await expect(person.page).toHaveURL(chat);
+
+    // Opened again, Back (Android's back gesture, the browser's) closes it and leaves the chat as it was.
+    await open.click();
+    await expect(view).toBeVisible();
+    await person.page.goBack();
+    await expect(view).toHaveCount(0);
+    await expect(person.page).toHaveURL(chat);
     await expect(person.page.getByPlaceholder("Message…")).toBeEnabled();
   } catch (error) {
     await bot.attachLogs(info);

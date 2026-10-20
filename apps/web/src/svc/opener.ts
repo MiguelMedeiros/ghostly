@@ -97,11 +97,37 @@ export async function serve(port: MessagePort, data: unknown, send: ServiceSend,
 export const VIEW_ID = SERVICE_VIEW_ID;
 
 /**
+ * The mark on the history entry an open view adds, at the app's own address and with the router's state, so Back
+ * (Android's back gesture, the browser's) closes the view and leaves the app's route where it was.
+ */
+const ENTRY = "ghostlyServiceView";
+const isViewEntry = (state: unknown) => !!state && typeof state === "object" && (state as Record<string, unknown>)[ENTRY] === true;
+/** Set while a second open closes the first: the new view keeps the entry. */
+let handingOver = false;
+
+/**
+ * Back to the entry the view was opened on. Straight to it where the browser can (the Navigation API): the contact's
+ * app may have moved its own history, and once its frame is gone a plain Back lands on its steps and does nothing.
+ */
+function leaveViewEntry(): void {
+  type Going = { committed: Promise<unknown>; finished: Promise<unknown> };
+  type Navigation = { currentEntry: { index: number } | null; entries(): { key: string }[]; traverseTo(key: string): Going };
+  const navigation = (globalThis as { navigation?: Navigation }).navigation;
+  const here = navigation?.currentEntry;
+  const under = here ? navigation!.entries()[here.index - 1] : undefined;
+  if (!under) { history.back(); return; }
+  const going = navigation!.traverseTo(under.key);
+  going.committed.catch(() => {});
+  going.finished.catch(() => {});
+}
+
+/**
  * Shows a contact's app full screen over the app, on its own origin under `host`, with a bar to close it. One at a
  * time: opening another closes the one before.
  */
 export async function openServiceView(options: { host: ServicesHost; tag: string; peer: string; service: string; title: string; send: ServiceSend; words: OpenerWords }): Promise<void> {
-  closeServiceView();
+  handingOver = true;
+  try { closeServiceView(); } finally { handingOver = false; }
   const origin = serviceOrigin(options.host, await serviceLabel(options.tag, options.peer, options.service));
   const jar = new CookieJar();
   const view = document.createElement("div");
@@ -119,6 +145,8 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
   close.style.cssText = "min-width:40px;min-height:40px;border:0;border-radius:8px;background:transparent;color:inherit;font-size:18px;cursor:pointer";
   const name = document.createElement("span");
   name.textContent = options.title;
+  // The contact's name for it, in its own direction: a Latin name in the Arabic app is cut at its end, not its start.
+  name.dir = "auto";
   name.style.cssText = "overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
   bar.append(close, name);
   const frame = document.createElement("iframe");
@@ -143,18 +171,32 @@ export async function openServiceView(options: { host: ServicesHost; tag: string
     channel.port1.onmessage = (request) => { if (request.ports[0]) void serve(request.ports[0], request.data, options.send, jar, options.words); };
     frame.contentWindow!.postMessage({ type: BRIDGE_PORT }, origin, [channel.port2]);
   };
+  // A dialog over the whole app: the app under it is out of the keyboard's reach while it is open (Tab never lands on
+  // the hidden chat), and closing it gives the focus back to what had it (the Open button), not to the page's body.
+  const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const shut = [...document.body.children].filter((el) => !el.hasAttribute("inert"));
   const end = () => {
     removeEventListener("message", onMessage);
     removeEventListener("keydown", onKey);
+    removeEventListener("popstate", onPop);
     for (const port of ports) port.close();
     view.remove();
+    for (const el of shut) el.removeAttribute("inert");
+    const active = document.activeElement;
+    if (before?.isConnected && (!active || active === document.body)) before.focus({ preventScroll: true });
+    // Closed by ✕, Escape or the lock: its entry goes too, back to the one the app was on.
+    if (!handingOver && isViewEntry(history.state)) leaveViewEntry();
   };
   const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") end(); };
+  const onPop = () => { if (!isViewEntry(history.state)) end(); };
+  if (!isViewEntry(history.state)) history.pushState({ ...(history.state as Record<string, unknown> | null), [ENTRY]: true }, "");
   addEventListener("message", onMessage);
   addEventListener("keydown", onKey);
+  addEventListener("popstate", onPop);
   close.addEventListener("click", end);
   view.addEventListener(SERVICE_VIEW_CLOSE, end);
   frame.src = `${origin}${BRIDGE_PAGE}`;
+  for (const el of shut) el.setAttribute("inert", "");
   document.body.append(view);
   close.focus();
 }

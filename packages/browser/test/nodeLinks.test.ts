@@ -628,10 +628,10 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
           const keys = Array.from({ length: members }, () => createIdentity().pubKeyZ32);
           // A member the group's beacon names as a hub.
           if (options.hub !== undefined) {
-            const groups = node["groups"] as { views(): { id: string; members: unknown[] }[] };
-            const views = groups.views.bind(groups);
-            vi.spyOn(groups, "views").mockImplementation(() => views().map((g) => g.id !== groupId ? g
-              : { ...g, members: [...g.members, { key: keys[options.hub!], role: "member", me: false, online: false, missing: 0, hub: true }] }));
+            const groups = node["groups"] as { view(id: string): { id: string; members: unknown[] } | undefined };
+            const view = groups.view.bind(groups);
+            vi.spyOn(groups, "view").mockImplementation((id) => { const g = view(id); return !g || g.id !== groupId ? g
+              : { ...g, members: [...g.members, { key: keys[options.hub!], role: "member", me: false, online: false, missing: 0, hub: true }] }; });
           }
           // A text in it a moment ago: it was in use more lately than the chats, each quiet for minutes.
           if (options.used) expect((await node.sendGroupMessage({ groupId, text: "hi" })).error).toBeNull();
@@ -711,6 +711,22 @@ describe("an app restarting (WISP 100, Back after a restart)", () => {
           expect(holders[0].registerEndpoint).toHaveBeenCalledOnce();
           expect(yielded(holders)).toEqual([holders[0]]);
           node.setActiveLink({ linkId: null });
+        });
+
+        it("a retry with many groups' edges waiting reads the view of each group it decides on, never every group's per edge", async () => {
+          // A CLI bot in many groups: each waiting edge's turn, per transport, built every group's whole view, every 15 s
+          // (1.8 s at twenty groups of fifteen members).
+          const { node } = await allLive([10, 9, 8, 7, 6, 5, 4, 3]);
+          for (let i = 0; i < 5; i++) await groupOf(node, 4);
+          expect(node["groupNativeWaiting"].size).toBeGreaterThan(10);
+          const groups = node["groups"];
+          const views = vi.spyOn(groups, "views"), view = vi.spyOn(groups, "view");
+          node["groupNativeRetryAt"] = 0;
+          node["anchorCheckAt"] = 0;
+          node["retryNative"]();
+          await node["nativeQueues"].get("iroh/1");
+          expect(view).toHaveBeenCalled();
+          expect(views).not.toHaveBeenCalled();
         });
 
         describe("both ends keep the same edge (ghostly-agents#1437)", () => {

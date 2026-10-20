@@ -70,9 +70,14 @@ export interface ProfilePaths { name: string; dir: string; db: string; socket: s
 export function profilePaths(home: string, name: string): ProfilePaths {
   const dir = profileDir(home, name);
   return {
-    name, dir, db: join(dir, "db"), socket: socketPath(dir), lock: join(dir, "daemon.lock"),
+    name, dir, db: join(dir, "db"), socket: socketPath(dir), lock: lockPath(dir),
     events: join(dir, "events.jsonl"), files: join(dir, "files"), log: join(dir, "daemon.log"),
   };
+}
+
+/** The file that says which process holds the profile (`acquireLock`). */
+export function lockPath(dir: string): string {
+  return join(dir, "daemon.lock");
 }
 
 /**

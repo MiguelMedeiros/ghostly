@@ -597,7 +597,7 @@ export class GroupFileDesk {
     for (const [id, want] of this.wants) {
       const kept = this.kept.get(id);
       if (!kept) { this.wants.delete(id); continue; }
-      if (this.leaveSlow(kept, want)) continue;
+      if (this.leaveSlow(kept, want) || this.leaveGone(kept, want)) continue;
       if (now - (want.wire ? want.movedAt : want.holder ? want.at : want.round) < GROUP_FILE_LIMITS.wantWaitMs) continue;
       if (want.wire) {
         // A holder that stalls, or sends too little to count (`wantMoveBytes`), is left: the transfer ends here, and the
@@ -769,6 +769,21 @@ export class GroupFileDesk {
     if (!other) return false;
     want.free = undefined;
     edge.files.cancel("in", want.wire);
+    return true;
+  }
+
+  /**
+   * The holder serving this want is gone (its edge's file session closed: its app went away mid-way) and another holder
+   * may be asked now: the transfer ends here, what came stays, and that one is asked (`transferChanged`), not once
+   * `wantWaitMs` went by with nothing moving. With nobody else in reach it waits, and goes on if the holder comes back.
+   */
+  private leaveGone(kept: Kept, want: Want): boolean {
+    const edge = want.wire && want.linkId ? this.edgesById.get(want.linkId) : undefined;
+    const record = edge?.files.get("in", want.wire!);
+    if (!edge || edge.files.live || !record || transferEnded(record) || record.state === "verifying") return false;
+    if (!this.freeFor(kept, want, this.freeEdges(kept.groupId))) return false;
+    kept.left = want.holder;
+    edge.files.cancel("in", want.wire!);
     return true;
   }
 
