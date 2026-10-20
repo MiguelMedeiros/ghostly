@@ -747,10 +747,13 @@ const ENGINE_SENDS: ReadonlySet<string> = new Set([
   "sendMessage", "sendGroupMessage", "editMessage", "forwardMessages", "sendGroupFile",
   // A payment's memo reaches the contact as a message's text does (`chat pay` and `chat request` guard it too).
   "sendPayment", "requestPayment", "requestGroupPayment", "askToPay",
+  // The payment sheet's own path (its memo goes out with the token), an invoice's description the payer reads, and a
+  // Lightning address's comment its owner reads (agents#1624).
+  "preparePayment", "fedimintInvoice", "lnurlInvoice",
 ]);
 
 async function guardEngineSend(ctx: ApiContext, method: string, args: Params): Promise<void> {
-  let texts: unknown = [args.text, args.card, args.caption, args.memo];
+  let texts: unknown = [args.text, args.card, args.caption, args.memo, args.comment];
   if (method === "forwardMessages") {
     const ids = Array.isArray(args.messageIds) ? args.messageIds.filter((id): id is string => typeof id === "string") : [];
     const linkId = args.linkId;
