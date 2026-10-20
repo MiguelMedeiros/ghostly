@@ -220,6 +220,49 @@ describe("the read lane of one chat", () => {
     expect(await settled(read)).toEqual({ error: "failed" });
   });
 
+  // agents#1766: a gallery read with remote.read's 1 MiB length, 24 KiB files: the server counted 1 MiB per ask against
+  // its 32 MiB a second, and from the 33rd read the app got `failed` having moved about 1 MiB.
+  it("asks no more than a serve said it holds, so small files read at a large length are not refused past 32 a second", async () => {
+    const SMALL = Uint8Array.from({ length: 24 * 1024 }, (_, i) => i % 251);
+    const { ana, bob, toAna, flush } = pair({ serveFile: () => SMALL });
+    const serves = Array.from({ length: 60 }, (_, i) => ana.serve(CINEMA, `photo-${i}`));
+    const asked: number[] = [];
+    const results = [];
+    for (const serve of serves) {
+      // Each photo's size is learnt from its first read (a stat, as a gallery does), then read at the documented length.
+      const stat = bob.read(CINEMA, serve, 0, 1);
+      flush();
+      await stat;
+      const read = bob.read(CINEMA, serve, 0, 1024 * 1024);
+      for (const frame of toAna) if (frame.t === "ar-get") asked.push(frame.n);
+      flush();
+      results.push(await settled(read));
+    }
+    expect(results.filter((r) => "error" in r)).toEqual([]);
+    expect(results.every((r) => "value" in r && r.value.bytes.length === SMALL.length)).toBe(true);
+    expect(Math.max(...asked)).toBe(SMALL.length);
+  });
+
+  it("a server counts a finished ask as the bytes the file held from its offset: 60 small files read at 1 MiB, none refused", async () => {
+    const SMALL = Uint8Array.from({ length: 24 * 1024 }, (_, i) => i % 251);
+    const { ana, bob, flush } = pair({ serveFile: () => SMALL });
+    const results = [];
+    for (let i = 0; i < 60; i++) {
+      const read = bob.read(CINEMA, ana.serve(CINEMA, `photo-${i}`), 0, 1024 * 1024);
+      flush();
+      results.push(await settled(read));
+    }
+    expect(results.filter((r) => "error" in r)).toEqual([]);
+  });
+
+  it("a server's busy reads as busy, a wait, not as failed", async () => {
+    const { ana, bob, toAna } = pair({ hold: true });
+    const read = bob.read(CINEMA, ana.serve(CINEMA, "film-id"), 0, 1);
+    const [get] = toAna.splice(0);
+    bob.receiveAnswer({ t: "ar-err", a: CINEMA, r: get.r, e: "busy" });
+    expect(await settled(read)).toEqual({ error: "busy" });
+  });
+
   it("an error code this version does not know reads as failed", async () => {
     const { ana, bob, toAna } = pair({ hold: true });
     const read = bob.read(CINEMA, ana.serve(CINEMA, "film-id"), 0, 1);

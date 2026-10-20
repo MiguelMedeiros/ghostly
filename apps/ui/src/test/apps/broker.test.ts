@@ -869,6 +869,15 @@ describe("the read lane (WISP 1200 § A read lane to the contact)", () => {
 
   // A contact that never answered an `ar-get` held the app's one read chain: its own files.read, files.list and
   // files.serve waited for good behind it. The contact's reads wait for the contact only, still one at a time.
+  // agents#1766: the contact's limits answered `busy`, which reached the app as a generic `failed`: no sign to back off.
+  it("a remote.read the contact refuses as busy is too-fast for the app: a wait, not a failure", async () => {
+    const { ask, host } = await cinema(["chat"]);
+    host.remote.set(SERVE, film);
+    vi.spyOn(host.ranges!, "read").mockResolvedValueOnce({ error: "busy" });
+    expect(await ask("remote.read", [SERVE, { offset: 0, length: 5 }])).toMatchObject({ ok: false, error: "too-fast" });
+    expect(await ask("remote.read", [SERVE, { offset: 0, length: 5 }])).toMatchObject({ ok: true });
+  });
+
   it("a remote.read the contact never answers holds no read of the app's own", async () => {
     const { ask, host, broker, id } = await cinema();
     let reads = 0;
