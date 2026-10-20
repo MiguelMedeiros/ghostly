@@ -220,6 +220,23 @@ describe("the BDK wallet", () => {
     expect(esplora.requests.some((r) => r.startsWith("GET /scripthash/"))).toBe(true);
   });
 
+  it("reads the chain again when the server stumbles for a moment, as electrs does on a block it is still indexing", async () => {
+    const provider = await funded(20_000);
+    esplora.mine();
+    // electrs answers 404 for its latest blocks for a moment after a new tip: the review's sync must not fail on it.
+    let stumbles = 2;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (new URL(url).pathname.endsWith("/blocks") && stumbles-- > 0) return Promise.resolve(Object.defineProperty(new Response("Block not found", { status: 404 }), "url", { value: url }));
+      return esplora.fetch(input, init);
+    });
+    expect((await provider.prepareSend({ address: fakeAddress(), amount: 1_000, feeCap: 2_000 })).amount).toBe(1_000);
+    expect(stumbles).toBeLessThan(0);
+    // A server that keeps failing still says so.
+    vi.stubGlobal("fetch", () => Promise.reject(new TypeError("fetch failed")));
+    await expect(provider.sync(true)).rejects.toThrow(/Could not sync from Esplora/);
+  });
+
   it("counts coins in the mempool as unconfirmed, and does not spend a stranger's unconfirmed coins", async () => {
     const provider = await open();
     esplora.fund(await provider.receiveAddress(), 30_000, false);

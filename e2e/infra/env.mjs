@@ -139,6 +139,17 @@ export const endpoints = {
 /** `host:port` of a URL, the way the app shows where a service is. */
 export const hostOf = (url) => new URL(url).host;
 
+/**
+ * Whether the HyperDHT relay at `url` can carry a chat: it answers, and its own HyperDHT node is reachable. A node that
+ * counts itself firewalled (a relay image from before it was made reachable on its loopback network, or any new node
+ * until dht-rpc's first network check, about 20 minutes in) answers too, but two browsers on it never reach each other.
+ */
+export async function hyperdhtRelayReady(url = endpoints.hyperdhtRelay) {
+  const health = await fetch(`${url.replace(/^ws/, "http")}/healthz`, { signal: AbortSignal.timeout(5000) })
+    .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  return health?.ok === true && health.firewalled === false;
+}
+
 /** Written to `.env.e2e` only when the environment runs on another host (`--host`, remote.mjs). */
 export const REMOTE = {
   E2E_INFRA_HOST: "SSH target the environment runs on (its Docker); unset: this machine",

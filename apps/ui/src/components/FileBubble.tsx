@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { PREVIEWABLE_IMAGE, readImageMeta, sanitizeFileName, type ImageMeta } from "@ghostly/core";
+import { PREVIEWABLE_IMAGE, previewable, readImageMeta, sanitizeFileName, type ImageMeta } from "@ghostly/core";
 import { useFocusKept } from "../hooks/useFocusKept";
 import { useTransfer } from "../hooks/useServicesPlatform";
 import { formatFileSize } from "../lib/format";
@@ -108,10 +108,18 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
         setMissing(saveable ? false : held === "left-out" ? "left-out" : true);
         return;
       }
-      // Its sender said nothing of its size: read here from its first bytes, so the box is right before it shows.
-      const size = picture && !file.image && !knownPictureSize(file.id) ? await readImageMeta(shown.blob, file.mime) : undefined;
+      // A picture's size is read here from its own first bytes, every time: what its sender said only lays out the
+      // box. One its bytes say is too large to draw (a few kilobytes can say gigabytes once decoded), or whose bytes
+      // say no size at all, is not drawn: it offers Save only.
+      const size = picture ? await readImageMeta(shown.blob, file.mime) : undefined;
       if (cancelled) { shown.release(); return; }
-      if (size) { rememberPictureSize(file.id, size); setFound({ id: file.id, size }); }
+      if (picture && !previewable(size)) {
+        shown.release();
+        setMissing(false);
+        setSaveOnly(true);
+        return;
+      }
+      if (size && !file.image && !knownPictureSize(file.id)) { rememberPictureSize(file.id, size); setFound({ id: file.id, size }); }
       setPreview({ id: file.id, url: shown.url, release: shown.release });
       setMissing(false);
       setSaveOnly(false);
@@ -218,22 +226,24 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
           </span>
         )}
         <div className="min-w-0 flex-1">
-          <p className="text-[14px] leading-tight truncate m-0" title={file.name}>
+          {/* In its own direction: an Arabic name in an English app was cut at its start, hiding what the file is. */}
+          <p dir="auto" className="text-[14px] leading-tight truncate m-0" title={file.name}>
             <Highlight text={file.name} term={highlight} />
           </p>
+          {/* The status wraps: cut with … on a phone, it lost its end (how far the file is, its size). */}
           <p className={`flex items-center gap-1 text-[11px] m-0 ${failed || missing ? "text-danger-ink" : "text-text-primary/65"}`}>
-            <span className="min-w-0 truncate" data-testid="file-status">{status}</span>
+            <span className="min-w-0 [overflow-wrap:anywhere]" data-testid="file-status">{status}</span>
             {(reason || hint) && <WhyButton open={why} onToggle={() => setWhy(!why)} controls={whyId} testId="file-why" danger={!!reason} />}
           </p>
         </div>
         {(blobUrl || saveOnly) && (
-          <a
-            href={blobUrl ?? undefined}
-            download={blobUrl ? file.name : undefined}
-            onClick={(event) => { event.preventDefault(); save(); }}
-            role="button"
+          // A button, not a link to the picture's address: a file that is no picture has none here, and a link
+          // without one is no stop for Tab.
+          <button
+            type="button"
+            onClick={save}
             data-testid="file-save"
-            className={`w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 flex items-center justify-center shrink-0 text-inherit transition-colors cursor-pointer ${watched ? "animate-pop" : ""}`}
+            className={`w-9 h-9 rounded-full bg-black/20 hover:bg-black/30 border-none p-0 flex items-center justify-center shrink-0 text-inherit transition-colors cursor-pointer ${watched ? "animate-pop" : ""}`}
             title={t("common.save")}
             aria-label={t("common.save")}
           >
@@ -242,7 +252,7 @@ export function FileBubble({ file, peerName: named, highlight }: { file: ChatFil
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-          </a>
+          </button>
         )}
       </div>
       {offered && group && (

@@ -196,13 +196,29 @@ export interface UsageCard {
   windows?: UsageWindow[];
 }
 
-export type StatusCard = TaskCard | RoutineCard | ButtonsCard | AppCard | UsageCard;
+/** The kinds a sender may take back (WISP 405 § Removing a card). */
+export const REMOVABLE_KINDS = ["task", "routine"] as const;
+export type RemovableKind = typeof REMOVABLE_KINDS[number];
+
+/**
+ * A task or routine its sender took back (WISP 405 § Removing a card): the edit of the card's message that retracts it.
+ * Not a task nor a routine, so no Tasks view counts it; an app without this kind drops it and shows the text.
+ */
+export interface RemovedCard {
+  kind: "removed";
+  /** The id of the card taken back. */
+  id: string;
+  of: RemovableKind;
+}
+
+export type StatusCard = TaskCard | RoutineCard | ButtonsCard | AppCard | UsageCard | RemovedCard;
 export type StatusCardKind = StatusCard["kind"];
 
 const ID = /^[A-Za-z0-9_.:][A-Za-z0-9_.:-]{0,63}$/;
 /** A button's id: 1 to 32 of `A-Z a-z 0-9 _ . : -`, not starting with `-`. */
 export const BUTTON_ID = /^[A-Za-z0-9_.:][A-Za-z0-9_.:-]{0,31}$/;
-const CRON = /^[0-9A-Za-z*,/?#\- ]{1,64}$/;
+/** A routine's cron line, trimmed: 1 to 64 of `0-9 A-Z a-z * , / ? # -` and spaces (shown, never run). */
+export const CRON_LINE = /^[0-9A-Za-z*,/?#\- ]{1,64}$/;
 
 /**
  * Whether a typed answer is a button's label or id (WISP 406 · Message Buttons): ignoring case and spaces at the ends.
@@ -367,6 +383,10 @@ export function readStatusCard(raw: unknown, now = Date.now()): StatusCard | und
     return { kind: "app", id, ref: raw.ref, digest: raw.digest, sequence: raw.sequence, title,
       ...(version && { version }), ...(url && { url }), ...(raw.opened === true && { opened: true as const }) };
   }
+  if (raw.kind === "removed") {
+    const of = oneOf(REMOVABLE_KINDS, raw.of);
+    return of && { kind: "removed", id, of };
+  }
   const latest = now + MESSAGE_CLOCK_SKEW_MS;
   if (raw.kind === "usage") return readUsage(raw, id, now);
   const links = readLinks(raw.links);
@@ -409,7 +429,7 @@ export function readStatusCard(raw: unknown, now = Date.now()): StatusCard | und
   if (raw.kind === "routine") {
     const name = cardLine(raw.name, STATUS_CARD_LIMITS.title), schedule = cardLine(raw.schedule, STATUS_CARD_LIMITS.schedule), state = oneOf(ROUTINE_STATES, raw.state);
     if (!name || !schedule || !state) return undefined;
-    const cron = typeof raw.cron === "string" && CRON.test(raw.cron.trim()) ? raw.cron.trim() : undefined;
+    const cron = typeof raw.cron === "string" && CRON_LINE.test(raw.cron.trim()) ? raw.cron.trim() : undefined;
     const lastRun = readRun(raw.lastRun, now);
     const nextRunAt = typeof raw.nextRunAt === "number" && Number.isSafeInteger(raw.nextRunAt) && raw.nextRunAt > 0 && raw.nextRunAt <= now + STATUS_CARD_LIMITS.nextRunMs ? raw.nextRunAt : undefined;
     const runs: RoutineRun[] = [];
@@ -450,7 +470,7 @@ export function checkStatusCard(raw: unknown, now = Date.now()): { card: StatusC
   if (!isObject(raw)) return { error: "A card is an object" };
   const bytes = statusCardBytes(raw);
   if (bytes > STATUS_CARD_LIMITS.bytes) return { error: `The card takes ${bytes} bytes; at most ${STATUS_CARD_LIMITS.bytes}` };
-  if (raw.kind !== "task" && raw.kind !== "routine" && raw.kind !== "buttons" && raw.kind !== "app" && raw.kind !== "usage") return { error: "kind is task, routine, buttons, app or usage" };
+  if (raw.kind !== "task" && raw.kind !== "routine" && raw.kind !== "buttons" && raw.kind !== "app" && raw.kind !== "usage" && raw.kind !== "removed") return { error: "kind is task, routine, buttons, app, usage or removed" };
   if (typeof raw.id !== "string" || !ID.test(raw.id)) return { error: `id is 1 to ${STATUS_CARD_LIMITS.id} of A-Z a-z 0-9 _ . : - and does not start with -` };
   const line = (field: string, value: unknown, max: number, required = false): string | null => {
     if (value === undefined && !required) return null;
@@ -470,7 +490,12 @@ export function checkStatusCard(raw: unknown, now = Date.now()): { card: StatusC
   }
   const share = (field: string, value: unknown) => (value === undefined || (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100) ? null : `${field} is a number from 0 to 100`);
   const reset = (field: string, value: unknown) => (value === undefined || ahead(value, now) !== undefined ? null : `${field} is a time in milliseconds, within a year`);
-  if (raw.kind === "usage") {
+  if (raw.kind === "removed") {
+    // The id and what it was, nothing more: a reader keeps nothing else of it.
+    if (!oneOf(REMOVABLE_KINDS, raw.of)) errors.push(`of is one of ${REMOVABLE_KINDS.join(", ")}`);
+    const extra = Object.keys(raw).find(key => key !== "kind" && key !== "id" && key !== "of");
+    if (extra) errors.push(`a removed card takes only kind, id and of, not ${extra}`);
+  } else if (raw.kind === "usage") {
     if (raw.links !== undefined) errors.push("a usage card takes no links");
     if (raw.left === undefined && raw.used === undefined) errors.push("left (a percent) or used and limit");
     errors.push(share("left", raw.left));
@@ -569,7 +594,7 @@ export function checkStatusCard(raw: unknown, now = Date.now()): { card: StatusC
   } else {
     errors.push(line("name", raw.name, STATUS_CARD_LIMITS.title, true), line("schedule", raw.schedule, STATUS_CARD_LIMITS.schedule, true));
     if (!oneOf(ROUTINE_STATES, raw.state)) errors.push(`state is one of ${ROUTINE_STATES.join(", ")}`);
-    if (raw.cron !== undefined && !(typeof raw.cron === "string" && CRON.test(raw.cron.trim()))) errors.push(`cron is a cron line of at most ${STATUS_CARD_LIMITS.cron} characters`);
+    if (raw.cron !== undefined && !(typeof raw.cron === "string" && CRON_LINE.test(raw.cron.trim()))) errors.push(`cron is a cron line of at most ${STATUS_CARD_LIMITS.cron} characters`);
     if (raw.nextRunAt !== undefined && !(typeof raw.nextRunAt === "number" && Number.isSafeInteger(raw.nextRunAt) && raw.nextRunAt > 0 && raw.nextRunAt <= now + STATUS_CARD_LIMITS.nextRunMs)) errors.push("nextRunAt is a time in milliseconds, within a year");
     const run = (field: string, value: unknown) => {
       if (!isObject(value)) return errors.push(`${field} is an object`);
@@ -605,10 +630,20 @@ export function cardTimeUtc(ms: number): string {
 }
 
 /**
+ * The text a removed card's message carries (WISP 405 § Removing a card): "🗑 Task removed", with the card's title or
+ * name when the sender knows it ("🗑 Task removed: Fix relay rotation"). An app without the `removed` kind shows it.
+ */
+export function removedCardText(of: RemovableKind, title?: string): string {
+  return `🗑 ${of === "task" ? "Task" : "Routine"} removed${title ? `: ${title}` : ""}`;
+}
+
+/**
  * The text a card's message carries: what an app without cards shows, the DHT floor carries, the chat list previews
  * and search finds. Plain lines, the first naming the card, no bars or layout that would read badly elsewhere.
  */
 export function statusCardText(card: StatusCard): string {
+  // A sender that knows the title says it ("🗑 Task removed: Fix relay rotation"); this is the text without one.
+  if (card.kind === "removed") return removedCardText(card.of);
   // An app card names the app, and its url on a line of its own so an older app shows a link (WISP 405 § An app).
   if (card.kind === "app") {
     const named = `${card.title}${card.version ? ` ${card.version}` : ""}`;

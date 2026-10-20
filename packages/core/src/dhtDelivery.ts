@@ -9,7 +9,7 @@ import type { PairingCredentials } from "./pairedSession";
 import { measureRecords, MAX_DNS_PACKET_BYTES, PKARR_FUTURE_SKEW_MS, type GhostRecord, type SignedPacket } from "./pkarr";
 import { budgetRetryMs, isDiscoveryBudgetError, type PkarrRequestOptions, type PkarrTransport } from "./transport";
 import { traceLink } from "./linkTrace";
-import { AWAITING_PEER_MS, unusedInviteWait } from "./link";
+import { AWAITING_PEER_MS, countUnusedInvite, unusedInviteWait } from "./link";
 import { REACTION_LIMITS, readDhtReactions, validReactionNumber, type WireReaction } from "./reactions";
 import { readForwarded } from "./forwards";
 import { validEditNumber } from "./pairedEdits";
@@ -406,6 +406,7 @@ export class DhtDelivery {
     if (this.controlTimer) clearTimeout(this.controlTimer);
     if (this.announceTimer) clearTimeout(this.announceTimer);
     this.timer = this.controlTimer = this.announceTimer = null;
+    countUnusedInvite(this.options.transport, this, false);
     await this.chain;
   }
   async setMode(mode: DeliveryMode): Promise<void> {
@@ -469,6 +470,8 @@ export class DhtDelivery {
     if (this.options.credentials.peerKey && this.state.peerMode) void this.tick(); else this.schedule();
   }
   get isLive(): boolean { return this.live; }
+  /** Someone else used the invite first (`DhtDeliveryState.inviteTaken`). */
+  get inviteTaken(): boolean { return !!this.state.inviteTaken; }
   /** The chat is open with the app in front: on the DHT, its mailbox is read at the signaling pace. */
   setActive(active: boolean): void {
     if (active === this.active) return;
@@ -659,7 +662,9 @@ export class DhtDelivery {
     const receiptDue = !!receipt && !receipt.settled && (receipt.next ?? 0) <= now;
     const reseal = this.resealDue;
     const keepAlive = !force && (!pending || pending.next > now) && !receiptDue && !this.reactionsDue && !reseal;
-    if (keepAlive && this.controlDue > now) return;
+    // The invite was taken from this side: its mailbox is the joiner's every copy of the invite derives, and a keep-alive
+    // there would only cover the envelope of whoever joined first. Nothing goes until the invite turns out not taken.
+    if (keepAlive && (this.controlDue > now || (this.state.inviteTaken && !this.options.credentials.peerKey))) return;
     // Dated back (`DHT_ISSUED_BACK_MS`), and a control envelope's lifetime with it: a reader bounds `expires - issued`.
     const expires = pending?.expires ?? now - DHT_ISSUED_BACK_MS + CONTROL_TTL;
     const issued = Math.min(now, Math.max(now - DHT_ISSUED_BACK_MS, expires - (pending ? DHT_MESSAGE_TTL : CONTROL_TTL), (pending?.message[1] ?? 0) - 30_000));
@@ -759,6 +764,8 @@ export class DhtDelivery {
     if (this.state.inviteTaken || !expected || sender !== expected) return;
     if (this.state.peerPinned || this.state.confirmed || this.state.wasLive || this.live) return;
     traceLink(this.from, "invite-taken", {});
+    // Nothing is awaited from that contact now: the first contact's fast reads end here.
+    this.fastUntil = 0;
     await this.persist({ ...this.state, inviteTaken: true });
     this.changed();
   }
@@ -850,8 +857,9 @@ export class DhtDelivery {
     for (const [i, box] of boxes.entries()) {
       if (i > 0 && box === "pinned") {
         // The contact just said it can use it: looked in at once. Otherwise a probe, when the invite's mailbox held a
-        // packet but nothing from the contact, now and then.
-        if (!this.state.peerPinned && (!found || Date.now() - this.pinnedProbeAt < PINNED_PROBE_MS)) return;
+        // packet but nothing from the contact, now and then; never while the invite is taken (that packet is the contact's,
+        // sealed to another: had it pinned this side, it would open here).
+        if (!this.state.peerPinned && (!found || this.state.inviteTaken || Date.now() - this.pinnedProbeAt < PINNED_PROBE_MS)) return;
         if (!this.state.peerPinned) this.pinnedProbeAt = Date.now();
       }
       const address = box === "pinned" ? pinned!.peerAddress : this.peerAddress;
@@ -935,10 +943,13 @@ export class DhtDelivery {
   /** How long until the next read of the contact's mailbox (WISP 403, poll pace). */
   get pollMs(): number {
     if (this.options.pollMs) return this.options.pollMs;
+    const taken = this.takenInviteWait();
+    if (taken !== undefined) return taken;
     const now = Date.now();
-    // An invite nobody used, no longer awaited: the older it is, the less often its mailbox is read.
-    const unused = this.unusedInviteAge(now);
-    if (unused !== undefined && !this.active && now >= this.fastUntil) return unusedInviteWait(unused, this.mode === "dht" ? DHT_POLL_MS : STREAM_POLL_MS);
+    // An invite nobody used, no longer awaited: the older it is, the less often its mailbox is read, as far as their count needs.
+    const unused = this.running ? this.unusedInviteAge(now) : undefined;
+    const readers = countUnusedInvite(this.options.transport, this, unused !== undefined && !this.active && now >= this.fastUntil);
+    if (unused !== undefined && !this.active && now >= this.fastUntil) return unusedInviteWait(unused, this.mode === "dht" ? DHT_POLL_MS : STREAM_POLL_MS, readers);
     if (this.mode === "dht" || (this.state.peerMode === "dht" && now < this.leavingUntil) || now < this.fastUntil) return DHT_POLL_MS;
     if (this.live) return LIVE_POLL_MS;
     // Our text awaits its receipt: the receipt is what the person is looking at.
@@ -954,6 +965,17 @@ export class DhtDelivery {
     if (madeAt === undefined || ((this.options.credentials.peerKey || this.state.peerSequence) && !this.unanswered)) return undefined;
     const age = now - Math.min(madeAt, this.startedAt);
     return age >= AWAITING_PEER_MS ? age : undefined;
+  }
+  /**
+   * The wait between reads of the mailbox of a joined chat whose invite someone else used first (`inviteTaken`), whether
+   * or not its look-up pinned the inviter first (`unanswered`): nothing is awaited from its inviter, so it is read as an
+   * unused invite of its age (counted from the join) from the notice on, however few other invites the app holds. One
+   * slow read stays, so a chat whose invite turns out not to be taken (`untaken`) still notices. Undefined for any other chat.
+   */
+  private takenInviteWait(): number | undefined {
+    const now = Date.now(), madeAt = this.options.inviteMadeAt;
+    if (!this.state.inviteTaken || madeAt === undefined || this.active || now < this.fastUntil) return undefined;
+    return unusedInviteWait(now - Math.min(madeAt, this.startedAt), this.mode === "dht" ? DHT_POLL_MS : STREAM_POLL_MS, Infinity);
   }
   private schedule(): void {
     if (!this.running || this.ticking) return;

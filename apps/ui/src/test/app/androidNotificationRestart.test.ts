@@ -88,7 +88,7 @@ describe("Android: the notifications an earlier page left", () => {
     expect(posted()).toHaveLength(1);
   });
 
-  it("only in the Android app: macOS takes its own away, and a browser's page has none left", async () => {
+  it("only in the Android and Linux apps: macOS takes its own away, and a browser's page has none left", async () => {
     vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15");
     const mac = await page();
     mac.onNotificationOpen(() => {});
@@ -152,5 +152,38 @@ describe("Android: the notifications an earlier page left", () => {
     await tick();
     expect(opened).toEqual([]);
     expect(calls("native_clear_notifications").slice(-1).map(call => call.args)).toEqual([{ keep: [] }]);
+  });
+});
+
+/*
+ * The Linux app's page that loads again (a reload, or the app opened again) knew none of its chats' notifications: they
+ * stayed in the desktop's list, reading the chat closed none, its next message added a second one and a click on the
+ * old one opened nothing. Its chats' tags are kept as the Android app's now, and the rest the earlier page left goes.
+ */
+describe("Linux: a page that loads again", () => {
+  beforeEach(() => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15");
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("Linux x86_64");
+  });
+
+  it("replaces, closes and opens its chats' notifications from before, and takes back the rest", async () => {
+    const first = await page();
+    await first.showPrivateNotification("message:link-a:m1", "New message", "chat-1", true);
+    await first.showPrivateNotification("message:link-b:m1", "New message", "chat-2", true);
+    await first.showPrivateNotification("call:chat-3:1", "Incoming call", "chat-3");
+    const [one, two] = posted();
+
+    const next = await page();
+    const opened: string[] = [];
+    next.onNotificationOpen(chat => opened.push(chat));
+    await tick();
+    expect(calls("native_clear_notifications").slice(-1).map(call => call.args)).toEqual([{ keep: [one, two] }]);
+    // A click on chat-2's from before opens it, its next message replaces it, and reading chat-1 closes chat-1's.
+    tauri.handlers.get("notification-open")!({ payload: two });
+    expect(opened).toEqual(["chat-2"]);
+    await next.showPrivateNotification("message:link-b:m2", "New message", "chat-2", true);
+    expect(posted().slice(-1)).toEqual([two]);
+    next.clearChatNotification("chat-1");
+    expect(calls("native_clear_notification").map(call => call.args)).toEqual([{ id: one }]);
   });
 });

@@ -42,13 +42,17 @@ import {
 } from "../lib/storage";
 import { createPairedChat } from "../lib/pairedChat";
 import { chatPath, decodePart } from "../lib/url";
+import { stopPlayingFrom } from "../lib/nowPlaying";
 import type { ChatSession } from "../lib/types";
 import { useAppNavigation } from "../hooks/useAppNavigation";
 import { useRowReorder } from "../hooks/useRowReorder";
+import { usePinMoveNote } from "../hooks/usePinMoveNote";
+import { PinMoveNote } from "./chat/PinOrder";
 import { usePageShown } from "../hooks/usePageShown";
 import { shownContactName, useContactFaces } from "./identities/contactFace";
 import { reactionNoteText } from "../lib/reactions";
 import { SidebarTasks } from "./tasks/SidebarTasks";
+import { SidebarSaved } from "./saved/SidebarSaved";
 import { openJoinProfile } from "../lib/devices";
 
 const subscribeEngine = (listener: () => void) => engine.subscribe(listener);
@@ -62,6 +66,21 @@ const MIN_PAGE_WIDTH = 320;
 
 /** Search folds case and accents, as the in-chat search does: "jose" finds "José". `q` is folded already. */
 const found = (text: string | undefined, q: string) => !!text && foldText(text).includes(q);
+
+/**
+ * A chat's message texts folded for search, once per list of messages: the page's one cache keeps that list while the
+ * chat is unchanged (`listShownSessions`). Folded at every draw, a search over 100k messages took ~100 ms of each
+ * engine state, which draws the list again with nothing in a message changed.
+ */
+const foldedTexts = new WeakMap<ChatSession["messages"], string[]>();
+function messagesFound(messages: ChatSession["messages"], q: string): boolean {
+  let texts = foldedTexts.get(messages);
+  if (!texts) {
+    texts = messages.flatMap((m) => (m.text ? [foldText(m.text)] : []));
+    foldedTexts.set(messages, texts);
+  }
+  return texts.some((text) => text.includes(q));
+}
 
 /** The groups whose name has the search in it; all of them with no search. (Outside the component: the React Compiler keeps its memoization then.) */
 function groupsFound<G extends { name: string }>(groups: G[], search: string): G[] {
@@ -200,13 +219,21 @@ export function Sidebar() {
   // The identity a contact is shown as (identities/contactFace.ts): its name in the row, and found by search.
   const faceOf = useContactFaces();
   const query = foldText(search);
+  // A search reads every chat's messages: their whole histories, where the engine sent this page only their newest page
+  // (the extension's pages), are asked for while it lasts.
+  const searching = !!search;
+  useEffect(() => {
+    if (!searching) return;
+    const releases = (engine.state?.links ?? []).map((link) => engine.keepWhole(link.id));
+    return () => releases.forEach((release) => release());
+  }, [searching]);
   const filtered = sessions.filter((s) => {
     if (!search) return true;
     if (found(s.label, query)) return true;
     if (found(s.nick, query)) return true;
     if (found(faceOf(s.peerPubKeyB64)?.name, query)) return true;
     if (found(s.peerPubKeyB64, query)) return true;
-    return s.messages.some((m) => found(m.text, query));
+    return messagesFound(s.messages, query);
   });
   const shownGroups = groupsFound(groups, search);
   // The person's folders, first in the list and in their order; a search shows what it finds as one list, with no folders.
@@ -238,13 +265,18 @@ export function Sidebar() {
   const besideRow = (id: string) => parts.find(part => part.includes(id)) ?? [];
   const partOf = (chat: string) => (filed(chat) ? folderOf(chat) : undefined);
   const movable = byFolders ? parts.flat() : [];
-  /** A row let go at `index` among the rows of its part: that part keeps the order it now has. */
+  /** A row let go at `index` among the rows of its part: that part keeps the order it now has. Its new place there. */
   const moveInPart = (id: string, index: number) => {
     const rows = besideRow(id).filter(key => key !== id);
-    rows.splice(Math.max(0, Math.min(rows.length, index)), 0, id);
+    const to = Math.max(0, Math.min(rows.length, index));
+    rows.splice(to, 0, id);
     setSectionOrder(partOf(id), rows);
+    return { index: to, count: rows.length };
   };
-  const reorder = useRowReorder({ ids: parts.flat(), beside: besideRow, enabled: !search, onMove: byFolders ? moveInPart : movePinnedBeside,
+  // Dragged or moved with Alt+↑/↓, the new place is read out.
+  const [moveNote, announceMove] = usePinMoveNote();
+  const reorder = useRowReorder({ ids: parts.flat(), beside: besideRow, enabled: !search,
+    onMove: (id, index) => announceMove(byFolders ? moveInPart(id, index) : movePinnedBeside(id, index), byFolders),
     folders: { rows: movable, of: partOf, onDrop: setChatFolder } });
   /** A part of the list a dragged row would go to is marked while the row is over it. */
   const dropMark = (folder: string | null) => (reorder.over === folder ? " bg-accent/10 outline-2 -outline-offset-2 outline-accent" : "");
@@ -304,6 +336,7 @@ export function Sidebar() {
       className={`relative flex flex-col bg-sidebar-bg ${isMobile ? "flex-1 min-w-0" : "sidebar-desktop border-e border-border shrink-0"}`}
       style={isMobile ? undefined : { width: sidebarWidth, minWidth: MIN_WIDTH, maxWidth: `min(${MAX_WIDTH}px, 100vw - ${MIN_PAGE_WIDTH}px)` }}
     >
+      <PinMoveNote text={moveNote} />
       {/* Header */}
       <div ref={headerRef} data-labels={labelsFit ? undefined : "off"} className="sidebar-header h-14 header-safe shrink-0 flex items-center justify-between px-4 bg-panel-header">
         <div ref={brandRef} className="flex shrink-0"><AppBrand onHome={() => nav.home()} /></div>
@@ -370,6 +403,7 @@ export function Sidebar() {
       </div>
 
       <SidebarTasks active={location.pathname === "/tasks"} onOpen={() => (location.pathname === "/tasks" ? nav.home() : nav.place("/tasks"))} />
+      <SidebarSaved active={location.pathname === "/saved"} onOpen={() => (location.pathname === "/saved" ? nav.home() : nav.place("/saved"))} />
 
       {/* Chat List */}
       <div className="flex-1 overflow-y-auto" data-testid="chat-list" data-drag-scroll="" aria-busy={!listReady || undefined}>
@@ -442,7 +476,7 @@ export function Sidebar() {
       {confirmDeleteId && <DeleteChatDialog
         name={(() => { const target=sessions.find(s=>s.id===confirmDeleteId); return `${target?.label || target?.nick || t("common.unnamedContact", { key: contactTag(target?.peerPubKeyB64 ?? confirmDeleteId) })} · ${publicKeyLabel(target?.peerPubKeyB64 ?? confirmDeleteId)}`; })()}
         onClose={() => setConfirmDeleteId(null)}
-        onConfirm={() => { const id=confirmDeleteId; deleteSession(id); setChatFolder(id, undefined); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
+        onConfirm={() => { const id=confirmDeleteId; deleteSession(id); setChatFolder(id, undefined); stopPlayingFrom(chatPath(id), activeSessionId===id); setConfirmDeleteId(null); refreshSessions(); window.dispatchEvent(new Event("session-updated")); if(activeSessionId===id) nav.home(); }} />}
       {!isMobile && <AccountBar />}
 
       {/* Resize Handle */}

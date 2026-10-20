@@ -1,9 +1,22 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { encryptText, epochKeys } from "../src/groupCrypto";
-import { fromBase64Url } from "../src/bytes";
+import { fromBase64Url, toBase64Url } from "../src/bytes";
+import { publicKeyFromZ32 } from "../src/identity";
 import { GroupSession, type GroupMessageFrame } from "../src/groupSession";
 import { Mesh, admit, clone } from "./support/groupMesh";
 // covers: groups.catch-up, groups.hubs
+
+/** The key of each Ed25519 check the sessions make. */
+const verifies = vi.hoisted(() => [] as Uint8Array[]);
+vi.mock("../src/identity", async importOriginal => {
+  const real = await importOriginal<typeof import("../src/identity")>();
+  return { ...real, verify: (signature: Uint8Array, message: Uint8Array, key: Uint8Array) => {
+    verifies.push(key);
+    return real.verify(signature, message, key);
+  } };
+});
+/** The checks of signatures by `who`. */
+const checksOf = (who: GroupSession) => verifies.filter(k => toBase64Url(k) === toBase64Url(publicKeyFromZ32(who.myKey))).length;
 
 /*
  * A member's name travels with its messages (WISP 902 § Messages, "The author's name"): past 16 members a group runs
@@ -75,6 +88,31 @@ describe("a member's name travels with its messages", { timeout: 60_000 }, () =>
     await bob.handle(alice.myKey, older);
     expect(mesh.texts(bob)).toEqual(["as Caz", "as Carol"]);
     expect(bob.state.nicks[carol.myKey]).toBe("Caz");
+  });
+
+  it("checks the author's signature over a name only when it differs from the one held", async () => {
+    const { mesh, alice, bob, carol } = await three();
+    away(mesh, bob, [alice, carol]);
+    for (let i = 1; i <= 4; i++) await carol.sendText(`m${i}`, i * 1_000);
+    await mesh.settle();
+    const frames = carol.state.sent.map(clone);
+    verifies.length = 0;
+    // Handed on oldest first: `sig` and `xs` each, and `ns` once, for the name Bob did not hold yet.
+    for (const frame of frames) await bob.handle(alice.myKey, frame);
+    expect(mesh.texts(bob)).toEqual(["m1", "m2", "m3", "m4"]);
+    expect(bob.state.nicks[carol.myKey]).toBe("Carol");
+    expect(checksOf(carol)).toBe(2 * frames.length + 1);
+    // Live from Carol's edge, at Alice and Bob: `sig` only, while her name stays the same.
+    mesh.setEdge(bob.myKey, carol.myKey, true);
+    verifies.length = 0;
+    await carol.sendText("live", 5_000); await mesh.settle();
+    expect(checksOf(carol)).toBe(2);
+    // A new name is checked again, and taken.
+    mesh.names.set(carol.myKey, "Caz");
+    verifies.length = 0;
+    await carol.sendText("as Caz", 6_000); await mesh.settle();
+    expect(bob.state.nicks[carol.myKey]).toBe("Caz");
+    expect(checksOf(carol)).toBe(4);
   });
 
   it("says no name for an app that shares none, and a name that shows nothing is none", async () => {

@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PACKAGES_READ_FROM_SITE, TESTED_PAGES, WEBSITE_INPUTS, covers, plan, testedAs } from "../ci-changes.mjs";
+import { PACKAGES_READ_FROM_SITE, TESTED_PAGES, WEBSITE_INPUTS, covers, plan, supersededBy, testedAs } from "../ci-changes.mjs";
 import { FILES as DECK } from "../../../apps/website/scripts/sync-app-deck.mjs";
 import { FILES as STORE_CORE } from "../../../apps/website/scripts/sync-store-core.mjs";
 
@@ -298,5 +298,69 @@ describe("a push to dev whose tree a pull request already tested", () => {
     const short = fake({ runs: [[run({ head_branch: "issue-1-x", head_commit: { tree_id: "x".repeat(40) } })], full] });
     expect(await testedAs({ sha, tree, repo, api: short.api })).toBe(null);
     expect(short.asked).toHaveLength(1);
+  });
+});
+
+// A batch of two lands as two pushes 3 to 6 s apart. The first one's run is already going when the second arrives, so
+// the push-dev group cannot cancel it; the second one's run waits in that group and tests a tree that holds the first.
+describe("a push to dev that dev already moved past", () => {
+  const sha = "1".repeat(40);
+  const tip = "2".repeat(40);
+  const ciRun = (over: object = {}) => ({ head_sha: tip, path: ".github/workflows/ci.yml", html_url: "https://github.com/o/r/actions/runs/9", ...over });
+  const fake = ({ heads = [tip], status = "ahead", runs = [ciRun()] }: { heads?: string[]; status?: string; runs?: object[] } = {}) => {
+    const asked: string[] = [];
+    let reads = 0;
+    let settled = 0;
+    const api = async (path: string) => {
+      asked.push(path);
+      if (path === "branches/dev") return { commit: { sha: heads[Math.min(reads++, heads.length - 1)] } };
+      if (path.startsWith("compare/")) return { status };
+      if (path.startsWith("actions/workflows/ci.yml/runs?")) return { workflow_runs: runs };
+      throw new Error(path);
+    };
+    const settle = async () => {
+      settled++;
+    };
+    return { api, asked, settle, settled: () => settled };
+  };
+
+  it("is covered by the newer head's push run, and is planned as tested (only Tauri Backend)", async () => {
+    const { api, asked, settle, settled } = fake();
+    expect(await supersededBy({ sha, api, settle })).toBe("https://github.com/o/r/actions/runs/9");
+    expect(asked).toEqual(["branches/dev", `compare/${sha}...${tip}`, `actions/workflows/ci.yml/runs?event=push&branch=dev&head_sha=${tip}&per_page=10`]);
+    expect(settled()).toBe(0);
+    expect(plan(null, { draft: false, superseded: true })).toMatchObject({ rust: true, website: false, website_e2e: false, app: false, packages: false, full: false, affected: false, tested: true });
+  });
+
+  it("asks once more after settling when its plan starts before the next push lands", async () => {
+    const { api, settle, settled } = fake({ heads: [sha, tip] });
+    expect(await supersededBy({ sha, api, settle })).toBe("https://github.com/o/r/actions/runs/9");
+    expect(settled()).toBe(1);
+  });
+
+  it("runs everything while it is still dev's head: the landing may have stopped there", async () => {
+    const { api, asked, settle, settled } = fake({ heads: [sha] });
+    expect(await supersededBy({ sha, api, settle })).toBe(null);
+    expect(settled()).toBe(1);
+    expect(asked).toEqual(["branches/dev", "branches/dev"]);
+  });
+
+  it("runs everything when dev's head does not hold it (a force push)", async () => {
+    for (const status of ["diverged", "behind", "identical"]) {
+      const { api, settle } = fake({ status });
+      expect(await supersededBy({ sha, api, settle })).toBe(null);
+    }
+  });
+
+  it("runs everything when CI has no push run for the newer head, or only another workflow's", async () => {
+    for (const runs of [[], [ciRun({ head_sha: "3".repeat(40) })], [ciRun({ path: ".github/workflows/other.yml" })]]) {
+      const { api, settle } = fake({ runs });
+      expect(await supersededBy({ sha, api, settle })).toBe(null);
+    }
+  });
+
+  it("says in its plan why it skips, apart from a tested tree", () => {
+    expect(plan(null, { draft: false, superseded: true }).why[0]).toContain("dev already moved past this commit");
+    expect(plan(null, { draft: false, tested: true }).why[0]).toContain("This tree already passed CI Success");
   });
 });

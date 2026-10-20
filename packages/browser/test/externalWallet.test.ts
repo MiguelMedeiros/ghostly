@@ -3,7 +3,8 @@ import { ENDPOINT, ONCHAIN_PROVIDER, type GhostLink, type PaymentTarget } from "
 import { PaymentDesk, type DeskBitcoin, type DeskLightning } from "../src/engine/payments";
 import type { CashuWallet } from "../src/engine/wallet";
 import type { ArkWallet } from "../src/engine/paymentAdapters/arkWallet";
-import type { StoredPayment } from "../src/shared/types";
+import type { StoredPayment, StoredQuote } from "../src/shared/types";
+import { fakeInvoice } from "../src/engine/paymentAdapters/providers/testing";
 import { resetDb, rows, seed } from "./fakes";
 // covers: payments.external, wallet.testnet.receive-held
 
@@ -18,7 +19,7 @@ const INVOICE = "lnbc210n1p4tgljxdqqpp5cy0xj543cj0zcj5r2zhdmpgztxsxlzf7c6yw898qn
 const btc = (address = "bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080"): PaymentTarget => ({ method: "bitcoin", network: "regtest", provider: ONCHAIN_PROVIDER, asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 60_000 });
 const ark = (address: string): PaymentTarget => ({ method: "arkade", network: "regtest", provider: "http://localhost:7070", asset: "BTC", unit: "sat", address, expiresAt: Date.now() + 60_000 });
 
-function setup(stored: StoredPayment[], options: { received?: DeskBitcoin["received"]; arkReceived?: (address: string, amount: number, since: number, claimed: ReadonlySet<string>) => Promise<string | undefined> } = {}) {
+function setup(stored: StoredPayment[], options: { received?: DeskBitcoin["received"]; arkReceived?: (address: string, amount: number, since: number, claimed: ReadonlySet<string>) => Promise<string | undefined>; wallet?: Partial<CashuWallet> } = {}) {
   seed("payments", stored);
   const sent: { kind: string; frame: Record<string, unknown> }[] = [];
   const link = {
@@ -31,7 +32,7 @@ function setup(stored: StoredPayment[], options: { received?: DeskBitcoin["recei
   const lightning: DeskLightning = { createInvoice: vi.fn(), quote: vi.fn(), pay: vi.fn(), check: vi.fn(async () => {}) };
   const bitcoin: DeskBitcoin = { requestTarget: vi.fn(async () => btc()), received: vi.fn(options.received ?? (async () => undefined)) };
   const arkAdapter = { config: { provider: "http://localhost:7070", network: "regtest" }, received: vi.fn(options.arkReceived ?? (async () => undefined)), verifyReceipt: vi.fn(async () => false) };
-  const desk = new PaymentDesk({} as CashuWallet, host, { adapter: arkAdapter } as unknown as ArkWallet, undefined, undefined, lightning, bitcoin);
+  const desk = new PaymentDesk((options.wallet ?? {}) as CashuWallet, host, { adapter: arkAdapter } as unknown as ArkWallet, undefined, undefined, lightning, bitcoin);
   const state = (id: string) => rows<StoredPayment>("payments").find((p) => p.id === id);
   return { desk, link, sent, lightning, bitcoin, arkAdapter, state };
 }
@@ -172,6 +173,80 @@ describe("a test mint's invoice waits for the payer's word", () => {
       else expect(said, "Mainnet").toEqual([]);
       expect(link.sendPayment).toHaveBeenCalledTimes(network === "testnet" ? 1 : 0);
     }
+  });
+
+  it("the payer of an invoice found in a chat says so, with no request: the payee lets go of its held Receive invoice only", async () => {
+    const invoice = fakeInvoice(25, new Uint8Array(32).fill(9));
+    const { desk: payer, sent } = setup([]);
+    payer.sayInvoicePaid("l", ` ${invoice} `);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0].frame).toMatchObject({ amount: { value: "25", asset: "sat" }, endpoint: [ENDPOINT.bolt11, invoice] });
+    expect(sent[0].frame.requestId).toBeUndefined();
+
+    resetDb();
+    const quotes: StoredQuote[] = [
+      { quote: "q-receive", mint: "https://testnut.cashu.space", amount: 25, invoice, createdAt: 0, expiresAt: null, held: true },
+      { quote: "q-request", mint: "https://testnut.cashu.space", amount: 21, invoice: INVOICE, createdAt: 0, expiresAt: null, held: true, paymentId: "r1" },
+    ];
+    const wallet = { quotes: vi.fn(async () => quotes), vouch: vi.fn(async () => true) };
+    const { desk: payee, lightning } = setup([outgoing({ invoice: INVOICE, network: "testnet", linkId: "other" })], { wallet: wallet as unknown as Partial<CashuWallet> });
+    await payee.start();
+    await payee.onPayment("l", sent[0].frame as never);
+    expect(wallet.vouch).toHaveBeenCalledExactlyOnceWith(invoice);
+    expect(lightning.check, "no request is asked about").not.toHaveBeenCalled();
+    // A request's invoice is spoken for by its own contact only; within 3 s an invoice is not looked at again.
+    await payee.onPayment("l", { ...(sent[0].frame as never), endpoint: [ENDPOINT.bolt11, INVOICE] });
+    await payee.onPayment("l", sent[0].frame as never);
+    expect(wallet.vouch).toHaveBeenCalledOnce();
+  });
+
+  it("the payee lets go of two invoices the same contact says it paid one right after the other", async () => {
+    const a = fakeInvoice(25, new Uint8Array(32).fill(1)), b = fakeInvoice(40, new Uint8Array(32).fill(2));
+    const quotes: StoredQuote[] = [
+      { quote: "qa", mint: "https://testnut.cashu.space", amount: 25, invoice: a, createdAt: 0, expiresAt: null, held: true },
+      { quote: "qb", mint: "https://testnut.cashu.space", amount: 40, invoice: b, createdAt: 0, expiresAt: null, held: true },
+    ];
+    const wallet = { quotes: vi.fn(async () => quotes), vouch: vi.fn(async () => true) };
+    const { desk: payee } = setup([], { wallet: wallet as unknown as Partial<CashuWallet> });
+    await payee.start();
+    const said = (invoice: string) => ({ id: invoice.slice(-8), timestamp: 1, amount: { value: "1", asset: "sat" }, endpoint: [ENDPOINT.bolt11, invoice] as [string, string] });
+    await payee.onPayment("l", said(a));
+    await payee.onPayment("l", said(b));
+    expect(wallet.vouch.mock.calls).toEqual([[a], [b]]);
+  });
+
+  it("the payer's word waits for the payee's app: kept while it is away, said when the chat is up again, then never again", async () => {
+    const invoice = fakeInvoice(25, new Uint8Array(32).fill(3));
+    const { desk: payer, link, sent } = setup([]);
+    await payer.start();
+    link.sendPayment.mockRejectedValueOnce(new Error("This contact is away"));
+    payer.sayInvoicePaid("l", invoice);
+    await vi.waitFor(() => expect(link.sendPayment).toHaveBeenCalledOnce());
+    expect(sent).toEqual([]);
+
+    // The app closes and opens again before the contact is back: the word is still kept.
+    const { desk: reopened, sent: later } = setup([]);
+    await reopened.start();
+    await reopened.replay("l");
+    expect(later.map((s) => s.frame.endpoint)).toEqual([[ENDPOINT.bolt11, invoice]]);
+    await reopened.replay("l");
+    expect(later, "said once it got through").toHaveLength(1);
+  });
+
+  it("a payment of a chat's invoice left pending says so once it settles, and nothing when it fails", async () => {
+    const paid = fakeInvoice(25, new Uint8Array(32).fill(4)), failed = fakeInvoice(30, new Uint8Array(32).fill(5));
+    const { desk: payer, sent } = setup([]);
+    await payer.start();
+    payer.sayInvoicePaid("l", paid, { pending: true });
+    payer.sayInvoicePaid("l", failed, { pending: true });
+    await payer.replay("l");
+    expect(sent, "nothing is said before the payment settles").toEqual([]);
+    await payer.onLightningResolved({ invoice: failed }, false);
+    await payer.onLightningResolved({ invoice: paid.toUpperCase() }, true);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0].frame).toMatchObject({ amount: { value: "25", asset: "sat" }, endpoint: [ENDPOINT.bolt11, paid] });
+    await payer.replay("l");
+    expect(sent).toHaveLength(1);
   });
 
   it("a payment left pending says so once it settles", async () => {

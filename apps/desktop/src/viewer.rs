@@ -1,7 +1,10 @@
 //! Windows that show a web app a contact shares.
 //!
 //! The app gets a window and an origin of its own (`ghostly-svc://…`), never
-//! the Ghostly window's: it is remote code. Every request it makes lands here,
+//! the Ghostly window's: it is remote code. The origin names the service, the
+//! contact and a tag of this profile's chat with them (`viewerTag`): every
+//! profile shares the webview's storage, so without the tag a profile, or the
+//! same one after "Clear all data", would find what the app kept for another. Every request it makes lands here,
 //! is handed to the peer in the main window, travels over WebRTC to the contact
 //! and comes back the same way. The window cannot call Tauri commands: the app
 //! declares them in `build.rs`, so each call is checked against the
@@ -31,11 +34,22 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Default)]
 pub struct ViewerState {
-    /// Window label → (peer public key, service id, what a request with no answer says). The window decides where a
-    /// request goes, not its URL.
-    windows: Mutex<HashMap<String, (String, String, String)>>,
+    /// Window label → what it shows. The window decides where a request goes, not its URL.
+    windows: Mutex<HashMap<String, Bound>>,
     pending: Mutex<HashMap<u64, oneshot::Sender<ServiceResponse>>>,
     next_id: AtomicU64,
+}
+
+/// What a viewer window was opened for.
+#[derive(Clone, Debug, PartialEq)]
+struct Bound {
+    /// The contact's public key: where its requests go.
+    peer: String,
+    service: String,
+    /// `<peer>.<tag>`, the part of the origin after the service.
+    site: String,
+    /// What a request with no answer says.
+    unreachable: String,
 }
 
 #[derive(Clone, Serialize)]
@@ -80,13 +94,21 @@ fn is_label_safe(value: &str) -> bool {
         && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
+/// A chat's tag as `viewerTag` makes it: 16 characters of z-base-32.
+fn is_tag(value: &str) -> bool {
+    value.len() == 16
+        && value
+            .chars()
+            .all(|c| "ybndrfg8ejkmcpqxot1uwisza345h769".contains(c))
+}
+
 /// Whether a request is for the one origin its window was opened for.
 ///
 /// Windows and Android cannot register a non-standard scheme, so wry navigates
 /// to `http://<scheme>.<host>` there and turns it back before the handler sees
 /// it; both spellings name the same origin, so both are accepted.
-fn is_own_origin(host: Option<&str>, peer: &str, service: &str) -> bool {
-    let own = format!("{}.{}", service, peer);
+fn is_own_origin(host: Option<&str>, site: &str, service: &str) -> bool {
+    let own = format!("{}.{}", service, site);
     match host {
         Some(host) => {
             host.eq_ignore_ascii_case(&own)
@@ -100,14 +122,14 @@ fn is_own_origin(host: Option<&str>, peer: &str, service: &str) -> bool {
 /// `is_own_origin`, each under its own scheme), an empty frame, or a blob the app made there. Never
 /// the Ghostly window's pages or another website, which would show under the app's
 /// "<title> — Ghostly" window title.
-fn may_navigate(url: &url::Url, peer: &str, service: &str) -> bool {
+fn may_navigate(url: &url::Url, site: &str, service: &str) -> bool {
     let host = url.host_str().unwrap_or_default();
     match url.scheme() {
-        SCHEME => host.eq_ignore_ascii_case(&format!("{}.{}", service, peer)),
-        "http" | "https" => host.eq_ignore_ascii_case(&format!("{}.{}.{}", SCHEME, service, peer)),
+        SCHEME => host.eq_ignore_ascii_case(&format!("{}.{}", service, site)),
+        "http" | "https" => host.eq_ignore_ascii_case(&format!("{}.{}.{}", SCHEME, service, site)),
         "about" => matches!(url.path(), "blank" | "srcdoc"),
         "blob" => url::Url::parse(url.path()).is_ok_and(|inner| {
-            !matches!(inner.scheme(), "blob" | "about") && may_navigate(&inner, peer, service)
+            !matches!(inner.scheme(), "blob" | "about") && may_navigate(&inner, site, service)
         }),
         _ => false,
     }
@@ -115,20 +137,67 @@ fn may_navigate(url: &url::Url, peer: &str, service: &str) -> bool {
 
 /// The address a link the app opens in a new window (`target="_blank"`) goes to in the system browser, the way
 /// the Ghostly window opens links since #415: a plain http(s) link to another site (`commands::is_web_link`).
-/// None for the app's own origin, which has no second window, and for anything that is not a web link.
-fn external_target(url: &url::Url, peer: &str, service: &str) -> Option<String> {
-    if !matches!(url.scheme(), "http" | "https") || may_navigate(url, peer, service) {
+/// None for the app's own origin, which has no second window, for anything that is not a web link, and for a
+/// site on this machine or the local network (`is_local_host`).
+fn external_target(url: &url::Url, site: &str, service: &str) -> Option<String> {
+    if !matches!(url.scheme(), "http" | "https")
+        || may_navigate(url, site, service)
+        || is_local_host(url)
+    {
         return None;
     }
     crate::commands::is_web_link(url.as_str()).then(|| url.as_str().to_string())
+}
+
+/// Whether a link names this machine or the local network: an address that is not public (loopback, private,
+/// link-local, …), `localhost` and its subdomains, an mDNS `.local` name, or a name of one label (`router`, `nas`)
+/// that only a local resolver answers. The contact's page runs on the contact's side; opening such a link in the
+/// person's browser sends it with the browser's cookies, past the browser's own guard for local addresses
+/// (WebView2 opens one from script, with no click). A public name that resolves to a local address is not caught here.
+fn is_local_host(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => !crate::link_preview::is_public(ip.into()),
+        Some(url::Host::Ipv6(ip)) => !crate::link_preview::is_public(ip.into()),
+        Some(url::Host::Domain(name)) => {
+            let name = name.trim_end_matches('.').to_ascii_lowercase();
+            !name.contains('.')
+                || name.ends_with(".localhost")
+                || name.ends_with(".local")
+                || name.ends_with(".internal")
+                || name.ends_with(".home.arpa")
+        }
+        None => true,
+    }
 }
 
 /// Least time between two links a viewer window opens outside. A browser opens a new window only on a click, but
 /// WebView2 lets a page open one from script; this keeps an app from filling the browser with tabs.
 const EXTERNAL_LINK_SPACING: Duration = Duration::from_secs(2);
 
+/// Most links one viewer window opens outside in its life: past them, a page that keeps opening tabs opens no more.
+const EXTERNAL_LINKS_PER_WINDOW: u32 = 20;
+
 fn may_open_now(last: Option<std::time::Instant>, now: std::time::Instant) -> bool {
     last.is_none_or(|last| now.saturating_duration_since(last) >= EXTERNAL_LINK_SPACING)
+}
+
+/// The links a viewer window opened outside: when the last one went, and how many did.
+#[derive(Default)]
+struct OpenedOutside {
+    last: Option<std::time::Instant>,
+    count: u32,
+}
+
+impl OpenedOutside {
+    /// Whether one more may open now; counted when it may.
+    fn take(&mut self, now: std::time::Instant) -> bool {
+        if self.count >= EXTERNAL_LINKS_PER_WINDOW || !may_open_now(self.last, now) {
+            return false;
+        }
+        self.last = Some(now);
+        self.count += 1;
+        true
+    }
 }
 
 /// Whether a download a page asks for may start: never, in a window that shows a contact's page or an
@@ -143,12 +212,14 @@ pub fn open<R: tauri::Runtime>(
     app: &AppHandle<R>,
     peer: String,
     service: String,
+    tag: String,
     title: String,
     unreachable: Option<String>,
 ) -> Result<(), String> {
-    if !is_label_safe(&peer) || !is_label_safe(&service) {
+    if !is_label_safe(&peer) || !is_label_safe(&service) || !is_tag(&tag) {
         return Err("Invalid service".into());
     }
+    let site = format!("{}.{}", peer, tag);
     let state = app.state::<ViewerState>();
     let label = format!("svc-{}", state.next_id.fetch_add(1, Ordering::Relaxed));
     state
@@ -157,28 +228,31 @@ pub fn open<R: tauri::Runtime>(
         .map_err(|_| "viewer state poisoned")?
         .insert(
             label.clone(),
-            (peer.clone(), service.clone(), unreachable_text(unreachable)),
+            Bound {
+                peer,
+                service: service.clone(),
+                site: site.clone(),
+                unreachable: unreachable_text(unreachable),
+            },
         );
 
-    // One origin per contact and service keeps their storage apart.
-    let url = format!("{}://{}.{}/", SCHEME, service, peer)
+    // One origin per contact, service and chat of this profile keeps their storage apart.
+    let url = format!("{}://{}.{}/", SCHEME, service, site)
         .parse()
         .map_err(|e| format!("URL: {}", e))?;
-    let (link_peer, link_service) = (peer.clone(), service.clone());
-    let last_link = Mutex::new(None);
+    let (link_site, link_service) = (site.clone(), service.clone());
+    let opened_outside = Mutex::new(OpenedOutside::default());
     WebviewWindowBuilder::new(app, &label, WebviewUrl::CustomProtocol(url))
         .title(format!("{} — Ghostly", title))
         // The window itself never leaves its origin: a plain link to another site, a script or a frame that
         // goes there is refused, with no click to tell them apart.
-        .on_navigation(move |to| may_navigate(to, &peer, &service))
+        .on_navigation(move |to| may_navigate(to, &site, &service))
         // A link that asks for a new window (`target="_blank"`, a click) opens in the system browser. No window
         // is ever made here.
         .on_new_window(move |to, _| {
-            if let Some(target) = external_target(&to, &link_peer, &link_service) {
-                let now = std::time::Instant::now();
-                if let Ok(mut last) = last_link.lock() {
-                    if may_open_now(*last, now) {
-                        *last = Some(now);
+            if let Some(target) = external_target(&to, &link_site, &link_service) {
+                if let Ok(mut opened) = opened_outside.lock() {
+                    if opened.take(std::time::Instant::now()) {
                         let _ = crate::commands::launch(&target);
                     }
                 }
@@ -215,7 +289,12 @@ pub async fn handle<R: tauri::Runtime>(
     request: Request<Vec<u8>>,
 ) -> Response<Vec<u8>> {
     let state = app.state::<ViewerState>();
-    let Some((peer, service, unreachable)) = state
+    let Some(Bound {
+        peer,
+        service,
+        site,
+        unreachable,
+    }) = state
         .windows
         .lock()
         .ok()
@@ -232,7 +311,7 @@ pub async fn handle<R: tauri::Runtime>(
     // another contact's host would still be served by its own contact, while the
     // document it gets runs in that other contact's origin, with that app's
     // storage and cookies. Refuse before anything of theirs is served there.
-    if !is_own_origin(request.uri().host(), &peer, &service) {
+    if !is_own_origin(request.uri().host(), &site, &service) {
         return plain(
             StatusCode::FORBIDDEN,
             "This window only shows the service it was opened for.",
@@ -295,6 +374,35 @@ pub fn forget_window<R: tauri::Runtime>(app: &AppHandle<R>, label: &str) {
     }
 }
 
+/// The page that opened the viewer windows is gone (a profile switch, a reload, the WebView back after its process
+/// died) or its profile locked: every one of them closes. The page there now would answer their requests over its own
+/// chat with that contact, with the other profile's cookies in the window, and a locked one would go on answering
+/// them behind the lock screen. Their bindings go first, so a request still to come is refused, and every request
+/// still waiting fails at once.
+pub fn close_all<R: tauri::Runtime>(app: &AppHandle<R>) {
+    let Some(state) = app.try_state::<ViewerState>() else {
+        return;
+    };
+    for label in forget_all(&state) {
+        if let Some(window) = app.get_webview_window(&label) {
+            let _ = window.close();
+        }
+    }
+}
+
+/// Drops every binding and every request still waiting, and names the windows.
+fn forget_all(state: &ViewerState) -> Vec<String> {
+    let labels = state
+        .windows
+        .lock()
+        .map(|mut windows| windows.drain().map(|(label, _)| label).collect())
+        .unwrap_or_default();
+    if let Ok(mut pending) = state.pending.lock() {
+        pending.clear();
+    }
+    labels
+}
+
 /// A viewer window is one contact's app in one origin. What it asks for has to
 /// be that origin, or its contact would be serving code into another one.
 #[cfg(test)]
@@ -305,6 +413,10 @@ mod tests {
 
     const PEER: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const OTHER: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    /// PEER's chat with this profile (`<peer>.<tag>`), and the same contact's chat with another profile.
+    const SITE: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ybndrfg8ejkmcpqx";
+    const OTHER_PROFILE: &str =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.ot1uwisza345h769";
 
     fn app() -> tauri::App<MockRuntime> {
         mock_builder()
@@ -318,7 +430,12 @@ mod tests {
         let app = app();
         app.state::<ViewerState>().windows.lock().unwrap().insert(
             "svc-1".into(),
-            (PEER.into(), "atlas".into(), UNREACHABLE.into()),
+            Bound {
+                peer: PEER.into(),
+                service: "atlas".into(),
+                site: SITE.into(),
+                unreachable: UNREACHABLE.into(),
+            },
         );
         let request = Request::builder()
             .uri(url)
@@ -333,57 +450,66 @@ mod tests {
         // Navigated or framed by the app this window shows: served by PEER, but
         // running as OTHER's app, which is where that app keeps its data.
         assert_eq!(
-            status_for(&format!("{}://atlas.{}/", SCHEME, OTHER)),
+            status_for(&format!("{}://atlas.{}.ybndrfg8ejkmcpqx/", SCHEME, OTHER)),
             StatusCode::FORBIDDEN
         );
         // The same contact, a service the window was not opened for.
         assert_eq!(
-            status_for(&format!("{}://notes.{}/", SCHEME, PEER)),
+            status_for(&format!("{}://notes.{}/", SCHEME, SITE)),
             StatusCode::FORBIDDEN
         );
+        // The same contact and service as another profile's chat sees them, or with no chat at all: that
+        // origin's storage is another profile's, or what a profile cleared or deleted left behind.
+        for elsewhere in [OTHER_PROFILE, PEER] {
+            assert_eq!(
+                status_for(&format!("{}://atlas.{}/", SCHEME, elsewhere)),
+                StatusCode::FORBIDDEN,
+                "{elsewhere}"
+            );
+        }
     }
 
     #[test]
     fn its_own_origin_is_recognised() {
-        let own = format!("atlas.{}", PEER);
-        assert!(is_own_origin(Some(&own), PEER, "atlas"));
+        let own = format!("atlas.{}", SITE);
+        assert!(is_own_origin(Some(&own), SITE, "atlas"));
         // How Windows and Android spell the same origin.
         assert!(is_own_origin(
             Some(&format!("{}.{}", SCHEME, own)),
-            PEER,
+            SITE,
             "atlas"
         ));
         assert!(!is_own_origin(
-            Some(&format!("atlas.{}", OTHER)),
-            PEER,
+            Some(&format!("atlas.{}.ybndrfg8ejkmcpqx", OTHER)),
+            SITE,
             "atlas"
         ));
-        assert!(!is_own_origin(Some(&format!("evil{}", own)), PEER, "atlas"));
+        assert!(!is_own_origin(Some(&format!("evil{}", own)), SITE, "atlas"));
         assert!(!is_own_origin(
             Some(&format!("{}.evil.test", own)),
-            PEER,
+            SITE,
             "atlas"
         ));
-        assert!(!is_own_origin(None, PEER, "atlas"));
+        assert!(!is_own_origin(None, SITE, "atlas"));
     }
 
     fn may(url: &str) -> bool {
-        may_navigate(&url::Url::parse(url).unwrap(), PEER, "atlas")
+        may_navigate(&url::Url::parse(url).unwrap(), SITE, "atlas")
     }
 
     #[test]
     fn the_window_stays_on_its_own_origin() {
         for own in [
-            format!("{SCHEME}://atlas.{PEER}/"),
-            format!("{SCHEME}://atlas.{PEER}/maps/2?x=1#top"),
-            format!("{SCHEME}://ATLAS.{PEER}/"),
+            format!("{SCHEME}://atlas.{SITE}/"),
+            format!("{SCHEME}://atlas.{SITE}/maps/2?x=1#top"),
+            format!("{SCHEME}://ATLAS.{SITE}/"),
             // How Windows and Android spell it.
-            format!("http://{SCHEME}.atlas.{PEER}/page"),
-            format!("https://{SCHEME}.atlas.{PEER}/page"),
+            format!("http://{SCHEME}.atlas.{SITE}/page"),
+            format!("https://{SCHEME}.atlas.{SITE}/page"),
             // Frames the app makes of its own.
             "about:blank".into(),
             "about:srcdoc".into(),
-            format!("blob:{SCHEME}://atlas.{PEER}/1b4e28ba-2fa1-11d2-883f-0016d3cca427"),
+            format!("blob:{SCHEME}://atlas.{SITE}/1b4e28ba-2fa1-11d2-883f-0016d3cca427"),
         ] {
             assert!(may(&own), "{own}");
         }
@@ -398,22 +524,22 @@ mod tests {
             "javascript:alert(1)".into(),
             "about:config".into(),
             // Another contact's, or another app of the same contact.
-            format!("{SCHEME}://atlas.{OTHER}/"),
-            format!("{SCHEME}://notes.{PEER}/"),
-            format!("{SCHEME}://atlas.{PEER}.evil.test/"),
+            format!("{SCHEME}://atlas.{OTHER}.ybndrfg8ejkmcpqx/"),
+            format!("{SCHEME}://notes.{SITE}/"),
+            format!("{SCHEME}://atlas.{SITE}.evil.test/"),
             // The Windows spelling is wry's alone: under the custom scheme it is another host.
-            format!("{SCHEME}://{SCHEME}.atlas.{PEER}/"),
+            format!("{SCHEME}://{SCHEME}.atlas.{SITE}/"),
             // A real website whose name happens to spell the origin.
-            format!("https://atlas.{PEER}/"),
+            format!("https://atlas.{SITE}/"),
             "blob:https://example.com/1b4e28ba-2fa1-11d2-883f-0016d3cca427".into(),
-            format!("blob:{SCHEME}://atlas.{OTHER}/1b4e28ba-2fa1-11d2-883f-0016d3cca427"),
+            format!("blob:{SCHEME}://atlas.{OTHER}.ybndrfg8ejkmcpqx/1b4e28ba-2fa1-11d2-883f-0016d3cca427"),
         ] {
             assert!(!may(&elsewhere), "{elsewhere}");
         }
     }
 
     fn outside(url: &str) -> Option<String> {
-        external_target(&url::Url::parse(url).unwrap(), PEER, "atlas")
+        external_target(&url::Url::parse(url).unwrap(), SITE, "atlas")
     }
 
     #[test]
@@ -435,9 +561,9 @@ mod tests {
         );
         for kept in [
             // The app's own origin has no second window; Ghostly's own pages never open from here.
-            format!("{SCHEME}://atlas.{PEER}/other"),
-            format!("http://{SCHEME}.atlas.{PEER}/page"),
-            format!("https://{SCHEME}.atlas.{PEER}/page"),
+            format!("{SCHEME}://atlas.{SITE}/other"),
+            format!("http://{SCHEME}.atlas.{SITE}/page"),
+            format!("https://{SCHEME}.atlas.{SITE}/page"),
             "tauri://localhost/".into(),
             "file:///etc/passwd".into(),
             "javascript:alert(1)".into(),
@@ -451,8 +577,52 @@ mod tests {
     }
 
     #[test]
+    fn a_new_window_link_to_this_machine_or_the_local_network_opens_nowhere() {
+        for local in [
+            "http://127.0.0.1:8080/admin",
+            "http://127.1/",
+            "http://2130706433/",
+            "http://0.0.0.0:3000/",
+            "http://[::1]:9000/",
+            "http://[::ffff:127.0.0.1]/",
+            "http://[fe80::1]/",
+            "http://[fd00::1]/",
+            "http://192.168.1.1/cgi-bin/reboot",
+            "https://10.0.0.5/",
+            "http://172.16.0.1/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://100.81.12.32/",
+            "http://localhost:5173/",
+            "http://LOCALHOST./",
+            "http://0123456789abcdef0123456789abcdef.localhost:4000/",
+            "http://printer.local/",
+            "http://router/",
+            "http://metadata.google.internal/",
+            "http://nas.home.arpa/",
+        ] {
+            assert_eq!(outside(local), None, "{local}");
+        }
+        assert!(outside("https://8.8.8.8/").is_some());
+        assert!(outside("https://example.com/").is_some());
+    }
+
+    #[test]
+    fn a_window_opens_at_most_twenty_links_outside_in_its_life() {
+        let mut opened = OpenedOutside::default();
+        let start = std::time::Instant::now();
+        for n in 0..EXTERNAL_LINKS_PER_WINDOW {
+            assert!(opened.take(start + EXTERNAL_LINK_SPACING * n), "{n}");
+        }
+        assert!(!opened.take(start + EXTERNAL_LINK_SPACING * 100));
+        // And the spacing still holds before the cap.
+        let mut fresh = OpenedOutside::default();
+        assert!(fresh.take(start));
+        assert!(!fresh.take(start + Duration::from_millis(1999)));
+    }
+
+    #[test]
     fn every_download_a_page_asks_for_is_refused() {
-        let url: url::Url = format!("{SCHEME}://atlas.{PEER}/report.pdf")
+        let url: url::Url = format!("{SCHEME}://atlas.{SITE}/report.pdf")
             .parse()
             .unwrap();
         let mut destination = std::path::PathBuf::from("/home/someone/Downloads/report.pdf");
@@ -489,6 +659,7 @@ mod routing_tests {
     use tauri::Listener;
 
     const PEER: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const TAG: &str = "ybndrfg8ejkmcpqx";
 
     fn app() -> tauri::App<MockRuntime> {
         mock_builder()
@@ -500,7 +671,12 @@ mod routing_tests {
     fn bind(app: &tauri::App<MockRuntime>, label: &str) {
         app.state::<ViewerState>().windows.lock().unwrap().insert(
             label.into(),
-            (PEER.into(), "atlas".into(), UNREACHABLE.into()),
+            Bound {
+                peer: PEER.into(),
+                service: "atlas".into(),
+                site: format!("{PEER}.{TAG}"),
+                unreachable: UNREACHABLE.into(),
+            },
         );
     }
 
@@ -526,20 +702,34 @@ mod routing_tests {
     fn opens_a_window_of_its_own_only_for_a_valid_contact_and_service() {
         let app = app();
         let long = "a".repeat(65);
-        for (peer, service) in [
-            ("", "atlas"),
-            (PEER, ""),
-            ("peer.evil", "atlas"),
-            (PEER, "atlas/x"),
-            (PEER, "at las"),
-            (PEER, "ätlas"),
-            (PEER, "atlas_1"),
-            (long.as_str(), "atlas"),
+        for (peer, service, tag) in [
+            ("", "atlas", TAG),
+            (PEER, "", TAG),
+            ("peer.evil", "atlas", TAG),
+            (PEER, "atlas/x", TAG),
+            (PEER, "at las", TAG),
+            (PEER, "ätlas", TAG),
+            (PEER, "atlas_1", TAG),
+            (long.as_str(), "atlas", TAG),
+            // A chat's tag is 16 characters of z-base-32, nothing else.
+            (PEER, "atlas", ""),
+            (PEER, "atlas", "ybndrfg8ejkmcpq"),
+            (PEER, "atlas", "ybndrfg8ejkmcpqxo"),
+            (PEER, "atlas", "ybndrfg8ejkmcpq2"),
+            (PEER, "atlas", "ybndrfg8.jkmcpqx"),
         ] {
             assert_eq!(
-                open(app.handle(), peer.into(), service.into(), "t".into(), None).unwrap_err(),
+                open(
+                    app.handle(),
+                    peer.into(),
+                    service.into(),
+                    tag.into(),
+                    "t".into(),
+                    None
+                )
+                .unwrap_err(),
                 "Invalid service",
-                "{peer} {service}"
+                "{peer} {service} {tag}"
             );
         }
         assert!(app.webview_windows().is_empty());
@@ -548,6 +738,7 @@ mod routing_tests {
             app.handle(),
             PEER.into(),
             "atlas".into(),
+            TAG.into(),
             "Atlas".into(),
             None,
         )
@@ -556,6 +747,7 @@ mod routing_tests {
             app.handle(),
             PEER.into(),
             "notes".into(),
+            TAG.into(),
             "Notes".into(),
             Some("Este serviço não está acessível.".into()),
         )
@@ -566,24 +758,26 @@ mod routing_tests {
         assert_eq!(labels, ["svc-0", "svc-1"]);
         assert_eq!(
             windows["svc-0"].url().unwrap().as_str(),
-            format!("{SCHEME}://atlas.{PEER}/")
+            format!("{SCHEME}://atlas.{PEER}.{TAG}/")
         );
         let bound = app.state::<ViewerState>().windows.lock().unwrap().clone();
         assert_eq!(
             bound["svc-0"],
-            (
-                PEER.to_string(),
-                "atlas".to_string(),
-                UNREACHABLE.to_string()
-            )
+            Bound {
+                peer: PEER.into(),
+                service: "atlas".into(),
+                site: format!("{PEER}.{TAG}"),
+                unreachable: UNREACHABLE.into(),
+            }
         );
         assert_eq!(
             bound["svc-1"],
-            (
-                PEER.to_string(),
-                "notes".to_string(),
-                "Este serviço não está acessível.".to_string()
-            )
+            Bound {
+                peer: PEER.into(),
+                service: "notes".into(),
+                site: format!("{PEER}.{TAG}"),
+                unreachable: "Este serviço não está acessível.".into(),
+            }
         );
     }
 
@@ -592,16 +786,17 @@ mod routing_tests {
         let app = app();
         app.state::<ViewerState>().windows.lock().unwrap().insert(
             "svc-1".into(),
-            (
-                PEER.into(),
-                "atlas".into(),
-                unreachable_text(Some("Este serviço não está acessível.".into())),
-            ),
+            Bound {
+                peer: PEER.into(),
+                service: "atlas".into(),
+                site: format!("{PEER}.{TAG}"),
+                unreachable: unreachable_text(Some("Este serviço não está acessível.".into())),
+            },
         );
         let response = tauri::async_runtime::block_on(handle(
             app.handle().clone(),
             "svc-1".into(),
-            request("GET", &format!("{SCHEME}://atlas.{PEER}/"), b""),
+            request("GET", &format!("{SCHEME}://atlas.{PEER}.{TAG}/"), b""),
         ));
         assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
         assert_eq!(
@@ -635,7 +830,7 @@ mod routing_tests {
             "svc-1".into(),
             request(
                 "POST",
-                &format!("{SCHEME}://atlas.{PEER}/api/items?x=1"),
+                &format!("{SCHEME}://atlas.{PEER}.{TAG}/api/items?x=1"),
                 b"hi",
             ),
         ));
@@ -680,7 +875,7 @@ mod routing_tests {
         let response = tauri::async_runtime::block_on(handle(
             app.handle().clone(),
             "svc-1".into(),
-            request("GET", &format!("http://{SCHEME}.atlas.{PEER}/"), b""),
+            request("GET", &format!("http://{SCHEME}.atlas.{PEER}.{TAG}/"), b""),
         ));
         assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
         let carried = asked.try_recv().unwrap();
@@ -711,7 +906,7 @@ mod routing_tests {
             let pending = tauri::async_runtime::spawn(handle(
                 app.handle().clone(),
                 "svc-1".into(),
-                request("GET", &format!("{SCHEME}://atlas.{PEER}/"), b""),
+                request("GET", &format!("{SCHEME}://atlas.{PEER}.{TAG}/"), b""),
             ));
             let id = asked.recv_timeout(Duration::from_secs(5)).unwrap()["id"]
                 .as_u64()
@@ -763,7 +958,59 @@ mod routing_tests {
             let response = tauri::async_runtime::block_on(handle(
                 app.handle().clone(),
                 label.into(),
-                request("GET", &format!("{SCHEME}://atlas.{PEER}/"), b""),
+                request("GET", &format!("{SCHEME}://atlas.{PEER}.{TAG}/"), b""),
+            ));
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "{label}");
+        }
+        assert!(asked.try_recv().is_err(), "nothing reached the main window");
+    }
+
+    #[test]
+    fn a_new_page_or_the_lock_closes_every_window_and_its_waiting_requests_fail() {
+        let app = app();
+        open(
+            app.handle(),
+            PEER.into(),
+            "atlas".into(),
+            TAG.into(),
+            "Atlas".into(),
+            None,
+        )
+        .unwrap();
+        bind(&app, "svc-9");
+        let asked = requests(&app);
+        let waiting = tauri::async_runtime::spawn(handle(
+            app.handle().clone(),
+            "svc-9".into(),
+            request("GET", &format!("{SCHEME}://atlas.{PEER}.{TAG}/"), b""),
+        ));
+        let carried = asked.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        close_all(app.handle());
+
+        // Told at once, not after the timeout, and the answer of the page there now goes nowhere.
+        let started = std::time::Instant::now();
+        let response = tauri::async_runtime::block_on(waiting).unwrap();
+        assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+        assert!(started.elapsed() < REQUEST_TIMEOUT / 2);
+        respond(
+            app.handle(),
+            carried["id"].as_u64().unwrap(),
+            ServiceResponse {
+                status: 200,
+                headers: vec![],
+                body_b64: String::new(),
+            },
+        );
+        let state = app.state::<ViewerState>();
+        assert!(state.windows.lock().unwrap().is_empty());
+        assert!(state.pending.lock().unwrap().is_empty());
+        // Its next request (a click, a poll) is refused and never reaches the page.
+        for label in ["svc-0", "svc-9"] {
+            let response = tauri::async_runtime::block_on(handle(
+                app.handle().clone(),
+                label.into(),
+                request("GET", &format!("{SCHEME}://atlas.{PEER}.{TAG}/"), b""),
             ));
             assert_eq!(response.status(), StatusCode::FORBIDDEN, "{label}");
         }
@@ -785,7 +1032,17 @@ mod download_tests {
         let saved = crate::test_support::saved_by_a_window(
             SCHEME,
             |app| app.manage(ViewerState::default()),
-            |app| open(app, PEER.into(), "atlas".into(), "Atlas".into(), None).unwrap(),
+            |app| {
+                open(
+                    app,
+                    PEER.into(),
+                    "atlas".into(),
+                    "ybndrfg8ejkmcpqx".into(),
+                    "Atlas".into(),
+                    None,
+                )
+                .unwrap()
+            },
         );
         assert_eq!(saved, Vec::<String>::new());
     }

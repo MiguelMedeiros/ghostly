@@ -35,6 +35,10 @@ export class PairedFiles {
   private closed = false;
   constructor(private channel: FrameChannel, private events: FileTransferEvents & {
     onStored?(file: FileInfo): Promise<string | undefined>;
+    /** files/3 is on for this session: it replaces files/2, so a new file announced here is refused (WISP 501). */
+    replaced?(): boolean;
+    /** The room this device has left for files, or null when it does not say: a larger file is refused. */
+    room?(): Promise<number | null>;
   }) {}
 
   /** A file going either way on this session right now. */
@@ -120,6 +124,7 @@ export class PairedFiles {
           this.sendFrame({ t: "pf-ack", id, phase: "start", offset: 0 }); return;
         }
         if (active) throw new Error("Duplicate active file");
+        if (this.events.replaced?.()) throw new Error("files/3 replaces files/2 on this session");
         if (typeof frame.name !== "string" || frame.name.length > 1000 || typeof frame.mime !== "string" || frame.mime.length > 130 ||
           typeof frame.size !== "number" || !Number.isSafeInteger(frame.size) || frame.size < 0 || frame.size > LIMITS.maxFileBytes ||
           typeof frame.timestamp !== "number" || !Number.isSafeInteger(frame.timestamp) || frame.timestamp <= 0 ||
@@ -138,6 +143,9 @@ export class PairedFiles {
         if (forwarded) file.forwarded = forwarded;
         const stored = await this.events.onStored?.(file);
         if (this.closed) return;
+        const room = stored ? null : await this.events.room?.().catch(() => null) ?? null;
+        if (this.closed) return;
+        if (room !== null && file.size > room) throw new Error("No room for this file");
         const sink = stored ? null : this.events.onIncoming(file);
         if (!stored && (!sink || typeof sink === "string")) throw new Error(typeof sink === "string" ? sink : "File refused");
         const entry: Incoming = { file, sink: sink as FileSink | null, stored, hash: sha256.create(), offset: 0 };

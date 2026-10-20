@@ -222,7 +222,7 @@ A text is sent exactly as typed: nothing below changes the wire, and an app that
 | `# `, `## `, `### ` at the start of a line | A bold line, a little larger |
 | `[text](https://…)` | The text as a link |
 
-A link from `[text](…)` MUST be http or https; anything else stays text. The link's host SHOULD be shown on hover or long press. When the text names a host other than the link's (or one the link's host is not under), or holds an invisible or direction character, the receiver SHOULD show the address instead of the text, as the browser reads it (punycode for a non-ASCII host). A preview of a message on one line keeps a list's markers ("•" for any bullet, the author's numbers) and shows a link as its text.
+A link from `[text](…)` MUST be http or https; anything else stays text. The link's host SHOULD be shown on hover or long press. When the text names a host other than the link's (or one the link's host is not under), or holds an invisible or direction character, the receiver SHOULD show the address instead of the text, as the browser reads it (punycode for a non-ASCII host). An address shown, from `[text](…)` or typed in the text, SHOULD leave out a user part before its host (`https://name@host/` shows as `https://host/`), so the host it reads as is the one it opens. A preview of a message on one line keeps a list's markers ("•" for any bullet, the author's numbers) and shows a link as its text.
 
 ## Edits
 
@@ -237,6 +237,21 @@ A person can edit a text they sent in a 1:1 chat (revision 0.2.9) or a group (re
 - **The author's side.** The new text shows at once, with an "edited" mark beside the time; until the contact confirms the latest edit the mark says it has not been shown yet (in a group: until it was sent to the group). The edit is started from the message's ⋮ (Edit) or with ↑ in an empty composer (the last text of mine); the composer then shows what is being edited, Enter saves, and ✕ or Escape leaves the message as it was and gives back the draft.
 
 **Older apps.** An app from before this revision gets nothing: it offers no `edit/1`, so no edit is sent to it, and it keeps the text it has. The edit waits on the author's side and goes once the contact's app shows edits. No second message with the new text is sent instead: a bot rewriting a status would fill an older app's chat with copies. In a group, a member on an older app drops the edit frame and keeps showing the original text; the members on newer apps see the edit.
+
+## Delete for everyone
+
+The author of a message can take it off every member's device (revision 2026-10-18): a text, a status card ([405](405-status-cards.md#deleting-a-cards-message-for-everyone); a card alone is taken back as a removed card, [405](405-status-cards.md#removing-a-card)), a file or a voice message, in a 1:1 chat or a group. Deleting a message only here stays what it was: it forgets this device's copy and tells nobody.
+
+A removal is the author's **last edit** of the message, flagged `rm`: the edit frame of each path, with `rm: true` beside its text ([401](401-paired-chat.md#edits), [mesh](902-group-mesh.md#edits), [community](903-group-community.md#edits)). So it goes where an edit goes and is authenticated, ordered, sent again and caught up as one is. Its text is a fallback only: what an app from before this revision shows as the message's edited text. Ghostly writes `🗑 Message removed`.
+
+- **Who.** Only the author, as for an edit: the reader looks the id up among that author's messages of this chat only. A removal of anyone else's message finds nothing and changes nothing; in a community the admin removes nobody's message either.
+- **What.** Any message of the author's that has an id a reply can name ([Replies](#replies)): a text, a card, a file, a voice message. Not a notice, a call line, a payment or a payment request: a bearer token cannot be taken back.
+- **The number.** One past the message's last edit, as any edit. A removal holds whatever bound the message's edits had (100 for a text, 5,000 for a card): its number may be one past it, at most **5,001**.
+- **Final.** A reader that takes a removal keeps no text, version, card, preview, mention, reaction or file of the message, and drops a download of it in progress. It keeps only a **tombstone**: the message's id among those deleted on this device, as a message deleted here keeps (the newest **500** per chat), so a late copy of the message (a catch-up, a hold, the DHT floor) and an edit numbered before or after it bring nothing back. A removal of a message not here yet is kept as its tombstone at once, so the message, when it comes, is taken as gone. A tombstone is shown as nothing: the message is gone from the timeline, the chat list's line, search, the Tasks panel and board, and a quote of it finds no original, as for a message deleted here. It does not ring, count as unread or move the chat.
+- **The author's side.** The message goes from the author's timeline at once, as the same tombstone, which carries the removal until it is confirmed (1:1) or said to every member (a group), across restarts. A removal made while an edit of the message waits replaces it.
+- **Delivery.** As an edit: on the live session once both apps say `edit/1`, sent again until confirmed; to every member of a private group and again to one whose edge opens; with a community's catch-up. It never goes on the DHT floor ([403](403-dht-text.md#edits)): it waits for the live session, as a card's update does.
+
+**Older apps.** An app from before this revision takes a removal as an edit and shows its fallback text in place of the message, marked edited, keeping the earlier version in its history; an edit of a card message numbered past 100 it drops, keeping the card it last took. Nothing in a removal makes an older app keep less than it did: deleting for everyone asks every app to forget, and a member's own copy, a screenshot or an older app is not something a sender can take back. The app says so where the person removes a message.
 
 ## Forwards
 

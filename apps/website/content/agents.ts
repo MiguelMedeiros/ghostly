@@ -34,6 +34,7 @@ export const LINKS = {
   readme: `${DOCS}/packages/cli/README.md`,
   turns: `${DOCS}/docs/CLI.md#agent-turns`,
   claude: `${DOCS}/packages/cli/examples/claude-code-agent.sh`,
+  voiceAgent: "https://github.com/MiguelMedeiros/ghostly-voice-agent",
   cards: "/wisps/405-status-cards",
   buttons: "/wisps/406-message-buttons",
 } as const;
@@ -241,6 +242,8 @@ export const agents = {
     cliGuide: "CLI guide",
     readme: "Every command (CLI README)",
     claude: "Claude Code example",
+    voiceAgent: "Voice agent: it answers your calls",
+    faq: "Agents FAQ",
     cli: "The CLI",
     wisp: "WISP 1100: the contract",
   },

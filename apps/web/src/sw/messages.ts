@@ -17,7 +17,9 @@ export type FromWorker =
   /** Asked for a share, and there is none (it was already taken, or it timed out). */
   | { type: "share-none" }
   /** A wake-up notification was tapped: open this chat, in this profile (switching to it when another is open). */
-  | { type: "open-chat"; path: string; profile: string };
+  | { type: "open-chat"; path: string; profile: string }
+  /** A hashed file of this build is gone from the server: a deploy replaced it, so the page looks for the new version now. */
+  | { type: "build-gone" };
 
 /** How long a shared item waits for the app to ask for it. Past that it is dropped, never stored. */
 export const SHARE_HOLD_MS = 2 * 60_000;

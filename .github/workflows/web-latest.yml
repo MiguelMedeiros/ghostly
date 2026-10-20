@@ -7,9 +7,7 @@ name: Web image latest
 # alone. It moves only to GitHub's Latest release, and never back: a release
 # with a published one above it is refused (tools/scripts/web-latest.mjs).
 #
-# A person publishing the draft (docs/RELEASING.md, step 4) starts it. A
-# security autorelease publishes with the workflow token, which starts nothing,
-# so security-autorelease.yml dispatches this workflow itself. By hand:
+# A person publishing the draft (docs/RELEASING.md, step 4) starts it. By hand:
 #   gh workflow run web-latest.yml -f tag=v1.0.0
 # The image `:<tag>` has to exist: when the release is published before the
 # Release workflow's build-web is done, run it again once it is.

@@ -82,6 +82,15 @@ describe("the argument parser", () => {
     expect(() => parseArgs(["group", "--nope"], {}, (i) => i === 0)).toThrow(/Unknown option --nope/);
   });
 
+  it("says to put -- before a two-character word that starts with a dash, as it does for a longer one", () => {
+    const send = TEXT_COMMANDS.send;
+    for (const word of ["-1", "-5", "-ph"]) {
+      expect(() => parseArgs(["bob", word, "degrees"], send.options, idSlot(send)), word)
+        .toThrow(new CliError("usage", `Unknown option ${word} (put -- before text that starts with a dash)`));
+    }
+    expect(parseArgs(["bob", "--", "-1"], send.options, idSlot(send)).positionals).toEqual(["bob", "-1"]);
+  });
+
   it("knows booleans, --no-, short options, lists and global options anywhere", () => {
     const spec = { force: { type: "boolean" as const, description: "" }, mention: { type: "list" as const, description: "" } };
     expect(parseArgs(["-p", "bot", "g", "--mention", "a", "--no-force", "--mention", "b", "--pretty"], spec).options).toEqual({ profile: "bot", mention: ["a", "b"], force: false, pretty: true });
@@ -102,6 +111,29 @@ describe("the argument parser", () => {
     // `listen` parses with its own spec in main.ts, through the same parser.
     expect(() => parseArgs(["--since", ""], { since: { type: "number", description: "" } })).toThrow(/^--since takes a number, not ""$/);
     expect(parseArgs(["--left", "0"], COMMANDS["usage send"].options!).options).toEqual({ left: 0 });
+  });
+
+  it("refuses a word a flag does not take as a usage error that names the flag and its words, before the profile opens", () => {
+    // Before, the API answered after the profile opened: bad_request (exit 1), "network must be one of mainnet, testnet".
+    const refused = (name: string, argv: string[], message: string) => {
+      const command = COMMANDS[name] ?? TEXT_COMMANDS[name];
+      expect(() => parseArgs(["x", ...argv], command.options!, idSlot(command)), `${name} ${argv.join(" ")}`).toThrow(new CliError("usage", message));
+    };
+    for (const name of ["wallet list", "wallet history", "wallet create", "wallet remove", "wallet address", "wallet receive", "pay", "chat pay", "chat request", "lightning default"])
+      refused(name, ["--network", "weird"], "--network takes mainnet or testnet, not \"weird\"");
+    refused("wallet list", ["--network=Testnet"], "--network takes mainnet or testnet, not \"Testnet\"");
+    refused("wallet list", ["--network", ""], "--network takes mainnet or testnet, not \"\"");
+    refused("send", ["--wait", "weird"], "--wait takes none, sent or delivered, not \"weird\"");
+    refused("group send", ["--wait", "delivered"], "--wait takes none or sent, not \"delivered\"");
+    refused("edit", ["--wait", "sent"], "--wait takes none or confirmed, not \"sent\"");
+    refused("task update", ["t", "--wait", "delivered"], "--wait takes none, confirmed or sent, not \"delivered\"");
+    refused("chat wait", ["--until", "weird"], "--until takes live, text or paired, not \"weird\"");
+    refused("chat request", ["1", "--rail", "onchain"], "--rail takes cashu or lightning, not \"onchain\"");
+    refused("chat pay-request", ["p", "--via", "cashu"], "--via takes lightning, not \"cashu\"");
+    // The words each takes still go through as given.
+    expect(parseArgs(["--network", "mainnet"], COMMANDS["wallet list"].options!).options).toEqual({ network: "mainnet" });
+    expect(parseArgs(["--wait=delivered"], TEXT_COMMANDS.send.options!).options).toEqual({ wait: "delivered" });
+    expect(parseArgs(["--until", "paired"], COMMANDS["chat wait"].options!).options).toEqual({ until: "paired" });
   });
 
   it("moves global options given before the command after it", () => {
@@ -154,6 +186,25 @@ describe("the argument parser", () => {
     expect(() => positionals(COMMANDS["file accept"], [])).toThrow(/Missing <file>/);
     expect(() => positionals(COMMANDS["file accept"], ["a", "b", "c"])).toThrow(/Too many/);
     expect(() => positionals(COMMANDS["chat show"], ["a", "b"])).toThrow(/Too many/);
+  });
+
+  it("refuses a word an argument does not take as a usage error that names the argument and its words, before the profile opens", () => {
+    // Before, the API answered after the profile opened: bad_request (exit 1), "type must be one of cashu, lightning, …".
+    const refused = (name: string, values: string[], message: string) =>
+      expect(() => positionals(COMMANDS[name], values), `${name} ${values.join(" ")}`).toThrow(new CliError("usage", message));
+    const types = "cashu, lightning, arkade, bark, spark, bitcoin, fedimint or usdt";
+    for (const name of ["wallet create", "wallet remove", "wallet faucet"]) refused(name, ["weird"], `<type> takes ${types}, not "weird"`);
+    refused("wallet create", ["Cashu"], `<type> takes ${types}, not "Cashu"`);
+    refused("wallet address", ["cashu"], "<type> takes bitcoin, arkade, spark or usdt, not \"cashu\"");
+    refused("chat accept", ["bob", "weird"], "<method> takes cashu, lightning, arkade, usdt, bark, bitcoin, fedimint or spark, not \"weird\"");
+    refused("chat transport", ["bob", "weird"], "<transport> takes auto, dht, webrtc, iroh, hyperdht, webrtc/1, iroh/1 or hyperdht/1, not \"weird\"");
+    refused("chat transport", ["bob", "constructor"], "<transport> takes auto, dht, webrtc, iroh, hyperdht, webrtc/1, iroh/1 or hyperdht/1, not \"constructor\"");
+    // A missing or "" one is still the missing argument, and the words each takes go through as given.
+    expect(() => positionals(COMMANDS["wallet create"], [""])).toThrow(/^Missing <type>/);
+    expect(positionals(COMMANDS["wallet create"], ["spark"])).toEqual({ type: "spark" });
+    expect(positionals(COMMANDS["wallet address"], ["usdt"])).toEqual({ type: "usdt" });
+    expect(positionals(COMMANDS["chat accept"], ["bob", "lightning"])).toEqual({ chat: "bob", method: "lightning" });
+    expect(positionals(COMMANDS["chat transport"], ["bob", "iroh/1"])).toEqual({ chat: "bob", transport: "iroh/1" });
   });
 
   it("a required positional given as \"\" is the usage error a missing one is, before the profile opens, in every command", () => {
@@ -275,6 +326,14 @@ describe("the argument parser", () => {
       expect(params(name, [target, "--for", "600"])).toMatchObject({ for: 600, stop: false });
       expect(params(name, [target, "--stop"])).toMatchObject({ for: undefined, stop: true });
     }
+    // A rate no call takes: before, the API's own check answered after the profile opened ("rate must be …", exit 1),
+    // and `call answer` only once a call rang.
+    for (const [name, argv] of [["call start", ["alice"]], ["call answer", []], ["call answer", ["alice"]], ["call auto", ["on"]]] as const) {
+      usage(name, [...argv, "--rate", "44100"], "--rate takes 8000, 12000, 16000, 24000 or 48000, not 44100");
+      usage(name, [...argv, "--rate", "0"], "--rate takes 8000, 12000, 16000, 24000 or 48000, not 0");
+      expect(params(name, [...argv, "--rate", "16000"])).toMatchObject({ rate: 16000 });
+      expect(params(name, [...argv])).toMatchObject({ rate: undefined });
+    }
     // Each of the three is enough for an update, and a code is taken as typed.
     expect(params("button update", ["alice", "m1", "--chosen", "yes"])).toMatchObject({ chosen: "yes", close: false });
     expect(params("button update", ["alice", "m1", "--close"])).toMatchObject({ close: true });
@@ -368,5 +427,18 @@ describe("errors", () => {
     // `chat pay` / `chat connect` to a contact that never answers: the link's GhostlyHttpError "unreachable".
     expect(asCliError(new GhostlyHttpError("unreachable", "Could not connect to the peer")).toJSON()).toEqual({ code: "unavailable", message: "Could not connect to the peer" });
     expect(asCliError(new GhostlyHttpError("closed", "Connection closed")).code).toBe("engine");
+  });
+
+  // A member's admin-only group commands and an invitation already answered were `engine` (exit 1), the code for the
+  // engine failing: a bot could not tell "you are not allowed" from a crash. The engine's own words, as thrown.
+  it("say a group refusal as refused, and an invite into a community as a wrong request", () => {
+    for (const message of [
+      "Only the admin can rename the group", "Only the admin can change the members of this group", "Only the admin can renew the group's secret",
+      "Only the admin can share a link to the group", "Only the admin can invite", "Only the admin can choose the group's hubs",
+      "Only the admin can change the group's picture", "Only the admin can replace or turn off the group's link", "Only the admin can do that",
+      "No invitation to accept", "No invitation to decline",
+    ]) expect(asCliError(new Error(message)).toJSON(), message).toEqual({ code: "refused", message });
+    const community = "Share the group's link with them: anyone who opens it joins";
+    expect(asCliError(new Error(community)).toJSON()).toEqual({ code: "bad_request", message: community });
   });
 });

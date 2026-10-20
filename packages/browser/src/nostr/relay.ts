@@ -96,6 +96,14 @@ export function checkedEvent(raw: unknown, maxContentLength = 16 * 1024, now = D
   return { ...copy, tags: copy.tags.map(t => [...t]) };
 }
 
+/** Whether `raw` is `event` (one already checked) in every field, the tags included. */
+function sameEvent(event: NostrEvent, raw: Record<string, unknown>): boolean {
+  const tags = raw.tags;
+  return raw.id === event.id && raw.pubkey === event.pubkey && raw.sig === event.sig && raw.kind === event.kind && raw.created_at === event.created_at &&
+    raw.content === event.content && Array.isArray(tags) && tags.length === event.tags.length &&
+    event.tags.every((tag, i) => Array.isArray(tags[i]) && tags[i].length === tag.length && tag.every((x, j) => tags[i][j] === x));
+}
+
 const subscriptionId = () => "ghostly-" + Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, "0")).join("");
 
 /** Newest first, ties broken by the lexicographically smaller id (NIP-01's rule for replaceable events). */
@@ -137,10 +145,19 @@ export async function readRelays(relays: readonly string[], filter: NostrFilter,
       if (frame[0] === "EOSE") { replied = true; finish(true); return; }
       if (frame[0] === "CLOSED") { finish(replied); return; }
       if (frame[0] !== "EVENT") return;
-      const event = checkedEvent(frame[2], maxContentLength);
-      if (!event || !filter.kinds.includes(event.kind) || (filter.authors && !filter.authors.includes(event.pubkey))) return;
+      // A signature check is the costly part (3 ms): what the filter did not ask for is left out before it, and a copy
+      // of an event another relay sent is taken only as that same event, checked once.
+      const raw = frame[2] as Record<string, unknown> | null;
+      if (!raw || typeof raw !== "object" || !filter.kinds.includes(raw.kind as number) || (filter.authors && !filter.authors.includes(raw.pubkey as string))) return;
+      const known = typeof raw.id === "string" ? seen.get(raw.id) : undefined;
+      if (known) {
+        if (!sameEvent(known, raw)) return;
+      } else {
+        const event = checkedEvent(raw, maxContentLength);
+        if (!event) return;
+        seen.set(event.id, event);
+      }
       replied = true;
-      if (!seen.has(event.id)) seen.set(event.id, event);
       if (++count >= maxEvents) finish(true);
     };
   })));

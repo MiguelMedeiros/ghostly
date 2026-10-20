@@ -41,6 +41,15 @@ function mark(): Mark[] | null {
       const title = (el.matches(STEP) ? el : nearest(el.children, y))?.querySelector(TITLE);
       if (title && !marks.some((m) => m.el === title)) marks.push(marked(title, 0, title.getBoundingClientRect().top));
     }
+    if (!step && el.matches("section[id].scene") && !marks.some((m) => m.part)) {
+      step = true;
+      // The middle of the screen in a chapter but on none of its parts (past its last step, in its padding): the
+      // chapter folds to a few lines a step before it runs and takes far more after, so a spot as far down it lands
+      // elsewhere. The reader's step is the one nearest, kept by its title, ahead of what was found on the way here.
+      const list = el.querySelector(STEPS);
+      const title = list && nearest(list.children, y)?.querySelector(TITLE);
+      if (title) marks.unshift(marked(title, 0, title.getBoundingClientRect().top));
+    }
     const r = el.getBoundingClientRect();
     // A title keeps its top too: the other shape may wrap it over another number of lines.
     if (el.matches(TITLE)) marks.push(marked(el, 0, r.top));
@@ -104,9 +113,12 @@ class Hold extends Component<{ shape: string }> {
 
   componentDidUpdate(_prev: { shape: string }, _state: unknown, marks: Mark[] | null) {
     if (!marks) return;
-    hold(marks);
-    // Some of the page sizes itself only after this commit (a deck measures its width as it mounts, and renders
-    // again): held once more when that is done, still before the browser paints.
+    // Held once the task is done with the page, not in this commit: a deck mounts at no width, measures itself in a
+    // layout effect and renders again before the task ends. Held here, the page would sit a card's height off
+    // between that render and the next frame, where another task may read it.
+    queueMicrotask(() => hold(marks));
+    // Some of the page sizes itself only in a later task (a deck that measures its width again as it settles): held
+    // once more then, still before the browser paints.
     requestAnimationFrame(() => hold(marks));
   }
 

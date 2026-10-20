@@ -348,10 +348,11 @@ function fileFloodApp() {
     let ok = 0;
     const refused: string[] = [];
     for (let second = 0; second < 3; second++) {
-      const started = Date.now();
       const answers = await Promise.allSettled(Array.from({ length: 50 }, () => G.file("big.bin")));
       for (const a of answers as any[]) { if (a.status === "fulfilled") ok++; else refused.push(a.reason.message); }
-      await new Promise((r) => setTimeout(r, Math.max(0, 1050 - (Date.now() - started))));
+      // The host counts a second from when it starts a read, which can be well after the app asked on a loaded host:
+      // waited from the last answer, every read it counted is over a second old when the next 50 go.
+      await new Promise((r) => setTimeout(r, 1050));
     }
     await G.storage.set("report", { ok, refused: [...new Set(refused)] });
   })();

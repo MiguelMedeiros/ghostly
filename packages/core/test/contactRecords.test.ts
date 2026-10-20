@@ -4,7 +4,7 @@ import { createChatInvite } from "../src/invite";
 import { measureRecords } from "../src/pkarr";
 import { createContactLink } from "../src/contactLink";
 import {
-  ContactRequestError, contactDay, knockHolds, knockSlotIdentity, knockSlotOf, knockSlotRecords, linkRecords, makeStamp, mergeContactKnocks,
+  ContactRequestError, contactDay, knockHolds, knockSlotIdentity, knockSlotOf, knockSlotRecords, linkRecords, makeStamp, makeStampPaced, mergeContactKnocks,
   openRequest, readKnockSlot, readLinkRecord, requestPlaintextBytes, requestRecords, seenEntry, stampHolds,
   KNOCK_SLOTS, MAX_SEEN, MAX_SLOT_KNOCKS, REQUEST_LIFETIME_MS, REQUEST_PACKET_BYTES, type ContactKnock, type ContactRequest,
 } from "../src/contactRecords";
@@ -85,6 +85,10 @@ describe("the stamp", () => {
     const strong = makeStamp(link.linkKeyZ32, asker.pubKeyZ32, TODAY, 16);
     expect(stampHolds(link.linkKeyZ32, asker.pubKeyZ32, TODAY, strong, 16)).toBe(true);
     expect(stampHolds(link.linkKeyZ32, asker.pubKeyZ32, TODAY, stamp, 30)).toBe(false);
+  });
+
+  it("the paced stamp is the same stamp", async () => {
+    expect(await makeStampPaced(link.linkKeyZ32, asker.pubKeyZ32, TODAY, 16)).toBe(makeStamp(link.linkKeyZ32, asker.pubKeyZ32, TODAY, 16));
   });
 
   it("the owner takes today's and yesterday's, not the day before nor tomorrow's", () => {

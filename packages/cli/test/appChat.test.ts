@@ -30,7 +30,7 @@ function fake({ mode = "daemon", apps = true, served = [CHESS] }: { mode?: strin
     sendMessage: vi.fn(async (): Promise<{ error: string | null; refused?: boolean; messageId?: string }> => ({ error: null, messageId: "me_1" })),
   };
   let frames: (chat: string, frame: never) => void = () => {};
-  const hub = { onAppFrame: (listener: typeof frames) => { frames = listener; return () => {}; }, emit: vi.fn() };
+  const hub = { onAppFrame: (listener: typeof frames) => { frames = listener; return () => {}; }, emitLive: vi.fn() };
   reportAppFrames(hub as never, node, dir);
   const ctx = { runtime: { server: { node }, paths: { dir }, apps }, hub, mode, version: "test" } as unknown as ApiContext;
   return { ctx, node, frame: (frame: Record<string, unknown>) => frames("chat-one", frame as never) };

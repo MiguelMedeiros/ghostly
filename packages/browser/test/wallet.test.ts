@@ -82,7 +82,8 @@ describe("Lightning in: mint quotes", () => {
 
     expect(balance()).toBe(100);
     expect(rows("quotes")).toHaveLength(0);
-    expect(rows<WalletTx>("walletTx")).toMatchObject([{ kind: "lightning-in", amount: 100, fee: 0 }]);
+    // Its quote goes with it: the invoice on the Receive screen knows it was this one, not other money of its amount.
+    expect(rows<WalletTx>("walletTx")).toMatchObject([{ kind: "lightning-in", amount: 100, fee: 0, quote: "q1" }]);
     expect(events.onQuotePaid).toHaveBeenCalledOnce();
   });
 

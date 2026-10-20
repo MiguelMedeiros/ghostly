@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { engine } from "@ghostly/browser/platform/engine";
 import type { CardIndexRow, EngineState, GroupMemberView, GroupView, LinkView, StoredMessage } from "@ghostly/browser/shared/types";
 import type { RoutineCard, TaskCard } from "@ghostly/core";
@@ -8,10 +8,11 @@ import type { MemberFaceOf } from "../components/chat/SenderAvatar";
 import { authorName, groupPath, memberPhoto } from "../lib/groups";
 import { contactTag } from "../lib/publicKeyLabel";
 import { sameValue } from "../lib/sameValue";
-import { listSessions } from "../lib/storage";
+import { listShownSessions } from "../lib/storage";
 import { boardEntries, cardSenders, isActiveTask, mergeCopies, type BoardCopy, type BoardEntry, type BoardRoutine, type BoardTask, type CardSender } from "../lib/taskBoard";
 import type { ChatSession } from "../lib/types";
 import { chatPath } from "../lib/url";
+import { useStoredSessions } from "./useStoredSessions";
 
 /*
  * The profile's cards across every chat and group, kept current for the Tasks board and its entry in the chat list.
@@ -187,19 +188,8 @@ export function useCardSenders(): (entry: Pick<BoardEntry, "linkId" | "author">)
   return useMemo(() => cardSenders(links, groups), [links, groups]);
 }
 
-const readSessions = (): BoardSession[] => listSessions().map((s) => ({ id: s.id, peerPubKeyB64: s.peerPubKeyB64, label: s.label, nick: s.nick }));
-
-/** The app's sessions (1:1 chats, kept by the page) as the board shows them, read again when one changes. */
-function useSessions(): BoardSession[] {
-  const [sessions, setSessions] = useState(readSessions);
-  useEffect(() => {
-    const refresh = () => setSessions((before) => { const next = readSessions(); return sameValue(next, before) ? before : next; });
-    refresh();
-    window.addEventListener("session-updated", refresh);
-    return () => window.removeEventListener("session-updated", refresh);
-  }, []);
-  return sessions;
-}
+/** The app's sessions (1:1 chats, kept by the page) as the board shows them, through the page's one cache (`useStoredSessions`). */
+const readSessions = (): BoardSession[] => listShownSessions().map((s) => ({ id: s.id, peerPubKeyB64: s.peerPubKeyB64, label: s.label, nick: s.nick }));
 
 export interface TaskBoardData {
   tasks: BoardTask[];
@@ -222,7 +212,7 @@ export function useTaskBoard(): TaskBoardData {
   const { t } = useI18n();
   const index = useCardIndex();
   const { links, groups } = useSyncExternalStore(subscribeEngine, boardChats);
-  const sessions = useSessions();
+  const sessions = useStoredSessions(readSessions, sameValue);
   const choices = useFaceChoices();
   return useMemo(() => {
     const groupOf = new Map(groups.map((g) => [`group:${g.id}`, g]));

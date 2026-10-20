@@ -39,6 +39,18 @@ describe("Sidebar: groups in the chat list", () => {
     expect(screen.getByTestId("where")).toHaveTextContent(/^\/$/);
   });
 
+  it("Accept from the keyboard keeps the focus on the invitation's row once its buttons go", async () => {
+    // It was left on the page's body: the next Tab started again from the top.
+    const { user, engine } = sidebar([invitation(), { ...invitation(), id: "group-2" }]);
+    engine.on("acceptGroupInvitation", ({ groupId }) => {
+      fakeEngine.update({ groups: fakeEngine.state.groups.map(g => g.id === groupId ? { ...g, invitation: { ...g.invitation!, accepted: true } } : g) });
+    });
+    within(row()).getByTestId("group-accept").focus();
+    await user.keyboard("{Enter}");
+    expect(within(row()).queryByTestId("group-accept")).not.toBeInTheDocument();
+    expect(within(row()).getByTestId("group-row-open")).toHaveFocus();
+  });
+
   it("declines an invitation", async () => {
     const { user, engine } = sidebar([invitation({ contact: "", members: 1 })]);
     engine.on("declineGroupInvitation", () => undefined);
@@ -136,6 +148,15 @@ describe("Sidebar: groups in the chat list", () => {
     expect(row("g-active")).toHaveTextContent("Climbing2 members");
     expect(row("g-removed")).toHaveTextContent("You were removed from this group");
     expect(row("g-left")).toHaveTextContent("A groupleft");
+  });
+
+  it("gives a group's and a contact's name its own direction on the box that cuts it, so in Arabic a Latin name is cut at its end", () => {
+    saveSession({ id: "a", profile: "paired-chat/1", mySeedB64: "seed-a", peerPubKeyB64: "a".repeat(52), encKeyB64: "enc", messages: [], createdAt: 1, nick: "Neighbour Ana" });
+    sidebar([groupView({ id: "g-a", name: "Neighbourhood book club", status: "active" })]);
+    const names = screen.getAllByTestId("chat-row-name");
+    expect(names.map(name => [name.textContent, name.getAttribute("dir")]).sort()).toEqual([["Neighbour Ana", "auto"], ["Neighbourhood book club", "auto"]]);
+    // A <bdi> inside it would leave nothing for `dir="auto"` to read the direction from (the page's would win).
+    expect(names.flatMap(name => [...name.querySelectorAll("bdi")])).toEqual([]);
   });
 
   it("says why a group is over in the app's language", () => {

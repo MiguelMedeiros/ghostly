@@ -67,17 +67,23 @@ for (const panel of ["#wallet-panel", "#identity-panel"]) {
     const top = () => page.evaluate((sel) => Math.round(document.querySelector(sel)!.getBoundingClientRect().top), panel);
     const before = await top();
 
-    // Every frame from the release on, read once it is painted: where the panel is.
+    // From the release on, where the panel is in every frame, read once it is painted, and at the end of every task
+    // that changes the page (the browser may paint after any of them): after the microtasks the change queued.
     await page.evaluate((sel) => {
       const w = window as unknown as { tops: number[] };
       w.tops = [];
+      const read = () => {
+        const el = document.querySelector(sel);
+        if (el) w.tops.push(Math.round(el.getBoundingClientRect().top));
+      };
+      let frames = 0;
       const frame = () =>
         setTimeout(() => {
-          const el = document.querySelector(sel);
-          if (el) w.tops.push(Math.round(el.getBoundingClientRect().top));
-          if (w.tops.length < 240) requestAnimationFrame(frame);
+          read();
+          if (++frames < 240) requestAnimationFrame(frame);
         });
       requestAnimationFrame(frame);
+      new MutationObserver(() => queueMicrotask(() => queueMicrotask(read))).observe(document.body, { subtree: true, childList: true, attributes: true });
     }, panel);
     release();
     await expect(page.locator(".sp-deck .deck")).toHaveCount(2);

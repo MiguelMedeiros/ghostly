@@ -100,6 +100,42 @@ test("a member whose network blocks direct connections is reached by the whole g
     await expect(wallpaper(member).getByText(text, { exact: true })).toBeVisible({ timeout: 120_000 });
 });
 
+// A member already in the group, live with everyone over WebRTC, opens the app again behind a VPN (2026-10-16): its
+// messages went out only once the VPN was off. Each edge's offer is answered and connects nothing; the edge goes on over
+// Iroh through its relay a few seconds after that, not once ICE gives up, and messages flow both ways.
+test("a member already in the group whose network starts blocking direct connections sends and gets the group's messages", {
+  tag: ["@feature:groups.connection", "@feature:groups.send", "@feature:groups.native-links", "@feature:transport.iroh-web"],
+}, async ({ peer }) => {
+  test.setTimeout(10 * 60_000);
+  const relay = endpoints.irohRelay;
+  const [alice, bob, carol] = await Promise.all([peer("alice", { irohRelay: relay }), peer("bob", { irohRelay: relay }), peer("carol", { irohRelay: relay })]);
+  await Promise.all([setName(alice, "Alice"), setName(bob, "Bob"), setName(carol, "Carol")]);
+  await pair(alice, bob);
+  await pair(alice, carol);
+  await alice.page.getByTestId("sidebar-new-more").click();
+  await alice.page.getByTestId("new-group").click();
+  await alice.page.getByTestId("new-group-name").fill("Ghosts");
+  await alice.page.getByTestId("new-group-kind-mesh").click();
+  await alice.page.getByTestId("new-group-create").click();
+  await alice.page.getByTestId("group-share-done").click();
+  await invite(alice, "Bob");
+  await invite(alice, "Carol");
+  await Promise.all([accept(bob, "Ghosts"), accept(carol, "Ghosts")]);
+  for (const member of [alice, bob, carol]) await expect(member.page.getByTestId("group-members")).toContainText("2 of 2 reachable", { timeout: 240_000 });
+  await say(bob, "before the VPN");
+  for (const member of [alice, carol]) await expect(wallpaper(member).getByText("before the VPN", { exact: true })).toBeVisible({ timeout: 60_000 });
+
+  // The VPN comes on, and Bob's app starts again behind it, in the group.
+  await noDirectPath(bob.context);
+  await bob.page.reload();
+  await expect(groupChat(bob)).toHaveAttribute("data-status", "active", { timeout: 60_000 });
+  await say(bob, "from behind the VPN");
+  await say(carol, "carol, while Bob is on the VPN");
+  for (const member of [alice, carol]) await expect(wallpaper(member).getByText("from behind the VPN", { exact: true })).toBeVisible({ timeout: 90_000 });
+  await expect(wallpaper(bob).getByText("carol, while Bob is on the VPN", { exact: true })).toBeVisible({ timeout: 90_000 });
+  await expect(bob.page.getByTestId("group-members")).toContainText("2 of 2 reachable", { timeout: 90_000 });
+});
+
 // The entry session of a group's link ran WebRTC only: the admin's app answered the knock, its packet was seen, and the
 // join stayed at "Let in: getting the group's keys" until it was cancelled, whichever side was behind the block.
 for (const blocked of ["joiner", "admin"] as const) {
