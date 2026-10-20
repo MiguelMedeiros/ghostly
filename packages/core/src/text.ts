@@ -55,3 +55,23 @@ export function trimEndOf(text: string, chars: string): string {
   while (end > 0 && chars.includes(text[end - 1])) end--;
   return end === text.length ? text : text.slice(0, end);
 }
+
+/** What a token is copied with before it: quotes, guillemets, brackets, a backtick. */
+const PASTE_OPENERS = "\"'“‘«‹<[({`";
+/** What a token is copied with after it: those closed, and a sentence's marks. */
+const PASTE_CLOSERS = "\"'”’»›>])}`.,!?;:…";
+const PASTE_SPACES = " \t\n\r\u00a0\u202f";
+
+/**
+ * The token in what someone copied with the words around it: an invite, a group's link or a device code from the end
+ * of "Join us: <https://…#ghostly1…>!", "« ghostly1… »" or "code: ghostly1…". The last word, without the quotes,
+ * brackets and marks before and after it. Readers try it only once the paste itself did not read, so a bare token
+ * reads as it always did and a token with a character lost is still refused as one.
+ */
+export function unwrapPasted(text: string): string {
+  const words = trimEndOf(text.trim(), PASTE_CLOSERS + PASTE_SPACES).split(/\s+/);
+  const last = words[words.length - 1] ?? "";
+  let start = 0;
+  while (start < last.length && PASTE_OPENERS.includes(last[start])) start++;
+  return trimEndOf(last.slice(start), PASTE_CLOSERS);
+}
