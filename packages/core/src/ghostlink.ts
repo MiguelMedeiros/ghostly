@@ -280,6 +280,14 @@ const FILES_IN_USE_MS = 2_000;
  */
 const APP_AHEAD_OF_FILES = 16 * 1024;
 
+/**
+ * How much of an app's data may be on its way to the contact, not yet handled there (WISP 1200 § In a chat): a ping
+ * follows it, and the pong says it arrived. A transport holds what it sends in flight beyond the channel's
+ * `bufferedAmount` (UDX's window, an SCTP congestion window), so on a link slower than the app sends, the local buffer
+ * stayed under its line while the queue under it grew and every chat text waited 0.5-2.3 s behind the app's data.
+ */
+const APP_IN_FLIGHT = 64 * 1024;
+
 /** Largest `paired-message` frame sent with a preview: a session fails on a frame over 60 KiB (`PairedSession`). */
 export const MAX_PAIRED_MESSAGE_FRAME = 56 * 1024;
 
@@ -878,6 +886,12 @@ export class GhostLink {
   private pongsHeard = 0;
   /** The liveness ping whose pong measures the round trip: its number in `pingsSent`. */
   private rttPing = 0;
+  /**
+   * Apps' data sent on this session and not yet answered (`APP_IN_FLIGHT`): the bytes each ping that followed them
+   * covers, and those sent since the last such ping, which the next one covers.
+   */
+  private appInFlight: { ping: number; bytes: number }[] = [];
+  private appUnmarked = 0;
   /** `handled` callers, each waiting for the pong to its ping. */
   private handledWaiters: { ping: number; done: (exact: boolean | "late") => void }[] = [];
   /** The last ping's `PONG_WAIT_MS`: running until something comes back from the contact. */
@@ -3470,7 +3484,9 @@ export class GhostLink {
    * behind an app's data on a link slower than it sends (WISP 1200 § In a chat). While a file goes, that quarter sits
    * above what files may hold (`filesWritable`): files keep the channel at their own line for the whole transfer. While
    * the file waits for room, the app gets no further than `APP_AHEAD_OF_FILES` ahead of it, so it cannot refill the
-   * channel each time it drains to files' line and keep the file from moving.
+   * channel each time it drains to files' line and keep the file from moving. With a contact that answers pings, it is
+   * also refused while `APP_IN_FLIGHT` of the apps' data has not been answered for: what the transport holds in flight
+   * under the channel counts too.
    */
   sendAppData(app: string, data: unknown): AppSendError | null {
     if (!this.apps.open.has(app)) return "not-open";
@@ -3482,12 +3498,28 @@ export class GhostLink {
     if (use && !files) use.appAhead = 0;
     if (this.channel.bufferedAmount >= (files ? filesCap(this.channel) : 0) + (this.channel.sendBudget ?? LIMITS.sendHighWaterMark) / 4) return "too-fast";
     if (files && files.waiting > 0 && files.appAhead >= APP_AHEAD_OF_FILES) return "too-fast";
+    if (this.peerAnswersPings && this.appUnanswered() >= APP_IN_FLIGHT) return "too-fast";
     const refused = this.apps.canSend(app, data);
     if (refused) return refused;
     const frame = JSON.stringify(appDataFrame(app, data));
     try { this.channel.send(frame); } catch { return "offline"; }
     if (files) files.appAhead = Math.min(files.appAhead + frame.length, APP_AHEAD_OF_FILES + APP_DATA_MAX_BYTES);
+    if (this.peerAnswersPings) {
+      this.appUnmarked += frame.length;
+      // One ping a round trip for small frames (a Chess move), one every quarter of the window for a stream.
+      if (this.appInFlight.length === 0 || this.appUnmarked >= APP_IN_FLIGHT / 4) this.markAppData(this.channel);
+    }
     return null;
+  }
+  /** Apps' data sent on this session that the contact has not answered for yet (`APP_IN_FLIGHT`). */
+  private appUnanswered(): number {
+    return this.appInFlight.reduce((sum, mark) => sum + mark.bytes, this.appUnmarked);
+  }
+  /** A ping after the apps' data sent since the last one: its pong says the contact handled it. */
+  private markAppData(channel: FrameChannel): void {
+    try { this.sendPing(channel, false); } catch { return; /* the session is going: a new one starts from nothing */ }
+    this.appInFlight.push({ ping: this.pingsSent, bytes: this.appUnmarked });
+    this.appUnmarked = 0;
   }
   /** Both sides offer `app-ranges/1` (and `apps/1`) on the open session: an app's files can be read from the other side. */
   get supportsAppRanges(): boolean { return this.supportsApps && this.sessionCapabilities.agreed(APP_RANGES_CAPABILITY); }
@@ -4169,6 +4201,8 @@ export class GhostLink {
             const answered = ++this.pongsHeard;
             if (this.pingSentAt && answered >= this.rttPing) { this.rtt = Date.now() - this.pingSentAt; this.pingSentAt = 0; this.options.events?.onRtt?.(this.rtt); }
             for (const waiter of this.handledWaiters.filter(w => w.ping <= answered)) waiter.done(true);
+            while (this.appInFlight.length > 0 && this.appInFlight[0]!.ping <= answered) this.appInFlight.shift();
+            if (this.appInFlight.length === 0 && this.appUnmarked > 0 && this.channel === channel) this.markAppData(channel);
             return;
           }
           if (frame?.t === "paired-bye") {
@@ -4458,6 +4492,8 @@ export class GhostLink {
     this.pingSentAt = 0;
     this.rtt = undefined;
     this.pingsSent = this.pongsHeard = this.rttPing = 0;
+    this.appInFlight = [];
+    this.appUnmarked = 0;
     for (const waiter of [...this.handledWaiters]) waiter.done(false);
   }
   /** `live`: a liveness ping, whose pong measures the round trip. */
