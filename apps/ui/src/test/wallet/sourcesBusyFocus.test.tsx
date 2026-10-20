@@ -1,4 +1,5 @@
 import { screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { SourcePicker } from "../../components/wallet/providers/SourcePicker";
 import { BackupRows } from "../../components/wallet/BackupRows";
@@ -83,6 +84,43 @@ describe("a card's Source", () => {
     set.refuse(new Error("Could not connect to Nostr Wallet Connect: no answer"));
     await done(save);
     expect(save).toHaveFocus();
+  });
+
+  it("once a provider's save has worked, the source select takes the keys from the form it closed", async () => {
+    const set = later<void>();
+    const { user } = renderApp(<SourcePicker kind="lightning" view={sourceView({ offered: offered("lightning", "mainnet") })} onSet={() => set.promise} />);
+    const select = screen.getByRole("combobox", { name: "Lightning source" });
+    await choose(user, select, "nwc");
+    await user.type(screen.getByLabelText("Connection URI"), "nostr+walletconnect://wallet");
+    await press(user, screen.getByTestId("provider-save"));
+    set.answer();
+    await screen.findByTestId("lightning-source-saved");
+    expect(screen.queryByTestId("provider-save")).not.toBeInTheDocument();
+    expect(select).toHaveFocus();
+  });
+
+  /** The card as BitcoinWalletPanel holds it: Remove clears the source, and the engine's view follows (`late`: once it has answered). */
+  function Removable({ list, late = false }: { list: ReturnType<typeof offered>; late?: boolean }) {
+    const [view, setView] = useState(() => ({ ...failing(), offered: list }));
+    const cleared = () => setView(sourceView({ mode: "testnet", offered: list }));
+    return <SourcePicker kind="onchain" view={view} onSet={async () => {}} onRetry={async () => {}} onReconfigure={async () => {}}
+      onClear={async () => { if (late) setTimeout(cleared, 10); else cleared(); }} />;
+  }
+
+  for (const late of [false, true]) {
+    it(`once Remove has worked, the source select takes the keys from the button it took away${late ? " (the view follows later)" : ""}`, async () => {
+      const { user } = renderApp(<Removable list={offered("onchain", "testnet")} late={late} />);
+      await press(user, screen.getByTestId("onchain-source-clear"));
+      await waitFor(() => expect(screen.queryByTestId("onchain-source-clear")).not.toBeInTheDocument());
+      await waitFor(() => expect(screen.getByRole("combobox", { name: "Bitcoin source" })).toHaveFocus());
+    });
+  }
+
+  it("once Remove has worked on a card with nothing else to choose, the source's row takes the keys", async () => {
+    const { user } = renderApp(<Removable list={[]} />);
+    await press(user, screen.getByTestId("onchain-source-clear"));
+    await waitFor(() => expect(screen.queryByTestId("onchain-source-clear")).not.toBeInTheDocument());
+    expect(screen.getByTestId("onchain-source-status")).toHaveFocus();
   });
 });
 
