@@ -144,6 +144,22 @@ describe("the lock password a device set needs (WISP 06 § Adding a device)", ()
     expect(engine.callsTo("deviceEnrollConfirm")).toEqual([{ match: true }]);
   }, 20_000);
 
+  it("the focus stays in the dialog when Next and They match go away with their step", async () => {
+    localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    engine.on("deviceEnrollInvite", () => waiting);
+    engine.on("deviceHandoffVerifier", () => undefined);
+    engine.on("deviceEnrollView", () => ({ role: "inviter", step: "confirm", digits: "482913", device: "Phone", kind: "web" }));
+    engine.on("deviceEnrollConfirm", () => ({ role: "inviter", step: "adding", device: "Phone" }));
+    await user.type(screen.getByTestId("device-add-password"), "a long password");
+    await user.click(screen.getByTestId("device-add-next"));
+    await screen.findByTestId("device-add-digits", {}, { timeout: 3_000 });
+    expect(screen.getByTestId("device-add")).toContainElement(document.activeElement as HTMLElement);
+    await user.click(screen.getByTestId("device-add-match"));
+    await screen.findByTestId("device-add-adding");
+    expect(screen.getByTestId("device-add")).toContainElement(document.activeElement as HTMLElement);
+  }, 20_000);
+
   it("a double click on They match is one answer: both buttons are off until the engine has answered", async () => {
     localStorage.setItem("ghostly_app_settings", JSON.stringify({ lockScreen: { enabled: true, passwordHash: await hashPassword("a long password"), timeoutMinutes: 5 } }));
     const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);

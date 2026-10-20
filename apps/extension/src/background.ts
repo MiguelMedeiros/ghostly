@@ -150,7 +150,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
     return true;
   }
   if (message.type === "open-service") {
-    void openViewer(message.peerPubKeyZ32, message.serviceId).then(
+    void openViewer(message.peerPubKeyZ32, message.serviceId, message.tag).then(
       () => sendResponse({ ok: true }),
       (error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }),
     );
@@ -164,7 +164,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
 // A remote web application needs a real origin: relative URLs, ES modules,
 // fetch/XHR, cookies and history all hang off it, and it must not share an
 // origin with the extension. No such origin exists on the network, so the tab
-// is pointed at a virtual one (`https://<service>.<peer>.invalid`) and every
+// is pointed at a virtual one (`https://<service>.<peer>.<tag>.invalid`) and every
 // request to it is answered through the DevTools protocol with the response the
 // peer sent over WebRTC. Nothing else in the tab is intercepted, and no other
 // tab is touched.
@@ -200,6 +200,7 @@ interface PausedRequest {
 interface ViewerBinding {
   peerPubKeyZ32: string;
   serviceId: string;
+  tag: string;
 }
 
 // Session storage outlives the service worker, which the browser stops whenever it is idle.
@@ -221,16 +222,16 @@ export async function devtools(tabId: number, method: string, params?: Record<st
   await chrome.debugger.sendCommand({ tabId }, method, params);
 }
 
-async function openViewer(peerPubKeyZ32: string, serviceId: string): Promise<void> {
-  const url = viewerUrl(peerPubKeyZ32, serviceId);
+async function openViewer(peerPubKeyZ32: string, serviceId: string, tag: string): Promise<void> {
+  const url = viewerUrl(peerPubKeyZ32, serviceId, tag);
   const parsed = parseViewerUrl(url);
-  if (!parsed || parsed.serviceId !== serviceId || parsed.peerPubKeyZ32 !== peerPubKeyZ32) throw new Error("Invalid service");
+  if (!parsed || parsed.serviceId !== serviceId || parsed.peerPubKeyZ32 !== peerPubKeyZ32 || parsed.tag !== tag) throw new Error("Invalid service");
   await ensureEngine();
 
   // The one tab DevTools ever attaches to: the one created right here, for this service.
   const tab = await chrome.tabs.create({ url: "about:blank" });
   if (tab.id === undefined) throw new Error("Could not open a tab");
-  await chrome.storage.session.set({ [bindingKey(tab.id)]: { peerPubKeyZ32, serviceId } satisfies ViewerBinding });
+  await chrome.storage.session.set({ [bindingKey(tab.id)]: { peerPubKeyZ32, serviceId, tag } satisfies ViewerBinding });
   try {
     await chrome.debugger.attach({ tabId: tab.id }, PROTOCOL_VERSION);
     await devtools(tab.id, "Fetch.enable", {
@@ -264,7 +265,7 @@ async function fulfill(tabId: number, paused: PausedRequest): Promise<void> {
     return;
   }
   const parsed = parseViewerUrl(paused.request.url);
-  if (!parsed || parsed.peerPubKeyZ32 !== binding.peerPubKeyZ32 || parsed.serviceId !== binding.serviceId) {
+  if (!parsed || parsed.peerPubKeyZ32 !== binding.peerPubKeyZ32 || parsed.serviceId !== binding.serviceId || parsed.tag !== binding.tag) {
     await devtools(tabId, "Fetch.failRequest", { requestId: paused.requestId, errorReason: "BlockedByClient" });
     return;
   }

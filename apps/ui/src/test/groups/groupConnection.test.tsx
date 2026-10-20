@@ -203,6 +203,14 @@ describe("GroupConnection: the popover lists every member's edge", () => {
     expect(within(screen.getAllByTestId("group-connection-member")[0]).getByTestId("group-connection-reconnect")).toBeInTheDocument();
   });
 
+  it("a private group on hubs says the app links to the admin and the hubs, never that each member is a direct link", async () => {
+    await open({ ...active([me, alice(), bob(), member({ key: CAROL, nick: "Carol", online: true, viaHub: true })]), hubs: { hub: false } });
+    const note = screen.getByTestId("group-connection-note");
+    expect(note).toHaveTextContent("your app links to a few members only: the admin and the group's hubs");
+    expect(note).toHaveTextContent("A hub sees who talks when, not what is said.");
+    expect(note).not.toHaveTextContent("direct");
+  });
+
   it("a member this device has no free native connection for says it waits for one", async () => {
     // Ghostly Desktop on Linux: its group links go over Iroh or HyperDHT, a few listeners shared with 1:1 chats.
     await open(active([me, alice({ transport: "iroh/1" }), bob({ state: "waiting", transport: undefined, noSlot: true })]), { transport: { protocol: "webrtc/1", relays: [], webrtc: false } });

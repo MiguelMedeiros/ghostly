@@ -4,7 +4,6 @@ import { useBackdropDismiss, useDialogFocus } from "../../hooks/useDismiss";
 import { useI18n } from "../../contexts/I18nContext";
 import { useAppNavigation } from "../../hooks/useAppNavigation";
 import { useChatTargets } from "../../hooks/useChatTargets";
-import { listSessions } from "../../lib/storage";
 import { requestOpenInChat } from "../../lib/apps/running";
 import type { OpenAppOptions } from "../../lib/apps/open";
 import { ChatTargetRow } from "../chat/ChatTargets";
@@ -23,9 +22,8 @@ export function AppChatPicker({ app, options, onClose }: { app: InstalledAppView
   useDialogFocus(ref, onClose);
   const backdrop = useBackdropDismiss(onClose);
   const all = useChatTargets();
-  // A paired 1:1 chat with its link: where an app's panel is.
-  const paired = new Set(listSessions().filter((s) => s.profile === "paired-chat/1").map((s) => s.id));
-  const targets = all.filter((target) => target.kind === "chat" && !!target.target && paired.has(target.chat));
+  // A paired 1:1 chat with its link: where an app's panel is. Told by the target: the picker reads no chat itself.
+  const targets = all.filter((target) => target.kind === "chat" && !!target.target && target.paired);
 
   const pick = (linkId: string, path: string) => {
     requestOpenInChat(linkId, { app, ...(options && { options }) });

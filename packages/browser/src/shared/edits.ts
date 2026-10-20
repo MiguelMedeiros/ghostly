@@ -25,7 +25,7 @@ export function canEdit(message: Pick<StoredMessage, "sender" | "linkId" | "wire
 }
 
 /** A group message's id: `<sender>:<epoch>:<seq>` in a private group, `<sender>:<epoch>:<commit>:<seq>` in a community. */
-const GROUP_MESSAGE_ID = /^[a-z0-9]{52}:\d+:(?:[0-9a-f]{16}:)?\d+$/;
+export const GROUP_MESSAGE_ID = /^[a-z0-9]{52}:\d+:(?:[0-9a-f]{16}:)?\d+$/;
 
 /** A text of mine in a group (WISP 902 § Edits): one the group carried under its id, not a payment, a note or an event line. */
 export function canEditInGroup(message: Pick<StoredMessage, "sender" | "linkId" | "id" | "file" | "paymentId" | "event" | "groupPay">): boolean {
@@ -40,6 +40,14 @@ export function canEditInGroup(message: Pick<StoredMessage, "sender" | "linkId" 
 export function takesPeerEdit(message: Pick<StoredMessage, "sender" | "file" | "paymentId" | "event" | "groupPay" | "text">, text?: string): boolean {
   return message.sender === "peer" && !message.file && !message.paymentId && !message.event && !message.groupPay && !JOIN_NOTICE.test(message.text)
     && (text === undefined || !JOIN_NOTICE.test(text));
+}
+
+/**
+ * A message its author may delete for everyone (WISP 400 § Delete for everyone), either side: a text, a card, a file or
+ * a voice message; never a payment or a request (a bearer token is not taken back), a notice or a group's line.
+ */
+export function canRemove(message: Pick<StoredMessage, "paymentId" | "event" | "groupPay" | "text">): boolean {
+  return !message.paymentId && !message.event && !message.groupPay && !JOIN_NOTICE.test(message.text);
 }
 
 /**

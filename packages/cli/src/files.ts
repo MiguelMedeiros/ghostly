@@ -1,7 +1,7 @@
 import { openAsBlob } from "node:fs";
 import { access, constants, open, rm, stat } from "node:fs/promises";
-import { basename, extname, join, resolve } from "node:path";
-import { GROUP_FILE_LIMITS, LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, type VoiceMeta } from "@ghostly/core";
+import { basename, dirname, extname, join, resolve } from "node:path";
+import { GROUP_FILE_LIMITS, LIMITS, PLAYABLE_AUDIO, VOICE_LIMITS, baseMime, parseVoiceMeta, randomBytes, readImageMeta, sanitizeFileName, sanitizeMime, toBase64Url, voiceDownloadName, type VoiceMeta } from "@ghostly/core";
 import { FILE_BYTES_STEP, fileBytes, fileBytesOf } from "@ghostly/browser/shared/fileBytes";
 import { fileStore } from "@ghostly/browser/shared/idb";
 import { removeStored, waitingGroupFile } from "@ghostly/browser/shared/storedFiles";
@@ -201,7 +201,9 @@ export const FILE_METHODS: Record<string, Method> = {
       await removeStored(file.id).catch(() => {});
       throw new CliError("refused", error instanceof Error ? error.message : String(error));
     }
-    return { chat: link.id, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
+    // The message's id, as a group's file and `send` answer it: what `message delete`, `react`, `pin` and `--reply` take.
+    // The engine names a sent file's row after its time (node.ts `sendFile`), the one given here.
+    return { chat: link.id, messageId: `me_${timestamp}`, file: { id: file.id, name: file.name, size: file.size, mime: file.mime, ...(voice ? { voice: true } : {}), ...(image ? { image } : {}) }, ...(warning ? { warning } : {}) };
   },
 
   async "file.list"(ctx, params) {
@@ -274,7 +276,11 @@ export const FILE_METHODS: Record<string, Method> = {
     return { ...where, file: fileId, state: "done", size: transfer.size };
   },
 
-  /** Writes a received (or sent) file to disk: into `dir` under its own name (`saveName`), or to `path`. Never over a file unless `force`. */
+  /**
+   * Writes a received (or sent) file to disk: into `dir` under its own name (`saveName`), a voice message under the one
+   * Ghostly makes for it as the apps' Download does (`voiceDownloadName`, never the sender's), or to `path`. Never over
+   * a file unless `force`.
+   */
   async "file.save"(ctx, params) {
     const fileId = str(params, "file", true);
     if (params.chat !== undefined) fileChat(ctx, params, fileId);
@@ -285,7 +291,7 @@ export const FILE_METHODS: Record<string, Method> = {
     // A sent file's bytes were staged whole at send: its transfer is the contact's download, not bytes missing here.
     const transfer = stored.direction === "out" ? undefined : state(ctx).transfers[fileId] ?? stored.transfer;
     if (transfer && transfer.state !== "done") throw new CliError("unavailable", `The file is not all here yet (${transfer.transferred} of ${transfer.size} bytes)`);
-    const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.name));
+    const target = str(params, "path") ? resolve(str(params, "path", true)) : join(resolve(str(params, "dir") ?? "."), saveName(stored.metadata.voice ? voiceDownloadName(stored.metadata.mime, stored.metadata.timestamp) : stored.metadata.name));
     const flags = bool(params, "force") ? "w" : "wx";
     let out;
     try { out = await open(target, flags, 0o600); } catch (error) {
@@ -293,6 +299,13 @@ export const FILE_METHODS: Record<string, Method> = {
       // A folder there is no file to replace: before, it asked for --force, and the --force then failed "is a folder".
       if ((code === "EEXIST" || code === "EISDIR") && (await stat(target).catch(() => undefined))?.isDirectory()) throw new CliError("bad_request", `${target} is a folder: name a file, or use dir (--dir ${target})`);
       if (code === "EEXIST") throw new CliError("confirm", `${target} exists: pass force (--force) to replace it`);
+      // The folder it goes in is what is missing (or a file): named alone, as `listen --cursor` names its own. Before,
+      // Node's whole path ("No such file or folder: <folder>/<name>") read as if the received file were gone.
+      if (code === "ENOENT" || code === "ENOTDIR") {
+        const folder = dirname(target), there = await stat(folder).catch(() => undefined);
+        if (!there) throw new CliError("not_found", `No such file or folder: ${folder}`);
+        if (!there.isDirectory()) throw new CliError("not_found", `${folder} is a file, not a folder`);
+      }
       throw error;
     }
     let written = 0, complete = false;

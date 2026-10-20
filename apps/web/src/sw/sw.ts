@@ -13,7 +13,7 @@
  *   page and caches nothing, and only shows wake-ups (WISP 401 § Wake-up push). A scope per profile gives each
  *   profile a push subscription of its own, so contacts of two profiles cannot tell they share a browser.
  */
-import { CACHE_PREFIX, SHARED_ROUTE, classify, precacheMode, pushNotice, pushScopeProfile, readShare, readShareBody, type SharedItem } from "./policy";
+import { CACHE_PREFIX, SHARED_ROUTE, assetAnswer, classify, precacheMode, pushNotice, pushScopeProfile, readShare, readShareBody, TOO_LARGE_SHARE, type SharedItem } from "./policy";
 import { readWakeEntry, readWakeText } from "./wakeStore";
 import { readPushDeviceView } from "./deviceState";
 import { deviceNoticeWords } from "./deviceWords";
@@ -83,9 +83,23 @@ async function asset(key: string, request: Request, event: ExtendableEvent): Pro
   if (cached) return cached;
   const response = await fetch(request);
   // Answered at once and stored behind it: `put` settles with the last byte, and these are the wasm modules (2 to
-  // 12 MiB) the page compiles while they arrive.
-  if (response.ok && response.status === 200 && response.type === "basic") event.waitUntil(cache.put(key, response.clone()).catch(() => {}));
+  // 12 MiB) the page compiles while they arrive. A 404 means a deploy replaced this build and the file is gone, so
+  // the open pages are told to look for the new version now, instead of hours later at their next check.
+  const verdict = assetAnswer(response);
+  if (verdict === "store") event.waitUntil(cache.put(key, response.clone()).catch(() => {}));
+  else if (verdict === "gone") event.waitUntil(tellBuildGone());
   return response;
+}
+
+/** Told once per life of this worker: a wallet's Try again asks for the same gone file, and the pages already know. */
+let toldGone = false;
+
+/** Every open page of the app is told a file of its build is gone: it checks for the new version at once. */
+async function tellBuildGone(): Promise<void> {
+  if (toldGone) return;
+  toldGone = true;
+  const all = await worker.clients.matchAll({ type: "window" });
+  for (const client of all) client.postMessage({ type: "build-gone" });
 }
 
 // ---------- share target ----------
@@ -98,10 +112,10 @@ function share(event: FetchEvent): void {
   event.respondWith((async () => {
     try {
       // Read with a cap before it is parsed: `formData()` alone would hold a body of any size in memory.
+      // A larger one is held all the same, as a share with nothing in it but that it was too large: the picker says so.
       const body = await readShareBody(event.request);
-      if (!body) throw new Error("share too large");
       const type = event.request.headers.get("content-type") ?? "";
-      const item = readShare(await new Response(body, { headers: { "content-type": type } }).formData());
+      const item = body ? readShare(await new Response(body, { headers: { "content-type": type } }).formData()) : TOO_LARGE_SHARE;
       held?.done();
       held = { item, done };
       setTimeout(() => { if (held?.done === done) { held = null; done(); } }, SHARE_HOLD_MS);

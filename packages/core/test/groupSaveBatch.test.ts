@@ -78,6 +78,20 @@ describe("a private group's state is saved once for a burst of messages", { time
     expect(mesh.saved.get(alice.myKey)!.seq).toBe(1);
   });
 
+  it("another member's name, however often it changes, is saved within the wait; my own at once", async () => {
+    const { mesh, alice, bob } = await two();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const before = saves(mesh, alice);
+    for (let i = 0; i < 100; i++) await alice.setNick(bob.myKey, i % 2 ? "Bob" : "B0b");
+    expect(saves(mesh, alice) - before).toBe(0);
+    expect(alice.state.nicks[bob.myKey]).toBe("Bob");
+    await vi.advanceTimersByTimeAsync(GROUP_LIMITS.saveWithinMs);
+    expect(saves(mesh, alice) - before).toBe(1);
+    expect(mesh.saved.get(alice.myKey)!.nicks[bob.myKey]).toBe("Bob");
+    await alice.setNick(alice.myKey, "Alice again");
+    expect(saves(mesh, alice) - before).toBe(2);
+  });
+
   it("an app killed before the save takes the messages again and shows none twice", async () => {
     const { mesh, alice, bob } = await two();
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });

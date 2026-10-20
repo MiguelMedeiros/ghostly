@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Outbox, type Resender } from "../src/engine/outbox";
+import { Outbox, RESEND_POLICY, type Resender } from "../src/engine/outbox";
 import type { StoredMessage } from "../src/shared/types";
 // covers: chat.order, chat.paired.offline-send, chat.waiting
 
@@ -107,12 +107,11 @@ describe("a chat's messages go out in the order they were written", () => {
   it("a link that says it is open a moment before it carries text: the first messages are not left behind", async () => {
     // Seen with two apps: the look began as the session opened, found the first three not ready, and sent from the
     // fourth on; the three went at the next look, after the later ones.
-    let live = false;
-    const c = chat([1, 2, 3, 4, 5, 6].map(n => row(n, "waiting")), async () => null, { ready: () => live });
+    let live = false, looking = false;
+    // The link carries text from the moment the fourth message is looked at: between two steps of the same look.
+    const c = chat([1, 2, 3, 4, 5, 6].map(n => row(n, "waiting")), async () => null, { ready: m => { if (looking && m.text === "m4") live = true; return live; } });
     await c.box.recover();
-    // The link carries text from the moment the fourth message's row is read: between two steps of the same look.
-    c.hooks.reads = 0;
-    c.hooks.read = n => { if (n === 5) live = true; };
+    looking = true;
     await c.box.flush({ reopened: true });
     expect(c.sent).toEqual(["m1", "m2", "m3", "m4", "m5", "m6"]);
     await c.box.stop();
@@ -278,6 +277,28 @@ describe("a file that waits for the live link goes in its place among the texts"
     await c.box.stop();
   });
 
+  it("a link that closes under the look its own check asked for: the file is asked again by itself, not only by the next look", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const said: string[] = [];
+    let asked = 0, drops = 1;
+    // The file's check comes due first. The link says it is open a moment before it carries text, so the text before
+    // the file is passed by, then goes as the file is found able to go, and the link closes under that send.
+    const c = chat([file(2), row(1, "queued")], async m => { said.push(m.text); if (drops-- > 0) void c.box.disconnected(); return null; }, {
+      ready: m => !!m.file || asked++ > 0,
+      sendFile: async message => { said.push(message.text); delete c.rows.find(m => m.id === message.id)!.delivery; },
+    });
+    await c.box.recover();
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs[0]);
+    expect(said[0]).toBe("m1");
+    expect(c.rows[0].delivery).toBe("waiting");
+    // No look since reaches the file (the text's own check reads up to its timestamp): the file's own check sends it
+    // once the link is back, as the text's sends the text.
+    await vi.advanceTimersByTimeAsync(RESEND_POLICY.backoffMs[1] * 2);
+    expect(said.filter(t => t.startsWith("f"))).toEqual(["f2"]);
+    expect(c.rows[0].delivery).toBeUndefined();
+    await c.box.stop();
+  });
+
   it("an outbox given no way to send files leaves them alone", async () => {
     const c = chat([file(1), row(2, "waiting")]);
     await c.box.recover();
@@ -371,6 +392,92 @@ describe("while the contact is away, a file's offer takes its place on the DHT f
     await vi.waitFor(() => expect(c.said).toEqual(["f2 floor"]));
     await c.receipt();
     await vi.waitFor(() => expect(c.said).toEqual(["f2 floor", "m3 floor"]));
+    await c.box.stop();
+  });
+
+  // The engine stores a waiting file itself and tells its outbox only that it does (`storing`): a new text no longer
+  // reads the chat when nothing of its own waits, so that is all it has to find the file by.
+  it("a file stored when nothing else waits: a text written after it waits behind its offer", async () => {
+    const c = floor([]);
+    await c.box.transmit(c.add(row(1, "sending")));
+    await c.receipt();
+    await c.box.storing(Promise.resolve(c.add(file(2))));
+    await c.box.transmit(c.add(row(3, "sending")));
+    await vi.waitFor(() => expect(c.said).toEqual(["m1 floor", "f2 floor"]));
+    await c.receipt();
+    await vi.waitFor(() => expect(c.said).toEqual(["m1 floor", "f2 floor", "m3 floor"]));
+    await c.box.stop();
+  });
+
+  it("a file whose write is still on its way when a text is written after it: the text still goes after it", async () => {
+    const c = floor([]);
+    await c.box.transmit(c.add(row(1, "sending")));
+    await c.receipt();
+    // As the engine stores a row: it is in the store, and what follows the write (the chat shown again) is not over yet.
+    let over = () => {};
+    const stored = c.box.storing(new Promise<void>(resolve => { c.add(file(2)); over = resolve; }));
+    await c.box.transmit(c.add(row(3, "sending")));
+    over();
+    await stored;
+    await vi.waitFor(() => expect(c.said).toEqual(["m1 floor", "f2 floor"]));
+    await c.receipt();
+    await vi.waitFor(() => expect(c.said).toEqual(["m1 floor", "f2 floor", "m3 floor"]));
+    await c.box.stop();
+  });
+});
+
+/**
+ * Seen 2026-10-17 on the CLI's store at 10,000 messages: each text sent read and sorted the chat's whole history first
+ * (about 220 ms per send) to find the messages before it that still wait, and found none.
+ */
+describe("a new text with nothing before it still to go", () => {
+  function long(n: number) {
+    const rows = Array.from({ length: n }, (_, i) => row(i + 1, "delivered")), sent: string[] = [];
+    const counts = { reads: 0 };
+    const box = new Outbox({
+      read: async () => { counts.reads++; return rows.map(m => ({ ...m })); },
+      get: async id => { const found = rows.find(m => m.id === id); return found && { ...found }; },
+      update: async (id, delivery, error, extra) => { const found = rows.find(m => m.id === id); if (found && found.delivery !== "delivered") Object.assign(found, extra, { delivery, deliveryError: error }); },
+    }, async m => { sent.push(m.text); return null; });
+    const add = (m: StoredMessage) => { rows.push(m); return m.id; };
+    return { box, rows, sent, counts, add };
+  }
+
+  it("goes without the chat's history being read, once a look at it found nothing of mine to go", async () => {
+    const c = long(1_000);
+    for (const n of [1001, 1002, 1003, 1004, 1005]) {
+      await c.box.transmit(c.add(row(n, "sending")));
+      await c.box.received(wire(n));
+    }
+    expect(c.sent).toEqual(["m1001", "m1002", "m1003", "m1004", "m1005"]);
+    // The first send's look, and none after it.
+    expect(c.counts.reads).toBe(1);
+    await c.box.stop();
+  });
+
+  it("a text whose row is still being stored when a later one is sent: the later one looks, and goes after it", async () => {
+    const c = long(10);
+    await c.box.transmit(c.add(row(11, "sending")));
+    await c.box.received(wire(11));
+    // The row is in the store, and what follows its write is not over when the next text is sent.
+    let over = () => {};
+    const first = c.box.transmit(`me_${wire(12)}`, { storing: new Promise<void>(resolve => { c.add(row(12, "sending")); over = resolve; }) });
+    const second = c.box.transmit(c.add(row(13, "sending")));
+    over();
+    await Promise.all([first, second]);
+    expect(c.sent).toEqual(["m11", "m12", "m13"]);
+    await c.box.stop();
+  });
+
+  it("a write it was told of that fails: the send it was for fails, and the next one is not held back for it", async () => {
+    const c = long(10);
+    await expect(c.box.transmit(`me_${wire(11)}`, { storing: Promise.reject(new Error("full")) })).rejects.toThrow("full");
+    await c.box.transmit(c.add(row(12, "sending")));
+    await c.box.received(wire(12));
+    const reads = c.counts.reads;
+    await c.box.transmit(c.add(row(13, "sending")));
+    expect(c.sent).toEqual(["m12", "m13"]);
+    expect(c.counts.reads).toBe(reads);
     await c.box.stop();
   });
 });

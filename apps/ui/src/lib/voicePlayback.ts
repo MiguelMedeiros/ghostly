@@ -35,6 +35,11 @@ export function releasePlayback(id: string): void {
   if (playing === id) playing = null;
 }
 
+/** Whichever plays pauses (a call starts). */
+export function pausePlaying(): void {
+  if (playing) players.get(playing)?.pause();
+}
+
 /**
  * The message after this one, when it is a voice message from the same sender, starts.
  * "After" is the next row on screen: anything else in between (a text, a payment, a group

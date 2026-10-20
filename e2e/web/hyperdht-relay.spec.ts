@@ -1,3 +1,4 @@
+import { hyperdhtRelayReady } from "../infra/env.mjs";
 import { chat, connect, expect, link, say, test, type Peer } from "../support/fixtures";
 
 // HyperDHT in the browser (WISP 103, browser profile): each app reaches the HyperDHT through a relay
@@ -42,6 +43,11 @@ test("with WebRTC gone, two browsers keep chatting over HyperDHT through a relay
 }, async ({ peer }) => {
   test.skip(process.env.GHOSTLY_HYPERDHT_RELAY !== "1" || !relay, "Requires the HyperDHT relay of e2e/infra (GHOSTLY_HYPERDHT_RELAY)");
   test.setTimeout(5 * 60_000);
+  // A relay whose own node still counts itself firewalled answers, but the two never reach each other through it.
+  await expect.poll(() => hyperdhtRelayReady(relay), {
+    message: "The HyperDHT relay's node is not reachable yet (/healthz firewalled): rebuild its image (npm run e2e:infra:reset)",
+    timeout: 30_000,
+  }).toBe(true);
   const [alice, bob] = await Promise.all([peer("alice"), peer("bob")]);
   await link(alice, bob);
   await connect(alice, bob);

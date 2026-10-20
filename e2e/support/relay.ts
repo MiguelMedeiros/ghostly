@@ -20,9 +20,9 @@ export class LocalRelay {
   gets = 0;
   private server: Server | null = null;
 
-  static readonly pattern = /^https:\/\/(pkarr\.pubky\.(org|app)|relay\.pkarr\.org)\//;
+  static readonly pattern = /^https:\/\/(pkarr\.pubky\.(org|app)|relay\.pkarr\.org|pkarr\.miguelmedeiros\.dev)\//;
   /** The public relays `pattern` answers for, by name. */
-  static readonly hosts = ["pkarr.pubky.org", "pkarr.pubky.app", "relay.pkarr.org"];
+  static readonly hosts = ["pkarr.pubky.org", "pkarr.pubky.app", "relay.pkarr.org", "pkarr.miguelmedeiros.dev"];
 
   private static readonly cors = {
     "access-control-allow-origin": "*",

@@ -146,6 +146,13 @@
     "cannotRetry": "No se puede reintentar este archivo",
     "clipboardUnavailable": "No se puede leer el portapapeles",
     "clipboardUnavailableNext": "Adjúntalo con +.",
+    "floor": {
+      "noRoomNext": "Libera espacio y pide a tu contacto que lo envíe de nuevo.",
+      "notInAWeek": "No llegó en una semana",
+      "refused": "Este dispositivo no pudo recibir este archivo",
+      "tooMany": "Hay demasiados archivos esperando aquí",
+      "tooManyNext": "Responde a los archivos que te esperan y pide a tu contacto que lo envíe de nuevo."
+    },
     "gone": "Este archivo ya no está aquí",
     "noRoom": "No hay espacio en el dispositivo de tu contacto",
     "noRoomHere": "No hay espacio en este dispositivo",
@@ -203,6 +210,7 @@
     "adminOnly": "Solo el admin puede hacer eso",
     "adminPicture": "Solo el admin puede cambiar la foto del grupo",
     "adminRename": "Solo el admin puede cambiar el nombre del grupo",
+    "adminRotate": "Solo el admin puede renovar el secreto del grupo",
     "adminShares": "Solo el admin puede compartir un enlace al grupo",
     "alreadyJoining": "Ya te estás uniendo a este grupo",
     "alreadyMember": "Este contacto ya es miembro",
@@ -502,6 +510,12 @@
     "usdtReverted": "La transacción fue revertida",
     "usdtRevertedNext": "No se enviaron tokens; el gas se gastó."
   },
+  "relayOnly": {
+    "keepsTurn": "Ocultar mi IP necesita este servidor TURN",
+    "keepsTurnNext": "Desactívalo primero y luego quita el servidor.",
+    "needsTurn": "Primero añade un servidor TURN",
+    "needsTurnNext": "Guarda uno arriba y luego activa esto."
+  },
   "relays": {
     "atLeastOne": "Escribe al menos una dirección de relay",
     "notAddress": "No es una dirección de relay: {{address}}",
@@ -531,6 +545,7 @@
     "listenerReleased": "En pausa por otro chat. Abre este chat para reanudar.",
     "noAddress": "Aún no se conoce la dirección de tu contacto para este transporte",
     "noAddressNext": "Reconecta una vez por WebRTC para intercambiarla.",
+    "noAddressWait": "Llega cuando tu contacto abra este chat en su app.",
     "noOverlap": "Sus elecciones de transporte no coinciden",
     "noOverlapNext": "Activa la Alternativa o elige el mismo transporte en ambos lados.",
     "noneConnected": "Ningún transporte pudo conectar",

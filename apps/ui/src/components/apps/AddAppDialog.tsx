@@ -40,26 +40,38 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
   const [error, setError] = useState<string | null>(null);
   const [app, setApp] = useState<{ url: string; preview: AppPreview } | null>(null);
   const [store, setStore] = useState<AppStorePreview | null>(null);
+  // Which check is the field's: a link edited while Check runs drops the answer for the link it no longer holds.
+  const asked = useRef(0);
 
   const check = async () => {
     const typed = url.trim();
     if (!typed) return;
     // The engine takes nothing but `https:` (`appPasteUrl`): any other text goes to it as typed, and it refuses it in the dialog's words.
     const link = typed.replace(LOOSE_SCHEME, "https://");
+    const mine = ++asked.current;
+    const current = () => mine === asked.current;
     focusBack();
     setBusy(true); setError(null); setStore(null);
     try {
       if (!/\.json(?:[?#].*)?$/i.test(link)) {
         try {
-          setApp({ url: link, preview: await engine.call("appPreview", { url: link }) });
+          const preview = await engine.call("appPreview", { url: link });
+          if (current()) setApp({ url: link, preview });
           return;
         } catch (e) {
+          if (!current()) return;
           // No app there (a 404, or not a bundle): it may be a store. A link to a host off the list stops here.
           if (/\.ghostlyapp(?:[?#].*)?$/i.test(link) || appErrorCode(e) === "host" || appErrorCode(e) === "github-link") throw e;
         }
       }
-      setStore(await engine.call("appStorePreview", { url: link }));
-    } catch (e) { setError(appErrorText(e, t)); } finally { setBusy(false); }
+      const found = await engine.call("appStorePreview", { url: link });
+      if (current()) setStore(found);
+    } catch (e) { if (current()) setError(appErrorText(e, t)); } finally { if (current()) setBusy(false); }
+  };
+
+  const edit = (value: string) => {
+    asked.current++;
+    setUrl(value); setStore(null); setError(null); setBusy(false);
   };
 
   const addStore = async () => {
@@ -80,7 +92,7 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
         <form className="space-y-2" noValidate onSubmit={(e) => { e.preventDefault(); void check(); }}>
           <label htmlFor={fieldId} className="text-sm text-text-primary">{t("apps.add.label")}</label>
           <input id={fieldId} data-testid="apps-add-url" autoFocus className={input} type="url" inputMode="url" autoComplete="off" spellCheck={false} dir="ltr"
-            placeholder="https://github.com/owner/repo" value={url} onChange={(e) => { setUrl(e.target.value); setStore(null); setError(null); }} />
+            placeholder="https://github.com/owner/repo" value={url} onChange={(e) => edit(e.target.value)} />
           <Notice>{t("apps.add.hint")}</Notice>
           {error && <Notice tone="error" testId="apps-add-error">{error}</Notice>}
           {!store && (
@@ -93,13 +105,13 @@ export function AddAppDialog({ onClose, onStoreAdded, onInstalled }: { onClose: 
         {store && (
           <div className="space-y-3" data-testid="apps-add-store">
             <div className="bg-surface rounded-xl px-4 py-3 space-y-1">
-              <p dir="auto" className="text-sm text-text-primary">{store.name}</p>
+              <p dir="auto" className="text-sm text-text-primary [overflow-wrap:anywhere]">{store.name}</p>
               <p className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted">
                 <span>{store.kind === "indexed" ? t("apps.store.indexed") : t("apps.store.curated")}</span>
                 <span>{t(store.apps === 1 ? "apps.store.countOne" : "apps.store.count", { count: store.apps })}</span>
                 <Fingerprint value={store.fingerprint} />
               </p>
-              {store.description && <p dir="auto" className="text-xs text-text-secondary whitespace-pre-line">{store.description}</p>}
+              {store.description && <p dir="auto" className="text-xs text-text-secondary whitespace-pre-line [overflow-wrap:anywhere]">{store.description}</p>}
               {store.expired && <p className="text-xs text-test-money-ink">{t("apps.store.stale", { date: date(store.expires, t.language) })}</p>}
             </div>
             <Notice>{t("apps.add.storeReads", { host: hostOf(store.url) })}</Notice>

@@ -186,7 +186,9 @@ describe("admin actions and their refusals", () => {
     await expect(alice.remove(alice.myKey)).rejects.toThrow("Not a member");
     await expect(alice.transferAdmin(createIdentity().pubKeyZ32)).rejects.toThrow("Not a member");
     await expect(alice.transferAdmin(alice.myKey)).rejects.toThrow("Not a member");
-    await expect(bob.rotate()).rejects.toThrow("Only the admin can change the members of this group");
+    await expect(bob.remove(alice.myKey)).rejects.toThrow("Only the admin can change the members of this group");
+    // A new secret changes no member: it says what it does.
+    await expect(bob.rotate()).rejects.toThrow("Only the admin can renew the group's secret");
     expect(() => bob.inviteFrame()).toThrow("Only the admin");
   });
 

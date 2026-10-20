@@ -1,0 +1,1 @@
+A removal (WISP 400 § Delete for everyone) never goes on the floor: it waits for the live session. A text on the floor whose id the reader holds a tombstone for is receipted and taken as the copy already there. The floor's envelope is unchanged.

@@ -22,6 +22,7 @@
   "pasteScreenshot": "QRコードのスクリーンショットを貼り付けることもできます。",
   "placeholder": "招待を貼り付け…",
   "qrReaderNotLoaded": "QRリーダーを読み込めませんでした。接続を確認してから、もう一度試してください。",
+  "qrReaderReload": "QRリーダーをまだ読み込めません。Ghostly を再読み込みしてください。",
   "scan": "QRをスキャン",
   "submit": "参加",
   "title": "チャットに参加",

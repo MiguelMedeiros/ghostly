@@ -102,6 +102,27 @@ describe("resolveTargetUrl", () => {
     expect(resolveTargetUrl(app, "/")).toBe("http://localhost:3400/app/");
   });
 
+  it("refuses a segment a server may read as .. once it drops ;params or decodes again", () => {
+    for (const path of [
+      "/..;/manager/html",
+      "/..%3b/x",
+      "/..%3B/x",
+      "/..;jsessionid=1/x",
+      "/x/..;/..;/y",
+      "/.;/x",
+      "/%252e%252e/admin",
+      "/%25252e%25252e/admin",
+      "/..%252fadmin",
+      "/x%255cy",
+    ]) {
+      expect(resolveTargetUrl(app, path), path).toBeNull();
+    }
+    // `;` and `%25` elsewhere are left alone.
+    expect(resolveTargetUrl(app, "/x;v=1/y")).toBe("http://localhost:3400/app/x;v=1/y");
+    expect(resolveTargetUrl(app, "/100%25.png")).toBe("http://localhost:3400/app/100%25.png");
+    expect(resolveTargetUrl(app, "/x?next=/..;/y")).toBe("http://localhost:3400/app/x?next=/..;/y");
+  });
+
   it("cannot be pointed at another host through an @ in the path", () => {
     expect(resolveTargetUrl(root, "/@evil.com/x")).toBe("http://localhost:3400/@evil.com/x");
   });

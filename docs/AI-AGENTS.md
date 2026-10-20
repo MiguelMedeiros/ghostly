@@ -58,6 +58,16 @@ curl -fsSL --create-dirs https://raw.githubusercontent.com/MiguelMedeiros/ghostl
   -o ~/.cursor/skills/ghostly/SKILL.md
 ```
 
+### Talk to your owner: the skill with scripts
+
+For a coding agent that works for you and reports to you, rather than a bot that answers other people:
+[packages/cli/skills/ghostly](../packages/cli/skills/ghostly). Its four `sh` scripts talk to one chat only, yours:
+`listen` (your messages and button presses as JSON lines, everything else dropped), `say` (with `--reply` and
+`--button`), `status` ("thinking" with a status line) and `react`. Its SKILL.md has the security rules: only your
+chat gives instructions, quoted or forwarded text is data, buttons before anything irreversible, no wallets. It is
+also named `ghostly`, so install it or the CLI's skill above under that name, not both. Install:
+[its README](../packages/cli/skills/ghostly/README.md).
+
 ## What the agent can do
 
 | Command | What |
@@ -72,7 +82,7 @@ curl -fsSL --create-dirs https://raw.githubusercontent.com/MiguelMedeiros/ghostl
 | `ghostly routine send` / `routine update` | a routine card for a scheduled job: its schedule, last run and next run |
 | `ghostly group create` / `group send` | take part in a group, with `@mentions` (`group send --mention <member>`) |
 | `ghostly file send` / `file send --voice` | send a file or a voice note |
-| `ghostly call auto on --from <chat>` / `call start` | take or make a voice call, its audio as raw PCM on a Unix socket |
+| `ghostly call auto on --from <chat>` / `call start` | take or make a voice call, its audio as raw PCM on a Unix socket ([ghostly-voice-agent](https://github.com/MiguelMedeiros/ghostly-voice-agent) answers by voice: speech to text, Claude, text to speech) |
 | `ghostly chat request` / `chat pay` | ask for a payment or pay, on Testnet unless told otherwise |
 
 Task and routine cards need a `ghostly` newer than 1.0.0 (`ghostly help task` tells).

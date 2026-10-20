@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppPreview, BuiltInAppOffer, InstalledAppView } from "@ghostly/browser/engine/apps";
 import { ChatAppsDialog } from "../../components/apps/ChatAppsDialog";
@@ -66,6 +66,42 @@ describe("the chat's Apps with an app whose files are not on this device", () =>
     expect(screen.getByTestId("chat-app")).toHaveTextContent("Needs its files");
   });
 
+  it("Open shows it is working while the files are fetched: a turning ring on the one pressed, busy, no second click", async () => {
+    let finish: () => void = () => {};
+    setAppOpener(vi.fn(() => new Promise<void>((resolve) => { finish = () => { run = { status: "ok" }; resolve(); }; })));
+    const { user, onClose } = await dialog();
+    const open = screen.getByTestId("chat-app-open");
+    await user.click(open);
+    expect(open).toHaveAttribute("aria-busy", "true");
+    expect(open).toHaveAttribute("aria-disabled", "true");
+    expect(within(open).getByTestId("button-spinner")).toBeInTheDocument();
+    expect(open).toHaveTextContent("Open");
+    await act(async () => { finish(); });
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(open).not.toHaveAttribute("aria-busy");
+    expect(within(open).queryByTestId("button-spinner")).not.toBeInTheDocument();
+  });
+
+  it("Open pressed from the keyboard keeps the focus while it runs, so a refused start leaves it on Open", async () => {
+    // A focused button that turns disabled loses the focus to the page in a browser: the next Tab started over.
+    let refuse!: (error: Error) => void;
+    const opener = vi.fn(() => new Promise<void>((_, reject) => { refuse = reject; }));
+    setAppOpener(opener);
+    const { user } = await dialog();
+    const open = screen.getByTestId("chat-app-open");
+    open.focus();
+    await user.keyboard("{Enter}");
+    expect(open).toHaveAttribute("aria-busy", "true");
+    expect(open).toBeEnabled();
+    expect(open).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Enter}");
+    expect(opener).toHaveBeenCalledTimes(1);
+    await act(async () => { refuse(new Error("needs-files: This app's files are not on this device yet")); });
+    expect(await screen.findByTestId("chat-apps-error")).toHaveTextContent("Its files are not on this device yet.");
+    expect(open).not.toHaveAttribute("aria-disabled");
+    expect(open).toHaveFocus();
+  });
+
   it.each([{ status: "revoked" }, { status: "removed", by: [{ store: "k", name: "A store", reason: "", at: 1 }] }] as InstalledAppView["run"][])("a $status version stays Stopped, with Open off", async (taken) => {
     run = taken;
     await dialog();
@@ -95,7 +131,8 @@ describe("the chat's Apps with an app that comes with Ghostly, never opened here
     let have = false;
     lists.mockImplementation(() => (have ? [installed()] : []));
     fakeEngine.on("appBuiltIns", () => (have ? [] : [offer])).on("appPreview", () => carried).on("appInstall", () => { have = true; return installed(); });
-    const opener = vi.fn(async () => {});
+    let finish: () => void = () => {};
+    const opener = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
     setAppOpener(opener);
     const onClose = vi.fn();
     const { user } = renderApp(<ChatAppsDialog linkId="link-1" name="Ana" onClose={onClose} />);
@@ -114,6 +151,12 @@ describe("the chat's Apps with an app that comes with Ghostly, never opened here
 
     await user.click(confirm);
     await waitFor(() => expect(opener).toHaveBeenCalledWith(REF, "link-1", {}));
+    // Installed, it is listed as an installed app: while it starts, its Open shows it is working.
+    expect(screen.queryByTestId("chat-built-in-app")).not.toBeInTheDocument();
+    const open = screen.getByTestId("chat-app-open");
+    expect(open).toHaveAttribute("aria-busy", "true");
+    expect(within(open).getByTestId("button-spinner")).toBeInTheDocument();
+    await act(async () => { finish(); });
     await waitFor(() => expect(sent).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     lists.mockImplementation(() => [installed()]);

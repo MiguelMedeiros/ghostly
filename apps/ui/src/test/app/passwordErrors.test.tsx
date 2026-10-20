@@ -191,6 +191,33 @@ describe("a refused lock password in Add a device", () => {
     expect(screen.getByTestId("device-add-notice")).toHaveTextContent("This password could not be set up for moving the profile. Try again.");
     expect(engine.callsTo("deviceEnrollInvite")).toHaveLength(0);
   }, 30_000);
+
+  it("the card goes with the error it repeats: once the field is typed in again", async () => {
+    const { user } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    await user.type(screen.getByTestId("device-add-password"), "short");
+    await user.type(screen.getByTestId("device-add-password-again"), "short");
+    await user.click(screen.getByTestId("device-add-next"));
+    expect(await screen.findByTestId("device-add-notice")).toHaveTextContent("Use 8 characters or more.");
+    await user.keyboard("long enough");
+    expect(screen.queryByTestId("device-add-password-error")).toBeNull();
+    expect(screen.queryByTestId("device-add-notice")).toBeNull();
+  }, 30_000);
+
+  it("the code that comes next shows with no card from the refusal before it", async () => {
+    const { user, engine } = renderApp(<AddDeviceDialog onClose={() => {}} />);
+    let refuse = true;
+    engine.on("deviceHandoffVerifier", () => { if (refuse) throw new Error("offline"); });
+    engine.on("deviceEnrollInvite", () => ({ role: "inviter", step: "waiting", code: "ghostly1zexample", expires: Math.floor(Date.now() / 1000) + 600 }));
+    await user.type(screen.getByTestId("device-add-password"), "long enough");
+    await user.type(screen.getByTestId("device-add-password-again"), "long enough");
+    await user.click(screen.getByTestId("device-add-next"));
+    expect(await screen.findByTestId("device-add-notice")).toHaveTextContent("This password could not be set up for moving the profile. Try again.");
+    // Next again, the engine answering this time: the code, and nothing over its status.
+    refuse = false;
+    await user.click(screen.getByTestId("device-add-next"));
+    expect(await screen.findByTestId("device-add-code")).toBeInTheDocument();
+    expect(screen.queryByTestId("device-add-notice")).toBeNull();
+  }, 30_000);
 });
 
 describe("the floating card", () => {
@@ -214,6 +241,36 @@ describe("the floating card", () => {
     expect(screen.getByTestId("toast")).toBeInTheDocument();
     await act(() => new Promise((resolve) => setTimeout(resolve, 1_100)));
     expect(screen.queryByTestId("toast")).toBeNull();
+  });
+
+  it("with the keyboard up, not over the button of the focused field's form either: it goes to the top", async () => {
+    function Form() {
+      const notice = useToast();
+      return <>
+        <Toast toast={notice.toast} onDismiss={notice.dismiss} place="dialog" />
+        <form onSubmit={(event) => { event.preventDefault(); notice.show("Use 8 characters or more."); }}>
+          <input aria-label="password" />
+          <button type="submit">Next</button>
+        </form>
+      </>;
+    }
+    // A 375×667 phone with the keyboard up (407 px left): the dialog 50-358, the field 180-224, Next 293-337; the card
+    // at the bottom of what is left 329-383 (over Next's lower 8 px), at the top 60-114.
+    const box = (top: number, bottom: number) => DOMRect.fromRect({ x: 16, y: top, width: 343, height: bottom - top });
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.matches("input")) return box(180, 224);
+      if (this.matches("button[type=submit]")) return box(293, 337);
+      if (this.matches("[data-testid=toast]")) return this.parentElement?.dataset.at === "top" ? box(60, 114) : box(329, 383);
+      return box(0, 0);
+    });
+    try {
+      const { user } = renderApp(<Form />);
+      await user.click(screen.getByRole("textbox", { name: "password" }));
+      await user.keyboard("abc{Enter}");
+      expect(screen.getByTestId("toast")).toHaveTextContent("Use 8 characters or more.");
+      expect(screen.getByRole("textbox", { name: "password" })).toHaveFocus();
+      expect(screen.getByTestId("toast-region")).toHaveAttribute("data-at", "top");
+    } finally { rect.mockRestore(); }
   });
 });
 

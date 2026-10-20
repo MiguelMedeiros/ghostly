@@ -12,6 +12,7 @@ import {
   parseVoiceMeta,
   toBase64Url,
   randomBytes,
+  viewerTag,
 } from "@ghostly/core";
 import type { ServicesPlatform, WalletPlatform } from "../../../../apps/ui/src/lib/platform";
 import type { WalletNetwork } from "@ghostly/core";
@@ -203,7 +204,10 @@ function walletPlatform(network?: WalletNetwork, card?: string): WalletPlatform 
     bitcoinReconfigureSource: (values) => engine.call("bitcoinReconfigureSource", { values, ...(network?{network}:{}) }),
     bitcoinReceiveAddress: () => engine.call("bitcoinReceiveAddress", on),
     bitcoinRefresh: () => engine.call("bitcoinRefresh", on),
-    payQuote: async (quote, mint, note, confirmedReal) => (await engine.call("walletPayQuote", { quote, mint, note, ...(confirmedReal ? { confirmedReal: true as const } : {}) })).paid,
+    payQuote: async (quote, mint, note, confirmedReal, chat) => {
+      const linkId = chat && engine.linkByPeer(chat.peerPubKey)?.id;
+      return (await engine.call("walletPayQuote", { quote, mint, note, ...(confirmedReal ? { confirmedReal: true as const } : {}), ...(chat && linkId ? { linkId, invoice: chat.invoice } : {}) })).paid;
+    },
     resolveLightningAddress: (text) => engine.call("lnurlResolve", { text, ...(network?{network}:{}) }),
     lightningAddressInvoice: (id, amount, comment) => engine.call("lnurlInvoice", { id, amount, comment, ...(network?{network}:{}) }),
     async checkPayment(peerPubKeyZ32, paymentId) {
@@ -304,7 +308,11 @@ export const servicesPlatform: ServicesPlatform | null = {
     const link = engine.linkByPeer(peerPubKeyZ32);
     if (link) void engine.call("connect", { linkId: link.id }).catch(() => {});
   },
-  openService: (peerPubKeyZ32, serviceId) => getBrowserHost().openService(peerPubKeyZ32, serviceId),
+  async openService(peerPubKeyZ32, serviceId) {
+    const link = engine.linkByPeer(peerPubKeyZ32);
+    if (!link) throw new Error("Ghostly is still starting. Try again in a moment.");
+    await getBrowserHost().openService(peerPubKeyZ32, serviceId, viewerTag(link.myPubKeyZ32));
+  },
   openPaymentLink(uri) {
     const open = getBrowserHost().openPaymentLink;
     return open ? open(uri) : null;

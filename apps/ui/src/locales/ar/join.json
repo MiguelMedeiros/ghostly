@@ -22,6 +22,7 @@
   "pasteScreenshot": "أو الصق لقطة شاشة لرمز QR.",
   "placeholder": "الصق الدعوة…",
   "qrReaderNotLoaded": "لم يُحمَّل قارئ QR. تحقّق من اتصالك، ثم حاول مرة أخرى.",
+  "qrReaderReload": "لا يزال قارئ QR لم يُحمَّل. أعد تحميل Ghostly لتحميله.",
   "scan": "مسح QR",
   "submit": "انضمام",
   "title": "الانضمام إلى محادثة",

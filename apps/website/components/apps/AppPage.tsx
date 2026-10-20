@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Shell } from "@/components/site/Shell";
 import { APP_URL, NO_INTERNET, PERMISSIONS, VIEWS, apps, clientLabel } from "@/content/apps";
+import { ICON_DRAWN } from "@/lib/appIcon";
 import type { StoreApp } from "@/lib/storeRead";
 import { AppIcon } from "./AppIcon";
 import "@/app/apps.css";
@@ -31,7 +32,7 @@ export function AppPage({ app, store }: { app: StoreApp; store: string }) {
             ← {t.back}
           </Link>
           <div className="ap-head">
-            <AppIcon app={app} size={96} />
+            <AppIcon app={app} size={ICON_DRAWN.page} />
             <div className="ap-head-copy">
               <h1 className="h-section ap-app-title">{app.title}</h1>
               <p className="lead">{app.tagline}</p>
