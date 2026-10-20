@@ -1,5 +1,6 @@
 import {
   ChatFiles,
+  FileUplink,
   GROUP_FILE_LIMITS,
   GROUP_HAVE_FRAME,
   GROUP_WANT_FRAME,
@@ -302,6 +303,13 @@ export class GroupFileDesk {
   private readonly communityHave = new Map<string, { ids: Set<string>; at: number }>();
   /** Bytes served today, and the day (UTC days since the epoch). */
   private served = { day: 0, bytes: 0 };
+
+  /**
+   * The uplink every edge's files leave this device by: the floor of their windows is shared out among those sending.
+   * Each with 64 KiB of its own, serving one file to three members at 1 Mbit/s held everything else this device said
+   * 1-2 s behind them (agents#1569).
+   */
+  private readonly uplink = new FileUplink();
 
   constructor(private readonly deps: GroupFileDeps) {}
 
@@ -992,6 +1000,7 @@ export class GroupFileDesk {
       haveSent: new RateWindow(GROUP_FILE_LIMITS.haveFrames, GROUP_FILE_LIMITS.haveWindowMs, () => this.deps.now()),
       haveTaken: new RateWindow(GROUP_FILE_LIMITS.haveFramesTaken, GROUP_FILE_LIMITS.haveWindowMs, () => this.deps.now()), busy: new Set(), gone: new Set() };
     edge.files = new ChatFiles({
+      uplink: this.uplink,
       // An offer names the group message it serves (`gm`), which a 1:1 chat never carries.
       send: frame => {
         const kept = frame.t === "pf-offer" ? this.kept.get(edge.serving.get(frame.id as string) ?? "") : undefined;
