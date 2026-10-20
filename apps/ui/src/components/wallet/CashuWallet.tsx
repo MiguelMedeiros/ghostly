@@ -300,7 +300,7 @@ export function CashuWallet({ wallet, state, rail, onOpenCashu, focusAmount = fa
                 {!destination && <Button type="submit" variant="primary" className="w-full" loading={running === "send"} disabled={busy || !payInput.trim() || (!isToken && route.kind !== "invoice")}>
                   {busy ? t("wallet.cashu.working") : isToken ? t("wallet.cashu.redeem") : pasted?.amountSat ? t("wallet.cashu.payAmount", { amount: formatAmount(pasted.amountSat, t.language), unit }) : t("wallet.lightning.pay")}
                 </Button>}
-                {destinationError ? <Notice tone="error">{destinationError}</Notice> : route.kind === "no-amount" ? <Notice tone="error" testId="wallet-pay-no-amount">{t("wallet.send.noAmount")}</Notice> : route.kind === "unknown" ? <Notice tone="error">{t("wallet.lightning.notInvoice")}</Notice> : !destination && <Notice>{t("wallet.cashu.contactHint")}</Notice>}
+                {destinationError ? <Notice tone="error">{destinationError}</Notice> : route.kind === "no-amount" ? <Notice tone="error" testId="wallet-pay-no-amount">{t("wallet.send.noAmount")}</Notice> : route.kind === "refused" ? <Notice tone="error" testId="wallet-pay-refused">{t("payments.formats.unsupported")}</Notice>: route.kind === "unknown" ? <Notice tone="error">{t("wallet.lightning.notInvoice")}</Notice> : !destination && <Notice>{t("wallet.cashu.contactHint")}</Notice>}
               </form>
               </SendScan>
             )}

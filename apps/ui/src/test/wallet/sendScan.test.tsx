@@ -123,6 +123,22 @@ describe("Send on the Cashu card: scan, paste or picture, review, pay", () => {
     expect(quoteInvoice).not.toHaveBeenCalled();
   });
 
+  it("a bitcoin: link the chat would not pay opens no review: refused, or its Lightning leg left out", async () => {
+    const quoteInvoice = vi.fn();
+    const { user } = show({ quoteInvoice });
+    await user.click(screen.getByRole("tab", { name: "Send" }));
+    // BIP 21: a req- parameter this app does not understand means the link is not paid.
+    qr.text = `bitcoin:?req-pop=x&lightning=${invoice}`;
+    await user.upload(screen.getByLabelText("Choose image"), picture());
+    expect(await screen.findByTestId("wallet-pay-refused")).toHaveTextContent("This link asks for something this app does not understand");
+    // A fallback for another amount than its link's is not the same payment.
+    qr.text = `bitcoin:bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080?amount=0.001&lightning=${invoice}`;
+    await user.upload(screen.getByLabelText("Choose image"), picture());
+    expect(await screen.findByText("That is not a Lightning invoice or a Lightning address.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Pay$/ })).toBeDisabled();
+    expect(quoteInvoice).not.toHaveBeenCalled();
+  });
+
   it("no camera: Scan says so and leaves Paste, the field and Choose image", async () => {
     const { user } = show({});
     await user.click(screen.getByRole("tab", { name: "Send" }));
